@@ -1,0 +1,6 @@
+# 正規化換行，避免 Windows/Unix 之間的 CRLF 漂移
+* text=auto eol=lf
+
+# 合約生成物固定 LF，確保漂移檢查穩定
+frontend/openapi.json text eol=lf
+frontend/lib/api-types.ts text eol=lf

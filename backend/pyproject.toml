@@ -1,0 +1,67 @@
+[project]
+name = "lu-camp-backend"
+version = "0.1.0"
+description = "二手裝備門市系統 — 後端（FastAPI 模組化單體）"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.136.3",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "pyjwt>=2.13.0",
+    "python-multipart>=0.0.30",
+    "sqlalchemy[asyncio]>=2.0.50",
+    "uvicorn[standard]>=0.48.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+# E (pycodestyle), F (pyflakes incl F401/F811/F821), I (isort), UP, B, ASYNC, RUF
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+# E402: imports 一律置頂（CLAUDE.md §9）— 預設啟用，明示於此
+extend-select = ["E402"]
+# 本專案註解/docstring 使用中文全形標點，停用「歧義 unicode」誤報
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_unreachable = true
+# 註：第三方缺少型別 stub 的套件（asyncpg/argon2 等）在實際 import 時，
+# 再於此加 per-module overrides(ignore_missing_imports)。
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = ["app/scripts/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["if TYPE_CHECKING:", "pragma: no cover"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.1.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.15",
+]

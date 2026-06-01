@@ -1,0 +1,54 @@
+[project]
+name = "lu-camp-hardware-agent"
+version = "0.1.0"
+description = "POS 硬體代理（localhost）：收據/證明聯/條碼標籤/錢櫃（ESC/POS）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.3",
+    "pydantic>=2.13.4",
+    "uvicorn[standard]>=0.48.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["agent", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
+extend-select = ["E402"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["agent", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --cov=agent --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+source = ["agent"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["if TYPE_CHECKING:", "pragma: no cover"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.1.0",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.15",
+]

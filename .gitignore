@@ -1,0 +1,11 @@
+# Claude Code worktrees（並行用，勿入庫）
+.claude/worktrees/
+
+# 商品照片等執行期媒體（只保留資料夾，不入庫內容）
+/media/*
+!/media/.gitkeep
+
+# OS / 編輯器
+.DS_Store
+Thumbs.db
+*.swp
