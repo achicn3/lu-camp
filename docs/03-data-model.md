@@ -70,14 +70,16 @@ erDiagram
 `id, store_id, sku, name, brand_id?, category_id, unit_price, quantity_on_hand, reorder_point, cost_method, supplier_id?, created_at`
 
 ### serialized_item（序號化單品：二手買斷/寄售，等級 S–D）
-- `id, store_id, item_code(唯一條碼), name, brand_id?, product_model_id?(型號主檔,供歷史/報表), category_id, grade(S|A|B|C|D), ownership_type(OWNED|CONSIGNMENT)`
+- `id, store_id, item_code(唯一條碼,建檔當下產生即固定、永不變), name, brand_id?, product_model_id?(型號主檔,供歷史/報表), category_id, grade(S|A|B|C|D), ownership_type(OWNED|CONSIGNMENT)`
+- `item_code` 於建檔當下產生即**固定、永不變**，與 POS 掃描結帳所用為**同一套碼**；標籤以 **1D Code 128** 編碼此識別碼（內容只放 `item_code`），可隨時補印（見 04 列印端點）。
 - `photos`：不存二進位於 DB；以關聯記錄存**檔案系統相對路徑 + metadata**（檔名、content_type、size），media 卷另行備份，路徑抽象化以便日後換物件儲存。
 - `acquisition_cost`（OWNED 用）, `consignor_id`+`commission_pct`（CONSIGNMENT 用，預設 50）
 - `listed_price, status(IN_STOCK|SOLD|RETURNED_TO_CONSIGNOR|WRITTEN_OFF), source_contact_id, acquisition_id, intake_date, sold_date`
 - 約束：`ownership=OWNED` 必須有 `acquisition_cost`；`ownership=CONSIGNMENT` 必須有 `consignor_id` 與 `commission_pct`。E 級不走這張表，走 `bulk_lot`。
 
 ### bulk_lot（E 級二手散裝批：分堆、每堆固定均一價）
-- `id, store_id, lot_code(唯一,可印標籤), label(店員可命名,如「A堆」), name, brand_id?, category_id, grade(=E), acquisition_id, source_contact_id`
+- `id, store_id, lot_code(唯一,可印標籤,建檔當下產生即固定、永不變), label(店員可命名,如「A堆」), name, brand_id?, category_id, grade(=E), acquisition_id, source_contact_id`
+- `lot_code` 於建檔當下產生即**固定、永不變**，與 POS 掃描所用為**同一套碼**；標籤以 **1D Code 128** 編碼此識別碼（內容只放 `lot_code`），可隨時補印（見 04）。
 - `acquisition_cost(整堆收購成本), acquisition_basis(WEIGHT|BAG|UNSPECIFIED), unit_price(每件固定均一價)`
 - `total_qty(件數,入庫時記錄,可估算), remaining_qty, status(ON_SALE|SOLD_OUT|WRITTEN_OFF), intake_date`
 - 每堆獨立記錄、可有各自的 `unit_price`（A 堆≠B 堆）。

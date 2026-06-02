@@ -41,11 +41,13 @@ GET    /api/v1/serialized-items/{id}
 GET    /api/v1/serialized-items/by-code/{item_code}   # POS 掃碼查件
 PATCH  /api/v1/serialized-items/{id}        # 改價/下架(留痕)
 POST   /api/v1/serialized-items/{id}/photos
+POST   /api/v1/serialized-items/{id}/print-label   # 補印條碼標籤(經硬體代理, Code 128 編 item_code, 留稽核)
 
 GET    /api/v1/bulk-lots?status=&q=          # E 級散裝批清單(供 POS 選堆)
 GET    /api/v1/bulk-lots/{id}
 GET    /api/v1/bulk-lots/by-code/{lot_code}  # 掃堆標籤
 PATCH  /api/v1/bulk-lots/{id}                # 改均一價/調整件數(留痕)
+POST   /api/v1/bulk-lots/{id}/print-label    # 補印整堆標籤(經硬體代理, Code 128 編 lot_code, 留稽核)
 ```
 
 ## Master Data（品牌/型號主檔 + 定價輔助）
@@ -73,7 +75,8 @@ POST   /api/v1/acquisitions
              stock_movement(IN); BUYOUT/BULK_LOT 建 cash_movement(BUYOUT_OUT);
              回傳待列印 item_code / lot_code
 GET    /api/v1/acquisitions/{id}
-POST   /api/v1/acquisitions/{id}/print-labels   # 觸發硬體代理列印條碼/堆標籤
+POST   /api/v1/acquisitions/{id}/print-labels   # 入庫批次列印條碼/堆標籤(經硬體代理, Code 128)
+       # 事後補印單件改用 /serialized-items/{id}/print-label 或 /bulk-lots/{id}/print-label
 ```
 
 ## Sales / POS
@@ -160,6 +163,7 @@ POST   http://localhost:<port>/print/receipt    { sale }
 POST   http://localhost:<port>/print/detail      { sale }   # 商品明細聯(逐項品名/數量/單價/小計/總計)
 POST   http://localhost:<port>/print/einvoice    { invoice }
 POST   http://localhost:<port>/print/label       { code(item_code 或 lot_code), name, price }
+       # 以 1D Code 128 編碼 code(識別碼); 標籤含品名/價格等可讀文字
 POST   http://localhost:<port>/drawer/open
 GET    http://localhost:<port>/health
 ```

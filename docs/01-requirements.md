@@ -38,10 +38,11 @@
    - `photos`：選填、可多張
    - `OWNED`：`acquisition_cost`（收購成本）
    - `CONSIGNMENT`：`consignor_id`、`commission_pct`（預設 50）
-   - `item_code`（唯一條碼，入庫時產生並列印標籤）、`listed_price`、`status`、`source_contact_id`、`intake_date`、`sold_date`
+   - `item_code`（唯一條碼，**建檔當下產生即固定、永不變**，與 POS 結帳掃描同一套碼；入庫時列印標籤、事後可隨時補印）、`listed_price`、`status`、`source_contact_id`、`intake_date`、`sold_date`
    - `status`：`IN_STOCK → SOLD`／`RETURNED_TO_CONSIGNOR`／`WRITTEN_OFF`（已 `SOLD` 不可再售）。
-3. **散裝批（`bulk_lot`，等級 E）**：分批向客人收購，**每堆一筆獨立記錄、各自固定每件均一價**（A 堆價≠B 堆價）。含整堆收購成本、件數（入庫記錄、可估算）、剩餘件數、均一價、狀態。售出按該堆均一價扣一件；每件成本 = 整堆成本 ÷ 件數。
+3. **散裝批（`bulk_lot`，等級 E）**：分批向客人收購，**每堆一筆獨立記錄、各自固定每件均一價**（A 堆價≠B 堆價）。含 `lot_code`（唯一條碼，**建檔當下產生即固定、永不變**，與 POS 掃描同碼）、整堆收購成本、件數（入庫記錄、可估算）、剩餘件數、均一價、狀態。售出按該堆均一價扣一件；每件成本 = 整堆成本 ÷ 件數。
 - 庫存查詢、上架/下架、改價（改價留痕）。
+- **商品條碼列印**：序號品 `item_code`、散裝堆 `lot_code` 採 **1D Code 128**，內容只放識別碼；建檔當下產生即固定、永不變，與 POS 結帳掃描為同一套碼。庫存頁/商品詳情可隨時**補印條碼**（補印須留稽核）。
 
 ### D. Acquisition / 收購鑑價入庫
 - 一張 `acquisition` 單據對應一次入庫事件：`type = BUYOUT | CONSIGNMENT | BULK_LOT`、賣方/寄售人 `contact`（必填姓名+national_id）、經手店員、日期。
@@ -54,6 +55,7 @@
   - 收購時品名「**自由輸入 + 優先 autocomplete 既有 `product_model`**」；選既有 → 自動帶入品牌/分類與該型號的收購/售出價歷史；輸入全新 → 順手建一筆 `product_model`。
   - 入庫的 `serialized_item`/`bulk_lot`/`catalog_product` 帶 `brand_id`；`serialized_item` 可選 `product_model_id`（供型號層級的歷史與報表）。
 - **定價輔助（定價計算機）**：主算法用目標毛利率 `建議售價 = round_ntd(收購價 ÷ (1 − margin_pct/100))`，為**含稅整數元**；`default_margin_pct` 放 `settings`（整數百分數，預設 45），`margin_pct` 限 0–99。同時顯示該型號歷史售價當參考；店員可手動覆蓋任一數字（毛利率或建議售價）。價格歷史由既有 `acquisition`/`sale` 紀錄依 `product_model_id` 聚合取得。
+- **條碼列印**：識別碼（`item_code`/`lot_code`）一旦建檔即固定不變。入庫時可批次列印標籤（`/acquisitions/{id}/print-labels`）；序號品與散裝堆事後皆可隨時**補印**（`/serialized-items/{id}/print-label`、`/bulk-lots/{id}/print-label`，補印留稽核）。標籤以 1D Code 128 編碼識別碼。
 - 寫入 `stock_movement`（IN）。
 
 ### E. Consignment / 寄售管理

@@ -50,7 +50,7 @@
     - **定價輔助 UI（定價計算機）**：輸入收購價後，顯示依目標毛利率算的**建議含稅售價**（`round_ntd(收購價 ÷ (1 − margin_pct/100))`，`default_margin_pct` 預設 45、margin 限 0–99）與**該型號歷史售價**參考；店員可手動覆蓋毛利率或售價任一數字。
   - **散裝（E）**：建立一「堆」——選品牌、填整堆收購成本、收購基準（秤斤/整袋）、件數（可估算）、**該堆每件均一價**、可命名（如「A堆」）。
   買斷/散裝顯示「應付現金」並提示付款（現金出帳）；完成後列印序號條碼或整堆標籤。API：`/acquisitions`、`/acquisitions/{id}/print-labels`、`/contacts`、`/contacts/lookup`、`/brands`、`/product-models`、`/product-models/{id}/pricing`。
-- **/inventory**：三個分頁——序號品（S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、數量品（庫存量、低庫存標示、改價）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。API：`/serialized-items`、`/catalog-products`、`/bulk-lots`。
+- **/inventory**：三個分頁——序號品（S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、數量品（庫存量、低庫存標示、改價）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。序號品與散裝堆（含商品詳情頁）皆有「**列印條碼**」按鈕，可隨時補印（識別碼固定不變、1D Code 128）。API：`/serialized-items`、`/serialized-items/{id}/print-label`、`/catalog-products`、`/bulk-lots`、`/bulk-lots/{id}/print-label`。
 - **/consignment**：待結算/應付未付清單；「付款給寄售人」（現金出帳）；退回寄售人。API：`/consignment/*`。
 - **/contacts**：會員/賣方/寄售人查詢與建檔；會員消費紀錄/點數；身分證字號預設遮罩，MANAGER 可解密查看（寫稽核）。API：`/contacts*`。
 - **/purchasing**：供應商、採購單、收貨入庫、低庫存提醒。API：`/suppliers`、`/purchase-orders`、`/purchase-orders/{id}/receive`。
@@ -109,6 +109,7 @@ flowchart LR
 - 桌機/觸控櫃檯螢幕為主；版面在常見 POS 解析度可用。
 - 依賴店內伺服器在線（LAN）；硬體代理在 POS 機本機（localhost）。
 - 條碼槍即插即用（HID）；印表機/錢櫃由硬體代理驅動。
+- **採購提醒：條碼槍須採「2D 影像式」**（可同時讀 1D Code 128 商品標籤 + Code 39 手機條碼載具 + QR），**非純 1D 雷射式**（純 1D 無法讀 QR/部分二維碼）。商品標籤條碼採 Code 128、雲端載具手機條碼為 Code 39，故以 2D 影像式一機通吃。
 
 ## 附錄 B — 雲端載具讀取流程（POS，定案）
 
