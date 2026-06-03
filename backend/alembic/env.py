@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.core.audit  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.contacts.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.inventory.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.store.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.user.models  # noqa: F401  # 註冊模型到 metadata（autogenerate 用）
 from app.core.config import get_settings
