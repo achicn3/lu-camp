@@ -10,7 +10,8 @@
 
 **後端**
 - `pytest`、`pytest-asyncio`、`httpx`（呼叫 FastAPI）、`pytest-cov`。
-- 測試 DB：用真實 PostgreSQL（`testcontainers` 或 CI service container），每測以交易回滾隔離。**不用 SQLite 取代**（行為需與正式一致）。
+- 測試 DB：用真實 PostgreSQL，每測以交易回滾隔離。**不用 SQLite 取代**（行為需與正式一致）。
+  - 現況（Phase 1 起）：改用 `docker compose` 起的本機開發 DB + 交易回滾隔離（conftest 以外層交易包覆、session 走 savepoint），**暫不使用 testcontainers**——本機環境曾出現 Node/子行程不穩，先採最省、可立即跑綠的方案。待環境穩定（或上 CI service container）即可回 `testcontainers` 取得每次乾淨實例。
 - 測資工廠：`factory_boy` 或自製 fixtures（建立 store/user/contact/item...）。
 - 時間/隨機性可注入（避免 flaky）。
 

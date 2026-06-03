@@ -127,6 +127,8 @@ hardware-agent/
 
 ## docker-compose（概念）
 
+> 開發階段 compose **只起 PostgreSQL**（volume 持久化、port 綁 127.0.0.1、healthcheck、帳密走 .env）；backend/frontend/hardware-agent 用 uv/pnpm 本機跑。下方完整服務組態於 **Phase 7（部署）** 才建置。
+
 ```
 services:
   db:        postgres:16  (volume 持久化)

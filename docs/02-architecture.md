@@ -91,6 +91,7 @@ graph LR
 ## 5. 部署拓樸
 
 - 店內一台伺服器跑 `docker compose`：`postgres` + `backend(api)` + `frontend` + `hardware-agent`（代理也可只跑在 POS 機，視機器配置）。
+  - 開發階段：`docker compose` **只起 PostgreSQL**，backend/frontend/hardware-agent 用 uv/pnpm 本機跑；上述完整服務 compose 於 **Phase 7（部署）** 才建置。
 - Turnkey 跑在另一台機器或雲端 VM；後端把 MIG XML 寫入兩者共用的交換目錄（本機資料夾或網路掛載）。
 - 每晚 `pg_dump` 自動備份至本地第二顆碟 + 雲端儲存桶。
 - 外網中斷時：POS、收購、開立發票（產 XML）照常；Turnkey 上傳排隊，連線恢復後補送。

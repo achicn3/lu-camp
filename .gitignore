@@ -1,3 +1,8 @@
+# 環境變數與金鑰（勿入庫；只入庫 .env.example 範本）
+.env
+.env.*
+!.env.example
+
 # Claude Code worktrees（並行用，勿入庫）
 .claude/worktrees/
 
