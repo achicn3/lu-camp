@@ -22,7 +22,8 @@ PATCH  /api/v1/users/{id}            # 角色/停用
 ## Contacts
 ```
 GET    /api/v1/contacts?role=&q=     # q 比對姓名/電話(national_id 不可明文搜尋)
-GET    /api/v1/contacts/lookup?national_id=   # 後端以 HMAC blind index 精確比對, 供收購去重(回既有 contact 或空)
+POST   /api/v1/contacts/lookup   # body: { national_id }; 後端以 HMAC blind index 精確比對, 供收購去重(回既有 contact 或空)
+       # 用 POST 放 body(不放 query): national_id 不可進入 URL/access log(CLAUDE.md §5 優先於本規格)
 POST   /api/v1/contacts              # 建檔(含加密 national_id + blind index)
 GET    /api/v1/contacts/{id}         # national_id 預設遮罩
 GET    /api/v1/contacts/{id}/national-id   # MANAGER 解密查看 -> 寫稽核

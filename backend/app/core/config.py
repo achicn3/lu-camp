@@ -1,13 +1,18 @@
 """應用設定：一律從環境變數 / 根目錄 .env 讀取，程式內不寫死祕密。
 
 金鑰一律由環境注入、無預設值（缺少即啟動失敗），確保金鑰不入 repo。
-SECRET_KEY（JWT）尚未被程式使用，待 auth 導入時再加入。
+金鑰格式於啟動時即驗證（fail-fast），設錯立即失敗、不延到首次使用。
 """
 
+import base64
+import binascii
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PII_KEY_BYTES = 32
 
 # 專案根目錄的 .env（compose 與後端共用同一份）。
 # config.py 位於 backend/app/core/config.py → parents[3] 為 repo 根。
@@ -25,9 +30,30 @@ class Settings(BaseSettings):
 
     database_url: str
     app_env: str = "development"
-    # PII 欄位加密金鑰（base64 of 32 bytes）與 blind-index HMAC 金鑰；無預設、由 env 注入。
+    # 金鑰皆無預設、由 env 注入。pii_enc_key 為 base64 of 32 bytes；secret_key 供 JWT 簽章。
     pii_enc_key: str
     hmac_key: str
+    secret_key: str
+
+    @field_validator("pii_enc_key")
+    @classmethod
+    def _validate_pii_enc_key(cls, value: str) -> str:
+        """PII_ENC_KEY 必須能 base64 解出 32 bytes（AES-256）。"""
+        try:
+            raw = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("PII_ENC_KEY 必須為合法 base64") from exc
+        if len(raw) != _PII_KEY_BYTES:
+            raise ValueError(f"PII_ENC_KEY 解出長度須為 {_PII_KEY_BYTES} bytes")
+        return value
+
+    @field_validator("hmac_key", "secret_key")
+    @classmethod
+    def _validate_non_empty(cls, value: str) -> str:
+        """HMAC_KEY / SECRET_KEY 不可為空。"""
+        if not value.strip():
+            raise ValueError("金鑰不可為空")
+        return value
 
 
 @lru_cache

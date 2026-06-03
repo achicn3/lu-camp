@@ -52,6 +52,9 @@ addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=80"
 source = ["app"]
 branch = true
 omit = ["app/scripts/*"]
+# SQLAlchemy async 透過 greenlet 橋接 async/sync；需追蹤 greenlet 切換才能正確計算
+# 經 await DB 操作後續行的覆蓋率（否則 router/service 的 return 行會誤判未覆蓋）。
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 show_missing = true

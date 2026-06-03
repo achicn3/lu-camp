@@ -18,6 +18,7 @@ from sqlalchemy.pool import NullPool
 
 import app.core.audit  # 註冊模型到 Base.metadata
 import app.core.db as app_db
+import app.modules.contacts.models  # 註冊模型到 Base.metadata
 import app.modules.store.models  # 註冊模型到 Base.metadata
 import app.modules.user.models  # noqa: F401  # 註冊模型到 Base.metadata
 from app.core.config import get_settings

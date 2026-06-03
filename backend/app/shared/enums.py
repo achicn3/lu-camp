@@ -8,3 +8,11 @@ class UserRole(StrEnum):
 
     MANAGER = "MANAGER"
     CLERK = "CLERK"
+
+
+class ContactRole(StrEnum):
+    """聯絡人角色（統一主檔可同時具備多重角色）。"""
+
+    MEMBER = "MEMBER"
+    SELLER = "SELLER"
+    CONSIGNOR = "CONSIGNOR"
