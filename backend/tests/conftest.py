@@ -17,9 +17,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 import app.core.db as app_db
+import app.modules.store.models  # 註冊模型到 Base.metadata
+import app.modules.user.models  # noqa: F401  # 註冊模型到 Base.metadata
 from app.core.config import get_settings
+from app.core.db import Base
 
 test_engine = create_async_engine(get_settings().database_url, poolclass=NullPool)
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session", autouse=True)
+async def _create_app_schema() -> AsyncGenerator[None]:
+    """為測試建立應用 schema（session 結束時移除，不留殘餘）。"""
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
@@ -52,6 +65,8 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _dispose_app_engine() -> AsyncGenerator[None]:
-    """每個測試後釋放正式 engine 的連線池，避免連線跨 event loop 重用。"""
+    """每個測試後釋放正式 engine 的連線池並清快取，避免連線跨 event loop 重用。"""
     yield
-    await app_db.engine.dispose()
+    await app_db.get_engine().dispose()
+    app_db.get_sessionmaker.cache_clear()
+    app_db.get_engine.cache_clear()
