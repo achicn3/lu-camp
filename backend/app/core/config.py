@@ -1,7 +1,7 @@
 """應用設定：一律從環境變數 / 根目錄 .env 讀取，程式內不寫死祕密。
 
-目前僅納入 T1 實際使用的欄位（database_url / app_env）；
-金鑰類（SECRET_KEY / PII_ENC_KEY / HMAC_KEY）等到實際被程式使用時再加入。
+金鑰一律由環境注入、無預設值（缺少即啟動失敗），確保金鑰不入 repo。
+SECRET_KEY（JWT）尚未被程式使用，待 auth 導入時再加入。
 """
 
 from functools import lru_cache
@@ -25,6 +25,9 @@ class Settings(BaseSettings):
 
     database_url: str
     app_env: str = "development"
+    # PII 欄位加密金鑰（base64 of 32 bytes）與 blind-index HMAC 金鑰；無預設、由 env 注入。
+    pii_enc_key: str
+    hmac_key: str
 
 
 @lru_cache

@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import app.core.audit  # 註冊模型到 Base.metadata
 import app.core.db as app_db
 import app.modules.store.models  # 註冊模型到 Base.metadata
 import app.modules.user.models  # noqa: F401  # 註冊模型到 Base.metadata
