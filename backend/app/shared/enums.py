@@ -80,6 +80,18 @@ class CashMovementType(StrEnum):
     MANUAL_ADJUST = "MANUAL_ADJUST"
 
 
+class AcquisitionType(StrEnum):
+    """收購/寄售入庫單類型。
+
+    BUYOUT 買斷（建序號品、付現）；CONSIGNMENT 寄售（建序號品、不付現）；
+    BULK_LOT E 級散裝（建散裝批、付現）。
+    """
+
+    BUYOUT = "BUYOUT"
+    CONSIGNMENT = "CONSIGNMENT"
+    BULK_LOT = "BULK_LOT"
+
+
 class ItemKind(StrEnum):
     """庫存品種類（stock_movement 用）。"""
 

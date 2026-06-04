@@ -4,6 +4,177 @@
  */
 
 export interface paths {
+    "/api/v1/acquisitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Acquisition */
+        post: operations["createAcquisition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/acquisitions/{acquisition_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Acquisition */
+        get: operations["getAcquisition"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Cash Session */
+        get: operations["getCurrentCashSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open Cash Session */
+        post: operations["openCashSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/{session_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close Cash Session */
+        post: operations["closeCashSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/{session_id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Cash Movement */
+        post: operations["recordCashMovement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contacts */
+        get: operations["listContacts"];
+        put?: never;
+        /** Create Contact */
+        post: operations["createContact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lookup Contact */
+        post: operations["lookupContact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Contact */
+        get: operations["getContact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/national-id": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reveal National Id */
+        get: operations["revealContactNationalId"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -26,12 +197,314 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AcquisitionCreate
+         * @description 收購單輸入。BUYOUT/CONSIGNMENT 走 items；BULK_LOT 走 lot。
+         */
+        AcquisitionCreate: {
+            /** Contact Id */
+            contact_id: number;
+            /** Items */
+            items?: components["schemas"]["AcquisitionItemIn"][] | null;
+            lot?: components["schemas"]["AcquisitionLotIn"] | null;
+            /** Note */
+            note?: string | null;
+            type: components["schemas"]["AcquisitionType"];
+        };
+        /**
+         * AcquisitionItemIn
+         * @description 序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。
+         */
+        AcquisitionItemIn: {
+            /** Acquisition Cost */
+            acquisition_cost?: number | string | null;
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Commission Pct */
+            commission_pct?: number | null;
+            grade: components["schemas"]["Grade"];
+            /** Listed Price */
+            listed_price: number | string;
+            /** Name */
+            name: string;
+            /** Product Model Id */
+            product_model_id?: number | null;
+        };
+        /**
+         * AcquisitionLotIn
+         * @description E 級散裝批入庫（BULK_LOT）。
+         */
+        AcquisitionLotIn: {
+            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
+            /** Acquisition Cost */
+            acquisition_cost: number | string;
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Name */
+            name: string;
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /**
+         * AcquisitionRead
+         * @description 收購單查詢輸出。
+         */
+        AcquisitionRead: {
+            /** Clerk User Id */
+            clerk_user_id: number;
+            /** Contact Id */
+            contact_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string | null;
+            /** Store Id */
+            store_id: number;
+            /** Total Cash Paid */
+            total_cash_paid: string | null;
+            type: components["schemas"]["AcquisitionType"];
+        };
+        /**
+         * AcquisitionResult
+         * @description 收購成功結果：回傳可辨識的收購單號與待列印識別碼。
+         */
+        AcquisitionResult: {
+            /** Acquisition Id */
+            acquisition_id: number;
+            /** Contact Id */
+            contact_id: number;
+            /** Item Codes */
+            item_codes: string[];
+            /** Lot Code */
+            lot_code: string | null;
+            /** Total Cash Paid */
+            total_cash_paid: string | null;
+            type: components["schemas"]["AcquisitionType"];
+        };
+        /**
+         * AcquisitionType
+         * @description 收購/寄售入庫單類型。
+         *
+         *     BUYOUT 買斷（建序號品、付現）；CONSIGNMENT 寄售（建序號品、不付現）；
+         *     BULK_LOT E 級散裝（建散裝批、付現）。
+         * @enum {string}
+         */
+        AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
+        /**
+         * BulkAcquisitionBasis
+         * @description 散裝批收購計價基礎。
+         * @enum {string}
+         */
+        BulkAcquisitionBasis: "WEIGHT" | "BAG" | "UNSPECIFIED";
+        /**
+         * CashMovementCreateRequest
+         * @description 記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。
+         */
+        CashMovementCreateRequest: {
+            /** Amount */
+            amount: number | string;
+            /** Note */
+            note?: string | null;
+            type: components["schemas"]["CashMovementType"];
+        };
+        /**
+         * CashMovementRead
+         * @description 現金異動輸出。
+         */
+        CashMovementRead: {
+            /** Amount */
+            amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Ref Id */
+            ref_id: number | null;
+            /** Ref Type */
+            ref_type: string | null;
+            /** Session Id */
+            session_id: number;
+            /** Store Id */
+            store_id: number;
+            type: components["schemas"]["CashMovementType"];
+        };
+        /**
+         * CashMovementType
+         * @description 現金異動類型。
+         *
+         *     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。
+         * @enum {string}
+         */
+        CashMovementType: "SALE_IN" | "BUYOUT_OUT" | "CONSIGNMENT_PAYOUT_OUT" | "MANUAL_ADJUST";
+        /**
+         * CashSessionCloseRequest
+         * @description 結帳：點數後的實際現金。
+         */
+        CashSessionCloseRequest: {
+            /** Counted Amount */
+            counted_amount: number | string;
+        };
+        /**
+         * CashSessionOpenRequest
+         * @description 開帳：期初零用金。
+         */
+        CashSessionOpenRequest: {
+            /** Opening Float */
+            opening_float: number | string;
+        };
+        /**
+         * CashSessionRead
+         * @description 現金班別輸出。
+         */
+        CashSessionRead: {
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: number | null;
+            /** Counted Amount */
+            counted_amount: string | null;
+            /** Expected Amount */
+            expected_amount: string | null;
+            /** Id */
+            id: number;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Opened By */
+            opened_by: number;
+            /** Opening Float */
+            opening_float: string;
+            status: components["schemas"]["CashSessionStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Variance */
+            variance: string | null;
+        };
+        /**
+         * CashSessionStatus
+         * @description 現金抽屜班別狀態。
+         * @enum {string}
+         */
+        CashSessionStatus: "OPEN" | "CLOSED";
+        /**
+         * ContactCreate
+         * @description 建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。
+         */
+        ContactCreate: {
+            /** Default Carrier Id */
+            default_carrier_id?: string | null;
+            /** Default Carrier Type */
+            default_carrier_type?: string | null;
+            /**
+             * Member Points
+             * @default 0
+             */
+            member_points: number;
+            /** Name */
+            name: string;
+            /** National Id */
+            national_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Roles */
+            roles?: components["schemas"]["ContactRole"][];
+            /** Source Note */
+            source_note?: string | null;
+        };
+        /**
+         * ContactLookupRequest
+         * @description 以 national_id 精確查重（放 body，避免 national_id 進入 URL / access log）。
+         */
+        ContactLookupRequest: {
+            /** National Id */
+            national_id: string;
+        };
+        /**
+         * ContactNationalIdRead
+         * @description MANAGER 解密查看的回應（明文，僅此端點回傳）。
+         */
+        ContactNationalIdRead: {
+            /** National Id */
+            national_id: string;
+        };
+        /**
+         * ContactRead
+         * @description 聯絡人輸出：national_id 一律遮罩，不回明文。
+         */
+        ContactRead: {
+            /** Default Carrier Id */
+            default_carrier_id: string | null;
+            /** Default Carrier Type */
+            default_carrier_type: string | null;
+            /** Has National Id */
+            has_national_id: boolean;
+            /** Id */
+            id: number;
+            /** Member Points */
+            member_points: number;
+            /** Name */
+            name: string;
+            /** National Id Masked */
+            national_id_masked: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Roles */
+            roles: string[];
+            /** Source Note */
+            source_note: string | null;
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * ContactRole
+         * @description 聯絡人角色（統一主檔可同時具備多重角色）。
+         * @enum {string}
+         */
+        ContactRole: "MEMBER" | "SELLER" | "CONSIGNOR";
+        /**
+         * Grade
+         * @description 成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
+         * @enum {string}
+         */
+        Grade: "S" | "A" | "B" | "C" | "D" | "E";
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
          * HealthResponse
          * @description `/health` 回應。
          */
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
     };
     responses: never;
@@ -42,6 +515,353 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    createAcquisition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAcquisition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"] | null;
+                };
+            };
+        };
+    };
+    openCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashSessionOpenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    closeCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashSessionCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordCashMovement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashMovementCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashMovementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listContacts: {
+        parameters: {
+            query?: {
+                role?: components["schemas"]["ContactRole"] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    lookupContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactLookupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revealContactNationalId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactNationalIdRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;

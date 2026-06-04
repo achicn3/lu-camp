@@ -1,6 +1,616 @@
 {
   "components": {
     "schemas": {
+      "AcquisitionCreate": {
+        "description": "收購單輸入。BUYOUT/CONSIGNMENT 走 items；BULK_LOT 走 lot。",
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AcquisitionItemIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "lot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcquisitionLotIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AcquisitionType"
+          }
+        },
+        "required": [
+          "type",
+          "contact_id"
+        ],
+        "title": "AcquisitionCreate",
+        "type": "object"
+      },
+      "AcquisitionItemIn": {
+        "description": "序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。",
+        "properties": {
+          "acquisition_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Cost"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "listed_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Listed Price"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          }
+        },
+        "required": [
+          "name",
+          "grade",
+          "listed_price"
+        ],
+        "title": "AcquisitionItemIn",
+        "type": "object"
+      },
+      "AcquisitionLotIn": {
+        "description": "E 級散裝批入庫（BULK_LOT）。",
+        "properties": {
+          "acquisition_basis": {
+            "$ref": "#/components/schemas/BulkAcquisitionBasis"
+          },
+          "acquisition_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Acquisition Cost"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "total_qty": {
+            "exclusiveMinimum": 0.0,
+            "title": "Total Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "name",
+          "acquisition_cost",
+          "acquisition_basis",
+          "total_qty",
+          "unit_price"
+        ],
+        "title": "AcquisitionLotIn",
+        "type": "object"
+      },
+      "AcquisitionRead": {
+        "description": "收購單查詢輸出。",
+        "properties": {
+          "clerk_user_id": {
+            "title": "Clerk User Id",
+            "type": "integer"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_cash_paid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cash Paid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AcquisitionType"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "type",
+          "contact_id",
+          "clerk_user_id",
+          "total_cash_paid",
+          "note",
+          "created_at"
+        ],
+        "title": "AcquisitionRead",
+        "type": "object"
+      },
+      "AcquisitionResult": {
+        "description": "收購成功結果：回傳可辨識的收購單號與待列印識別碼。",
+        "properties": {
+          "acquisition_id": {
+            "title": "Acquisition Id",
+            "type": "integer"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "item_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Item Codes",
+            "type": "array"
+          },
+          "lot_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lot Code"
+          },
+          "total_cash_paid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cash Paid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AcquisitionType"
+          }
+        },
+        "required": [
+          "acquisition_id",
+          "type",
+          "contact_id",
+          "total_cash_paid",
+          "item_codes",
+          "lot_code"
+        ],
+        "title": "AcquisitionResult",
+        "type": "object"
+      },
+      "AcquisitionType": {
+        "description": "收購/寄售入庫單類型。\n\nBUYOUT 買斷（建序號品、付現）；CONSIGNMENT 寄售（建序號品、不付現）；\nBULK_LOT E 級散裝（建散裝批、付現）。",
+        "enum": [
+          "BUYOUT",
+          "CONSIGNMENT",
+          "BULK_LOT"
+        ],
+        "title": "AcquisitionType",
+        "type": "string"
+      },
+      "BulkAcquisitionBasis": {
+        "description": "散裝批收購計價基礎。",
+        "enum": [
+          "WEIGHT",
+          "BAG",
+          "UNSPECIFIED"
+        ],
+        "title": "BulkAcquisitionBasis",
+        "type": "string"
+      },
+      "CashMovementCreateRequest": {
+        "description": "記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CashMovementType"
+          }
+        },
+        "required": [
+          "type",
+          "amount"
+        ],
+        "title": "CashMovementCreateRequest",
+        "type": "object"
+      },
+      "CashMovementRead": {
+        "description": "現金異動輸出。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Type"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "integer"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CashMovementType"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "session_id",
+          "type",
+          "amount",
+          "ref_type",
+          "ref_id",
+          "created_at"
+        ],
+        "title": "CashMovementRead",
+        "type": "object"
+      },
+      "CashMovementType": {
+        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。",
+        "enum": [
+          "SALE_IN",
+          "BUYOUT_OUT",
+          "CONSIGNMENT_PAYOUT_OUT",
+          "MANUAL_ADJUST"
+        ],
+        "title": "CashMovementType",
+        "type": "string"
+      },
+      "CashSessionCloseRequest": {
+        "description": "結帳：點數後的實際現金。",
+        "properties": {
+          "counted_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Counted Amount"
+          }
+        },
+        "required": [
+          "counted_amount"
+        ],
+        "title": "CashSessionCloseRequest",
+        "type": "object"
+      },
+      "CashSessionOpenRequest": {
+        "description": "開帳：期初零用金。",
+        "properties": {
+          "opening_float": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Opening Float"
+          }
+        },
+        "required": [
+          "opening_float"
+        ],
+        "title": "CashSessionOpenRequest",
+        "type": "object"
+      },
+      "CashSessionRead": {
+        "description": "現金班別輸出。",
+        "properties": {
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed By"
+          },
+          "counted_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counted Amount"
+          },
+          "expected_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Amount"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "opened_by": {
+            "title": "Opened By",
+            "type": "integer"
+          },
+          "opening_float": {
+            "title": "Opening Float",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CashSessionStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variance"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "status",
+          "opening_float",
+          "opened_by",
+          "opened_at",
+          "closed_by",
+          "closed_at",
+          "counted_amount",
+          "expected_amount",
+          "variance"
+        ],
+        "title": "CashSessionRead",
+        "type": "object"
+      },
+      "CashSessionStatus": {
+        "description": "現金抽屜班別狀態。",
+        "enum": [
+          "OPEN",
+          "CLOSED"
+        ],
+        "title": "CashSessionStatus",
+        "type": "string"
+      },
       "ContactCreate": {
         "description": "建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。",
         "properties": {
@@ -224,6 +834,19 @@
         "title": "ContactRole",
         "type": "string"
       },
+      "Grade": {
+        "description": "成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。",
+        "enum": [
+          "S",
+          "A",
+          "B",
+          "C",
+          "D",
+          "E"
+        ],
+        "title": "Grade",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -305,6 +928,293 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/acquisitions": {
+      "post": {
+        "operationId": "createAcquisition",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquisitionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}": {
+      "get": {
+        "operationId": "getAcquisition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/cash-sessions/current": {
+      "get": {
+        "operationId": "getCurrentCashSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CashSessionRead"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Getcurrentcashsession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Current Cash Session",
+        "tags": [
+          "cashdrawer"
+        ]
+      }
+    },
+    "/api/v1/cash-sessions/open": {
+      "post": {
+        "operationId": "openCashSession",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashSessionOpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Open Cash Session",
+        "tags": [
+          "cashdrawer"
+        ]
+      }
+    },
+    "/api/v1/cash-sessions/{session_id}/close": {
+      "post": {
+        "operationId": "closeCashSession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashSessionCloseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Close Cash Session",
+        "tags": [
+          "cashdrawer"
+        ]
+      }
+    },
+    "/api/v1/cash-sessions/{session_id}/movements": {
+      "post": {
+        "operationId": "recordCashMovement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashMovementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Cash Movement",
+        "tags": [
+          "cashdrawer"
+        ]
+      }
+    },
     "/api/v1/contacts": {
       "get": {
         "operationId": "listContacts",

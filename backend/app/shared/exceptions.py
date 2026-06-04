@@ -39,3 +39,15 @@ class CashSessionAlreadyClosed(DomainError):
 
 class UnknownCashMovementType(DomainError):
     """對帳時遇到未知的現金異動類型，拒絕靜默計算以免算錯現金。"""
+
+
+class ContactNotFound(DomainError):
+    """收購指定的 contact 不存在（或不屬於本店）。"""
+
+
+class AcquisitionRequiresNationalId(DomainError):
+    """收購/寄售對象必須有 national_id（接 T4：SELLER/CONSIGNOR 必填）。"""
+
+
+class InvalidCommissionPct(DomainError):
+    """寄售抽成 commission_pct 超出合法範圍（0-100）。"""

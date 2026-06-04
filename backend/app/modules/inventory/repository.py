@@ -14,6 +14,7 @@ from app.modules.inventory.models import (
     BulkLot,
     ProductModel,
     SerializedItem,
+    StockMovement,
 )
 from app.shared.enums import BulkLotStatus, SerializedItemStatus
 
@@ -70,6 +71,12 @@ class InventoryRepository:
         )
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1
+
+    # ── 庫存異動帳 ──
+    async def add_stock_movement(self, movement: StockMovement) -> StockMovement:
+        self._session.add(movement)
+        await self._session.flush()
+        return movement
 
     # ── 散裝批 ──
     async def add_bulk_lot(self, lot: BulkLot) -> BulkLot:

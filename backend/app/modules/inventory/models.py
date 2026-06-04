@@ -90,7 +90,7 @@ class SerializedItem(Base, TimestampMixin):
         default=SerializedItemStatus.IN_STOCK,
         server_default=SerializedItemStatus.IN_STOCK.value,
     )
-    acquisition_id: Mapped[int | None] = mapped_column()
+    acquisition_id: Mapped[int | None] = mapped_column(ForeignKey("acquisitions.id"))
     intake_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -120,7 +120,7 @@ class BulkLot(Base, TimestampMixin):
         default=BulkLotStatus.ON_SALE,
         server_default=BulkLotStatus.ON_SALE.value,
     )
-    acquisition_id: Mapped[int | None] = mapped_column()
+    acquisition_id: Mapped[int | None] = mapped_column(ForeignKey("acquisitions.id"))
     intake_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

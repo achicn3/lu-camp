@@ -24,6 +24,13 @@ class CashDrawerRepository:
         result: CashSession | None = await self._session.scalar(stmt)
         return result
 
+    async def get_session(self, store_id: int, session_id: int) -> CashSession | None:
+        stmt = select(CashSession).where(
+            CashSession.id == session_id, CashSession.store_id == store_id
+        )
+        result: CashSession | None = await self._session.scalar(stmt)
+        return result
+
     async def add_movement(self, movement: CashMovement) -> CashMovement:
         self._session.add(movement)
         await self._session.flush()

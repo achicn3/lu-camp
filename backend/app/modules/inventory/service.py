@@ -5,13 +5,22 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import suggested_price
-from app.modules.inventory.models import Brand, BulkLot, ProductModel, SerializedItem
+from app.modules.inventory.models import (
+    Brand,
+    BulkLot,
+    ProductModel,
+    SerializedItem,
+    StockMovement,
+)
 from app.modules.inventory.repository import InventoryRepository
 from app.shared.enums import (
     BulkAcquisitionBasis,
     Grade,
+    ItemKind,
     OwnershipType,
     SerializedItemStatus,
+    StockDirection,
+    StockReason,
 )
 from app.shared.exceptions import (
     InsufficientStock,
@@ -49,6 +58,7 @@ class InventoryService:
         acquisition_cost: Decimal | None = None,
         consignor_id: int | None = None,
         commission_pct: int | None = None,
+        acquisition_id: int | None = None,
     ) -> SerializedItem:
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
@@ -70,8 +80,38 @@ class InventoryService:
             acquisition_cost=acquisition_cost,
             consignor_id=consignor_id,
             commission_pct=commission_pct,
+            acquisition_id=acquisition_id,
         )
         return await self._repo.add_serialized(item)
+
+    # ── 庫存異動帳 ──
+    async def record_stock_in(
+        self,
+        store_id: int,
+        item_kind: ItemKind,
+        *,
+        qty: int,
+        reason: StockReason,
+        ref_type: str | None = None,
+        ref_id: int | None = None,
+        serialized_item_id: int | None = None,
+        catalog_product_id: int | None = None,
+        bulk_lot_id: int | None = None,
+    ) -> StockMovement:
+        """記一筆入庫（IN）異動帳；供收購/進貨等流程在同一交易內呼叫。"""
+        movement = StockMovement(
+            store_id=store_id,
+            item_kind=item_kind,
+            direction=StockDirection.IN,
+            qty=qty,
+            reason=reason,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            serialized_item_id=serialized_item_id,
+            catalog_product_id=catalog_product_id,
+            bulk_lot_id=bulk_lot_id,
+        )
+        return await self._repo.add_stock_movement(movement)
 
     async def _transition(self, item_id: int, to_status: SerializedItemStatus) -> None:
         """合法轉移一律自 IN_STOCK 出發（由條件式 UPDATE 原子強制，亦擋併發重複）。"""
@@ -110,6 +150,7 @@ class InventoryService:
         brand_id: int | None = None,
         consignor_id: int | None = None,
         label: str | None = None,
+        acquisition_id: int | None = None,
     ) -> BulkLot:
         if grade != Grade.E:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
@@ -129,6 +170,7 @@ class InventoryService:
             brand_id=brand_id,
             consignor_id=consignor_id,
             label=label,
+            acquisition_id=acquisition_id,
         )
         return await self._repo.add_bulk_lot(lot)
 

@@ -32,6 +32,9 @@ class CashDrawerService:
     async def get_current_session(self, store_id: int) -> CashSession | None:
         return await self._repo.get_open_session(store_id)
 
+    async def get_session(self, store_id: int, session_id: int) -> CashSession | None:
+        return await self._repo.get_session(store_id, session_id)
+
     async def open_session(
         self, store_id: int, opened_by: int, opening_float: Decimal
     ) -> CashSession:
@@ -58,8 +61,9 @@ class CashDrawerService:
     ) -> CashMovement:
         """記一筆現金異動；必須在開帳中的 session 下進行，否則拒絕。
 
-        MANUAL_ADJUST 屬「現金調整」敏感操作，須寫 audit_log（CLAUDE.md §5）；
-        SALE_IN / BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 由各自上游交易稽核，不在此重複。
+        MANUAL_ADJUST 屬「現金調整」敏感操作，於此寫 audit_log（CLAUDE.md §5）。
+        SALE_IN / BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 為一般營業現金流，本身即以
+        cash_movement 入帳，不在 §5 強制稽核之列，故此層不另寫 audit。
         """
         session = await self._repo.get_open_session(store_id)
         if session is None:
