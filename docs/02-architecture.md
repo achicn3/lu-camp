@@ -123,6 +123,13 @@ graph LR
 - **Alternatives**: WebUSB/WebSerial（裝置相容性與權限問題）。
 - **Consequences**: ＋穩定、與瀏覽器解耦；－多一個需部署的元件。
 
+### ADR-005：硬體代理提供裝置狀態回報，前端輪詢顯示面板
+- **Status**: Accepted
+- **Context**: 店員需即時掌握各機器（Brother QL-810W 標籤機、EPSON TM-T82iii 收據/發票機、掃碼槍、錢櫃）是否在線與細部狀態，避免列印才發現離線；前端不可直接驅動硬體。
+- **Decision**: 由 hardware-agent 作為硬體狀態的唯一抽象來源，暴露 `GET /devices/status`（見 04）。回報分兩級：**A 級**（連線/離線 + 最後回應時間心跳，保證做到）與 **B 級**（缺紙/上蓋/錯誤/錢櫃開啟等，依各機型官方 Python SDK 實際支援度，查不到者標記 `unsupported`、不臆造）。前端 `lib/hardware.ts` **定時輪詢**該端點顯示成唯讀面板，不直接碰硬體。
+- **Gate**: 實作 B 級前必須先取得兩台機器官方 Python SDK 文件，依實際狀態查詢能力實作（比照 ADR-004 的 MIG/Turnkey 規格前置），列為 Phase 3 動工閘門。
+- **Consequences**: ＋單一抽象、前端與硬體解耦、能力誠實（不假裝支援）；－各機型能力不齊，面板需處理「不支援」態與輪詢失敗（代理離線）態。
+
 ### ADR-004：電子發票以 MIG XML 拋檔 + 開關 + 離線佇列
 - **Status**: Accepted
 - **Context**: 法規要求電子發票；草創期需可關閉；外網可能不穩。

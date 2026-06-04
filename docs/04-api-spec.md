@@ -167,6 +167,13 @@ POST   http://localhost:<port>/print/label       { code(item_code 或 lot_code),
        # 以 1D Code 128 編碼 code(識別碼); 標籤含品名/價格等可讀文字
 POST   http://localhost:<port>/drawer/open
 GET    http://localhost:<port>/health
+GET    http://localhost:<port>/devices/status
+       # 裝置狀態面板資料來源；前端定時輪詢（前端不直接碰硬體）。回傳各機器：
+       # { devices: [ { id, kind(LABEL_PRINTER|RECEIPT_PRINTER|SCANNER|CASH_DRAWER),
+       #                model, online(bool), last_seen(ISO8601 UTC),         # A 級：保證
+       #                details: { <能報的細項: paper_out|cover_open|error|drawer_open...> },
+       #                unsupported: [ <該機型 SDK 查不到的細項鍵> ] } ] }    # B 級：優雅降級
+       # 細項欄位依各機型官方 Python SDK 實際支援度填寫；查不到者列入 unsupported，不得臆造。
 ```
 
 ## Notification（預留接口，本期 no-op）

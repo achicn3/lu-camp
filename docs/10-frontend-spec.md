@@ -58,6 +58,11 @@
 - **/stocktake**：建盤點單、掃描/輸入實際數、顯示差異、確認調整。API：`/stocktakes/*`。
 - **/reports（MANAGER）**：每日現金對帳、營收/成本/毛利（區分買斷成本與寄售只認抽成）、庫存價值與庫齡、寄售應付、趨勢；匯出 CSV/Excel。API：`/reports/*`。
 - **/settings（MANAGER）**：發票開關 `einvoice_enabled`、預設寄售抽成、稅率/稅務處理、成色分級列舉、reorder 預設、店家/發票資訊。API：`/settings`。
+- **/devices（裝置狀態面板）**：顯示櫃檯各機器（Brother QL-810W 標籤機、EPSON TM-T82iii 收據/發票機、掃碼槍、錢櫃）的狀態卡片。
+  - **A 級（保證）**：每張卡片顯示「連線/離線」燈號 + 「最後回應時間」（心跳）；離線醒目標示（Wi-Fi 的 Brother 尤其要能看出斷線）。
+  - **B 級（優雅降級）**：缺紙、上蓋開啟、印表機錯誤、錢櫃開啟等細項，**有報才顯示**；hardware-agent 回傳 `unsupported` 的細項顯示「此機型不支援」灰字，**不渲染為故障**。
+  - **資料來源/輪詢**：以 `lib/hardware.ts` 定時輪詢 hardware-agent 的 `GET /devices/status`（前端不直接碰硬體）；輪詢失敗（代理離線）整面板顯示「硬體代理離線」並持續重試。此面板**唯讀**，不阻擋任何交易。
+  - 此面板於 **Phase 3** 隨硬體代理一併實作；細項能力以兩台機器官方 Python SDK 實測支援度為準（見 01 N-1、07 閘門）。
 
 ## 6. 關鍵流程
 
