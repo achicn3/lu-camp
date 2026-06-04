@@ -61,6 +61,25 @@ class BulkAcquisitionBasis(StrEnum):
     UNSPECIFIED = "UNSPECIFIED"
 
 
+class CashSessionStatus(StrEnum):
+    """現金抽屜班別狀態。"""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+
+
+class CashMovementType(StrEnum):
+    """現金異動類型。
+
+    SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。
+    """
+
+    SALE_IN = "SALE_IN"
+    BUYOUT_OUT = "BUYOUT_OUT"
+    CONSIGNMENT_PAYOUT_OUT = "CONSIGNMENT_PAYOUT_OUT"
+    MANUAL_ADJUST = "MANUAL_ADJUST"
+
+
 class ItemKind(StrEnum):
     """庫存品種類（stock_movement 用）。"""
 

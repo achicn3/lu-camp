@@ -23,3 +23,19 @@ class InsufficientStock(DomainError):
 
 class OwnershipValidationError(DomainError):
     """入庫資料與 ownership/grade 規則不符。"""
+
+
+class CashSessionAlreadyOpen(DomainError):
+    """同一 store 已有開帳中的 cash_session，不可重複開帳。"""
+
+
+class NoOpenCashSession(DomainError):
+    """影響現金的操作必須在開帳中的 cash_session 下進行，但目前無開帳。"""
+
+
+class CashSessionAlreadyClosed(DomainError):
+    """cash_session 已結帳，不可重複結帳（避免覆寫對帳結果）。"""
+
+
+class UnknownCashMovementType(DomainError):
+    """對帳時遇到未知的現金異動類型，拒絕靜默計算以免算錯現金。"""
