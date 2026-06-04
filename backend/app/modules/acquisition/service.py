@@ -14,6 +14,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.core.money import round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
 from app.modules.acquisition.models import Acquisition
@@ -98,6 +99,27 @@ class AcquisitionService:
                 ref_id=acquisition.id,
             )
             await self._session.flush()
+
+        # 收購入庫稽核（溯源）：只記參照與彙總，絕不含 national_id 等 PII 明文（§5）。
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=clerk_user_id,
+            action="CREATE_ACQUISITION",
+            entity_type="acquisition",
+            entity_id=str(acquisition.id),
+            after={
+                "type": data.type.value,
+                "contact_id": contact.id,
+                "total_cash_paid": (
+                    str(acquisition.total_cash_paid)
+                    if acquisition.total_cash_paid is not None
+                    else None
+                ),
+                "item_count": len(item_codes),
+                "lot_code": lot_code,
+            },
+        )
 
         return AcquisitionResult(
             acquisition_id=acquisition.id,

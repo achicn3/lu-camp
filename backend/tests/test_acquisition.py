@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
     AcquisitionItemIn,
@@ -214,6 +215,18 @@ async def test_bulk_lot_creates_lot_stock_and_cash(db_session: AsyncSession) -> 
     assert cash.type == CashMovementType.BUYOUT_OUT
     assert cash.amount == Decimal("3000")
 
+    audit = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "CREATE_ACQUISITION",
+            AuditLog.entity_id == str(result.acquisition_id),
+        )
+    )
+    assert audit is not None and audit.after is not None
+    assert audit.after["type"] == "BULK_LOT"
+    assert audit.after["item_count"] == 0
+    assert audit.after["lot_code"] == result.lot_code
+    assert audit.after["total_cash_paid"] == "3000"
+
 
 async def test_contact_not_found(db_session: AsyncSession) -> None:
     store_id, clerk_id, _ = await _seed(db_session)
@@ -258,6 +271,58 @@ async def test_commission_pct_out_of_range_rejected(db_session: AsyncSession) ->
     )
     with pytest.raises(InvalidCommissionPct):
         await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
+
+
+async def test_acquisition_writes_audit_without_pii(db_session: AsyncSession) -> None:
+    """收購寫 CREATE_ACQUISITION 稽核，含彙總可溯源，但不得有 national_id 明文。"""
+    store_id, clerk_id, contact_id = await _seed(db_session)
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id, clerk_id, _buyout(contact_id)
+    )
+
+    rows = list(
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "CREATE_ACQUISITION", AuditLog.store_id == store_id
+            )
+        )
+    )
+    assert len(rows) == 1
+    entry = rows[0]
+    assert entry.actor_user_id == clerk_id
+    assert entry.entity_type == "acquisition"
+    assert entry.entity_id == str(result.acquisition_id)
+    assert entry.after is not None
+    assert entry.after["type"] == "BUYOUT"
+    assert entry.after["contact_id"] == contact_id
+    assert entry.after["item_count"] == 2
+    assert entry.after["total_cash_paid"] == "2500"
+    # 只記 contact_id 參照，不含 national_id（明文或鍵）。
+    assert "national_id" not in entry.after
+    assert "national_id" not in str(entry.before)
+
+
+async def test_consignment_audit_records_no_cash(db_session: AsyncSession) -> None:
+    store_id, clerk_id, contact_id = await _seed(db_session)
+    data = AcquisitionCreate(
+        type=AcquisitionType.CONSIGNMENT,
+        contact_id=contact_id,
+        items=[
+            AcquisitionItemIn(
+                name="寄售品", grade=Grade.A, listed_price=Decimal("2000"), commission_pct=50
+            )
+        ],
+    )
+    result = await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
+    entry = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "CREATE_ACQUISITION",
+            AuditLog.entity_id == str(result.acquisition_id),
+        )
+    )
+    assert entry is not None and entry.after is not None
+    assert entry.after["type"] == "CONSIGNMENT"
+    assert entry.after["total_cash_paid"] is None
 
 
 # ── schema 邊界驗證（不需 DB）──

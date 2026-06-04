@@ -9,8 +9,10 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
@@ -91,6 +93,34 @@ async def test_buyout_happy_path(client: httpx.AsyncClient, db_session: AsyncSes
     got = await client.get(f"/api/v1/acquisitions/{body['acquisition_id']}", headers=_auth(token))
     assert got.status_code == 200
     assert got.json()["type"] == "BUYOUT"
+
+
+async def test_acquisition_audit_has_no_national_id_plaintext(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """端到端：賣方有加密 national_id；收購稽核絕不出現其明文。"""
+    _, token = await _seed_token(db_session)
+    await _open_drawer(client, token)
+    contact_id = await _make_seller(client, token)  # national_id = A123456789（加密儲存）
+
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": contact_id,
+            "items": [
+                {"name": "相機", "grade": "A", "listed_price": "3000", "acquisition_cost": "1800"}
+            ],
+        },
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201
+
+    entry = await db_session.scalar(select(AuditLog).where(AuditLog.action == "CREATE_ACQUISITION"))
+    assert entry is not None
+    assert "A123456789" not in str(entry.before)
+    assert "A123456789" not in str(entry.after)
+    assert entry.after is not None and entry.after["contact_id"] == contact_id
 
 
 async def test_bulk_lot_happy_path(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
