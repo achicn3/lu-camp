@@ -4,8 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.money import round_ntd, split_tax_inclusive, suggested_price
-from app.shared.exceptions import InvalidMargin, InvalidTaxRate
+from app.core.money import commission, round_ntd, split_tax_inclusive, suggested_price
+from app.shared.exceptions import InvalidCommissionPct, InvalidMargin, InvalidTaxRate
 
 
 def test_round_ntd_half_up() -> None:
@@ -75,3 +75,27 @@ def test_split_tax_inclusive_rounds_total_before_splitting() -> None:
 def test_split_tax_inclusive_invalid_rate_raises(rate: Decimal) -> None:
     with pytest.raises(InvalidTaxRate):
         split_tax_inclusive(Decimal("100"), rate)
+
+
+def test_commission_default_50() -> None:
+    # 售價 3000、抽成 50% → 1500；應付寄售人 = 3000 - 1500 = 1500
+    assert commission(Decimal("3000"), 50) == 1500
+
+
+def test_commission_rounds_half_up() -> None:
+    # 999 × 50 / 100 = 499.5 → ROUND_HALF_UP → 500
+    assert commission(Decimal("999"), 50) == 500
+
+
+@pytest.mark.parametrize(
+    ("gross", "pct", "expected"),
+    [(Decimal("1000"), 0, 0), (Decimal("1000"), 100, 1000), (Decimal("1234"), 30, 370)],
+)
+def test_commission_bounds(gross: Decimal, pct: int, expected: int) -> None:
+    assert commission(gross, pct) == expected
+
+
+@pytest.mark.parametrize("pct", [-1, 101, 150])
+def test_commission_invalid_pct_raises(pct: int) -> None:
+    with pytest.raises(InvalidCommissionPct):
+        commission(Decimal("1000"), pct)

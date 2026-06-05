@@ -55,3 +55,19 @@ class InvalidCommissionPct(DomainError):
 
 class InvalidTaxRate(DomainError):
     """稅率超出合法範圍（須 0 ≤ rate < 1）。"""
+
+
+class EmptySale(DomainError):
+    """銷售單沒有任何明細行，無法結帳。"""
+
+
+class SaleItemNotFound(DomainError):
+    """銷售明細指向的商品不存在（或不屬於本店）。"""
+
+
+class SaleLineInvalid(DomainError):
+    """銷售明細行內容不合法（型別與參照不符、數量 <= 0 等）。"""
+
+
+class CrossStoreReference(DomainError):
+    """交易引用了不屬於本店的對象（如他店的 contact / user），多分店資料隔離違規。"""

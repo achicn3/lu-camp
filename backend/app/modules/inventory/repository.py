@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.inventory.models import (
     Brand,
     BulkLot,
+    CatalogProduct,
     ProductModel,
     SerializedItem,
     StockMovement,
@@ -52,6 +53,31 @@ class InventoryRepository:
         await self._session.flush()
         return item
 
+    async def get_serialized_by_code(self, store_id: int, item_code: str) -> SerializedItem | None:
+        stmt = select(SerializedItem).where(
+            SerializedItem.store_id == store_id, SerializedItem.item_code == item_code
+        )
+        result: SerializedItem | None = await self._session.scalar(stmt)
+        return result
+
+    # ── 數量型商品 ──
+    async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
+        stmt = select(CatalogProduct).where(
+            CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id
+        )
+        result: CatalogProduct | None = await self._session.scalar(stmt)
+        return result
+
+    async def decrement_catalog(self, catalog_id: int, qty: int) -> bool:
+        """原子扣減 quantity_on_hand；不足則不動作。回傳是否成功一筆。"""
+        stmt = (
+            update(CatalogProduct)
+            .where(CatalogProduct.id == catalog_id, CatalogProduct.quantity_on_hand >= qty)
+            .values(quantity_on_hand=CatalogProduct.quantity_on_hand - qty)
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1
+
     async def transition_serialized_status(
         self,
         item_id: int,
@@ -83,6 +109,11 @@ class InventoryRepository:
         self._session.add(lot)
         await self._session.flush()
         return lot
+
+    async def get_bulk_lot(self, store_id: int, lot_id: int) -> BulkLot | None:
+        stmt = select(BulkLot).where(BulkLot.id == lot_id, BulkLot.store_id == store_id)
+        result: BulkLot | None = await self._session.scalar(stmt)
+        return result
 
     async def decrement_bulk_lot(self, lot_id: int, qty: int) -> bool:
         """原子扣減 remaining_qty；不足則不動作。歸零自動轉 SOLD_OUT。回傳是否成功。"""

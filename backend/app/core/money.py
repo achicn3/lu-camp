@@ -1,15 +1,17 @@
 """金額工具：新台幣整數元（無角分），一律用 Decimal、ROUND_HALF_UP。
 
-本檔提供 round_ntd、定價輔助 suggested_price 與發票稅額拆分 split_tax_inclusive；
-commission（寄售抽成）於 Phase 4（consignment）導入時再加入。
+本檔提供 round_ntd、定價輔助 suggested_price、發票稅額拆分 split_tax_inclusive
+與寄售抽成 commission。
 """
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.shared.exceptions import InvalidMargin, InvalidTaxRate
+from app.shared.exceptions import InvalidCommissionPct, InvalidMargin, InvalidTaxRate
 
 MARGIN_MIN = 0
 MARGIN_MAX = 99
+COMMISSION_PCT_MIN = 0
+COMMISSION_PCT_MAX = 100
 
 
 def round_ntd(value: Decimal) -> int:
@@ -41,3 +43,16 @@ def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
     net = round_ntd(total / (Decimal(1) + rate))
     tax = total_ntd - net
     return net, tax
+
+
+def commission(gross: Decimal, pct: int) -> int:
+    """寄售抽成金額 = round_ntd(售價 × pct / 100)（§7.2）。
+
+    pct 為整數百分數，限 0–100；超出視為錯誤（避免負抽成或 >全額）。
+    應付寄售人 = gross − commission(gross, pct)，由呼叫端相減。
+    """
+    if not COMMISSION_PCT_MIN <= pct <= COMMISSION_PCT_MAX:
+        raise InvalidCommissionPct(
+            f"commission_pct 須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}，收到 {pct}"
+        )
+    return round_ntd(gross * Decimal(pct) / Decimal(100))

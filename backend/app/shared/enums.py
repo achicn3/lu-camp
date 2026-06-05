@@ -184,3 +184,11 @@ class EInvoiceAction(StrEnum):
     ISSUE = "ISSUE"
     VOID = "VOID"
     ALLOWANCE = "ALLOWANCE"
+
+
+class ConsignmentSettlementStatus(StrEnum):
+    """寄售結算狀態。售出時建 PENDING；付款（Phase 4）轉 PAID；退貨反轉為 CANCELLED。"""
+
+    PENDING = "PENDING"
+    PAID = "PAID"
+    CANCELLED = "CANCELLED"

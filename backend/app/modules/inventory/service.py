@@ -8,6 +8,7 @@ from app.core.money import suggested_price
 from app.modules.inventory.models import (
     Brand,
     BulkLot,
+    CatalogProduct,
     ProductModel,
     SerializedItem,
     StockMovement,
@@ -113,6 +114,34 @@ class InventoryService:
         )
         return await self._repo.add_stock_movement(movement)
 
+    async def record_stock_out(
+        self,
+        store_id: int,
+        item_kind: ItemKind,
+        *,
+        qty: int,
+        reason: StockReason,
+        ref_type: str | None = None,
+        ref_id: int | None = None,
+        serialized_item_id: int | None = None,
+        catalog_product_id: int | None = None,
+        bulk_lot_id: int | None = None,
+    ) -> StockMovement:
+        """記一筆出庫（OUT）異動帳；供銷售/退貨等流程在同一交易內呼叫。"""
+        movement = StockMovement(
+            store_id=store_id,
+            item_kind=item_kind,
+            direction=StockDirection.OUT,
+            qty=qty,
+            reason=reason,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            serialized_item_id=serialized_item_id,
+            catalog_product_id=catalog_product_id,
+            bulk_lot_id=bulk_lot_id,
+        )
+        return await self._repo.add_stock_movement(movement)
+
     async def _transition(self, item_id: int, to_status: SerializedItemStatus) -> None:
         """合法轉移一律自 IN_STOCK 出發（由條件式 UPDATE 原子強制，亦擋併發重複）。"""
         ok = await self._repo.transition_serialized_status(
@@ -125,6 +154,10 @@ class InventoryService:
             raise InvalidStateTransition(
                 f"序號品非 IN_STOCK，無法轉移到 {to_status}（如已售出/已下架）"
             )
+
+    async def get_serialized_by_code(self, store_id: int, item_code: str) -> SerializedItem | None:
+        """以 item_code 取序號品（供 POS 掃碼查件、讀取售價/ownership）。"""
+        return await self._repo.get_serialized_by_code(store_id, item_code)
 
     async def sell_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.SOLD)
@@ -174,12 +207,27 @@ class InventoryService:
         )
         return await self._repo.add_bulk_lot(lot)
 
+    async def get_bulk_lot(self, store_id: int, lot_id: int) -> BulkLot | None:
+        return await self._repo.get_bulk_lot(store_id, lot_id)
+
     async def sell_bulk_lot_items(self, lot_id: int, qty: int) -> None:
         if qty <= 0:
             raise InsufficientStock("售出數量必須 > 0")
         ok = await self._repo.decrement_bulk_lot(lot_id, qty)
         if not ok:
             raise InsufficientStock("散裝批庫存不足，無法售出")
+
+    # ── 數量型商品 ──
+    async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
+        return await self._repo.get_catalog(store_id, catalog_id)
+
+    async def sell_catalog_items(self, catalog_id: int, qty: int) -> None:
+        """原子扣減數量型商品庫存；不足則拒絕（不先查再改，併發安全）。"""
+        if qty <= 0:
+            raise InsufficientStock("售出數量必須 > 0")
+        ok = await self._repo.decrement_catalog(catalog_id, qty)
+        if not ok:
+            raise InsufficientStock("數量型商品庫存不足，無法售出")
 
     @staticmethod
     def per_piece_cost(lot: BulkLot) -> Decimal:
