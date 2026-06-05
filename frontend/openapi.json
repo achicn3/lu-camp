@@ -874,6 +874,101 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "SettingsRead": {
+        "description": "單店設定輸出。",
+        "properties": {
+          "default_commission_pct": {
+            "title": "Default Commission Pct",
+            "type": "integer"
+          },
+          "default_margin_pct": {
+            "title": "Default Margin Pct",
+            "type": "integer"
+          },
+          "einvoice_enabled": {
+            "title": "Einvoice Enabled",
+            "type": "boolean"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "tax_rate": {
+            "title": "Tax Rate",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store_id",
+          "einvoice_enabled",
+          "tax_rate",
+          "default_commission_pct",
+          "default_margin_pct"
+        ],
+        "title": "SettingsRead",
+        "type": "object"
+      },
+      "SettingsUpdateRequest": {
+        "description": "PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。",
+        "properties": {
+          "default_commission_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Commission Pct"
+          },
+          "default_margin_pct": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Margin Pct"
+          },
+          "einvoice_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Einvoice Enabled"
+          },
+          "tax_rate": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Rate"
+          }
+        },
+        "title": "SettingsUpdateRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1499,6 +1594,76 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "getSettings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "updateSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Settings",
+        "tags": [
+          "settings"
         ]
       }
     }

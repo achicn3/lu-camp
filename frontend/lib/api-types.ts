@@ -192,6 +192,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Settings */
+        get: operations["getSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Settings */
+        patch: operations["updateSettings"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -492,6 +510,36 @@ export interface components {
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /**
+         * SettingsRead
+         * @description 單店設定輸出。
+         */
+        SettingsRead: {
+            /** Default Commission Pct */
+            default_commission_pct: number;
+            /** Default Margin Pct */
+            default_margin_pct: number;
+            /** Einvoice Enabled */
+            einvoice_enabled: boolean;
+            /** Store Id */
+            store_id: number;
+            /** Tax Rate */
+            tax_rate: string;
+        };
+        /**
+         * SettingsUpdateRequest
+         * @description PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。
+         */
+        SettingsUpdateRequest: {
+            /** Default Commission Pct */
+            default_commission_pct?: number | null;
+            /** Default Margin Pct */
+            default_margin_pct?: number | null;
+            /** Einvoice Enabled */
+            einvoice_enabled?: boolean | null;
+            /** Tax Rate */
+            tax_rate?: number | string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -878,6 +926,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsRead"];
+                };
+            };
+        };
+    };
+    updateSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
