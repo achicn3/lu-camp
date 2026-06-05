@@ -64,8 +64,12 @@ class CashDrawerService:
         MANUAL_ADJUST 屬「現金調整」敏感操作，於此寫 audit_log（CLAUDE.md §5）。
         SALE_IN / BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 為一般營業現金流，本身即以
         cash_movement 入帳，不在 §5 強制稽核之列，故此層不另寫 audit。
+
+        併發保證：以 FOR UPDATE 鎖開帳中的 session 列，與 close_session 互斥（DB 層原子，
+        非先查狀態再插入）。若關帳已先一步轉 CLOSED，這裡的條件式查詢即查不到 OPEN → 拒絕，
+        避免現金異動落進已關閉的 session 而被對帳漏算。T6/T7/T11 的現金寫入都經此一處。
         """
-        session = await self._repo.get_open_session(store_id)
+        session = await self._repo.get_open_session(store_id, for_update=True)
         if session is None:
             raise NoOpenCashSession("無開帳中的 cash_session，請先開帳")
         movement = CashMovement(
@@ -113,9 +117,15 @@ class CashDrawerService:
     async def close_session(
         self, session: CashSession, counted_amount: Decimal, closed_by: int
     ) -> CashSession:
-        """結帳：計算 expected 與 variance、轉 CLOSED，並寫 audit_log（現金對帳，CLAUDE.md §5）。"""
-        if session.status != CashSessionStatus.OPEN:
+        """結帳：計算 expected 與 variance、轉 CLOSED，並寫 audit_log（現金對帳，CLAUDE.md §5）。
+
+        併發保證：先以 FOR UPDATE 鎖 session 列並刷新到已提交狀態，與 record_movement 互斥；
+        確保「計算 expected → 轉 CLOSED」期間沒有現金異動偷插入，對帳數字不漏算。
+        """
+        locked = await self._repo.lock_session(session.store_id, session.id)
+        if locked is None or locked.status != CashSessionStatus.OPEN:
             raise CashSessionAlreadyClosed(f"cash_session {session.id} 已結帳，不可重複結帳")
+        session = locked
         expected = await self.expected_amount(session)
         session.expected_amount = expected
         session.counted_amount = counted_amount

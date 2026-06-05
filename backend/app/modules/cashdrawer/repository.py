@@ -16,10 +16,30 @@ class CashDrawerRepository:
         await self._session.flush()
         return cash_session
 
-    async def get_open_session(self, store_id: int) -> CashSession | None:
+    async def get_open_session(
+        self, store_id: int, *, for_update: bool = False
+    ) -> CashSession | None:
+        """取開帳中的 session。
+
+        for_update=True 時對該列上 row lock（SELECT … FOR UPDATE），供寫入現金異動前序列化，
+        與關帳互斥；唯讀的前置檢查（如 get_current_session）用預設不上鎖。
+        """
         stmt = select(CashSession).where(
             CashSession.store_id == store_id,
             CashSession.status == CashSessionStatus.OPEN,
+        )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result: CashSession | None = await self._session.scalar(stmt)
+        return result
+
+    async def lock_session(self, store_id: int, session_id: int) -> CashSession | None:
+        """對指定 session 列上 row lock 並刷新到已提交狀態（供關帳前序列化、與現金異動互斥）。"""
+        stmt = (
+            select(CashSession)
+            .where(CashSession.id == session_id, CashSession.store_id == store_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         result: CashSession | None = await self._session.scalar(stmt)
         return result
