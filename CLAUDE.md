@@ -97,11 +97,24 @@
 ## 10. 版本控制（Git，強制；見 `docs/12-git-workflow.md`）
 
 - **禁止在 `main` 直接 commit/push**。只有一條長期分支 `main`（不用 develop）；每個功能從**最新的 `main`** 開短命分支（`feat/…`、`fix/…`、`refactor/…`、`test/…`、`chore/…`），一分支只做一件事。
-- **本專案不使用 GitHub CI；品質關卡全在本機執行。** 合併進 `main` 前必須：本機四道門全綠（`ruff`/`mypy`、`pytest`+覆蓋率、前端 `eslint`/`tsc`/測試、API 合約漂移檢查）**且**`code-reviewer` 子代理回 `APPROVE`（須真的執行並貼出綠燈輸出，不接受「應該會過」）。
+- **本專案不使用 GitHub CI；品質關卡全在本機執行。** 合併進 `main` 前必須：本機四道門全綠（`ruff`/`mypy`、`pytest`+覆蓋率、前端 `eslint`/`tsc`/測試、API 合約漂移檢查，須真的執行並貼出綠燈輸出，不接受「應該會過」）**且**通過 Codex 審查（見下「Code Review 採 Codex」）。
 - **合併前先 rebase**：`git fetch && git rebase origin/main`（至少一次，確保用最新 main）。
 - **每次完成 feature 都要 push remote**：先 push feature 分支，合併進 `main` 後再 push `main`；不讓進度只留本機。合併用快轉或 `--squash`，完後刪分支。
 - **並行**：無相依、不碰共用檔的功能才並行；實作型子代理用 `isolation: worktree` 各自隔離分支；合併前各自 rebase 到最新 main，依相依順序逐一合併並 push。動到 Alembic migration / `shared/enums.py` / `core/*` / 同一模組者一律**序列**。
 - 不對 `main` force-push；以 rebase + 快轉（或 squash）保持乾淨線性歷史。
+
+### Code Review 採 Codex（codex-plugin-cc，強制）
+
+- **主要審查者改為 Codex**（OpenAI `codex-plugin-cc`，在 Claude Code 內執行），取代原本的 `code-reviewer` 子代理。
+- **每個 task 合併前的審查流程**：
+  - 一般 task：合併前跑 `/codex:review --base main`。
+  - 高風險 task（涉及金額／現金／發票／併發／PII／rollback，例如 T11）：跑 `/codex:adversarial-review --base main`，重點挑 race condition、失敗回滾、資料一致性。
+  - Codex 回報問題 → 修正 → 再跑一次 Codex review → 重複直到 Codex 無重大意見。
+  - **每一輪修正都要停下讓使用者確認，不得無人看管自動循環。**
+- **不啟用 review gate（Stop hook 全自動）**：官方警告其會造成 Claude/Codex 長迴圈、快速燒用量；除非使用者明確要求並在場盯著，否則一律保持關閉。
+- **Codex 意見的定位**：是「建議」，**不得凌駕本機四道門與測試這個客觀底線**。
+- **採納 Codex 意見修正後**：必須跑過四道門全綠 **＋ 全部既有測試仍綠**，證明沒有把功能改壞，才算修完。
+- **嚴禁為了消除 Codex 意見而**：刪除／弱化既有測試、修改測試使其通過、捏造輸出、或做與該 task 無關的擅自更動。修正必須針對 Codex 指出的真實問題，且有測試與四道門背書。
 
 ## 常用指令（實作後補齊實際指令）
 
