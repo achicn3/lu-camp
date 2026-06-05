@@ -28,7 +28,7 @@ graph TD
     end
 
     subgraph Ext["外網 (降級時可離線排隊)"]
-        Turnkey["Turnkey v3.2 (本機或雲端 VM)"]
+        Turnkey["Turnkey Ver 3.9 (本機或雲端 VM)"]
         MOF["財政部電子發票整合平台"]
         Backup["雲端備份儲存"]
     end
@@ -123,7 +123,7 @@ graph LR
 - **Alternatives**: WebUSB/WebSerial（裝置相容性與權限問題）。
 - **Consequences**: ＋穩定、與瀏覽器解耦；－多一個需部署的元件。
 
-### ADR-005：硬體代理提供裝置狀態回報，前端輪詢顯示面板
+### ADR-010：硬體代理提供裝置狀態回報，前端輪詢顯示面板
 - **Status**: Accepted
 - **Context**: 店員需即時掌握各機器（Brother QL-810W 標籤機、EPSON TM-T82iii 收據/發票機、掃碼槍、錢櫃）是否在線與細部狀態，避免列印才發現離線；前端不可直接驅動硬體。
 - **Decision**: 由 hardware-agent 作為硬體狀態的唯一抽象來源，暴露 `GET /devices/status`（見 04）。回報分兩級：**A 級**（連線/離線 + 最後回應時間心跳，保證做到）與 **B 級**（缺紙/上蓋/錯誤/錢櫃開啟等，依各機型官方 Python SDK 實際支援度，查不到者標記 `unsupported`、不臆造）。前端 `lib/hardware.ts` **定時輪詢**該端點顯示成唯讀面板，不直接碰硬體。
@@ -133,9 +133,11 @@ graph LR
 ### ADR-004：電子發票以 MIG XML 拋檔 + 開關 + 離線佇列
 - **Status**: Accepted
 - **Context**: 法規要求電子發票；草創期需可關閉；外網可能不穩。
-- **Decision**: 產生 MIG 4.0/4.1 XML 拋入 Turnkey 目錄、讀 ProcessResult 確認；`einvoice_enabled` 控制是否開立；維護上傳佇列與狀態。**銷售一律完整記錄，與是否開票解耦。**
+- **Decision**: 產生 MIG 4.0/4.1 XML 拋入 **Turnkey Ver 3.9** 目錄、讀 ProcessResult/SummaryResult 確認；`einvoice_enabled` 控制是否開立；維護上傳佇列與狀態。**銷售一律完整記錄，與是否開票解耦。**
+  - **訊息代碼（MIG 4.0/4.1 為準）**：自建 Turnkey 存證路徑用 **`F0401` 開立 / `F0501` 作廢 / `F0701` 註銷**、折讓用 **`G0401` / `G0501`**；MIG V4.0（2024-05-30）已刪除舊 `C0401`/`C0501`/`C0701` 與 `B0401`/`D0401`/`B0501`/`D0501`。欄位對照見 `docs/14-einvoice-mig-mapping.md`。
+- **Gate**: T13 動工前必須下載 Turnkey 3.9 完整手冊與 MIG 4.0/4.1 規格，依實際 XSD 欄位長度/Enum 與目錄設定實作，不得憑記憶或摘要硬寫（列為 Phase 3 閘門，見 docs/01 H、docs/07）。
 - **Alternatives**: 直接串加值中心 API（未來可加）。
-- **Consequences**: ＋符合官方流程、離線可排隊、草創彈性；－需依當前 Turnkey/MIG 版本實作細節。
+- **Consequences**: ＋符合官方流程、離線可排隊、草創彈性；－需依當前 Turnkey/MIG 版本實作細節（版本會演進，故設閘門）。
 
 ### ADR-005：PII 欄位層級加密 + 稽核
 - **Status**: Accepted

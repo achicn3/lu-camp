@@ -36,9 +36,12 @@ graph TD
 - **驗收**：完整收購入庫；現金出帳正確；開/結帳對帳數字正確（含不變量測試）。
 
 ## Phase 3 — POS 銷售 + 電子發票 + 硬體代理
+- **前置（foundational，序列）**：`settings` 模組（einvoice_enabled/tax_rate/default_commission_pct/default_margin_pct）、`core/money.split_tax_inclusive`、`shared/enums` 銷售/發票列舉。
+- **閘門 G1（電子發票，已完成查證）**：採 **MIG 4.0/4.1（F0401/F0501/F0701 + G0401/G0501）+ Turnkey 3.9**；對照骨架見 `docs/14-einvoice-mig-mapping.md`。T13 動工前仍須下載 Turnkey 3.9 完整手冊與 MIG 規格，依實際 XSD 欄位長度/Enum 與目錄/回執格式實作，不得憑摘要硬寫。
+- **閘門 G2（裝置狀態 B，已完成查證）**：兩家無官方 Python SDK；**Brother QL-810W 維持 Wi-Fi、A 級做、B 級標 `unsupported`**；**EPSON TM-T82iii A+B 皆做**（缺紙三態現成、cover/error/drawer 解析 DLE EOT）。每台 A/B 能力對照見 `docs/15-device-sdk-capability.md`，遵守 ADR-010「不臆造、不當故障」。
 - `sales`（購物車、序號/數量混合、SALE_IN 現金、序號品轉 SOLD、stock OUT）。
-- `einvoice`（MIG 4.0/4.1 XML 產生、拋 Turnkey 目錄、upload queue、ProcessResult 對帳、開關控制；**先確認當前 Turnkey/MIG 規格**）。
-- `hardware-agent`（收據、證明聯、條碼標籤、開櫃）。
+- `einvoice`（MIG 4.0/4.1 XML 產生、拋 Turnkey 目錄、upload queue、ProcessResult 對帳、開關控制；依 `docs/14` 為準）。
+- `hardware-agent`（收據、證明聯、條碼標籤、開櫃；裝置狀態 A/B 依 `docs/15`）。
 - **驗收**：可結帳；開關 on/off 行為正確且銷售皆完整記錄；發票 XML 可拋出/排隊；可列印/開櫃（fake + 實機）。
 
 ## Phase 4 — 寄售結算 + 退換貨
