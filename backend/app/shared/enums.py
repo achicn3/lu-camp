@@ -118,3 +118,69 @@ class StockReason(StrEnum):
     CONSIGN_RETURN = "CONSIGN_RETURN"
     WRITE_OFF = "WRITE_OFF"
     STOCKTAKE = "STOCKTAKE"
+
+
+class SaleStatus(StrEnum):
+    """銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。"""
+
+    COMPLETED = "COMPLETED"
+    RETURNED = "RETURNED"
+
+
+class SaleLineType(StrEnum):
+    """銷售明細行的品項種類。"""
+
+    SERIALIZED = "SERIALIZED"
+    CATALOG = "CATALOG"
+    BULK_LOT = "BULK_LOT"
+
+
+class PaymentMethod(StrEnum):
+    """付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。"""
+
+    CASH = "CASH"
+
+
+class SaleInvoiceStatus(StrEnum):
+    """銷售單的開票狀態（sales.invoice_status）。
+
+    NOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；
+    ISSUED：已開立發票；VOID：已作廢；ALLOWANCE：已折讓。
+    """
+
+    NOT_ISSUED = "NOT_ISSUED"
+    ISSUED = "ISSUED"
+    VOID = "VOID"
+    ALLOWANCE = "ALLOWANCE"
+
+
+class InvoiceType(StrEnum):
+    """發票交易類型（本系統領域層；與 MIG InvoiceTypeEnum 07/08 為不同概念）。"""
+
+    B2C = "B2C"
+    B2B = "B2B"
+
+
+class InvoiceStatus(StrEnum):
+    """發票（invoices）狀態。UPLOADED 表已上傳整合平台並取得回執。"""
+
+    ISSUED = "ISSUED"
+    UPLOADED = "UPLOADED"
+    VOID = "VOID"
+    ALLOWANCE = "ALLOWANCE"
+
+
+class UploadStatus(StrEnum):
+    """上傳佇列/發票上傳狀態（einvoice_upload_queue.status、invoice.upload_status）。"""
+
+    PENDING = "PENDING"
+    UPLOADED = "UPLOADED"
+    FAILED = "FAILED"
+
+
+class EInvoiceAction(StrEnum):
+    """電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。"""
+
+    ISSUE = "ISSUE"
+    VOID = "VOID"
+    ALLOWANCE = "ALLOWANCE"
