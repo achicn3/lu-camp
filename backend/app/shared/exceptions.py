@@ -51,3 +51,7 @@ class AcquisitionRequiresNationalId(DomainError):
 
 class InvalidCommissionPct(DomainError):
     """寄售抽成 commission_pct 超出合法範圍（0-100）。"""
+
+
+class InvalidTaxRate(DomainError):
+    """稅率超出合法範圍（須 0 ≤ rate < 1）。"""

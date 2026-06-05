@@ -1,12 +1,12 @@
 """金額工具：新台幣整數元（無角分），一律用 Decimal、ROUND_HALF_UP。
 
-本檔目前提供 T5 所需的 round_ntd 與定價輔助 suggested_price；
-split_tax_inclusive / commission 等於對應 phase（發票/寄售）導入時再加入。
+本檔提供 round_ntd、定價輔助 suggested_price 與發票稅額拆分 split_tax_inclusive；
+commission（寄售抽成）於 Phase 4（consignment）導入時再加入。
 """
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.shared.exceptions import InvalidMargin
+from app.shared.exceptions import InvalidMargin, InvalidTaxRate
 
 MARGIN_MIN = 0
 MARGIN_MAX = 99
@@ -26,3 +26,18 @@ def suggested_price(acquisition_cost: Decimal, margin_pct: int) -> int:
         raise InvalidMargin(f"margin_pct 須介於 {MARGIN_MIN}-{MARGIN_MAX}，收到 {margin_pct}")
     divisor = Decimal(1) - Decimal(margin_pct) / Decimal(100)
     return round_ntd(acquisition_cost / divisor)
+
+
+def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
+    """將含稅總額拆為（未稅 net, 稅額 tax），保證 net + tax = total（整數元、不差一元）。
+
+    稅於發票總額層級推算一次（不逐項算稅，見 CLAUDE.md §6）：
+    `net = round_ntd(total / (1 + rate))`、`tax = total − net`。
+    rate 為小數稅率（如 0.05），限 0 ≤ rate < 1。
+    """
+    if not Decimal(0) <= rate < Decimal(1):
+        raise InvalidTaxRate(f"稅率須介於 0（含）至 1（不含），收到 {rate}")
+    total_ntd = round_ntd(total)
+    net = round_ntd(total / (Decimal(1) + rate))
+    tax = total_ntd - net
+    return net, tax
