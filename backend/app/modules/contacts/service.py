@@ -46,8 +46,10 @@ class ContactService:
         """以 blind index 精確比對既有聯絡人（供收購去重）。"""
         return await self._repo.get_by_blind_index(store_id, national_id_blind_index(national_id))
 
-    async def search(self, store_id: int, role: str | None, q: str | None) -> list[Contact]:
-        return await self._repo.search(store_id, role, q)
+    async def search(
+        self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
+    ) -> list[Contact]:
+        return await self._repo.search(store_id, role, q, limit=limit, offset=offset)
 
     async def reveal_national_id(
         self, store_id: int, contact_id: int, actor_user_id: int

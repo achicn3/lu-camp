@@ -71,3 +71,11 @@ class SaleLineInvalid(DomainError):
 
 class CrossStoreReference(DomainError):
     """交易引用了不屬於本店的對象（如他店的 contact / user），多分店資料隔離違規。"""
+
+
+class SaleAlreadyVoid(DomainError):
+    """銷售已作廢，不可重複作廢。"""
+
+
+class IdempotencyKeyConflict(DomainError):
+    """同一 idempotency key 但購物車內容不同：拒絕，避免靜默丟掉新的結帳。"""

@@ -1,0 +1,124 @@
+"""sales 的 Pydantic schema：結帳請求與輸出（§11 合約）。
+
+金額以字串傳輸（§11）、新台幣整數元（§6）。明細依 line_type 擇一帶參照，於 service 解析。
+"""
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, model_validator
+
+from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.models import Sale, SaleLine
+from app.shared.enums import PaymentMethod, SaleInvoiceStatus, SaleLineType, SaleStatus
+
+NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+
+
+class SaleLineCreateRequest(BaseModel):
+    """單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT→id + qty。"""
+
+    line_type: SaleLineType
+    item_code: str | None = None
+    catalog_product_id: int | None = None
+    bulk_lot_id: int | None = None
+    qty: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def _check_shape(self) -> "SaleLineCreateRequest":
+        """依 line_type 驗證：只接受對應的參照、序號品 qty 必為 1（避免靜默只賣 1）。"""
+        if self.line_type == SaleLineType.SERIALIZED:
+            if self.item_code is None:
+                raise ValueError("SERIALIZED 明細必須帶 item_code")
+            if self.catalog_product_id is not None or self.bulk_lot_id is not None:
+                raise ValueError("SERIALIZED 明細只能帶 item_code")
+            if self.qty != 1:
+                raise ValueError("SERIALIZED 明細數量必須為 1")
+        elif self.line_type == SaleLineType.CATALOG:
+            if self.catalog_product_id is None:
+                raise ValueError("CATALOG 明細必須帶 catalog_product_id")
+            if self.item_code is not None or self.bulk_lot_id is not None:
+                raise ValueError("CATALOG 明細只能帶 catalog_product_id")
+        else:  # BULK_LOT
+            if self.bulk_lot_id is None:
+                raise ValueError("BULK_LOT 明細必須帶 bulk_lot_id")
+            if self.item_code is not None or self.catalog_product_id is not None:
+                raise ValueError("BULK_LOT 明細只能帶 bulk_lot_id")
+        return self
+
+    def to_input(self) -> SaleLineInput:
+        return SaleLineInput(
+            line_type=self.line_type,
+            item_code=self.item_code,
+            catalog_product_id=self.catalog_product_id,
+            bulk_lot_id=self.bulk_lot_id,
+            qty=self.qty,
+        )
+
+
+class SaleCreateRequest(BaseModel):
+    """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。"""
+
+    lines: list[SaleLineCreateRequest] = Field(min_length=1)
+    buyer_contact_id: int | None = None
+
+    def to_inputs(self) -> list[SaleLineInput]:
+        return [line.to_input() for line in self.lines]
+
+
+class SaleLineRead(BaseModel):
+    """銷售明細輸出。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    line_type: SaleLineType
+    serialized_item_id: int | None
+    catalog_product_id: int | None
+    bulk_lot_id: int | None
+    description: str
+    qty: int
+    unit_price: NTDAmount
+    line_total: NTDAmount
+
+
+class SaleRead(BaseModel):
+    """銷售單輸出（含明細）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    store_id: int
+    clerk_user_id: int
+    buyer_contact_id: int | None
+    subtotal: NTDAmount
+    tax: NTDAmount
+    total: NTDAmount
+    payment_method: PaymentMethod
+    invoice_status: SaleInvoiceStatus
+    status: SaleStatus
+    created_at: datetime
+    lines: list[SaleLineRead] = []
+
+    @classmethod
+    def build(cls, sale: Sale, lines: list[SaleLine]) -> "SaleRead":
+        data = cls.model_validate(sale)
+        return data.model_copy(
+            update={"lines": [SaleLineRead.model_validate(line) for line in lines]}
+        )
+
+
+class SaleSummaryRead(BaseModel):
+    """銷售單摘要輸出（列表用，不含明細）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    store_id: int
+    subtotal: NTDAmount
+    tax: NTDAmount
+    total: NTDAmount
+    invoice_status: SaleInvoiceStatus
+    status: SaleStatus
+    created_at: datetime

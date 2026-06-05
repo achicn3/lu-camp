@@ -53,9 +53,11 @@ async def list_contacts(
     user: CurrentUserDep,
     role: Annotated[ContactRole | None, Query()] = None,
     q: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ContactRead]:
     contacts = await ContactService(session).search(
-        user.store_id, role.value if role is not None else None, q
+        user.store_id, role.value if role is not None else None, q, limit=limit, offset=offset
     )
     return [ContactRead.from_model(c) for c in contacts]
 

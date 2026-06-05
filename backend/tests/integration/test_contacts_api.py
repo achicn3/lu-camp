@@ -308,3 +308,21 @@ async def test_list_filter_by_role(client: httpx.AsyncClient, db_session: AsyncS
     )
     assert sellers.status_code == 200
     assert [c["name"] for c in sellers.json()] == ["賣家"]
+
+
+async def test_list_pagination(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    for i in range(3):
+        await client.post(
+            "/api/v1/contacts",
+            json={"name": f"會員{i}", "roles": ["MEMBER"]},
+            headers=_auth(m_token),
+        )
+    page1 = await client.get("/api/v1/contacts", params={"limit": 2}, headers=_auth(m_token))
+    assert len(page1.json()) == 2
+    page2 = await client.get(
+        "/api/v1/contacts", params={"limit": 2, "offset": 2}, headers=_auth(m_token)
+    )
+    assert len(page2.json()) == 1
+    over = await client.get("/api/v1/contacts", params={"limit": 201}, headers=_auth(m_token))
+    assert over.status_code == 422

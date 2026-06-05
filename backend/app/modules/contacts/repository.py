@@ -28,8 +28,10 @@ class ContactRepository:
         result: Contact | None = await self._session.scalar(stmt)
         return result
 
-    async def search(self, store_id: int, role: str | None, q: str | None) -> list[Contact]:
-        """以姓名/電話模糊搜尋；national_id 不可明文/部分搜尋，故不納入。"""
+    async def search(
+        self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
+    ) -> list[Contact]:
+        """以姓名/電話模糊搜尋；national_id 不可明文/部分搜尋，故不納入。分頁（docs/04）。"""
         stmt = select(Contact).where(Contact.store_id == store_id)
         if role is not None:
             # ARRAY 包含該角色（@>）。
@@ -37,5 +39,5 @@ class ContactRepository:
         if q is not None:
             like = f"%{q}%"
             stmt = stmt.where(or_(Contact.name.ilike(like), Contact.phone.ilike(like)))
-        result = await self._session.scalars(stmt.order_by(Contact.id))
+        result = await self._session.scalars(stmt.order_by(Contact.id).limit(limit).offset(offset))
         return list(result)

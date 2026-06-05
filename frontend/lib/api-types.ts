@@ -192,6 +192,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Sales */
+        get: operations["listSales"];
+        put?: never;
+        /** Create Sale */
+        post: operations["createSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sale */
+        get: operations["getSale"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}/print-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Print Sale Detail */
+        post: operations["printSaleDetail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void Sale */
+        post: operations["voidSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -512,6 +581,140 @@ export interface components {
             status: string;
         };
         /**
+         * PaymentMethod
+         * @description 付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。
+         * @enum {string}
+         */
+        PaymentMethod: "CASH";
+        /**
+         * SaleCreateRequest
+         * @description 結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
+         */
+        SaleCreateRequest: {
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
+            /** Lines */
+            lines: components["schemas"]["SaleLineCreateRequest"][];
+        };
+        /**
+         * SaleInvoiceStatus
+         * @description 銷售單的開票狀態（sales.invoice_status）。
+         *
+         *     NOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；
+         *     ISSUED：已開立發票；VOID：已作廢；ALLOWANCE：已折讓。
+         * @enum {string}
+         */
+        SaleInvoiceStatus: "NOT_ISSUED" | "ISSUED" | "VOID" | "ALLOWANCE";
+        /**
+         * SaleLineCreateRequest
+         * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT→id + qty。
+         */
+        SaleLineCreateRequest: {
+            /** Bulk Lot Id */
+            bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            line_type: components["schemas"]["SaleLineType"];
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
+        };
+        /**
+         * SaleLineRead
+         * @description 銷售明細輸出。
+         */
+        SaleLineRead: {
+            /** Bulk Lot Id */
+            bulk_lot_id: number | null;
+            /** Catalog Product Id */
+            catalog_product_id: number | null;
+            /** Description */
+            description: string;
+            /** Id */
+            id: number;
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
+            /** Qty */
+            qty: number;
+            /** Serialized Item Id */
+            serialized_item_id: number | null;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * SaleLineType
+         * @description 銷售明細行的品項種類。
+         * @enum {string}
+         */
+        SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT";
+        /**
+         * SaleRead
+         * @description 銷售單輸出（含明細）。
+         */
+        SaleRead: {
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
+            /** Clerk User Id */
+            clerk_user_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            invoice_status: components["schemas"]["SaleInvoiceStatus"];
+            /**
+             * Lines
+             * @default []
+             */
+            lines: components["schemas"]["SaleLineRead"][];
+            payment_method: components["schemas"]["PaymentMethod"];
+            status: components["schemas"]["SaleStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Subtotal */
+            subtotal: string;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
+        };
+        /**
+         * SaleStatus
+         * @description 銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。
+         * @enum {string}
+         */
+        SaleStatus: "COMPLETED" | "RETURNED";
+        /**
+         * SaleSummaryRead
+         * @description 銷售單摘要輸出（列表用，不含明細）。
+         */
+        SaleSummaryRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            invoice_status: components["schemas"]["SaleInvoiceStatus"];
+            status: components["schemas"]["SaleStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Subtotal */
+            subtotal: string;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
+        };
+        /**
          * SettingsRead
          * @description 單店設定輸出。
          */
@@ -755,6 +958,8 @@ export interface operations {
             query?: {
                 role?: components["schemas"]["ContactRole"] | null;
                 q?: string | null;
+                limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -926,6 +1131,168 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    listSales: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleSummaryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createSale: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    printSaleDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voidSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

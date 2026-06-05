@@ -443,6 +443,51 @@ async def test_same_store_buyer_contact_ok(db_session: AsyncSession) -> None:
     assert sale.buyer_contact_id == buyer.id
 
 
+def test_sale_line_request_shape_validation() -> None:
+    from app.modules.sales.schemas import SaleLineCreateRequest
+
+    # 正常路徑通過。
+    SaleLineCreateRequest(line_type=SaleLineType.SERIALIZED, item_code="S1")
+    SaleLineCreateRequest(line_type=SaleLineType.CATALOG, catalog_product_id=1, qty=2)
+    SaleLineCreateRequest(line_type=SaleLineType.BULK_LOT, bulk_lot_id=1, qty=3)
+    # SERIALIZED qty != 1 → 拒絕（避免靜默只賣 1）。
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.SERIALIZED, item_code="S1", qty=2)
+    # SERIALIZED 帶多餘參照 → 拒絕。
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(
+            line_type=SaleLineType.SERIALIZED, item_code="S1", catalog_product_id=1
+        )
+    # CATALOG 帶 item_code → 拒絕。
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.CATALOG, catalog_product_id=1, item_code="X")
+    # BULK_LOT 帶 catalog_product_id → 拒絕。
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.BULK_LOT, bulk_lot_id=1, catalog_product_id=1)
+    # 缺對應參照 → 拒絕。
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.SERIALIZED)
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.CATALOG)
+    with pytest.raises(ValueError):
+        SaleLineCreateRequest(line_type=SaleLineType.BULK_LOT)
+
+
+async def test_serialized_qty_not_one_raises_at_service(db_session: AsyncSession) -> None:
+    store_id, clerk_id = await _seed_base(db_session)
+    await _seed_serialized(
+        db_session, store_id, code="S1", price=Decimal("3000"), ownership=OwnershipType.OWNED
+    )
+    from app.shared.exceptions import SaleLineInvalid
+
+    with pytest.raises(SaleLineInvalid):
+        await SalesService(db_session).create_sale(
+            store_id,
+            clerk_id,
+            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="S1", qty=2)],
+        )
+
+
 async def test_einvoice_disabled_sale_still_fully_recorded(db_session: AsyncSession) -> None:
     # 預設 einvoice_enabled=false → invoice_status=NOT_ISSUED，但 sale/明細/異動皆完整。
     store_id, clerk_id = await _seed_base(db_session)

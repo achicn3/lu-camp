@@ -3,19 +3,46 @@
 > 從審查（含 Codex adversarial-review）或實作中發現、經決議延後處理的真實問題。
 > 每項註明來源、原因、預定處理時機，確保不被遺忘。完成後移除並於該 PR 註記。
 
-## D-2（T12 必做）— POS 結帳 idempotency
+## D-4（橫切任務，待排）— 敏感操作的當前授權重驗（auth-hardening）
 
-- **來源**：T11 sales 的 Codex adversarial-review（2026-06-05）finding ①。
-- **問題**：`SalesService.create_sale` 每次呼叫都新建一筆 sale 並重跑所有副作用（扣庫存、收現）。
-  屬領域層正確行為；但一旦有 `POST /sales`（T12），網路重試／回應遺失會重複建單、重複收錢、
-  重複扣庫存（CATALOG/BULK_LOT 純數量購物車尤其無從以序號狀態機擋下）。
-- **T12 必做**：`POST /sales` 接受呼叫端產生的 idempotency key；以 `(store_id, idempotency_key)`
-  唯一約束持久化，重試時回傳原結果而非重複建單。補「已提交後重試」整合測試。
-- **狀態**：待辦（T12 實作 sales API 時必做，勿遺漏）。
+- **來源**：T12 Codex adversarial-review（2026-06-06）對 void 授權的觀察。
+- **問題**：所有端點的身分都由 JWT claims 解出、**不查 DB**（見 `core/deps.py` 明載設計）。
+  故被降權／停用／轉店的使用者，在短效 token 到期前仍可執行敏感操作（如 void、settings PATCH、
+  national-id 解密）。這是**全應用層級的 auth 設計議題、非 T12 bug**——void 與其他敏感端點一視同仁。
+- **修法（統一、集中）**：在 `core/deps.py`/auth 集中加「敏感操作重載 actor、驗當前 DB 的
+  `role==MANAGER` 且 `is_active`」的依賴，**套用到所有敏感端點**（void、settings PATCH、
+  national-id 解密，及未來新增者），不逐一各補、避免補一漏二與不一致。
+- **現有緩解**：CLAUDE.md §5「JWT 短效 + refresh」先限縮風險窗口。
+- **狀態**：待排獨立橫切任務。Codex 之後每跑會再報此點（app-wide 設計），視為已處置已知項、非 blocker。
+
+## D-3（設計筆記，待 Phase 4 退貨一起評估）— 銷售作廢 vs 發票作廢狀態建模
+
+- **來源**：T12 Codex adversarial-review（2026-06-06）對 void 的建模點。
+- **觀察**：目前 `void` 以 `invoice_status=VOID` 表示「銷售已作廢」，混用了「銷售作廢」與「發票
+  作廢」兩種語意；且對 `NOT_ISSUED`（尚未開票）的銷售也標 VOID，語意上是「待作廢接縫」而非真正
+  發票作廢。這是**刻意、有文件記載的接縫**（實體回退屬 Phase 4 退貨、發票作廢 XML 屬 T13/T14），
+  非 bug；經使用者明確拍板維持現狀（Codex 建議「拒絕作廢 NOT_ISSUED」會使 void 在 T13 前永遠
+  不可用，故不採納）。
+- **未來評估**：若要把「銷售作廢狀態」與「發票狀態」拆開（例如新增 `SaleStatus.VOIDED`、或獨立的
+  cancellation 狀態機），併入 **Phase 4 退貨（returns）** 一起設計——那時才有序號品回 IN_STOCK、
+  散裝回補、寄售反轉、退現金等整套實體回退，狀態建模一次到位。
+- **狀態**：設計筆記，現在不做。
 
 ---
 
 ## 已解決
+
+### D-2 ✅ — POS 結帳 idempotency（2026-06-06 解決，T12）
+
+- **來源**：T11 Codex adversarial-review finding ①。
+- **修法**：`POST /sales` 需 `Idempotency-Key` 標頭（min_length=1/max_length=80）；sales 加
+  `idempotency_key` + `idempotency_fingerprint`（購物車 sha256）+ `(store_id, idempotency_key)`
+  唯一約束。同 key 內容相同 → 回原單、不重跑副作用；內容不同 → `IdempotencyKeyConflict`→409。
+  pre-check 與 router 的 IntegrityError handler 共用 `find_idempotent_replay`（避免修一條漏一條），
+  handler 縮窄到只吞 idempotency 唯一約束違反。
+- **測試**：`test_sales_api.py`（缺/空 key→422、同 key 不同內容→409、replay）、
+  `test_sales_idempotency_concurrency.py`（真並行：同 key 同購物車只建一筆/只扣一次/只收一次、
+  同 key 不同購物車一筆成功一筆 409）。
 
 ### D-1 ✅ — 現金異動 vs 關帳競態（2026-06-05 解決）
 
