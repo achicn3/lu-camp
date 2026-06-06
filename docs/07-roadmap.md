@@ -16,7 +16,10 @@ graph TD
     P4 --> P6
     P5 --> P6
     P6 --> P7[Phase 7 強化+部署]
+    P7 --> EINV[發票收尾階段 電子發票 T13/T14<br/>閘門：工商憑證+帳號核定 / Linux x86-64 主機 / G1 規格]
 ```
+
+> **發票解耦**：電子發票（T13/T14）已從 Phase 3 抽出，集中於最末「發票收尾階段」（見文末）。`einvoice_enabled=false` 時銷售照常完整記錄（NOT_ISSUED），故其延後不阻擋 P3–P7。
 
 ## Phase 0 — 地基
 - Monorepo、docker-compose、PostgreSQL、Alembic、CI（lint/type/test/coverage gate）。
@@ -35,19 +38,19 @@ graph TD
 - `cashdrawer`（開帳/結帳/異動、expected 計算）。
 - **驗收**：完整收購入庫；現金出帳正確；開/結帳對帳數字正確（含不變量測試）。
 
-## Phase 3 — POS 銷售 + 電子發票 + 硬體代理
+## Phase 3 — POS 銷售 + 硬體代理（電子發票已抽出，見「發票收尾階段」）
 - **前置（foundational，序列）**：`settings` 模組（einvoice_enabled/tax_rate/default_commission_pct/default_margin_pct）、`core/money.split_tax_inclusive`、`shared/enums` 銷售/發票列舉。
-- **閘門 G1（電子發票，已完成查證）**：採 **MIG 4.0/4.1（F0401/F0501/F0701 + G0401/G0501）+ Turnkey 3.9**；對照骨架見 `docs/14-einvoice-mig-mapping.md`。T13 動工前仍須下載 Turnkey 3.9 完整手冊與 MIG 規格，依實際 XSD 欄位長度/Enum 與目錄/回執格式實作，不得憑摘要硬寫。
 - **閘門 G2（裝置狀態 B，已完成查證）**：兩家無官方 Python SDK；**Brother QL-810W 維持 Wi-Fi、A 級做、B 級標 `unsupported`**；**EPSON TM-T82iii A+B 皆做**（缺紙三態現成、cover/error/drawer 解析 DLE EOT）。每台 A/B 能力對照見 `docs/15-device-sdk-capability.md`，遵守 ADR-010「不臆造、不當故障」。
-- `sales`（購物車、序號/數量混合、SALE_IN 現金、序號品轉 SOLD、stock OUT）。
-- `einvoice`（MIG 4.0/4.1 XML 產生、拋 Turnkey 目錄、upload queue、ProcessResult 對帳、開關控制；依 `docs/14` 為準）。
+- `sales`（購物車、序號/數量混合、SALE_IN 現金、序號品轉 SOLD、stock OUT）。**已完成（T11/T12）。**
 - `hardware-agent`（收據、證明聯、條碼標籤、開櫃；裝置狀態 A/B 依 `docs/15`）。
-- **驗收**：可結帳；開關 on/off 行為正確且銷售皆完整記錄；發票 XML 可拋出/排隊；可列印/開櫃（fake + 實機）。
+- **電子發票（`einvoice` 模組 T13/T14）已從本 Phase 抽出**，集中到文末「**發票收尾階段**」、排在所有其他 Phase/Wave 之後。理由＝**發票與系統已解耦**：`einvoice_enabled=false` 時每筆銷售仍完整寫入 `sales`（`invoice_status=NOT_ISSUED`，可日後補開，§6），前端發票區於未啟用時隱藏 → 移走發票不影響 sales / 硬體 / 前端的開發與上線。
+- **驗收**：可結帳；`einvoice_enabled` on/off 行為正確且銷售皆完整記錄；可列印/開櫃（fake + 實機）。**（不含發票 XML 上傳，留待收尾階段。）**
 
 ## Phase 4 — 寄售結算 + 退換貨
 - `consignment`（賣出觸發 settlement、付款流程、應付彙總、退回寄售人）。
-- `returns`（退現金、回補庫存、已開票產生折讓並排上傳）。
+- `returns`（退現金、回補庫存、已開票產生折讓單 allowance）。
 - **驗收**：寄售拆帳與付款正確；退貨折讓流程正確（不變量測試）。
+- **發票解耦註記**：退貨折讓在 `einvoice_enabled=false` 時僅產生/記錄 allowance（不實際上傳）；折讓的 **G0401/G0501 XML 產生與上傳** 一併留待「發票收尾階段」實作，不阻擋本 Phase。
 
 ## Phase 5 — 採購 + 盤點
 - `purchasing`（supplier、PO、收貨入庫、低庫存提醒）。
@@ -65,6 +68,25 @@ graph TD
 - `notification` 介面確認預留（仍 no-op）。
 - 安全複查（PII、金鑰、權限）。
 - **驗收**：可一鍵部署、備份可還原、e2e 全綠。
+
+## 發票收尾階段（電子發票，延後至最後實作）
+
+> **電子發票整包（`einvoice` 模組 T13、e-invoice API T14、Turnkey 環境搭建與憑證接線）從原 Wave 3/4 抽出**，集中於此、排在**所有其他 Phase/Wave 之後**。因發票與系統已解耦（見 Phase 3 註記），此階段延後不影響 sales / 硬體 / 前端的開發與上線。
+
+- **前置閘門（三者齊備才動工，缺一不可）**：
+  1. **憑證/帳號**：工商憑證（MOEACA）申請完成 **＋** 平台帳號核定（含 Turnkey 申請，審核約 3 工作天）。
+  2. **主機**：Linux x86-64 主機備妥（**選項 A：與門市後端同機**；非 mac/Apple Silicon）。
+  3. **規格**：G1 完整規格與本次調查已落 repo（`docs/14`，含 §5 部署/憑證/流程盤點）。
+  - 另需釐清：主憑證政策（待打客服 02-89782365）、防火牆對外固定 IP 開通（SFTP 2222＋HTTPS、非中國大陸 IP）。
+- **工作項**：
+  - 環境：Turnkey 3.2.1 安裝（OpenJDK 17、獨立 PostgreSQL DB、目錄設定 V4.1、headless `run_cmd.sh`）。
+  - **T13 `einvoice` 模組**：MIG 4.1 XML 產生（F0401/F0501/F0701 + 折讓 G0401/G0501）、拋 `UpCast/B2SSTORAGE/<msg>/SRC`、upload queue、回讀 `TURNKEY_MESSAGE_LOG` 對帳、開關控制；依 `docs/14` 為準，動工前仍須對齊實際 XSD 欄位長度/Enum，不得憑摘要硬寫。
+  - **T14 e-invoice API**：開立/重送/查 ProcessResult/折讓 端點。
+- **驗收**：`einvoice_enabled=true` 時 XML 可產生並經 Turnkey 上傳、ProcessResult 可對帳；關閉時銷售仍完整記錄（NOT_ISSUED）。
+
+## 橫切延後項時機（D-3 / D-4，詳 `docs/deferred-items.md`）
+- **D-4（auth 強化，跨切）**：敏感操作改為重查 DB 驗證當前 `role==MANAGER` 與 `is_active`，集中於 `deps.py`/auth。**建議時機：前端（T19/T20）與真錢交易上線之前**完成，避免帶著「全憑 JWT claim」的設計進到使用者實際操作期。
+- **D-3（sale-void vs invoice-void 模型）**：**建議時機：與 Phase 4 退換貨一併評估**（是否拆 `SaleStatus.VOIDED`）。
 
 ## 預留（未來）
 - 多分店上線（雲端/同步）、通知（LINE/簡訊）、加值中心 API、會員行銷/點數進階。

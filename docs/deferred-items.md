@@ -13,6 +13,8 @@
   `role==MANAGER` 且 `is_active`」的依賴，**套用到所有敏感端點**（void、settings PATCH、
   national-id 解密，及未來新增者），不逐一各補、避免補一漏二與不一致。
 - **現有緩解**：CLAUDE.md §5「JWT 短效 + refresh」先限縮風險窗口。
+- **建議時機**：**前端（T19/T20）與真錢交易上線之前**完成（見 `docs/07-roadmap.md`），避免帶著
+  「全憑 JWT claim」設計進入使用者實際操作期。
 - **狀態**：待排獨立橫切任務。Codex 之後每跑會再報此點（app-wide 設計），視為已處置已知項、非 blocker。
 
 ## D-3（設計筆記，待 Phase 4 退貨一起評估）— 銷售作廢 vs 發票作廢狀態建模
