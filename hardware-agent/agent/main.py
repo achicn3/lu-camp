@@ -80,10 +80,12 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         return OkResponse(status="ok")
 
     # --- T15/T16 在此 include 各自的 router（避免彼此改同一 endpoint）---
-    # from agent.routers.print import router as print_router      # T15
-    # app.include_router(print_router)
+    # 兩個 router 都從無循環的 agent.deps 取 DI（DevicesDep/OkResponse），
+    # 故可在 create_app 末端延遲 include，不會與 module 層 app = create_app() 互咬。
     from agent.routers.devices import router as devices_router  # T16
+    from agent.routers.print import router as print_router  # T15
 
+    app.include_router(print_router)
     app.include_router(devices_router)
 
     return app

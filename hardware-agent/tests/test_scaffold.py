@@ -24,6 +24,7 @@ from agent.interfaces import (
     ReceiptPrinter,
     SaleLinePayload,
     SalePayload,
+    StoreHeader,
 )
 from agent.main import create_app
 
@@ -42,6 +43,7 @@ _SALE = SalePayload(
         )
     ],
 )
+_HEADER = StoreHeader(name="路營二手", tax_id="12345678", address="台北市", phone="02-1234-5678")
 
 
 def test_fakes_satisfy_protocols() -> None:
@@ -70,18 +72,18 @@ def test_fake_label_printer_records_and_simulates_failure() -> None:
 
 def test_fake_receipt_printer_simulates_each_failure() -> None:
     ok = FakeReceiptPrinter()
-    ok.print_receipt(_SALE)
-    ok.print_detail(_SALE)
-    assert ok.receipts == [_SALE]
-    assert ok.details == [_SALE]
+    ok.print_receipt(_SALE, _HEADER)
+    ok.print_detail(_SALE, _HEADER)
+    assert ok.receipts == [(_SALE, _HEADER)]
+    assert ok.details == [(_SALE, _HEADER)]
     with pytest.raises(DeviceOffline):
-        FakeReceiptPrinter(offline=True).print_receipt(_SALE)
+        FakeReceiptPrinter(offline=True).print_receipt(_SALE, _HEADER)
     with pytest.raises(PaperOut):
-        FakeReceiptPrinter(paper_out=True).print_detail(_SALE)
+        FakeReceiptPrinter(paper_out=True).print_detail(_SALE, _HEADER)
     with pytest.raises(CoverOpen):
-        FakeReceiptPrinter(cover_open=True).print_receipt(_SALE)
+        FakeReceiptPrinter(cover_open=True).print_receipt(_SALE, _HEADER)
     with pytest.raises(DeviceTimeout):
-        FakeReceiptPrinter(timeout=True).print_receipt(_SALE)
+        FakeReceiptPrinter(timeout=True).print_receipt(_SALE, _HEADER)
 
 
 def test_fake_cash_drawer_connected_and_not_connected() -> None:

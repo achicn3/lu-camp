@@ -22,6 +22,7 @@ from agent.interfaces import (
     DeviceStatus,
     InvoicePayload,
     SalePayload,
+    StoreHeader,
 )
 
 
@@ -56,8 +57,8 @@ class FakeReceiptPrinter:
         self.timeout = timeout
         self.paper_out = paper_out
         self.cover_open = cover_open
-        self.receipts: list[SalePayload] = []
-        self.details: list[SalePayload] = []
+        self.receipts: list[tuple[SalePayload, StoreHeader]] = []
+        self.details: list[tuple[SalePayload, StoreHeader]] = []
         self.einvoices: list[InvoicePayload] = []
 
     def _guard(self) -> None:
@@ -70,13 +71,13 @@ class FakeReceiptPrinter:
         if self.paper_out:
             raise PaperOut("fake receipt printer out of paper")
 
-    def print_receipt(self, sale: SalePayload) -> None:
+    def print_receipt(self, sale: SalePayload, header: StoreHeader) -> None:
         self._guard()
-        self.receipts.append(sale)
+        self.receipts.append((sale, header))
 
-    def print_detail(self, sale: SalePayload) -> None:
+    def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
         self._guard()
-        self.details.append(sale)
+        self.details.append((sale, header))
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
         self._guard()

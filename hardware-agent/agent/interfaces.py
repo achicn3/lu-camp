@@ -68,6 +68,21 @@ class SalePayload(BaseModel):
     lines: list[SaleLinePayload]
 
 
+class StoreHeader(BaseModel):
+    """收據／明細聯抬頭（店名/統編/地址/電話）。
+
+    **單一事實來源為後端 `stores` 表**（CLAUDE.md §4），由 agent 依 `SalePayload.store_id`
+    向後端 `GET /stores/{id}/receipt-header` 取得並快取，不存在 agent 設定檔（避免漂移）。
+    收據/明細聯列印時必須印出此抬頭——不印出沒有店名/統編的收據。
+    """
+
+    name: str
+    tax_id: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    invoice_track_info: str | None = None
+
+
 class InvoicePayload(BaseModel):
     """電子發票列印輸入（**介面 placeholder**）。
 
@@ -115,12 +130,12 @@ class LabelPrinter(Protocol):
 class ReceiptPrinter(Protocol):
     """收據機（EPSON TM-T82III）：收據聯／商品明細聯／電子發票。"""
 
-    def print_receipt(self, sale: SalePayload) -> None:
-        """列印結帳收據聯。"""
+    def print_receipt(self, sale: SalePayload, header: StoreHeader) -> None:
+        """列印結帳收據聯（含店家抬頭）。"""
         ...
 
-    def print_detail(self, sale: SalePayload) -> None:
-        """列印商品明細聯（逐項品名/數量/單價/小計 + 總計/稅）。"""
+    def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
+        """列印商品明細聯（含店家抬頭；逐項品名/數量/單價/小計 + 總計/稅）。"""
         ...
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:

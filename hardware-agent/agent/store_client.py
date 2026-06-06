@@ -1,0 +1,63 @@
+"""後端店家抬頭 client（T15）。
+
+收據／明細聯的抬頭（店名/統編/地址/電話）**單一事實來源為後端 `stores` 表**
+（CLAUDE.md §4），不放 agent 設定檔以免漂移。本 client 依 `store_id` 向後端
+`GET /api/v1/stores/{id}/receipt-header` 取得並**快取（per store_id、懶載入）**，
+抗後端暫時斷線；取不到且無快取時丟 `StoreHeaderUnavailable`，由列印路由轉 503
+——**絕不印出沒有店名/統編的收據**。後端 URL／服務 token 由環境變數設定。
+"""
+
+from __future__ import annotations
+
+import os
+
+import httpx
+
+from agent.interfaces import StoreHeader
+
+
+class StoreHeaderUnavailable(Exception):
+    """後端店家抬頭取不到且無快取（不可印出無抬頭收據）。"""
+
+
+class StoreHeaderClient:
+    """向後端取店家抬頭，per store_id 快取。"""
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None = None,
+        timeout: float = 5.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._token = token
+        self._timeout = timeout
+        self._transport = transport  # 測試可注入 httpx.MockTransport
+        self._cache: dict[int, StoreHeader] = {}
+
+    async def get_header(self, store_id: int) -> StoreHeader:
+        """回傳該店抬頭；命中快取直接回，否則向後端取並快取。取不到丟 StoreHeaderUnavailable。"""
+        cached = self._cache.get(store_id)
+        if cached is not None:
+            return cached
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        url = f"{self._base_url}/api/v1/stores/{store_id}/receipt-header"
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            ) as client:
+                resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise StoreHeaderUnavailable(f"無法取得 store {store_id} 抬頭：{exc}") from exc
+        header = StoreHeader.model_validate(resp.json())
+        self._cache[store_id] = header
+        return header
+
+
+def build_store_header_client() -> StoreHeaderClient:
+    """由環境變數建立 client（AGENT_BACKEND_URL、AGENT_SERVICE_TOKEN）。"""
+    base_url = os.environ.get("AGENT_BACKEND_URL", "http://localhost:8000")
+    token = os.environ.get("AGENT_SERVICE_TOKEN")
+    return StoreHeaderClient(base_url=base_url, token=token)

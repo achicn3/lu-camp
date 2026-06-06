@@ -1,0 +1,188 @@
+"""T15 列印端點測試：收據/明細聯印出抬頭、發票 placeholder、抬頭取不到/裝置失敗映射。
+
+全程免實機：注入 FakeReceiptPrinter；店家抬頭 client 以覆寫依賴或 httpx.MockTransport mock。
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+import httpx
+import pytest
+from fastapi import FastAPI
+
+from agent.devices import AgentDevices, default_fake_devices
+from agent.drivers.escpos_receipt import EscposReceiptPrinter
+from agent.escpos_printer import FakePrinter
+from agent.fakes import FakeReceiptPrinter
+from agent.interfaces import InvoicePayload, SaleLinePayload, SalePayload, StoreHeader
+from agent.main import create_app
+from agent.routers.print import get_store_header_client
+from agent.store_client import StoreHeaderClient, StoreHeaderUnavailable
+
+_AGENT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_print_router_importable_in_isolation() -> None:
+    """回歸測試：agent.routers.print 必須能在全新直譯器中獨立匯入，
+    防止 router↔main 循環匯入再度發生（DI 應從無循環的 agent.deps 取，而非 agent.main）。"""
+    result = subprocess.run(
+        [sys.executable, "-c", "import agent.routers.print as p; assert p.router"],
+        cwd=_AGENT_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+_SALE = SalePayload(
+    id=1,
+    store_id=7,
+    subtotal="952",
+    tax="48",
+    total="1000",
+    payment_method="CASH",
+    invoice_status="NOT_ISSUED",
+    created_at="2026-06-07T00:00:00Z",
+    lines=[
+        SaleLinePayload(
+            line_type="CATALOG", description="帳篷", qty=1, unit_price="1000", line_total="1000"
+        )
+    ],
+)
+_HEADER = StoreHeader(name="路營二手", tax_id="12345678", address="台北市", phone="02-1234-5678")
+
+
+class _FakeClient:
+    """測試用抬頭 client：回傳固定抬頭或丟 StoreHeaderUnavailable。"""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = 0
+
+    async def get_header(self, store_id: int) -> StoreHeader:
+        self.calls += 1
+        if self.fail:
+            raise StoreHeaderUnavailable(f"store {store_id} 抬頭不可得")
+        return _HEADER
+
+
+def _app_with(printer: object, client: _FakeClient) -> FastAPI:
+    base = default_fake_devices()
+    app = create_app(
+        AgentDevices(
+            label_printer=base.label_printer,
+            receipt_printer=printer,  # type: ignore[arg-type]
+            cash_drawer=base.cash_drawer,
+            status_provider=base.status_provider,
+        )
+    )
+    app.dependency_overrides[get_store_header_client] = lambda: client
+    return app
+
+
+async def _post(app: object, path: str, json: dict[str, object] | None = None) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app)  # type: ignore[arg-type]
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.post(path, json=json)
+
+
+async def test_print_receipt_includes_header() -> None:
+    printer = FakeReceiptPrinter()
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/receipt", _SALE.model_dump(mode="json")
+    )
+    assert resp.status_code == 200
+    assert printer.receipts == [(_SALE, _HEADER)]
+
+
+async def test_print_detail_includes_header() -> None:
+    printer = FakeReceiptPrinter()
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/detail", _SALE.model_dump(mode="json")
+    )
+    assert resp.status_code == 200
+    assert printer.details == [(_SALE, _HEADER)]
+
+
+async def test_print_einvoice_is_pending_placeholder() -> None:
+    printer = FakeReceiptPrinter()
+    resp = await _post(_app_with(printer, _FakeClient()), "/print/einvoice", {"sale_id": 1})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pending_einvoice_stage"
+    assert printer.einvoices == [InvoicePayload(sale_id=1)]
+
+
+async def test_receipt_header_unavailable_returns_503() -> None:
+    printer = FakeReceiptPrinter()
+    resp = await _post(
+        _app_with(printer, _FakeClient(fail=True)), "/print/receipt", _SALE.model_dump(mode="json")
+    )
+    assert resp.status_code == 503
+    assert printer.receipts == []  # 抬頭取不到 → 不印
+
+
+async def test_receipt_printer_offline_returns_503() -> None:
+    printer = FakeReceiptPrinter(offline=True)
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/receipt", _SALE.model_dump(mode="json")
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "DeviceOffline"
+
+
+async def test_receipt_printer_paper_out_returns_409() -> None:
+    printer = FakeReceiptPrinter(paper_out=True)
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/detail", _SALE.model_dump(mode="json")
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "PaperOut"
+
+
+async def test_store_client_fetches_caches_and_raises() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"name": "路營二手", "tax_id": "12345678", "address": "台北市", "phone": "02-1"},
+        )
+
+    client = StoreHeaderClient("http://backend", token="t", transport=httpx.MockTransport(handler))
+    h1 = await client.get_header(7)
+    h2 = await client.get_header(7)
+    assert h1.name == "路營二手"
+    assert h1 == h2
+    assert len(requests) == 1  # 第二次命中快取、不再打後端
+    assert requests[0].headers["Authorization"] == "Bearer t"
+
+    def fail_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    failing = StoreHeaderClient("http://backend", transport=httpx.MockTransport(fail_handler))
+    with pytest.raises(StoreHeaderUnavailable):
+        await failing.get_header(9)
+
+
+def test_escpos_receipt_driver_renders_header_and_totals() -> None:
+    writer = FakePrinter()
+    EscposReceiptPrinter(writer).print_receipt(_SALE, _HEADER)
+    buf = bytes(writer.buffer)
+    assert "路營二手".encode() in buf
+    assert b"12345678" in buf  # 統編
+    assert "帳篷 x1".encode() in buf
+    assert "總計".encode() in buf
+    assert b"1000" in buf
+
+
+def test_escpos_receipt_driver_detail_title_and_einvoice_placeholder() -> None:
+    writer = FakePrinter()
+    driver = EscposReceiptPrinter(writer)
+    driver.print_detail(_SALE, _HEADER)
+    assert "商品明細聯".encode() in bytes(writer.buffer)
+
+    writer2 = FakePrinter()
+    EscposReceiptPrinter(writer2).print_einvoice(InvoicePayload(sale_id=1))
+    assert "電子發票待發票收尾階段".encode() in bytes(writer2.buffer)
