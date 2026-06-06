@@ -12,12 +12,11 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
 from agent.devices import AgentDevices, default_fake_devices
 from agent.errors import (
     CoverOpen,
@@ -38,27 +37,10 @@ _DEVICE_ERROR_STATUS: dict[type[DeviceError], int] = {
 }
 
 
-class OkResponse(BaseModel):
-    status: str
-
-
 class LabelRequest(BaseModel):
     code: str
     name: str
     price: int
-
-
-async def get_devices(request: Request) -> AgentDevices:
-    """從 app.state 取得注入的裝置組合，供路由依賴。
-
-    宣告為 async：此查找只讀 `app.state`、無 I/O，async 依賴會在事件迴圈上直接
-    執行，避免被 FastAPI/AnyIO 派到 worker thread（在受限 ASGI 環境會卡住請求）。
-    """
-    devices: AgentDevices = request.app.state.devices
-    return devices
-
-
-DevicesDep = Annotated[AgentDevices, Depends(get_devices)]
 
 
 def create_app(devices: AgentDevices | None = None) -> FastAPI:
@@ -99,9 +81,10 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
 
     # --- T15/T16 在此 include 各自的 router（避免彼此改同一 endpoint）---
     # from agent.routers.print import router as print_router      # T15
-    # from agent.routers.devices import router as devices_router  # T16
     # app.include_router(print_router)
-    # app.include_router(devices_router)
+    from agent.routers.devices import router as devices_router  # T16
+
+    app.include_router(devices_router)
 
     return app
 

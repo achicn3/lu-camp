@@ -85,6 +85,9 @@ class DeviceStatus(BaseModel):
     B 級（T17）：`details`（缺紙/上蓋/錯誤/錢櫃）逐機型填，查不到者列 `unsupported`，
     依 ADR-010 不臆造、不當故障。
     `driver`/`validated_on_hardware` 標明此態來自真機驅動或 Fake、是否已實機驗證。
+    `probe_error`：探測時遇到的**驅動/套件/設定錯誤**（非單純離線）的如實描述；用以區分
+    「裝置離線（online=False、probe_error=None）」與「探測本身失敗（驅動或套件問題）」，
+    後者**不可偽裝成單純離線**，前端應顯示錯誤、不誤導店員（ADR-010：不隱藏真實錯誤）。
     """
 
     id: str
@@ -96,6 +99,7 @@ class DeviceStatus(BaseModel):
     unsupported: list[str] = []
     driver: str  # "real" | "fake"
     validated_on_hardware: bool = False
+    probe_error: str | None = None
 
 
 @runtime_checkable
