@@ -87,20 +87,28 @@ async def test_get_devices_status_reflects_offline_device() -> None:
     assert devices[0]["id"] == "label-offline"
 
 
-async def test_get_devices_status_brother_unsupported_contains_b_grade_keys() -> None:
-    """Brother QL-810W 的 unsupported 清單必須包含 B 級鍵（Wi-Fi 下不支援）。"""
+async def test_get_devices_status_unsupported_matches_real_contract() -> None:
+    """預設 Fake 的 unsupported 必須鏡射真機 RealStatusProvider 契約（ADR-011）：
+    兩台印表機 B 級（缺紙/上蓋/錯誤）皆 unsupported、錢櫃開關偵測 unsupported；
+    否則 Fake/預設模式與真機模式的 /devices/status 契約分歧、誤導前端。"""
     app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/devices/status")
     devices = resp.json()["devices"]
-    brother = next((d for d in devices if d["model"] == "Brother QL-810W"), None)
-    assert brother is not None, "Brother QL-810W 裝置不存在於回應中"
-    unsupported = brother["unsupported"]
-    # Wi-Fi 下 B 級三項皆應標為 unsupported（docs/15 §2）
-    assert "paper_out" in unsupported
-    assert "cover_open" in unsupported
-    assert "error" in unsupported
+    by_kind = {d["kind"]: d for d in devices}
+
+    # 兩台印表機：B 級三項皆 unsupported（docs/15、ADR-011）
+    for kind in ("LABEL_PRINTER", "RECEIPT_PRINTER"):
+        assert kind in by_kind, f"{kind} 裝置不存在於回應中"
+        unsupported = by_kind[kind]["unsupported"]
+        assert "paper_out" in unsupported
+        assert "cover_open" in unsupported
+        assert "error" in unsupported
+
+    # 錢櫃：開/關狀態偵測 unsupported（彈開指令另做）
+    assert "CASH_DRAWER" in by_kind, "CASH_DRAWER 裝置不存在於回應中"
+    assert "drawer_open" in by_kind["CASH_DRAWER"]["unsupported"]
 
 
 def test_devices_router_operation_id() -> None:

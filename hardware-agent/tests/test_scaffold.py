@@ -96,9 +96,9 @@ def test_fake_status_provider_defaults_three_devices() -> None:
     statuses = FakeStatusProvider().poll()
     models = {s.model for s in statuses}
     assert "Brother QL-810W" in models
-    assert "EPSON TM-T82iii" in models
+    assert "EPSON TM-T82III" in models  # 與真機驅動 model 字串一致（ADR-011）
     brother = next(s for s in statuses if s.model == "Brother QL-810W")
-    assert "paper_out" in brother.unsupported  # Wi-Fi 下 B 級不支援
+    assert "paper_out" in brother.unsupported  # 網路下 B 級不做
     assert all(s.driver == "fake" for s in statuses)
 
 

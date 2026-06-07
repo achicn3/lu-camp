@@ -107,8 +107,14 @@ class FakeStatusProvider:
 
 
 def _default_statuses() -> list[DeviceStatus]:
-    """預設兩台印表機 + 錢櫃皆在線的 Fake 狀態（A 級欄位）。"""
+    """預設兩台印表機 + 錢櫃皆在線的 Fake 狀態（A 級欄位）。
+
+    `unsupported` 必須**鏡射真機 `RealStatusProvider` 的契約**（ADR-011）：兩台印表機
+    B 級（缺紙/上蓋/錯誤）皆不做、錢櫃開關偵測不做，否則 Fake/預設模式與真機模式的
+    `/devices/status` 契約會分歧、誤導前端把「不支援」當成「支援」。
+    """
     now = datetime.now(UTC)
+    printer_unsupported = ["paper_out", "cover_open", "error"]
     return [
         DeviceStatus(
             id="label-1",
@@ -116,15 +122,16 @@ def _default_statuses() -> list[DeviceStatus]:
             model="Brother QL-810W",
             online=True,
             last_seen=now,
-            unsupported=["paper_out", "cover_open", "error"],  # Wi-Fi 下 B 級不支援
+            unsupported=list(printer_unsupported),  # 網路下 B 級不做
             driver="fake",
         ),
         DeviceStatus(
             id="receipt-1",
             kind=DeviceKind.RECEIPT_PRINTER,
-            model="EPSON TM-T82iii",
+            model="EPSON TM-T82III",
             online=True,
             last_seen=now,
+            unsupported=list(printer_unsupported),  # 產品裁示不做 → unsupported
             driver="fake",
         ),
         DeviceStatus(
@@ -133,6 +140,7 @@ def _default_statuses() -> list[DeviceStatus]:
             model="EPSON drawer port",
             online=True,
             last_seen=now,
+            unsupported=["drawer_open"],  # 開/關狀態偵測不做（彈開指令另做）
             driver="fake",
         ),
     ]
