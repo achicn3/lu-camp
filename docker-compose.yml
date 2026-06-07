@@ -10,7 +10,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "127.0.0.1:5432:5432"
+      # host 1234 → 容器內 postgres 5432（只綁 127.0.0.1，不對外）
+      - "127.0.0.1:1234:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
