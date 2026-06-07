@@ -882,6 +882,68 @@
         "title": "PaymentMethod",
         "type": "string"
       },
+      "ReceiptHeaderRead": {
+        "description": "收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "invoice_track_info": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Track Info"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "tax_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Id"
+          }
+        },
+        "required": [
+          "name",
+          "tax_id",
+          "address",
+          "phone",
+          "invoice_track_info"
+        ],
+        "title": "ReceiptHeaderRead",
+        "type": "object"
+      },
       "SaleCreateRequest": {
         "description": "結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。",
         "properties": {
@@ -2302,6 +2364,49 @@
         "summary": "Update Settings",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/stores/{store_id}/receipt-header": {
+      "get": {
+        "description": "回傳指定門市的收據抬頭；門市不存在 → 404。",
+        "operationId": "getStoreReceiptHeader",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "store_id",
+            "required": true,
+            "schema": {
+              "title": "Store Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptHeaderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Receipt Header",
+        "tags": [
+          "stores"
         ]
       }
     }

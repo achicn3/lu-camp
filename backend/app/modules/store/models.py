@@ -17,3 +17,4 @@ class Store(Base, TimestampMixin):
     tax_id: Mapped[str | None] = mapped_column(String(8))
     invoice_track_info: Mapped[str | None] = mapped_column(String(50))
     address: Mapped[str | None] = mapped_column(String(500))
+    phone: Mapped[str | None] = mapped_column(String(50))

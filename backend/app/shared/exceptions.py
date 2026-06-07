@@ -5,6 +5,10 @@ class DomainError(Exception):
     """所有領域錯誤的基底。"""
 
 
+class StoreNotFound(DomainError):
+    """指定的門市（store）不存在。"""
+
+
 class InvalidMargin(DomainError):
     """定價 margin_pct 超出合法範圍（0-99）。"""
 

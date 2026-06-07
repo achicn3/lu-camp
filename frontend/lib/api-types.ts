@@ -279,6 +279,26 @@ export interface paths {
         patch: operations["updateSettings"];
         trace?: never;
     };
+    "/api/v1/stores/{store_id}/receipt-header": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Receipt Header
+         * @description 回傳指定門市的收據抬頭；門市不存在 → 404。
+         */
+        get: operations["getStoreReceiptHeader"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -586,6 +606,22 @@ export interface components {
          * @enum {string}
          */
         PaymentMethod: "CASH";
+        /**
+         * ReceiptHeaderRead
+         * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
+         */
+        ReceiptHeaderRead: {
+            /** Address */
+            address: string | null;
+            /** Invoice Track Info */
+            invoice_track_info: string | null;
+            /** Name */
+            name: string;
+            /** Phone */
+            phone: string | null;
+            /** Tax Id */
+            tax_id: string | null;
+        };
         /**
          * SaleCreateRequest
          * @description 結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
@@ -1337,6 +1373,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getStoreReceiptHeader: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                store_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptHeaderRead"];
                 };
             };
             /** @description Validation Error */
