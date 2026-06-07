@@ -1,227 +1,167 @@
-"""T16 真機狀態驅動（RealStatusProvider）單元測試。
+"""真機狀態驅動（RealStatusProvider，網路 TCP 探測）單元測試。
 
-全程用 mock：不依賴真實硬體。
-測試覆蓋：
-- Brother QL-810W TCP 在線（socket 成功）
-- Brother QL-810W TCP 離線（socket 逾時/失敗）
-- EPSON TM-T82III USB 在線（Usb.open 成功 + is_online True）
-- EPSON TM-T82III USB 離線（Usb.open 拋例外）
-- 錢櫃狀態依附 EPSON
-- unsupported 欄位正確（Brother 標 B 級三項）
-- driver="real"、validated_on_hardware=False
+全程用 mock（patch `socket.create_connection`）：不依賴真實硬體。
+**兩台裝置皆網路**（Brother + EPSON），A 級統一 TCP 9100 探測。
 
-重要：每個測試必須同時 mock socket.create_connection 與 Usb，
-避免任一路徑真的嘗試連接硬體（OSError/RuntimeError）。
+註：原 T16 的 EPSON USB 測試（mock `Usb`、`DeviceNotFoundError`、`USBError` 權限、
+USB finite timeout）已隨「EPSON 改網路版」的事實變更而移除——USB 情境不再存在，
+非為消審查意見而弱化測試。以**等量的網路情境**取代並守住誠實原則：
+- 連不上（refused/timeout/unreachable/DNS）→ 離線、`probe_error=None`。
+- 非預期例外 → `online=False` 但 `probe_error` 如實記，不偽裝成離線。
 """
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import socket
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from escpos.exceptions import DeviceNotFoundError  # type: ignore[import-untyped]
-from usb.core import USBError  # type: ignore[import-untyped]
+import pytest
 
-from agent.drivers.status_real import RealStatusProvider
-from agent.interfaces import DeviceKind
+from agent.config import PrinterEndpoint
+from agent.drivers.status_real import RealStatusProvider, real_status_provider_from_env
+from agent.interfaces import DeviceKind, DeviceStatus, DeviceStatusProvider
+
+_BROTHER_HOST = "192.168.0.41"
+_EPSON_HOST = "192.168.0.42"
 
 
 def make_provider(**kwargs: Any) -> RealStatusProvider:
-    """以預設參數建立 RealStatusProvider（不真的連硬體）。"""
+    """以預設網路端點建立 RealStatusProvider（不真的連硬體）。"""
     defaults: dict[str, Any] = {
-        "brother_host": "192.168.1.100",
-        "brother_port": 9100,
-        "brother_timeout": 2.0,
-        "epson_vendor_id": 0x04B8,
-        "epson_product_id": 0x0202,
+        "brother": PrinterEndpoint(host=_BROTHER_HOST, port=9100, timeout=2.0),
+        "epson": PrinterEndpoint(host=_EPSON_HOST, port=9100, timeout=2.0),
     }
     defaults.update(kwargs)
     return RealStatusProvider(**defaults)
 
 
 @contextmanager
-def _mock_all_hw(
-    *,
-    tcp_result: Any = None,
-    tcp_error: Exception | None = None,
-    epson_printer: MagicMock | None = None,
-) -> Generator[tuple[MagicMock, MagicMock], None, None]:
-    """同時 mock TCP（socket.create_connection）與 USB（Usb 類別），
-    確保測試不碰任何真實硬體。
+def _mock_tcp(outcomes: Mapping[str, Any]) -> Generator[MagicMock, None, None]:
+    """patch `socket.create_connection`，依目標 host 決定行為（確保不碰真實硬體）。
 
-    Args:
-        tcp_result: socket.create_connection 的回傳值（預設 MagicMock）。
-        tcp_error: 若提供，socket.create_connection 改拋此例外。
-        epson_printer: Usb() 回傳的 mock 物件（預設在線的 MagicMock）。
+    outcomes: host -> 行為。
+      - "ok"：連線成功，回傳支援 context manager 的 mock socket。
+      - Exception 實例：connect 拋此例外。
+    未列出的 host 預設連線被拒（避免漏網真連）。
     """
-    if epson_printer is None:
-        epson_printer = MagicMock()
-        epson_printer.is_online.return_value = True
 
-    if tcp_result is None and tcp_error is None:
-        tcp_result = MagicMock()
+    def fake_create_connection(address: tuple[str, int], timeout: float | None = None) -> Any:
+        outcome = outcomes.get(address[0], ConnectionRefusedError("refused"))
+        if isinstance(outcome, Exception):
+            raise outcome
+        sock = MagicMock()
+        sock.__enter__.return_value = sock
+        sock.__exit__.return_value = False
+        return sock
 
-    tcp_kwargs: dict[str, Any] = {}
-    if tcp_error is not None:
-        tcp_kwargs["side_effect"] = tcp_error
-    else:
-        tcp_kwargs["return_value"] = tcp_result
+    with patch("socket.create_connection", side_effect=fake_create_connection) as mock_conn:
+        yield mock_conn
 
-    with (
-        patch("socket.create_connection", **tcp_kwargs) as mock_conn,
-        patch("agent.drivers.status_real.Usb", return_value=epson_printer) as mock_usb,
-    ):
-        yield mock_conn, mock_usb
+
+def _by_kind(statuses: list[DeviceStatus], kind: DeviceKind) -> DeviceStatus:
+    return next(s for s in statuses if s.kind == kind)
 
 
 # ─────────────────────────────────────────────
-# Brother QL-810W A 級 TCP 探測
+# A 級在線（兩台皆 TCP 9100 探測）
 # ─────────────────────────────────────────────
 
 
 def test_brother_online_when_tcp_succeeds() -> None:
-    """TCP 連線成功 → Brother 狀態 online=True、last_seen 有值。"""
+    """TCP 連線成功 → Brother online=True、last_seen 有值、無 probe_error。"""
     provider = make_provider()
-    mock_sock = MagicMock()
-    with _mock_all_hw(tcp_result=mock_sock) as (mock_conn, _):
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
         statuses = provider.poll()
-    brother = next(s for s in statuses if s.kind == DeviceKind.LABEL_PRINTER)
+    brother = _by_kind(statuses, DeviceKind.LABEL_PRINTER)
     assert brother.online is True
     assert brother.last_seen is not None
+    assert brother.probe_error is None
     assert brother.driver == "real"
     assert brother.validated_on_hardware is False
-    mock_conn.assert_called_once_with(("192.168.1.100", 9100), timeout=2.0)
-    mock_sock.close.assert_called_once()
 
 
-def test_brother_offline_when_tcp_timeout() -> None:
-    """TCP 逾時 → Brother 狀態 online=False、last_seen=None。"""
+def test_epson_online_when_tcp_succeeds() -> None:
+    """TCP 連線成功 → EPSON online=True（不依賴 DLE EOT 狀態回應）。"""
     provider = make_provider()
-    with _mock_all_hw(tcp_error=TimeoutError("timed out")):
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
         statuses = provider.poll()
-    brother = next(s for s in statuses if s.kind == DeviceKind.LABEL_PRINTER)
-    assert brother.online is False
-    assert brother.last_seen is None
-
-
-def test_brother_offline_when_tcp_connection_refused() -> None:
-    """TCP 連線被拒 → Brother 狀態 online=False。"""
-    provider = make_provider()
-    with _mock_all_hw(tcp_error=OSError("connection refused")):
-        statuses = provider.poll()
-    brother = next(s for s in statuses if s.kind == DeviceKind.LABEL_PRINTER)
-    assert brother.online is False
-
-
-def test_brother_unsupported_contains_b_grade_keys() -> None:
-    """Brother Wi-Fi 下 B 級三項（paper_out/cover_open/error）必須列入 unsupported。"""
-    provider = make_provider()
-    with _mock_all_hw():
-        statuses = provider.poll()
-    brother = next(s for s in statuses if s.kind == DeviceKind.LABEL_PRINTER)
-    assert "paper_out" in brother.unsupported
-    assert "cover_open" in brother.unsupported
-    assert "error" in brother.unsupported
-
-
-# ─────────────────────────────────────────────
-# EPSON TM-T82III A 級 USB 探測
-# ─────────────────────────────────────────────
-
-
-def test_epson_online_when_usb_open_and_is_online_true() -> None:
-    """USB 開啟成功且 is_online()=True → EPSON 狀態 online=True。"""
-    provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.is_online.return_value = True
-    with _mock_all_hw(epson_printer=mock_printer):
-        statuses = provider.poll()
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
+    epson = _by_kind(statuses, DeviceKind.RECEIPT_PRINTER)
     assert epson.online is True
     assert epson.last_seen is not None
+    assert epson.probe_error is None
     assert epson.driver == "real"
     assert epson.validated_on_hardware is False
-    mock_printer.open.assert_called_once()
-    mock_printer.is_online.assert_called_once()
-    mock_printer.close.assert_called_once()
 
 
-def test_epson_offline_when_device_not_found() -> None:
-    """裝置未連接（DeviceNotFoundError）→ 合理離線：online=False、probe_error=None。"""
+# ─────────────────────────────────────────────
+# 連不上 → 合理離線、probe_error=None（誠實原則）
+# ─────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionRefusedError("connection refused"),
+        TimeoutError("timed out"),
+        OSError("No route to host"),
+        socket.gaierror("name resolution failed"),  # DNS 失敗亦為 OSError 子類
+    ],
+)
+def test_epson_offline_when_unreachable_without_probe_error(error: Exception) -> None:
+    """連線被拒/逾時/不通/DNS 失敗 → online=False、probe_error=None（單純離線、非錯誤）。"""
     provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.open.side_effect = DeviceNotFoundError("device not found")
-    with _mock_all_hw(epson_printer=mock_printer):
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: error}):
         statuses = provider.poll()
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
+    epson = _by_kind(statuses, DeviceKind.RECEIPT_PRINTER)
     assert epson.online is False
     assert epson.last_seen is None
-    assert epson.probe_error is None  # 單純離線，不是錯誤
+    assert epson.probe_error is None
 
 
-def test_epson_driver_error_is_surfaced_not_masked() -> None:
-    """驅動/套件錯誤（如 pyusb 未裝→RuntimeError）→ online=False 但 probe_error 如實標示，
-    **不可偽裝成單純離線**（使用者要求：不隱藏真實錯誤）。"""
+def test_brother_offline_when_unreachable() -> None:
+    """Brother 逾時 → online=False、probe_error=None。"""
     provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.open.side_effect = RuntimeError("usb dependency not installed")
-    with _mock_all_hw(epson_printer=mock_printer):
+    with _mock_tcp({_BROTHER_HOST: TimeoutError("timed out"), _EPSON_HOST: "ok"}):
         statuses = provider.poll()
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
+    brother = _by_kind(statuses, DeviceKind.LABEL_PRINTER)
+    assert brother.online is False
+    assert brother.last_seen is None
+    assert brother.probe_error is None
+
+
+# ─────────────────────────────────────────────
+# 非預期例外 → probe_error 如實記，不偽裝成離線（誠實原則）
+# ─────────────────────────────────────────────
+
+
+def test_epson_unexpected_error_is_surfaced_not_masked() -> None:
+    """非 OSError 的非預期例外（設定/程式錯誤）→ online=False 但 probe_error 如實標示，
+    **不可偽裝成單純離線**（ADR-010、使用者要求）。"""
+    provider = make_provider()
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: RuntimeError("unexpected boom")}):
+        statuses = provider.poll()
+    epson = _by_kind(statuses, DeviceKind.RECEIPT_PRINTER)
     assert epson.online is False
-    assert epson.probe_error is not None  # 錯誤被如實標示
-    assert "usb dependency not installed" in epson.probe_error
-    # 錢櫃依附 EPSON：也不可顯示成正常，且要帶出錯誤
-    drawer = next(s for s in statuses if s.kind == DeviceKind.CASH_DRAWER)
+    assert epson.probe_error is not None
+    assert "unexpected boom" in epson.probe_error
+    # 錢櫃依附 EPSON：不可顯示成正常，且要帶出錯誤
+    drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
     assert drawer.online is False
     assert drawer.probe_error is not None
 
 
-def test_epson_usb_permission_error_surfaced_not_masked() -> None:
-    """udev/libusb 權限錯誤被 escpos 包成 DeviceNotFoundError(__context__=USBError)：
-    必須如實標 probe_error，**不可偽裝成單純離線**（最關鍵的部署誤設情境）。"""
-
-    def _raise_wrapped(*_a: object, **_k: object) -> None:
-        try:
-            raise USBError("Access denied (insufficient permissions)")
-        except USBError as e:
-            raise DeviceNotFoundError("Unable to open USB printer: access denied") from e
-
+def test_brother_unexpected_error_is_surfaced_not_masked() -> None:
+    """Brother 的非預期例外同樣如實標 probe_error，不偽裝成離線。"""
     provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.open.side_effect = _raise_wrapped
-    with _mock_all_hw(epson_printer=mock_printer):
+    with _mock_tcp({_BROTHER_HOST: RuntimeError("brother boom"), _EPSON_HOST: "ok"}):
         statuses = provider.poll()
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
-    assert epson.online is False
-    assert epson.probe_error is not None
-    assert "存取錯誤" in epson.probe_error
-
-
-def test_epson_offline_when_is_online_returns_false() -> None:
-    """USB 開啟成功但 is_online()=False → EPSON 狀態 online=False。"""
-    provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.is_online.return_value = False
-    with _mock_all_hw(epson_printer=mock_printer):
-        statuses = provider.poll()
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
-    assert epson.online is False
-
-
-def test_epson_survives_close_exception() -> None:
-    """printer.close() 拋例外時不應傳播（finally 中靜默捕捉）。"""
-    provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.is_online.return_value = True
-    mock_printer.close.side_effect = Exception("close failed")
-    with _mock_all_hw(epson_printer=mock_printer):
-        statuses = provider.poll()
-    # 不應因 close 例外而崩潰，EPSON 仍應在線
-    epson = next(s for s in statuses if s.kind == DeviceKind.RECEIPT_PRINTER)
-    assert epson.online is True
+    brother = _by_kind(statuses, DeviceKind.LABEL_PRINTER)
+    assert brother.online is False
+    assert brother.probe_error is not None
+    assert "brother boom" in brother.probe_error
 
 
 # ─────────────────────────────────────────────
@@ -230,60 +170,107 @@ def test_epson_survives_close_exception() -> None:
 
 
 def test_cash_drawer_online_when_epson_online() -> None:
-    """EPSON 在線 → 錢櫃也應為 online=True（依附推定）。"""
+    """EPSON 在線 → 錢櫃 online=True（依附推定）。"""
     provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.is_online.return_value = True
-    with _mock_all_hw(epson_printer=mock_printer):
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
         statuses = provider.poll()
-    drawer = next(s for s in statuses if s.kind == DeviceKind.CASH_DRAWER)
+    drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
     assert drawer.online is True
     assert drawer.driver == "real"
     assert drawer.validated_on_hardware is False
 
 
 def test_cash_drawer_offline_when_epson_offline() -> None:
-    """EPSON 離線 → 錢櫃也應為 online=False。"""
+    """EPSON 離線 → 錢櫃 online=False。"""
     provider = make_provider()
-    mock_printer = MagicMock()
-    mock_printer.open.side_effect = Exception("USB not found")
-    with _mock_all_hw(epson_printer=mock_printer):
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: ConnectionRefusedError("refused")}):
         statuses = provider.poll()
-    drawer = next(s for s in statuses if s.kind == DeviceKind.CASH_DRAWER)
+    drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
     assert drawer.online is False
 
 
 # ─────────────────────────────────────────────
-# 回傳清單結構
+# unsupported：B 級皆不做（產品裁示）
+# ─────────────────────────────────────────────
+
+
+def test_b_grade_keys_are_unsupported_on_all_devices() -> None:
+    """兩台印表機 B 級（缺紙/上蓋/錯誤）皆 unsupported；錢櫃開關偵測 unsupported。"""
+    provider = make_provider()
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
+        statuses = provider.poll()
+    brother = _by_kind(statuses, DeviceKind.LABEL_PRINTER)
+    epson = _by_kind(statuses, DeviceKind.RECEIPT_PRINTER)
+    drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
+    for key in ("paper_out", "cover_open", "error"):
+        assert key in brother.unsupported
+        assert key in epson.unsupported
+    assert "drawer_open" in drawer.unsupported
+
+
+# ─────────────────────────────────────────────
+# 有限逾時 + 打到設定的 host/port（IP 不寫死）
+# ─────────────────────────────────────────────
+
+
+def test_tcp_probe_uses_finite_timeout() -> None:
+    """探測必須帶有限 timeout（避免輪詢卡住 /devices/status）。"""
+    provider = make_provider(
+        brother=PrinterEndpoint(host=_BROTHER_HOST, timeout=1.5),
+        epson=PrinterEndpoint(host=_EPSON_HOST, timeout=1.5),
+    )
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}) as mock_conn:
+        provider.poll()
+    assert mock_conn.call_count == 2
+    for call in mock_conn.call_args_list:
+        assert call.kwargs["timeout"] == 1.5
+
+
+def test_tcp_probe_targets_configured_host_and_port() -> None:
+    """探測必須打到設定注入的 host/port（IP 來自設定、非寫死）。"""
+    provider = make_provider(epson=PrinterEndpoint(host="10.0.0.9", port=9100, timeout=2.0))
+    with _mock_tcp({_BROTHER_HOST: "ok", "10.0.0.9": "ok"}) as mock_conn:
+        provider.poll()
+    targets = {call.args[0] for call in mock_conn.call_args_list}
+    assert ("10.0.0.9", 9100) in targets
+    assert (_BROTHER_HOST, 9100) in targets
+
+
+# ─────────────────────────────────────────────
+# 回傳結構 / Protocol / 由環境變數建立
 # ─────────────────────────────────────────────
 
 
 def test_poll_returns_three_devices() -> None:
     """poll() 必須回傳三台裝置（Brother + EPSON + 錢櫃）。"""
     provider = make_provider()
-    with _mock_all_hw():
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
         statuses = provider.poll()
     assert len(statuses) == 3
     kinds = {s.kind for s in statuses}
-    assert DeviceKind.LABEL_PRINTER in kinds
-    assert DeviceKind.RECEIPT_PRINTER in kinds
-    assert DeviceKind.CASH_DRAWER in kinds
+    assert kinds == {
+        DeviceKind.LABEL_PRINTER,
+        DeviceKind.RECEIPT_PRINTER,
+        DeviceKind.CASH_DRAWER,
+    }
 
 
 def test_real_provider_satisfies_protocol() -> None:
     """RealStatusProvider 必須滿足 DeviceStatusProvider Protocol（runtime check）。"""
-    from agent.interfaces import DeviceStatusProvider
-
     provider = make_provider()
     assert isinstance(provider, DeviceStatusProvider)
 
 
-def test_epson_usb_constructed_with_finite_timeout() -> None:
-    """EPSON USB 必須帶有限 timeout（避免 is_online() 無限阻塞拖垮 /devices/status）。"""
-    provider = make_provider(epson_timeout_ms=1500)
-    with _mock_all_hw() as (_, mock_usb):
+def test_from_env_builds_provider_targeting_configured_ips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """real_status_provider_from_env 由環境變數建立、探測設定的 IP（非寫死）。"""
+    monkeypatch.setenv("AGENT_BROTHER_HOST", _BROTHER_HOST)
+    monkeypatch.setenv("AGENT_EPSON_HOST", _EPSON_HOST)
+    provider = real_status_provider_from_env()
+    assert isinstance(provider, RealStatusProvider)
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}) as mock_conn:
         provider.poll()
-    _, kwargs = mock_usb.call_args
-    assert kwargs["timeout"] == 1500
-    assert kwargs["idVendor"] == 0x04B8
-    assert kwargs["idProduct"] == 0x0202
+    targets = {call.args[0] for call in mock_conn.call_args_list}
+    assert (_EPSON_HOST, 9100) in targets
+    assert (_BROTHER_HOST, 9100) in targets

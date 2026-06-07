@@ -1,0 +1,23 @@
+# ADR-011：裝置改網路連線、A 級統一 TCP 探測、EPSON B 級不做
+
+- **Status**: Accepted（2026-06-07）
+- **Context**:
+  - G2 閘門（docs/15）原假設 **EPSON TM-T82III 走 USB**、Brother QL-810W 走 Wi-Fi，並裁定 EPSON B 級（缺紙/上蓋/錯誤/錢櫃 pin3）可做。
+  - 實際盤點推翻此假設：**EPSON 為網路版（Ethernet/LAN，現場 IP 192.168.0.42）**，Brother 亦為**網路**連線；**兩台皆非 USB**。
+  - 以 `python-escpos` 3.1 實測：網路後端為 `Network(host, port=9100, timeout=…)`（建構即 TCP `connect`），`cashdraw()`／`is_online()`／`paper_status()` 經 TCP `sendall`/`recv` 皆可運作；連線失敗拋原生 `OSError`，無 escpos 專屬包裝。
+  - 產品決策：缺紙/上蓋這類狀態機器本身亮燈、店員現場肉眼可見；網路裝置「掉線」反而肉眼看不出。面板價值應集中在連線/離線。
+- **Decision**:
+  - **兩台裝置皆以網路連線**對待；A 級**統一以 TCP 9100 連線探測 + 心跳**判定在線/離線（連得上＝在線；**不依賴 ESC/POS DLE EOT 狀態回應**，避免「連得上但未回狀態」被誤判離線）。Brother 與 EPSON 共用同一 `_tcp_probe`。
+  - **EPSON B 級（缺紙/上蓋/印表機錯誤/錢櫃開關偵測）不做**：連功能帶測試一律不做，對應鍵標 `unsupported`（不臆造、不當故障，沿用 ADR-010）。雖技術上網路後端可讀 DLE EOT 狀態，仍依產品決定不做。
+  - **錢櫃彈開「指令」要做**（結帳必需）：屬列印/drawer 功能，經 EPSON drawer port 以 `cashdraw()`／ESC `p` 位元組**經網路送達**；要做就有測試。錢櫃「開/關狀態偵測」屬 B 級，不做、標 `unsupported`。
+  - **網路錯誤誠實處理**（沿用 T16 probe_error 原則）：可辨識的連不上（`OSError`：refused/timeout/unreachable/DNS）＝合理離線、`probe_error=None`；其他非預期例外＝`online=False` 但 `probe_error` 如實記，**不偽裝成離線**。原 USB 版 `DeviceNotFoundError`/`USBError`/udev 權限區分**已不適用、移除**（事實變更，非弱化測試），以等量網路情境測試取代。
+  - **裝置 IP 一律外部化、不寫死**（兩台一視同仁）：由環境變數提供（`AGENT_EPSON_HOST`/`AGENT_BROTHER_HOST`/`…_PORT`/`AGENT_DEVICE_PROBE_TIMEOUT`），程式以 `agent.config` 讀取；host 必填、未設即報錯（不臆造 IP）。建議路由器以 DHCP 依 MAC 綁定固定 IP，變更只改設定一處。見 `hardware-agent/.env.example`。
+- **Alternatives**:
+  - EPSON A 級用 `Network.is_online()`（DLE EOT）：駁回——依賴韌體在 raw port 回應，不回則阻塞且「連得上但未回」會誤判離線；TCP 連通更穩健且兩台一致。
+  - 仍做 EPSON B 級（技術可行）：駁回——機器燈號+店員肉眼已覆蓋，面板重複偵測不划算，違背「要做就要有測試、否則不做」的取捨。
+  - IP 寫死/帶程式碼預設 IP：駁回——IP 會變、且違反 CLAUDE.md「絕不可 hardcode 裝置 IP」。
+- **Consequences**:
+  - ＋面板聚焦 A 級、兩台邏輯一致（共用 `_tcp_probe`）、IP 變更零改碼；＋誠實區分離線與探測錯誤。
+  - －EPSON B 級（缺紙/上蓋）面板不顯示，需靠機器燈號+店員現場；－Brother 實機 IP 待現場確認後填入設定。
+  - docs/15 同步更新（連線方式、範圍、回傳範例、閘門未解項）。
+- **Trade-off**: 以「只做 A 級 + 機器/人眼覆蓋 B 級」換取實作/測試成本與面板價值的平衡。

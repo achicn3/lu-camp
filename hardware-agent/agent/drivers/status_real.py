@@ -1,151 +1,119 @@
-"""真機裝置狀態驅動（T16 A 級）。
+"""真機裝置狀態驅動（A 級，網路 TCP 探測）。
 
-`RealStatusProvider` 實作 `DeviceStatusProvider` Protocol。A 級只做連線/離線偵測：
-- Brother QL-810W（Wi-Fi）：TCP 探測 port 9100；B 級標 unsupported。
-- EPSON TM-T82III（USB）：用 python-escpos `Usb.open()` + `is_online()`。
-- 錢櫃：依附 EPSON 在線狀態推定。
+`RealStatusProvider` 實作 `DeviceStatusProvider` Protocol。**兩台裝置皆為網路連線**
+（Brother QL-810W、EPSON TM-T82III 均走 Ethernet/Wi-Fi），A 級統一以 **TCP 9100
+連線探測 + 心跳**判定在線/離線（連得上＝在線；不依賴 ESC/POS DLE EOT 狀態回應，
+避免「連得上但未回狀態」被誤判離線）。
 
-**不依賴真實硬體**：連線參數由建構引數傳入，所有 I/O 可在測試中 mock。
-`validated_on_hardware=False`（全部）——等實機接上再更改（T18）。
+B 級（缺紙/上蓋/印表機錯誤/錢櫃開關偵測）**產品裁示不做**（ADR-011）：這類狀態機器
+本身會以燈號表現、店員現場肉眼可見，面板不重複偵測；對應鍵一律標 `unsupported`，
+不臆造、不當故障（ADR-010）。錢櫃「彈開指令」屬列印/drawer 功能（經 EPSON drawer
+port 另行實作），與此狀態驅動無關。
 
-ADR-010 原則：報不到的狀態標 unsupported，不臆造、不當故障。
+誠實原則（ADR-010、使用者要求）：
+- 連不上（連線被拒/逾時/主機不可達/DNS，皆 `OSError`）→ 合理離線，`online=False`、
+  `probe_error=None`。
+- 其他非預期例外（設定/程式錯誤）→ `online=False` 但 `probe_error` 如實記，
+  **不可偽裝成單純離線**。
+
+IP/port 由 `agent.config` 經建構引數注入，**程式碼不寫死任何 IP**。
+`validated_on_hardware=False`（全部）——待實機接上再更改（T18）。
 """
 
 from __future__ import annotations
 
 import socket
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from escpos.exceptions import (  # type: ignore[import-untyped]
-    DeviceNotFoundError,
-    USBNotFoundError,
-)
-from escpos.printer import Usb  # type: ignore[import-untyped]
-from usb.core import USBError  # type: ignore[import-untyped]
-
+from agent.config import PrinterEndpoint, device_config_from_env
 from agent.interfaces import DeviceKind, DeviceStatus
+
+# B 級（產品裁示不做）一律列入 unsupported，前端顯示「不支援」而非「故障」（ADR-010/011）
+_PRINTER_UNSUPPORTED = ["paper_out", "cover_open", "error"]
+_DRAWER_UNSUPPORTED = ["drawer_open"]
+
+
+@dataclass(frozen=True)
+class _ProbeResult:
+    """TCP 探測結果：在線、心跳時間、（非離線的）探測錯誤。"""
+
+    online: bool
+    last_seen: datetime | None
+    probe_error: str | None
+
+
+def _tcp_probe(endpoint: PrinterEndpoint) -> _ProbeResult:
+    """TCP 連線探測一台網路裝置（A 級：連得上＝在線），兩台共用。
+
+    - 連線成功 → `online=True`、`last_seen=now`、`probe_error=None`。
+    - `OSError`（連線被拒/逾時/主機不可達/DNS 失敗）→ 合理離線，`probe_error=None`。
+    - 其他非預期例外（設定/程式錯誤）→ `online=False` 但 `probe_error` 如實記，
+      **不偽裝成單純離線**。
+    """
+    try:
+        with socket.create_connection((endpoint.host, endpoint.port), timeout=endpoint.timeout):
+            return _ProbeResult(online=True, last_seen=datetime.now(UTC), probe_error=None)
+    except OSError:
+        # 連線被拒/逾時/不通/DNS 失敗 → 合理離線（非錯誤）
+        return _ProbeResult(online=False, last_seen=None, probe_error=None)
+    except Exception as exc:  # 非預期例外（設定/程式錯誤）須如實標示、不可吞成離線
+        return _ProbeResult(
+            online=False,
+            last_seen=None,
+            probe_error=f"探測 {endpoint.host}:{endpoint.port} 失敗（設定/程式錯誤）：{exc}",
+        )
 
 
 class RealStatusProvider:
-    """真機裝置狀態提供者（A 級：online/last_seen 心跳）。
+    """真機裝置狀態提供者（A 級：online/last_seen 心跳；兩台皆網路 TCP 探測）。
 
     Args:
-        brother_host: Brother QL-810W 的 IP 或主機名。
-        brother_port: TCP 探測 port（通常 9100）。
-        brother_timeout: TCP 連線逾時秒數。
-        epson_vendor_id: EPSON USB Vendor ID（0x04B8）。
-        epson_product_id: EPSON USB Product ID（例如 0x0202）。
-        epson_timeout_ms: EPSON USB 操作逾時（毫秒，預設 2000）；避免裝置不回應時
-            is_online() 無限阻塞、拖垮被輪詢的 /devices/status。
+        brother: Brother QL-810W 連線端點（IP/port/逾時，由設定注入）。
+        epson: EPSON TM-T82III 連線端點（IP/port/逾時，由設定注入）。
     """
 
-    def __init__(
-        self,
-        *,
-        brother_host: str,
-        brother_port: int = 9100,
-        brother_timeout: float = 2.0,
-        epson_vendor_id: int,
-        epson_product_id: int,
-        epson_timeout_ms: int = 2000,
-    ) -> None:
-        self._brother_host = brother_host
-        self._brother_port = brother_port
-        self._brother_timeout = brother_timeout
-        self._epson_vendor_id = epson_vendor_id
-        self._epson_product_id = epson_product_id
-        self._epson_timeout_ms = epson_timeout_ms
+    def __init__(self, *, brother: PrinterEndpoint, epson: PrinterEndpoint) -> None:
+        self._brother = brother
+        self._epson = epson
 
     def _poll_brother(self) -> DeviceStatus:
-        """TCP 探測 Brother QL-810W；B 級全標 unsupported（Wi-Fi 後端不支援讀狀態）。"""
-        online = False
-        last_seen: datetime | None = None
-        try:
-            sock = socket.create_connection(
-                (self._brother_host, self._brother_port),
-                timeout=self._brother_timeout,
-            )
-            sock.close()
-            online = True
-            last_seen = datetime.now(UTC)
-        except OSError:
-            pass
-
+        """TCP 探測 Brother QL-810W；B 級全標 unsupported（網路後端不讀狀態、產品不做）。"""
+        result = _tcp_probe(self._brother)
         return DeviceStatus(
             id="brother-1",
             kind=DeviceKind.LABEL_PRINTER,
             model="Brother QL-810W",
-            online=online,
-            last_seen=last_seen,
+            online=result.online,
+            last_seen=result.last_seen,
             details={},
-            # Wi-Fi 後端無法查 B 級狀態（docs/15 §2）
-            unsupported=["paper_out", "cover_open", "error"],
+            unsupported=list(_PRINTER_UNSUPPORTED),
             driver="real",
             validated_on_hardware=False,
+            probe_error=result.probe_error,
         )
 
     def _poll_epson(self) -> DeviceStatus:
-        """USB 探測 EPSON TM-T82III。
-
-        **如實區分兩種非在線情況，不把後者偽裝成單純離線**（ADR-010、使用者要求）：
-        - 裝置未連接/找不到（DeviceNotFoundError/USBNotFoundError）→ 合理離線，`probe_error=None`。
-        - 驅動/套件/設定錯誤（pyusb 未裝→RuntimeError、無 libusb 後端→NoBackendError、其他非預期）
-          → `online=False` 但 `probe_error` 如實記錄，讓面板顯示錯誤、不誤導店員「只是離線」。
-        """
-        online = False
-        last_seen: datetime | None = None
-        probe_error: str | None = None
-        printer = None
-        try:
-            # 設有限 USB timeout（python-escpos 預設 timeout=0 表「不逾時」，
-            # 裝置在線但不回應即時狀態時 is_online() 會無限阻塞，拖垮被輪詢的 /devices/status）
-            printer = Usb(
-                idVendor=self._epson_vendor_id,
-                idProduct=self._epson_product_id,
-                timeout=self._epson_timeout_ms,
-            )
-            printer.open()
-            online = bool(printer.is_online())
-            if online:
-                last_seen = datetime.now(UTC)
-        except USBNotFoundError:
-            # 裝置未連接/找不到 → 合理離線（非錯誤）
-            online = False
-        except DeviceNotFoundError as exc:
-            # escpos 把「找不到裝置」與「USB 存取/權限/設定錯誤」都包成 DeviceNotFoundError；
-            # 以被包的原始例外（__context__）區分：USBError → 真實權限/驅動/設定錯誤，須如實
-            # 標示（udev/libusb 設定不對時最關鍵），不可偽裝成單純離線；否則才算裝置不在的離線。
-            online = False
-            if isinstance(exc.__context__, USBError):
-                probe_error = f"EPSON USB 存取錯誤（權限/驅動/設定）：{exc}"
-        except Exception as exc:
-            # pyusb 未裝（RuntimeError）、無 libusb 後端（NoBackendError）或其他非預期錯誤
-            # → 驅動/套件/設定錯誤，如實標示，不可偽裝成單純離線
-            online = False
-            probe_error = f"EPSON USB 探測失敗（驅動/套件/設定）：{exc}"
-        finally:
-            if printer is not None:
-                try:
-                    printer.close()
-                except Exception:
-                    # 關閉失敗不影響已判定狀態；無法把離線/錯誤偽裝成在線，故僅忽略
-                    pass
-
+        """TCP 探測 EPSON TM-T82III；B 級全標 unsupported（產品裁示不做，ADR-011）。"""
+        result = _tcp_probe(self._epson)
         return DeviceStatus(
             id="epson-1",
             kind=DeviceKind.RECEIPT_PRINTER,
-            model="EPSON TM-T82iii",
-            online=online,
-            last_seen=last_seen,
+            model="EPSON TM-T82III",
+            online=result.online,
+            last_seen=result.last_seen,
             details={},
-            unsupported=[],
+            unsupported=list(_PRINTER_UNSUPPORTED),
             driver="real",
             validated_on_hardware=False,
-            probe_error=probe_error,
+            probe_error=result.probe_error,
         )
 
     def _poll_cash_drawer(self, *, epson: DeviceStatus) -> DeviceStatus:
-        """錢櫃狀態依附 EPSON（掛在 drawer port）；EPSON 探測錯誤一併如實傳達。"""
+        """錢櫃狀態依附 EPSON（掛在其 drawer port）；開關偵測不做（標 unsupported）。
+
+        EPSON 探測錯誤一併如實傳達，錢櫃不可獨自顯示成正常。
+        """
         last_seen = datetime.now(UTC) if epson.online else None
         probe_error = (
             f"依附 EPSON，EPSON 探測錯誤：{epson.probe_error}" if epson.probe_error else None
@@ -157,7 +125,7 @@ class RealStatusProvider:
             online=epson.online,
             last_seen=last_seen,
             details={},
-            unsupported=[],
+            unsupported=list(_DRAWER_UNSUPPORTED),
             driver="real",
             validated_on_hardware=False,
             probe_error=probe_error,
@@ -169,3 +137,9 @@ class RealStatusProvider:
         epson = self._poll_epson()
         drawer = self._poll_cash_drawer(epson=epson)
         return [brother, epson, drawer]
+
+
+def real_status_provider_from_env() -> RealStatusProvider:
+    """由環境變數（裝置 IP/port/逾時）建立真機狀態提供者；IP 不寫死於程式碼。"""
+    config = device_config_from_env()
+    return RealStatusProvider(brother=config.brother, epson=config.epson)
