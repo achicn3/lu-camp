@@ -12,6 +12,7 @@ from typing import Protocol
 
 ESC = b"\x1b"
 GS = b"\x1d"
+FS = b"\x1c"
 
 
 class SupportsWrite(Protocol):

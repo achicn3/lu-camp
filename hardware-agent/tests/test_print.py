@@ -12,7 +12,13 @@ import pytest
 from fastapi import FastAPI
 
 from agent.devices import AgentDevices, default_fake_devices
-from agent.drivers.escpos_receipt import EscposReceiptPrinter
+from agent.drivers.escpos_receipt import (
+    _ITEM_HEADER,
+    _WIDTH,
+    EscposReceiptPrinter,
+    _disp_width,
+    _item_row,
+)
 from agent.escpos_printer import FakePrinter
 from agent.fakes import FakeReceiptPrinter
 from agent.interfaces import InvoicePayload, SaleLinePayload, SalePayload, StoreHeader
@@ -260,19 +266,56 @@ def test_escpos_receipt_driver_renders_header_and_totals() -> None:
     writer = FakePrinter()
     EscposReceiptPrinter(writer).print_receipt(_SALE, _HEADER)
     buf = bytes(writer.buffer)
-    assert "路營二手".encode() in buf
-    assert b"12345678" in buf  # 統編
-    assert "帳篷 x1".encode() in buf
-    assert "總計".encode() in buf
+    # TM-T82III 繁中走 Big5 + FS & 中文模式（實機驗證 2026-06-08）
+    assert b"\x1c&" in buf  # FS &：進入中文（Big5）模式
+    assert "路營二手".encode("big5") in buf  # 抬頭以 Big5 編碼
+    assert "路營二手".encode() not in buf  # 不再送 UTF-8（預設）——會在 TM-T82III 亂碼
+    assert b"12345678" in buf  # 統編（ASCII 不變）
+    assert "帳篷 x1".encode("big5") in buf
+    assert "總計".encode("big5") in buf
     assert b"1000" in buf
+    # 品項區欄位標題列
+    assert "品項".encode("big5") in buf
+    assert "單價".encode("big5") in buf
+    assert "總價".encode("big5") in buf
+    # 切紙前需進紙，讓結尾（總計區）通過切刀、不被切掉/殘留到下一張
+    assert b"\n\n\n\n\x1dV\x00" in buf  # >=4 行進紙緊接 GS V 0 全切
+
+
+def test_item_header_is_fixed_width() -> None:
+    assert _disp_width(_ITEM_HEADER) == _WIDTH
+
+
+def test_item_row_columns_are_fixed_width_and_right_aligned() -> None:
+    line = SaleLinePayload(
+        line_type="ITEM", description="防水外套（男款）", qty=2, unit_price="800", line_total="1600"
+    )
+    row = _item_row(line)
+    assert _disp_width(row) == _WIDTH  # 整列固定寬，欄位對齊
+    assert row.startswith("防水外套（男款） x2")  # 品名靠左
+    assert row.endswith("1600")  # 總價靠右
+
+
+def test_item_row_truncates_overlong_name_keeping_width() -> None:
+    line = SaleLinePayload(
+        line_type="ITEM", description="超" * 40, qty=1, unit_price="1", line_total="1"
+    )
+    row = _item_row(line)
+    assert _disp_width(row) == _WIDTH  # 截斷後仍固定寬、不溢出折行
+    assert ".." in row  # 截斷標記
+    assert row.endswith(" 1")  # 單價/總價欄仍靠右對齊（不溢出）
 
 
 def test_escpos_receipt_driver_detail_title_and_einvoice_placeholder() -> None:
     writer = FakePrinter()
     driver = EscposReceiptPrinter(writer)
     driver.print_detail(_SALE, _HEADER)
-    assert "商品明細聯".encode() in bytes(writer.buffer)
+    detail_buf = bytes(writer.buffer)
+    assert b"\x1c&" in detail_buf  # 中文模式
+    assert "商品明細聯".encode("big5") in detail_buf
 
     writer2 = FakePrinter()
     EscposReceiptPrinter(writer2).print_einvoice(InvoicePayload(sale_id=1))
-    assert "電子發票待發票收尾階段".encode() in bytes(writer2.buffer)
+    einv_buf = bytes(writer2.buffer)
+    assert b"\x1c&" in einv_buf
+    assert "電子發票待發票收尾階段".encode("big5") in einv_buf
