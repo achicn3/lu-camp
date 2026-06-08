@@ -12,13 +12,15 @@
 
 from __future__ import annotations
 
+import os
+
 import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
-from agent.devices import AgentDevices, default_fake_devices
+from agent.devices import AgentDevices, default_fake_devices, real_epson_devices_from_env
 from agent.errors import (
     CoverOpen,
     DeviceError,
@@ -96,4 +98,14 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+def _devices_from_env() -> AgentDevices | None:
+    """依 `AGENT_DEVICES` 選注入：`real` → 真機 EPSON 組合；其餘（含未設/測試）→ None。
+
+    回傳 None 時 `create_app` 用全 Fake 預設，確保自動化測試與無實機開發不需設定 IP。
+    """
+    if os.environ.get("AGENT_DEVICES", "").strip().lower() == "real":
+        return real_epson_devices_from_env()
+    return None
+
+
+app = create_app(_devices_from_env())

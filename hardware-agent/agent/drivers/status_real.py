@@ -69,16 +69,20 @@ class RealStatusProvider:
     """真機裝置狀態提供者（A 級：online/last_seen 心跳；兩台皆網路 TCP 探測）。
 
     Args:
-        brother: Brother QL-810W 連線端點（IP/port/逾時，由設定注入）。
         epson: EPSON TM-T82III 連線端點（IP/port/逾時，由設定注入）。
+        brother: Brother QL-810W 連線端點；`None` 表示未列管 Brother（測 A 只接 EPSON），
+            此時 `poll()` 只回 EPSON 收據機 + 依附錢櫃。
     """
 
-    def __init__(self, *, brother: PrinterEndpoint, epson: PrinterEndpoint) -> None:
+    def __init__(
+        self, *, epson: PrinterEndpoint, brother: PrinterEndpoint | None = None
+    ) -> None:
         self._brother = brother
         self._epson = epson
 
     def _poll_brother(self) -> DeviceStatus:
         """TCP 探測 Brother QL-810W；B 級全標 unsupported（網路後端不讀狀態、產品不做）。"""
+        assert self._brother is not None  # 僅在 Brother 已列管時由 poll() 呼叫
         result = _tcp_probe(self._brother)
         return DeviceStatus(
             id="brother-1",
@@ -132,11 +136,12 @@ class RealStatusProvider:
         )
 
     def poll(self) -> list[DeviceStatus]:
-        """輪詢所有裝置；回傳順序：Brother → EPSON → 錢櫃。"""
-        brother = self._poll_brother()
+        """輪詢裝置。Brother 有列管時順序 Brother → EPSON → 錢櫃；未列管則只回 EPSON → 錢櫃。"""
         epson = self._poll_epson()
         drawer = self._poll_cash_drawer(epson=epson)
-        return [brother, epson, drawer]
+        if self._brother is None:
+            return [epson, drawer]
+        return [self._poll_brother(), epson, drawer]
 
 
 def real_status_provider_from_env() -> RealStatusProvider:

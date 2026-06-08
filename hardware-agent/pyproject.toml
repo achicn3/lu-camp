@@ -33,6 +33,12 @@ plugins = ["pydantic.mypy"]
 warn_unused_configs = true
 warn_unreachable = true
 
+# python-escpos 無型別 stub / py.typed；對其忽略缺失 import（第三方無 stub 的標準處置，
+# 非弱化專案自身型別）。真機驅動以 agent 自有的 _EscposNetwork Protocol 重新收斂型別。
+[[tool.mypy.overrides]]
+module = ["escpos.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

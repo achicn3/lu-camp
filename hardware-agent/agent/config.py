@@ -69,9 +69,21 @@ def device_config_from_env(env: Mapping[str, str] | None = None) -> DeviceConfig
             port=int(resolved.get("AGENT_BROTHER_PORT", str(_DEFAULT_PORT))),
             timeout=timeout,
         ),
-        epson=PrinterEndpoint(
-            host=_require_host(resolved, "AGENT_EPSON_HOST"),
-            port=int(resolved.get("AGENT_EPSON_PORT", str(_DEFAULT_PORT))),
-            timeout=timeout,
-        ),
+        epson=epson_endpoint_from_env(resolved),
+    )
+
+
+def epson_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndpoint:
+    """只讀 EPSON 連線端點（測 A：只接 EPSON 收據機+錢櫃，**不要求** Brother host）。
+
+    必填 `AGENT_EPSON_HOST`（未設即丟 `MissingDeviceConfigError`，不臆造 IP）；選填
+    `AGENT_EPSON_PORT`（預設 9100）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，連線/送出
+    共用，避免用 escpos 預設 60 秒）。IP 一律由環境變數提供、程式碼不寫死。
+    """
+    resolved = os.environ if env is None else env
+    timeout = float(resolved.get("AGENT_DEVICE_PROBE_TIMEOUT", str(_DEFAULT_PROBE_TIMEOUT)))
+    return PrinterEndpoint(
+        host=_require_host(resolved, "AGENT_EPSON_HOST"),
+        port=int(resolved.get("AGENT_EPSON_PORT", str(_DEFAULT_PORT))),
+        timeout=timeout,
     )

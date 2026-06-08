@@ -66,6 +66,23 @@ def _by_kind(statuses: list[DeviceStatus], kind: DeviceKind) -> DeviceStatus:
 
 
 # ─────────────────────────────────────────────
+# EPSON-only（測 A：Brother 未接，brother=None）
+# ─────────────────────────────────────────────
+
+
+def test_epson_only_poll_omits_brother() -> None:
+    """brother=None → poll 只回 EPSON 收據機 + 依附錢櫃，不列管 Brother 標籤機。"""
+    provider = make_provider(brother=None)
+    with _mock_tcp({_EPSON_HOST: "ok"}):
+        statuses = provider.poll()
+    kinds = [s.kind for s in statuses]
+    assert DeviceKind.LABEL_PRINTER not in kinds
+    assert kinds == [DeviceKind.RECEIPT_PRINTER, DeviceKind.CASH_DRAWER]
+    drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
+    assert drawer.online is True  # 依附 EPSON，EPSON 在線則錢櫃在線
+
+
+# ─────────────────────────────────────────────
 # A 級在線（兩台皆 TCP 9100 探測）
 # ─────────────────────────────────────────────
 
