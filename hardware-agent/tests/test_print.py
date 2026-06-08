@@ -188,6 +188,42 @@ async def test_store_client_rejects_header_without_tax_id(bad_tax_id: str | None
     assert len(requests) == 2
 
 
+async def test_store_client_rejects_blank_store_name() -> None:
+    """店名空白（tax_id 正常）→ 抬頭不可用、不快取（不印沒有店名的收據）。"""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"name": "   ", "tax_id": "12345678"})
+
+    client = StoreHeaderClient("http://backend", transport=httpx.MockTransport(handler))
+    with pytest.raises(StoreHeaderUnavailable):
+        await client.get_header(7)
+    with pytest.raises(StoreHeaderUnavailable):
+        await client.get_header(7)
+    assert len(requests) == 2  # 未快取殘缺抬頭
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, text="<html>not json</html>"),  # 非 JSON
+        httpx.Response(200, json={"tax_id": "12345678"}),  # 缺必填 name，schema 不符
+    ],
+)
+async def test_store_client_maps_malformed_response_to_unavailable(
+    response: httpx.Response,
+) -> None:
+    """後端回 200 但 body 非 JSON／schema 不符 → 503（StoreHeaderUnavailable），非 500。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response
+
+    client = StoreHeaderClient("http://backend", transport=httpx.MockTransport(handler))
+    with pytest.raises(StoreHeaderUnavailable):
+        await client.get_header(7)
+
+
 def test_escpos_receipt_driver_renders_header_and_totals() -> None:
     writer = FakePrinter()
     EscposReceiptPrinter(writer).print_receipt(_SALE, _HEADER)

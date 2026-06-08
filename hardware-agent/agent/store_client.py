@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 
 import httpx
+from pydantic import ValidationError
 
 from agent.interfaces import StoreHeader
 
@@ -51,11 +52,16 @@ class StoreHeaderClient:
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise StoreHeaderUnavailable(f"無法取得 store {store_id} 抬頭：{exc}") from exc
-        header = StoreHeader.model_validate(resp.json())
-        if not header.tax_id or not header.tax_id.strip():
+        try:
+            header = StoreHeader.model_validate(resp.json())
+        except (ValueError, ValidationError) as exc:
+            # 後端回 200 但 body 非 JSON／schema 不符：視為抬頭不可用，由列印路由轉 503
+            # （而非讓未處理例外變成 500）。ValueError 涵蓋 json.JSONDecodeError。
+            raise StoreHeaderUnavailable(f"store {store_id} 抬頭格式異常：{exc}") from exc
+        if not header.name.strip() or not header.tax_id or not header.tax_id.strip():
             # 後端允許 tax_id=null（門市暫未設統編），但列印端要求抬頭完整：
-            # 絕不印出沒有賣方統編的收據。視為不可用、不寫快取，由列印路由轉 503。
-            raise StoreHeaderUnavailable(f"store {store_id} 抬頭缺少統一編號，拒絕列印")
+            # 絕不印出沒有店名/統編的收據。視為不可用、不寫快取，由列印路由轉 503。
+            raise StoreHeaderUnavailable(f"store {store_id} 抬頭缺少店名或統一編號，拒絕列印")
         self._cache[store_id] = header
         return header
 
