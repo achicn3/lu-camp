@@ -3,6 +3,22 @@
 > 從審查（含 Codex adversarial-review）或實作中發現、經決議延後處理的真實問題。
 > 每項註明來源、原因、預定處理時機，確保不被遺忘。完成後移除並於該 PR 註記。
 
+## D-5（併入測 A 真機接線）— 真機列印 writer 的 OSError → DeviceError 映射
+
+- **來源**：T15 Codex 複審（2026-06-08）第 3 輪對 `hardware-agent/agent/drivers/escpos_receipt.py` 的觀察。
+- **觀察**：`EscposReceiptPrinter._emit_doc` 末端呼叫 `self._writer.write(...)`。當改用真機 Network
+  writer 時，連線被拒／逾時會以原生 `OSError` 冒出，繞過 `agent.main` 的 `DeviceError` handler
+  （`DeviceOffline→503`／`DeviceTimeout→504`），變成未處理的 500，違反 `errors.py`/`print.py`
+  docstring 的裝置錯誤語意。
+- **目前非 live path**：現行只有 `FakePrinter` 實作 `SupportsWrite`，真機 Network writer 尚未存在，
+  故今天列印路徑不會真的冒出 500。Codex 建議「在排版驅動 `escpos_receipt.py` 包 OSError」**層級錯**：
+  排版驅動不該懂網路語意（`SupportsWrite` 介面正是要隔離此事）。
+- **修法（併入測 A）**：在**真機 Network writer 邊界**（建構真機列印時）把 `OSError` 翻譯成
+  `DeviceOffline`／`DeviceTimeout`，與 `status_real.py` 對 socket 錯誤的處理（ADR-010 誠實原則）
+  對稱；並用「會丟 OSError 的測試 writer」覆蓋該路徑。
+- **狀態**：延後至「測 A：程式驅動 EPSON 真機列印 + 錢櫃」一起做（使用者要求現階段先不動 wiring）。
+  Codex 之後每跑會再報此點，視為已處置已知項、非 blocker。
+
 ## D-4（橫切任務，待排）— 敏感操作的當前授權重驗（auth-hardening）
 
 - **來源**：T12 Codex adversarial-review（2026-06-06）對 void 授權的觀察。
