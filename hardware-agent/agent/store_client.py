@@ -38,10 +38,25 @@ class StoreHeaderClient:
         self._cache: dict[int, StoreHeader] = {}
 
     async def get_header(self, store_id: int) -> StoreHeader:
-        """回傳該店抬頭；命中快取直接回，否則向後端取並快取。取不到丟 StoreHeaderUnavailable。"""
-        cached = self._cache.get(store_id)
-        if cached is not None:
-            return cached
+        """回傳該店抬頭。
+
+        **抓取優先、快取備援**：每次先向後端取最新抬頭（單一事實來源為後端 `stores`，
+        故統編/地址等更正會即時反映、不會永遠印舊值）；成功才覆蓋快取並回傳。後端暫時
+        不可用或回傳資料異常時，退回**最後一次成功取得**的抬頭（仍含店名/統編、把關不破），
+        以抗後端暫時斷線；若連快取都沒有則丟 `StoreHeaderUnavailable`（由列印路由轉 503）。
+        """
+        try:
+            header = await self._fetch(store_id)
+        except StoreHeaderUnavailable:
+            cached = self._cache.get(store_id)
+            if cached is not None:
+                return cached
+            raise
+        self._cache[store_id] = header
+        return header
+
+    async def _fetch(self, store_id: int) -> StoreHeader:
+        """向後端取一次抬頭並驗證；任何不可用（連線/格式/缺店名統編）丟 StoreHeaderUnavailable。"""
         headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
         url = f"{self._base_url}/api/v1/stores/{store_id}/receipt-header"
         try:
@@ -62,7 +77,6 @@ class StoreHeaderClient:
             # 後端允許 tax_id=null（門市暫未設統編），但列印端要求抬頭完整：
             # 絕不印出沒有店名/統編的收據。視為不可用、不寫快取，由列印路由轉 503。
             raise StoreHeaderUnavailable(f"store {store_id} 抬頭缺少店名或統一編號，拒絕列印")
-        self._cache[store_id] = header
         return header
 
 

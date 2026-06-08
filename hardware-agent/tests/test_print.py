@@ -140,7 +140,8 @@ async def test_receipt_printer_paper_out_returns_409() -> None:
     assert resp.json()["error"] == "PaperOut"
 
 
-async def test_store_client_fetches_caches_and_raises() -> None:
+async def test_store_client_fetches_each_call_and_raises_without_cache() -> None:
+    """抓取優先：每次都打後端取最新抬頭；無快取時後端失敗即丟 StoreHeaderUnavailable。"""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -155,7 +156,7 @@ async def test_store_client_fetches_caches_and_raises() -> None:
     h2 = await client.get_header(7)
     assert h1.name == "路營二手"
     assert h1 == h2
-    assert len(requests) == 1  # 第二次命中快取、不再打後端
+    assert len(requests) == 2  # 抓取優先：兩次都打後端（不再「快取優先」回舊值）
     assert requests[0].headers["Authorization"] == "Bearer t"
 
     def fail_handler(request: httpx.Request) -> httpx.Response:
@@ -164,6 +165,37 @@ async def test_store_client_fetches_caches_and_raises() -> None:
     failing = StoreHeaderClient("http://backend", transport=httpx.MockTransport(fail_handler))
     with pytest.raises(StoreHeaderUnavailable):
         await failing.get_header(9)
+
+
+async def test_store_client_fetch_first_reflects_backend_update() -> None:
+    """後端更正抬頭（如換真統編）後，下次取得即拿到新值、不會永遠印舊快取。"""
+    tax_ids = iter(["00000000", "12345678"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"name": "露坑", "tax_id": next(tax_ids)})
+
+    client = StoreHeaderClient("http://backend", transport=httpx.MockTransport(handler))
+    first = await client.get_header(1)
+    second = await client.get_header(1)
+    assert first.tax_id == "00000000"
+    assert second.tax_id == "12345678"  # 反映後端更正，非陳舊快取
+
+
+async def test_store_client_falls_back_to_cache_on_backend_error() -> None:
+    """後端暫時不可用時，退回最後一次成功取得的抬頭（抗暫時斷線；仍含店名/統編）。"""
+    fail = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if fail:
+            return httpx.Response(503)
+        return httpx.Response(200, json={"name": "露坑", "tax_id": "12345678"})
+
+    client = StoreHeaderClient("http://backend", transport=httpx.MockTransport(handler))
+    warm = await client.get_header(1)  # 先成功一次、暖快取
+    assert warm.tax_id == "12345678"
+    fail = True
+    fallback = await client.get_header(1)  # 後端 503 → 退回快取，不丟例外
+    assert fallback == warm
 
 
 @pytest.mark.parametrize("bad_tax_id", [None, "", "   "])
