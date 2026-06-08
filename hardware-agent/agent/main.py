@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -71,12 +72,16 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
 
     @app.post("/print/label", response_model=OkResponse, operation_id="printLabel")
     async def label(req: LabelRequest, devices: DevicesDep) -> OkResponse:
-        devices.label_printer.print_label(req.code, req.name, req.price)
+        # 真機列印為同步阻塞 I/O，卸載到 worker thread，勿阻塞事件迴圈。
+        await anyio.to_thread.run_sync(
+            devices.label_printer.print_label, req.code, req.name, req.price
+        )
         return OkResponse(status="ok")
 
     @app.post("/drawer/open", response_model=OkResponse, operation_id="openDrawer")
     async def drawer(devices: DevicesDep) -> OkResponse:
-        devices.cash_drawer.open()
+        # 真機踢櫃為同步阻塞 I/O（網路），卸載到 worker thread，勿阻塞事件迴圈。
+        await anyio.to_thread.run_sync(devices.cash_drawer.open)
         return OkResponse(status="ok")
 
     # --- T15/T16 在此 include 各自的 router（避免彼此改同一 endpoint）---

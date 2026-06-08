@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException
 
 from agent.deps import DevicesDep, OkResponse
@@ -45,7 +46,8 @@ async def print_receipt(
     sale: SalePayload, devices: DevicesDep, client: StoreClientDep
 ) -> OkResponse:
     header = await _fetch_header(client, sale.store_id)
-    devices.receipt_printer.print_receipt(sale, header)
+    # 真機列印是同步阻塞 I/O（網路/逾時），卸載到 worker thread，勿阻塞事件迴圈。
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_receipt, sale, header)
     return OkResponse(status="ok")
 
 
@@ -54,12 +56,12 @@ async def print_detail(
     sale: SalePayload, devices: DevicesDep, client: StoreClientDep
 ) -> OkResponse:
     header = await _fetch_header(client, sale.store_id)
-    devices.receipt_printer.print_detail(sale, header)
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_detail, sale, header)
     return OkResponse(status="ok")
 
 
 @router.post("/einvoice", response_model=OkResponse, operation_id="printEinvoice")
 async def print_einvoice(invoice: InvoicePayload, devices: DevicesDep) -> OkResponse:
     """電子發票列印（介面 placeholder）：內容待發票收尾階段（docs/14 §5）。"""
-    devices.receipt_printer.print_einvoice(invoice)
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_einvoice, invoice)
     return OkResponse(status="pending_einvoice_stage")
