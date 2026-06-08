@@ -166,6 +166,28 @@ async def test_store_client_fetches_caches_and_raises() -> None:
         await failing.get_header(9)
 
 
+@pytest.mark.parametrize("bad_tax_id", [None, "", "   "])
+async def test_store_client_rejects_header_without_tax_id(bad_tax_id: str | None) -> None:
+    """統編缺漏／空白 → 抬頭視為不可用（丟 StoreHeaderUnavailable）、且不得寫入快取。
+
+    後端 schema 允許 tax_id=null（門市暫未設統編），但列印端要求抬頭完整：
+    不可印出沒有賣方統編的收據（store_client / interfaces docstring 不變量）。
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"name": "路營二手", "tax_id": bad_tax_id})
+
+    client = StoreHeaderClient("http://backend", transport=httpx.MockTransport(handler))
+    with pytest.raises(StoreHeaderUnavailable):
+        await client.get_header(7)
+    # 不得快取殘缺抬頭：再呼叫一次仍會重打後端並再次拒絕
+    with pytest.raises(StoreHeaderUnavailable):
+        await client.get_header(7)
+    assert len(requests) == 2
+
+
 def test_escpos_receipt_driver_renders_header_and_totals() -> None:
     writer = FakePrinter()
     EscposReceiptPrinter(writer).print_receipt(_SALE, _HEADER)

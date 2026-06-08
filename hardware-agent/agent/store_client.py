@@ -52,6 +52,10 @@ class StoreHeaderClient:
         except httpx.HTTPError as exc:
             raise StoreHeaderUnavailable(f"無法取得 store {store_id} 抬頭：{exc}") from exc
         header = StoreHeader.model_validate(resp.json())
+        if not header.tax_id or not header.tax_id.strip():
+            # 後端允許 tax_id=null（門市暫未設統編），但列印端要求抬頭完整：
+            # 絕不印出沒有賣方統編的收據。視為不可用、不寫快取，由列印路由轉 503。
+            raise StoreHeaderUnavailable(f"store {store_id} 抬頭缺少統一編號，拒絕列印")
         self._cache[store_id] = header
         return header
 
