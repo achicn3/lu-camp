@@ -76,3 +76,28 @@ async def test_upsert_updates_same_row_on_rerun(db_session: AsyncSession) -> Non
     assert store.name == "露坑"
     count = await db_session.scalar(select(func.count()).select_from(Store))
     assert count == 1
+
+
+async def test_seed_advances_id_sequence_for_later_normal_insert(
+    db_session: AsyncSession,
+) -> None:
+    """顯式 id seed 後，一般流程（不帶 id）新增門市應拿下一個序號、不撞已 seed 的 id。
+
+    多分店就緒（CLAUDE.md §4）：seed 不可讓之後正常建第二間店因序列未推進而撞 id 失敗。
+    """
+    await upsert_dev_store(
+        db_session,
+        DevStoreSeed(
+            store_id=1,
+            name="露坑（測試）",
+            tax_id="00000000",
+            address="（測試地址）",
+            phone="02-0000-0000",
+            invoice_track_info="ZZ",
+        ),
+    )
+    other = Store(name="第二間店")
+    db_session.add(other)
+    await db_session.flush()  # 未推進序列時 nextval=1 → 撞 id=1、IntegrityError
+    assert other.id is not None
+    assert other.id != 1
