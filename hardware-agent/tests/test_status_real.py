@@ -97,7 +97,7 @@ def test_brother_online_when_tcp_succeeds() -> None:
     assert brother.last_seen is not None
     assert brother.probe_error is None
     assert brother.driver == "real"
-    assert brother.validated_on_hardware is False
+    assert brother.validated_on_hardware is True
 
 
 def test_epson_online_when_tcp_succeeds() -> None:
@@ -110,7 +110,7 @@ def test_epson_online_when_tcp_succeeds() -> None:
     assert epson.last_seen is not None
     assert epson.probe_error is None
     assert epson.driver == "real"
-    assert epson.validated_on_hardware is False
+    assert epson.validated_on_hardware is True
 
 
 # ─────────────────────────────────────────────
@@ -194,7 +194,7 @@ def test_cash_drawer_online_when_epson_online() -> None:
     drawer = _by_kind(statuses, DeviceKind.CASH_DRAWER)
     assert drawer.online is True
     assert drawer.driver == "real"
-    assert drawer.validated_on_hardware is False
+    assert drawer.validated_on_hardware is True
 
 
 def test_cash_drawer_offline_when_epson_offline() -> None:

@@ -17,7 +17,8 @@ port 另行實作），與此狀態驅動無關。
   **不可偽裝成單純離線**。
 
 IP/port 由 `agent.config` 經建構引數注入，**程式碼不寫死任何 IP**。
-`validated_on_hardware=False`（全部）——待實機接上再更改（T18）。
+`validated_on_hardware=True`：A 級 TCP 探測已於實機驗證（EPSON 在線/離線 2026-06-08~10、
+Brother 在線 2026-06-11，T18／docs/15 §5）。
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ class RealStatusProvider:
             details={},
             unsupported=list(_PRINTER_UNSUPPORTED),
             driver="real",
-            validated_on_hardware=False,
+            validated_on_hardware=True,
             probe_error=result.probe_error,
         )
 
@@ -107,7 +108,7 @@ class RealStatusProvider:
             details={},
             unsupported=list(_PRINTER_UNSUPPORTED),
             driver="real",
-            validated_on_hardware=False,
+            validated_on_hardware=True,
             probe_error=result.probe_error,
         )
 
@@ -129,7 +130,7 @@ class RealStatusProvider:
             details={},
             unsupported=list(_DRAWER_UNSUPPORTED),
             driver="real",
-            validated_on_hardware=False,
+            validated_on_hardware=True,
             probe_error=probe_error,
         )
 
