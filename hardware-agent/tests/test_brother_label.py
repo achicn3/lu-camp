@@ -50,6 +50,36 @@ class TestBuildLabelImage:
         assert row_a == row_b  # 垂直 bar：不同高度的列樣式相同
         assert 0 in row_a  # 有黑 bar
 
+    def test_long_name_wraps_and_caps_width(self) -> None:
+        """長品名：降字級換行（最多三行）、標籤長度不超過 ≈40mm 上限
+        （與短品名單行標籤同級大小，使用者裁示 2026-06-11）。"""
+        from agent.drivers.brother_label import MAX_LABEL_WIDTH_DOTS
+
+        image = build_label_image(
+            "ITM-0003", "Snow Peak 雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT
+        )
+        assert image.width <= MAX_LABEL_WIDTH_DOTS
+        assert MAX_LABEL_WIDTH_DOTS / 300 * 25.4 <= 41.0  # 上限 ≈ 40mm
+
+    def test_wrapped_layout_keeps_vertical_barcode(self) -> None:
+        """兩行版面的條碼帶位置下移後，bar 仍為垂直線且存在。"""
+        from agent.drivers.brother_label import _BARCODE_TOP_WRAPPED
+
+        image = build_label_image(
+            "ITM-0003", "Snow Peak 雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT
+        )
+        row_a = [image.getpixel((x, _BARCODE_TOP_WRAPPED + 10)) for x in range(image.width)]
+        row_b = [image.getpixel((x, _BARCODE_TOP_WRAPPED + 60)) for x in range(image.width)]
+        assert row_a == row_b
+        assert 0 in row_a
+
+    def test_overlong_name_truncated_with_stable_output(self) -> None:
+        """超過兩行的品名截斷加「…」：截斷點之後的內容差異不影響輸出（確實截斷）。"""
+        base = "防水露營帳篷豪華版" * 5  # 45 字，兩行裝不下
+        a = build_label_image("ITM-0001", base + "Ａ", 100, _FONT)
+        b = build_label_image("ITM-0001", base + "Ｂ", 100, _FONT)
+        assert a.tobytes() == b.tobytes()
+
     def test_different_codes_render_different_barcodes(self) -> None:
         from agent.drivers.brother_label import _BARCODE_TOP
 
