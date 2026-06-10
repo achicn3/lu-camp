@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent.drivers.escpos_raster import (
     GAP_DOTS,
+    MAX_PAIR_QR_VERSION,
     PRINT_WIDTH_DOTS,
     QUIET_DOTS,
     code39_rows,
@@ -84,6 +87,18 @@ class TestQrPairRows:
         width = len(rows[0])
         # 寬度可整除：QUIET+side+GAP+side+QUIET，side 相等
         assert (width - 2 * QUIET_DOTS - GAP_DOTS) % 2 == 0
+
+    def test_max_pair_version_fits_but_next_does_not(self) -> None:
+        """版本上限 = 最小模組（2 dots）下仍塞得進紙寬的最大版本；再 +1 版即超寬。"""
+        fits = 17 + 4 * MAX_PAIR_QR_VERSION  # 該版本模組數
+        too_big = fits + 4
+        assert 2 * QUIET_DOTS + GAP_DOTS + 2 * fits * 2 <= PRINT_WIDTH_DOTS
+        assert 2 * QUIET_DOTS + GAP_DOTS + 2 * too_big * 2 > PRINT_WIDTH_DOTS
+
+    def test_raises_when_data_cannot_fit_paper(self) -> None:
+        """資料大到超過版本上限 → 如實報錯，不印會被裁切的 QR（呼叫端應先縮減品目）。"""
+        with pytest.raises(ValueError):
+            qr_pair_rows("X" * 1300, "**")  # 需 V21 > 上限
 
 
 class TestCode39Rows:

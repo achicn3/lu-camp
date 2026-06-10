@@ -13,6 +13,7 @@ import base64
 from datetime import date, time
 
 import pytest
+import qrcode
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -22,6 +23,7 @@ from agent.drivers.einvoice_format import (
     qr_pair_text,
     roc_period_label,
 )
+from agent.drivers.escpos_raster import MAX_PAIR_QR_VERSION
 from agent.interfaces import InvoicePayload, SaleLinePayload
 
 _KEY_HEX = "0123456789abcdef0123456789abcdef"  # 測試用 dummy 金鑰（16 bytes hex）
@@ -134,6 +136,31 @@ class TestQrPairText:
         left, right = qr_pair_text(invoice, _KEY_HEX)
         assert right == "**"
         assert left.endswith(":1:乾電池:1:105")
+
+    def test_recorded_count_spans_both_qrs_per_spec_example(self) -> None:
+        """欄位「二維條碼記載完整品目筆數」記錄**左右兩個** QR 合計（規格範例：
+        左 1 筆、右 2 筆 → 3:3），非僅左方筆數。"""
+        left, right = qr_pair_text(_spec_example_invoice(), _KEY_HEX)
+        fields = left[77:].split(":")
+        assert fields[2] == "3"  # 記載筆數＝兩 QR 合計 3 筆
+        assert fields[3] == "3"  # 總筆數 3 筆
+        assert right.count(":") == 5  # 右 QR 實際接續 2 筆（每筆 3 欄、首筆無前導冒號）
+
+    def test_truncates_items_when_qr_would_exceed_paper(self) -> None:
+        """品項多到雙 QR 塞不下紙寬（版本上限）時：少記品項、筆數欄如實反映
+        「記載筆數 < 總筆數」（規格欄位 10/11 與補充說明 3 允許品目不記錄）。"""
+        many = [_line(f"露營用品第{i:03d}號標準品", 1, str(10 + i)) for i in range(120)]
+        invoice = _spec_example_invoice().model_copy(update={"lines": many})
+        left, right = qr_pair_text(invoice, _KEY_HEX)
+        for payload in (left, right):
+            probe = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+            probe.add_data(payload.encode("utf-8"))
+            assert probe.best_fit() <= MAX_PAIR_QR_VERSION  # 兩個 QR 都印得下
+        fields = left[77:].split(":")
+        recorded, total = int(fields[2]), int(fields[3])
+        assert total == 120
+        assert 0 < recorded < total  # 如實回報：只記載部分品項
+        assert right.startswith("**露營用品第001號標準品:")  # 首筆在左、第二筆起接右
 
     def test_colon_in_item_name_is_sanitized(self) -> None:
         """品名不得含半形冒號（規格：避免使用間隔符號）；以全形冒號取代。"""

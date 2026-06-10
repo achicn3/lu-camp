@@ -25,6 +25,11 @@ GAP_DOTS = 32  # 兩 QR 中央間隔（左右各留 0.2cm）
 _MIN_MODULE_DOTS = 2  # 模組下限（再小熱感印恐難辨識；版本極高時物理邊長仍 ≥1.5cm）
 _BARCODE_HEIGHT_DOTS = 60  # 一維條碼高 60 dots = 7.5mm ≥ 0.5cm
 _MIN_QR_VERSION = 6  # 規格：左方 QR 須 V6（41×41）以上
+# 並列雙 QR 的版本上限：最小模組（2 dots）下仍塞得進紙寬的最大模組數 → 版本。
+# 超過此版本即使縮到模組下限也會超出紙寬（Codex P2 實機裁切風險），由
+# `qr_pair_rows` 拒印、`einvoice_format.qr_pair_text` 先行縮減記載品目避免觸及。
+_MAX_PAIR_SIZE = (PRINT_WIDTH_DOTS - 2 * QUIET_DOTS - GAP_DOTS) // (2 * _MIN_MODULE_DOTS)
+MAX_PAIR_QR_VERSION = (_MAX_PAIR_SIZE - 17) // 4
 
 
 def qr_matrix(data: str, *, min_version: int = _MIN_QR_VERSION) -> list[list[bool]]:
@@ -38,6 +43,19 @@ def qr_matrix(data: str, *, min_version: int = _MIN_QR_VERSION) -> list[list[boo
     qr.add_data(data.encode("utf-8"))
     qr.make(fit=True)
     return [list(row) for row in qr.get_matrix()]
+
+
+def qr_version_for(data: str) -> int:
+    """資料（UTF-8、ECC Level L）所需之 QR 版本（以 qrcode 實算，不自寫容量表）。
+
+    資料大到連 V40 都塞不下時回 41（恆大於任何上限），供呼叫端視為「不可用」。
+    """
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+    qr.add_data(data.encode("utf-8"))
+    try:
+        return int(qr.best_fit())
+    except ValueError:  # qrcode：超過 V40 容量
+        return 41
 
 
 def _scaled_row(modules: list[bool], module_dots: int) -> list[bool]:
@@ -60,6 +78,13 @@ def qr_pair_rows(left_data: str, right_data: str) -> list[list[bool]]:
     right = qr_matrix(right_data)
     size = max(len(left), len(right))
     version = (size - 17) // 4
+    if version > MAX_PAIR_QR_VERSION:
+        # 即使縮到最小模組也會超出紙寬 → 如實拒印（呼叫端應先縮減 QR 內容），
+        # 不印右側被裁切、無法掃描的 QR。
+        raise ValueError(
+            f"雙 QR 資料過大（需 V{version} > 上限 V{MAX_PAIR_QR_VERSION}），"
+            f"超出可印寬度 {PRINT_WIDTH_DOTS} dots；請縮減記載品目。"
+        )
     if len(left) < size:
         left = qr_matrix(left_data, min_version=version)
     if len(right) < size:

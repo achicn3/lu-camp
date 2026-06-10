@@ -23,6 +23,7 @@ from datetime import date
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from agent.drivers.escpos_raster import MAX_PAIR_QR_VERSION, qr_version_for
 from agent.interfaces import InvoicePayload, SaleLinePayload
 
 # 官方規格第伍章參考原始碼之固定 IV（RijndaelManaged.IV）
@@ -75,11 +76,38 @@ def _item_fields(line: SaleLinePayload) -> str:
     return f"{line.description.replace(':', '：')}:{line.qty}:{line.unit_price}"
 
 
-def qr_pair_text(invoice: InvoicePayload, aes_key_hex: str) -> tuple[str, str]:
+def _build_pair(invoice: InvoicePayload, prefix77: str, recorded: int) -> tuple[str, str]:
+    """以前 `recorded` 筆品目組出左右 QR 內容。
+
+    「二維條碼記載完整品目筆數」依規格為**左右兩個 QR 合計**之記載筆數（規格範例：
+    左 1 筆、右 2 筆 → 3:3）、「該張發票交易品目總筆數」為發票全部品目數；兩者在
+    品目未全數記載（紙寬容量受限）時不同，規格欄位 10/11 與補充說明 3 允許此情形。
+    """
+    total = len(invoice.lines)
+    head = f":{_UNUSED_MERCHANT_AREA}:{recorded}:{total}:{_ENCODING_PARAM_UTF8}"
+    items = invoice.lines[:recorded]
+    if not items:
+        return prefix77 + head, "**"
+    first, rest = items[0], items[1:]
+    left = f"{prefix77}{head}:{_item_fields(first)}"
+    if not rest:
+        return left, "**"
+    right = "**" + ":".join(_item_fields(line) for line in rest)
+    return left + ":", right
+
+
+def qr_pair_text(
+    invoice: InvoicePayload,
+    aes_key_hex: str,
+    *,
+    max_version: int = MAX_PAIR_QR_VERSION,
+) -> tuple[str, str]:
     """產生左、右二維條碼內容。
 
-    品目配置依規格範例：首筆記於左方（結尾補 ":" 接續），其餘接續右方；
-    右方一律以 "**" 起始（品目皆已記載於左方時右方僅含起始符號）。
+    品目配置依規格範例：首筆記於左方（結尾補 ":" 接續），其餘接續右方；右方一律
+    以 "**" 起始（品目皆已記載於左方時右方僅含起始符號）。品目多到任一 QR 超過
+    `max_version`（紙寬內可印之版本上限）時，自後縮減記載品目並如實回報
+    「記載筆數 < 總筆數」，避免印出超寬被裁切的 QR。
     """
     buyer = invoice.buyer_tax_id or "00000000"  # 一般消費者
     prefix77 = (
@@ -92,11 +120,8 @@ def qr_pair_text(invoice: InvoicePayload, aes_key_hex: str) -> tuple[str, str]:
         + invoice.seller_tax_id
         + encrypt_verification(invoice.invoice_number, invoice.random_code, aes_key_hex)
     )
-    count = len(invoice.lines)
-    head = f":{_UNUSED_MERCHANT_AREA}:{count}:{count}:{_ENCODING_PARAM_UTF8}"
-    first, rest = invoice.lines[0], invoice.lines[1:]
-    left = f"{prefix77}{head}:{_item_fields(first)}"
-    if not rest:
-        return left, "**"
-    right = "**" + ":".join(_item_fields(line) for line in rest)
-    return left + ":", right
+    for recorded in range(len(invoice.lines), -1, -1):
+        left, right = _build_pair(invoice, prefix77, recorded)
+        if qr_version_for(left) <= max_version and qr_version_for(right) <= max_version:
+            return left, right
+    raise ValueError("發票固定欄位即超過 QR 版本上限")  # pragma: no cover（77+head 必塞得下）
