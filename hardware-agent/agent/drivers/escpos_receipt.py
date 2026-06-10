@@ -41,6 +41,12 @@ _WIDTH = 34
 _UNIT_W = 7
 _TOTAL_W = 7
 _NAME_W = _WIDTH - _UNIT_W - _TOTAL_W
+# 列印區寬度（dots）：34 半形 × 12 dots（Font A 半形寬）= 408，與實機尺規量測一致。
+# 此台裝 58mm 紙、但印表機印區仍照 80mm（576 dots）設定，置中會以 576 為基準 →
+# 內容整體右偏且右側遭裁切（實機驗證 2026-06-10）；證明聯以 GS W 將印區設為實際
+# 紙寬，讓 ESC a 置中（標題/條碼/QR）以 408 dots 為基準。
+_PRINT_AREA_DOTS = _WIDTH * 12
+_SET_PRINT_AREA = GS + b"W" + bytes([_PRINT_AREA_DOTS & 0xFF, _PRINT_AREA_DOTS >> 8])
 _SEP = "-" * _WIDTH
 _TRUNCATE_MARK = ".."  # ASCII 截斷標記（Big5 安全、寬度確定）
 
@@ -167,6 +173,7 @@ class EscposReceiptPrinter:
         number = invoice.invoice_number
         out = bytearray()
         out += _INIT
+        out += _SET_PRINT_AREA  # 須在 ESC @ 之後（避免被重設）、版面內容之前
         out += _ENTER_CHINESE
         out += _ALIGN_CENTER
         out += _line(invoice.seller_name)  # 1. 營業人識別標章（文字）

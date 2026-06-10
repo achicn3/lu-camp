@@ -380,6 +380,12 @@ def test_escpos_einvoice_renders_official_layout() -> None:
     assert b"\x1bE\x01" in buf  # 年期別/字軌粗體
     assert buf.index(b"\x1bE\x01") < buf.index("115年05-06月".encode("big5"))
     assert b"\x1dV\x00" in buf  # 切紙
+    # 列印區寬度設為實際紙寬（58mm 紙可印 408 dots = 34 半形 ×12）：印表機若仍照
+    # 80mm 設定，置中會以 576 dots 為基準 → 整體右偏、右側裁切（實機驗證 2026-06-10）。
+    # GS W 408（nL=0x98, nH=0x01）須在版面內容之前、ESC @ 之後生效。
+    assert b"\x1dW\x98\x01" in buf
+    assert buf.index(b"\x1dW\x98\x01") < buf.index("電子發票證明聯".encode("big5"))
+    assert buf.index(b"\x1b@") < buf.index(b"\x1dW\x98\x01")  # 不被 ESC @ 重設掉
 
 
 def test_escpos_einvoice_b2b_prints_buyer() -> None:
