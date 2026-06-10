@@ -19,6 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from agent.config import MissingDeviceConfigError
 from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
 from agent.devices import AgentDevices, default_fake_devices, real_epson_devices_from_env
 from agent.errors import (
@@ -65,6 +66,16 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         status = _DEVICE_ERROR_STATUS.get(type(exc), 502)
         return JSONResponse(
             status_code=status,
+            content={"detail": str(exc), "error": type(exc).__name__},
+        )
+
+    @app.exception_handler(MissingDeviceConfigError)
+    async def _missing_config_handler(
+        _request: Request, exc: MissingDeviceConfigError
+    ) -> JSONResponse:
+        # 設定缺漏（如電子發票 AES 金鑰未設）→ 503 如實回報，不偽裝成功也不露 traceback。
+        return JSONResponse(
+            status_code=503,
             content={"detail": str(exc), "error": type(exc).__name__},
         )
 

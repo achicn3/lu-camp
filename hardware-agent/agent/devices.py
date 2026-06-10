@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.config import epson_endpoint_from_env
+from agent.config import einvoice_aes_key_from_env, epson_endpoint_from_env
 from agent.drivers.escpos_network import NetworkEscposWriter, RealCashDrawer
 from agent.drivers.escpos_receipt import EscposReceiptPrinter
 from agent.drivers.status_real import RealStatusProvider
@@ -60,7 +60,7 @@ def real_epson_devices_from_env() -> AgentDevices:
     writer = NetworkEscposWriter(epson)
     return AgentDevices(
         label_printer=FakeLabelPrinter(),
-        receipt_printer=EscposReceiptPrinter(writer),
+        receipt_printer=EscposReceiptPrinter(writer, einvoice_aes_key=einvoice_aes_key_from_env()),
         cash_drawer=RealCashDrawer(writer),
         status_provider=RealStatusProvider(epson=epson),
     )

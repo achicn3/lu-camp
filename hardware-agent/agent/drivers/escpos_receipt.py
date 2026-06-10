@@ -2,14 +2,17 @@
 
 實作 `agent.interfaces.ReceiptPrinter`，把銷售與店家抬頭排版成 ESC/POS 位元組寫到
 `SupportsWrite`（實機為 EPSON TM-T82III 的連線；測試用 byte buffer 斷言版面，免實機）。
-金額皆為字串整數元（§6），驅動不做金額運算、只如實排版。電子發票列印為 placeholder
-（內容待發票收尾階段，docs/14 §5），僅輸出佔位標記、不偽造發票內容。
+金額皆為字串整數元（§6），驅動不做金額運算、只如實排版。電子發票證明聯版面依
+「電子發票實施作業要點」附件一格式一，條碼內容依條碼規格 v1.9（`einvoice_format`）。
 """
 
 from __future__ import annotations
 
 import unicodedata
 
+from agent.config import MissingDeviceConfigError
+from agent.drivers.einvoice_format import barcode_text, qr_pair_text, roc_period_label
+from agent.drivers.escpos_raster import code39_rows, qr_pair_rows, raster_command
 from agent.escpos_printer import ESC, FS, GS, SupportsWrite
 from agent.interfaces import InvoicePayload, SaleLinePayload, SalePayload, StoreHeader
 
@@ -24,6 +27,12 @@ _FEED_BEFORE_CUT = b"\n" * 5
 # ASCII（< 0x80）在中文模式下仍以單位元組如實列印，故整份文件包在中文模式即可。
 _ENTER_CHINESE = FS + b"&"
 _EXIT_CHINESE = FS + b"."
+# 證明聯標題字級：附件一規定「電子發票證明聯」「年期別」「字軌號碼」字高 ≥0.5cm、
+# 後兩者粗體；雙倍字（24×2 dots = 6mm）達標。GS ! 控 ASCII、FS W 控中文（Big5）字級。
+_DOUBLE_ON = GS + b"!" + bytes([0x11]) + FS + b"W" + bytes([1])
+_DOUBLE_OFF = GS + b"!" + bytes([0x00]) + FS + b"W" + bytes([0])
+_BOLD_ON = ESC + b"E" + bytes([1])
+_BOLD_OFF = ESC + b"E" + bytes([0])
 
 # 品項表格欄寬（半形單位）：此台 TM-T82III 實機量得一行可印 34 半形（中文全形佔 2，
 # 實機尺規驗證 2026-06-08）。品名靠左（過長截斷），單價/總價靠右對齊成固定欄，標題列
@@ -109,10 +118,17 @@ def _totals_block(sale: SalePayload) -> bytes:
 
 
 class EscposReceiptPrinter:
-    """以 ESC/POS 位元組列印收據／明細聯的真機驅動。"""
+    """以 ESC/POS 位元組列印收據／明細聯／電子發票證明聯的真機驅動。
 
-    def __init__(self, writer: SupportsWrite) -> None:
+    Args:
+        writer: 位元組輸出端（實機為 EPSON 網路連線；測試為 byte buffer）。
+        einvoice_aes_key: 電子發票 QR 加密驗證資訊之 AES 金鑰（hex，環境變數
+            `AGENT_EINVOICE_AES_KEY` 提供）；未設時列印證明聯即報設定缺漏。
+    """
+
+    def __init__(self, writer: SupportsWrite, *, einvoice_aes_key: str | None = None) -> None:
         self._writer = writer
+        self._einvoice_aes_key = einvoice_aes_key
 
     def _emit_doc(self, sale: SalePayload, header: StoreHeader, *, title: str) -> None:
         out = bytearray()
@@ -137,11 +153,41 @@ class EscposReceiptPrinter:
         self._emit_doc(sale, header, title="商品明細聯")
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
-        """placeholder：發票版面/欄位待發票收尾階段；此處僅輸出佔位、不偽造發票內容。"""
+        """列印電子發票證明聯（附件一格式一；記載順序固定、不得增刪/變更）。
+
+        順序：營業人識別標章 → 「電子發票證明聯」 → 年期別 → 字軌號碼 →
+        交易日期時間 → 隨機碼/總計 → 賣方（買方）統編 → 一維條碼 → 左右二維條碼。
+        """
+        if self._einvoice_aes_key is None:
+            raise MissingDeviceConfigError(
+                "環境變數 AGENT_EINVOICE_AES_KEY 未設定；電子發票 QR 加密驗證資訊"
+                "需要 AES 金鑰（hex），請於 env/.env 提供（金鑰不入 repo）。"
+            )
+        left_qr, right_qr = qr_pair_text(invoice, self._einvoice_aes_key)
+        number = invoice.invoice_number
         out = bytearray()
         out += _INIT
         out += _ENTER_CHINESE
-        out += _line(f"[電子發票待發票收尾階段] sale_id={invoice.sale_id}")
+        out += _ALIGN_CENTER
+        out += _line(invoice.seller_name)  # 1. 營業人識別標章（文字）
+        out += _DOUBLE_ON
+        out += _line("電子發票證明聯")  # 2. 字高 ≥0.5cm
+        out += _BOLD_ON
+        out += _line(roc_period_label(invoice.invoice_date))  # 3. 年期別（粗體）
+        out += _line(f"{number[:2]}-{number[2:]}")  # 4. 字軌號碼（粗體）
+        out += _BOLD_OFF
+        out += _DOUBLE_OFF
+        out += _ALIGN_LEFT
+        # 5. 交易日期時間：西元年-月-日 時:分:秒
+        out += _line(f"{invoice.invoice_date.isoformat()} {invoice.invoice_time.isoformat()}")
+        out += _line(f"隨機碼:{invoice.random_code} 總計:{invoice.total_amount}")  # 6/7
+        buyer_part = f" 買方{invoice.buyer_tax_id}" if invoice.buyer_tax_id else ""
+        out += _line(f"賣方{invoice.seller_tax_id}{buyer_part}")  # 8/9
+        out += _ALIGN_CENTER
+        out += raster_command(code39_rows(barcode_text(invoice)))  # 11. 一維條碼 ≥0.5cm 高
+        out += b"\n"
+        out += raster_command(qr_pair_rows(left_qr, right_qr))  # 12. 二維條碼 ×2 左右並列
+        out += _ALIGN_LEFT
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT
         out += _CUT

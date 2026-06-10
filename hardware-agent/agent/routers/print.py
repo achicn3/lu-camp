@@ -3,7 +3,8 @@
 收據與明細聯都會先取店家抬頭（後端 `stores`，見 `agent.store_client`）再交給注入的
 `ReceiptPrinter` 列印——**印出店名/統編/地址/電話**。抬頭取不到 → 503（不印無抬頭收據）。
 裝置層失敗（離線/缺紙/上蓋）由 `agent.main` 的 DeviceError handler 轉對應 HTTP。
-電子發票端點先做介面 placeholder，回 `pending_einvoice_stage`，內容待發票收尾階段。
+電子發票端點列印證明聯（附件一格式一），取號資料由 payload 提供（後端發票模組
+T13/T14 接手後為正式來源）；AES 金鑰缺漏由 MissingDeviceConfigError handler 轉 503。
 """
 
 from __future__ import annotations
@@ -62,6 +63,6 @@ async def print_detail(
 
 @router.post("/einvoice", response_model=OkResponse, operation_id="printEinvoice")
 async def print_einvoice(invoice: InvoicePayload, devices: DevicesDep) -> OkResponse:
-    """電子發票列印（介面 placeholder）：內容待發票收尾階段（docs/14 §5）。"""
+    """列印電子發票證明聯（附件一格式一 + 條碼規格 v1.9，欄位見 `InvoicePayload`）。"""
     await anyio.to_thread.run_sync(devices.receipt_printer.print_einvoice, invoice)
-    return OkResponse(status="pending_einvoice_stage")
+    return OkResponse(status="ok")

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "POS 硬體代理（localhost）：收據/證明聯/條碼標籤/錢櫃（ESC/POS）"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=48.0.1",
     "fastapi>=0.136.3",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
@@ -33,10 +34,11 @@ plugins = ["pydantic.mypy"]
 warn_unused_configs = true
 warn_unreachable = true
 
-# python-escpos 無型別 stub / py.typed；對其忽略缺失 import（第三方無 stub 的標準處置，
-# 非弱化專案自身型別）。真機驅動以 agent 自有的 _EscposNetwork Protocol 重新收斂型別。
+# python-escpos / python-barcode 無型別 stub / py.typed；對其忽略缺失 import（第三方無
+# stub 的標準處置，非弱化專案自身型別）。真機驅動以 agent 自有的 _EscposNetwork Protocol
+# 重新收斂型別；barcode 的 build() 輸出在 escpos_raster 以明確型別註記收斂。
 [[tool.mypy.overrides]]
-module = ["escpos.*"]
+module = ["escpos.*", "barcode.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -60,4 +62,5 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.15",
+    "types-qrcode>=8.2.0.20260518",
 ]

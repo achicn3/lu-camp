@@ -5,12 +5,14 @@
 
 import subprocess
 import sys
+from datetime import date, time
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
+from agent.config import MissingDeviceConfigError
 from agent.devices import AgentDevices, default_fake_devices
 from agent.drivers.escpos_receipt import (
     _ITEM_HEADER,
@@ -111,12 +113,55 @@ async def test_print_detail_includes_header() -> None:
     assert printer.details == [(_SALE, _HEADER)]
 
 
-async def test_print_einvoice_is_pending_placeholder() -> None:
+_INVOICE = InvoicePayload(
+    sale_id=1,
+    invoice_number="AB12345678",
+    invoice_date=date(2026, 6, 10),
+    invoice_time=time(19, 30, 0),
+    random_code="9999",
+    sales_amount="952",
+    tax_amount="48",
+    total_amount="1000",
+    seller_tax_id="12345678",
+    seller_name="路營二手",
+    buyer_tax_id=None,
+    lines=[
+        SaleLinePayload(
+            line_type="CATALOG", description="帳篷", qty=1, unit_price="1000", line_total="1000"
+        )
+    ],
+)
+_TEST_AES_KEY = "0123456789abcdef0123456789abcdef"
+
+
+async def test_print_einvoice_prints_and_returns_ok() -> None:
     printer = FakeReceiptPrinter()
-    resp = await _post(_app_with(printer, _FakeClient()), "/print/einvoice", {"sale_id": 1})
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/einvoice", _INVOICE.model_dump(mode="json")
+    )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "pending_einvoice_stage"
-    assert printer.einvoices == [InvoicePayload(sale_id=1)]
+    assert resp.json()["status"] == "ok"
+    assert printer.einvoices == [_INVOICE]
+
+
+async def test_print_einvoice_rejects_invalid_payload() -> None:
+    printer = FakeReceiptPrinter()
+    bad = {**_INVOICE.model_dump(mode="json"), "invoice_number": "12345678AB"}
+    resp = await _post(_app_with(printer, _FakeClient()), "/print/einvoice", bad)
+    assert resp.status_code == 422
+    assert printer.einvoices == []
+
+
+async def test_print_einvoice_without_aes_key_returns_503() -> None:
+    """真機驅動未設 AGENT_EINVOICE_AES_KEY → 503 設定缺漏，不印、不偽裝成功。"""
+    writer = FakePrinter()
+    printer = EscposReceiptPrinter(writer)  # 未注入金鑰
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/einvoice", _INVOICE.model_dump(mode="json")
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "MissingDeviceConfigError"
+    assert bytes(writer.buffer) == b""  # 完全沒送位元組到印表機
 
 
 async def test_receipt_header_unavailable_returns_503() -> None:
@@ -306,7 +351,7 @@ def test_item_row_truncates_overlong_name_keeping_width() -> None:
     assert row.endswith(" 1")  # 單價/總價欄仍靠右對齊（不溢出）
 
 
-def test_escpos_receipt_driver_detail_title_and_einvoice_placeholder() -> None:
+def test_escpos_receipt_driver_detail_title() -> None:
     writer = FakePrinter()
     driver = EscposReceiptPrinter(writer)
     driver.print_detail(_SALE, _HEADER)
@@ -314,8 +359,39 @@ def test_escpos_receipt_driver_detail_title_and_einvoice_placeholder() -> None:
     assert b"\x1c&" in detail_buf  # 中文模式
     assert "商品明細聯".encode("big5") in detail_buf
 
-    writer2 = FakePrinter()
-    EscposReceiptPrinter(writer2).print_einvoice(InvoicePayload(sale_id=1))
-    einv_buf = bytes(writer2.buffer)
-    assert b"\x1c&" in einv_buf
-    assert "電子發票待發票收尾階段".encode("big5") in einv_buf
+
+def test_escpos_einvoice_renders_official_layout() -> None:
+    """證明聯版面（附件一格式一）：標題/年期別/字軌/日期/隨機碼/總計/賣方 + 兩塊點陣。"""
+    writer = FakePrinter()
+    EscposReceiptPrinter(writer, einvoice_aes_key=_TEST_AES_KEY).print_einvoice(_INVOICE)
+    buf = bytes(writer.buffer)
+    assert b"\x1c&" in buf  # 中文（Big5）模式
+    assert "路營二手".encode("big5") in buf  # 1. 營業人識別標章
+    assert "電子發票證明聯".encode("big5") in buf  # 2.
+    assert "115年05-06月".encode("big5") in buf  # 3. 年期別（民國 115、06 期）
+    assert b"AB-12345678" in buf  # 4. 字軌號碼
+    assert b"2026-06-10 19:30:00" in buf  # 5. 交易日期時間（西元）
+    assert "隨機碼".encode("big5") in buf and b"9999" in buf  # 6.
+    assert "總計".encode("big5") in buf and b"1000" in buf  # 7.
+    assert "賣方".encode("big5") + b"12345678" in buf  # 8.
+    assert "買方".encode("big5") not in buf  # B2C 不印買方
+    assert buf.count(b"\x1dv0\x00") == 2  # 一維條碼 + 雙 QR 兩塊 GS v 0 點陣
+    assert b"\x1d!\x11" in buf and b"\x1cW\x01" in buf  # 標題雙倍字（ASCII+中文）
+    assert b"\x1bE\x01" in buf  # 年期別/字軌粗體
+    assert buf.index(b"\x1bE\x01") < buf.index("115年05-06月".encode("big5"))
+    assert b"\x1dV\x00" in buf  # 切紙
+
+
+def test_escpos_einvoice_b2b_prints_buyer() -> None:
+    writer = FakePrinter()
+    invoice = _INVOICE.model_copy(update={"buyer_tax_id": "87654321"})
+    EscposReceiptPrinter(writer, einvoice_aes_key=_TEST_AES_KEY).print_einvoice(invoice)
+    buf = bytes(writer.buffer)
+    assert "買方".encode("big5") + b"87654321" in buf
+
+
+def test_escpos_einvoice_without_key_raises_and_writes_nothing() -> None:
+    writer = FakePrinter()
+    with pytest.raises(MissingDeviceConfigError):
+        EscposReceiptPrinter(writer).print_einvoice(_INVOICE)
+    assert bytes(writer.buffer) == b""

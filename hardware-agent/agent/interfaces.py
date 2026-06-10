@@ -15,11 +15,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class DeviceKind(StrEnum):
@@ -84,13 +84,34 @@ class StoreHeader(BaseModel):
 
 
 class InvoicePayload(BaseModel):
-    """電子發票列印輸入（**介面 placeholder**）。
+    """電子發票證明聯列印輸入。
 
-    實際發票版面與欄位依「發票收尾階段」（docs/14 §5）定案，現在只先佔位、
-    保留接縫；T13/T14 完成後再補齊欄位，不在此憑記憶硬寫發票內容。
+    版面依「電子發票實施作業要點」附件一格式一、條碼內容依財政資訊中心
+    「電子發票證明聯一維及二維條碼規格說明」v1.9。金額為字串整數元（§6）。
+    字軌號碼、隨機碼等取號資料由呼叫端提供（正式來源為後端發票模組，屬
+    發票收尾階段 T13/T14；MIG XML 與 Turnkey 上傳亦在該階段，與列印解耦）。
     """
 
     sale_id: int
+    invoice_number: str = Field(pattern=r"^[A-Z]{2}\d{8}$")  # 字軌 2 碼 + 號碼 8 碼
+    invoice_date: date
+    invoice_time: time
+    random_code: str = Field(pattern=r"^(\d{4}| {4})$")  # B2B 為 4 位空白（規格 FAQ 6）
+    sales_amount: str = Field(pattern=r"^\d+$")  # 未稅銷售額（整數元）
+    tax_amount: str = Field(pattern=r"^\d+$")
+    total_amount: str = Field(pattern=r"^\d+$")  # 含稅總計（整數元）
+    seller_tax_id: str = Field(pattern=r"^\d{8}$")
+    seller_name: str = Field(min_length=1)  # 營業人識別標章（文字）
+    buyer_tax_id: str | None = Field(default=None, pattern=r"^\d{8}$")
+    lines: list[SaleLinePayload] = Field(min_length=1)
+
+    @field_validator("total_amount")
+    @classmethod
+    def _total_positive(cls, value: str) -> str:
+        """不得開立零元發票（條碼規格第肆章參數說明）。"""
+        if int(value) <= 0:
+            raise ValueError("總計額必須大於 0（不得開立零元發票）")
+        return value
 
 
 class DeviceStatus(BaseModel):
@@ -139,7 +160,7 @@ class ReceiptPrinter(Protocol):
         ...
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
-        """列印電子發票（介面 placeholder，內容待發票收尾階段）。"""
+        """列印電子發票證明聯（附件一格式一：標題/年期別/字軌/一維條碼/雙 QR）。"""
         ...
 
 
