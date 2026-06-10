@@ -59,6 +59,14 @@ _SEND_TIMEOUT_S = 10.0  # 光柵資料送出逾時（量大於探測逾時，比
 SenderFn = Callable[[PrinterEndpoint, bytes], None]
 
 
+class LabelContentTooWide(Exception):
+    """標籤內容（條碼/識別碼/價格）在最小可印尺寸下仍超出長度上限。
+
+    條碼**不可截斷**（截斷即印出掃起來是錯的碼），故如實拒印；由 `agent.main`
+    handler 轉 422（請求內容問題，非裝置故障）。
+    """
+
+
 def _send_raster(endpoint: PrinterEndpoint, instructions: bytes) -> None:
     """帶逾時的 TCP 9100 raw 送出（連線逾時用探測逾時、送出逾時放寬到 10 秒）。"""
     with socket.create_connection((endpoint.host, endpoint.port), timeout=endpoint.timeout) as s:
@@ -129,6 +137,13 @@ def build_label_image(code: str, name: str, price: int, font_path: str) -> Image
     code_width = int(probe.textlength(code, font=code_font))
     price_width = int(probe.textlength(price_text, font=price_font))
     width = max(name_width, barcode_width, code_width, price_width) + 2 * _MARGIN
+    if width > MAX_LABEL_WIDTH_DOTS:
+        # 品名已換行/截斷受控；會超寬的只有條碼/識別碼/價格——條碼不可截斷，如實拒印。
+        raise LabelContentTooWide(
+            f"標籤內容超出長度上限 {MAX_LABEL_WIDTH_DOTS} dots"
+            f"（≈{MAX_LABEL_WIDTH_DOTS / 300 * 25.4:.0f}mm）：需 {width} dots。"
+            f"識別碼（{len(code)} 字）或價格過長，條碼不可截斷，請縮短識別碼。"
+        )
 
     image = Image.new("L", (width, LABEL_HEIGHT_DOTS), 255)
     draw = ImageDraw.Draw(image)

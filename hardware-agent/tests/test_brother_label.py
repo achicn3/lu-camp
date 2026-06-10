@@ -13,6 +13,7 @@ from agent.config import PrinterEndpoint, label_font_path_from_env
 from agent.drivers.brother_label import (
     LABEL_HEIGHT_DOTS,
     BrotherLabelPrinter,
+    LabelContentTooWide,
     build_label_image,
 )
 from agent.errors import DeviceOffline, DeviceTimeout
@@ -73,6 +74,16 @@ class TestBuildLabelImage:
         assert row_a == row_b
         assert 0 in row_a
 
+    def test_overlong_code_is_rejected_not_oversized(self) -> None:
+        """識別碼過長（條碼在最小窄條下仍超出長度上限）→ 如實拒印（條碼不可截斷，
+        截斷會印出掃起來是錯的碼）；不得默默印出超過上限的長標籤。"""
+        with pytest.raises(LabelContentTooWide):
+            build_label_image("X" * 64, "帳篷", 1000, _FONT)
+
+    def test_wide_price_is_rejected_not_oversized(self) -> None:
+        with pytest.raises(LabelContentTooWide):
+            build_label_image("ITM-0001", "帳篷", 10**30, _FONT)
+
     def test_overlong_name_truncated_with_stable_output(self) -> None:
         """超過兩行的品名截斷加「…」：截斷點之後的內容差異不影響輸出（確實截斷）。"""
         base = "防水露營帳篷豪華版" * 5  # 45 字，兩行裝不下
@@ -99,6 +110,34 @@ class _SendRecorder:
         if self.exc is not None:
             raise self.exc
         self.calls.append((endpoint, instructions))
+
+
+class TestLabelTooWideHttpMapping:
+    async def test_print_label_with_overlong_code_returns_422(self) -> None:
+        """經 /print/label 真機驅動路徑：內容超寬 → 422（不送印、不印超長標籤）。"""
+        import httpx
+
+        from agent.devices import AgentDevices, default_fake_devices
+        from agent.main import create_app
+
+        recorder = _SendRecorder()
+        base = default_fake_devices()
+        app = create_app(
+            AgentDevices(
+                label_printer=BrotherLabelPrinter(_EP, font_path=_FONT, sender=recorder),
+                receipt_printer=base.receipt_printer,
+                cash_drawer=base.cash_drawer,
+                status_provider=base.status_provider,
+            )
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/print/label", json={"code": "X" * 64, "name": "帳篷", "price": 1000}
+            )
+        assert resp.status_code == 422
+        assert resp.json()["error"] == "LabelContentTooWide"
+        assert recorder.calls == []  # 未送任何位元組到印表機
 
 
 class TestBrotherLabelPrinter:

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from agent.config import MissingDeviceConfigError
 from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
 from agent.devices import AgentDevices, default_fake_devices, real_epson_devices_from_env
+from agent.drivers.brother_label import LabelContentTooWide
 from agent.errors import (
     CoverOpen,
     DeviceError,
@@ -76,6 +77,15 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         # 設定缺漏（如電子發票 AES 金鑰未設）→ 503 如實回報，不偽裝成功也不露 traceback。
         return JSONResponse(
             status_code=503,
+            content={"detail": str(exc), "error": type(exc).__name__},
+        )
+
+    @app.exception_handler(LabelContentTooWide)
+    async def _label_too_wide_handler(_request: Request, exc: LabelContentTooWide) -> JSONResponse:
+        # 標籤內容（條碼/識別碼/價格）超出長度上限 → 422 請求內容問題（非裝置故障），
+        # 如實拒印；條碼不可截斷（截斷即印出錯的碼）。
+        return JSONResponse(
+            status_code=422,
             content={"detail": str(exc), "error": type(exc).__name__},
         )
 
