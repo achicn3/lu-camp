@@ -74,9 +74,7 @@ class RealStatusProvider:
             此時 `poll()` 只回 EPSON 收據機 + 依附錢櫃。
     """
 
-    def __init__(
-        self, *, epson: PrinterEndpoint, brother: PrinterEndpoint | None = None
-    ) -> None:
+    def __init__(self, *, epson: PrinterEndpoint, brother: PrinterEndpoint | None = None) -> None:
         self._brother = brother
         self._epson = epson
 

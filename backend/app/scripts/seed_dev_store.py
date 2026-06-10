@@ -74,10 +74,7 @@ async def upsert_dev_store(session: AsyncSession, seed: DevStoreSeed) -> Store:
     # 顯式插入 id 不會推進 Postgres serial 序列；校正序列到 max(id)，避免之後一般流程
     # （不帶 id，CLAUDE.md §4 多分店）新增門市時 nextval 撞已 seed 的 id 而失敗。
     await session.execute(
-        text(
-            "SELECT setval(pg_get_serial_sequence('stores', 'id'), "
-            "(SELECT MAX(id) FROM stores))"
-        )
+        text("SELECT setval(pg_get_serial_sequence('stores', 'id'), (SELECT MAX(id) FROM stores))")
     )
     return store
 
