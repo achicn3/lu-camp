@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.config import einvoice_aes_key_from_env, epson_endpoint_from_env
+from agent.config import (
+    brother_endpoint_from_env,
+    einvoice_aes_key_from_env,
+    epson_endpoint_from_env,
+    label_font_path_from_env,
+)
+from agent.drivers.brother_label import BrotherLabelPrinter
 from agent.drivers.escpos_network import NetworkEscposWriter, RealCashDrawer
 from agent.drivers.escpos_receipt import EscposReceiptPrinter
 from agent.drivers.status_real import RealStatusProvider
@@ -47,20 +53,27 @@ def default_fake_devices() -> AgentDevices:
 
 
 def real_epson_devices_from_env() -> AgentDevices:
-    """測 A 真機組合：EPSON 收據機 + 錢櫃走網路真機；Brother 標籤機維持 Fake（未接）。
+    """真機組合：EPSON 收據機 + 錢櫃必接；Brother 標籤機選配（T18）。
 
     - `receipt_printer`：`EscposReceiptPrinter` 包 `NetworkEscposWriter`（lazy 連 EPSON）。
     - `cash_drawer`：`RealCashDrawer` 經同一 EPSON 連線送 kick。
-    - `label_printer`：`FakeLabelPrinter`（Brother 之後再接，本次不列管）。
-    - `status_provider`：`RealStatusProvider` 只探測 EPSON（+依附錢櫃），不列管 Brother。
+    - `label_printer`：`AGENT_BROTHER_HOST` 有設 → `BrotherLabelPrinter`（brother_ql 光柵、
+      網路）；未設 → `FakeLabelPrinter`（不列管）。
+    - `status_provider`：探測 EPSON（+依附錢櫃）；Brother 有設一併列管。
 
-    EPSON 連線資訊（IP/port/逾時）由環境變數提供（`AGENT_EPSON_HOST` 等），程式碼不寫死。
+    連線資訊（IP/port/逾時）一律由環境變數提供，程式碼不寫死。
     """
     epson = epson_endpoint_from_env()
+    brother = brother_endpoint_from_env()
     writer = NetworkEscposWriter(epson)
+    label_printer: LabelPrinter = (
+        BrotherLabelPrinter(brother, font_path=label_font_path_from_env())
+        if brother is not None
+        else FakeLabelPrinter()
+    )
     return AgentDevices(
-        label_printer=FakeLabelPrinter(),
+        label_printer=label_printer,
         receipt_printer=EscposReceiptPrinter(writer, einvoice_aes_key=einvoice_aes_key_from_env()),
         cash_drawer=RealCashDrawer(writer),
-        status_provider=RealStatusProvider(epson=epson),
+        status_provider=RealStatusProvider(epson=epson, brother=brother),
     )

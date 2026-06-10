@@ -16,6 +16,7 @@ from escpos.exceptions import DeviceNotFoundError
 
 from agent.config import PrinterEndpoint
 from agent.devices import real_epson_devices_from_env
+from agent.drivers.brother_label import BrotherLabelPrinter
 from agent.drivers.escpos_network import NetworkEscposWriter, RealCashDrawer
 from agent.drivers.escpos_receipt import EscposReceiptPrinter
 from agent.drivers.status_real import RealStatusProvider
@@ -109,14 +110,27 @@ def test_real_cash_drawer_offline_maps_device_error() -> None:
 
 
 def test_real_epson_devices_builder_wires_epson_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    """只需 AGENT_EPSON_HOST；receipt+drawer=真機、label=Fake、狀態 EPSON-only（無 Brother）。"""
+    """只設 AGENT_EPSON_HOST；receipt+drawer=真機、label=Fake、狀態 EPSON-only（無 Brother）。"""
     monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
     monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)  # 不接 Brother、也不該必填
     devices = real_epson_devices_from_env()
     assert isinstance(devices.receipt_printer, EscposReceiptPrinter)
     assert isinstance(devices.cash_drawer, RealCashDrawer)
-    assert isinstance(devices.label_printer, FakeLabelPrinter)  # Brother 維持 Fake
+    assert isinstance(devices.label_printer, FakeLabelPrinter)  # Brother 未設維持 Fake
     assert isinstance(devices.status_provider, RealStatusProvider)
     # 狀態 EPSON-only：未列管 Brother（不真的連線、只看結構）
     assert devices.status_provider._brother is None
     assert devices.status_provider._epson.host == "192.168.0.42"
+
+
+def test_real_devices_builder_wires_brother_when_host_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENT_BROTHER_HOST 有設 → 標籤機接真機 Brother 驅動、狀態列管 Brother（T18）。"""
+    monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
+    monkeypatch.setenv("AGENT_BROTHER_HOST", "192.0.2.45")
+    devices = real_epson_devices_from_env()
+    assert isinstance(devices.label_printer, BrotherLabelPrinter)
+    assert isinstance(devices.status_provider, RealStatusProvider)
+    assert devices.status_provider._brother is not None
+    assert devices.status_provider._brother.host == "192.0.2.45"

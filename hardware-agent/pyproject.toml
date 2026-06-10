@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "POS 硬體代理（localhost）：收據/證明聯/條碼標籤/錢櫃（ESC/POS）"
 requires-python = ">=3.12"
 dependencies = [
+    "brother-ql>=0.9.4",
     "cryptography>=48.0.1",
     "fastapi>=0.136.3",
     "httpx>=0.28.1",
@@ -38,7 +39,7 @@ warn_unreachable = true
 # stub 的標準處置，非弱化專案自身型別）。真機驅動以 agent 自有的 _EscposNetwork Protocol
 # 重新收斂型別；barcode 的 build() 輸出在 escpos_raster 以明確型別註記收斂。
 [[tool.mypy.overrides]]
-module = ["escpos.*", "barcode.*"]
+module = ["escpos.*", "barcode.*", "brother_ql.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
