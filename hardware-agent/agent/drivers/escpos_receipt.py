@@ -12,7 +12,12 @@ import unicodedata
 
 from agent.config import MissingDeviceConfigError
 from agent.drivers.einvoice_format import barcode_text, qr_pair_text, roc_period_label
-from agent.drivers.escpos_raster import code39_rows, qr_pair_rows, raster_command
+from agent.drivers.escpos_raster import (
+    PRINT_WIDTH_DOTS,
+    code39_rows,
+    qr_pair_rows,
+    raster_command,
+)
 from agent.escpos_printer import ESC, FS, GS, SupportsWrite
 from agent.interfaces import InvoicePayload, SaleLinePayload, SalePayload, StoreHeader
 
@@ -41,12 +46,11 @@ _WIDTH = 34
 _UNIT_W = 7
 _TOTAL_W = 7
 _NAME_W = _WIDTH - _UNIT_W - _TOTAL_W
-# 列印區寬度（dots）：34 半形 × 12 dots（Font A 半形寬）= 408，與實機尺規量測一致。
-# 此台裝 58mm 紙、但印表機印區仍照 80mm（576 dots）設定，置中會以 576 為基準 →
-# 內容整體右偏且右側遭裁切（實機驗證 2026-06-10）；證明聯以 GS W 將印區設為實際
-# 紙寬，讓 ESC a 置中（標題/條碼/QR）以 408 dots 為基準。
-_PRINT_AREA_DOTS = _WIDTH * 12
-_SET_PRINT_AREA = GS + b"W" + bytes([_PRINT_AREA_DOTS & 0xFF, _PRINT_AREA_DOTS >> 8])
+# 列印區寬度：與 escpos_raster.PRINT_WIDTH_DOTS 共用（408 = 34 半形 × 12 dots，實機
+# 尺規量測）。此台裝 58mm 紙、但印表機印區仍照 80mm（576 dots）設定，置中會以 576
+# 為基準 → 內容整體右偏且右側遭裁切（實機驗證 2026-06-10）；證明聯以 GS W 將印區
+# 設為實際紙寬，讓 ESC a 置中（標題/條碼/QR）以 408 dots 為基準。
+_SET_PRINT_AREA = GS + b"W" + bytes([PRINT_WIDTH_DOTS & 0xFF, PRINT_WIDTH_DOTS >> 8])
 _SEP = "-" * _WIDTH
 _TRUNCATE_MARK = ".."  # ASCII 截斷標記（Big5 安全、寬度確定）
 

@@ -19,9 +19,10 @@ from barcode import Code39
 
 from agent.escpos_printer import GS
 
-MODULE_DOTS = 3  # QR 每模組 3 dots：41 模組 × 3 ÷ 8 dots/mm ≈ 15.4mm ≥ 1.5cm
+PRINT_WIDTH_DOTS = 408  # 58mm 紙可印寬：34 半形 × 12 dots（escpos_receipt 的 GS W 同值）
 QUIET_DOTS = 16  # QR 四周留白 16 dots = 2mm ≥ 0.2cm
 GAP_DOTS = 32  # 兩 QR 中央間隔（左右各留 0.2cm）
+_MIN_MODULE_DOTS = 2  # 模組下限（再小熱感印恐難辨識；版本極高時物理邊長仍 ≥1.5cm）
 _BARCODE_HEIGHT_DOTS = 60  # 一維條碼高 60 dots = 7.5mm ≥ 0.5cm
 _MIN_QR_VERSION = 6  # 規格：左方 QR 須 V6（41×41）以上
 
@@ -39,8 +40,15 @@ def qr_matrix(data: str, *, min_version: int = _MIN_QR_VERSION) -> list[list[boo
     return [list(row) for row in qr.get_matrix()]
 
 
-def _scaled_row(modules: list[bool]) -> list[bool]:
-    return [dot for module in modules for dot in (module,) * MODULE_DOTS]
+def _scaled_row(modules: list[bool], module_dots: int) -> list[bool]:
+    return [dot for module in modules for dot in (module,) * module_dots]
+
+
+def _pair_module_dots(size: int) -> int:
+    """雙 QR 並列時每模組 dots：在可印寬度內取最大（V6=41 模組時為 4 ≈ 20.5mm/顆），
+    版本升高（模組數變多）時自動縮小以不超出紙寬，但不低於 `_MIN_MODULE_DOTS`。"""
+    available = PRINT_WIDTH_DOTS - 2 * QUIET_DOTS - GAP_DOTS
+    return max(_MIN_MODULE_DOTS, available // (2 * size))
 
 
 def qr_pair_rows(left_data: str, right_data: str) -> list[list[bool]]:
@@ -57,18 +65,19 @@ def qr_pair_rows(left_data: str, right_data: str) -> list[list[bool]]:
     if len(right) < size:
         right = qr_matrix(right_data, min_version=version)
 
-    width = QUIET_DOTS + size * MODULE_DOTS + GAP_DOTS + size * MODULE_DOTS + QUIET_DOTS
+    module_dots = _pair_module_dots(size)
+    width = QUIET_DOTS + size * module_dots + GAP_DOTS + size * module_dots + QUIET_DOTS
     blank = [False] * width
     rows: list[list[bool]] = [list(blank) for _ in range(QUIET_DOTS)]
     for left_row, right_row in zip(left, right, strict=True):
         line = (
             [False] * QUIET_DOTS
-            + _scaled_row(left_row)
+            + _scaled_row(left_row, module_dots)
             + [False] * GAP_DOTS
-            + _scaled_row(right_row)
+            + _scaled_row(right_row, module_dots)
             + [False] * QUIET_DOTS
         )
-        rows.extend(list(line) for _ in range(MODULE_DOTS))
+        rows.extend(list(line) for _ in range(module_dots))
     rows.extend(list(blank) for _ in range(QUIET_DOTS))
     return rows
 
