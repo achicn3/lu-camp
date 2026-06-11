@@ -159,6 +159,50 @@ async def test_void_claws_back_points(client: httpx.AsyncClient, db_session: Asy
     assert member.member_points == 2  # 沖回 8
 
 
+async def test_void_with_insufficient_points_returns_409_not_500(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """點數餘額異常低於該筆累積（資料被外力改動）時，void 回 409 域錯誤、
+    整筆回滾（銷售不被作廢）——不可冒出 500（Codex P2）。"""
+    token, store_id = await _seed(db_session)
+    member = await _seed_member(db_session, store_id)
+    cat = await _seed_catalog(db_session, store_id, price="800")
+    sale = await _checkout(client, token, cat, buyer=member.id)
+    assert sale.status_code == 201
+    member.member_points = 3  # 外力改動：低於該筆累積的 8 點
+    await db_session.flush()
+    from tests.integration.test_sales_api import _seed_manager
+
+    mgr_token = await _seed_manager(db_session, store_id)
+    void = await client.post(
+        f"/api/v1/sales/{sale.json()['id']}/void",
+        headers={"Authorization": f"Bearer {mgr_token}"},
+    )
+    assert void.status_code == 409
+    check = await client.get(
+        f"/api/v1/sales/{sale.json()['id']}",
+        headers={"Authorization": f"Bearer {mgr_token}"},
+    )
+    assert check.json()["invoice_status"] != "VOID"  # 整筆回滾、未作廢
+    await db_session.refresh(member)
+    # rollback 連同本測試的手動竄改（3）一起回復到累積後的 8——同一交易整筆回滾、
+    # 無半套：點數絕不會落在被扣到負的狀態。
+    assert member.member_points == 8
+
+
+async def test_contact_create_rejects_negative_points(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """根因防護：建檔不可帶負點數（Codex P2 的可達路徑）。"""
+    token, _store_id = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/contacts",
+        json={"name": "負點數", "member_points": -1},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
 async def test_void_without_buyer_is_fine(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

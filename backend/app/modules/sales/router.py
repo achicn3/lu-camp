@@ -24,6 +24,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InsufficientStock,
     InvalidStateTransition,
+    MemberPointsAdjustFailed,
     NoOpenCashSession,
     SaleAlreadyVoid,
     SaleItemNotFound,
@@ -143,6 +144,10 @@ async def void_sale(sale_id: int, session: SessionDep, user: ManagerDep) -> Sale
     try:
         voided = await svc.void_sale(sale, user.id)
     except SaleAlreadyVoid as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except MemberPointsAdjustFailed as exc:
+        # 點數沖回失敗（餘額異常低於該筆累積）→ 整筆回滾、409 域錯誤，不冒 500。
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     lines = await svc.get_lines(voided.id)

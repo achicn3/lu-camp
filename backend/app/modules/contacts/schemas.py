@@ -15,7 +15,7 @@ class ContactCreate(BaseModel):
     phone: str | None = None
     national_id: str | None = None
     roles: list[ContactRole] = Field(default_factory=list)
-    member_points: int = 0
+    member_points: int = Field(default=0, ge=0)  # 點數不可為負（docs/16 §0 僅累積）
     default_carrier_type: str | None = None
     default_carrier_id: str | None = None
     source_note: str | None = None
