@@ -16,6 +16,7 @@ from app.modules.inventory.models import (
 from app.modules.inventory.repository import InventoryRepository
 from app.shared.enums import (
     BulkAcquisitionBasis,
+    BulkLotStatus,
     Grade,
     ItemKind,
     OwnershipType,
@@ -158,6 +159,37 @@ class InventoryService:
     async def get_serialized_by_code(self, store_id: int, item_code: str) -> SerializedItem | None:
         """以 item_code 取序號品（供 POS 掃碼查件、讀取售價/ownership）。"""
         return await self._repo.get_serialized_by_code(store_id, item_code)
+
+    async def list_serialized(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None = None,
+        ownership_type: OwnershipType | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SerializedItem]:
+        """列序號品（庫存頁/POS 查件；可篩 status/ownership，§4 店別範圍）。"""
+        return await self._repo.list_serialized(
+            store_id, status=status, ownership_type=ownership_type, limit=limit, offset=offset
+        )
+
+    async def list_catalog(
+        self, store_id: int, *, limit: int = 50, offset: int = 0
+    ) -> list[CatalogProduct]:
+        """列數量型商品（POS 選件/庫存頁；依品名排序）。"""
+        return await self._repo.list_catalog(store_id, limit=limit, offset=offset)
+
+    async def list_bulk_lots(
+        self,
+        store_id: int,
+        *,
+        status: BulkLotStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[BulkLot]:
+        """列散裝堆（POS 明確選堆/庫存頁；可篩狀態，如僅 ON_SALE）。"""
+        return await self._repo.list_bulk_lots(store_id, status=status, limit=limit, offset=offset)
 
     async def sell_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.SOLD)

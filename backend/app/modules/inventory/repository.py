@@ -17,7 +17,7 @@ from app.modules.inventory.models import (
     SerializedItem,
     StockMovement,
 )
-from app.shared.enums import BulkLotStatus, SerializedItemStatus
+from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus
 
 
 class InventoryRepository:
@@ -59,6 +59,49 @@ class InventoryRepository:
         )
         result: SerializedItem | None = await self._session.scalar(stmt)
         return result
+
+    async def list_serialized(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None = None,
+        ownership_type: OwnershipType | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[SerializedItem]:
+        stmt = select(SerializedItem).where(SerializedItem.store_id == store_id)
+        if status is not None:
+            stmt = stmt.where(SerializedItem.status == status)
+        if ownership_type is not None:
+            stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
+        stmt = stmt.order_by(SerializedItem.id.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_catalog(
+        self, store_id: int, *, limit: int = 50, offset: int = 0
+    ) -> list[CatalogProduct]:
+        stmt = (
+            select(CatalogProduct)
+            .where(CatalogProduct.store_id == store_id)
+            .order_by(CatalogProduct.name)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_bulk_lots(
+        self,
+        store_id: int,
+        *,
+        status: BulkLotStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[BulkLot]:
+        stmt = select(BulkLot).where(BulkLot.store_id == store_id)
+        if status is not None:
+            stmt = stmt.where(BulkLot.status == status)
+        stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(stmt)).all())
 
     # ── 數量型商品 ──
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:

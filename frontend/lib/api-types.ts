@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Bulk Lots */
+        get: operations["listBulkLots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cash-sessions/current": {
         parameters: {
             query?: never;
@@ -117,6 +134,23 @@ export interface paths {
         put?: never;
         /** Record Cash Movement */
         post: operations["recordCashMovement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Catalog */
+        get: operations["listCatalogProducts"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -278,6 +312,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Serialized */
+        get: operations["listSerializedItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/serialized-items/by-code/{item_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Serialized By Code
+         * @description POS 掃碼查件：以 item_code 取序號品（他店/不存在一律 404，不洩漏跨店資料）。
+         */
+        get: operations["getSerializedItemByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -429,6 +500,41 @@ export interface components {
          */
         BulkAcquisitionBasis: "WEIGHT" | "BAG" | "UNSPECIFIED";
         /**
+         * BulkLotRead
+         * @description 散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。
+         */
+        BulkLotRead: {
+            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Brand Id */
+            brand_id: number | null;
+            grade: components["schemas"]["Grade"];
+            /** Id */
+            id: number;
+            /** Label */
+            label: string | null;
+            /** Lot Code */
+            lot_code: string;
+            /** Name */
+            name: string;
+            /** Remaining Qty */
+            remaining_qty: number;
+            status: components["schemas"]["BulkLotStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * BulkLotStatus
+         * @description 散裝批狀態。
+         * @enum {string}
+         */
+        BulkLotStatus: "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
+        /**
          * CashMovementCreateRequest
          * @description 記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。
          */
@@ -523,6 +629,28 @@ export interface components {
          * @enum {string}
          */
         CashSessionStatus: "OPEN" | "CLOSED";
+        /**
+         * CatalogProductRead
+         * @description 數量型商品輸出（POS 選件/庫存列表）。
+         */
+        CatalogProductRead: {
+            /** Brand Id */
+            brand_id: number | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Point */
+            reorder_point: number;
+            /** Sku */
+            sku: string;
+            /** Store Id */
+            store_id: number;
+            /** Unit Price */
+            unit_price: string;
+        };
         /**
          * ContactCreate
          * @description 建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。
@@ -627,6 +755,12 @@ export interface components {
             /** Username */
             username: string;
         };
+        /**
+         * OwnershipType
+         * @description 序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。
+         * @enum {string}
+         */
+        OwnershipType: "OWNED" | "CONSIGNMENT";
         /**
          * PaymentMethod
          * @description 付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。
@@ -777,6 +911,46 @@ export interface components {
             /** Total */
             total: string;
         };
+        /**
+         * SerializedItemRead
+         * @description 序號品輸出（POS 掃碼查件/庫存列表；不含 acquisition_cost）。
+         */
+        SerializedItemRead: {
+            /** Brand Id */
+            brand_id: number | null;
+            /** Commission Pct */
+            commission_pct: number | null;
+            /** Consignor Id */
+            consignor_id: number | null;
+            grade: components["schemas"]["Grade"];
+            /** Id */
+            id: number;
+            /**
+             * Intake Date
+             * Format: date-time
+             */
+            intake_date: string;
+            /** Item Code */
+            item_code: string;
+            /** Listed Price */
+            listed_price: string;
+            /** Name */
+            name: string;
+            ownership_type: components["schemas"]["OwnershipType"];
+            /** Product Model Id */
+            product_model_id: number | null;
+            /** Sold Date */
+            sold_date: string | null;
+            status: components["schemas"]["SerializedItemStatus"];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * SerializedItemStatus
+         * @description 序號品狀態機。
+         * @enum {string}
+         */
+        SerializedItemStatus: "IN_STOCK" | "SOLD" | "RETURNED_TO_CONSIGNOR" | "WRITTEN_OFF";
         /**
          * SettingsRead
          * @description 單店設定輸出。
@@ -940,6 +1114,39 @@ export interface operations {
             };
         };
     };
+    listBulkLots: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["BulkLotStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getCurrentCashSession: {
         parameters: {
             query?: never;
@@ -1050,6 +1257,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CashMovementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCatalogProducts: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"][];
                 };
             };
             /** @description Validation Error */
@@ -1394,6 +1633,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listSerializedItems: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SerializedItemStatus"] | null;
+                ownership_type?: components["schemas"]["OwnershipType"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSerializedItemByCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */

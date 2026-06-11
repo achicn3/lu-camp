@@ -347,6 +347,101 @@
         "title": "BulkAcquisitionBasis",
         "type": "string"
       },
+      "BulkLotRead": {
+        "description": "散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。",
+        "properties": {
+          "acquisition_basis": {
+            "$ref": "#/components/schemas/BulkAcquisitionBasis"
+          },
+          "acquisition_cost": {
+            "title": "Acquisition Cost",
+            "type": "string"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "lot_code": {
+            "title": "Lot Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "remaining_qty": {
+            "title": "Remaining Qty",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BulkLotStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_qty": {
+            "title": "Total Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "lot_code",
+          "label",
+          "name",
+          "brand_id",
+          "grade",
+          "acquisition_cost",
+          "acquisition_basis",
+          "unit_price",
+          "total_qty",
+          "remaining_qty",
+          "status"
+        ],
+        "title": "BulkLotRead",
+        "type": "object"
+      },
+      "BulkLotStatus": {
+        "description": "散裝批狀態。",
+        "enum": [
+          "ON_SALE",
+          "SOLD_OUT",
+          "WRITTEN_OFF"
+        ],
+        "title": "BulkLotStatus",
+        "type": "string"
+      },
       "CashMovementCreateRequest": {
         "description": "記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。",
         "properties": {
@@ -610,6 +705,62 @@
         ],
         "title": "CashSessionStatus",
         "type": "string"
+      },
+      "CatalogProductRead": {
+        "description": "數量型商品輸出（POS 選件/庫存列表）。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quantity_on_hand": {
+            "title": "Quantity On Hand",
+            "type": "integer"
+          },
+          "reorder_point": {
+            "title": "Reorder Point",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "sku",
+          "name",
+          "brand_id",
+          "unit_price",
+          "quantity_on_hand",
+          "reorder_point"
+        ],
+        "title": "CatalogProductRead",
+        "type": "object"
       },
       "ContactCreate": {
         "description": "建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。",
@@ -896,6 +1047,15 @@
         ],
         "title": "LoginRequest",
         "type": "object"
+      },
+      "OwnershipType": {
+        "description": "序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。",
+        "enum": [
+          "OWNED",
+          "CONSIGNMENT"
+        ],
+        "title": "OwnershipType",
+        "type": "string"
       },
       "PaymentMethod": {
         "description": "付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。",
@@ -1277,6 +1437,130 @@
         "title": "SaleSummaryRead",
         "type": "object"
       },
+      "SerializedItemRead": {
+        "description": "序號品輸出（POS 掃碼查件/庫存列表；不含 acquisition_cost）。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
+          "consignor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Id"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "intake_date": {
+            "format": "date-time",
+            "title": "Intake Date",
+            "type": "string"
+          },
+          "item_code": {
+            "title": "Item Code",
+            "type": "string"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ownership_type": {
+            "$ref": "#/components/schemas/OwnershipType"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          },
+          "sold_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Date"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SerializedItemStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "item_code",
+          "name",
+          "brand_id",
+          "product_model_id",
+          "grade",
+          "ownership_type",
+          "consignor_id",
+          "commission_pct",
+          "listed_price",
+          "status",
+          "intake_date",
+          "sold_date"
+        ],
+        "title": "SerializedItemRead",
+        "type": "object"
+      },
+      "SerializedItemStatus": {
+        "description": "序號品狀態機。",
+        "enum": [
+          "IN_STOCK",
+          "SOLD",
+          "RETURNED_TO_CONSIGNOR",
+          "WRITTEN_OFF"
+        ],
+        "title": "SerializedItemStatus",
+        "type": "string"
+      },
       "SettingsRead": {
         "description": "單店設定輸出。",
         "properties": {
@@ -1580,6 +1864,87 @@
         ]
       }
     },
+    "/api/v1/bulk-lots": {
+      "get": {
+        "operationId": "listBulkLots",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BulkLotStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BulkLotRead"
+                  },
+                  "title": "Response Listbulklots",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bulk Lots",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/cash-sessions/current": {
       "get": {
         "operationId": "getCurrentCashSession",
@@ -1771,6 +2136,71 @@
         "summary": "Record Cash Movement",
         "tags": [
           "cashdrawer"
+        ]
+      }
+    },
+    "/api/v1/catalog-products": {
+      "get": {
+        "operationId": "listCatalogProducts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogProductRead"
+                  },
+                  "title": "Response Listcatalogproducts",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Catalog",
+        "tags": [
+          "inventory"
         ]
       }
     },
@@ -2378,6 +2808,151 @@
         "summary": "Void Sale",
         "tags": [
           "sales"
+        ]
+      }
+    },
+    "/api/v1/serialized-items": {
+      "get": {
+        "operationId": "listSerializedItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SerializedItemStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ownership_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OwnershipType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ownership Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SerializedItemRead"
+                  },
+                  "title": "Response Listserializeditems",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Serialized",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/by-code/{item_code}": {
+      "get": {
+        "description": "POS 掃碼查件：以 item_code 取序號品（他店/不存在一律 404，不洩漏跨店資料）。",
+        "operationId": "getSerializedItemByCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_code",
+            "required": true,
+            "schema": {
+              "title": "Item Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Serialized By Code",
+        "tags": [
+          "inventory"
         ]
       }
     },
