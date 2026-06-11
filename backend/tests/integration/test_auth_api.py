@@ -6,6 +6,7 @@
 from collections.abc import AsyncGenerator
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,9 @@ from app.core.security import decode_access_token, hash_password
 from app.main import create_app
 from app.modules.store.models import Store
 from app.modules.user.models import User
+from app.modules.user.router import get_login_throttle
+from app.modules.user.service import UserService
+from app.modules.user.throttle import LoginThrottle
 from app.shared.enums import UserRole
 
 
@@ -25,6 +29,9 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
         yield db_session
 
     app.dependency_overrides[get_session] = _override
+    # 每個測試 app 用「同一個」獨立節流器實例：跨請求累積狀態，但不污染其他測試
+    throttle = LoginThrottle()
+    app.dependency_overrides[get_login_throttle] = lambda: throttle
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -127,3 +134,59 @@ async def test_login_inactive_user_401_same_detail(
 async def test_login_missing_fields_422(client: httpx.AsyncClient) -> None:
     resp = await client.post("/api/v1/auth/login", json={"username": "only-name"})
     assert resp.status_code == 422
+
+
+async def test_login_throttled_after_repeated_failures(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """連續失敗達門檻 → 429 + Retry-After，**即使密碼正確也被擋**（鎖定中）。"""
+    await _seed_user(db_session)
+    for _ in range(5):
+        resp = await client.post(
+            "/api/v1/auth/login", json={"username": "manager1", "password": "wrong"}
+        )
+        assert resp.status_code == 401
+    locked = await client.post(
+        "/api/v1/auth/login", json={"username": "manager1", "password": "pw-123456"}
+    )
+    assert locked.status_code == 429
+    assert int(locked.headers["Retry-After"]) > 0
+
+
+async def test_throttled_request_does_no_hash_work(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """節流中的請求在進入 argon2 驗證**之前**就被擋（防 CPU 耗盡）。"""
+    await _seed_user(db_session)
+    for _ in range(5):
+        await client.post("/api/v1/auth/login", json={"username": "manager1", "password": "x"})
+
+    calls: list[str] = []
+    original = UserService.authenticate
+
+    async def _spy(self: UserService, username: str, password: str) -> User | None:
+        calls.append(username)
+        return await original(self, username, password)
+
+    monkeypatch.setattr(UserService, "authenticate", _spy)
+    locked = await client.post(
+        "/api/v1/auth/login", json={"username": "manager1", "password": "pw-123456"}
+    )
+    assert locked.status_code == 429
+    assert calls == []  # 未進入認證（也就未做任何雜湊運算）
+
+
+async def test_login_success_resets_failure_count(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    await _seed_user(db_session)
+    for _ in range(4):
+        await client.post("/api/v1/auth/login", json={"username": "manager1", "password": "x"})
+    ok = await client.post(
+        "/api/v1/auth/login", json={"username": "manager1", "password": "pw-123456"}
+    )
+    assert ok.status_code == 200  # 第 5 次（正確）仍可，且成功重置帳號失敗計數
+    again = await client.post(
+        "/api/v1/auth/login", json={"username": "manager1", "password": "pw-123456"}
+    )
+    assert again.status_code == 200

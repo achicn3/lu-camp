@@ -11,6 +11,18 @@ from app.scripts.seed_dev_user import DevUserSeed, seed_from_env, upsert_dev_use
 from app.shared.enums import UserRole
 
 
+def test_environment_guard_blocks_non_dev() -> None:
+    """環境防護：非開發/測試環境一律拒跑（防誤對正式庫改寫特權帳號）。"""
+    from app.scripts.seed_dev_user import ensure_dev_environment
+
+    with pytest.raises(SystemExit):
+        ensure_dev_environment("production")
+    with pytest.raises(SystemExit):
+        ensure_dev_environment("staging")
+    ensure_dev_environment("development")  # 不丟例外
+    ensure_dev_environment("test")
+
+
 def test_seed_from_env_requires_password() -> None:
     """密碼無預設：未設即報錯退出（開發密碼也不入 repo）。"""
     with pytest.raises(SystemExit):

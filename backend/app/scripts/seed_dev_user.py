@@ -22,10 +22,26 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.core.security import hash_password
 from app.modules.user.models import User
 from app.shared.enums import UserRole
+
+_ALLOWED_ENVS = frozenset({"development", "test"})
+
+
+def ensure_dev_environment(app_env: str) -> None:
+    """環境防護：非開發/測試環境一律拒跑。
+
+    upsert 以 username 為鍵、會改寫密碼/角色並重新啟用——若誤對正式庫執行，
+    等同接管特權帳號（Codex adversarial review 2026-06-11 high）。
+    """
+    if app_env not in _ALLOWED_ENVS:
+        raise SystemExit(
+            f"seed_dev_user 僅限開發/測試環境執行（目前 APP_ENV={app_env!r}；"
+            f"允許：{sorted(_ALLOWED_ENVS)}）。正式環境帳號管理請走正規流程。"
+        )
 
 
 @dataclass(frozen=True)
@@ -73,7 +89,8 @@ async def upsert_dev_user(session: AsyncSession, seed: DevUserSeed) -> User:
 
 
 async def main() -> None:
-    """讀環境變數 → upsert dev user → commit，印出結果摘要（不含密碼）。"""
+    """環境防護 → 讀環境變數 → upsert dev user → commit，印出結果摘要（不含密碼）。"""
+    ensure_dev_environment(get_settings().app_env)
     seed = seed_from_env()
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:
