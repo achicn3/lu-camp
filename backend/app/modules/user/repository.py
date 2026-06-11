@@ -14,3 +14,9 @@ class UserRepository:
         stmt = select(User).where(User.id == user_id, User.store_id == store_id)
         result: User | None = await self._session.scalar(stmt)
         return result
+
+    async def get_by_username(self, username: str) -> User | None:
+        """以帳號查使用者（username 全域唯一，登入用、不分店）。"""
+        stmt = select(User).where(User.username == username)
+        result: User | None = await self._session.scalar(stmt)
+        return result

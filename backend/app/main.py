@@ -14,6 +14,7 @@ from app.modules.contacts.router import router as contacts_router
 from app.modules.sales.router import router as sales_router
 from app.modules.settings.router import router as settings_router
 from app.modules.store.router import router as store_router
+from app.modules.user.router import router as auth_router
 
 API_PREFIX = "/api/v1"
 
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     async def health() -> HealthResponse:
         return HealthResponse(status="ok")
 
+    app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(contacts_router, prefix=API_PREFIX)
     app.include_router(cashdrawer_router, prefix=API_PREFIX)
     app.include_router(acquisition_router, prefix=API_PREFIX)

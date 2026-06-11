@@ -874,6 +874,29 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LoginRequest": {
+        "description": "登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。",
+        "properties": {
+          "password": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
       "PaymentMethod": {
         "description": "付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。",
         "enum": [
@@ -1349,6 +1372,26 @@
         "title": "SettingsUpdateRequest",
         "type": "object"
       },
+      "TokenResponse": {
+        "description": "登入成功回應：JWT access token（payload 含 sub/role/store_id）。",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "bearer",
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1493,6 +1536,47 @@
         "summary": "Get Acquisition",
         "tags": [
           "acquisition"
+        ]
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
         ]
       }
     },

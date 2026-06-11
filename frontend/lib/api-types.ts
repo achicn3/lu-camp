@@ -38,6 +38,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cash-sessions/current": {
         parameters: {
             query?: never;
@@ -601,6 +618,16 @@ export interface components {
             status: string;
         };
         /**
+         * LoginRequest
+         * @description 登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。
+         */
+        LoginRequest: {
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
+        /**
          * PaymentMethod
          * @description 付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。
          * @enum {string}
@@ -780,6 +807,20 @@ export interface components {
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
+        /**
+         * TokenResponse
+         * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。
+         */
+        TokenResponse: {
+            /** Access Token */
+            access_token: string;
+            /**
+             * Token Type
+             * @default bearer
+             * @constant
+             */
+            token_type: "bearer";
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -853,6 +894,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
                 };
             };
             /** @description Validation Error */
