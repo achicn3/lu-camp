@@ -159,6 +159,36 @@ async def test_void_claws_back_points(client: httpx.AsyncClient, db_session: Asy
     assert member.member_points == 2  # 沖回 8
 
 
+async def test_void_legacy_sale_claws_back_nothing(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """歷史單（點數功能上線前、awarded_points=0）作廢不得倒扣（Codex P1）：
+    沖回以「當時實際累積」為準、不重算。"""
+    token, store_id = await _seed(db_session)
+    member = await _seed_member(db_session, store_id, points=2)
+    cat = await _seed_catalog(db_session, store_id, price="800")
+    sale_resp = await _checkout(client, token, cat, buyer=member.id)
+    assert sale_resp.status_code == 201
+    sale_id = sale_resp.json()["id"]
+    # 模擬歷史單：當時沒有點數功能 → awarded_points=0，並還原會員點數
+    from app.modules.sales.models import Sale
+
+    sale_row = await db_session.get(Sale, sale_id)
+    assert sale_row is not None
+    sale_row.awarded_points = 0
+    member.member_points = 2
+    await db_session.flush()
+    from tests.integration.test_sales_api import _seed_manager
+
+    mgr_token = await _seed_manager(db_session, store_id)
+    void = await client.post(
+        f"/api/v1/sales/{sale_id}/void", headers={"Authorization": f"Bearer {mgr_token}"}
+    )
+    assert void.status_code == 200  # 不被點數不足擋下
+    await db_session.refresh(member)
+    assert member.member_points == 2  # 沒給過就不倒扣
+
+
 async def test_void_with_insufficient_points_returns_409_not_500(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

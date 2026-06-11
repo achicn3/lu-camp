@@ -178,10 +178,10 @@ class SalesService:
 
         # 會員點數累積（docs/16 §0）：floor(total/100)，同交易內、與銷售同生共死；
         # 無買方不計；冪等重送走 find_idempotent_replay 回原單、不會重複累積。
+        # 實際累積數記在 sale.awarded_points：void 以此沖回、不重算（規則改版/歷史單不錯沖）。
         if buyer_contact_id is not None:
-            await self._contacts.add_member_points(
-                store_id, buyer_contact_id, _member_points_for(total)
-            )
+            sale.awarded_points = _member_points_for(total)
+            await self._contacts.add_member_points(store_id, buyer_contact_id, sale.awarded_points)
 
         await self._session.flush()
         return sale
@@ -255,10 +255,10 @@ class SalesService:
             before={"invoice_status": before},
             after={"invoice_status": SaleInvoiceStatus.VOID.value},
         )
-        # 作廢沖回該筆累積的會員點數（docs/16 §0；點數僅累積、沖回同額不會為負）。
-        if sale.buyer_contact_id is not None:
+        # 作廢沖回該筆「當時實際累積」的點數（awarded_points；歷史單為 0 → 不倒扣）。
+        if sale.buyer_contact_id is not None and sale.awarded_points > 0:
             await self._contacts.add_member_points(
-                sale.store_id, sale.buyer_contact_id, -_member_points_for(sale.total)
+                sale.store_id, sale.buyer_contact_id, -sale.awarded_points
             )
         return sale
 
