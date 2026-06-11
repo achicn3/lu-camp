@@ -201,6 +201,99 @@ async def test_list_bulk_lots_with_status_filter(
     assert {row["lot_code"] for row in everything.json()} == {"LOT-A", "LOT-B"}
 
 
+async def test_list_serialized_q_searches_name_and_code(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """docs/04：/serialized-items?q= 搜尋品名或識別碼（不分大小寫、子字串）。"""
+    store_id = await _seed_store(db_session)
+    await _seed_item(db_session, store_id, item_code="ITM-0001")  # name=雙人帳篷
+    sleeping = SerializedItem(
+        store_id=store_id,
+        item_code="ITM-0002",
+        name="睡袋",
+        grade=Grade.B,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal("300"),
+        status=SerializedItemStatus.IN_STOCK,
+    )
+    db_session.add(sleeping)
+    await db_session.flush()
+    by_name = await client.get(
+        "/api/v1/serialized-items", params={"q": "帳篷"}, headers=_auth(store_id)
+    )
+    assert {row["item_code"] for row in by_name.json()} == {"ITM-0001"}
+    by_code = await client.get(
+        "/api/v1/serialized-items", params={"q": "itm-0002"}, headers=_auth(store_id)
+    )
+    assert {row["item_code"] for row in by_code.json()} == {"ITM-0002"}
+
+
+async def test_list_catalog_q_and_low_stock(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """docs/04：/catalog-products?q=&low_stock=；low_stock=true 篩 量≤再訂購點。"""
+    store_id = await _seed_store(db_session)
+    db_session.add(
+        CatalogProduct(
+            store_id=store_id,
+            sku="GAS-230",
+            name="高山瓦斯罐 230g",
+            unit_price=Decimal("120"),
+            quantity_on_hand=3,
+            reorder_point=5,
+        )
+    )
+    db_session.add(
+        CatalogProduct(
+            store_id=store_id,
+            sku="ROPE-10",
+            name="營繩 10m",
+            unit_price=Decimal("80"),
+            quantity_on_hand=40,
+            reorder_point=5,
+        )
+    )
+    await db_session.flush()
+    low = await client.get(
+        "/api/v1/catalog-products", params={"low_stock": "true"}, headers=_auth(store_id)
+    )
+    assert [row["sku"] for row in low.json()] == ["GAS-230"]
+    by_q = await client.get(
+        "/api/v1/catalog-products", params={"q": "rope"}, headers=_auth(store_id)
+    )
+    assert [row["sku"] for row in by_q.json()] == ["ROPE-10"]
+
+
+async def test_list_bulk_lots_q_searches_name_label_code(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """docs/04：/bulk-lots?q= 搜尋名稱/堆名/識別碼。"""
+    store_id = await _seed_store(db_session)
+
+    def _lot(code: str, name: str, label: str | None) -> BulkLot:
+        return BulkLot(
+            store_id=store_id,
+            lot_code=code,
+            name=name,
+            label=label,
+            grade=Grade.E,
+            acquisition_cost=Decimal("500"),
+            acquisition_basis=BulkAcquisitionBasis.BAG,
+            unit_price=Decimal("30"),
+            total_qty=50,
+            remaining_qty=10,
+            status=BulkLotStatus.ON_SALE,
+        )
+
+    db_session.add(_lot("LOT-A1", "營釘雜項", "A堆"))
+    db_session.add(_lot("LOT-B2", "餐具雜項", "B堆"))
+    await db_session.flush()
+    by_label = await client.get("/api/v1/bulk-lots", params={"q": "A堆"}, headers=_auth(store_id))
+    assert [row["lot_code"] for row in by_label.json()] == ["LOT-A1"]
+    by_name = await client.get("/api/v1/bulk-lots", params={"q": "餐具"}, headers=_auth(store_id))
+    assert [row["lot_code"] for row in by_name.json()] == ["LOT-B2"]
+
+
 async def test_get_bulk_lot_by_code(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     """掃堆標籤（docs/04 GET /bulk-lots/by-code/{lot_code}；T18 標籤即印 lot_code Code128）。"""
     store_id = await _seed_store(db_session)

@@ -47,6 +47,7 @@ async def list_serialized(
     user: CurrentUserDep,
     status_filter: Annotated[SerializedItemStatus | None, Query(alias="status")] = None,
     ownership_type: Annotated[OwnershipType | None, Query(alias="ownership")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[SerializedItemRead]:
@@ -54,6 +55,7 @@ async def list_serialized(
         user.store_id,
         status=status_filter,
         ownership_type=ownership_type,
+        q=q,
         limit=limit,
         offset=offset,
     )
@@ -68,11 +70,13 @@ async def list_serialized(
 async def list_catalog(
     session: SessionDep,
     user: CurrentUserDep,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    low_stock: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CatalogProductRead]:
     products = await InventoryService(session).list_catalog(
-        user.store_id, limit=limit, offset=offset
+        user.store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
     return [CatalogProductRead.model_validate(product) for product in products]
 
@@ -97,10 +101,11 @@ async def list_bulk_lots(
     session: SessionDep,
     user: CurrentUserDep,
     status_filter: Annotated[BulkLotStatus | None, Query(alias="status")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[BulkLotRead]:
     lots = await InventoryService(session).list_bulk_lots(
-        user.store_id, status=status_filter, limit=limit, offset=offset
+        user.store_id, status=status_filter, q=q, limit=limit, offset=offset
     )
     return [BulkLotRead.model_validate(lot) for lot in lots]

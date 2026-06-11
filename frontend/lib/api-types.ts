@@ -1138,6 +1138,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["BulkLotStatus"] | null;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };
@@ -1324,6 +1325,8 @@ export interface operations {
     listCatalogProducts: {
         parameters: {
             query?: {
+                q?: string | null;
+                low_stock?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -1702,6 +1705,7 @@ export interface operations {
             query?: {
                 status?: components["schemas"]["SerializedItemStatus"] | null;
                 ownership?: components["schemas"]["OwnershipType"] | null;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };

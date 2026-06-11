@@ -166,30 +166,42 @@ class InventoryService:
         *,
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SerializedItem]:
-        """列序號品（庫存頁/POS 查件；可篩 status/ownership，§4 店別範圍）。"""
+        """列序號品（庫存頁/POS 查件；篩 status/ownership、q 搜品名/識別碼，§4 店別範圍）。"""
         return await self._repo.list_serialized(
-            store_id, status=status, ownership_type=ownership_type, limit=limit, offset=offset
+            store_id, status=status, ownership_type=ownership_type, q=q, limit=limit, offset=offset
         )
 
     async def list_catalog(
-        self, store_id: int, *, limit: int = 50, offset: int = 0
+        self,
+        store_id: int,
+        *,
+        q: str | None = None,
+        low_stock: bool = False,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[CatalogProduct]:
-        """列數量型商品（POS 選件/庫存頁；依品名排序）。"""
-        return await self._repo.list_catalog(store_id, limit=limit, offset=offset)
+        """列數量型商品（POS 選件/庫存頁；q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
+        return await self._repo.list_catalog(
+            store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+        )
 
     async def list_bulk_lots(
         self,
         store_id: int,
         *,
         status: BulkLotStatus | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BulkLot]:
-        """列散裝堆（POS 明確選堆/庫存頁；可篩狀態，如僅 ON_SALE）。"""
-        return await self._repo.list_bulk_lots(store_id, status=status, limit=limit, offset=offset)
+        """列散裝堆（POS 明確選堆/庫存頁；篩狀態、q 搜名稱/堆名/識別碼）。"""
+        return await self._repo.list_bulk_lots(
+            store_id, status=status, q=q, limit=limit, offset=offset
+        )
 
     async def sell_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.SOLD)

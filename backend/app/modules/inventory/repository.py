@@ -66,6 +66,7 @@ class InventoryRepository:
         *,
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SerializedItem]:
@@ -74,19 +75,32 @@ class InventoryRepository:
             stmt = stmt.where(SerializedItem.status == status)
         if ownership_type is not None:
             stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
+        if q:
+            pattern = f"%{q}%"
+            stmt = stmt.where(
+                SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
+            )
         stmt = stmt.order_by(SerializedItem.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def list_catalog(
-        self, store_id: int, *, limit: int = 50, offset: int = 0
+        self,
+        store_id: int,
+        *,
+        q: str | None = None,
+        low_stock: bool = False,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[CatalogProduct]:
-        stmt = (
-            select(CatalogProduct)
-            .where(CatalogProduct.store_id == store_id)
-            .order_by(CatalogProduct.name)
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(CatalogProduct).where(CatalogProduct.store_id == store_id)
+        if q:
+            pattern = f"%{q}%"
+            stmt = stmt.where(
+                CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern)
+            )
+        if low_stock:
+            stmt = stmt.where(CatalogProduct.quantity_on_hand <= CatalogProduct.reorder_point)
+        stmt = stmt.order_by(CatalogProduct.name).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def list_bulk_lots(
@@ -94,12 +108,20 @@ class InventoryRepository:
         store_id: int,
         *,
         status: BulkLotStatus | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BulkLot]:
         stmt = select(BulkLot).where(BulkLot.store_id == store_id)
         if status is not None:
             stmt = stmt.where(BulkLot.status == status)
+        if q:
+            pattern = f"%{q}%"
+            stmt = stmt.where(
+                BulkLot.name.ilike(pattern)
+                | BulkLot.lot_code.ilike(pattern)
+                | BulkLot.label.ilike(pattern)
+            )
         stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
