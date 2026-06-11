@@ -8,7 +8,11 @@
     SEED_USER_ROLE     預設「MANAGER」（可給 CLERK）
     SEED_USER_STORE_ID 預設 1（先跑 seed_dev_store 建門市）
 
-執行：``cd backend && SEED_USER_PASSWORD=<密碼> uv run python -m app.scripts.seed_dev_user``
+執行（需明確 opt-in，且 APP_ENV 須為 development/test）：
+
+    cd backend && ALLOW_DEV_SEED=true SEED_USER_PASSWORD=<密碼> \
+        uv run python -m app.scripts.seed_dev_user
+
 重跑會以 username 為鍵 upsert（更新密碼/角色/啟用狀態）。
 """
 
@@ -31,12 +35,19 @@ from app.shared.enums import UserRole
 _ALLOWED_ENVS = frozenset({"development", "test"})
 
 
-def ensure_dev_environment(app_env: str) -> None:
-    """環境防護：非開發/測試環境一律拒跑。
+def ensure_dev_environment(app_env: str, *, allow_flag: str) -> None:
+    """環境防護（fail-closed 雙保險）：非開發/測試環境拒跑，且必須明確 opt-in。
 
     upsert 以 username 為鍵、會改寫密碼/角色並重新啟用——若誤對正式庫執行，
     等同接管特權帳號（Codex adversarial review 2026-06-11 high）。
+    APP_ENV 預設即 development，單靠它防不了「忘記設定的正式環境」（第二輪
+    medium），故另要求 ``ALLOW_DEV_SEED=true``（僅接受字面 true）才放行。
     """
+    if allow_flag != "true":
+        raise SystemExit(
+            "seed_dev_user 需明確 opt-in：請帶 ALLOW_DEV_SEED=true 執行"
+            "（fail-closed：APP_ENV 有預設值、不可單獨作為防護）。"
+        )
     if app_env not in _ALLOWED_ENVS:
         raise SystemExit(
             f"seed_dev_user 僅限開發/測試環境執行（目前 APP_ENV={app_env!r}；"
@@ -90,7 +101,7 @@ async def upsert_dev_user(session: AsyncSession, seed: DevUserSeed) -> User:
 
 async def main() -> None:
     """環境防護 → 讀環境變數 → upsert dev user → commit，印出結果摘要（不含密碼）。"""
-    ensure_dev_environment(get_settings().app_env)
+    ensure_dev_environment(get_settings().app_env, allow_flag=os.environ.get("ALLOW_DEV_SEED", ""))
     seed = seed_from_env()
     sessionmaker = get_sessionmaker()
     async with sessionmaker() as session:

@@ -16,6 +16,7 @@ def _throttle(clock: FakeClock, **overrides: float | int) -> LoginThrottle:
         window_seconds=float(overrides.get("window_seconds", 900.0)),
         max_failures_per_username=int(overrides.get("max_failures_per_username", 5)),
         max_failures_per_ip=int(overrides.get("max_failures_per_ip", 20)),
+        max_tracked_buckets=int(overrides.get("max_tracked_buckets", 10_000)),
     )
     return LoginThrottle(policy=policy, clock=clock)
 
@@ -69,6 +70,45 @@ def test_ip_threshold_across_usernames() -> None:
         throttle.record_failure(f"user-{i}", "10.0.0.9")
     assert throttle.retry_after("fresh-user", "10.0.0.9") is not None
     assert throttle.retry_after("fresh-user", "10.0.0.8") is None  # 其他 IP 不受影響
+
+
+def test_read_path_does_not_allocate_state() -> None:
+    """retry_after 對未知帳號/IP 不建任何桶（防攻擊者以無限 username 撐爆記憶體）。"""
+    clock = FakeClock()
+    throttle = _throttle(clock)
+    for i in range(100):
+        assert throttle.retry_after(f"ghost-{i}", f"10.0.{i}.1") is None
+    assert throttle.tracked_buckets() == 0
+
+
+def test_expired_buckets_are_dropped_on_touch() -> None:
+    clock = FakeClock()
+    throttle = _throttle(clock, window_seconds=900.0)
+    throttle.record_failure("alice", "10.0.0.1")
+    assert throttle.tracked_buckets() > 0
+    clock.now += 901.0
+    assert throttle.retry_after("alice", "10.0.0.1") is None
+    assert throttle.tracked_buckets() == 0  # 過期桶在觸碰時即刪除
+
+
+def test_cardinality_is_bounded_under_username_flood() -> None:
+    """以海量唯一 username 灌失敗：追蹤桶數不得超過上限（記憶體有界）。"""
+    clock = FakeClock()
+    throttle = _throttle(clock, max_tracked_buckets=50)
+    for i in range(500):
+        throttle.record_failure(f"flood-{i}", "10.0.0.1")
+    assert throttle.tracked_buckets() <= 50 + 1  # username 桶受限（+1 為同一 IP 桶）
+
+
+def test_eviction_keeps_throttle_functional() -> None:
+    """逐出舊桶後，新的失敗仍正常累計與鎖定。"""
+    clock = FakeClock()
+    throttle = _throttle(clock, max_tracked_buckets=10)
+    for i in range(100):
+        throttle.record_failure(f"flood-{i}", "10.0.0.1")
+    for _ in range(5):
+        throttle.record_failure("target", "10.0.0.2")
+    assert throttle.retry_after("target", "10.0.0.2") is not None
 
 
 def test_retry_after_counts_down_with_time() -> None:

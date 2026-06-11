@@ -15,6 +15,10 @@
 - **現有緩解**：CLAUDE.md §5「JWT 短效 + refresh」先限縮風險窗口。
 - **建議時機**：**前端（T19/T20）與真錢交易上線之前**完成（見 `docs/07-roadmap.md`），避免帶著
   「全憑 JWT claim」設計進入使用者實際操作期。
+- **再次回報（2026-06-11，pre-A adversarial review 第二輪 medium）**：登入端點上線後此風險
+  窗口進入實際使用期——已簽發 token 的 role/store_id/is_active 在 `exp` 前不會反映 DB 變更。
+  D-4 實作時一併涵蓋：敏感操作重查 DB（既定修法）、必要時 token 版本/撤銷機制、登入節流
+  改共享儲存（多 worker 時）、`seed_dev_store.py` 補與 `seed_dev_user.py` 相同的環境防護。
 - **狀態**：待排獨立橫切任務。Codex 之後每跑會再報此點（app-wide 設計），視為已處置已知項、非 blocker。
 
 ## D-3（設計筆記，待 Phase 4 退貨一起評估）— 銷售作廢 vs 發票作廢狀態建模

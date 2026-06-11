@@ -16,11 +16,25 @@ def test_environment_guard_blocks_non_dev() -> None:
     from app.scripts.seed_dev_user import ensure_dev_environment
 
     with pytest.raises(SystemExit):
-        ensure_dev_environment("production")
+        ensure_dev_environment("production", allow_flag="true")
     with pytest.raises(SystemExit):
-        ensure_dev_environment("staging")
-    ensure_dev_environment("development")  # 不丟例外
-    ensure_dev_environment("test")
+        ensure_dev_environment("staging", allow_flag="true")
+    ensure_dev_environment("development", allow_flag="true")  # 不丟例外
+    ensure_dev_environment("test", allow_flag="true")
+
+
+def test_environment_guard_requires_explicit_opt_in() -> None:
+    """APP_ENV 預設即 development，單靠它防不了「忘記設定的正式環境」；
+    必須再帶 ALLOW_DEV_SEED=true 明確 opt-in（fail-closed 雙保險）。"""
+    from app.scripts.seed_dev_user import ensure_dev_environment
+
+    with pytest.raises(SystemExit):
+        ensure_dev_environment("development", allow_flag="")
+    with pytest.raises(SystemExit):
+        ensure_dev_environment("development", allow_flag="false")
+    with pytest.raises(SystemExit):
+        ensure_dev_environment("test", allow_flag="1")  # 僅接受字面 true
+    ensure_dev_environment("development", allow_flag="true")
 
 
 def test_seed_from_env_requires_password() -> None:
