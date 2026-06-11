@@ -239,6 +239,10 @@ class InventoryService:
         )
         return await self._repo.add_bulk_lot(lot)
 
+    async def get_bulk_lot_by_code(self, store_id: int, lot_code: str) -> BulkLot | None:
+        """以 lot_code 取散裝堆（POS 掃堆標籤；docs/04）。"""
+        return await self._repo.get_bulk_lot_by_code(store_id, lot_code)
+
     async def get_bulk_lot(self, store_id: int, lot_id: int) -> BulkLot | None:
         return await self._repo.get_bulk_lot(store_id, lot_id)
 

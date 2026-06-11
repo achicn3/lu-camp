@@ -122,7 +122,7 @@ async def test_list_serialized_filters_status_and_ownership(
     assert codes == {"ITM-IN", "ITM-CONS"}
     consignment = await client.get(
         "/api/v1/serialized-items",
-        params={"ownership_type": "CONSIGNMENT"},
+        params={"ownership": "CONSIGNMENT"},  # docs/04 合約參數名為 ownership
         headers=_auth(store_id),
     )
     assert {row["item_code"] for row in consignment.json()} == {"ITM-CONS"}
@@ -201,6 +201,38 @@ async def test_list_bulk_lots_with_status_filter(
     assert {row["lot_code"] for row in everything.json()} == {"LOT-A", "LOT-B"}
 
 
+async def test_get_bulk_lot_by_code(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """掃堆標籤（docs/04 GET /bulk-lots/by-code/{lot_code}；T18 標籤即印 lot_code Code128）。"""
+    store_id = await _seed_store(db_session)
+    other = await _seed_store(db_session, "他店")
+    db_session.add(
+        BulkLot(
+            store_id=store_id,
+            lot_code="LOT-0001",
+            name="營釘雜項",
+            grade=Grade.E,
+            acquisition_cost=Decimal("500"),
+            acquisition_basis=BulkAcquisitionBasis.BAG,
+            unit_price=Decimal("30"),
+            total_qty=50,
+            remaining_qty=12,
+            status=BulkLotStatus.ON_SALE,
+        )
+    )
+    await db_session.flush()
+    resp = await client.get("/api/v1/bulk-lots/by-code/LOT-0001", headers=_auth(store_id))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["lot_code"] == "LOT-0001"
+    assert body["unit_price"] == "30"
+    assert body["remaining_qty"] == 12
+    # 他店 token 查 → 404（§4）
+    cross = await client.get("/api/v1/bulk-lots/by-code/LOT-0001", headers=_auth(other))
+    assert cross.status_code == 404
+    unknown = await client.get("/api/v1/bulk-lots/by-code/NOPE", headers=_auth(store_id))
+    assert unknown.status_code == 404
+
+
 @pytest.mark.parametrize(
     "path",
     [
@@ -208,6 +240,7 @@ async def test_list_bulk_lots_with_status_filter(
         "/api/v1/serialized-items",
         "/api/v1/catalog-products",
         "/api/v1/bulk-lots",
+        "/api/v1/bulk-lots/by-code/LOT-0001",
     ],
 )
 async def test_endpoints_require_auth(client: httpx.AsyncClient, path: str) -> None:

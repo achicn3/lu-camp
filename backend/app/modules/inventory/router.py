@@ -46,7 +46,7 @@ async def list_serialized(
     session: SessionDep,
     user: CurrentUserDep,
     status_filter: Annotated[SerializedItemStatus | None, Query(alias="status")] = None,
-    ownership_type: Annotated[OwnershipType | None, Query()] = None,
+    ownership_type: Annotated[OwnershipType | None, Query(alias="ownership")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[SerializedItemRead]:
@@ -75,6 +75,21 @@ async def list_catalog(
         user.store_id, limit=limit, offset=offset
     )
     return [CatalogProductRead.model_validate(product) for product in products]
+
+
+@router.get(
+    "/bulk-lots/by-code/{lot_code}",
+    response_model=BulkLotRead,
+    operation_id="getBulkLotByCode",
+)
+async def get_bulk_lot_by_code(
+    lot_code: str, session: SessionDep, user: CurrentUserDep
+) -> BulkLotRead:
+    """POS 掃堆標籤：以 lot_code 取散裝堆（docs/04；標籤條碼即 Code 128 編 lot_code）。"""
+    lot = await InventoryService(session).get_bulk_lot_by_code(user.store_id, lot_code)
+    if lot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此識別碼的散裝堆")
+    return BulkLotRead.model_validate(lot)
 
 
 @router.get("/bulk-lots", response_model=list[BulkLotRead], operation_id="listBulkLots")

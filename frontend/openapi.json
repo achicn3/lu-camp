@@ -1945,6 +1945,54 @@
         ]
       }
     },
+    "/api/v1/bulk-lots/by-code/{lot_code}": {
+      "get": {
+        "description": "POS 掃堆標籤：以 lot_code 取散裝堆（docs/04；標籤條碼即 Code 128 編 lot_code）。",
+        "operationId": "getBulkLotByCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_code",
+            "required": true,
+            "schema": {
+              "title": "Lot Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bulk Lot By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/cash-sessions/current": {
       "get": {
         "operationId": "getCurrentCashSession",
@@ -2833,7 +2881,7 @@
           },
           {
             "in": "query",
-            "name": "ownership_type",
+            "name": "ownership",
             "required": false,
             "schema": {
               "anyOf": [
@@ -2844,7 +2892,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Ownership Type"
+              "title": "Ownership"
             }
           },
           {

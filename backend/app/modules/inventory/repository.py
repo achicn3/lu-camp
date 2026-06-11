@@ -158,6 +158,11 @@ class InventoryRepository:
         result: BulkLot | None = await self._session.scalar(stmt)
         return result
 
+    async def get_bulk_lot_by_code(self, store_id: int, lot_code: str) -> BulkLot | None:
+        stmt = select(BulkLot).where(BulkLot.lot_code == lot_code, BulkLot.store_id == store_id)
+        result: BulkLot | None = await self._session.scalar(stmt)
+        return result
+
     async def decrement_bulk_lot(self, lot_id: int, qty: int) -> bool:
         """原子扣減 remaining_qty；不足則不動作。歸零自動轉 SOLD_OUT。回傳是否成功。"""
         new_remaining = BulkLot.remaining_qty - qty

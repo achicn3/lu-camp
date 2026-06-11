@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/by-code/{lot_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Lot By Code
+         * @description POS 掃堆標籤：以 lot_code 取散裝堆（docs/04；標籤條碼即 Code 128 編 lot_code）。
+         */
+        get: operations["getBulkLotByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cash-sessions/current": {
         parameters: {
             query?: never;
@@ -1147,6 +1167,37 @@ export interface operations {
             };
         };
     };
+    getBulkLotByCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getCurrentCashSession: {
         parameters: {
             query?: never;
@@ -1650,7 +1701,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["SerializedItemStatus"] | null;
-                ownership_type?: components["schemas"]["OwnershipType"] | null;
+                ownership?: components["schemas"]["OwnershipType"] | null;
                 limit?: number;
                 offset?: number;
             };
