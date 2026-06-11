@@ -48,6 +48,13 @@ from app.shared.exceptions import (
     SaleLineInvalid,
 )
 
+_POINTS_DIVISOR = Decimal(100)  # 會員點數：floor(含稅總額 ÷ 100)，docs/16 §0
+
+
+def _member_points_for(total: Decimal) -> int:
+    """該筆銷售累積的會員點數（floor；total 為含稅整數元，與 tender 組成無關）。"""
+    return int(total // _POINTS_DIVISOR)
+
 
 def _cart_fingerprint(lines: list[SaleLineInput], buyer_contact_id: int | None) -> str:
     """購物車內容的穩定 sha256；供 idempotency 重播時比對請求是否相同。"""
@@ -169,6 +176,13 @@ class SalesService:
                 commission_pct=commission_pct,
             )
 
+        # 會員點數累積（docs/16 §0）：floor(total/100)，同交易內、與銷售同生共死；
+        # 無買方不計；冪等重送走 find_idempotent_replay 回原單、不會重複累積。
+        if buyer_contact_id is not None:
+            await self._contacts.add_member_points(
+                store_id, buyer_contact_id, _member_points_for(total)
+            )
+
         await self._session.flush()
         return sale
 
@@ -241,6 +255,11 @@ class SalesService:
             before={"invoice_status": before},
             after={"invoice_status": SaleInvoiceStatus.VOID.value},
         )
+        # 作廢沖回該筆累積的會員點數（docs/16 §0；點數僅累積、沖回同額不會為負）。
+        if sale.buyer_contact_id is not None:
+            await self._contacts.add_member_points(
+                sale.store_id, sale.buyer_contact_id, -_member_points_for(sale.total)
+            )
         return sale
 
     async def record_print_detail(self, sale: Sale, actor_user_id: int) -> None:

@@ -81,5 +81,9 @@ class SaleAlreadyVoid(DomainError):
     """銷售已作廢，不可重複作廢。"""
 
 
+class MemberPointsAdjustFailed(DomainError):
+    """會員點數調整失敗（對象不存在或會使點數為負）——資料不一致，整筆交易應回滾。"""
+
+
 class IdempotencyKeyConflict(DomainError):
     """同一 idempotency key 但購物車內容不同：拒絕，避免靜默丟掉新的結帳。"""

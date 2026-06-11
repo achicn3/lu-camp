@@ -7,6 +7,7 @@ from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.modules.contacts.models import Contact
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
+from app.shared.exceptions import MemberPointsAdjustFailed
 
 
 class ContactService:
@@ -38,6 +39,19 @@ class ContactService:
             source_note=data.source_note,
         )
         return await self._repo.add(contact)
+
+    async def add_member_points(self, store_id: int, contact_id: int, delta: int) -> None:
+        """調整會員點數（結帳累積 +、作廢沖回 −；docs/16 §0）。
+
+        原子 UPDATE（不讀-改-寫）；對象不存在/跨店/將為負 → MemberPointsAdjustFailed，
+        由呼叫端的交易整筆回滾（點數與銷售同生共死）。
+        """
+        if delta == 0:
+            return
+        if not await self._repo.adjust_member_points(store_id, contact_id, delta):
+            raise MemberPointsAdjustFailed(
+                f"contact {contact_id} 點數調整 {delta:+d} 失敗（不存在/跨店/將為負）"
+            )
 
     async def get_contact(self, store_id: int, contact_id: int) -> Contact | None:
         return await self._repo.get(store_id, contact_id)
