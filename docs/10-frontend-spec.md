@@ -56,8 +56,8 @@
 - **/purchasing**：供應商、採購單、收貨入庫、低庫存提醒。API：`/suppliers`、`/purchase-orders`、`/purchase-orders/{id}/receive`。
 - **/cash（現金對帳）**：開帳（輸入零用金）、當前 session 現金異動清單、結帳（輸入實點金額 → 顯示系統應有與差異）。API：`/cash-sessions/*`。
 - **/stocktake**：建盤點單、掃描/輸入實際數、顯示差異、確認調整。API：`/stocktakes/*`。
-- **/reports（MANAGER）**：每日現金對帳、營收/成本/毛利（區分買斷成本與寄售只認抽成）、庫存價值與庫齡、寄售應付、趨勢；匯出 CSV/Excel。API：`/reports/*`。
-- **/settings（MANAGER）**：發票開關 `einvoice_enabled`、預設寄售抽成、稅率/稅務處理、成色分級列舉、reorder 預設、店家/發票資訊。API：`/settings`。
+- **/reports（MANAGER）**：每日現金對帳、營收/成本/毛利（區分買斷成本與寄售只認抽成）、庫存價值與庫齡、寄售應付、趨勢；匯出 CSV/Excel。**新增購物金報表區（docs/16 §5）**：負債總額/各會員餘額/帳齡分桶、發出 vs 兌付 vs 淨變化（日/週/月）、負債健康比、效益指標（take rate、平均溢價率、β/α 一律標示「估計值」，α 加註「代理法」）；皆可匯出 CSV 與 Excel（檔含產生時間/區間/店別）。關帳報表維持純現金，購物金兌付當日彙總另列展示。API：`/reports/*`、`/reports/store-credit/*`。
+- **/settings（MANAGER）**：發票開關 `einvoice_enabled`、預設寄售抽成、稅率/稅務處理、成色分級列舉、reorder 預設、店家/發票資訊。**新增溢價率區（docs/16 §6）**：調整畫面並列「當日建議值＋各約束中間值摘要」（毛利約束/負債約束/選用率導向），可一鍵採納或自行輸入（夾在 min/max）；金錢級設定、需二次確認、變更留痕；冷啟動顯示「資料不足，採用預設值」。建議值永不自動生效。API：`/settings`、`/settings/premium-rate/history`、`/store-credit/premium-suggestion/today`。
 - **/devices（裝置狀態面板）**：顯示櫃檯各機器（Brother QL-810W 標籤機、EPSON TM-T82iii 收據/發票機、掃碼槍、錢櫃）的狀態卡片。
   - **A 級（保證）**：每張卡片顯示「連線/離線」燈號 + 「最後回應時間」（心跳）；離線醒目標示（Wi-Fi 的 Brother 尤其要能看出斷線）。
   - **B 級（優雅降級）**：缺紙、上蓋開啟、印表機錯誤、錢櫃開啟等細項，**有報才顯示**；hardware-agent 回傳 `unsupported` 的細項顯示「此機型不支援」灰字，**不渲染為故障**。

@@ -1,0 +1,28 @@
+# ADR-012：購物金（store credit）採不可變僅新增帳本
+
+- **Status**: Proposed（2026-06-11，待使用者審）
+- **Context**:
+  - 新需求：客人販售二手品時可選「現金」或「購物金」撥款；購物金可設溢價（例：現金 1,000 → 購物金 1,100）。購物金 1:1 對應現金、是**帳上負債**，資料正確性與保存為最高優先。
+  - 既有模式可沿用：金額一律 `Decimal` 整數元（ADR-007、`core/money.py`）；錢櫃現金異動已有「單一寫入點 + `SELECT … FOR UPDATE` 列鎖序列化」模式（D-1）；結帳冪等已有「fingerprint + 唯一約束」模式（D-2）。
+  - 失敗的替代方案是「可變餘額欄位」：直接 UPDATE `contacts.balance` 之類的設計，歷史不可重建、併發易丟更新、稽核困難——對負債科目不可接受。
+- **Decision**:
+  - **事實來源 = `store_credit_ledger` 不可變帳本**：僅 INSERT，**永不 UPDATE/DELETE**（應用層 repository 只提供 insert；migration 加 DB trigger 直接拒絕 UPDATE/DELETE，雙保險）。
+  - **entry_type 四種**：`CREDIT`（收購入帳）／`DEBIT`（消費扣抵）／`REVERSAL`（沖正：作廢/回滾，方向依被沖正列相反）／`ADJUSTMENT`（人工校正，限 MANAGER、必填事由、寫 audit_log）。錯誤不修改、只沖正：任何「改錯」都以新列表達。
+  - **餘額為推導值**：帳戶餘額 = `SUM(signed_amount)`，且恆等於該帳戶最新一列的 `balance_after`。另設 `store_credit_accounts` 快取（balance + version 樂觀鎖），**必須隨時可從帳本重算**；對帳工作驗證三者一致，不符即告警。
+  - **併發序列化**：每次寫入先對 `store_credit_accounts` 該帳戶列 `SELECT … FOR UPDATE`（沿用 D-1 錢櫃原子 session 鎖模式），鎖內讀最新餘額、算 `balance_after`、插入帳本列、更新快取。
+  - **扣抵守衛**：新餘額 `>= 0` 否則 raise `InsufficientStoreCredit`，永不負餘額。
+  - **冪等**：`(store_id, source_type, source_id, entry_type)` 唯一約束 + 內容 fingerprint（沿用 D-2 指紋去重：同 key 同內容回原列、不重複入帳；同 key 不同內容 409）。
+  - **溢價可重現**：每筆 `CREDIT` 同列記 `cash_equivalent`（現金等值）、`premium_rate_applied`（當下適用溢價率）；實發購物金 = `signed_amount`。三值缺一不可——是負債報表、效益指標與建議值引擎的資料基礎。
+  - **與現金嚴格隔離**：購物金不碰 `cash_session`／錢櫃；錢櫃關帳（D-1）只對現金 tender；購物金為獨立負債科目，關帳報表僅「另列展示」當日兌付彙總、不入現金對帳。
+  - **保存**：有購物金歷史的 contact **不可硬刪**；PII 可去識別化（姓名/電話/身分證欄位清空或代填），帳本列永久保存。
+- **Alternatives**:
+  - 可變餘額欄位（UPDATE balance）：駁回——負債歷史不可重建、無法稽核、併發丟更新風險。
+  - 事件溯源全套（event store + projection 框架）：駁回——超出單店 POS 規模；insert-only 帳本 + 快取已取得同等正確性，複雜度低一個量級。
+  - 餘額只存快取不驗帳本：駁回——快取漂移即負債失真；對帳工作（SUM == 快取 == 最新 balance_after）是底線。
+  - 負餘額容忍（先扣再補）：駁回——購物金是客人的錢，永不透支。
+- **Consequences**:
+  - ＋歷史完整可稽核、任意時點餘額可重建；＋併發安全與既有錢櫃/冪等模式一致，心智模型統一；＋報表全部可從帳本推導。
+  - －寫入路徑多一次列鎖與快取維護；－沖正模型要求所有整合點（收購/銷售/作廢）都以「成對列」思考，不能偷懶改數字。
+  - 衍生規格見 `docs/16-store-credit.md`（資料模型、不變量、整合點、API、報表、建議值引擎）。
+- **Trade-off**: 以多一張快取表與較囉嗦的沖正流程，換取負債科目的完整稽核軌跡與可重算性。
+- **G3 閘門（不阻擋建模）**：待會計師確認「購物金屬禮券/儲值之歸類、效期與履約保證義務、溢價之稅務認列時點」；效期暫定**永久不過期**，欄位 `expires_at` 預留、恆為 NULL，待 G3 定案。

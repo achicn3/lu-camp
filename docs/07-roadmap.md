@@ -46,6 +46,19 @@ graph TD
 - **電子發票（`einvoice` 模組 T13/T14）已從本 Phase 抽出**，集中到文末「**發票收尾階段**」、排在所有其他 Phase/Wave 之後。理由＝**發票與系統已解耦**：`einvoice_enabled=false` 時每筆銷售仍完整寫入 `sales`（`invoice_status=NOT_ISSUED`，可日後補開，§6），前端發票區於未啟用時隱藏 → 移走發票不影響 sales / 硬體 / 前端的開發與上線。
 - **驗收**：可結帳；`einvoice_enabled` on/off 行為正確且銷售皆完整記錄；可列印/開櫃（fake + 實機）。**（不含發票 XML 上傳，留待收尾階段。）**
 
+## 購物金階段（store credit，插於硬體完成後、T19 POS 前端之前；見 `docs/16`、ADR-012）
+
+> 2026-06-11 新增需求：收購撥款可選現金或購物金（可設溢價）；購物金為帳上負債、
+> insert-only 帳本為事實來源。**SC-1～3 是 T19 POS 結帳 UI 的前置**；SC-4/5 可與 T19 並行。
+
+- **點數小任務**：結帳累積 `floor(total/100)` 點（購物金支付照計、收購不給點、void 沖回；docs/16 §0）。與 pre-A（auth login）、pre-B（inventory 唯讀查詢）同屬 T19 前置後端補洞。
+- **SC-1 帳本核心**：`store_credit_ledger` + `store_credit_accounts` + 不變量 I-1～I-11 + 對帳 + 查詢/人工校正端點。
+- **SC-2 收購撥款整合**：payout `CASH | STORE_CREDIT | SPLIT`，與收購同一原子交易。
+- **SC-3 銷售 tender 整合**：`sale_tenders` 多付款、`InsufficientStoreCredit` 守衛、void 沖正。
+- **SC-4 報表 API + 匯出**：負債/帳齡/流量/效益指標（α 為代理法估計值）＋ CSV/Excel。
+- **SC-5 溢價設定 + 建議值引擎**：premium_rate（金錢級設定、history 留痕）、deterministic 規則式建議值、suggestion_log、永不自動生效。
+- **G3 閘門**：待會計師確認「禮券/儲值歸類、效期與履約保證、溢價稅務認列時點」；不阻擋建模，效期欄位（暫定永久不過期）待定案。
+
 ## Phase 4 — 寄售結算 + 退換貨
 - `consignment`（賣出觸發 settlement、付款流程、應付彙總、退回寄售人）。
 - `returns`（退現金、回補庫存、已開票產生折讓單 allowance）。
