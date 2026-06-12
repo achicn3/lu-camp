@@ -26,6 +26,7 @@ from app.shared.enums import (
     StoreCreditSourceType,
 )
 from app.shared.exceptions import (
+    CrossStoreReference,
     InsufficientStoreCredit,
     StoreCreditConflict,
     StoreCreditMemberRequired,
@@ -84,6 +85,10 @@ class StoreCreditService:
     ) -> StoreCreditLedger:
         if signed_amount == 0:
             raise StoreCreditConflict("分錄金額不可為零")
+        # 多分店隔離（§4，adversarial review high）：contact 必須屬於本店——
+        # 否則會建立「A 店 contact 配 B 店帳戶」的越界配對。所有寫入路徑統一在此守。
+        if await self._contacts.get_contact(store_id, contact_id) is None:
+            raise CrossStoreReference(f"contact {contact_id} 不屬於 store {store_id}")
         fingerprint = _fingerprint(
             store_id=store_id,
             contact_id=contact_id,
@@ -200,11 +205,24 @@ class StoreCreditService:
         source_id: int,
         created_by: int,
     ) -> StoreCreditLedger:
-        """沖正：方向與被沖正列相反；同來源只能沖一次（唯一約束涵蓋）。
+        """沖正：方向與被沖正列相反；**一列只能被沖一次**（部分唯一索引）。
 
+        被沖正列必須屬於本店（多分店隔離）；同一來源重試 → 冪等回原沖正列；
+        不同來源試圖再沖同一列 → StoreCreditConflict（不重複退/扣款）。
         扣回方向（沖 CREDIT）餘額不足 → InsufficientStoreCredit，由呼叫端依
         docs/16 §3.3 擋下轉人工。
         """
+        if original.store_id != store_id:
+            raise CrossStoreReference(
+                f"被沖正列 {original.id} 屬於 store {original.store_id}，非 store {store_id}"
+            )
+        existing = await self._repo.find_reversal_of(original.id)
+        if existing is not None:
+            if existing.source_type == source_type and existing.source_id == source_id:
+                return existing  # 同來源重試 → 冪等
+            raise StoreCreditConflict(
+                f"分錄 {original.id} 已被沖正（reversal {existing.id}），不可重複沖"
+            )
         return await self._write_entry(
             store_id,
             original.contact_id,

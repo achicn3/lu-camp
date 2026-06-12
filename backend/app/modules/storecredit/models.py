@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Numeric,
     String,
     UniqueConstraint,
@@ -46,6 +47,14 @@ class StoreCreditLedger(Base):
             "source_id",
             "entry_type",
             name="uq_store_credit_ledger_source",
+        ),
+        # 一列只能被沖正一次（adversarial review high）：不同 source 重複沖同一列
+        # 會重複退/扣款。部分唯一索引（NULL 不受限）。
+        Index(
+            "uq_store_credit_ledger_reversal_of",
+            "reversal_of_id",
+            unique=True,
+            postgresql_where=text("reversal_of_id IS NOT NULL"),
         ),
     )
 

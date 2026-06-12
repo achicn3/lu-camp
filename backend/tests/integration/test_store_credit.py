@@ -20,6 +20,7 @@ from app.shared.enums import (
     UserRole,
 )
 from app.shared.exceptions import (
+    CrossStoreReference,
     InsufficientStoreCredit,
     StoreCreditConflict,
     StoreCreditMemberRequired,
@@ -204,6 +205,96 @@ async def test_reverse_credit_and_only_once(db_session: AsyncSession) -> None:
         created_by=user_id,
     )
     assert again.id == reversal.id
+
+
+async def test_reverse_same_row_with_different_source_conflicts(
+    db_session: AsyncSession,
+) -> None:
+    """一列只能被沖一次（adversarial high）：不同來源試圖再沖 → 409、餘額不變。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=70,
+        created_by=user_id,
+    )
+    await svc.reverse(
+        store_id,
+        credit,
+        source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        source_id=70,
+        created_by=user_id,
+    )
+    # 補一筆讓餘額足夠（排除「餘額不足」因素，專測重複沖正防護）
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(2000),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=71,
+        created_by=user_id,
+    )
+    before = await svc.get_balance(store_id, member_id)
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(
+            store_id,
+            credit,
+            source_type=StoreCreditSourceType.SALE_VOID,  # 不同來源
+            source_id=999,
+            created_by=user_id,
+        )
+    assert await svc.get_balance(store_id, member_id) == before
+
+
+async def test_reverse_rejects_cross_store_original(db_session: AsyncSession) -> None:
+    """多分店隔離（adversarial high）：他店的列不可在本店被沖正。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    other_store = Store(name="B 店")
+    db_session.add(other_store)
+    await db_session.flush()
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=88,
+        created_by=user_id,
+    )
+    with pytest.raises(CrossStoreReference):
+        await svc.reverse(
+            other_store.id,
+            credit,
+            source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+            source_id=88,
+            created_by=user_id,
+        )
+
+
+async def test_debit_rejects_cross_store_contact(db_session: AsyncSession) -> None:
+    """寫入路徑統一守店別：他店 contact 不可在本店建帳/扣抵。"""
+    store_id, user_id, _ = await _seed(db_session)
+    other_store = Store(name="B 店")
+    db_session.add(other_store)
+    await db_session.flush()
+    foreign_member = Contact(store_id=other_store.id, name="他店會員", roles=["MEMBER"])
+    db_session.add(foreign_member)
+    await db_session.flush()
+    with pytest.raises(CrossStoreReference):
+        await StoreCreditService(db_session).debit(
+            store_id,
+            foreign_member.id,
+            amount=Decimal(10),
+            source_type=StoreCreditSourceType.SALE,
+            source_id=55,
+            created_by=user_id,
+        )
 
 
 async def test_reverse_credit_blocked_when_already_spent(db_session: AsyncSession) -> None:

@@ -65,6 +65,12 @@ class StoreCreditRepository:
         result: StoreCreditLedger | None = await self._session.scalar(stmt)
         return result
 
+    async def find_reversal_of(self, original_id: int) -> StoreCreditLedger | None:
+        """找某列的既有沖正（一列只能被沖一次）。"""
+        stmt = select(StoreCreditLedger).where(StoreCreditLedger.reversal_of_id == original_id)
+        result: StoreCreditLedger | None = await self._session.scalar(stmt)
+        return result
+
     async def get_account(self, store_id: int, contact_id: int) -> StoreCreditAccount | None:
         stmt = select(StoreCreditAccount).where(
             StoreCreditAccount.store_id == store_id,

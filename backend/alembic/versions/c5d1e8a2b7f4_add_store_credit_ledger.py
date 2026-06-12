@@ -66,6 +66,13 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_store_credit_ledger_store_id", "store_credit_ledger", ["store_id"])
+    op.create_index(
+        "uq_store_credit_ledger_reversal_of",
+        "store_credit_ledger",
+        ["reversal_of_id"],
+        unique=True,
+        postgresql_where=sa.text("reversal_of_id IS NOT NULL"),
+    )
     op.create_index("ix_store_credit_ledger_contact_id", "store_credit_ledger", ["contact_id"])
 
     op.create_table(
