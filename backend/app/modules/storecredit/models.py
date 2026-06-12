@@ -65,6 +65,13 @@ class StoreCreditLedger(Base):
             ["contacts.id", "contacts.store_id"],
             name="fk_store_credit_ledger_contact_store",
         ),
+        # 帳本列必有帳戶列（adversarial 第六輪 high）：孤兒帳本（無帳戶）會讓
+        # 對帳與總負債漏算。寫入路徑先 lock_account（必建列）再插帳本，順序相容。
+        ForeignKeyConstraint(
+            ["store_id", "contact_id"],
+            ["store_credit_accounts.store_id", "store_credit_accounts.contact_id"],
+            name="fk_store_credit_ledger_account",
+        ),
         # 供下方租戶綁定自參考 FK 指向（id 為 PK，本約束恆成立）。
         UniqueConstraint("id", "store_id", "contact_id", name="uq_store_credit_ledger_id_tenant"),
         # 沖正必須指向**同店同帳戶**的原列（adversarial 第三輪 high）：

@@ -138,6 +138,15 @@ class StoreCreditRepository:
         value = await self._session.scalar(stmt)
         return None if value is None else Decimal(value)
 
+    async def list_ledger_contacts(self, store_id: int) -> list[int]:
+        """帳本中出現過的 contact（孤兒帳本偵測：與帳戶列做全比對）。"""
+        stmt = (
+            select(StoreCreditLedger.contact_id)
+            .where(StoreCreditLedger.store_id == store_id)
+            .distinct()
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_accounts(self, store_id: int) -> list[StoreCreditAccount]:
         stmt = select(StoreCreditAccount).where(StoreCreditAccount.store_id == store_id)
         return list((await self._session.scalars(stmt)).all())

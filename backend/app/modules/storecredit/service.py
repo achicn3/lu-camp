@@ -93,6 +93,12 @@ class StoreCreditService:
         呼叫端據此避免重複副作用（如稽核）。"""
         if signed_amount == 0:
             raise StoreCreditConflict("分錄金額不可為零")
+        # 整數元守衛（§6；adversarial 第六輪 high）：Numeric(12,0) 會在持久化時
+        # 各自捨入，非整數金額將使「SUM == balance_after == 快取」不變量破裂。
+        if signed_amount != signed_amount.to_integral_value():
+            raise StoreCreditConflict("分錄金額必須為整數元")
+        if cash_equivalent is not None and cash_equivalent != cash_equivalent.to_integral_value():
+            raise StoreCreditConflict("現金等值必須為整數元")
         # 多分店隔離（§4，adversarial review high）：contact 必須屬於本店——
         # 否則會建立「A 店 contact 配 B 店帳戶」的越界配對。所有寫入路徑統一在此守。
         if await self._contacts.get_contact(store_id, contact_id) is None:
@@ -373,6 +379,22 @@ class StoreCreditService:
         不符**只回報、不靜默修正**（docs/16 §2 I-3）。另回全域總負債（Σ 正餘額）。
         """
         mismatches: list[dict[str, str | int]] = []
+        # 孤兒帳本偵測（adversarial 第六輪 high；DB FK 已擋新寫入，這裡涵蓋
+        # 歷史/極端情況）：帳本出現過、卻無帳戶列的 contact 一律列為不符。
+        ledger_contacts = await self._repo.list_ledger_contacts(store_id)
+        account_contacts = {
+            account.contact_id for account in await self._repo.list_accounts(store_id)
+        }
+        for contact_id in ledger_contacts:
+            if contact_id not in account_contacts:
+                mismatches.append(
+                    {
+                        "contact_id": contact_id,
+                        "ledger_sum": str(await self._repo.sum_signed(store_id, contact_id)),
+                        "cached": "（無帳戶列）",
+                        "latest_balance_after": "",
+                    }
+                )
         for account in await self._repo.list_accounts(store_id):
             ledger_sum = await self._repo.sum_signed(store_id, account.contact_id)
             latest = await self._repo.latest_balance_after(store_id, account.contact_id)

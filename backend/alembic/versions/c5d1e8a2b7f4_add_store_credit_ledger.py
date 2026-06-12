@@ -149,6 +149,13 @@ def upgrade() -> None:
     op.create_index("ix_store_credit_accounts_store_id", "store_credit_accounts", ["store_id"])
     op.create_index("ix_store_credit_accounts_contact_id", "store_credit_accounts", ["contact_id"])
 
+    op.create_foreign_key(
+        "fk_store_credit_ledger_account",
+        "store_credit_ledger",
+        "store_credit_accounts",
+        ["store_id", "contact_id"],
+        ["store_id", "contact_id"],
+    )
     for ddl in LEDGER_IMMUTABLE_DDL:
         op.execute(ddl)
 

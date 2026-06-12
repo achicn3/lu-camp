@@ -465,6 +465,49 @@ async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> Non
     await db_session.rollback()
 
 
+async def test_fractional_amounts_rejected(db_session: AsyncSession) -> None:
+    """整數元守衛（adversarial 第六輪 high）：小數 debit/adjust/cash_equivalent 一律拒。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=400,
+        created_by=user_id,
+    )
+    with pytest.raises(StoreCreditConflict):
+        await svc.debit(
+            store_id,
+            member_id,
+            amount=Decimal("0.5"),
+            source_type=StoreCreditSourceType.SALE,
+            source_id=401,
+            created_by=user_id,
+        )
+    with pytest.raises(StoreCreditConflict):
+        await svc.adjust(
+            store_id,
+            member_id,
+            amount=Decimal("1.5"),
+            reason="小數",
+            created_by=user_id,
+            idempotency_key="frac",
+        )
+    with pytest.raises(StoreCreditConflict):
+        await svc.credit(
+            store_id,
+            member_id,
+            cash_equivalent=Decimal("99.5"),
+            premium_rate=Decimal("0.10"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=402,
+            created_by=user_id,
+        )
+
+
 async def test_adjust_retry_writes_audit_once(db_session: AsyncSession) -> None:
     """冪等重放不得重複寫稽核（adversarial 第四輪 high）：同鍵重試恰一筆 audit。"""
     store_id, user_id, member_id = await _seed(db_session)
