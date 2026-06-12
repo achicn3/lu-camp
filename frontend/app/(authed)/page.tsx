@@ -1,11 +1,13 @@
 // 首頁：模組入口卡片（依完成度開放；操作速度優先，docs/10 §1）。
-const MODULES: { title: string; description: string; ready: boolean }[] = [
-  { title: "POS 結帳", description: "掃碼、購物車、收現找零、列印", ready: false },
-  { title: "現金對帳", description: "開帳／異動／結帳差異", ready: false },
-  { title: "會員/賣方", description: "查詢、建檔、點數", ready: false },
-  { title: "庫存", description: "序號品、數量品、散裝堆", ready: false },
-  { title: "收購", description: "買斷／寄售／散裝入庫", ready: false },
-  { title: "裝置狀態", description: "印表機、錢櫃連線", ready: false },
+import Link from "next/link";
+
+const MODULES: { title: string; description: string; href?: string }[] = [
+  { title: "POS 結帳", description: "掃碼、購物車、收現找零、列印" },
+  { title: "現金對帳", description: "開帳／異動／結帳差異", href: "/cash" },
+  { title: "會員/賣方", description: "查詢、建檔、點數" },
+  { title: "庫存", description: "序號品、數量品、散裝堆" },
+  { title: "收購", description: "買斷／寄售／散裝入庫" },
+  { title: "裝置狀態", description: "印表機、錢櫃連線" },
 ];
 
 export default function HomePage() {
@@ -13,16 +15,20 @@ export default function HomePage() {
     <section>
       <h1 className="page-title">門市作業</h1>
       <div className="module-grid">
-        {MODULES.map((module) => (
-          <div
-            key={module.title}
-            className={module.ready ? "module-card" : "module-card module-card-disabled"}
-          >
-            <h2>{module.title}</h2>
-            <p>{module.description}</p>
-            {!module.ready && <span className="badge-soon">開發中</span>}
-          </div>
-        ))}
+        {MODULES.map((module) =>
+          module.href !== undefined ? (
+            <Link key={module.title} href={module.href} className="module-card module-card-link">
+              <h2>{module.title}</h2>
+              <p>{module.description}</p>
+            </Link>
+          ) : (
+            <div key={module.title} className="module-card module-card-disabled">
+              <h2>{module.title}</h2>
+              <p>{module.description}</p>
+              <span className="badge-soon">開發中</span>
+            </div>
+          ),
+        )}
       </div>
     </section>
   );
