@@ -329,6 +329,29 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_blank_idempotency_key_rejected_at_service(db_session: AsyncSession) -> None:
+    """空/None 鍵（Codex 第八輪 high）：service 執行期守衛直接拒、零落地。"""
+    import pytest
+
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+    from app.shared.exceptions import IdempotencyKeyConflict
+
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    data = AcquisitionCreate.model_validate(_buyout_payload(seller_id))
+    svc = AcquisitionService(db_session)
+    for bad in (None, "", "   "):
+        with pytest.raises(IdempotencyKeyConflict):
+            await svc.create_acquisition(
+                store_id,
+                clerk_id,
+                data,
+                idempotency_key=bad,  # type: ignore[arg-type]
+            )
+    assert await db_session.scalar(select(func.count()).select_from(Acquisition)) == 0
+
+
 async def test_concurrent_service_callers_same_key_replay() -> None:
     """並發同 key 直呼 service（Codex 第七輪 high）：兩邊都拿到同一收購單、
     帳本只入一次（輸家在 service 層轉重放，不冒 IntegrityError）。"""

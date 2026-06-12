@@ -7,7 +7,7 @@
 
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Numeric, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Numeric, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -20,6 +20,11 @@ class Acquisition(Base, TimestampMixin):
     __tablename__ = "acquisitions"
     __table_args__ = (
         UniqueConstraint("store_id", "idempotency_key", name="uq_acquisitions_store_idem_key"),
+        # NULL 僅限 legacy 回填列；新寫入一律非空（service 守衛＋本 CHECK 防空字串）。
+        CheckConstraint(
+            "idempotency_key IS NULL OR length(idempotency_key) > 0",
+            name="ck_acquisitions_idem_key_nonempty",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

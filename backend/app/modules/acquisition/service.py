@@ -154,6 +154,10 @@ class AcquisitionService:
         留下半套。外層交易由呼叫端 commit/rollback。
         """
         # 冪等為 service 邊界必填（Codex：任何呼叫者重試都不得重複付現/入購物金）。
+        # 執行期守衛（第八輪）：型別註記擋不住 None/空字串——NULL 鍵不受唯一約束，
+        # 並發首寫會重複撥款。
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise IdempotencyKeyConflict("idempotency_key 必須為非空字串")
         replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
         if replay is not None:
             return replay

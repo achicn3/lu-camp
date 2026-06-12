@@ -59,6 +59,11 @@ def upgrade() -> None:
     op.create_unique_constraint(
         "uq_acquisitions_store_idem_key", "acquisitions", ["store_id", "idempotency_key"]
     )
+    op.create_check_constraint(
+        "ck_acquisitions_idem_key_nonempty",
+        "acquisitions",
+        "idempotency_key IS NULL OR length(idempotency_key) > 0",
+    )
     # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
     # 避免新欄位讀起來像「資料缺漏」而非「全額付現」。
     op.execute(
@@ -69,6 +74,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_constraint("ck_acquisitions_idem_key_nonempty", "acquisitions", type_="check")
     op.drop_constraint("uq_acquisitions_store_idem_key", "acquisitions", type_="unique")
     op.drop_column("acquisitions", "idempotency_fingerprint")
     op.drop_column("acquisitions", "idempotency_key")
