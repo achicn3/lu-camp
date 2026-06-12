@@ -326,6 +326,24 @@ class StoreCreditService:
             raise CrossStoreReference(f"被沖正列 {original_entry_id} 不存在於 store {store_id}")
         if original.entry_type == StoreCreditEntryType.REVERSAL:
             raise StoreCreditConflict(f"分錄 {original.id} 本身是沖正列，不可再沖")
+        # 沖正來源須對應原列業務事件（adversarial 第十三輪 high）：
+        # SALE_VOID 只能沖銷售扣抵（DEBIT/SALE）、ACQUISITION_ROLLBACK 只能沖
+        # 收購入帳（CREDIT/ACQUISITION）——錯配在算術上自洽、對帳抓不到。
+        valid_pairs = {
+            StoreCreditSourceType.SALE_VOID: (
+                StoreCreditEntryType.DEBIT,
+                StoreCreditSourceType.SALE,
+            ),
+            StoreCreditSourceType.ACQUISITION_ROLLBACK: (
+                StoreCreditEntryType.CREDIT,
+                StoreCreditSourceType.ACQUISITION,
+            ),
+        }
+        expected_entry, expected_source = valid_pairs[source_type]
+        if original.entry_type != expected_entry or original.source_type != expected_source:
+            raise StoreCreditConflict(
+                f"{source_type} 不可沖 {original.entry_type}/{original.source_type} 列"
+            )
         entry, _ = await self._write_entry(
             store_id,
             original.contact_id,

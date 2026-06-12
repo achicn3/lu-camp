@@ -212,13 +212,21 @@ BEGIN
   IF NEW.reversal_of_id IS NULL THEN
     RETURN NEW;
   END IF;
-  SELECT entry_type, signed_amount INTO original
+  SELECT entry_type, signed_amount, source_type INTO original
     FROM store_credit_ledger WHERE id = NEW.reversal_of_id;
   IF original.entry_type = 'REVERSAL' THEN
     RAISE EXCEPTION '沖正列不可再被沖正';
   END IF;
   IF NEW.signed_amount <> -original.signed_amount THEN
     RAISE EXCEPTION '沖正金額必須為原列負值';
+  END IF;
+  IF NEW.source_type = 'SALE_VOID'
+     AND (original.entry_type <> 'DEBIT' OR original.source_type <> 'SALE') THEN
+    RAISE EXCEPTION 'SALE_VOID 只能沖 DEBIT/SALE 列';
+  END IF;
+  IF NEW.source_type = 'ACQUISITION_ROLLBACK'
+     AND (original.entry_type <> 'CREDIT' OR original.source_type <> 'ACQUISITION') THEN
+    RAISE EXCEPTION 'ACQUISITION_ROLLBACK 只能沖 CREDIT/ACQUISITION 列';
   END IF;
   RETURN NEW;
 END;

@@ -603,6 +603,46 @@ async def test_write_aborts_on_cache_drift(db_session: AsyncSession) -> None:
         )
 
 
+async def test_reversal_source_must_match_original_event(db_session: AsyncSession) -> None:
+    """沖正來源對應原列（第十三輪 high）：SALE_VOID 沖 CREDIT、
+    ACQUISITION_ROLLBACK 沖 DEBIT 一律拒。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=800,
+        created_by=user_id,
+    )
+    debit = await svc.debit(
+        store_id,
+        member_id,
+        amount=Decimal(200),
+        source_type=StoreCreditSourceType.SALE,
+        source_id=801,
+        created_by=user_id,
+    )
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(  # SALE_VOID 不可沖 CREDIT
+            store_id,
+            credit.id,
+            source_type=StoreCreditSourceType.SALE_VOID,
+            source_id=802,
+            created_by=user_id,
+        )
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(  # ACQUISITION_ROLLBACK 不可沖 DEBIT
+            store_id,
+            debit.id,
+            source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+            source_id=803,
+            created_by=user_id,
+        )
+
+
 async def test_source_type_binding(db_session: AsyncSession) -> None:
     """來源-類型綁定（第十二輪 medium）：CREDIT≠ACQUISITION、DEBIT≠SALE、
     REVERSAL 非 VOID/ROLLBACK 一律拒。"""
