@@ -138,6 +138,20 @@ class StoreCreditRepository:
         value = await self._session.scalar(stmt)
         return None if value is None else Decimal(value)
 
+    async def rows_violating_chain(self, store_id: int) -> list[int]:
+        """balance_after ≠ 滾動和的列（全鏈對帳；window 累計依 id 序）。"""
+        stmt = text(
+            "SELECT id FROM ("
+            "  SELECT id, balance_after,"
+            "         SUM(signed_amount) OVER ("
+            "           PARTITION BY store_id, contact_id ORDER BY id"
+            "         ) AS running"
+            "  FROM store_credit_ledger WHERE store_id = :sid"
+            ") chain WHERE balance_after <> running ORDER BY id"
+        )
+        result = await self._session.execute(stmt, {"sid": store_id})
+        return [int(row[0]) for row in result]
+
     async def list_ledger_contacts(self, store_id: int) -> list[int]:
         """帳本中出現過的 contact（孤兒帳本偵測：與帳戶列做全比對）。"""
         stmt = (

@@ -643,6 +643,82 @@ async def test_reversal_source_must_match_original_event(db_session: AsyncSessio
         )
 
 
+async def test_reversal_source_id_must_match_original(db_session: AsyncSession) -> None:
+    """沖正須追溯同一業務事件（第十四輪 high）：錯 id 沖正拒絕、不佔名額。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=900,
+        created_by=user_id,
+    )
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(
+            store_id,
+            credit.id,
+            source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+            source_id=999,  # ≠ 900
+            created_by=user_id,
+        )
+    # 正確 id 仍可沖（名額未被錯誤嘗試佔用）
+    ok = await svc.reverse(
+        store_id,
+        credit.id,
+        source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        source_id=900,
+        created_by=user_id,
+    )
+    assert ok.signed_amount == Decimal(-500)
+
+
+async def test_reconcile_detects_mid_chain_forgery(db_session: AsyncSession) -> None:
+    """全鏈對帳（第十四輪 medium）：中段 balance_after 偽造、即使尾列補平也要被抓。
+
+    直插兩列（繞過 service；trigger 僅限制沖正/CREDIT 形狀，DEBIT 直插帶錯
+    balance_after 可落地）→ reconcile 必須回報鏈違規。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=910,
+        created_by=user_id,
+    )
+    # 直插：DEBIT -100 但 balance_after 偽造為 999（正確應為 900）
+    await db_session.execute(
+        text(
+            "INSERT INTO store_credit_ledger"
+            " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+            "  source_type, source_id, fingerprint, created_by, created_at)"
+            " VALUES (:sid, :cid, 'DEBIT', -100, 999, 'SALE', 911, 'forged-mid', :uid, now())"
+        ),
+        {"sid": store_id, "cid": member_id, "uid": user_id},
+    )
+    # 尾列補平：DEBIT -100、balance_after = 正確總和 800（快取也補平）
+    await db_session.execute(
+        text(
+            "INSERT INTO store_credit_ledger"
+            " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+            "  source_type, source_id, fingerprint, created_by, created_at)"
+            " VALUES (:sid, :cid, 'DEBIT', -100, 800, 'SALE', 912, 'forged-tail', :uid, now())"
+        ),
+        {"sid": store_id, "cid": member_id, "uid": user_id},
+    )
+    await db_session.execute(
+        text("UPDATE store_credit_accounts SET balance = 800 WHERE store_id = :sid"),
+        {"sid": store_id},
+    )
+    report = await svc.reconcile(store_id)
+    assert report["mismatches"] != []  # 中段偽造被全鏈驗證抓到
+
+
 async def test_source_type_binding(db_session: AsyncSession) -> None:
     """來源-類型綁定（第十二輪 medium）：CREDIT≠ACQUISITION、DEBIT≠SALE、
     REVERSAL 非 VOID/ROLLBACK 一律拒。"""
@@ -825,7 +901,7 @@ async def test_db_check_constraints_reject_invalid_states(db_session: AsyncSessi
 
 async def test_db_rejects_cross_tenant_reversal_insert(db_session: AsyncSession) -> None:
     """持久層沖正租戶綁定（adversarial 第三輪 high）：直插「B 店沖 A 店列」被
-    複合自參考 FK 擋。"""
+    複合自參考 FK 擋（沖正守衛 trigger 會更早觸發——兩者皆 DBAPIError，防護等價）。"""
     store_id, user_id, member_id = await _seed(db_session)
     other_store = Store(name="B 店")
     db_session.add(other_store)
@@ -846,9 +922,9 @@ async def test_db_rejects_cross_tenant_reversal_insert(db_session: AsyncSession)
         source_id=77,
         created_by=user_id,
     )
-    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.exc import DBAPIError
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await db_session.execute(
             text(
                 "INSERT INTO store_credit_ledger"

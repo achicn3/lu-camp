@@ -344,6 +344,12 @@ class StoreCreditService:
             raise StoreCreditConflict(
                 f"{source_type} 不可沖 {original.entry_type}/{original.source_type} 列"
             )
+        # 沖正須追溯同一業務事件（第十四輪 high）：錯 id 的沖正會永久佔用該列
+        # 唯一的沖正名額、封死真正的回滾/作廢。
+        if source_id != original.source_id:
+            raise StoreCreditConflict(
+                f"沖正 source_id（{source_id}）必須等於原列 source_id（{original.source_id}）"
+            )
         entry, _ = await self._write_entry(
             store_id,
             original.contact_id,
@@ -444,6 +450,17 @@ class StoreCreditService:
                         "latest_balance_after": "",
                     }
                 )
+        # 全鏈驗證（第十四輪 medium）：每一列 balance_after 必等於該列止的滾動和
+        # ——只驗最新列會漏掉「中段偽造、尾列補平」的歷史污染。
+        for row_id in await self._repo.rows_violating_chain(store_id):
+            mismatches.append(
+                {
+                    "contact_id": -1,
+                    "ledger_sum": f"列 {row_id} 的 balance_after 不等於滾動和",
+                    "cached": "",
+                    "latest_balance_after": "",
+                }
+            )
         for account in await self._repo.list_accounts(store_id):
             ledger_sum = await self._repo.sum_signed(store_id, account.contact_id)
             latest = await self._repo.latest_balance_after(store_id, account.contact_id)
