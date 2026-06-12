@@ -338,6 +338,13 @@ async def test_zero_total_store_credit_is_422_not_500(
     payload["items"][0]["acquisition_cost"] = "0"  # type: ignore[index]
     resp = await client.post("/api/v1/acquisitions", json=payload, headers=_auth(token))
     assert resp.status_code == 422
+    # 零元 CASH 同樣拒（第十五輪：不留「入庫卻無撥款副作用」的單）。
+    # 前一個 422 的 router rollback 連 seed 一起回復（測試共用交易）→ 重 seed。
+    token, _store_id, seller_id = await _seed(db_session, open_drawer=False)
+    cash_payload = _buyout_payload(seller_id)
+    cash_payload["items"][0]["acquisition_cost"] = "0"  # type: ignore[index]
+    resp = await client.post("/api/v1/acquisitions", json=cash_payload, headers=_auth(token))
+    assert resp.status_code == 422
 
 
 async def test_db_rejects_inconsistent_payout_shapes(db_session: AsyncSession) -> None:

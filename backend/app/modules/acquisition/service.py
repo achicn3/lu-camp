@@ -226,10 +226,13 @@ class AcquisitionService:
         expected_cash = expected_credit = Decimal(0)
         if pays_out:
             expected_total = self._payout_total_from_request(data)
-            # 零應付總額（第十三輪 medium）：購物金/拆分腿無意義，DB 形狀 CHECK
-            # 會炸成 500——在領域層轉成可恢復的 422。
-            if expected_total <= 0 and payout_method != PayoutMethod.CASH:
-                raise InvalidPayoutSplit("應付總額為 0：僅可使用 CASH 撥款方式")
+            # 零應付總額（第十三/十五輪）：付費型收購必須有對價——零元 CASH 會
+            # 留下「入庫卻無任何撥款副作用」的單，與漏付路徑無法區分。若未來
+            # 需要「受贈/免費入庫」，應另立明確流程，不借道收購。
+            if expected_total <= 0:
+                raise InvalidPayoutSplit(
+                    "應付總額必須大於 0（BUYOUT/BULK_LOT 必須有對價；免費入庫請走獨立流程）"
+                )
             expected_cash, expected_credit = self._split_payout(data, expected_total)
             if expected_credit > 0 and ContactRole.MEMBER.value not in contact.roles:
                 raise StoreCreditMemberRequired(
