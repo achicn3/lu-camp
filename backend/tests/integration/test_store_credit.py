@@ -1130,6 +1130,74 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
             await s.commit()
 
 
+async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
+    """DB 鏈守衛並發（第十六輪 high）：兩個並發「直插」同帳戶，至多一個成功
+    ——帳戶列鎖在 DB 層序列化，輸家因前和已變而被鏈守衛拒。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="直插競態店")
+        s.add(store)
+        await s.flush()
+        user = User(
+            store_id=store.id, username="race-raw", password_hash="h", role=UserRole.MANAGER
+        )
+        member = Contact(store_id=store.id, name="直插會員", roles=["MEMBER"])
+        s.add_all([user, member])
+        await s.flush()
+        await StoreCreditService(s).credit(
+            store.id,
+            member.id,
+            cash_equivalent=Decimal(1000),
+            premium_rate=Decimal("0.00"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=950,
+            created_by=user.id,
+        )
+        store_id, user_id, member_id = store.id, user.id, member.id
+        await s.commit()
+
+    try:
+
+        async def _raw_debit(src: int) -> bool:
+            from sqlalchemy.exc import DBAPIError
+
+            async with sm() as s:
+                try:
+                    await s.execute(
+                        text(
+                            "INSERT INTO store_credit_ledger"
+                            " (store_id, contact_id, entry_type, signed_amount,"
+                            "  balance_after, source_type, source_id, fingerprint,"
+                            "  created_by, created_at)"
+                            " VALUES (:sid, :cid, 'DEBIT', -100, 900, 'SALE', :src,"
+                            "  :fp, :uid, now())"
+                        ),
+                        {
+                            "sid": store_id,
+                            "cid": member_id,
+                            "uid": user_id,
+                            "src": src,
+                            "fp": f"raw-{src}",
+                        },
+                    )
+                    await s.commit()
+                    return True
+                except DBAPIError:
+                    await s.rollback()
+                    return False
+
+        results = await asyncio.gather(_raw_debit(951), _raw_debit(952))
+        assert results.count(True) <= 1  # 兩個都宣稱 balance_after=900：至多一個能成立
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
 async def test_concurrent_debits_never_oversell() -> None:
     """I-7 並發：兩個並行扣抵合計超過餘額 → 恰一個成功（帳戶列鎖序列化）。
 

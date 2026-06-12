@@ -277,6 +277,12 @@ CREATE OR REPLACE FUNCTION store_credit_balance_chain_guard() RETURNS trigger AS
 DECLARE
   prior NUMERIC;
 BEGIN
+  -- 先鎖帳戶列再算前和（第十六輪 high）：READ COMMITTED 下兩個並發直插
+  -- 會讀到同一前和、雙雙通過——以帳戶列鎖在 DB 層序列化（service 路徑
+  -- 本就持同一鎖，重入無害）。
+  PERFORM 1 FROM store_credit_accounts
+    WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id
+    FOR UPDATE;
   SELECT COALESCE(SUM(signed_amount), 0) INTO prior
     FROM store_credit_ledger
     WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id;
