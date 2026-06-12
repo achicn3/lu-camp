@@ -6,8 +6,10 @@ docs/05-project-structure.md 掛載於此。
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.contacts.router import router as contacts_router
@@ -30,6 +32,16 @@ class HealthResponse(BaseModel):
 def create_app() -> FastAPI:
     """建立並設定 FastAPI 應用程式。"""
     app = FastAPI(title="lu-camp API", version="0.1.0")
+    # CORS：允許來源由設定提供（CORS_ORIGINS，逗號分隔）。認證走 Bearer 標頭
+    # （非 cookie），不需 allow_credentials。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get(
         f"{API_PREFIX}/health",

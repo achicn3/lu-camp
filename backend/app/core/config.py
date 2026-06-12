@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     database_url: str
     app_env: str = "development"
+    # CORS 允許來源（逗號分隔）：瀏覽器前端與 API 不同埠/主機時必須列入，
+    # 否則瀏覽器一律擋（實測發現：docs/10 架構即為 LAN 前端打 FastAPI）。
+    cors_origins: str = "http://localhost:3000"
     # 金鑰皆無預設、由 env 注入。pii_enc_key 為 base64 of 32 bytes；secret_key 供 JWT 簽章。
     pii_enc_key: str
     hmac_key: str

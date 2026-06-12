@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.modules.store.models  # noqa: F401  # 註冊 stores 到 metadata（users FK 解析需要）
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.core.security import hash_password
