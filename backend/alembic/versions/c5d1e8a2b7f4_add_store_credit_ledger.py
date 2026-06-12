@@ -31,7 +31,7 @@ def upgrade() -> None:
     op.create_unique_constraint("uq_contacts_id_store", "contacts", ["id", "store_id"])
     op.create_table(
         "store_credit_ledger",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.Integer(), sa.Identity(always=True), primary_key=True),
         sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.id"), nullable=False),
         sa.Column("contact_id", sa.Integer(), nullable=False),
         sa.Column(

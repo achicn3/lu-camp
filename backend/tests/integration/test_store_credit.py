@@ -1187,8 +1187,9 @@ async def test_raw_insert_heals_drifted_cache(db_session: AsyncSession) -> None:
     assert (await svc.reconcile(store_id))["mismatches"] == []
 
 
-async def test_db_rejects_backdated_id_insert(db_session: AsyncSession) -> None:
-    """尾插守衛（第十九輪 high）：回填帶低 id（插隊歷史）直接拒。"""
+async def test_db_rejects_explicit_id_inserts(db_session: AsyncSession) -> None:
+    """id 為 GENERATED ALWAYS（第十九/二十輪 high）：外帶 id——不論前插（低 id）
+    或未來 id（會讓序列落後、卡死後續寫入）——一律被 DB 拒。"""
     from sqlalchemy.exc import DBAPIError
 
     store_id, user_id, member_id = await _seed(db_session)
@@ -1202,23 +1203,30 @@ async def test_db_rejects_backdated_id_insert(db_session: AsyncSession) -> None:
         source_id=980,
         created_by=user_id,
     )
-    with pytest.raises(DBAPIError):
-        await db_session.execute(
-            text(
-                "INSERT INTO store_credit_ledger"
-                " (id, store_id, contact_id, entry_type, signed_amount, balance_after,"
-                "  source_type, source_id, fingerprint, created_by, created_at)"
-                " VALUES (:lowid, :sid, :cid, 'DEBIT', -100, 900, 'SALE', 981,"
-                "  'backdate', :uid, now())"
-            ),
-            {
-                "lowid": entry.id - 1 if entry.id > 1 else 0,
-                "sid": store_id,
-                "cid": member_id,
-                "uid": user_id,
-            },
+    for forged_id in (max(entry.id - 1, 0), entry.id + 1_000_000):
+        with pytest.raises(DBAPIError):
+            await db_session.execute(
+                text(
+                    "INSERT INTO store_credit_ledger"
+                    " (id, store_id, contact_id, entry_type, signed_amount, balance_after,"
+                    "  source_type, source_id, fingerprint, created_by, created_at)"
+                    " VALUES (:fid, :sid, :cid, 'DEBIT', -100, 900, 'SALE', 981,"
+                    "  'forged-id', :uid, now())"
+                ),
+                {"fid": forged_id, "sid": store_id, "cid": member_id, "uid": user_id},
+            )
+        await db_session.rollback()
+        store_id, user_id, member_id = await _seed(db_session)
+        svc = StoreCreditService(db_session)
+        entry = await svc.credit(
+            store_id,
+            member_id,
+            cash_equivalent=Decimal(1000),
+            premium_rate=Decimal("0.00"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=980,
+            created_by=user_id,
         )
-    await db_session.rollback()
 
 
 async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Numeric,
     String,
@@ -143,7 +144,9 @@ class StoreCreditLedger(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    # GENERATED ALWAYS：外帶 id（前插/未來 id）一律被 DB 拒（第二十輪 high：
+    # 高 id 直插會讓序列落後、卡死該帳戶後續合法寫入）。
+    id: Mapped[int] = mapped_column(Identity(always=True), primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     contact_id: Mapped[int] = mapped_column(index=True)  # 複合 FK 見 __table_args__
     entry_type: Mapped[StoreCreditEntryType] = mapped_column(_enum_col(StoreCreditEntryType))
