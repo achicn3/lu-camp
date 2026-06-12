@@ -109,6 +109,18 @@ def upgrade() -> None:
             "entry_type = 'ADJUSTMENT' OR source_id IS NOT NULL",
             name="ck_scl_source_required",
         ),
+        sa.CheckConstraint(
+            "entry_type <> 'CREDIT' OR source_type = 'ACQUISITION'",
+            name="ck_scl_credit_source",
+        ),
+        sa.CheckConstraint(
+            "entry_type <> 'DEBIT' OR source_type = 'SALE'",
+            name="ck_scl_debit_source",
+        ),
+        sa.CheckConstraint(
+            "entry_type <> 'REVERSAL' OR source_type IN ('SALE_VOID', 'ACQUISITION_ROLLBACK')",
+            name="ck_scl_reversal_source",
+        ),
         sa.CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
         sa.CheckConstraint(
             "entry_type <> 'CREDIT' OR"

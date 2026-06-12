@@ -575,6 +575,77 @@ async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> Non
     await db_session.rollback()
 
 
+async def test_write_aborts_on_cache_drift(db_session: AsyncSession) -> None:
+    """快取漂移時寫入硬中止（第十二輪 high）：不把錯的 balance_after 燒進帳本。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=700,
+        created_by=user_id,
+    )
+    await db_session.execute(
+        text("UPDATE store_credit_accounts SET balance = 99999 WHERE store_id = :sid"),
+        {"sid": store_id},
+    )
+    with pytest.raises(StoreCreditConflict):
+        await svc.debit(
+            store_id,
+            member_id,
+            amount=Decimal(500),  # 以漂移快取看似足夠，以帳本看不足——必須中止
+            source_type=StoreCreditSourceType.SALE,
+            source_id=701,
+            created_by=user_id,
+        )
+
+
+async def test_source_type_binding(db_session: AsyncSession) -> None:
+    """來源-類型綁定（第十二輪 medium）：CREDIT≠ACQUISITION、DEBIT≠SALE、
+    REVERSAL 非 VOID/ROLLBACK 一律拒。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    with pytest.raises(StoreCreditConflict):
+        await svc.credit(
+            store_id,
+            member_id,
+            cash_equivalent=Decimal(100),
+            premium_rate=Decimal("0.10"),
+            source_type=StoreCreditSourceType.SALE,
+            source_id=710,
+            created_by=user_id,
+        )
+    with pytest.raises(StoreCreditConflict):
+        await svc.debit(
+            store_id,
+            member_id,
+            amount=Decimal(10),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=711,
+            created_by=user_id,
+        )
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=712,
+        created_by=user_id,
+    )
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(
+            store_id,
+            credit.id,
+            source_type=StoreCreditSourceType.SALE,
+            source_id=713,
+            created_by=user_id,
+        )
+
+
 async def test_premium_rate_policy_bounds(db_session: AsyncSession) -> None:
     """溢價率政策界線（第八輪 medium）：負值/超過 20% 的 CREDIT 一律拒——
     超界會寫出自洽但違反政策的負債，I-3 抓不到。"""

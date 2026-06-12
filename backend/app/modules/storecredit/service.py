@@ -137,7 +137,18 @@ class StoreCreditService:
         )
         if replay is not None:
             return replay, False
-        new_balance = Decimal(account.balance) + signed_amount
+        # 寫入前一致性檢查（adversarial 第十二輪 high）：快取若已漂移，繼續寫
+        # 會把錯的 balance_after 燒進不可變帳本（事後對帳只能發現、不能修正）。
+        # 鎖內重算帳本餘額為權威基底；三方不一致即硬中止、先對帳。
+        ledger_balance = await self._repo.sum_signed(store_id, contact_id)
+        latest_after = await self._repo.latest_balance_after(store_id, contact_id)
+        cached = Decimal(account.balance)
+        if cached != ledger_balance or (latest_after is not None and latest_after != cached):
+            raise StoreCreditConflict(
+                f"contact {contact_id} 帳本/快取不一致（帳本 {ledger_balance}、"
+                f"快取 {cached}），寫入中止——請先執行對帳處理"
+            )
+        new_balance = ledger_balance + signed_amount
         if new_balance < 0:
             raise InsufficientStoreCredit(
                 f"contact {contact_id} 購物金餘額不足（{account.balance} {signed_amount:+}）"
@@ -241,6 +252,8 @@ class StoreCreditService:
         """收購入帳（CREDIT）：實發 = round_ntd(現金等值 × (1+溢價率))（I-4）。"""
         if cash_equivalent <= 0:
             raise StoreCreditConflict("現金等值必須為正")
+        if source_type is not StoreCreditSourceType.ACQUISITION:
+            raise StoreCreditConflict("CREDIT 只能來自 ACQUISITION（docs/16 §3.1）")
         if not (PREMIUM_RATE_MIN <= premium_rate <= PREMIUM_RATE_MAX):
             raise StoreCreditConflict(
                 f"溢價率 {premium_rate} 超出政策界線 [{PREMIUM_RATE_MIN}, {PREMIUM_RATE_MAX}]"
@@ -273,6 +286,8 @@ class StoreCreditService:
         """消費扣抵（DEBIT，負向）；餘額不足 → InsufficientStoreCredit（I-6）。"""
         if amount <= 0:
             raise StoreCreditConflict("扣抵金額必須為正")
+        if source_type is not StoreCreditSourceType.SALE:
+            raise StoreCreditConflict("DEBIT 只能來自 SALE（docs/16 §3.2）")
         entry, _ = await self._write_entry(
             store_id,
             contact_id,
@@ -301,6 +316,11 @@ class StoreCreditService:
         同一列 → StoreCreditConflict。扣回方向餘額不足 → InsufficientStoreCredit，
         由呼叫端依 docs/16 §3.3 擋下轉人工。
         """
+        if source_type not in (
+            StoreCreditSourceType.SALE_VOID,
+            StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        ):
+            raise StoreCreditConflict("REVERSAL 來源僅限 SALE_VOID / ACQUISITION_ROLLBACK")
         original = await self._repo.get_entry(store_id, original_entry_id)
         if original is None:
             raise CrossStoreReference(f"被沖正列 {original_entry_id} 不存在於 store {store_id}")

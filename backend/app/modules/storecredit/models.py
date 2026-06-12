@@ -117,6 +117,20 @@ class StoreCreditLedger(Base):
             "entry_type = 'ADJUSTMENT' OR source_id IS NOT NULL",
             name="ck_scl_source_required",
         ),
+        # 來源-類型綁定（adversarial 第十二輪 medium）：算術自洽但掛錯業務事件的
+        # 列，對帳抓不到——形狀收進 DB。
+        CheckConstraint(
+            "entry_type <> 'CREDIT' OR source_type = 'ACQUISITION'",
+            name="ck_scl_credit_source",
+        ),
+        CheckConstraint(
+            "entry_type <> 'DEBIT' OR source_type = 'SALE'",
+            name="ck_scl_debit_source",
+        ),
+        CheckConstraint(
+            "entry_type <> 'REVERSAL' OR source_type IN ('SALE_VOID', 'ACQUISITION_ROLLBACK')",
+            name="ck_scl_reversal_source",
+        ),
         CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
         CheckConstraint(
             "entry_type <> 'CREDIT' OR"
