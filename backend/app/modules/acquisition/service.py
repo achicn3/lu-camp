@@ -145,12 +145,29 @@ class AcquisitionService:
         *,
         idempotency_key: str,
     ) -> AcquisitionResult:
-        """建立收購單並完成入庫/付現；任一步失敗整筆回復（不 commit）。"""
+        """建立收購單並完成入庫/付現。
+
+        **service 邊界原子性（Codex 第六輪）**：主體包在 savepoint 內，任何例外
+        （含未來新增的失敗模式：溢價政策、帳本漂移…）都自動回滾本操作的全部
+        寫入——直呼 service、catch 例外後不回滾就 commit 的呼叫者，也不可能
+        留下半套。外層交易由呼叫端 commit/rollback。
+        """
         # 冪等為 service 邊界必填（Codex：任何呼叫者重試都不得重複付現/入購物金）。
         replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
         if replay is not None:
             return replay
+        async with self._session.begin_nested():
+            return await self._create_acquisition_impl(
+                store_id, clerk_user_id, data, idempotency_key
+            )
 
+    async def _create_acquisition_impl(
+        self,
+        store_id: int,
+        clerk_user_id: int,
+        data: AcquisitionCreate,
+        idempotency_key: str,
+    ) -> AcquisitionResult:
         contact = await self._contacts.get_contact(store_id, data.contact_id)
         if contact is None:
             raise ContactNotFound(f"找不到 contact {data.contact_id}")

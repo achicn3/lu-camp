@@ -329,6 +329,36 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_late_payout_failure_rolls_back_via_savepoint(
+    db_session: AsyncSession,
+) -> None:
+    """savepoint 原子性（Codex 第六輪 high）：晚期失敗（溢價超出政策——只能在
+    credit 內被擋）後 catch、不回滾、直接 commit → 仍零落地。"""
+    import pytest
+
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+    from app.modules.inventory.models import SerializedItem
+    from app.modules.settings.models import StoreSettings
+    from app.shared.exceptions import DomainError
+
+    _token, store_id, seller_id = await _seed(db_session)  # 會員、已開帳
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    # 直插超界溢價（PATCH API 會擋 0.2 以上，模擬設定被外力改壞的晚期失敗）
+    db_session.add(StoreSettings(store_id=store_id, premium_rate=Decimal("0.9000")))
+    await db_session.flush()
+    data = AcquisitionCreate.model_validate(
+        _buyout_payload(seller_id, payout_method="SPLIT", payout_split_cash="400")
+    )
+    svc = AcquisitionService(db_session)
+    with pytest.raises(DomainError):
+        await svc.create_acquisition(store_id, clerk_id, data, idempotency_key="late-fail")
+    await db_session.commit()  # 粗心呼叫者
+    assert await db_session.scalar(select(func.count()).select_from(Acquisition)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(SerializedItem)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
+
+
 async def test_service_level_retry_is_idempotent(db_session: AsyncSession) -> None:
     """service 邊界冪等必填（Codex）：router 之外的呼叫者重試也不得重複付現/入帳。"""
     from app.modules.acquisition.schemas import AcquisitionCreate
