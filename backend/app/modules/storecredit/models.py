@@ -289,6 +289,15 @@ BEGIN
   IF NEW.balance_after <> prior + NEW.signed_amount THEN
     RAISE EXCEPTION 'balance_after 必須等於滾動和（前和＋本列）';
   END IF;
+  -- 必須尾插（第十九輪 high）：歷史以 id 排序，回填帶低 id 會造出
+  -- 「總和正確但順序不可能」的鏈、並卡死後續寫入。
+  IF EXISTS (
+    SELECT 1 FROM store_credit_ledger
+     WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id
+       AND id >= NEW.id
+  ) THEN
+    RAISE EXCEPTION '帳本只能尾插：id 必須大於該帳戶既有最大 id';
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql

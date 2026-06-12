@@ -1187,6 +1187,40 @@ async def test_raw_insert_heals_drifted_cache(db_session: AsyncSession) -> None:
     assert (await svc.reconcile(store_id))["mismatches"] == []
 
 
+async def test_db_rejects_backdated_id_insert(db_session: AsyncSession) -> None:
+    """尾插守衛（第十九輪 high）：回填帶低 id（插隊歷史）直接拒。"""
+    from sqlalchemy.exc import DBAPIError
+
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    entry = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=980,
+        created_by=user_id,
+    )
+    with pytest.raises(DBAPIError):
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (id, store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  source_type, source_id, fingerprint, created_by, created_at)"
+                " VALUES (:lowid, :sid, :cid, 'DEBIT', -100, 900, 'SALE', 981,"
+                "  'backdate', :uid, now())"
+            ),
+            {
+                "lowid": entry.id - 1 if entry.id > 1 else 0,
+                "sid": store_id,
+                "cid": member_id,
+                "uid": user_id,
+            },
+        )
+    await db_session.rollback()
+
+
 async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
     """DB 鏈守衛並發（第十六輪 high）：兩個並發「直插」同帳戶，至多一個成功
     ——帳戶列鎖在 DB 層序列化，輸家因前和已變而被鏈守衛拒。"""
