@@ -207,6 +207,36 @@ async def test_store_credit_payout_retry_is_idempotent(
     assert count == 1
 
 
+async def test_retry_fingerprint_canonicalizes_money_forms(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同 key、語意相同但金額形式不同（1000／"1000"／"1000.0"）→ 一律冪等回原單
+    （Codex：形式差異不得把合法重試打成 409）。"""
+    token, _store_id, seller_id = await _seed(db_session)
+
+    def payload(cost: object) -> dict[str, object]:
+        return {
+            "type": "BUYOUT",
+            "contact_id": seller_id,
+            "items": [
+                {"name": "帳篷", "grade": "A", "acquisition_cost": cost, "listed_price": "1800"}
+            ],
+        }
+
+    first = await client.post(
+        "/api/v1/acquisitions", json=payload("1000"), headers=_auth(token, idem="canon-key")
+    )
+    assert first.status_code == 201
+    for variant in (1000, "1000.0"):
+        retry = await client.post(
+            "/api/v1/acquisitions",
+            json=payload(variant),
+            headers=_auth(token, idem="canon-key"),
+        )
+        assert retry.status_code == 201, retry.text
+        assert retry.json()["acquisition_id"] == first.json()["acquisition_id"]
+
+
 async def test_same_key_different_payload_conflicts(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -32,7 +32,9 @@ def _ensure_whole_nonneg(value: Decimal, field: str) -> Decimal:
         raise ValueError(f"{field} 不可為負")
     if value != value.to_integral_value():
         raise ValueError(f"{field} 必須為整數元（無角分）")
-    return value
+    # 正規化（Codex：冪等指紋不可受 "1000.0"/"1000"/1000 形式差異影響）：
+    # 一律回整數形 Decimal，下游序列化/指紋/持久化全 canonical。
+    return Decimal(value.to_integral_value())
 
 
 class AcquisitionItemIn(BaseModel):
@@ -88,6 +90,11 @@ class AcquisitionCreate(BaseModel):
     # ＝應付總額−現金部分，由後端推導，避免兩數加總不一致）。
     payout_method: PayoutMethod = PayoutMethod.CASH
     payout_split_cash: NTDAmount | None = None
+
+    @field_validator("payout_split_cash")
+    @classmethod
+    def _normalize_split_cash(cls, v: Decimal | None) -> Decimal | None:
+        return v if v is None else _ensure_whole_nonneg(v, "payout_split_cash")
 
     @model_validator(mode="after")
     def _check_payout(self) -> Self:
