@@ -24,7 +24,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
-from app.shared.enums import UserRole
+from app.shared.enums import StoreCreditSourceType, UserRole
 
 
 @pytest_asyncio.fixture
@@ -528,8 +528,10 @@ async def test_blank_idempotency_key_rejected_at_service(db_session: AsyncSessio
 
 
 async def test_forged_credit_leg_rejected_at_commit() -> None:
-    """credit 腿綁定帳本（第十六輪 medium）：直插「有購物金腿、無對應分錄」的
-    header → COMMIT 時被 deferrable 約束觸發器擋。"""
+    """credit 腿 ↔ 帳本雙向綁定（第十六輪 medium＋第十七輪 P1×2）：
+    (a) 有購物金腿、無對應分錄的 header → COMMIT 擋；
+    (b) 分錄入錯對象（同店等值但 contact 不符）→ COMMIT 擋；
+    (c) 孤兒分錄（source_id 不指向任何收購）憑空鑄造購物金 → COMMIT 擋。"""
     import pytest
     from sqlalchemy import text
     from sqlalchemy.exc import DBAPIError
@@ -545,26 +547,64 @@ async def test_forged_credit_leg_rejected_at_commit() -> None:
         seller = Contact(
             store_id=store.id, name="賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
         )
-        s.add_all([clerk, seller])
+        other = Contact(
+            store_id=store.id, name="別的會員", roles=["MEMBER"], national_id_enc="enc2"
+        )
+        s.add_all([clerk, seller, other])
         await s.flush()
-        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        store_id, clerk_id = store.id, clerk.id
+        seller_id, other_id = seller.id, other.id
         await s.commit()
 
+    forged_header_sql = text(
+        "INSERT INTO acquisitions"
+        " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+        "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+        "  created_at, updated_at)"
+        " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, :credit,"
+        "  now(), now()) RETURNING id"
+    )
     try:
+        # (a) header 有 credit 腿、帳本無分錄
         async with sm() as s:
             await s.execute(
-                text(
-                    "INSERT INTO acquisitions"
-                    " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
-                    "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
-                    "  created_at, updated_at)"
-                    " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, 999999,"
-                    "  now(), now())"
-                ),
-                {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+                forged_header_sql,
+                {"sid": store_id, "cid": seller_id, "uid": clerk_id, "credit": 999999},
             )
             with pytest.raises(DBAPIError):
                 await s.commit()  # deferrable trigger 於提交時驗
+
+        # (b) 分錄入錯對象：header 給賣方、等值分錄卻記在別的會員帳上
+        async with sm() as s:
+            acq_id = await s.scalar(
+                forged_header_sql,
+                {"sid": store_id, "cid": seller_id, "uid": clerk_id, "credit": 1000},
+            )
+            await StoreCreditService(s).credit(
+                store_id,
+                other_id,
+                cash_equivalent=Decimal(1000),
+                premium_rate=Decimal("0.10"),
+                source_type=StoreCreditSourceType.ACQUISITION,
+                source_id=acq_id,
+                created_by=clerk_id,
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+
+        # (c) 孤兒分錄：source_id 不指向任何收購 → 不可憑空鑄造負債
+        async with sm() as s:
+            await StoreCreditService(s).credit(
+                store_id,
+                seller_id,
+                cash_equivalent=Decimal(500),
+                premium_rate=Decimal("0.10"),
+                source_type=StoreCreditSourceType.ACQUISITION,
+                source_id=424242,
+                created_by=clerk_id,
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))

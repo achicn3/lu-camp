@@ -39,6 +39,49 @@ async def _seed(session: AsyncSession) -> tuple[int, int, int]:
     return store.id, user.id, member.id
 
 
+async def _seed_acquisition_header(
+    session: AsyncSession,
+    store_id: int,
+    contact_id: int,
+    clerk_user_id: int,
+    credit_cash_equivalent: int,
+    acq_id: int | None = None,
+) -> int:
+    """插一筆 STORE_CREDIT 撥款的收購頭，回其 id。
+
+    SC-2 起帳本的 ACQUISITION CREDIT 分錄必須對應同店同對象等值的收購
+    （COMMIT 時驗）——real-commit 測試的種子須在同交易帶上 header。
+    指定 acq_id 時用 ON CONFLICT DO NOTHING：並發 fixture 兩邊搶建同一頭，
+    輸家沿用既有列（等值，仍滿足綁定）。
+    """
+    inserted = (
+        await session.execute(
+            text(
+                "INSERT INTO acquisitions"
+                " (id, store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                "  created_at, updated_at)"
+                " VALUES ("
+                "  COALESCE(:id, nextval(pg_get_serial_sequence('acquisitions', 'id'))),"
+                "  :sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, :credit,"
+                "  now(), now())"
+                " ON CONFLICT (id) DO NOTHING RETURNING id"
+            ),
+            {
+                "id": acq_id,
+                "sid": store_id,
+                "cid": contact_id,
+                "uid": clerk_user_id,
+                "credit": credit_cash_equivalent,
+            },
+        )
+    ).scalar()
+    if inserted is not None:
+        return int(inserted)
+    assert acq_id is not None  # 衝突只可能發生在指定 id 的並發情境
+    return acq_id
+
+
 async def test_credit_applies_premium_and_records_three_values(
     db_session: AsyncSession,
 ) -> None:
@@ -1046,13 +1089,18 @@ async def test_concurrent_same_source_credits_idempotent() -> None:
 
         async def _credit_once() -> int:
             async with sm() as s:
+                # 兩邊搶建同一收購頭（輸家在 ON CONFLICT 等贏家 commit 後沿用），
+                # 再以其 id 為來源入帳——重現「同收購重試」的並發。
+                acq_id = await _seed_acquisition_header(
+                    s, store_id, member_id, user_id, 1000, acq_id=880001
+                )
                 entry = await StoreCreditService(s).credit(
                     store_id,
                     member_id,
                     cash_equivalent=Decimal(1000),
                     premium_rate=Decimal("0.1000"),
                     source_type=StoreCreditSourceType.ACQUISITION,
-                    source_id=500,
+                    source_id=acq_id,
                     created_by=user_id,
                 )
                 await s.commit()
@@ -1067,6 +1115,7 @@ async def test_concurrent_same_source_credits_idempotent() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
             await s.execute(text("DELETE FROM users"))
@@ -1087,13 +1136,14 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
         member = Contact(store_id=store.id, name="沖正會員", roles=["MEMBER"])
         s.add_all([user, member])
         await s.flush()
+        acq_id = await _seed_acquisition_header(s, store.id, member.id, user.id, 1000)
         credit = await StoreCreditService(s).credit(
             store.id,
             member.id,
             cash_equivalent=Decimal(1000),
             premium_rate=Decimal("0.0000"),
             source_type=StoreCreditSourceType.ACQUISITION,
-            source_id=600,
+            source_id=acq_id,
             created_by=user.id,
         )
         store_id, user_id, member_id, credit_id = store.id, user.id, member.id, credit.id
@@ -1108,7 +1158,7 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
                     store_id,
                     credit_id,
                     source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
-                    source_id=600,
+                    source_id=acq_id,
                     created_by=user_id,
                 )
                 await s.commit()
@@ -1123,6 +1173,7 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
             await s.execute(text("DELETE FROM users"))
@@ -1243,13 +1294,14 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
         member = Contact(store_id=store.id, name="直插會員", roles=["MEMBER"])
         s.add_all([user, member])
         await s.flush()
+        acq_id = await _seed_acquisition_header(s, store.id, member.id, user.id, 1000)
         await StoreCreditService(s).credit(
             store.id,
             member.id,
             cash_equivalent=Decimal(1000),
             premium_rate=Decimal("0.00"),
             source_type=StoreCreditSourceType.ACQUISITION,
-            source_id=950,
+            source_id=acq_id,
             created_by=user.id,
         )
         store_id, user_id, member_id = store.id, user.id, member.id
@@ -1290,6 +1342,7 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
             await s.execute(text("DELETE FROM users"))
@@ -1311,13 +1364,14 @@ async def test_concurrent_debits_never_oversell() -> None:
         member = Contact(store_id=store.id, name="競態會員", roles=["MEMBER"])
         s.add_all([user, member])
         await s.flush()
+        acq_id = await _seed_acquisition_header(s, store.id, member.id, user.id, 1000)
         await StoreCreditService(s).credit(
             store.id,
             member.id,
             cash_equivalent=Decimal(1000),
             premium_rate=Decimal("0.00"),
             source_type=StoreCreditSourceType.ACQUISITION,
-            source_id=99,
+            source_id=acq_id,
             created_by=user.id,
         )
         store_id, user_id, member_id = store.id, user.id, member.id
@@ -1355,6 +1409,7 @@ async def test_concurrent_debits_never_oversell() -> None:
             # 帳本 insert-only trigger 連 DELETE 都擋（正確行為）；
             # 測試清理用 TRUNCATE（不觸發列級 trigger）。
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
             await s.execute(text("DELETE FROM users"))

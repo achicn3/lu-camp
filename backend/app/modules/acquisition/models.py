@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import AcquisitionType, PayoutMethod
 
 
@@ -113,10 +114,11 @@ BEGIN
   END IF;
   SELECT cash_equivalent INTO ledger_ce
     FROM store_credit_ledger
-   WHERE store_id = NEW.store_id AND source_type = 'ACQUISITION'
-     AND source_id = NEW.id AND entry_type = 'CREDIT';
+   WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id
+     AND source_type = 'ACQUISITION' AND source_id = NEW.id
+     AND entry_type = 'CREDIT';
   IF ledger_ce IS NULL OR ledger_ce <> NEW.payout_credit_cash_equivalent THEN
-    RAISE EXCEPTION '收購購物金腿必須對應等值的帳本 ACQUISITION CREDIT 分錄';
+    RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
   END IF;
   RETURN NEW;
 END;
@@ -135,8 +137,50 @@ ACQ_CREDIT_LEG_GUARD_DROP_DDL: tuple[str, ...] = (
     "DROP FUNCTION IF EXISTS acquisitions_credit_leg_guard()",
 )
 
+# 反向綁定（Codex SC-2 第十七輪 P1）：帳本的 ACQUISITION CREDIT 分錄也必須對應
+# 一筆同店同對象、credit 腿等值的收購頭——否則直插/直呼 storecredit service 可
+# 憑空鑄造購物金負債（孤兒分錄）。同為 COMMIT 時驗：正常時序 header 先插、
+# 分錄後插，同交易內彼此可見。
+LEDGER_ACQ_SOURCE_GUARD_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION store_credit_ledger_acq_source_guard() RETURNS trigger AS $$
+DECLARE
+  acq_credit NUMERIC;
+BEGIN
+  IF NEW.entry_type <> 'CREDIT' OR NEW.source_type <> 'ACQUISITION' THEN
+    RETURN NEW;
+  END IF;
+  SELECT payout_credit_cash_equivalent INTO acq_credit
+    FROM acquisitions
+   WHERE id = NEW.source_id AND store_id = NEW.store_id
+     AND contact_id = NEW.contact_id;
+  IF acq_credit IS NULL OR acq_credit <> NEW.cash_equivalent THEN
+    RAISE EXCEPTION 'ACQUISITION CREDIT 分錄必須對應同店同對象、credit 腿等值的收購';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE CONSTRAINT TRIGGER trg_store_credit_ledger_acq_source_guard
+AFTER INSERT OR UPDATE ON store_credit_ledger
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION store_credit_ledger_acq_source_guard()
+""",
+)
+
+LEDGER_ACQ_SOURCE_GUARD_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_store_credit_ledger_acq_source_guard ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS store_credit_ledger_acq_source_guard()",
+)
+
 for _ddl in ACQ_CREDIT_LEG_GUARD_DDL:
     # 掛本表 after_create（只在表真正建立時觸發一次；metadata 層在 checkfirst
     # 重跑時會重複執行而撞 DuplicateObject）。plpgsql 函式主體對
     # store_credit_ledger 的引用於執行期才解析，故不需等 ledger 表先建。
     event.listen(Acquisition.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]
+
+for _ddl in LEDGER_ACQ_SOURCE_GUARD_DDL:
+    # 掛 ledger 表 after_create：trigger 本體只需 ledger 存在；plpgsql 函式對
+    # acquisitions 的引用同樣於執行期才解析，不受兩表建立順序影響。
+    event.listen(StoreCreditLedger.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]

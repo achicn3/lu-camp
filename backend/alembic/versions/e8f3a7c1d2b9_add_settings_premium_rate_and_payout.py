@@ -17,6 +17,8 @@ from alembic import op
 from app.modules.acquisition.models import (
     ACQ_CREDIT_LEG_GUARD_DDL,
     ACQ_CREDIT_LEG_GUARD_DROP_DDL,
+    LEDGER_ACQ_SOURCE_GUARD_DDL,
+    LEDGER_ACQ_SOURCE_GUARD_DROP_DDL,
 )
 
 # revision identifiers, used by Alembic.
@@ -115,13 +117,13 @@ def upgrade() -> None:
         " AND payout_cash_amount > 0 AND payout_credit_cash_equivalent > 0"
         " AND total_cash_paid = payout_cash_amount)",
     )
-    for ddl in ACQ_CREDIT_LEG_GUARD_DDL:
+    for ddl in ACQ_CREDIT_LEG_GUARD_DDL + LEDGER_ACQ_SOURCE_GUARD_DDL:
         op.execute(ddl)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
-    for ddl in ACQ_CREDIT_LEG_GUARD_DROP_DDL:
+    for ddl in LEDGER_ACQ_SOURCE_GUARD_DROP_DDL + ACQ_CREDIT_LEG_GUARD_DROP_DDL:
         op.execute(ddl)
     op.drop_constraint("ck_acquisitions_split_shape", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_store_credit_shape", "acquisitions", type_="check")
