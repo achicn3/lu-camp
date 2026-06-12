@@ -101,13 +101,23 @@ class AcquisitionService:
         SPLIT 的現金部分必須小於應付總額（等於＝CASH、超過＝多付），兩部分皆 >0
         （docs/16 §1.7）。
         """
-        if data.payout_method is PayoutMethod.CASH:
-            return total, Decimal(0)
-        if data.payout_method is PayoutMethod.STORE_CREDIT:
+        # service 邊界完整驗證（Codex：schema 可被 model_construct 繞過；
+        # 負/零現金部分會造成「無現金腿」或購物金超發）。
+        if data.payout_method is not PayoutMethod.SPLIT:
+            if data.payout_split_cash is not None:
+                raise InvalidPayoutSplit("僅 SPLIT 可提供 payout_split_cash")
+            if data.payout_method is PayoutMethod.CASH:
+                return total, Decimal(0)
             return Decimal(0), total
-        cash_part = Decimal(data.payout_split_cash or 0)
-        if cash_part >= total:
-            raise InvalidPayoutSplit(f"SPLIT 現金部分（{cash_part}）必須小於應付總額（{total}）")
+        if data.payout_split_cash is None:
+            raise InvalidPayoutSplit("SPLIT 必須提供現金部分（payout_split_cash）")
+        cash_part = Decimal(data.payout_split_cash)
+        if cash_part != cash_part.to_integral_value():
+            raise InvalidPayoutSplit("SPLIT 現金部分必須為整數元")
+        if cash_part <= 0 or cash_part >= total:
+            raise InvalidPayoutSplit(
+                f"SPLIT 現金部分（{cash_part}）必須介於 0 與應付總額（{total}）之間（不含端點）"
+            )
         return cash_part, total - cash_part
 
     async def create_acquisition(
@@ -130,6 +140,10 @@ class AcquisitionService:
         if contact.national_id_enc is None:
             raise AcquisitionRequiresNationalId("收購/寄售對象必須有 national_id")
 
+        if data.type == AcquisitionType.CONSIGNMENT and (
+            data.payout_method is not PayoutMethod.CASH or data.payout_split_cash is not None
+        ):
+            raise InvalidPayoutSplit("CONSIGNMENT 不撥款，不可指定撥款方式/拆分")
         pays_out = data.type in _CASH_PAYING
         # 純購物金不碰現金、不要求開帳（docs/16 §3.1）；含現金部分才要求。
         needs_cash_session = pays_out and data.payout_method in (

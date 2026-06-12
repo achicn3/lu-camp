@@ -254,6 +254,54 @@ async def test_same_key_different_payload_conflicts(
     assert resp.status_code == 409
 
 
+async def test_service_rejects_invalid_split_even_bypassing_schema(
+    db_session: AsyncSession,
+) -> None:
+    """service 邊界完整驗證（Codex high）：model_construct 繞過 Pydantic 帶
+    零/負現金部分 → 拒絕且零落地（無收購/現金/帳本）。"""
+    from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
+    from app.modules.acquisition.service import AcquisitionService
+    from app.shared.enums import AcquisitionType as AT
+    from app.shared.enums import Grade
+    from app.shared.enums import PayoutMethod as PM
+    from app.shared.exceptions import InvalidPayoutSplit
+
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    item = AcquisitionItemIn.model_construct(
+        name="帳篷",
+        grade=Grade.A,
+        listed_price=Decimal(1800),
+        acquisition_cost=Decimal(1000),
+        brand_id=None,
+        product_model_id=None,
+        commission_pct=None,
+    )
+    svc = AcquisitionService(db_session)
+    for bad_cash in (Decimal(0), Decimal(-100)):
+        data = AcquisitionCreate.model_construct(
+            type=AT.BUYOUT,
+            contact_id=seller_id,
+            note=None,
+            items=[item],
+            lot=None,
+            payout_method=PM.SPLIT,
+            payout_split_cash=bad_cash,
+        )
+        import pytest
+
+        with pytest.raises(InvalidPayoutSplit):
+            await svc.create_acquisition(
+                store_id, clerk_id, data, idempotency_key=f"bypass-{bad_cash}"
+            )
+        await db_session.rollback()
+        _token, store_id, seller_id = await _seed(db_session)
+        clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+        svc = AcquisitionService(db_session)
+    count = await db_session.scalar(select(func.count()).select_from(Acquisition))
+    assert count == 0
+
+
 async def test_service_level_retry_is_idempotent(db_session: AsyncSession) -> None:
     """service 邊界冪等必填（Codex）：router 之外的呼叫者重試也不得重複付現/入帳。"""
     from app.modules.acquisition.schemas import AcquisitionCreate
