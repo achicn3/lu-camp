@@ -14,6 +14,7 @@ from app.modules.settings.defaults import (
     DEFAULT_COMMISSION_PCT,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
+    DEFAULT_PREMIUM_RATE,
     DEFAULT_TAX_RATE,
 )
 from app.modules.settings.models import StoreSettings
@@ -46,6 +47,7 @@ class StoreSettingsService:
             tax_rate=DEFAULT_TAX_RATE,
             default_commission_pct=DEFAULT_COMMISSION_PCT,
             default_margin_pct=DEFAULT_MARGIN_PCT,
+            premium_rate=DEFAULT_PREMIUM_RATE,
         )
 
     async def update_settings(

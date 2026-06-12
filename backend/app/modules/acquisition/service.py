@@ -23,18 +23,23 @@ from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionResult
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.service import InventoryService
+from app.modules.settings.service import StoreSettingsService
+from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     AcquisitionType,
     CashMovementType,
     Grade,
     ItemKind,
     OwnershipType,
+    PayoutMethod,
     StockReason,
+    StoreCreditSourceType,
 )
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     InvalidCommissionPct,
+    InvalidPayoutSplit,
     NoOpenCashSession,
 )
 
@@ -49,10 +54,28 @@ class AcquisitionService:
         self._repo = AcquisitionRepository(session)
         self._contacts = ContactService(session)
         self._inventory = InventoryService(session)
+        self._settings = StoreSettingsService(session)
+        self._storecredit = StoreCreditService(session)
         self._cash = CashDrawerService(session)
 
     async def get_acquisition(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         return await self._repo.get(store_id, acquisition_id)
+
+    @staticmethod
+    def _split_payout(data: AcquisitionCreate, total: Decimal) -> tuple[Decimal, Decimal]:
+        """依撥款方式拆（現金部分, 購物金現金等值）；SPLIT 由現金部分推導購物金部分。
+
+        SPLIT 的現金部分必須小於應付總額（等於＝CASH、超過＝多付），兩部分皆 >0
+        （docs/16 §1.7）。
+        """
+        if data.payout_method is PayoutMethod.CASH:
+            return total, Decimal(0)
+        if data.payout_method is PayoutMethod.STORE_CREDIT:
+            return Decimal(0), total
+        cash_part = Decimal(data.payout_split_cash or 0)
+        if cash_part >= total:
+            raise InvalidPayoutSplit(f"SPLIT 現金部分（{cash_part}）必須小於應付總額（{total}）")
+        return cash_part, total - cash_part
 
     async def create_acquisition(
         self, store_id: int, clerk_user_id: int, data: AcquisitionCreate
@@ -64,8 +87,13 @@ class AcquisitionService:
         if contact.national_id_enc is None:
             raise AcquisitionRequiresNationalId("收購/寄售對象必須有 national_id")
 
-        pays_cash = data.type in _CASH_PAYING
-        if pays_cash and await self._cash.get_current_session(store_id) is None:
+        pays_out = data.type in _CASH_PAYING
+        # 純購物金不碰現金、不要求開帳（docs/16 §3.1）；含現金部分才要求。
+        needs_cash_session = pays_out and data.payout_method in (
+            PayoutMethod.CASH,
+            PayoutMethod.SPLIT,
+        )
+        if needs_cash_session and await self._cash.get_current_session(store_id) is None:
             raise NoOpenCashSession("收購付現必須在開帳中的 cash_session 下進行，請先開帳")
 
         acquisition = await self._repo.add(
@@ -87,17 +115,37 @@ class AcquisitionService:
             )
             lot_code = None
 
-        if pays_cash:
-            paid = Decimal(round_ntd(total_cash))
-            acquisition.total_cash_paid = paid
-            await self._cash.record_movement(
-                store_id,
-                CashMovementType.BUYOUT_OUT,
-                paid,
-                actor_user_id=clerk_user_id,
-                ref_type="acquisition",
-                ref_id=acquisition.id,
-            )
+        if pays_out:
+            total_payout = Decimal(round_ntd(total_cash))
+            cash_part, credit_part = self._split_payout(data, total_payout)
+            acquisition.payout_method = data.payout_method
+            acquisition.payout_cash_amount = cash_part
+            acquisition.payout_credit_cash_equivalent = credit_part
+            acquisition.total_cash_paid = cash_part  # 語意維持「實際付現」
+            if cash_part > 0:
+                await self._cash.record_movement(
+                    store_id,
+                    CashMovementType.BUYOUT_OUT,
+                    cash_part,
+                    actor_user_id=clerk_user_id,
+                    ref_type="acquisition",
+                    ref_id=acquisition.id,
+                )
+            if credit_part > 0:
+                # 同一原子交易：購物金入帳與收購同生共死（docs/16 §3.1）；
+                # 溢價率取當下 settings（入帳列自帶三值可重現，I-4）。
+                premium = Decimal(
+                    (await self._settings.get_effective_settings(store_id)).premium_rate
+                )
+                await self._storecredit.credit(
+                    store_id,
+                    contact.id,
+                    cash_equivalent=credit_part,
+                    premium_rate=premium,
+                    source_type=StoreCreditSourceType.ACQUISITION,
+                    source_id=acquisition.id,
+                    created_by=clerk_user_id,
+                )
             await self._session.flush()
 
         # 收購入庫稽核（溯源）：只記參照與彙總，絕不含 national_id 等 PII 明文（§5）。
@@ -126,6 +174,9 @@ class AcquisitionService:
             type=data.type,
             contact_id=contact.id,
             total_cash_paid=acquisition.total_cash_paid,
+            payout_method=acquisition.payout_method,
+            payout_cash_amount=acquisition.payout_cash_amount,
+            payout_credit_cash_equivalent=acquisition.payout_credit_cash_equivalent,
             item_codes=item_codes,
             lot_code=lot_code,
         )

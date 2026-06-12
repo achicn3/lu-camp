@@ -24,6 +24,7 @@ class SettingsRead(BaseModel):
     tax_rate: RateOut
     default_commission_pct: int
     default_margin_pct: int
+    premium_rate: RateOut
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -37,3 +38,5 @@ class SettingsUpdateRequest(BaseModel):
     tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
     default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
     default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
+    # 政策硬界線同 storecredit service/DB（docs/16 §6.1 預設 0–20%）
+    premium_rate: Annotated[Decimal, Field(ge=0, le=Decimal("0.2000"))] | None = None

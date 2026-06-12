@@ -21,7 +21,10 @@ from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     DomainError,
+    InvalidPayoutSplit,
     NoOpenCashSession,
+    StoreCreditConflict,
+    StoreCreditMemberRequired,
 )
 
 router = APIRouter(prefix="/acquisitions", tags=["acquisition"])
@@ -34,6 +37,10 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     ContactNotFound: status.HTTP_404_NOT_FOUND,
     AcquisitionRequiresNationalId: status.HTTP_422_UNPROCESSABLE_CONTENT,
     NoOpenCashSession: status.HTTP_409_CONFLICT,
+    # SC-2 撥款：拆分不合法/非會員 → 422；同來源衝突 → 409
+    InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    StoreCreditConflict: status.HTTP_409_CONFLICT,
 }
 
 

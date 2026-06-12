@@ -471,6 +471,10 @@ export interface components {
             lot?: components["schemas"]["AcquisitionLotIn"] | null;
             /** Note */
             note?: string | null;
+            /** @default CASH */
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Payout Split Cash */
+            payout_split_cash?: number | string | null;
             type: components["schemas"]["AcquisitionType"];
         };
         /**
@@ -529,6 +533,11 @@ export interface components {
             id: number;
             /** Note */
             note: string | null;
+            /** Payout Cash Amount */
+            payout_cash_amount: string | null;
+            /** Payout Credit Cash Equivalent */
+            payout_credit_cash_equivalent: string | null;
+            payout_method: components["schemas"]["PayoutMethod"];
             /** Store Id */
             store_id: number;
             /** Total Cash Paid */
@@ -548,6 +557,11 @@ export interface components {
             item_codes: string[];
             /** Lot Code */
             lot_code: string | null;
+            /** Payout Cash Amount */
+            payout_cash_amount: string | null;
+            /** Payout Credit Cash Equivalent */
+            payout_credit_cash_equivalent: string | null;
+            payout_method: components["schemas"]["PayoutMethod"];
             /** Total Cash Paid */
             total_cash_paid: string | null;
             type: components["schemas"]["AcquisitionType"];
@@ -838,6 +852,12 @@ export interface components {
          */
         PaymentMethod: "CASH";
         /**
+         * PayoutMethod
+         * @description 收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。
+         * @enum {string}
+         */
+        PayoutMethod: "CASH" | "STORE_CREDIT" | "SPLIT";
+        /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
          */
@@ -1032,6 +1052,8 @@ export interface components {
             default_margin_pct: number;
             /** Einvoice Enabled */
             einvoice_enabled: boolean;
+            /** Premium Rate */
+            premium_rate: string;
             /** Store Id */
             store_id: number;
             /** Tax Rate */
@@ -1048,6 +1070,8 @@ export interface components {
             default_margin_pct?: number | null;
             /** Einvoice Enabled */
             einvoice_enabled?: boolean | null;
+            /** Premium Rate */
+            premium_rate?: number | string | null;
             /** Tax Rate */
             tax_rate?: number | string | null;
         };

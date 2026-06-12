@@ -99,3 +99,7 @@ class StoreCreditConflict(DomainError):
 
 class StoreCreditMemberRequired(DomainError):
     """購物金帳戶主體必須是會員（contacts.roles 含 MEMBER，docs/16 I-8）。"""
+
+
+class InvalidPayoutSplit(DomainError):
+    """收購撥款拆分不合法（SPLIT 現金部分須 >0 且 < 應付總額）。"""

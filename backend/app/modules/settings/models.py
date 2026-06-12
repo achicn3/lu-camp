@@ -32,3 +32,7 @@ class StoreSettings(Base, TimestampMixin):
     default_margin_pct: Mapped[int] = mapped_column(
         Integer, server_default=text("45"), nullable=False
     )
+    # 購物金溢價率（docs/16 §1.5；SC-5 將補 min/max 與建議值引擎，本欄為 SC-2 所需最小前移）
+    premium_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), server_default=text("0.10"), nullable=False
+    )
