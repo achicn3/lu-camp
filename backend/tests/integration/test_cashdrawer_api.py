@@ -168,6 +168,24 @@ async def test_manual_adjust_requires_note(
     assert resp.status_code == 422
 
 
+async def test_manual_adjust_blank_note_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """純空白事由 → 422（等同無留痕；後端為權威，Codex P2）。"""
+    token = await _seed_token(db_session)
+    opened = await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "1000"}, headers=_auth(token)
+    )
+    session_id = opened.json()["id"]
+    manager_token = await _seed_manager(db_session, token)
+    resp = await client.post(
+        f"/api/v1/cash-sessions/{session_id}/movements",
+        json={"type": "MANUAL_ADJUST", "amount": "10", "note": "   "},
+        headers=_auth(manager_token),
+    )
+    assert resp.status_code == 422
+
+
 async def test_manual_adjust_note_written_to_audit(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

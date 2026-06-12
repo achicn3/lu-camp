@@ -53,6 +53,15 @@ class CashMovementCreateRequest(BaseModel):
     amount: NTDAmount
     note: str = Field(min_length=1, max_length=200)  # 事由必填（留痕，§5）
 
+    @field_validator("note")
+    @classmethod
+    def _note_not_blank(cls, value: str) -> str:
+        """事由去空白後不得為空（純空白等同無留痕，Codex P2）。"""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("事由不可為空白")
+        return stripped
+
     @field_validator("amount")
     @classmethod
     def _check(cls, v: Decimal) -> Decimal:
