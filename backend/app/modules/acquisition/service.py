@@ -113,6 +113,15 @@ class AcquisitionService:
         return Decimal(round_ntd(total))
 
     @staticmethod
+    def _normalized_payout_method(data: AcquisitionCreate) -> PayoutMethod:
+        """入口正規化（Codex 第九輪）：model_construct 可帶 raw string，StrEnum
+        身分比較（is）會誤判；統一轉枚舉、非法值如實拒。"""
+        try:
+            return PayoutMethod(data.payout_method)
+        except ValueError as exc:
+            raise InvalidPayoutSplit(f"未知的撥款方式：{data.payout_method!r}") from exc
+
+    @staticmethod
     def _split_payout(data: AcquisitionCreate, total: Decimal) -> tuple[Decimal, Decimal]:
         """依撥款方式拆（現金部分, 購物金現金等值）；SPLIT 由現金部分推導購物金部分。
 
@@ -121,10 +130,11 @@ class AcquisitionService:
         """
         # service 邊界完整驗證（Codex：schema 可被 model_construct 繞過；
         # 負/零現金部分會造成「無現金腿」或購物金超發）。
-        if data.payout_method is not PayoutMethod.SPLIT:
+        method = AcquisitionService._normalized_payout_method(data)
+        if method != PayoutMethod.SPLIT:
             if data.payout_split_cash is not None:
                 raise InvalidPayoutSplit("僅 SPLIT 可提供 payout_split_cash")
-            if data.payout_method is PayoutMethod.CASH:
+            if method == PayoutMethod.CASH:
                 return total, Decimal(0)
             return Decimal(0), total
         if data.payout_split_cash is None:
@@ -189,13 +199,14 @@ class AcquisitionService:
         if contact.national_id_enc is None:
             raise AcquisitionRequiresNationalId("收購/寄售對象必須有 national_id")
 
+        payout_method = self._normalized_payout_method(data)
         if data.type == AcquisitionType.CONSIGNMENT and (
-            data.payout_method is not PayoutMethod.CASH or data.payout_split_cash is not None
+            payout_method != PayoutMethod.CASH or data.payout_split_cash is not None
         ):
             raise InvalidPayoutSplit("CONSIGNMENT 不撥款，不可指定撥款方式/拆分")
         pays_out = data.type in _CASH_PAYING
         # 純購物金不碰現金、不要求開帳（docs/16 §3.1）；含現金部分才要求。
-        needs_cash_session = pays_out and data.payout_method in (
+        needs_cash_session = pays_out and payout_method in (
             PayoutMethod.CASH,
             PayoutMethod.SPLIT,
         )
@@ -236,7 +247,7 @@ class AcquisitionService:
         if pays_out:
             total_payout = Decimal(round_ntd(total_cash))
             cash_part, credit_part = self._split_payout(data, total_payout)
-            acquisition.payout_method = data.payout_method
+            acquisition.payout_method = payout_method
             acquisition.payout_cash_amount = cash_part
             acquisition.payout_credit_cash_equivalent = credit_part
             acquisition.total_cash_paid = cash_part  # 語意維持「實際付現」

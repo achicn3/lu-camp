@@ -329,6 +329,62 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_raw_string_payout_method_normalized(db_session: AsyncSession) -> None:
+    """raw string 撥款方式（Codex 第九輪 high）：model_construct 帶 "SPLIT"（無拆分）
+    不得被誤判為全購物金；非法字串如實拒。"""
+    import pytest
+
+    from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
+    from app.modules.acquisition.service import AcquisitionService
+    from app.shared.enums import AcquisitionType as AT
+    from app.shared.enums import Grade
+    from app.shared.exceptions import InvalidPayoutSplit
+
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    item = AcquisitionItemIn.model_construct(
+        name="帳篷",
+        grade=Grade.A,
+        listed_price=Decimal(1800),
+        acquisition_cost=Decimal(1000),
+        brand_id=None,
+        product_model_id=None,
+        commission_pct=None,
+    )
+    svc = AcquisitionService(db_session)
+    for raw_method, split in (("SPLIT", None), ("NOT-A-METHOD", None)):
+        data = AcquisitionCreate.model_construct(
+            type=AT.BUYOUT,
+            contact_id=seller_id,
+            note=None,
+            items=[item],
+            lot=None,
+            payout_method=raw_method,  # type: ignore[arg-type]  # 故意繞過型別測 raw string
+            payout_split_cash=split,
+        )
+        with pytest.raises(InvalidPayoutSplit):
+            await svc.create_acquisition(
+                store_id, clerk_id, data, idempotency_key=f"raw-{raw_method}"
+            )
+        await db_session.rollback()
+        _token, store_id, seller_id = await _seed(db_session)
+        clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+        svc = AcquisitionService(db_session)
+    # raw "CASH" 行為等同枚舉 CASH（正規化後正確分類、可成單）
+    data = AcquisitionCreate.model_construct(
+        type=AT.BUYOUT,
+        contact_id=seller_id,
+        note=None,
+        items=[item],
+        lot=None,
+        payout_method="CASH",  # type: ignore[arg-type]  # 故意繞過型別測 raw string
+        payout_split_cash=None,
+    )
+    result = await svc.create_acquisition(store_id, clerk_id, data, idempotency_key="raw-cash")
+    assert result.payout_method == "CASH"
+    assert result.payout_cash_amount == Decimal(1000)
+
+
 async def test_blank_idempotency_key_rejected_at_service(db_session: AsyncSession) -> None:
     """空/None 鍵（Codex 第八輪 high）：service 執行期守衛直接拒、零落地。"""
     import pytest
