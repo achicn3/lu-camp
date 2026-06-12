@@ -10,6 +10,8 @@
 金額一律 Decimal/整數元（core/money），無 float。
 """
 
+import hashlib
+import json
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +40,7 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
+    IdempotencyKeyConflict,
     InvalidCommissionPct,
     InvalidPayoutSplit,
     NoOpenCashSession,
@@ -62,6 +65,36 @@ class AcquisitionService:
         return await self._repo.get(store_id, acquisition_id)
 
     @staticmethod
+    def _fingerprint(data: AcquisitionCreate) -> str:
+        """請求內容穩定 sha256（D-2 模式）：同 key 重送比對是否同一請求。"""
+        canonical = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def find_idempotent_replay(
+        self, store_id: int, idempotency_key: str, data: AcquisitionCreate
+    ) -> AcquisitionResult | None:
+        """同 key 已有收購單 → 內容相同回原結果（含識別碼重建）、不同 → 409。"""
+        existing = await self._repo.get_by_idempotency_key(store_id, idempotency_key)
+        if existing is None:
+            return None
+        if existing.idempotency_fingerprint != self._fingerprint(data):
+            raise IdempotencyKeyConflict(
+                f"idempotency key 已用於不同的收購內容（acquisition {existing.id}）"
+            )
+        item_codes, lot_code = await self._repo.get_codes(store_id, existing.id)
+        return AcquisitionResult(
+            acquisition_id=existing.id,
+            type=existing.type,
+            contact_id=existing.contact_id,
+            total_cash_paid=existing.total_cash_paid,
+            payout_method=existing.payout_method,
+            payout_cash_amount=existing.payout_cash_amount,
+            payout_credit_cash_equivalent=existing.payout_credit_cash_equivalent,
+            item_codes=item_codes,
+            lot_code=lot_code,
+        )
+
+    @staticmethod
     def _split_payout(data: AcquisitionCreate, total: Decimal) -> tuple[Decimal, Decimal]:
         """依撥款方式拆（現金部分, 購物金現金等值）；SPLIT 由現金部分推導購物金部分。
 
@@ -78,9 +111,19 @@ class AcquisitionService:
         return cash_part, total - cash_part
 
     async def create_acquisition(
-        self, store_id: int, clerk_user_id: int, data: AcquisitionCreate
+        self,
+        store_id: int,
+        clerk_user_id: int,
+        data: AcquisitionCreate,
+        *,
+        idempotency_key: str | None = None,
     ) -> AcquisitionResult:
         """建立收購單並完成入庫/付現；任一步失敗整筆回復（不 commit）。"""
+        if idempotency_key is not None:
+            replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
+            if replay is not None:
+                return replay
+
         contact = await self._contacts.get_contact(store_id, data.contact_id)
         if contact is None:
             raise ContactNotFound(f"找不到 contact {data.contact_id}")
@@ -103,6 +146,10 @@ class AcquisitionService:
                 contact_id=contact.id,
                 clerk_user_id=clerk_user_id,
                 note=data.note,
+                idempotency_key=idempotency_key,
+                idempotency_fingerprint=(
+                    self._fingerprint(data) if idempotency_key is not None else None
+                ),
             )
         )
 

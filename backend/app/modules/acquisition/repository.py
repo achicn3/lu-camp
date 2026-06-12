@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.acquisition.models import Acquisition
+from app.modules.inventory.models import BulkLot, SerializedItem
 
 
 class AcquisitionRepository:
@@ -14,6 +15,33 @@ class AcquisitionRepository:
         self._session.add(acquisition)
         await self._session.flush()
         return acquisition
+
+    async def get_by_idempotency_key(
+        self, store_id: int, idempotency_key: str
+    ) -> Acquisition | None:
+        stmt = select(Acquisition).where(
+            Acquisition.store_id == store_id,
+            Acquisition.idempotency_key == idempotency_key,
+        )
+        result: Acquisition | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_codes(self, store_id: int, acquisition_id: int) -> tuple[list[str], str | None]:
+        """重建該收購單的識別碼（冪等重放回應用）。"""
+        items = await self._session.scalars(
+            select(SerializedItem.item_code)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.acquisition_id == acquisition_id,
+            )
+            .order_by(SerializedItem.id)
+        )
+        lot = await self._session.scalar(
+            select(BulkLot.lot_code).where(
+                BulkLot.store_id == store_id, BulkLot.acquisition_id == acquisition_id
+            )
+        )
+        return list(items.all()), lot
 
     async def get(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         stmt = select(Acquisition).where(

@@ -13,7 +13,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create Acquisition */
+        /**
+         * Create Acquisition
+         * @description 建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複
+         *     入庫/付現/入購物金；同 key 不同內容 409。
+         */
         post: operations["createAcquisition"];
         delete?: never;
         options?: never;
@@ -1182,7 +1186,9 @@ export interface operations {
     createAcquisition: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };

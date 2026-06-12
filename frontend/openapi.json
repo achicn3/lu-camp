@@ -2030,7 +2030,21 @@
   "paths": {
     "/api/v1/acquisitions": {
       "post": {
+        "description": "建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複\n入庫/付現/入購物金；同 key 不同內容 409。",
         "operationId": "createAcquisition",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

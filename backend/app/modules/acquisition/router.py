@@ -6,7 +6,8 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -21,6 +22,7 @@ from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     DomainError,
+    IdempotencyKeyConflict,
     InvalidPayoutSplit,
     NoOpenCashSession,
     StoreCreditConflict,
@@ -39,6 +41,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     NoOpenCashSession: status.HTTP_409_CONFLICT,
     # SC-2 撥款：拆分不合法/非會員 → 422；同來源衝突 → 409
     InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditConflict: status.HTTP_409_CONFLICT,
 }
@@ -55,11 +58,34 @@ def _http_status_for(exc: DomainError) -> int:
     operation_id="createAcquisition",
 )
 async def create_acquisition(
-    payload: AcquisitionCreate, session: SessionDep, user: CurrentUserDep
+    payload: AcquisitionCreate,
+    session: SessionDep,
+    user: CurrentUserDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
 ) -> AcquisitionResult:
+    """建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複
+    入庫/付現/入購物金；同 key 不同內容 409。"""
     svc = AcquisitionService(session)
     try:
-        result = await svc.create_acquisition(user.store_id, user.id, payload)
+        result = await svc.create_acquisition(
+            user.store_id, user.id, payload, idempotency_key=idempotency_key
+        )
+    except IntegrityError as exc:
+        await session.rollback()
+        # 僅處理冪等唯一約束（並行重送）；其他完整性錯誤照拋。
+        if "uq_acquisitions_store_idem_key" not in str(exc.orig):
+            raise
+        try:
+            replay = await svc.find_idempotent_replay(user.store_id, idempotency_key, payload)
+        except IdempotencyKeyConflict as conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(conflict)
+            ) from conflict
+        if replay is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="收購衝突，請重試"
+            ) from exc
+        return replay
     except DomainError as exc:
         await session.rollback()
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc

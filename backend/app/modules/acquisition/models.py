@@ -7,7 +7,7 @@
 
 from decimal import Decimal
 
-from sqlalchemy import Enum, ForeignKey, Numeric, String, text
+from sqlalchemy import Enum, ForeignKey, Numeric, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -18,6 +18,9 @@ class Acquisition(Base, TimestampMixin):
     """收購/寄售入庫單。created_at 即收購日期；id 即收購單號。"""
 
     __tablename__ = "acquisitions"
+    __table_args__ = (
+        UniqueConstraint("store_id", "idempotency_key", name="uq_acquisitions_store_idem_key"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -37,4 +40,7 @@ class Acquisition(Base, TimestampMixin):
     )
     payout_cash_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     payout_credit_cash_equivalent: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    # 操作層冪等（D-2 模式；Codex SC-2 high）：重試不得重複入庫/付現/入購物金。
+    idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     note: Mapped[str | None] = mapped_column(String(500))

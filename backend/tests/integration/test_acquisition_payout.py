@@ -4,6 +4,7 @@ CASH | STORE_CREDIT | SPLIT：現金部分走錢櫃（需開帳）、購物金�
 （需會員、套用當下 settings.premium_rate、與收購同一原子交易）。
 """
 
+import itertools
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 
@@ -58,8 +59,14 @@ async def _seed(
     return token, store.id, seller.id
 
 
-def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+_idem_counter = itertools.count()
+
+
+def _auth(token: str, *, idem: str | None = None) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": idem if idem is not None else f"payout-key-{next(_idem_counter)}",
+    }
 
 
 def _buyout_payload(contact_id: int, **payout: object) -> dict[str, object]:
@@ -174,6 +181,57 @@ async def test_consignment_rejects_payout_method(
             "items": [{"name": "帳篷", "grade": "A", "listed_price": "1800", "commission_pct": 50}],
         },
         headers=_auth(token),
+    )
+    assert resp.status_code == 422
+
+
+async def test_store_credit_payout_retry_is_idempotent(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """重試同 key（Codex high）：回原收購單、不重複入庫/入購物金。"""
+    token, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    payload = _buyout_payload(seller_id, payout_method="STORE_CREDIT")
+    first = await client.post(
+        "/api/v1/acquisitions", json=payload, headers=_auth(token, idem="acq-retry")
+    )
+    retry = await client.post(
+        "/api/v1/acquisitions", json=payload, headers=_auth(token, idem="acq-retry")
+    )
+    assert first.status_code == 201
+    assert retry.status_code == 201
+    assert retry.json()["acquisition_id"] == first.json()["acquisition_id"]
+    assert retry.json()["item_codes"] == first.json()["item_codes"]  # 識別碼重建一致
+    balance = await StoreCreditService(db_session).get_balance(store_id, seller_id)
+    assert balance == Decimal(1100)  # 只入帳一次
+    count = await db_session.scalar(select(func.count()).select_from(Acquisition))
+    assert count == 1
+
+
+async def test_same_key_different_payload_conflicts(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _store_id, seller_id = await _seed(db_session)
+    await client.post(
+        "/api/v1/acquisitions",
+        json=_buyout_payload(seller_id),
+        headers=_auth(token, idem="acq-conflict"),
+    )
+    other = dict(_buyout_payload(seller_id))
+    other["note"] = "不同內容"
+    resp = await client.post(
+        "/api/v1/acquisitions", json=other, headers=_auth(token, idem="acq-conflict")
+    )
+    assert resp.status_code == 409
+
+
+async def test_missing_idempotency_key_422(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _store_id, seller_id = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json=_buyout_payload(seller_id),
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
 

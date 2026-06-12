@@ -52,10 +52,26 @@ def upgrade() -> None:
         "acquisitions",
         sa.Column("payout_credit_cash_equivalent", sa.Numeric(12, 0), nullable=True),
     )
+    op.add_column("acquisitions", sa.Column("idempotency_key", sa.String(80), nullable=True))
+    op.add_column(
+        "acquisitions", sa.Column("idempotency_fingerprint", sa.String(64), nullable=True)
+    )
+    op.create_unique_constraint(
+        "uq_acquisitions_store_idem_key", "acquisitions", ["store_id", "idempotency_key"]
+    )
+    # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
+    # 避免新欄位讀起來像「資料缺漏」而非「全額付現」。
+    op.execute(
+        "UPDATE acquisitions SET payout_cash_amount = total_cash_paid,"
+        " payout_credit_cash_equivalent = 0 WHERE total_cash_paid IS NOT NULL"
+    )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_constraint("uq_acquisitions_store_idem_key", "acquisitions", type_="unique")
+    op.drop_column("acquisitions", "idempotency_fingerprint")
+    op.drop_column("acquisitions", "idempotency_key")
     op.drop_column("acquisitions", "payout_credit_cash_equivalent")
     op.drop_column("acquisitions", "payout_cash_amount")
     op.drop_column("acquisitions", "payout_method")
