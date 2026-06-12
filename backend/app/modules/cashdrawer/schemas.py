@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, PlainSerializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.shared.enums import CashMovementType, CashSessionStatus
@@ -51,7 +51,7 @@ class CashMovementCreateRequest(BaseModel):
 
     type: CashMovementType
     amount: NTDAmount
-    note: str | None = None
+    note: str = Field(min_length=1, max_length=200)  # 事由必填（留痕，§5）
 
     @field_validator("amount")
     @classmethod
@@ -94,6 +94,7 @@ class CashMovementRead(BaseModel):
     amount: NTDAmount
     ref_type: str | None
     ref_id: int | None
+    note: str | None
     created_at: datetime
 
     @classmethod

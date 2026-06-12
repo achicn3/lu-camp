@@ -58,6 +58,7 @@ class CashDrawerService:
         actor_user_id: int | None = None,
         ref_type: str | None = None,
         ref_id: int | None = None,
+        note: str | None = None,
     ) -> CashMovement:
         """記一筆現金異動；必須在開帳中的 session 下進行，否則拒絕。
 
@@ -79,6 +80,7 @@ class CashDrawerService:
             amount=amount,
             ref_type=ref_type,
             ref_id=ref_id,
+            note=note,
         )
         saved = await self._repo.add_movement(movement)
         if movement_type == CashMovementType.MANUAL_ADJUST:
@@ -91,6 +93,7 @@ class CashDrawerService:
                 entity_id=str(session.id),
                 after={
                     "amount": str(amount),
+                    "note": note,
                     "ref_type": ref_type,
                     "ref_id": ref_id,
                 },

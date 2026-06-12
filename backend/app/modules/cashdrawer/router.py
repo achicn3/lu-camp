@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.cashdrawer.schemas import (
     CashMovementCreateRequest,
     CashMovementRead,
@@ -29,6 +29,7 @@ router = APIRouter(prefix="/cash-sessions", tags=["cashdrawer"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
 
 
 @router.post(
@@ -68,22 +69,32 @@ async def record_cash_movement(
     session_id: int,
     payload: CashMovementCreateRequest,
     session: SessionDep,
-    user: CurrentUserDep,
+    user: ManagerDep,
 ) -> CashMovementRead:
+    """手動現金調整（限 MANAGER；docs/10 §4）。
+
+    端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為
+    系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。
+    事由必填並隨 audit_log 留痕（CLAUDE.md §5）。
+    """
+    if payload.type != CashMovementType.MANUAL_ADJUST:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="此端點僅接受 MANUAL_ADJUST；系統類型由內部流程產生",
+        )
     svc = CashDrawerService(session)
     current = await svc.get_current_session(user.store_id)
     if current is None or current.id != session_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="此 session 非開帳中或不存在"
         )
-    if payload.type != CashMovementType.MANUAL_ADJUST and payload.amount < 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="此類型金額不可為負")
     movement = await svc.record_movement(
         user.store_id,
         payload.type,
         payload.amount,
         actor_user_id=user.id,
         ref_type="manual",
+        note=payload.note,
     )
     await session.commit()
     return CashMovementRead.from_model(movement)

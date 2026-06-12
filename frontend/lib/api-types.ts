@@ -152,7 +152,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record Cash Movement */
+        /**
+         * Record Cash Movement
+         * @description 手動現金調整（限 MANAGER；docs/10 §4）。
+         *
+         *     端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為
+         *     系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。
+         *     事由必填並隨 audit_log 留痕（CLAUDE.md §5）。
+         */
         post: operations["recordCashMovement"];
         delete?: never;
         options?: never;
@@ -562,7 +569,7 @@ export interface components {
             /** Amount */
             amount: number | string;
             /** Note */
-            note?: string | null;
+            note: string;
             type: components["schemas"]["CashMovementType"];
         };
         /**
@@ -579,6 +586,8 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            /** Note */
+            note: string | null;
             /** Ref Id */
             ref_id: number | null;
             /** Ref Type */

@@ -458,15 +458,10 @@
             "title": "Amount"
           },
           "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
           },
           "type": {
             "$ref": "#/components/schemas/CashMovementType"
@@ -474,7 +469,8 @@
         },
         "required": [
           "type",
-          "amount"
+          "amount",
+          "note"
         ],
         "title": "CashMovementCreateRequest",
         "type": "object"
@@ -494,6 +490,17 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "ref_id": {
             "anyOf": [
@@ -537,6 +544,7 @@
           "amount",
           "ref_type",
           "ref_id",
+          "note",
           "created_at"
         ],
         "title": "CashMovementRead",
@@ -2150,6 +2158,7 @@
     },
     "/api/v1/cash-sessions/{session_id}/movements": {
       "post": {
+        "description": "手動現金調整（限 MANAGER；docs/10 §4）。\n\n端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為\n系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。\n事由必填並隨 audit_log 留痕（CLAUDE.md §5）。",
         "operationId": "recordCashMovement",
         "parameters": [
           {

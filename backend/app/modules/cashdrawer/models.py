@@ -69,6 +69,8 @@ class CashMovement(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     ref_type: Mapped[str | None] = mapped_column(String(50))
     ref_id: Mapped[int | None] = mapped_column()
+    # 手動調整事由（留痕，CLAUDE.md §5）；系統產生的異動為 NULL。
+    note: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
