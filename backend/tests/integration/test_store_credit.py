@@ -505,6 +505,42 @@ async def test_db_reversal_guard_rejects_wrong_amount_and_double_layer(
     await db_session.rollback()
 
 
+async def test_db_credit_guard_rejects_forged_economics(db_session: AsyncSession) -> None:
+    """DB CREDIT 經濟守衛（第十一輪 high）：實發 ≠ round(等值×(1+溢價)) 的直插報錯。"""
+    from sqlalchemy.exc import DBAPIError
+
+    store_id, user_id, member_id = await _seed(db_session)
+
+    async def _raw_credit(amount: int, ce: int, rate: str, src: int) -> None:
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  cash_equivalent, premium_rate_applied, source_type, source_id,"
+                "  fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, 'CREDIT', :amount, :amount, :ce, :rate,"
+                "  'ACQUISITION', :src, 'forged', :uid, now())"
+            ),
+            {
+                "sid": store_id,
+                "cid": member_id,
+                "uid": user_id,
+                "amount": amount,
+                "ce": ce,
+                "rate": rate,
+                "src": src,
+            },
+        )
+
+    with pytest.raises(DBAPIError):
+        await _raw_credit(999, 100, "0.1000", 601)  # 應為 110
+    await db_session.rollback()
+    store_id, user_id, member_id = await _seed(db_session)
+    with pytest.raises(DBAPIError):
+        await _raw_credit(150, 100, "0.5000", 602)  # 溢價超界
+    await db_session.rollback()
+
+
 async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> None:
     """方向/形狀 CHECK（adversarial 第五輪 medium）：正額 DEBIT、無對象 REVERSAL
     直插一律 IntegrityError。"""

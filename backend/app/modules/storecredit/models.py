@@ -215,9 +215,40 @@ CREATE TRIGGER trg_store_credit_reversal_guard
 BEFORE INSERT ON store_credit_ledger
 FOR EACH ROW EXECUTE FUNCTION store_credit_reversal_guard()
 """,
+    # CREDIT 經濟不變量（adversarial 第十一輪 high）：I-4 的三值關係收進 DB——
+    # 回填/直插不可寫出「自洽加總但經濟錯誤」的 CREDIT（如等值 100、溢價 0.1、
+    # 實發 999）。ROUND(numeric) 為 half-away-from-zero，正數時等同 §6 的
+    # ROUND_HALF_UP（core/money.round_ntd）。溢價政策界線 0–0.2000 與 service
+    # 常數一致；SC-5 若放寬政策須連動 migration（金錢級變更本應慎重留痕）。
+    """
+CREATE OR REPLACE FUNCTION store_credit_credit_guard() RETURNS trigger AS $$
+BEGIN
+  IF NEW.entry_type <> 'CREDIT' THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.cash_equivalent <= 0 THEN
+    RAISE EXCEPTION 'CREDIT 現金等值必須為正';
+  END IF;
+  IF NEW.premium_rate_applied < 0 OR NEW.premium_rate_applied > 0.2000 THEN
+    RAISE EXCEPTION 'CREDIT 溢價率超出政策界線';
+  END IF;
+  IF NEW.signed_amount <> ROUND(NEW.cash_equivalent * (1 + NEW.premium_rate_applied)) THEN
+    RAISE EXCEPTION 'CREDIT 實發額必須等於 round(現金等值 × (1+溢價率))';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE TRIGGER trg_store_credit_credit_guard
+BEFORE INSERT ON store_credit_ledger
+FOR EACH ROW EXECUTE FUNCTION store_credit_credit_guard()
+""",
 )
 
 LEDGER_IMMUTABLE_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_store_credit_credit_guard ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS store_credit_credit_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_reversal_guard ON store_credit_ledger",
     "DROP FUNCTION IF EXISTS store_credit_reversal_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_ledger_immutable ON store_credit_ledger",
