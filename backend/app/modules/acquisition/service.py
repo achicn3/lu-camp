@@ -116,13 +116,13 @@ class AcquisitionService:
         clerk_user_id: int,
         data: AcquisitionCreate,
         *,
-        idempotency_key: str | None = None,
+        idempotency_key: str,
     ) -> AcquisitionResult:
         """建立收購單並完成入庫/付現；任一步失敗整筆回復（不 commit）。"""
-        if idempotency_key is not None:
-            replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
-            if replay is not None:
-                return replay
+        # 冪等為 service 邊界必填（Codex：任何呼叫者重試都不得重複付現/入購物金）。
+        replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
+        if replay is not None:
+            return replay
 
         contact = await self._contacts.get_contact(store_id, data.contact_id)
         if contact is None:
@@ -147,9 +147,7 @@ class AcquisitionService:
                 clerk_user_id=clerk_user_id,
                 note=data.note,
                 idempotency_key=idempotency_key,
-                idempotency_fingerprint=(
-                    self._fingerprint(data) if idempotency_key is not None else None
-                ),
+                idempotency_fingerprint=self._fingerprint(data),
             )
         )
 

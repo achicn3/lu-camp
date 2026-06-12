@@ -254,6 +254,26 @@ async def test_same_key_different_payload_conflicts(
     assert resp.status_code == 409
 
 
+async def test_service_level_retry_is_idempotent(db_session: AsyncSession) -> None:
+    """service 邊界冪等必填（Codex）：router 之外的呼叫者重試也不得重複付現/入帳。"""
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+
+    _token, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    data = AcquisitionCreate.model_validate(
+        _buyout_payload(seller_id, payout_method="STORE_CREDIT")
+    )
+    svc = AcquisitionService(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    first = await svc.create_acquisition(store_id, clerk_id, data, idempotency_key="svc-retry")
+    again = await svc.create_acquisition(store_id, clerk_id, data, idempotency_key="svc-retry")
+    assert again.acquisition_id == first.acquisition_id
+    balance = await StoreCreditService(db_session).get_balance(store_id, seller_id)
+    assert balance == Decimal(1100)  # 只入帳一次
+    count = await db_session.scalar(select(func.count()).select_from(Acquisition))
+    assert count == 1
+
+
 async def test_missing_idempotency_key_422(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
