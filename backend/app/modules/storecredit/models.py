@@ -269,9 +269,34 @@ CREATE TRIGGER trg_store_credit_credit_guard
 BEFORE INSERT ON store_credit_ledger
 FOR EACH ROW EXECUTE FUNCTION store_credit_credit_guard()
 """,
+    # 滾動餘額鏈（adversarial 第十五輪 high）：每列 balance_after 必等於
+    # 既有和＋本列——直插/回填寫不出假歷史餘額（service 路徑持帳戶鎖、
+    # 同帳戶序列化，計算一致；raw 並發直插最壞情況是被拒）。
+    """
+CREATE OR REPLACE FUNCTION store_credit_balance_chain_guard() RETURNS trigger AS $$
+DECLARE
+  prior NUMERIC;
+BEGIN
+  SELECT COALESCE(SUM(signed_amount), 0) INTO prior
+    FROM store_credit_ledger
+    WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id;
+  IF NEW.balance_after <> prior + NEW.signed_amount THEN
+    RAISE EXCEPTION 'balance_after 必須等於滾動和（前和＋本列）';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE TRIGGER trg_store_credit_balance_chain_guard
+BEFORE INSERT ON store_credit_ledger
+FOR EACH ROW EXECUTE FUNCTION store_credit_balance_chain_guard()
+""",
 )
 
 LEDGER_IMMUTABLE_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_store_credit_balance_chain_guard ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS store_credit_balance_chain_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_credit_guard ON store_credit_ledger",
     "DROP FUNCTION IF EXISTS store_credit_credit_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_reversal_guard ON store_credit_ledger",

@@ -543,8 +543,8 @@ async def test_db_credit_guard_rejects_forged_economics(db_session: AsyncSession
 
 async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> None:
     """方向/形狀 CHECK（adversarial 第五輪 medium）：正額 DEBIT、無對象 REVERSAL
-    直插一律 IntegrityError。"""
-    from sqlalchemy.exc import IntegrityError
+    直插一律被 DB 拒絕（CHECK 或更早的鏈守衛 trigger，皆 DBAPIError）。"""
+    from sqlalchemy.exc import DBAPIError
 
     store_id, user_id, member_id = await _seed(db_session)
 
@@ -566,11 +566,11 @@ async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> Non
             },
         )
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await _raw("DEBIT", 10, None)  # DEBIT 必負
     await db_session.rollback()
     store_id, user_id, member_id = await _seed(db_session)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await _raw("REVERSAL", -10, None)  # REVERSAL 必有對象
     await db_session.rollback()
 
@@ -675,11 +675,11 @@ async def test_reversal_source_id_must_match_original(db_session: AsyncSession) 
     assert ok.signed_amount == Decimal(-500)
 
 
-async def test_reconcile_detects_mid_chain_forgery(db_session: AsyncSession) -> None:
-    """全鏈對帳（第十四輪 medium）：中段 balance_after 偽造、即使尾列補平也要被抓。
+async def test_db_rejects_false_rolling_balance_insert(db_session: AsyncSession) -> None:
+    """滾動鏈 DB 守衛（第十五輪 high）：直插 balance_after ≠ 前和＋本列 → 直接拒，
+    不靠事後對帳。"""
+    from sqlalchemy.exc import DBAPIError
 
-    直插兩列（繞過 service；trigger 僅限制沖正/CREDIT 形狀，DEBIT 直插帶錯
-    balance_after 可落地）→ reconcile 必須回報鏈違規。"""
     store_id, user_id, member_id = await _seed(db_session)
     svc = StoreCreditService(db_session)
     await svc.credit(
@@ -691,32 +691,39 @@ async def test_reconcile_detects_mid_chain_forgery(db_session: AsyncSession) -> 
         source_id=910,
         created_by=user_id,
     )
-    # 直插：DEBIT -100 但 balance_after 偽造為 999（正確應為 900）
-    await db_session.execute(
-        text(
-            "INSERT INTO store_credit_ledger"
-            " (store_id, contact_id, entry_type, signed_amount, balance_after,"
-            "  source_type, source_id, fingerprint, created_by, created_at)"
-            " VALUES (:sid, :cid, 'DEBIT', -100, 999, 'SALE', 911, 'forged-mid', :uid, now())"
-        ),
-        {"sid": store_id, "cid": member_id, "uid": user_id},
+    with pytest.raises(DBAPIError):
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  source_type, source_id, fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, 'DEBIT', -100, 999, 'SALE', 911, 'forged', :uid, now())"
+            ),  # 正確應為 900
+            {"sid": store_id, "cid": member_id, "uid": user_id},
+        )
+    await db_session.rollback()
+    # 合法情況下全鏈對帳不誤報
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=920,
+        created_by=user_id,
     )
-    # 尾列補平：DEBIT -100、balance_after = 正確總和 800（快取也補平）
-    await db_session.execute(
-        text(
-            "INSERT INTO store_credit_ledger"
-            " (store_id, contact_id, entry_type, signed_amount, balance_after,"
-            "  source_type, source_id, fingerprint, created_by, created_at)"
-            " VALUES (:sid, :cid, 'DEBIT', -100, 800, 'SALE', 912, 'forged-tail', :uid, now())"
-        ),
-        {"sid": store_id, "cid": member_id, "uid": user_id},
-    )
-    await db_session.execute(
-        text("UPDATE store_credit_accounts SET balance = 800 WHERE store_id = :sid"),
-        {"sid": store_id},
+    await svc.debit(
+        store_id,
+        member_id,
+        amount=Decimal(100),
+        source_type=StoreCreditSourceType.SALE,
+        source_id=921,
+        created_by=user_id,
     )
     report = await svc.reconcile(store_id)
-    assert report["mismatches"] != []  # 中段偽造被全鏈驗證抓到
+    assert report["mismatches"] == []
 
 
 async def test_source_type_binding(db_session: AsyncSession) -> None:
@@ -854,8 +861,8 @@ async def test_adjust_retry_writes_audit_once(db_session: AsyncSession) -> None:
 
 async def test_db_check_constraints_reject_invalid_states(db_session: AsyncSession) -> None:
     """DB CHECK（adversarial 第四輪 medium）：零金額/負 balance_after/缺 CREDIT 欄位
-    的直插一律 IntegrityError。"""
-    from sqlalchemy.exc import IntegrityError
+    的直插一律被 DB 拒絕（CHECK 或更早的鏈守衛 trigger，皆 DBAPIError）。"""
+    from sqlalchemy.exc import DBAPIError
 
     store_id, user_id, member_id = await _seed(db_session)
 
@@ -884,15 +891,15 @@ async def test_db_check_constraints_reject_invalid_states(db_session: AsyncSessi
             params,
         )
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await _raw_insert(amount=0)  # signed_amount <> 0
     await db_session.rollback()
     store_id, user_id, member_id = await _seed(db_session)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await _raw_insert(after=-1, sid=store_id, cid=member_id, uid=user_id)  # balance_after >= 0
     await db_session.rollback()
     store_id, user_id, member_id = await _seed(db_session)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(DBAPIError):
         await _raw_insert(  # CREDIT 必帶 cash_equivalent/premium
             etype="CREDIT", amount=100, after=100, sid=store_id, cid=member_id, uid=user_id
         )
