@@ -17,14 +17,23 @@ const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
   { href: "/acquisition", label: "收購", ready: false },
 ];
 
+const emptySubscribe = () => () => {};
+
 export default function AuthedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   // token 為外部 store（記憶體＋sessionStorage）；SSR 快照為 null → 客戶端水合後同步。
   const token = useSyncExternalStore(subscribeToken, getToken, () => null);
+  // 水合完成偵測（伺服器快照 false / 客戶端 true；無 setState-in-effect）：
+  // 水合首輪 token 必為 null（server 快照），不可在還原 sessionStorage 前就誤導去登入。
+  const hydrated = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
 
   useEffect(() => {
-    if (token === null) router.replace("/login");
-  }, [token, router]);
+    if (hydrated && token === null) router.replace("/login");
+  }, [hydrated, token, router]);
 
   useEffect(() => {
     const onUnauthorized = () => router.replace("/login");
@@ -32,7 +41,7 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [router]);
 
-  if (token === null) return null;
+  if (!hydrated || token === null) return null;
   const session = decodeSession();
 
   return (
