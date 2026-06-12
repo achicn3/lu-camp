@@ -85,7 +85,8 @@ def upgrade() -> None:
         "ck_acquisitions_cash_shape",
         "acquisitions",
         "payout_method <> 'CASH' OR type = 'CONSIGNMENT'"
-        " OR (payout_cash_amount = total_cash_paid"
+        " OR (payout_cash_amount IS NOT NULL AND total_cash_paid IS NOT NULL"
+        " AND payout_cash_amount = total_cash_paid"
         " AND COALESCE(payout_credit_cash_equivalent, 0) = 0)"
         " OR (payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
         " AND total_cash_paid IS NULL)",
@@ -93,14 +94,16 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_acquisitions_store_credit_shape",
         "acquisitions",
-        "payout_method <> 'STORE_CREDIT' OR (COALESCE(payout_cash_amount, 0) = 0"
-        " AND COALESCE(total_cash_paid, 0) = 0 AND payout_credit_cash_equivalent > 0)",
+        "payout_method <> 'STORE_CREDIT' OR (payout_credit_cash_equivalent IS NOT NULL"
+        " AND payout_credit_cash_equivalent > 0"
+        " AND COALESCE(payout_cash_amount, 0) = 0 AND COALESCE(total_cash_paid, 0) = 0)",
     )
     op.create_check_constraint(
         "ck_acquisitions_split_shape",
         "acquisitions",
-        "payout_method <> 'SPLIT' OR (payout_cash_amount > 0"
-        " AND payout_credit_cash_equivalent > 0"
+        "payout_method <> 'SPLIT' OR (payout_cash_amount IS NOT NULL"
+        " AND payout_credit_cash_equivalent IS NOT NULL AND total_cash_paid IS NOT NULL"
+        " AND payout_cash_amount > 0 AND payout_credit_cash_equivalent > 0"
         " AND total_cash_paid = payout_cash_amount)",
     )
     # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
