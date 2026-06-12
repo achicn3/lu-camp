@@ -225,6 +225,10 @@ class AcquisitionService:
         # 直呼 service 又不回滾的呼叫者也不可能留下半套（入庫了卻沒撥款）。
         if pays_out:
             expected_total = self._payout_total_from_request(data)
+            # 零應付總額（第十三輪 medium）：購物金/拆分腿無意義，DB 形狀 CHECK
+            # 會炸成 500——在領域層轉成可恢復的 422。
+            if expected_total <= 0 and payout_method != PayoutMethod.CASH:
+                raise InvalidPayoutSplit("應付總額為 0：僅可使用 CASH 撥款方式")
             expected_cash, expected_credit = self._split_payout(data, expected_total)
             if expected_credit > 0 and ContactRole.MEMBER.value not in contact.roles:
                 raise StoreCreditMemberRequired(

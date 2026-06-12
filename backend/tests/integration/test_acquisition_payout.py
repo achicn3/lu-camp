@@ -329,6 +329,17 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_zero_total_store_credit_is_422_not_500(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """零成本＋STORE_CREDIT（第十三輪 medium）：領域層 422，不落到 DB CHECK 500。"""
+    token, _store_id, seller_id = await _seed(db_session, open_drawer=False)
+    payload = _buyout_payload(seller_id, payout_method="STORE_CREDIT")
+    payload["items"][0]["acquisition_cost"] = "0"  # type: ignore[index]
+    resp = await client.post("/api/v1/acquisitions", json=payload, headers=_auth(token))
+    assert resp.status_code == 422
+
+
 async def test_db_rejects_inconsistent_payout_shapes(db_session: AsyncSession) -> None:
     """形狀 CHECK（Codex 第十一輪 medium）：直插「STORE_CREDIT 卻有付現」「SPLIT
     缺購物金腿」一律 IntegrityError。"""

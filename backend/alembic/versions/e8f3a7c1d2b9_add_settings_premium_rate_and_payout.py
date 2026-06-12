@@ -74,6 +74,12 @@ def upgrade() -> None:
         "acquisitions",
         "payout_credit_cash_equivalent IS NULL OR payout_credit_cash_equivalent >= 0",
     )
+    # 回填必須先於形狀 CHECK（Codex 第十三輪 high：CHECK 建立時即驗既有列，
+    # 舊付現單尚未補拆分欄會讓 migration 直接失敗、正式庫無法升級）。
+    op.execute(
+        "UPDATE acquisitions SET payout_cash_amount = total_cash_paid,"
+        " payout_credit_cash_equivalent = 0 WHERE total_cash_paid IS NOT NULL"
+    )
     op.create_check_constraint(
         "ck_acquisitions_consignment_no_payout",
         "acquisitions",
@@ -105,12 +111,6 @@ def upgrade() -> None:
         " AND payout_credit_cash_equivalent IS NOT NULL AND total_cash_paid IS NOT NULL"
         " AND payout_cash_amount > 0 AND payout_credit_cash_equivalent > 0"
         " AND total_cash_paid = payout_cash_amount)",
-    )
-    # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
-    # 避免新欄位讀起來像「資料缺漏」而非「全額付現」。
-    op.execute(
-        "UPDATE acquisitions SET payout_cash_amount = total_cash_paid,"
-        " payout_credit_cash_equivalent = 0 WHERE total_cash_paid IS NOT NULL"
     )
 
 
