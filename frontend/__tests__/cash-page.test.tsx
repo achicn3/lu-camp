@@ -138,6 +138,32 @@ describe("/cash", () => {
     expect(screen.getByText("-100")).toBeDefined(); // 差異
   });
 
+  it("結帳成功後快取即失效：重新開帳顯示開帳表單、不殘留 OPEN 狀態", async () => {
+    loginAs("CLERK");
+    let closed = false;
+    stubFetch((url, init) => {
+      if (url.includes("/cash-sessions/current")) return json(closed ? null : OPEN_SESSION);
+      if (url.includes("/cash-sessions/9/close") && init?.method === "POST") {
+        closed = true;
+        return json({
+          ...OPEN_SESSION,
+          status: "CLOSED",
+          counted_amount: "1000",
+          expected_amount: "1000",
+          variance: "0",
+        });
+      }
+      return null;
+    });
+    renderPage();
+    await userEvent.type(await screen.findByLabelText("實點金額"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "結帳" }));
+    await screen.findByText("已結帳");
+    await userEvent.click(screen.getByRole("button", { name: "重新開帳" }));
+    expect(await screen.findByLabelText("開帳零用金")).toBeDefined();
+    expect(screen.queryByText("開帳中")).toBeNull();
+  });
+
   it("MANAGER 看得到手動調整並可送出；含事由", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];

@@ -290,7 +290,15 @@ export default function CashPage() {
             </dl>
           </div>
           {session?.role === "MANAGER" && <AdjustCard sessionId={open.id} onDone={refresh} />}
-          <CloseCard sessionId={open.id} onClosed={(closed) => setClosedResult(closed)} />
+          <CloseCard
+            sessionId={open.id}
+            onClosed={(closed) => {
+              // 同步失效快取：避免導航離開再回來時，殘留的 OPEN session 快取
+              // 讓使用者對「已關帳的錢櫃」看到/操作結帳與調整控制（Codex P2）。
+              setClosedResult(closed);
+              refresh();
+            }}
+          />
         </div>
       )}
     </section>
