@@ -298,9 +298,31 @@ CREATE TRIGGER trg_store_credit_balance_chain_guard
 BEFORE INSERT ON store_credit_ledger
 FOR EACH ROW EXECUTE FUNCTION store_credit_balance_chain_guard()
 """,
+    # 快取同步下沉 DB（adversarial 第十七輪 high）：每筆被接受的帳本插入
+    # 原子推進 accounts.balance/version——直插也不會留下過期快取；
+    # service 不再手動改快取（單一事實來源：本 trigger）。
+    """
+CREATE OR REPLACE FUNCTION store_credit_cache_sync() RETURNS trigger AS $$
+BEGIN
+  UPDATE store_credit_accounts
+     SET balance = balance + NEW.signed_amount,
+         version = version + 1,
+         updated_at = now()
+   WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE TRIGGER trg_store_credit_cache_sync
+AFTER INSERT ON store_credit_ledger
+FOR EACH ROW EXECUTE FUNCTION store_credit_cache_sync()
+""",
 )
 
 LEDGER_IMMUTABLE_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_store_credit_cache_sync ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS store_credit_cache_sync()",
     "DROP TRIGGER IF EXISTS trg_store_credit_balance_chain_guard ON store_credit_ledger",
     "DROP FUNCTION IF EXISTS store_credit_balance_chain_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_credit_guard ON store_credit_ledger",

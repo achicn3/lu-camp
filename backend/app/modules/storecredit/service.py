@@ -188,9 +188,10 @@ class StoreCreditService:
             if replay is not None:
                 return replay, False
             raise StoreCreditConflict(f"分錄寫入衝突（{source_type}:{source_id}），請重試") from exc
-        account.balance = new_balance
-        account.version += 1
+        # 快取由 DB trigger（store_credit_cache_sync）原子推進；ORM 端 expire
+        # 讓同交易後續讀取重抓最新值，service 不再手動改快取（單一事實來源）。
         await self._session.flush()
+        self._session.expire(account)
         return entry, True
 
     async def _find_replay_locked(

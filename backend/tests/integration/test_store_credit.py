@@ -1130,6 +1130,32 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
             await s.commit()
 
 
+async def test_raw_valid_insert_keeps_cache_in_sync(db_session: AsyncSession) -> None:
+    """快取同步 trigger（第十七輪 high）：合法直插也會推進快取，不留過期餘額。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=960,
+        created_by=user_id,
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO store_credit_ledger"
+            " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+            "  source_type, source_id, fingerprint, created_by, created_at)"
+            " VALUES (:sid, :cid, 'DEBIT', -100, 900, 'SALE', 961, 'raw-ok', :uid, now())"
+        ),
+        {"sid": store_id, "cid": member_id, "uid": user_id},
+    )
+    assert await svc.get_balance(store_id, member_id) == Decimal(900)  # 快取已同步
+    assert (await svc.reconcile(store_id))["mismatches"] == []
+
+
 async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
     """DB 鏈守衛並發（第十六輪 high）：兩個並發「直插」同帳戶，至多一個成功
     ——帳戶列鎖在 DB 層序列化，輸家因前和已變而被鏈守衛拒。"""
