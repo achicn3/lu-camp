@@ -1005,7 +1005,7 @@ async def test_reconcile_reports_mismatch_without_fixing(db_session: AsyncSessio
 
 async def test_db_rejects_cross_store_contact_pairing(db_session: AsyncSession) -> None:
     """持久層租戶約束（adversarial medium）：直插「A 店帳配 B 店 contact」被複合 FK 擋。"""
-    store_id, user_id, _ = await _seed(db_session)
+    store_id, _user_id, _ = await _seed(db_session)
     other_store = Store(name="B 店")
     db_session.add(other_store)
     await db_session.flush()
