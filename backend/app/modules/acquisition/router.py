@@ -7,7 +7,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -70,22 +69,6 @@ async def create_acquisition(
         result = await svc.create_acquisition(
             user.store_id, user.id, payload, idempotency_key=idempotency_key
         )
-    except IntegrityError as exc:
-        await session.rollback()
-        # 僅處理冪等唯一約束（並行重送）；其他完整性錯誤照拋。
-        if "uq_acquisitions_store_idem_key" not in str(exc.orig):
-            raise
-        try:
-            replay = await svc.find_idempotent_replay(user.store_id, idempotency_key, payload)
-        except IdempotencyKeyConflict as conflict:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=str(conflict)
-            ) from conflict
-        if replay is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="收購衝突，請重試"
-            ) from exc
-        return replay
     except DomainError as exc:
         await session.rollback()
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc

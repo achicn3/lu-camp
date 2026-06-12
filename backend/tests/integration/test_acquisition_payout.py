@@ -329,6 +329,64 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_concurrent_service_callers_same_key_replay() -> None:
+    """並發同 key 直呼 service（Codex 第七輪 high）：兩邊都拿到同一收購單、
+    帳本只入一次（輸家在 service 層轉重放，不冒 IntegrityError）。"""
+    import asyncio
+
+    from sqlalchemy import text
+
+    import app.core.db as app_db
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="收購冪等競態店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="acq-race", password_hash="h", role=UserRole.CLERK)
+        seller = Contact(
+            store_id=store.id, name="競態賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, seller])
+        await s.flush()
+        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        await s.commit()
+
+    try:
+        payload = AcquisitionCreate.model_validate(
+            _buyout_payload(seller_id, payout_method="STORE_CREDIT")
+        )
+
+        async def _create() -> int:
+            async with sm() as s:
+                result = await AcquisitionService(s).create_acquisition(
+                    store_id, clerk_id, payload, idempotency_key="race-key"
+                )
+                await s.commit()
+                return result.acquisition_id
+
+        ids = await asyncio.gather(_create(), _create())
+        assert ids[0] == ids[1]
+        async with sm() as s:
+            balance = await StoreCreditService(s).get_balance(store_id, seller_id)
+            assert balance == Decimal(1100)  # 只入帳一次
+            count = await s.scalar(select(func.count()).select_from(Acquisition))
+            assert count == 1
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM stock_movements"))
+            await s.execute(text("DELETE FROM serialized_items"))
+            await s.execute(text("DELETE FROM acquisitions"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
 async def test_late_payout_failure_rolls_back_via_savepoint(
     db_session: AsyncSession,
 ) -> None:

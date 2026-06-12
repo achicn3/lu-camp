@@ -14,6 +14,7 @@ import hashlib
 import json
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -156,10 +157,20 @@ class AcquisitionService:
         replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
         if replay is not None:
             return replay
-        async with self._session.begin_nested():
-            return await self._create_acquisition_impl(
-                store_id, clerk_user_id, data, idempotency_key
-            )
+        try:
+            async with self._session.begin_nested():
+                return await self._create_acquisition_impl(
+                    store_id, clerk_user_id, data, idempotency_key
+                )
+        except IntegrityError as exc:
+            # 並行同 key（Codex 第七輪）：輸家撞唯一約束——savepoint 已回滾，
+            # 在 service 層轉成「回原結果 / 409」，所有呼叫者同一語意。
+            if "uq_acquisitions_store_idem_key" not in str(exc.orig):
+                raise
+            replay = await self.find_idempotent_replay(store_id, idempotency_key, data)
+            if replay is None:
+                raise IdempotencyKeyConflict("收購衝突，請重試") from exc
+            return replay
 
     async def _create_acquisition_impl(
         self,
