@@ -390,6 +390,12 @@ async def test_db_rejects_inconsistent_payout_shapes(db_session: AsyncSession) -
     with pytest.raises(IntegrityError):
         await _raw("SPLIT", 400, 600, None)  # total NULL
     await db_session.rollback()
+    # 全 NULL CASH（第十四輪 high）：BUYOUT 不可有「無撥款」頭
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    with pytest.raises(IntegrityError):
+        await _raw("CASH", None, None, None)
+    await db_session.rollback()
 
 
 async def test_negative_cost_rejected_before_writes(db_session: AsyncSession) -> None:

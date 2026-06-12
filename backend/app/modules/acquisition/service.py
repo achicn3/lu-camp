@@ -223,6 +223,7 @@ class AcquisitionService:
 
         # 撥款預檢（Codex 第五輪 high）：在**任何寫入之前**完成全部驗證——
         # 直呼 service 又不回滾的呼叫者也不可能留下半套（入庫了卻沒撥款）。
+        expected_cash = expected_credit = Decimal(0)
         if pays_out:
             expected_total = self._payout_total_from_request(data)
             # 零應付總額（第十三輪 medium）：購物金/拆分腿無意義，DB 形狀 CHECK
@@ -235,6 +236,8 @@ class AcquisitionService:
                     f"contact {contact.id} 非本店會員，不可持有購物金（I-8）"
                 )
 
+        # 撥款欄於建單時即帶上（第十四輪：DB 形狀 CHECK 嚴格化後，header 不可
+        # 以「無撥款」形先落地再補）——預檢值與入庫實算同源必相等。
         acquisition = await self._repo.add(
             Acquisition(
                 store_id=store_id,
@@ -244,6 +247,10 @@ class AcquisitionService:
                 note=data.note,
                 idempotency_key=idempotency_key,
                 idempotency_fingerprint=self._fingerprint(data),
+                payout_method=payout_method if pays_out else PayoutMethod.CASH,
+                payout_cash_amount=expected_cash if pays_out else None,
+                payout_credit_cash_equivalent=expected_credit if pays_out else None,
+                total_cash_paid=expected_cash if pays_out else None,
             )
         )
 
@@ -259,10 +266,8 @@ class AcquisitionService:
         if pays_out:
             total_payout = Decimal(round_ntd(total_cash))
             cash_part, credit_part = self._split_payout(data, total_payout)
-            acquisition.payout_method = payout_method
-            acquisition.payout_cash_amount = cash_part
-            acquisition.payout_credit_cash_equivalent = credit_part
-            acquisition.total_cash_paid = cash_part  # 語意維持「實際付現」
+            # 入庫實算必須等於建單時的預檢值（同源；不等即程式錯誤，立即失敗）
+            assert (cash_part, credit_part) == (expected_cash, expected_credit)
             if cash_part > 0:
                 await self._cash.record_movement(
                     store_id,

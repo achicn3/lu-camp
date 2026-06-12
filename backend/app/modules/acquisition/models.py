@@ -45,9 +45,7 @@ class Acquisition(Base, TimestampMixin):
             "payout_method <> 'CASH' OR type = 'CONSIGNMENT'"
             " OR (payout_cash_amount IS NOT NULL AND total_cash_paid IS NOT NULL"
             " AND payout_cash_amount = total_cash_paid"
-            " AND COALESCE(payout_credit_cash_equivalent, 0) = 0)"
-            " OR (payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
-            " AND total_cash_paid IS NULL)",
+            " AND COALESCE(payout_credit_cash_equivalent, 0) = 0)",
             name="ck_acquisitions_cash_shape",
         ),
         CheckConstraint(
