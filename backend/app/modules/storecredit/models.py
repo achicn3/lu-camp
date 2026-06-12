@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -56,11 +57,18 @@ class StoreCreditLedger(Base):
             unique=True,
             postgresql_where=text("reversal_of_id IS NOT NULL"),
         ),
+        # DB 層租戶配對（adversarial medium）：contact 必須屬於同一 store——
+        # 服務層檢查之外的持久層保證，杜絕回填/直插造成跨店帳。
+        ForeignKeyConstraint(
+            ["contact_id", "store_id"],
+            ["contacts.id", "contacts.store_id"],
+            name="fk_store_credit_ledger_contact_store",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
-    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id"), index=True)
+    contact_id: Mapped[int] = mapped_column(index=True)  # 複合 FK 見 __table_args__
     entry_type: Mapped[StoreCreditEntryType] = mapped_column(_enum_col(StoreCreditEntryType))
     signed_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 非零；方向見 enum
     balance_after: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 滾動餘額，恆 >= 0
@@ -84,11 +92,16 @@ class StoreCreditAccount(Base, TimestampMixin):
     __tablename__ = "store_credit_accounts"
     __table_args__ = (
         UniqueConstraint("store_id", "contact_id", name="uq_store_credit_accounts_contact"),
+        ForeignKeyConstraint(
+            ["contact_id", "store_id"],
+            ["contacts.id", "contacts.store_id"],
+            name="fk_store_credit_accounts_contact_store",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
-    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id"), index=True)
+    contact_id: Mapped[int] = mapped_column(index=True)  # 複合 FK 見 __table_args__
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 0), default=Decimal(0))
     version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 

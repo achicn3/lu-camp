@@ -18,6 +18,9 @@ class Contact(Base, TimestampMixin):
         UniqueConstraint(
             "store_id", "national_id_blind_index", name="uq_contacts_store_blind_index"
         ),
+        # 供購物金等表以複合 FK (contact_id, store_id) 指向——DB 層保證
+        # 「contact 屬於該店」的租戶配對（adversarial review medium）。
+        UniqueConstraint("id", "store_id", name="uq_contacts_id_store"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

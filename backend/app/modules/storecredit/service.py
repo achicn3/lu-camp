@@ -13,6 +13,7 @@ credit/debit/reverse；本模組不碰他模組資料表。
 import hashlib
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -43,6 +44,7 @@ def _fingerprint(
     source_id: int | None,
     cash_equivalent: Decimal | None,
     premium_rate_applied: Decimal | None,
+    reversal_of_id: int | None,
 ) -> str:
     canonical = "|".join(
         str(part)
@@ -55,6 +57,7 @@ def _fingerprint(
             source_id,
             cash_equivalent,
             premium_rate_applied,
+            reversal_of_id,
         )
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -98,8 +101,84 @@ class StoreCreditService:
             source_id=source_id,
             cash_equivalent=cash_equivalent,
             premium_rate_applied=premium_rate_applied,
+            reversal_of_id=reversal_of_id,
         )
-        # 冪等 pre-check（I-5）：同來源已有分錄 → 指紋同回原列、不同 409。
+        # 先鎖帳戶列（同帳戶寫入序列化），**鎖內**才做冪等/沖正重查（adversarial
+        # 第二輪 high：鎖前 pre-check 在並發重試下兩邊都會通過，輸家撞唯一約束
+        # 變成 500 而非約定的「回原列 / 409」）。
+        account = await self._repo.lock_account(store_id, contact_id)
+        replay = await self._find_replay_locked(
+            store_id,
+            entry_type=entry_type,
+            source_type=source_type,
+            source_id=source_id,
+            reversal_of_id=reversal_of_id,
+            fingerprint=fingerprint,
+        )
+        if replay is not None:
+            return replay
+        new_balance = Decimal(account.balance) + signed_amount
+        if new_balance < 0:
+            raise InsufficientStoreCredit(
+                f"contact {contact_id} 購物金餘額不足（{account.balance} {signed_amount:+}）"
+            )
+        # savepoint 包插入：跨帳戶極端競態仍可能撞唯一約束（帳戶鎖只序列化同帳戶），
+        # 撞到時交易未廢，重查一次轉成冪等回列或 409，不冒 IntegrityError 500。
+        try:
+            async with self._session.begin_nested():
+                entry = await self._repo.insert_entry(
+                    StoreCreditLedger(
+                        store_id=store_id,
+                        contact_id=contact_id,
+                        entry_type=entry_type,
+                        signed_amount=signed_amount,
+                        balance_after=new_balance,
+                        cash_equivalent=cash_equivalent,
+                        premium_rate_applied=premium_rate_applied,
+                        source_type=source_type,
+                        source_id=source_id,
+                        reversal_of_id=reversal_of_id,
+                        fingerprint=fingerprint,
+                        reason=reason,
+                        created_by=created_by,
+                    )
+                )
+        except IntegrityError as exc:
+            replay = await self._find_replay_locked(
+                store_id,
+                entry_type=entry_type,
+                source_type=source_type,
+                source_id=source_id,
+                reversal_of_id=reversal_of_id,
+                fingerprint=fingerprint,
+            )
+            if replay is not None:
+                return replay
+            raise StoreCreditConflict(f"分錄寫入衝突（{source_type}:{source_id}），請重試") from exc
+        account.balance = new_balance
+        account.version += 1
+        await self._session.flush()
+        return entry
+
+    async def _find_replay_locked(
+        self,
+        store_id: int,
+        *,
+        entry_type: StoreCreditEntryType,
+        source_type: StoreCreditSourceType,
+        source_id: int | None,
+        reversal_of_id: int | None,
+        fingerprint: str,
+    ) -> StoreCreditLedger | None:
+        """鎖內冪等判定：同來源同指紋 → 回原列；同來源/同沖正對象但內容不同 → 409。"""
+        if reversal_of_id is not None:
+            existing_reversal = await self._repo.find_reversal_of(reversal_of_id)
+            if existing_reversal is not None:
+                if existing_reversal.fingerprint == fingerprint:
+                    return existing_reversal
+                raise StoreCreditConflict(
+                    f"分錄 {reversal_of_id} 已被沖正（reversal {existing_reversal.id}），不可重複沖"
+                )
         if source_id is not None:
             existing = await self._repo.find_by_source(store_id, source_type, source_id, entry_type)
             if existing is not None:
@@ -108,33 +187,7 @@ class StoreCreditService:
                 raise StoreCreditConflict(
                     f"來源 {source_type}:{source_id} 已有 {entry_type} 分錄且內容不同"
                 )
-        account = await self._repo.lock_account(store_id, contact_id)
-        new_balance = Decimal(account.balance) + signed_amount
-        if new_balance < 0:
-            raise InsufficientStoreCredit(
-                f"contact {contact_id} 購物金餘額不足（{account.balance} {signed_amount:+}）"
-            )
-        entry = await self._repo.insert_entry(
-            StoreCreditLedger(
-                store_id=store_id,
-                contact_id=contact_id,
-                entry_type=entry_type,
-                signed_amount=signed_amount,
-                balance_after=new_balance,
-                cash_equivalent=cash_equivalent,
-                premium_rate_applied=premium_rate_applied,
-                source_type=source_type,
-                source_id=source_id,
-                reversal_of_id=reversal_of_id,
-                fingerprint=fingerprint,
-                reason=reason,
-                created_by=created_by,
-            )
-        )
-        account.balance = new_balance
-        account.version += 1
-        await self._session.flush()
-        return entry
+        return None
 
     async def _require_member(self, store_id: int, contact_id: int) -> None:
         contact = await self._contacts.get_contact(store_id, contact_id)
@@ -215,13 +268,6 @@ class StoreCreditService:
         if original.store_id != store_id:
             raise CrossStoreReference(
                 f"被沖正列 {original.id} 屬於 store {original.store_id}，非 store {store_id}"
-            )
-        existing = await self._repo.find_reversal_of(original.id)
-        if existing is not None:
-            if existing.source_type == source_type and existing.source_id == source_id:
-                return existing  # 同來源重試 → 冪等
-            raise StoreCreditConflict(
-                f"分錄 {original.id} 已被沖正（reversal {existing.id}），不可重複沖"
             )
         return await self._write_entry(
             store_id,

@@ -27,11 +27,13 @@ _SOURCE_TYPES = ("ACQUISITION", "SALE", "SALE_VOID", "ACQUISITION_ROLLBACK", "MA
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # 供複合 FK 指向：contacts(id, store_id) 唯一（id 為 PK，本約束恆成立、零成本）。
+    op.create_unique_constraint("uq_contacts_id_store", "contacts", ["id", "store_id"])
     op.create_table(
         "store_credit_ledger",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.id"), nullable=False),
-        sa.Column("contact_id", sa.Integer(), sa.ForeignKey("contacts.id"), nullable=False),
+        sa.Column("contact_id", sa.Integer(), nullable=False),
         sa.Column(
             "entry_type",
             sa.Enum(*_ENTRY_TYPES, name="storecreditentrytype", native_enum=False, length=30),
@@ -64,6 +66,11 @@ def upgrade() -> None:
             "entry_type",
             name="uq_store_credit_ledger_source",
         ),
+        sa.ForeignKeyConstraint(
+            ["contact_id", "store_id"],
+            ["contacts.id", "contacts.store_id"],
+            name="fk_store_credit_ledger_contact_store",
+        ),
     )
     op.create_index("ix_store_credit_ledger_store_id", "store_credit_ledger", ["store_id"])
     op.create_index(
@@ -79,7 +86,7 @@ def upgrade() -> None:
         "store_credit_accounts",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.id"), nullable=False),
-        sa.Column("contact_id", sa.Integer(), sa.ForeignKey("contacts.id"), nullable=False),
+        sa.Column("contact_id", sa.Integer(), nullable=False),
         sa.Column("balance", sa.Numeric(12, 0), nullable=False),
         sa.Column("version", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column(
@@ -89,6 +96,11 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.UniqueConstraint("store_id", "contact_id", name="uq_store_credit_accounts_contact"),
+        sa.ForeignKeyConstraint(
+            ["contact_id", "store_id"],
+            ["contacts.id", "contacts.store_id"],
+            name="fk_store_credit_accounts_contact_store",
+        ),
     )
     op.create_index("ix_store_credit_accounts_store_id", "store_credit_accounts", ["store_id"])
     op.create_index("ix_store_credit_accounts_contact_id", "store_credit_accounts", ["contact_id"])
@@ -103,3 +115,4 @@ def downgrade() -> None:
         op.execute(ddl)
     op.drop_table("store_credit_accounts")
     op.drop_table("store_credit_ledger")
+    op.drop_constraint("uq_contacts_id_store", "contacts", type_="unique")

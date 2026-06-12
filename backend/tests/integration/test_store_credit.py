@@ -390,6 +390,135 @@ async def test_reconcile_reports_mismatch_without_fixing(db_session: AsyncSessio
     assert len(dirty["mismatches"]) == 1  # type: ignore[arg-type]
 
 
+async def test_db_rejects_cross_store_contact_pairing(db_session: AsyncSession) -> None:
+    """持久層租戶約束（adversarial medium）：直插「A 店帳配 B 店 contact」被複合 FK 擋。"""
+    store_id, user_id, _ = await _seed(db_session)
+    other_store = Store(name="B 店")
+    db_session.add(other_store)
+    await db_session.flush()
+    foreign = Contact(store_id=other_store.id, name="他店客", roles=["MEMBER"])
+    db_session.add(foreign)
+    await db_session.flush()
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_accounts"
+                " (store_id, contact_id, balance, version, created_at, updated_at)"
+                " VALUES (:sid, :cid, 0, 0, now(), now())"
+            ),
+            {"sid": store_id, "cid": foreign.id},
+        )
+    await db_session.rollback()
+
+
+async def test_concurrent_same_source_credits_idempotent() -> None:
+    """並發同來源同內容入帳：恰一列、餘額只加一次，兩邊都拿到同一分錄（不冒 500）。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="冪等競態店")
+        s.add(store)
+        await s.flush()
+        user = User(
+            store_id=store.id, username="race-idem", password_hash="h", role=UserRole.MANAGER
+        )
+        member = Contact(store_id=store.id, name="冪等會員", roles=["MEMBER"])
+        s.add_all([user, member])
+        await s.flush()
+        store_id, user_id, member_id = store.id, user.id, member.id
+        await s.commit()
+
+    try:
+
+        async def _credit_once() -> int:
+            async with sm() as s:
+                entry = await StoreCreditService(s).credit(
+                    store_id,
+                    member_id,
+                    cash_equivalent=Decimal(1000),
+                    premium_rate=Decimal("0.1000"),
+                    source_type=StoreCreditSourceType.ACQUISITION,
+                    source_id=500,
+                    created_by=user_id,
+                )
+                await s.commit()
+                return entry.id
+
+        ids = await asyncio.gather(_credit_once(), _credit_once())
+        assert ids[0] == ids[1]  # 兩邊拿到同一列
+        async with sm() as s:
+            svc = StoreCreditService(s)
+            assert await svc.get_balance(store_id, member_id) == Decimal(1100)  # 只加一次
+            assert (await svc.reconcile(store_id))["mismatches"] == []
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
+async def test_concurrent_reversals_of_same_row_safe() -> None:
+    """並發沖正同一列（同來源重試情境）：恰沖一次、兩邊拿到同一沖正列。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="沖正競態店")
+        s.add(store)
+        await s.flush()
+        user = User(
+            store_id=store.id, username="race-rev", password_hash="h", role=UserRole.MANAGER
+        )
+        member = Contact(store_id=store.id, name="沖正會員", roles=["MEMBER"])
+        s.add_all([user, member])
+        await s.flush()
+        credit = await StoreCreditService(s).credit(
+            store.id,
+            member.id,
+            cash_equivalent=Decimal(1000),
+            premium_rate=Decimal("0.0000"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=600,
+            created_by=user.id,
+        )
+        store_id, user_id, member_id, credit_id = store.id, user.id, member.id, credit.id
+        await s.commit()
+
+    try:
+
+        async def _reverse_once() -> int:
+            async with sm() as s:
+                svc = StoreCreditService(s)
+                original = await s.get(StoreCreditLedger, credit_id)
+                assert original is not None
+                entry = await svc.reverse(
+                    store_id,
+                    original,
+                    source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+                    source_id=600,
+                    created_by=user_id,
+                )
+                await s.commit()
+                return entry.id
+
+        ids = await asyncio.gather(_reverse_once(), _reverse_once())
+        assert ids[0] == ids[1]
+        async with sm() as s:
+            svc = StoreCreditService(s)
+            assert await svc.get_balance(store_id, member_id) == Decimal(0)  # 只沖一次
+            assert (await svc.reconcile(store_id))["mismatches"] == []
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
 async def test_concurrent_debits_never_oversell() -> None:
     """I-7 並發：兩個並行扣抵合計超過餘額 → 恰一個成功（帳戶列鎖序列化）。
 
