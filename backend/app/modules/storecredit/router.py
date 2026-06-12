@@ -6,7 +6,7 @@ service 進行；API 只暴露查詢與 MANAGER 校正。
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -60,8 +60,10 @@ async def adjust_store_credit(
     payload: StoreCreditAdjustRequest,
     session: SessionDep,
     user: ManagerDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
 ) -> StoreCreditEntryRead:
-    """人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負）。"""
+    """人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負；冪等鍵必帶——
+    重試/雙擊不得重複改負債）。"""
     svc = StoreCreditService(session)
     try:
         entry = await svc.adjust(
@@ -70,6 +72,7 @@ async def adjust_store_credit(
             amount=payload.amount,
             reason=payload.reason,
             created_by=user.id,
+            idempotency_key=idempotency_key,
         )
     except InsufficientStoreCredit as exc:
         await session.rollback()

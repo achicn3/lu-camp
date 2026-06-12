@@ -49,10 +49,9 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("source_id", sa.Integer(), nullable=True),
-        sa.Column(
-            "reversal_of_id", sa.Integer(), sa.ForeignKey("store_credit_ledger.id"), nullable=True
-        ),
+        sa.Column("reversal_of_id", sa.Integer(), nullable=True),
         sa.Column("fingerprint", sa.String(64), nullable=False),
+        sa.Column("idempotency_key", sa.String(80), nullable=True),
         sa.Column("reason", sa.String(200), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=False),
@@ -71,8 +70,27 @@ def upgrade() -> None:
             ["contacts.id", "contacts.store_id"],
             name="fk_store_credit_ledger_contact_store",
         ),
+        sa.UniqueConstraint(
+            "id", "store_id", "contact_id", name="uq_store_credit_ledger_id_tenant"
+        ),
+        sa.ForeignKeyConstraint(
+            ["reversal_of_id", "store_id", "contact_id"],
+            [
+                "store_credit_ledger.id",
+                "store_credit_ledger.store_id",
+                "store_credit_ledger.contact_id",
+            ],
+            name="fk_store_credit_ledger_reversal_tenant",
+        ),
     )
     op.create_index("ix_store_credit_ledger_store_id", "store_credit_ledger", ["store_id"])
+    op.create_index(
+        "uq_store_credit_ledger_idem_key",
+        "store_credit_ledger",
+        ["store_id", "idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text("idempotency_key IS NOT NULL"),
+    )
     op.create_index(
         "uq_store_credit_ledger_reversal_of",
         "store_credit_ledger",

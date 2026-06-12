@@ -45,6 +45,7 @@ def _fingerprint(
     cash_equivalent: Decimal | None,
     premium_rate_applied: Decimal | None,
     reversal_of_id: int | None,
+    idempotency_key: str | None,
 ) -> str:
     canonical = "|".join(
         str(part)
@@ -58,6 +59,7 @@ def _fingerprint(
             cash_equivalent,
             premium_rate_applied,
             reversal_of_id,
+            idempotency_key,
         )
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -85,6 +87,7 @@ class StoreCreditService:
         premium_rate_applied: Decimal | None = None,
         reversal_of_id: int | None = None,
         reason: str | None = None,
+        idempotency_key: str | None = None,
     ) -> StoreCreditLedger:
         if signed_amount == 0:
             raise StoreCreditConflict("分錄金額不可為零")
@@ -102,6 +105,7 @@ class StoreCreditService:
             cash_equivalent=cash_equivalent,
             premium_rate_applied=premium_rate_applied,
             reversal_of_id=reversal_of_id,
+            idempotency_key=idempotency_key,
         )
         # 先鎖帳戶列（同帳戶寫入序列化），**鎖內**才做冪等/沖正重查（adversarial
         # 第二輪 high：鎖前 pre-check 在並發重試下兩邊都會通過，輸家撞唯一約束
@@ -114,6 +118,7 @@ class StoreCreditService:
             source_id=source_id,
             reversal_of_id=reversal_of_id,
             fingerprint=fingerprint,
+            idempotency_key=idempotency_key,
         )
         if replay is not None:
             return replay
@@ -139,6 +144,7 @@ class StoreCreditService:
                         source_id=source_id,
                         reversal_of_id=reversal_of_id,
                         fingerprint=fingerprint,
+                        idempotency_key=idempotency_key,
                         reason=reason,
                         created_by=created_by,
                     )
@@ -151,6 +157,7 @@ class StoreCreditService:
                 source_id=source_id,
                 reversal_of_id=reversal_of_id,
                 fingerprint=fingerprint,
+                idempotency_key=idempotency_key,
             )
             if replay is not None:
                 return replay
@@ -169,10 +176,17 @@ class StoreCreditService:
         source_id: int | None,
         reversal_of_id: int | None,
         fingerprint: str,
+        idempotency_key: str | None,
     ) -> StoreCreditLedger | None:
         """鎖內冪等判定：同來源同指紋 → 回原列；同來源/同沖正對象但內容不同 → 409。"""
+        if idempotency_key is not None:
+            existing_key = await self._repo.find_by_idempotency_key(store_id, idempotency_key)
+            if existing_key is not None:
+                if existing_key.fingerprint == fingerprint:
+                    return existing_key
+                raise StoreCreditConflict(f"冪等鍵 {idempotency_key} 已用於不同內容的校正")
         if reversal_of_id is not None:
-            existing_reversal = await self._repo.find_reversal_of(reversal_of_id)
+            existing_reversal = await self._repo.find_reversal_of(store_id, reversal_of_id)
             if existing_reversal is not None:
                 if existing_reversal.fingerprint == fingerprint:
                     return existing_reversal
@@ -288,8 +302,13 @@ class StoreCreditService:
         amount: Decimal,
         reason: str,
         created_by: int,
+        idempotency_key: str,
     ) -> StoreCreditLedger:
-        """人工校正（限 MANAGER——由 router 驗；必填事由；寫 audit，I-11）。"""
+        """人工校正（限 MANAGER——由 router 驗；必填事由；寫 audit，I-11）。
+
+        MANUAL 無 source_id，重試防護走冪等鍵（adversarial 第三輪 high：
+        雙擊/重送不得重複改負債）。
+        """
         if not reason.strip():
             raise StoreCreditConflict("人工校正必須填寫事由")
         await self._require_member(store_id, contact_id)
@@ -302,6 +321,7 @@ class StoreCreditService:
             source_id=None,
             created_by=created_by,
             reason=reason.strip(),
+            idempotency_key=idempotency_key,
         )
         await write_audit_log(
             self._session,

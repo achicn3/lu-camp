@@ -46,8 +46,11 @@ async def _seed(session: AsyncSession) -> tuple[int, int, int, str, str]:
     return store.id, manager.id, member.id, mgr_token, clk_token
 
 
-def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+def _auth(token: str, *, idem: str | None = None) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    if idem is not None:
+        headers["Idempotency-Key"] = idem
+    return headers
 
 
 async def test_get_balance_and_history(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
@@ -89,7 +92,7 @@ async def test_adjust_requires_manager(client: httpx.AsyncClient, db_session: As
     resp = await client.post(
         f"/api/v1/contacts/{member_id}/store-credit/adjustments",
         json={"amount": "100", "reason": "測試"},
-        headers=_auth(clk_token),
+        headers=_auth(clk_token, idem="k-403"),
     )
     assert resp.status_code == 403
 
@@ -101,7 +104,7 @@ async def test_adjust_happy_path_and_negative_guard(
     ok = await client.post(
         f"/api/v1/contacts/{member_id}/store-credit/adjustments",
         json={"amount": "150", "reason": "開幕補發"},
-        headers=_auth(mgr_token),
+        headers=_auth(mgr_token, idem="k-150"),
     )
     assert ok.status_code == 201
     assert ok.json()["signed_amount"] == "150"
@@ -109,7 +112,7 @@ async def test_adjust_happy_path_and_negative_guard(
     over = await client.post(
         f"/api/v1/contacts/{member_id}/store-credit/adjustments",
         json={"amount": "-500", "reason": "回收"},
-        headers=_auth(mgr_token),
+        headers=_auth(mgr_token, idem="k-500"),
     )
     assert over.status_code == 409  # 餘額 150 扣 500 → 永不負
 
@@ -122,15 +125,53 @@ async def test_adjust_non_member_422(client: httpx.AsyncClient, db_session: Asyn
     resp = await client.post(
         f"/api/v1/contacts/{outsider.id}/store-credit/adjustments",
         json={"amount": "100", "reason": "x"},
+        headers=_auth(mgr_token, idem="k-nm"),
+    )
+    assert resp.status_code == 422
+
+
+async def test_adjust_requires_idempotency_key(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """缺 Idempotency-Key → 422（重試/雙擊不得重複改負債）。"""
+    _store_id, _manager_id, member_id, mgr_token, _ = await _seed(db_session)
+    resp = await client.post(
+        f"/api/v1/contacts/{member_id}/store-credit/adjustments",
+        json={"amount": "100", "reason": "x"},
         headers=_auth(mgr_token),
     )
     assert resp.status_code == 422
+
+
+async def test_adjust_retry_same_key_returns_original(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, _manager_id, member_id, mgr_token, _ = await _seed(db_session)
+    first = await client.post(
+        f"/api/v1/contacts/{member_id}/store-credit/adjustments",
+        json={"amount": "100", "reason": "補發"},
+        headers=_auth(mgr_token, idem="retry-key"),
+    )
+    retry = await client.post(
+        f"/api/v1/contacts/{member_id}/store-credit/adjustments",
+        json={"amount": "100", "reason": "補發"},
+        headers=_auth(mgr_token, idem="retry-key"),
+    )
+    assert first.status_code == 201
+    assert retry.status_code == 201
+    assert retry.json()["id"] == first.json()["id"]
+    balance = await client.get(
+        f"/api/v1/contacts/{member_id}/store-credit", headers=_auth(mgr_token)
+    )
+    assert balance.json()["balance"] == "100"  # 只加一次
 
 
 async def test_endpoints_require_auth(client: httpx.AsyncClient) -> None:
     assert (await client.get("/api/v1/contacts/1/store-credit")).status_code == 401
     assert (
         await client.post(
-            "/api/v1/contacts/1/store-credit/adjustments", json={"amount": "1", "reason": "x"}
+            "/api/v1/contacts/1/store-credit/adjustments",
+            json={"amount": "1", "reason": "x"},
+            headers={"Idempotency-Key": "k"},
         )
     ).status_code == 401

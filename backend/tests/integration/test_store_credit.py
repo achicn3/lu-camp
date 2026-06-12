@@ -333,14 +333,104 @@ async def test_adjust_writes_audit_and_requires_reason(db_session: AsyncSession)
     store_id, user_id, member_id = await _seed(db_session)
     svc = StoreCreditService(db_session)
     entry = await svc.adjust(
-        store_id, member_id, amount=Decimal(50), reason="開幕活動補發", created_by=user_id
+        store_id,
+        member_id,
+        amount=Decimal(50),
+        reason="開幕活動補發",
+        created_by=user_id,
+        idempotency_key="adj-k1",
     )
     assert entry.reason == "開幕活動補發"
     logs = (await db_session.scalars(select(AuditLog))).all()
     actions = [log.action for log in logs]
     assert "STORE_CREDIT_ADJUST" in actions
     with pytest.raises(StoreCreditConflict):
-        await svc.adjust(store_id, member_id, amount=Decimal(10), reason="   ", created_by=user_id)
+        await svc.adjust(
+            store_id,
+            member_id,
+            amount=Decimal(10),
+            reason="   ",
+            created_by=user_id,
+            idempotency_key="adj-k2",
+        )
+
+
+async def test_adjust_idempotent_by_key(db_session: AsyncSession) -> None:
+    """人工校正冪等（adversarial 第三輪 high）：同鍵重送回原列、負債只變一次；
+    同鍵不同內容 → 409。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    first = await svc.adjust(
+        store_id,
+        member_id,
+        amount=Decimal(50),
+        reason="補發",
+        created_by=user_id,
+        idempotency_key="same-key",
+    )
+    replay = await svc.adjust(
+        store_id,
+        member_id,
+        amount=Decimal(50),
+        reason="補發",
+        created_by=user_id,
+        idempotency_key="same-key",
+    )
+    assert replay.id == first.id
+    assert await svc.get_balance(store_id, member_id) == Decimal(50)  # 只加一次
+    with pytest.raises(StoreCreditConflict):
+        await svc.adjust(
+            store_id,
+            member_id,
+            amount=Decimal(999),
+            reason="不同內容",
+            created_by=user_id,
+            idempotency_key="same-key",
+        )
+
+
+async def test_db_rejects_cross_tenant_reversal_insert(db_session: AsyncSession) -> None:
+    """持久層沖正租戶綁定（adversarial 第三輪 high）：直插「B 店沖 A 店列」被
+    複合自參考 FK 擋。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    other_store = Store(name="B 店")
+    db_session.add(other_store)
+    await db_session.flush()
+    other_member = Contact(store_id=other_store.id, name="B 店會員", roles=["MEMBER"])
+    other_user = User(
+        store_id=other_store.id, username="b-mgr", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add_all([other_member, other_user])
+    await db_session.flush()
+    svc = StoreCreditService(db_session)
+    original = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=77,
+        created_by=user_id,
+    )
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  source_type, source_id, reversal_of_id, fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, 'REVERSAL', -110, 0, 'SALE_VOID', 9999, :rev,"
+                "  'forged', :uid, now())"
+            ),
+            {
+                "sid": other_store.id,
+                "cid": other_member.id,
+                "rev": original.id,
+                "uid": other_user.id,
+            },
+        )
+    await db_session.rollback()
 
 
 async def test_ledger_is_immutable_at_db_level(db_session: AsyncSession) -> None:

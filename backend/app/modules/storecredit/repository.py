@@ -65,9 +65,23 @@ class StoreCreditRepository:
         result: StoreCreditLedger | None = await self._session.scalar(stmt)
         return result
 
-    async def find_reversal_of(self, original_id: int) -> StoreCreditLedger | None:
-        """找某列的既有沖正（一列只能被沖一次）。"""
-        stmt = select(StoreCreditLedger).where(StoreCreditLedger.reversal_of_id == original_id)
+    async def find_reversal_of(self, store_id: int, original_id: int) -> StoreCreditLedger | None:
+        """找某列的既有沖正（一列只能被沖一次；店別範圍雙保險）。"""
+        stmt = select(StoreCreditLedger).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.reversal_of_id == original_id,
+        )
+        result: StoreCreditLedger | None = await self._session.scalar(stmt)
+        return result
+
+    async def find_by_idempotency_key(
+        self, store_id: int, idempotency_key: str
+    ) -> StoreCreditLedger | None:
+        """以冪等鍵找分錄（MANUAL 校正防重複）。"""
+        stmt = select(StoreCreditLedger).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.idempotency_key == idempotency_key,
+        )
         result: StoreCreditLedger | None = await self._session.scalar(stmt)
         return result
 

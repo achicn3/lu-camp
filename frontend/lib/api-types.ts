@@ -284,7 +284,8 @@ export interface paths {
         put?: never;
         /**
          * Adjust Store Credit
-         * @description 人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負）。
+         * @description 人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負；冪等鍵必帶——
+         *     重試/雙擊不得重複改負債）。
          */
         post: operations["adjustStoreCredit"];
         delete?: never;
@@ -1672,7 +1673,9 @@ export interface operations {
     adjustStoreCredit: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 contact_id: number;
             };

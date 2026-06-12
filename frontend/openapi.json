@@ -2850,7 +2850,7 @@
     },
     "/api/v1/contacts/{contact_id}/store-credit/adjustments": {
       "post": {
-        "description": "人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負）。",
+        "description": "人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負；冪等鍵必帶——\n重試/雙擊不得重複改負債）。",
         "operationId": "adjustStoreCredit",
         "parameters": [
           {
@@ -2860,6 +2860,17 @@
             "schema": {
               "title": "Contact Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],

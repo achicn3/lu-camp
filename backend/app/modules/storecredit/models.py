@@ -64,6 +64,27 @@ class StoreCreditLedger(Base):
             ["contacts.id", "contacts.store_id"],
             name="fk_store_credit_ledger_contact_store",
         ),
+        # 供下方租戶綁定自參考 FK 指向（id 為 PK，本約束恆成立）。
+        UniqueConstraint("id", "store_id", "contact_id", name="uq_store_credit_ledger_id_tenant"),
+        # 沖正必須指向**同店同帳戶**的原列（adversarial 第三輪 high）：
+        # 直插跨店/跨帳戶沖正在 DB 層即被擋。
+        ForeignKeyConstraint(
+            ["reversal_of_id", "store_id", "contact_id"],
+            [
+                "store_credit_ledger.id",
+                "store_credit_ledger.store_id",
+                "store_credit_ledger.contact_id",
+            ],
+            name="fk_store_credit_ledger_reversal_tenant",
+        ),
+        # 人工校正（MANUAL，source_id NULL）改以冪等鍵防重複（adversarial 第三輪 high）。
+        Index(
+            "uq_store_credit_ledger_idem_key",
+            "store_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -76,8 +97,9 @@ class StoreCreditLedger(Base):
     premium_rate_applied: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))  # CREDIT 必填
     source_type: Mapped[StoreCreditSourceType] = mapped_column(_enum_col(StoreCreditSourceType))
     source_id: Mapped[int | None] = mapped_column()
-    reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("store_credit_ledger.id"))
+    reversal_of_id: Mapped[int | None] = mapped_column()  # 租戶綁定複合自參考 FK 見 __table_args__
     fingerprint: Mapped[str] = mapped_column(String(64))  # 內容 sha256（冪等比對）
+    idempotency_key: Mapped[str | None] = mapped_column(String(80))  # MANUAL 校正用
     reason: Mapped[str | None] = mapped_column(String(200))  # ADJUSTMENT 必填
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # G3 前恆 NULL
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
