@@ -304,8 +304,11 @@ FOR EACH ROW EXECUTE FUNCTION store_credit_balance_chain_guard()
     """
 CREATE OR REPLACE FUNCTION store_credit_cache_sync() RETURNS trigger AS $$
 BEGIN
+  -- 設為 balance_after（第十八輪 high）：增量寫法會把既有漂移帶著走；
+  -- balance_after 已被鏈守衛驗證等於帳本滾動和（權威值），直接覆寫
+  -- 順帶自癒任何先前漂移。
   UPDATE store_credit_accounts
-     SET balance = balance + NEW.signed_amount,
+     SET balance = NEW.balance_after,
          version = version + 1,
          updated_at = now()
    WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id;
