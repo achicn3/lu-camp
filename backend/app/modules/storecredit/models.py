@@ -187,9 +187,39 @@ CREATE TRIGGER trg_store_credit_ledger_immutable
 BEFORE UPDATE OR DELETE ON store_credit_ledger
 FOR EACH ROW EXECUTE FUNCTION store_credit_ledger_immutable()
 """,
+    # 沖正跨列不變量（adversarial 第十輪 high）：CHECK 無法跨列，改以 BEFORE INSERT
+    # trigger 守——沖正對象不可是沖正列、金額必為原列負值。帳本不可變＋一列僅一個
+    # 沖正名額，寫錯即永久佔用名額並改變負債，必須在持久層擋。
+    """
+CREATE OR REPLACE FUNCTION store_credit_reversal_guard() RETURNS trigger AS $$
+DECLARE
+  original RECORD;
+BEGIN
+  IF NEW.reversal_of_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  SELECT entry_type, signed_amount INTO original
+    FROM store_credit_ledger WHERE id = NEW.reversal_of_id;
+  IF original.entry_type = 'REVERSAL' THEN
+    RAISE EXCEPTION '沖正列不可再被沖正';
+  END IF;
+  IF NEW.signed_amount <> -original.signed_amount THEN
+    RAISE EXCEPTION '沖正金額必須為原列負值';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE TRIGGER trg_store_credit_reversal_guard
+BEFORE INSERT ON store_credit_ledger
+FOR EACH ROW EXECUTE FUNCTION store_credit_reversal_guard()
+""",
 )
 
 LEDGER_IMMUTABLE_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_store_credit_reversal_guard ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS store_credit_reversal_guard()",
     "DROP TRIGGER IF EXISTS trg_store_credit_ledger_immutable ON store_credit_ledger",
     "DROP FUNCTION IF EXISTS store_credit_ledger_immutable()",
 )

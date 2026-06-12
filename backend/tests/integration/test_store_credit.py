@@ -431,6 +431,80 @@ async def test_reverse_uses_persisted_amount_not_caller_object(
         )
 
 
+async def test_db_reversal_guard_rejects_wrong_amount_and_double_layer(
+    db_session: AsyncSession,
+) -> None:
+    """DB 沖正跨列守衛（第十輪 high）：直插錯額沖正、沖沖正列 → 一律報錯。"""
+    from sqlalchemy.exc import DBAPIError
+
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=500,
+        created_by=user_id,
+    )
+
+    async def _raw_reversal(rev_id: int, amount: int, src: int) -> None:
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  source_type, source_id, reversal_of_id, fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, 'REVERSAL', :amount, 0, 'SALE_VOID', :src, :rev,"
+                "  'forged', :uid, now())"
+            ),
+            {
+                "sid": store_id,
+                "cid": member_id,
+                "uid": user_id,
+                "rev": rev_id,
+                "amount": amount,
+                "src": src,
+            },
+        )
+
+    with pytest.raises(DBAPIError):
+        await _raw_reversal(credit.id, -999, 501)  # 錯額（應為 -1100）
+    await db_session.rollback()
+
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=502,
+        created_by=user_id,
+    )
+    reversal = await svc.reverse(
+        store_id,
+        credit.id,
+        source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        source_id=502,
+        created_by=user_id,
+    )
+    # 補回餘額，讓「沖沖正列」不會先被餘額守衛擋住，專測 DB 層
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(5000),
+        premium_rate=Decimal("0.00"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=503,
+        created_by=user_id,
+    )
+    with pytest.raises(DBAPIError):
+        await _raw_reversal(reversal.id, 1000, 504)  # 沖沖正列
+    await db_session.rollback()
+
+
 async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> None:
     """方向/形狀 CHECK（adversarial 第五輪 medium）：正額 DEBIT、無對象 REVERSAL
     直插一律 IntegrityError。"""
