@@ -1,0 +1,75 @@
+"use client";
+// 受保護區殼層：無 token 導回 /login；監聽 401 廣播；頂欄導覽＋身分/登出。
+// 前端隱藏不等於安全——後端對每個請求仍驗權（docs/10 §4）。
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useEffect, useSyncExternalStore } from "react";
+
+import { decodeSession, logout } from "@/lib/auth";
+import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
+
+const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
+  { href: "/", label: "首頁", ready: true },
+  { href: "/pos", label: "POS 結帳", ready: false },
+  { href: "/cash", label: "現金對帳", ready: false },
+  { href: "/contacts", label: "會員/賣方", ready: false },
+  { href: "/inventory", label: "庫存", ready: false },
+  { href: "/acquisition", label: "收購", ready: false },
+];
+
+export default function AuthedLayout({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  // token 為外部 store（記憶體＋sessionStorage）；SSR 快照為 null → 客戶端水合後同步。
+  const token = useSyncExternalStore(subscribeToken, getToken, () => null);
+
+  useEffect(() => {
+    if (token === null) router.replace("/login");
+  }, [token, router]);
+
+  useEffect(() => {
+    const onUnauthorized = () => router.replace("/login");
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, [router]);
+
+  if (token === null) return null;
+  const session = decodeSession();
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <nav className="app-nav">
+          {NAV_ITEMS.map((item) =>
+            item.ready ? (
+              <Link key={item.href} href={item.href} className="nav-link">
+                {item.label}
+              </Link>
+            ) : (
+              <span key={item.href} className="nav-link nav-link-disabled" title="開發中">
+                {item.label}
+              </span>
+            ),
+          )}
+        </nav>
+        <div className="app-header-right">
+          {session !== null && (
+            <span className="session-badge">
+              {session.role === "MANAGER" ? "管理者" : "店員"}
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              logout();
+              router.replace("/login");
+            }}
+          >
+            登出
+          </button>
+        </div>
+      </header>
+      <main className="app-main">{children}</main>
+    </div>
+  );
+}

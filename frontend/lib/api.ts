@@ -5,7 +5,31 @@
 import createClient from "openapi-fetch";
 
 import type { paths } from "./api-types";
+import { UNAUTHORIZED_EVENT, clearToken, getToken } from "./token";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-export const api = createClient<paths>({ baseUrl: BASE_URL });
+// fetch 延遲到呼叫時才解析全域（而非 createClient 時抓參考）：行為相同，
+// 但測試以 stubGlobal 替換 fetch 才攔得到。
+export const api = createClient<paths>({
+  baseUrl: BASE_URL,
+  fetch: (request) => globalThis.fetch(request),
+});
+
+// 帶 token；401（登入端點除外）→ 清 token 並廣播，讓 (authed) layout 導回登入。
+api.use({
+  onRequest({ request }) {
+    const token = getToken();
+    if (token) request.headers.set("Authorization", `Bearer ${token}`);
+    return request;
+  },
+  onResponse({ request, response }) {
+    if (response.status === 401 && !request.url.includes("/auth/login")) {
+      clearToken();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+      }
+    }
+    return response;
+  },
+});
