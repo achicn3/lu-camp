@@ -14,6 +14,11 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from app.modules.acquisition.models import (
+    ACQ_CREDIT_LEG_GUARD_DDL,
+    ACQ_CREDIT_LEG_GUARD_DROP_DDL,
+)
+
 # revision identifiers, used by Alembic.
 revision: str = "e8f3a7c1d2b9"
 down_revision: str | Sequence[str] | None = "c5d1e8a2b7f4"
@@ -110,10 +115,14 @@ def upgrade() -> None:
         " AND payout_cash_amount > 0 AND payout_credit_cash_equivalent > 0"
         " AND total_cash_paid = payout_cash_amount)",
     )
+    for ddl in ACQ_CREDIT_LEG_GUARD_DDL:
+        op.execute(ddl)
 
 
 def downgrade() -> None:
     """Downgrade schema."""
+    for ddl in ACQ_CREDIT_LEG_GUARD_DROP_DDL:
+        op.execute(ddl)
     op.drop_constraint("ck_acquisitions_split_shape", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_store_credit_shape", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_cash_shape", "acquisitions", type_="check")

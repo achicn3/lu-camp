@@ -10,8 +10,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-
-_svc_idem = itertools.count()
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +24,8 @@ from app.modules.inventory.models import SerializedItem, StockMovement
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import AcquisitionType, Grade, UserRole
+
+_svc_idem = itertools.count()
 
 
 async def test_acquisition_rolls_back_entirely_when_cash_step_fails(

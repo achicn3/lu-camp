@@ -213,16 +213,10 @@ class AcquisitionService:
         ):
             raise InvalidPayoutSplit("CONSIGNMENT 不撥款，不可指定撥款方式/拆分")
         pays_out = data.type in _CASH_PAYING
-        # 純購物金不碰現金、不要求開帳（docs/16 §3.1）；含現金部分才要求。
-        needs_cash_session = pays_out and payout_method in (
-            PayoutMethod.CASH,
-            PayoutMethod.SPLIT,
-        )
-        if needs_cash_session and await self._cash.get_current_session(store_id) is None:
-            raise NoOpenCashSession("收購付現必須在開帳中的 cash_session 下進行，請先開帳")
 
         # 撥款預檢（Codex 第五輪 high）：在**任何寫入之前**完成全部驗證——
         # 直呼 service 又不回滾的呼叫者也不可能留下半套（入庫了卻沒撥款）。
+        # 純輸入驗證先於開帳等狀態檢查：無對價的請求不論開帳與否一律 422。
         expected_cash = expected_credit = Decimal(0)
         if pays_out:
             expected_total = self._payout_total_from_request(data)
@@ -238,6 +232,14 @@ class AcquisitionService:
                 raise StoreCreditMemberRequired(
                     f"contact {contact.id} 非本店會員，不可持有購物金（I-8）"
                 )
+
+        # 純購物金不碰現金、不要求開帳（docs/16 §3.1）；含現金部分才要求。
+        needs_cash_session = pays_out and payout_method in (
+            PayoutMethod.CASH,
+            PayoutMethod.SPLIT,
+        )
+        if needs_cash_session and await self._cash.get_current_session(store_id) is None:
+            raise NoOpenCashSession("收購付現必須在開帳中的 cash_session 下進行，請先開帳")
 
         # 撥款欄於建單時即帶上（第十四輪：DB 形狀 CHECK 嚴格化後，header 不可
         # 以「無撥款」形先落地再補）——預檢值與入庫實算同源必相等。

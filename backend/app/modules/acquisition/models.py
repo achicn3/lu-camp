@@ -7,7 +7,17 @@
 
 from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Numeric, String, UniqueConstraint, text
+from sqlalchemy import (
+    DDL,
+    CheckConstraint,
+    Enum,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    event,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -85,3 +95,48 @@ class Acquisition(Base, TimestampMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(80))
     idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     note: Mapped[str | None] = mapped_column(String(500))
+
+
+# credit 腿 ↔ 帳本綁定（Codex SC-2 第十六輪 medium）：收購頭的購物金腿必須對應
+# 一筆等值的 store_credit_ledger ACQUISITION CREDIT 分錄。DEFERRABLE INITIALLY
+# DEFERRED：於 COMMIT 時驗（header 先插、分錄後插的正常時序不受影響）；
+# 直插/修復腳本偽造 credit 腿（無分錄或不等值）在提交瞬間被擋。
+# 分錄本身的經濟正確性由 SC-1 的帳本守衛鏈保證。
+ACQ_CREDIT_LEG_GUARD_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION acquisitions_credit_leg_guard() RETURNS trigger AS $$
+DECLARE
+  ledger_ce NUMERIC;
+BEGIN
+  IF COALESCE(NEW.payout_credit_cash_equivalent, 0) = 0 THEN
+    RETURN NEW;
+  END IF;
+  SELECT cash_equivalent INTO ledger_ce
+    FROM store_credit_ledger
+   WHERE store_id = NEW.store_id AND source_type = 'ACQUISITION'
+     AND source_id = NEW.id AND entry_type = 'CREDIT';
+  IF ledger_ce IS NULL OR ledger_ce <> NEW.payout_credit_cash_equivalent THEN
+    RAISE EXCEPTION '收購購物金腿必須對應等值的帳本 ACQUISITION CREDIT 分錄';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE CONSTRAINT TRIGGER trg_acquisitions_credit_leg_guard
+AFTER INSERT OR UPDATE ON acquisitions
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION acquisitions_credit_leg_guard()
+""",
+)
+
+ACQ_CREDIT_LEG_GUARD_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_acquisitions_credit_leg_guard ON acquisitions",
+    "DROP FUNCTION IF EXISTS acquisitions_credit_leg_guard()",
+)
+
+for _ddl in ACQ_CREDIT_LEG_GUARD_DDL:
+    # 掛本表 after_create（只在表真正建立時觸發一次；metadata 層在 checkfirst
+    # 重跑時會重複執行而撞 DuplicateObject）。plpgsql 函式主體對
+    # store_credit_ledger 的引用於執行期才解析，故不需等 ledger 表先建。
+    event.listen(Acquisition.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]

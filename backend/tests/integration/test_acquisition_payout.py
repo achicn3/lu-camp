@@ -344,7 +344,7 @@ async def test_zero_total_store_credit_is_422_not_500(
     cash_payload = _buyout_payload(seller_id)
     cash_payload["items"][0]["acquisition_cost"] = "0"  # type: ignore[index]
     resp = await client.post("/api/v1/acquisitions", json=cash_payload, headers=_auth(token))
-    assert resp.status_code == 422
+    assert resp.status_code == 422, resp.text
 
 
 async def test_db_rejects_inconsistent_payout_shapes(db_session: AsyncSession) -> None:
@@ -525,6 +525,55 @@ async def test_blank_idempotency_key_rejected_at_service(db_session: AsyncSessio
                 idempotency_key=bad,  # type: ignore[arg-type]
             )
     assert await db_session.scalar(select(func.count()).select_from(Acquisition)) == 0
+
+
+async def test_forged_credit_leg_rejected_at_commit() -> None:
+    """credit 腿綁定帳本（第十六輪 medium）：直插「有購物金腿、無對應分錄」的
+    header → COMMIT 時被 deferrable 約束觸發器擋。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="偽腿店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="forge", password_hash="h", role=UserRole.CLERK)
+        seller = Contact(
+            store_id=store.id, name="賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, seller])
+        await s.flush()
+        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO acquisitions"
+                    " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                    "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, 999999,"
+                    "  now(), now())"
+                ),
+                {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()  # deferrable trigger 於提交時驗
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM acquisitions"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
 
 
 async def test_concurrent_service_callers_same_key_replay() -> None:

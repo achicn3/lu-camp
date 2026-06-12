@@ -8,8 +8,6 @@ import itertools
 from decimal import Decimal
 
 import pytest
-
-_svc_idem = itertools.count()
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +43,8 @@ from app.shared.exceptions import (
     InvalidCommissionPct,
     NoOpenCashSession,
 )
+
+_svc_idem = itertools.count()
 
 
 async def _seed(
