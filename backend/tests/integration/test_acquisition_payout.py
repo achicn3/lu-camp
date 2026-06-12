@@ -302,6 +302,33 @@ async def test_service_rejects_invalid_split_even_bypassing_schema(
     assert count == 0
 
 
+async def test_payout_failures_leave_nothing_even_if_caller_commits(
+    db_session: AsyncSession,
+) -> None:
+    """預檢先於寫入（Codex 第五輪 high）：直呼 service、catch 例外**不回滾就 commit**
+    ——也不得留下收購/庫存/現金/帳本任何一筆。"""
+    import pytest
+
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+    from app.modules.inventory.models import SerializedItem
+    from app.shared.exceptions import DomainError
+
+    _token, store_id, seller_id = await _seed(db_session, member=False)  # 非會員
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    data = AcquisitionCreate.model_validate(
+        _buyout_payload(seller_id, payout_method="STORE_CREDIT")
+    )
+    svc = AcquisitionService(db_session)
+    with pytest.raises(DomainError):
+        await svc.create_acquisition(store_id, clerk_id, data, idempotency_key="dirty-commit")
+    # 故意不 rollback、直接 commit（粗心呼叫者情境）
+    await db_session.commit()
+    assert await db_session.scalar(select(func.count()).select_from(Acquisition)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(SerializedItem)) == 0
+    assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
+
+
 async def test_service_level_retry_is_idempotent(db_session: AsyncSession) -> None:
     """service 邊界冪等必填（Codex）：router 之外的呼叫者重試也不得重複付現/入帳。"""
     from app.modules.acquisition.schemas import AcquisitionCreate

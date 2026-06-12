@@ -30,6 +30,7 @@ from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     AcquisitionType,
     CashMovementType,
+    ContactRole,
     Grade,
     ItemKind,
     OwnershipType,
@@ -44,6 +45,7 @@ from app.shared.exceptions import (
     InvalidCommissionPct,
     InvalidPayoutSplit,
     NoOpenCashSession,
+    StoreCreditMemberRequired,
 )
 
 COMMISSION_PCT_MIN = 0
@@ -93,6 +95,21 @@ class AcquisitionService:
             item_codes=item_codes,
             lot_code=lot_code,
         )
+
+    @staticmethod
+    def _payout_total_from_request(data: AcquisitionCreate) -> Decimal:
+        """自請求純算應付總額（零寫入）：供「任何副作用之前」的撥款預檢。
+
+        與入庫實算同源（BUYOUT＝Σ acquisition_cost、BULK_LOT＝lot.acquisition_cost），
+        兩者必然相等。
+        """
+        if data.type == AcquisitionType.BULK_LOT:
+            assert data.lot is not None  # schema/_check_shape 已保證
+            return Decimal(round_ntd(Decimal(data.lot.acquisition_cost)))
+        total = sum(
+            (Decimal(item.acquisition_cost or 0) for item in (data.items or [])), Decimal(0)
+        )
+        return Decimal(round_ntd(total))
 
     @staticmethod
     def _split_payout(data: AcquisitionCreate, total: Decimal) -> tuple[Decimal, Decimal]:
@@ -152,6 +169,16 @@ class AcquisitionService:
         )
         if needs_cash_session and await self._cash.get_current_session(store_id) is None:
             raise NoOpenCashSession("收購付現必須在開帳中的 cash_session 下進行，請先開帳")
+
+        # 撥款預檢（Codex 第五輪 high）：在**任何寫入之前**完成全部驗證——
+        # 直呼 service 又不回滾的呼叫者也不可能留下半套（入庫了卻沒撥款）。
+        if pays_out:
+            expected_total = self._payout_total_from_request(data)
+            expected_cash, expected_credit = self._split_payout(data, expected_total)
+            if expected_credit > 0 and ContactRole.MEMBER.value not in contact.roles:
+                raise StoreCreditMemberRequired(
+                    f"contact {contact.id} 非本店會員，不可持有購物金（I-8）"
+                )
 
         acquisition = await self._repo.add(
             Acquisition(
