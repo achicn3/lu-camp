@@ -164,6 +164,8 @@ def downgrade() -> None:
     """Downgrade schema."""
     for ddl in LEDGER_IMMUTABLE_DROP_DDL:
         op.execute(ddl)
-    op.drop_table("store_credit_accounts")
+    # ledger 持有指向 accounts 的 FK：必須先刪 ledger（Codex 第七輪 medium，
+    # 否則 PostgreSQL 因依賴拒刪、緊急回滾會卡住）。
     op.drop_table("store_credit_ledger")
+    op.drop_table("store_credit_accounts")
     op.drop_constraint("uq_contacts_id_store", "contacts", type_="unique")

@@ -95,6 +95,10 @@ class StoreCreditLedger(Base):
         ),
         # 核心不變量收進 DB（adversarial 第四輪 medium）：繞過 service 的直插/回填
         # 也不能寫出不可能狀態（帳本不可變，寫錯無法修正）。
+        # 【已知界線】Postgres 會在 CHECK 之前把輸入強制到 Numeric(12,0)（捨入），
+        # 故「raw SQL 小數直插」會以捨入後的值通過 CHECK——此為全專案金額欄位
+        # 的共同性質（§6 整數元慣例）。應用層由 _write_entry 整數守衛擋；
+        # 直插造成的 sum/balance_after 不一致由 reconcile（I-3）偵測回報。
         CheckConstraint("signed_amount <> 0", name="ck_scl_signed_nonzero"),
         # 方向/形狀（adversarial 第五輪 medium）：CREDIT 必正、DEBIT 必負、
         # REVERSAL 必有對象（且唯有它有）、ADJUSTMENT 必 MANUAL 無 source_id、
