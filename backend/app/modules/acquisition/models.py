@@ -33,6 +33,33 @@ class Acquisition(Base, TimestampMixin):
             "payout_credit_cash_equivalent IS NULL OR payout_credit_cash_equivalent >= 0",
             name="ck_acquisitions_payout_credit_nonneg",
         ),
+        # 形狀綁定（Codex 第十一輪 medium）：method/type/三金額欄互相一致，
+        # 回填/直插也寫不出「報表無法解讀為現金流出 vs 購物金負債」的怪單。
+        CheckConstraint(
+            "type <> 'CONSIGNMENT' OR (payout_method = 'CASH'"
+            " AND payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
+            " AND total_cash_paid IS NULL)",
+            name="ck_acquisitions_consignment_no_payout",
+        ),
+        CheckConstraint(
+            "payout_method <> 'CASH' OR type = 'CONSIGNMENT'"
+            " OR (payout_cash_amount = total_cash_paid"
+            " AND COALESCE(payout_credit_cash_equivalent, 0) = 0)"
+            " OR (payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
+            " AND total_cash_paid IS NULL)",
+            name="ck_acquisitions_cash_shape",
+        ),
+        CheckConstraint(
+            "payout_method <> 'STORE_CREDIT' OR (COALESCE(payout_cash_amount, 0) = 0"
+            " AND COALESCE(total_cash_paid, 0) = 0 AND payout_credit_cash_equivalent > 0)",
+            name="ck_acquisitions_store_credit_shape",
+        ),
+        CheckConstraint(
+            "payout_method <> 'SPLIT' OR (payout_cash_amount > 0"
+            " AND payout_credit_cash_equivalent > 0"
+            " AND total_cash_paid = payout_cash_amount)",
+            name="ck_acquisitions_split_shape",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

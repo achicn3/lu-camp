@@ -329,6 +329,47 @@ async def test_payout_failures_leave_nothing_even_if_caller_commits(
     assert await db_session.scalar(select(func.count()).select_from(CashMovement)) == 0
 
 
+async def test_db_rejects_inconsistent_payout_shapes(db_session: AsyncSession) -> None:
+    """形狀 CHECK（Codex 第十一輪 medium）：直插「STORE_CREDIT 卻有付現」「SPLIT
+    缺購物金腿」一律 IntegrityError。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+
+    async def _raw(method: str, cash: object, credit: object, total: object) -> None:
+        await db_session.execute(
+            text(
+                "INSERT INTO acquisitions"
+                " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                "  created_at, updated_at)"
+                " VALUES (:sid, 'BUYOUT', :cid, :uid, :total, :method, :cash, :credit,"
+                "  now(), now())"
+            ),
+            {
+                "sid": store_id,
+                "cid": seller_id,
+                "uid": clerk_id,
+                "method": method,
+                "cash": cash,
+                "credit": credit,
+                "total": total,
+            },
+        )
+
+    with pytest.raises(IntegrityError):
+        await _raw("STORE_CREDIT", 500, 1000, 500)  # 購物金單卻有付現
+    await db_session.rollback()
+    _token, store_id, seller_id = await _seed(db_session)
+    clerk_id = (await db_session.execute(select(User.id))).scalar_one()
+    with pytest.raises(IntegrityError):
+        await _raw("SPLIT", 400, 0, 400)  # SPLIT 缺購物金腿
+    await db_session.rollback()
+
+
 async def test_negative_cost_rejected_before_writes(db_session: AsyncSession) -> None:
     """負成本繞過（Codex 第十輪 high）：model_construct 帶負 acquisition_cost →
     純算階段即拒、零落地（不留「負撥款腿、無副作用」的怪單）。"""

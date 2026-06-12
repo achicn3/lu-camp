@@ -74,6 +74,35 @@ def upgrade() -> None:
         "acquisitions",
         "payout_credit_cash_equivalent IS NULL OR payout_credit_cash_equivalent >= 0",
     )
+    op.create_check_constraint(
+        "ck_acquisitions_consignment_no_payout",
+        "acquisitions",
+        "type <> 'CONSIGNMENT' OR (payout_method = 'CASH'"
+        " AND payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
+        " AND total_cash_paid IS NULL)",
+    )
+    op.create_check_constraint(
+        "ck_acquisitions_cash_shape",
+        "acquisitions",
+        "payout_method <> 'CASH' OR type = 'CONSIGNMENT'"
+        " OR (payout_cash_amount = total_cash_paid"
+        " AND COALESCE(payout_credit_cash_equivalent, 0) = 0)"
+        " OR (payout_cash_amount IS NULL AND payout_credit_cash_equivalent IS NULL"
+        " AND total_cash_paid IS NULL)",
+    )
+    op.create_check_constraint(
+        "ck_acquisitions_store_credit_shape",
+        "acquisitions",
+        "payout_method <> 'STORE_CREDIT' OR (COALESCE(payout_cash_amount, 0) = 0"
+        " AND COALESCE(total_cash_paid, 0) = 0 AND payout_credit_cash_equivalent > 0)",
+    )
+    op.create_check_constraint(
+        "ck_acquisitions_split_shape",
+        "acquisitions",
+        "payout_method <> 'SPLIT' OR (payout_cash_amount > 0"
+        " AND payout_credit_cash_equivalent > 0"
+        " AND total_cash_paid = payout_cash_amount)",
+    )
     # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
     # 避免新欄位讀起來像「資料缺漏」而非「全額付現」。
     op.execute(
@@ -84,6 +113,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_constraint("ck_acquisitions_split_shape", "acquisitions", type_="check")
+    op.drop_constraint("ck_acquisitions_store_credit_shape", "acquisitions", type_="check")
+    op.drop_constraint("ck_acquisitions_cash_shape", "acquisitions", type_="check")
+    op.drop_constraint("ck_acquisitions_consignment_no_payout", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_payout_credit_nonneg", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_payout_cash_nonneg", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_idem_key_nonempty", "acquisitions", type_="check")
