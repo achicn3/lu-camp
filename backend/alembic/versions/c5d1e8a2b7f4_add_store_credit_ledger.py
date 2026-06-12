@@ -82,6 +82,17 @@ def upgrade() -> None:
             ],
             name="fk_store_credit_ledger_reversal_tenant",
         ),
+        sa.CheckConstraint("signed_amount <> 0", name="ck_scl_signed_nonzero"),
+        sa.CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
+        sa.CheckConstraint(
+            "entry_type <> 'CREDIT' OR"
+            " (cash_equivalent IS NOT NULL AND premium_rate_applied IS NOT NULL)",
+            name="ck_scl_credit_fields",
+        ),
+        sa.CheckConstraint(
+            "entry_type <> 'ADJUSTMENT' OR (reason IS NOT NULL AND idempotency_key IS NOT NULL)",
+            name="ck_scl_adjust_fields",
+        ),
     )
     op.create_index("ix_store_credit_ledger_store_id", "store_credit_ledger", ["store_id"])
     op.create_index(
@@ -114,6 +125,7 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.UniqueConstraint("store_id", "contact_id", name="uq_store_credit_accounts_contact"),
+        sa.CheckConstraint("balance >= 0", name="ck_sca_balance_nonneg"),
         sa.ForeignKeyConstraint(
             ["contact_id", "store_id"],
             ["contacts.id", "contacts.store_id"],

@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     DDL,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -85,6 +86,19 @@ class StoreCreditLedger(Base):
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
+        # 核心不變量收進 DB（adversarial 第四輪 medium）：繞過 service 的直插/回填
+        # 也不能寫出不可能狀態（帳本不可變，寫錯無法修正）。
+        CheckConstraint("signed_amount <> 0", name="ck_scl_signed_nonzero"),
+        CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
+        CheckConstraint(
+            "entry_type <> 'CREDIT' OR"
+            " (cash_equivalent IS NOT NULL AND premium_rate_applied IS NOT NULL)",
+            name="ck_scl_credit_fields",
+        ),
+        CheckConstraint(
+            "entry_type <> 'ADJUSTMENT' OR (reason IS NOT NULL AND idempotency_key IS NOT NULL)",
+            name="ck_scl_adjust_fields",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -114,6 +128,7 @@ class StoreCreditAccount(Base, TimestampMixin):
     __tablename__ = "store_credit_accounts"
     __table_args__ = (
         UniqueConstraint("store_id", "contact_id", name="uq_store_credit_accounts_contact"),
+        CheckConstraint("balance >= 0", name="ck_sca_balance_nonneg"),
         ForeignKeyConstraint(
             ["contact_id", "store_id"],
             ["contacts.id", "contacts.store_id"],

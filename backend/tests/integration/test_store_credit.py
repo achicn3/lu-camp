@@ -389,6 +389,71 @@ async def test_adjust_idempotent_by_key(db_session: AsyncSession) -> None:
         )
 
 
+async def test_adjust_retry_writes_audit_once(db_session: AsyncSession) -> None:
+    """冪等重放不得重複寫稽核（adversarial 第四輪 high）：同鍵重試恰一筆 audit。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    for _ in range(3):
+        await svc.adjust(
+            store_id,
+            member_id,
+            amount=Decimal(50),
+            reason="補發",
+            created_by=user_id,
+            idempotency_key="audit-once",
+        )
+    logs = (await db_session.scalars(select(AuditLog))).all()
+    adjust_logs = [log for log in logs if log.action == "STORE_CREDIT_ADJUST"]
+    assert len(adjust_logs) == 1
+
+
+async def test_db_check_constraints_reject_invalid_states(db_session: AsyncSession) -> None:
+    """DB CHECK（adversarial 第四輪 medium）：零金額/負 balance_after/缺 CREDIT 欄位
+    的直插一律 IntegrityError。"""
+    from sqlalchemy.exc import IntegrityError
+
+    store_id, user_id, member_id = await _seed(db_session)
+
+    async def _raw_insert(**overrides: object) -> None:
+        params: dict[str, object] = {
+            "sid": store_id,
+            "cid": member_id,
+            "uid": user_id,
+            "etype": "DEBIT",
+            "amount": -10,
+            "after": 0,
+            "ce": None,
+            "rate": None,
+            "fp": "x",
+        }
+        params.update(overrides)
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  cash_equivalent, premium_rate_applied, source_type, source_id,"
+                "  fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, :etype, :amount, :after, :ce, :rate,"
+                "  'MANUAL', NULL, :fp, :uid, now())"
+            ),
+            params,
+        )
+
+    with pytest.raises(IntegrityError):
+        await _raw_insert(amount=0)  # signed_amount <> 0
+    await db_session.rollback()
+    store_id, user_id, member_id = await _seed(db_session)
+    with pytest.raises(IntegrityError):
+        await _raw_insert(after=-1, sid=store_id, cid=member_id, uid=user_id)  # balance_after >= 0
+    await db_session.rollback()
+    store_id, user_id, member_id = await _seed(db_session)
+    with pytest.raises(IntegrityError):
+        await _raw_insert(  # CREDIT 必帶 cash_equivalent/premium
+            etype="CREDIT", amount=100, after=100, sid=store_id, cid=member_id, uid=user_id
+        )
+    await db_session.rollback()
+
+
 async def test_db_rejects_cross_tenant_reversal_insert(db_session: AsyncSession) -> None:
     """持久層沖正租戶綁定（adversarial 第三輪 high）：直插「B 店沖 A 店列」被
     複合自參考 FK 擋。"""

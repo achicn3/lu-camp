@@ -88,7 +88,9 @@ class StoreCreditService:
         reversal_of_id: int | None = None,
         reason: str | None = None,
         idempotency_key: str | None = None,
-    ) -> StoreCreditLedger:
+    ) -> tuple[StoreCreditLedger, bool]:
+        """寫入一筆分錄；回 (分錄, 是否新插入)——冪等重放回 (原列, False)，
+        呼叫端據此避免重複副作用（如稽核）。"""
         if signed_amount == 0:
             raise StoreCreditConflict("分錄金額不可為零")
         # 多分店隔離（§4，adversarial review high）：contact 必須屬於本店——
@@ -121,7 +123,7 @@ class StoreCreditService:
             idempotency_key=idempotency_key,
         )
         if replay is not None:
-            return replay
+            return replay, False
         new_balance = Decimal(account.balance) + signed_amount
         if new_balance < 0:
             raise InsufficientStoreCredit(
@@ -160,12 +162,12 @@ class StoreCreditService:
                 idempotency_key=idempotency_key,
             )
             if replay is not None:
-                return replay
+                return replay, False
             raise StoreCreditConflict(f"分錄寫入衝突（{source_type}:{source_id}），請重試") from exc
         account.balance = new_balance
         account.version += 1
         await self._session.flush()
-        return entry
+        return entry, True
 
     async def _find_replay_locked(
         self,
@@ -228,7 +230,7 @@ class StoreCreditService:
             raise StoreCreditConflict("現金等值必須為正")
         await self._require_member(store_id, contact_id)
         amount = Decimal(round_ntd(cash_equivalent * (Decimal(1) + premium_rate)))
-        return await self._write_entry(
+        entry, _ = await self._write_entry(
             store_id,
             contact_id,
             entry_type=StoreCreditEntryType.CREDIT,
@@ -239,6 +241,7 @@ class StoreCreditService:
             cash_equivalent=cash_equivalent,
             premium_rate_applied=premium_rate,
         )
+        return entry
 
     async def debit(
         self,
@@ -253,7 +256,7 @@ class StoreCreditService:
         """消費扣抵（DEBIT，負向）；餘額不足 → InsufficientStoreCredit（I-6）。"""
         if amount <= 0:
             raise StoreCreditConflict("扣抵金額必須為正")
-        return await self._write_entry(
+        entry, _ = await self._write_entry(
             store_id,
             contact_id,
             entry_type=StoreCreditEntryType.DEBIT,
@@ -262,6 +265,7 @@ class StoreCreditService:
             source_id=source_id,
             created_by=created_by,
         )
+        return entry
 
     async def reverse(
         self,
@@ -283,7 +287,7 @@ class StoreCreditService:
             raise CrossStoreReference(
                 f"被沖正列 {original.id} 屬於 store {original.store_id}，非 store {store_id}"
             )
-        return await self._write_entry(
+        entry, _ = await self._write_entry(
             store_id,
             original.contact_id,
             entry_type=StoreCreditEntryType.REVERSAL,
@@ -293,6 +297,7 @@ class StoreCreditService:
             created_by=created_by,
             reversal_of_id=original.id,
         )
+        return entry
 
     async def adjust(
         self,
@@ -312,7 +317,7 @@ class StoreCreditService:
         if not reason.strip():
             raise StoreCreditConflict("人工校正必須填寫事由")
         await self._require_member(store_id, contact_id)
-        entry = await self._write_entry(
+        entry, inserted = await self._write_entry(
             store_id,
             contact_id,
             entry_type=StoreCreditEntryType.ADJUSTMENT,
@@ -323,6 +328,8 @@ class StoreCreditService:
             reason=reason.strip(),
             idempotency_key=idempotency_key,
         )
+        if not inserted:
+            return entry  # 冪等重放：不重複寫稽核（adversarial 第四輪 high）
         await write_audit_log(
             self._session,
             store_id=store_id,
