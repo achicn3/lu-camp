@@ -36,7 +36,13 @@ def upgrade() -> None:
         sa.Column("contact_id", sa.Integer(), nullable=False),
         sa.Column(
             "entry_type",
-            sa.Enum(*_ENTRY_TYPES, name="storecreditentrytype", native_enum=False, length=30),
+            sa.Enum(
+                *_ENTRY_TYPES,
+                name="storecreditentrytype",
+                native_enum=False,
+                length=30,
+                create_constraint=True,
+            ),
             nullable=False,
         ),
         sa.Column("signed_amount", sa.Numeric(12, 0), nullable=False),
@@ -45,7 +51,13 @@ def upgrade() -> None:
         sa.Column("premium_rate_applied", sa.Numeric(5, 4), nullable=True),
         sa.Column(
             "source_type",
-            sa.Enum(*_SOURCE_TYPES, name="storecreditsourcetype", native_enum=False, length=30),
+            sa.Enum(
+                *_SOURCE_TYPES,
+                name="storecreditsourcetype",
+                native_enum=False,
+                length=30,
+                create_constraint=True,
+            ),
             nullable=False,
         ),
         sa.Column("source_id", sa.Integer(), nullable=True),
