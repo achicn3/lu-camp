@@ -25,6 +25,14 @@ class Acquisition(Base, TimestampMixin):
             "idempotency_key IS NULL OR length(idempotency_key) > 0",
             name="ck_acquisitions_idem_key_nonempty",
         ),
+        CheckConstraint(
+            "payout_cash_amount IS NULL OR payout_cash_amount >= 0",
+            name="ck_acquisitions_payout_cash_nonneg",
+        ),
+        CheckConstraint(
+            "payout_credit_cash_equivalent IS NULL OR payout_credit_cash_equivalent >= 0",
+            name="ck_acquisitions_payout_credit_nonneg",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

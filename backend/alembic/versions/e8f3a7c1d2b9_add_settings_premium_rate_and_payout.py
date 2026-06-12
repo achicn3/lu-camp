@@ -64,6 +64,16 @@ def upgrade() -> None:
         "acquisitions",
         "idempotency_key IS NULL OR length(idempotency_key) > 0",
     )
+    op.create_check_constraint(
+        "ck_acquisitions_payout_cash_nonneg",
+        "acquisitions",
+        "payout_cash_amount IS NULL OR payout_cash_amount >= 0",
+    )
+    op.create_check_constraint(
+        "ck_acquisitions_payout_credit_nonneg",
+        "acquisitions",
+        "payout_credit_cash_equivalent IS NULL OR payout_credit_cash_equivalent >= 0",
+    )
     # legacy 回填（Codex medium）：既有付現單以 CASH 語意補齊拆分欄，
     # 避免新欄位讀起來像「資料缺漏」而非「全額付現」。
     op.execute(
@@ -74,6 +84,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.drop_constraint("ck_acquisitions_payout_credit_nonneg", "acquisitions", type_="check")
+    op.drop_constraint("ck_acquisitions_payout_cash_nonneg", "acquisitions", type_="check")
     op.drop_constraint("ck_acquisitions_idem_key_nonempty", "acquisitions", type_="check")
     op.drop_constraint("uq_acquisitions_store_idem_key", "acquisitions", type_="unique")
     op.drop_column("acquisitions", "idempotency_fingerprint")

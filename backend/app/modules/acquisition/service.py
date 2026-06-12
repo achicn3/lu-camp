@@ -106,10 +106,18 @@ class AcquisitionService:
         """
         if data.type == AcquisitionType.BULK_LOT:
             assert data.lot is not None  # schema/_check_shape 已保證
-            return Decimal(round_ntd(Decimal(data.lot.acquisition_cost)))
-        total = sum(
-            (Decimal(item.acquisition_cost or 0) for item in (data.items or [])), Decimal(0)
-        )
+            lot_cost = Decimal(data.lot.acquisition_cost)
+            if lot_cost < 0:
+                raise InvalidPayoutSplit("收購成本不可為負（schema 繞過防護）")
+            return Decimal(round_ntd(lot_cost))
+        total = Decimal(0)
+        for item in data.items or []:
+            cost = Decimal(item.acquisition_cost or 0)
+            if cost < 0:
+                # 第十輪：model_construct 帶負成本會持久化「負撥款腿」且無任何
+                # 現金/帳本副作用——在純算階段（零寫入）即拒。
+                raise InvalidPayoutSplit("收購成本不可為負（schema 繞過防護）")
+            total += cost
         return Decimal(round_ntd(total))
 
     @staticmethod
