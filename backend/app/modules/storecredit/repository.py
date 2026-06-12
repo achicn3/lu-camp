@@ -151,6 +151,18 @@ class StoreCreditRepository:
         stmt = select(StoreCreditAccount).where(StoreCreditAccount.store_id == store_id)
         return list((await self._session.scalars(stmt)).all())
 
+    async def ledger_total_outstanding(self, store_id: int) -> Decimal:
+        """帳本推導總負債 = Σ 各 contact 的正向帳本餘額（含孤兒帳本）。"""
+        per_contact = (
+            select(func.sum(StoreCreditLedger.signed_amount).label("bal"))
+            .where(StoreCreditLedger.store_id == store_id)
+            .group_by(StoreCreditLedger.contact_id)
+            .subquery()
+        )
+        stmt = select(func.coalesce(func.sum(per_contact.c.bal), 0)).where(per_contact.c.bal > 0)
+        value = await self._session.scalar(stmt)
+        return Decimal(value if value is not None else 0)
+
     async def total_outstanding(self, store_id: int) -> Decimal:
         """全域總負債 = Σ 正餘額（docs/16 §4 對帳）。"""
         stmt = select(func.coalesce(func.sum(StoreCreditAccount.balance), 0)).where(

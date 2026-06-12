@@ -465,6 +465,35 @@ async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> Non
     await db_session.rollback()
 
 
+async def test_premium_rate_policy_bounds(db_session: AsyncSession) -> None:
+    """溢價率政策界線（第八輪 medium）：負值/超過 20% 的 CREDIT 一律拒——
+    超界會寫出自洽但違反政策的負債，I-3 抓不到。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    for bad_rate in (Decimal("-0.5000"), Decimal("0.2001"), Decimal("1.0000")):
+        with pytest.raises(StoreCreditConflict):
+            await svc.credit(
+                store_id,
+                member_id,
+                cash_equivalent=Decimal(100),
+                premium_rate=bad_rate,
+                source_type=StoreCreditSourceType.ACQUISITION,
+                source_id=450,
+                created_by=user_id,
+            )
+    # 邊界值本身合法
+    edge = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal("0.2000"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=451,
+        created_by=user_id,
+    )
+    assert edge.signed_amount == Decimal(120)
+
+
 async def test_fractional_amounts_rejected(db_session: AsyncSession) -> None:
     """整數元守衛（adversarial 第六輪 high）：小數 debit/adjust/cash_equivalent 一律拒。"""
     store_id, user_id, member_id = await _seed(db_session)
@@ -654,7 +683,9 @@ async def test_reconcile_reports_mismatch_without_fixing(db_session: AsyncSessio
     )
     clean = await svc.reconcile(store_id)
     assert clean["mismatches"] == []
-    assert clean["total_outstanding"] == "110"
+    assert clean["ledger_total_outstanding"] == "110"
+    assert clean["cached_total_outstanding"] == "110"
+    assert clean["cached_total_trustworthy"] is True
     # 竄改快取（帳本不可改）
     await db_session.execute(
         text("UPDATE store_credit_accounts SET balance = 999 WHERE store_id = :sid"),
@@ -662,6 +693,10 @@ async def test_reconcile_reports_mismatch_without_fixing(db_session: AsyncSessio
     )
     dirty = await svc.reconcile(store_id)
     assert len(dirty["mismatches"]) == 1  # type: ignore[arg-type]
+    # 快取被竄改時：帳本推導總額仍正確、快取值標記不可信（第八輪 high）
+    assert dirty["ledger_total_outstanding"] == "110"
+    assert dirty["cached_total_outstanding"] == "999"
+    assert dirty["cached_total_trustworthy"] is False
 
 
 async def test_db_rejects_cross_store_contact_pairing(db_session: AsyncSession) -> None:

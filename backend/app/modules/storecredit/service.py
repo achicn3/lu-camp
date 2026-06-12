@@ -65,6 +65,13 @@ def _fingerprint(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# 溢價率政策界線（docs/16 §1.5 預設 0%–20%；SC-5 後改由 settings 提供 min/max，
+# 此為 service 邊界的硬守衛——超界 CREDIT 會寫出「自洽但違反政策」的負債，
+# I-3 對帳抓不到（adversarial 第八輪 medium））。
+PREMIUM_RATE_MIN = Decimal("0.0000")
+PREMIUM_RATE_MAX = Decimal("0.2000")
+
+
 class StoreCreditService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -234,6 +241,10 @@ class StoreCreditService:
         """收購入帳（CREDIT）：實發 = round_ntd(現金等值 × (1+溢價率))（I-4）。"""
         if cash_equivalent <= 0:
             raise StoreCreditConflict("現金等值必須為正")
+        if not (PREMIUM_RATE_MIN <= premium_rate <= PREMIUM_RATE_MAX):
+            raise StoreCreditConflict(
+                f"溢價率 {premium_rate} 超出政策界線 [{PREMIUM_RATE_MIN}, {PREMIUM_RATE_MAX}]"
+            )
         await self._require_member(store_id, contact_id)
         amount = Decimal(round_ntd(cash_equivalent * (Decimal(1) + premium_rate)))
         entry, _ = await self._write_entry(
@@ -408,9 +419,13 @@ class StoreCreditService:
                         "latest_balance_after": "" if latest is None else str(latest),
                     }
                 )
+        # 總負債雙值（adversarial 第八輪 high）：快取值在有不符時不可信，
+        # 一律同時回帳本推導值（含孤兒帳本）；呈報以 ledger 值為準。
         return {
             "store_id": store_id,
             "accounts_checked": len(await self._repo.list_accounts(store_id)),
             "mismatches": mismatches,
-            "total_outstanding": str(await self._repo.total_outstanding(store_id)),
+            "ledger_total_outstanding": str(await self._repo.ledger_total_outstanding(store_id)),
+            "cached_total_outstanding": str(await self._repo.total_outstanding(store_id)),
+            "cached_total_trustworthy": not mismatches,
         }
