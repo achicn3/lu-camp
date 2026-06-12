@@ -253,6 +253,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/contacts/{contact_id}/store-credit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Store Credit
+         * @description 餘額＋異動歷史（分頁，新到舊）；店別範圍（§4）。
+         */
+        get: operations["getStoreCredit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/store-credit/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adjust Store Credit
+         * @description 人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負）。
+         */
+        post: operations["adjustStoreCredit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1011,6 +1051,74 @@ export interface components {
             tax_rate?: number | string | null;
         };
         /**
+         * StoreCreditAdjustRequest
+         * @description 人工校正輸入（限 MANAGER；可正可負、非零；事由必填留痕）。
+         */
+        StoreCreditAdjustRequest: {
+            /** Amount */
+            amount: number | string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * StoreCreditBalanceRead
+         * @description 餘額＋異動歷史（GET /contacts/{id}/store-credit）。
+         */
+        StoreCreditBalanceRead: {
+            /** Balance */
+            balance: string;
+            /** Contact Id */
+            contact_id: number;
+            /** Entries */
+            entries: components["schemas"]["StoreCreditEntryRead"][];
+        };
+        /**
+         * StoreCreditEntryRead
+         * @description 帳本分錄輸出。
+         */
+        StoreCreditEntryRead: {
+            /** Balance After */
+            balance_after: string;
+            /** Cash Equivalent */
+            cash_equivalent: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: number;
+            entry_type: components["schemas"]["StoreCreditEntryType"];
+            /** Id */
+            id: number;
+            /** Premium Rate Applied */
+            premium_rate_applied: string | null;
+            /** Reason */
+            reason: string | null;
+            /** Reversal Of Id */
+            reversal_of_id: number | null;
+            /** Signed Amount */
+            signed_amount: string;
+            /** Source Id */
+            source_id: number | null;
+            source_type: components["schemas"]["StoreCreditSourceType"];
+        };
+        /**
+         * StoreCreditEntryType
+         * @description 購物金帳本分錄類型（docs/16 §1.1、ADR-012）。
+         *
+         *     CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；
+         *     ADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。
+         * @enum {string}
+         */
+        StoreCreditEntryType: "CREDIT" | "DEBIT" | "REVERSAL" | "ADJUSTMENT";
+        /**
+         * StoreCreditSourceType
+         * @description 購物金分錄來源（docs/16 §1.1；source_id 可追溯 acquisition / sale）。
+         * @enum {string}
+         */
+        StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
+        /**
          * TokenResponse
          * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。
          */
@@ -1514,6 +1622,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContactNationalIdRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getStoreCredit: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreCreditBalanceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adjustStoreCredit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoreCreditAdjustRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreCreditEntryRead"];
                 };
             };
             /** @description Validation Error */

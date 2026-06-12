@@ -87,3 +87,15 @@ class MemberPointsAdjustFailed(DomainError):
 
 class IdempotencyKeyConflict(DomainError):
     """同一 idempotency key 但購物車內容不同：拒絕，避免靜默丟掉新的結帳。"""
+
+
+class InsufficientStoreCredit(DomainError):
+    """購物金餘額不足以扣抵/沖回——永不負餘額（docs/16 I-2/I-6）。"""
+
+
+class StoreCreditConflict(DomainError):
+    """同來源分錄已存在且內容不同（冪等指紋不符，docs/16 I-5）。"""
+
+
+class StoreCreditMemberRequired(DomainError):
+    """購物金帳戶主體必須是會員（contacts.roles 含 MEMBER，docs/16 I-8）。"""

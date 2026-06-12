@@ -192,3 +192,26 @@ class ConsignmentSettlementStatus(StrEnum):
     PENDING = "PENDING"
     PAID = "PAID"
     CANCELLED = "CANCELLED"
+
+
+class StoreCreditEntryType(StrEnum):
+    """購物金帳本分錄類型（docs/16 §1.1、ADR-012）。
+
+    CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；
+    ADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。
+    """
+
+    CREDIT = "CREDIT"
+    DEBIT = "DEBIT"
+    REVERSAL = "REVERSAL"
+    ADJUSTMENT = "ADJUSTMENT"
+
+
+class StoreCreditSourceType(StrEnum):
+    """購物金分錄來源（docs/16 §1.1；source_id 可追溯 acquisition / sale）。"""
+
+    ACQUISITION = "ACQUISITION"
+    SALE = "SALE"
+    SALE_VOID = "SALE_VOID"
+    ACQUISITION_ROLLBACK = "ACQUISITION_ROLLBACK"
+    MANUAL = "MANUAL"

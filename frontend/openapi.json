@@ -1665,6 +1665,188 @@
         "title": "SettingsUpdateRequest",
         "type": "object"
       },
+      "StoreCreditAdjustRequest": {
+        "description": "人工校正輸入（限 MANAGER；可正可負、非零；事由必填留痕）。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "reason"
+        ],
+        "title": "StoreCreditAdjustRequest",
+        "type": "object"
+      },
+      "StoreCreditBalanceRead": {
+        "description": "餘額＋異動歷史（GET /contacts/{id}/store-credit）。",
+        "properties": {
+          "balance": {
+            "title": "Balance",
+            "type": "string"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/StoreCreditEntryRead"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contact_id",
+          "balance",
+          "entries"
+        ],
+        "title": "StoreCreditBalanceRead",
+        "type": "object"
+      },
+      "StoreCreditEntryRead": {
+        "description": "帳本分錄輸出。",
+        "properties": {
+          "balance_after": {
+            "title": "Balance After",
+            "type": "string"
+          },
+          "cash_equivalent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Equivalent"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "integer"
+          },
+          "entry_type": {
+            "$ref": "#/components/schemas/StoreCreditEntryType"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "premium_rate_applied": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Rate Applied"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "reversal_of_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversal Of Id"
+          },
+          "signed_amount": {
+            "title": "Signed Amount",
+            "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/StoreCreditSourceType"
+          }
+        },
+        "required": [
+          "id",
+          "entry_type",
+          "signed_amount",
+          "balance_after",
+          "cash_equivalent",
+          "premium_rate_applied",
+          "source_type",
+          "source_id",
+          "reversal_of_id",
+          "reason",
+          "created_by",
+          "created_at"
+        ],
+        "title": "StoreCreditEntryRead",
+        "type": "object"
+      },
+      "StoreCreditEntryType": {
+        "description": "購物金帳本分錄類型（docs/16 §1.1、ADR-012）。\n\nCREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；\nADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。",
+        "enum": [
+          "CREDIT",
+          "DEBIT",
+          "REVERSAL",
+          "ADJUSTMENT"
+        ],
+        "title": "StoreCreditEntryType",
+        "type": "string"
+      },
+      "StoreCreditSourceType": {
+        "description": "購物金分錄來源（docs/16 §1.1；source_id 可追溯 acquisition / sale）。",
+        "enum": [
+          "ACQUISITION",
+          "SALE",
+          "SALE_VOID",
+          "ACQUISITION_ROLLBACK",
+          "MANUAL"
+        ],
+        "title": "StoreCreditSourceType",
+        "type": "string"
+      },
       "TokenResponse": {
         "description": "登入成功回應：JWT access token（payload 含 sub/role/store_id）。",
         "properties": {
@@ -2592,6 +2774,135 @@
         "summary": "Reveal National Id",
         "tags": [
           "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/store-credit": {
+      "get": {
+        "description": "餘額＋異動歷史（分頁，新到舊）；店別範圍（§4）。",
+        "operationId": "getStoreCredit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreCreditBalanceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Store Credit",
+        "tags": [
+          "store-credit"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/store-credit/adjustments": {
+      "post": {
+        "description": "人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負）。",
+        "operationId": "adjustStoreCredit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoreCreditAdjustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreCreditEntryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adjust Store Credit",
+        "tags": [
+          "store-credit"
         ]
       }
     },

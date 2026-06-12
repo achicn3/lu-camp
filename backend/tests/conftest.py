@@ -26,6 +26,7 @@ import app.modules.inventory.models  # 註冊模型到 Base.metadata
 import app.modules.sales.models  # 註冊模型到 Base.metadata
 import app.modules.settings.models  # 註冊模型到 Base.metadata
 import app.modules.store.models  # 註冊模型到 Base.metadata
+import app.modules.storecredit.models  # 註冊模型到 Base.metadata
 import app.modules.user.models  # noqa: F401  # 註冊模型到 Base.metadata
 from app.core.config import get_settings
 from app.core.db import Base
