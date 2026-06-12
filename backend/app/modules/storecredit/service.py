@@ -270,7 +270,7 @@ class StoreCreditService:
     async def reverse(
         self,
         store_id: int,
-        original: StoreCreditLedger,
+        original_entry_id: int,
         *,
         source_type: StoreCreditSourceType,
         source_id: int,
@@ -278,15 +278,17 @@ class StoreCreditService:
     ) -> StoreCreditLedger:
         """沖正：方向與被沖正列相反；**一列只能被沖一次**（部分唯一索引）。
 
-        被沖正列必須屬於本店（多分店隔離）；同一來源重試 → 冪等回原沖正列；
-        不同來源試圖再沖同一列 → StoreCreditConflict（不重複退/扣款）。
-        扣回方向（沖 CREDIT）餘額不足 → InsufficientStoreCredit，由呼叫端依
-        docs/16 §3.3 擋下轉人工。
+        只收 id、交易內**重載持久列**（adversarial 第五輪 high：不信任呼叫端
+        物件——偽造/過期的 signed_amount 會寫出錯額沖正並封死正確沖正）。
+        被沖正列必須屬於本店；同一來源重試 → 冪等回原沖正列；不同來源再沖
+        同一列 → StoreCreditConflict。扣回方向餘額不足 → InsufficientStoreCredit，
+        由呼叫端依 docs/16 §3.3 擋下轉人工。
         """
-        if original.store_id != store_id:
-            raise CrossStoreReference(
-                f"被沖正列 {original.id} 屬於 store {original.store_id}，非 store {store_id}"
-            )
+        original = await self._repo.get_entry(store_id, original_entry_id)
+        if original is None:
+            raise CrossStoreReference(f"被沖正列 {original_entry_id} 不存在於 store {store_id}")
+        if original.entry_type == StoreCreditEntryType.REVERSAL:
+            raise StoreCreditConflict(f"分錄 {original.id} 本身是沖正列，不可再沖")
         entry, _ = await self._write_entry(
             store_id,
             original.contact_id,

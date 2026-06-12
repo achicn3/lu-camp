@@ -89,6 +89,23 @@ class StoreCreditLedger(Base):
         # 核心不變量收進 DB（adversarial 第四輪 medium）：繞過 service 的直插/回填
         # 也不能寫出不可能狀態（帳本不可變，寫錯無法修正）。
         CheckConstraint("signed_amount <> 0", name="ck_scl_signed_nonzero"),
+        # 方向/形狀（adversarial 第五輪 medium）：CREDIT 必正、DEBIT 必負、
+        # REVERSAL 必有對象（且唯有它有）、ADJUSTMENT 必 MANUAL 無 source_id、
+        # 其餘類型必有 source_id。
+        CheckConstraint("entry_type <> 'CREDIT' OR signed_amount > 0", name="ck_scl_credit_pos"),
+        CheckConstraint("entry_type <> 'DEBIT' OR signed_amount < 0", name="ck_scl_debit_neg"),
+        CheckConstraint(
+            "(entry_type = 'REVERSAL') = (reversal_of_id IS NOT NULL)",
+            name="ck_scl_reversal_ref",
+        ),
+        CheckConstraint(
+            "entry_type <> 'ADJUSTMENT' OR (source_type = 'MANUAL' AND source_id IS NULL)",
+            name="ck_scl_adjust_manual",
+        ),
+        CheckConstraint(
+            "entry_type = 'ADJUSTMENT' OR source_id IS NOT NULL",
+            name="ck_scl_source_required",
+        ),
         CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
         CheckConstraint(
             "entry_type <> 'CREDIT' OR"

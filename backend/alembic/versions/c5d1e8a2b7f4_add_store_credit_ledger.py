@@ -83,6 +83,20 @@ def upgrade() -> None:
             name="fk_store_credit_ledger_reversal_tenant",
         ),
         sa.CheckConstraint("signed_amount <> 0", name="ck_scl_signed_nonzero"),
+        sa.CheckConstraint("entry_type <> 'CREDIT' OR signed_amount > 0", name="ck_scl_credit_pos"),
+        sa.CheckConstraint("entry_type <> 'DEBIT' OR signed_amount < 0", name="ck_scl_debit_neg"),
+        sa.CheckConstraint(
+            "(entry_type = 'REVERSAL') = (reversal_of_id IS NOT NULL)",
+            name="ck_scl_reversal_ref",
+        ),
+        sa.CheckConstraint(
+            "entry_type <> 'ADJUSTMENT' OR (source_type = 'MANUAL' AND source_id IS NULL)",
+            name="ck_scl_adjust_manual",
+        ),
+        sa.CheckConstraint(
+            "entry_type = 'ADJUSTMENT' OR source_id IS NOT NULL",
+            name="ck_scl_source_required",
+        ),
         sa.CheckConstraint("balance_after >= 0", name="ck_scl_balance_after_nonneg"),
         sa.CheckConstraint(
             "entry_type <> 'CREDIT' OR"

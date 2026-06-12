@@ -65,6 +65,14 @@ class StoreCreditRepository:
         result: StoreCreditLedger | None = await self._session.scalar(stmt)
         return result
 
+    async def get_entry(self, store_id: int, entry_id: int) -> StoreCreditLedger | None:
+        """以 id 取本店分錄（沖正前重載持久列，不信任呼叫端物件）。"""
+        stmt = select(StoreCreditLedger).where(
+            StoreCreditLedger.id == entry_id, StoreCreditLedger.store_id == store_id
+        )
+        result: StoreCreditLedger | None = await self._session.scalar(stmt)
+        return result
+
     async def find_reversal_of(self, store_id: int, original_id: int) -> StoreCreditLedger | None:
         """找某列的既有沖正（一列只能被沖一次；店別範圍雙保險）。"""
         stmt = select(StoreCreditLedger).where(

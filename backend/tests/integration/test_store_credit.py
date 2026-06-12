@@ -188,7 +188,7 @@ async def test_reverse_credit_and_only_once(db_session: AsyncSession) -> None:
     )
     reversal = await svc.reverse(
         store_id,
-        credit,
+        credit.id,
         source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
         source_id=7,
         created_by=user_id,
@@ -199,7 +199,7 @@ async def test_reverse_credit_and_only_once(db_session: AsyncSession) -> None:
     # 同來源再沖 → 冪等回原列（內容相同）
     again = await svc.reverse(
         store_id,
-        credit,
+        credit.id,
         source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
         source_id=7,
         created_by=user_id,
@@ -224,7 +224,7 @@ async def test_reverse_same_row_with_different_source_conflicts(
     )
     await svc.reverse(
         store_id,
-        credit,
+        credit.id,
         source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
         source_id=70,
         created_by=user_id,
@@ -243,7 +243,7 @@ async def test_reverse_same_row_with_different_source_conflicts(
     with pytest.raises(StoreCreditConflict):
         await svc.reverse(
             store_id,
-            credit,
+            credit.id,
             source_type=StoreCreditSourceType.SALE_VOID,  # 不同來源
             source_id=999,
             created_by=user_id,
@@ -270,7 +270,7 @@ async def test_reverse_rejects_cross_store_original(db_session: AsyncSession) ->
     with pytest.raises(CrossStoreReference):
         await svc.reverse(
             other_store.id,
-            credit,
+            credit.id,
             source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
             source_id=88,
             created_by=user_id,
@@ -321,7 +321,7 @@ async def test_reverse_credit_blocked_when_already_spent(db_session: AsyncSessio
     with pytest.raises(InsufficientStoreCredit):
         await svc.reverse(
             store_id,
-            credit,
+            credit.id,
             source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
             source_id=8,
             created_by=user_id,
@@ -387,6 +387,82 @@ async def test_adjust_idempotent_by_key(db_session: AsyncSession) -> None:
             created_by=user_id,
             idempotency_key="same-key",
         )
+
+
+async def test_reverse_uses_persisted_amount_not_caller_object(
+    db_session: AsyncSession,
+) -> None:
+    """沖正以持久列為準（adversarial 第五輪 high）：以 id 重載，呼叫端無從帶入
+    偽造金額；沖正額恆等於原列負值。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    credit = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.10"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=300,
+        created_by=user_id,
+    )
+    reversal = await svc.reverse(
+        store_id,
+        credit.id,
+        source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        source_id=300,
+        created_by=user_id,
+    )
+    assert reversal.signed_amount == -Decimal(1100)  # 恆為持久列負值
+    with pytest.raises(CrossStoreReference):
+        await svc.reverse(  # 不存在的 id → 拒絕
+            store_id,
+            999999,
+            source_type=StoreCreditSourceType.SALE_VOID,
+            source_id=301,
+            created_by=user_id,
+        )
+    with pytest.raises(StoreCreditConflict):
+        await svc.reverse(  # 沖正列本身不可再沖
+            store_id,
+            reversal.id,
+            source_type=StoreCreditSourceType.SALE_VOID,
+            source_id=302,
+            created_by=user_id,
+        )
+
+
+async def test_db_check_rejects_wrong_direction(db_session: AsyncSession) -> None:
+    """方向/形狀 CHECK（adversarial 第五輪 medium）：正額 DEBIT、無對象 REVERSAL
+    直插一律 IntegrityError。"""
+    from sqlalchemy.exc import IntegrityError
+
+    store_id, user_id, member_id = await _seed(db_session)
+
+    async def _raw(etype: str, amount: int, rev: int | None) -> None:
+        await db_session.execute(
+            text(
+                "INSERT INTO store_credit_ledger"
+                " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                "  source_type, source_id, reversal_of_id, fingerprint, created_by, created_at)"
+                " VALUES (:sid, :cid, :etype, :amount, 100, 'SALE', 1, :rev, 'x', :uid, now())"
+            ),
+            {
+                "sid": store_id,
+                "cid": member_id,
+                "uid": user_id,
+                "etype": etype,
+                "amount": amount,
+                "rev": rev,
+            },
+        )
+
+    with pytest.raises(IntegrityError):
+        await _raw("DEBIT", 10, None)  # DEBIT 必負
+    await db_session.rollback()
+    store_id, user_id, member_id = await _seed(db_session)
+    with pytest.raises(IntegrityError):
+        await _raw("REVERSAL", -10, None)  # REVERSAL 必有對象
+    await db_session.rollback()
 
 
 async def test_adjust_retry_writes_audit_once(db_session: AsyncSession) -> None:
@@ -646,11 +722,9 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
         async def _reverse_once() -> int:
             async with sm() as s:
                 svc = StoreCreditService(s)
-                original = await s.get(StoreCreditLedger, credit_id)
-                assert original is not None
                 entry = await svc.reverse(
                     store_id,
-                    original,
+                    credit_id,
                     source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
                     source_id=600,
                     created_by=user_id,
