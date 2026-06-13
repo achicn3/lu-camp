@@ -779,6 +779,98 @@ async def test_shell_acquisition_without_inventory_cannot_mint_credit() -> None:
             await s.commit()
 
 
+async def test_inventory_mutation_cannot_break_credit_backing() -> None:
+    """第二十輪 P2：購物金收購正常落地後，事後改庫存實體成本／搬走 acquisition_id
+    破壞背書 → COMMIT 時被庫存側守衛擋。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="背書店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="back", password_hash="h", role=UserRole.CLERK)
+        seller = Contact(
+            store_id=store.id, name="賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, seller])
+        await s.flush()
+        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        await s.commit()
+
+    async with sm() as s:
+        acq_id = await s.scalar(
+            text(
+                "INSERT INTO acquisitions"
+                " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                "  created_at, updated_at)"
+                " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, 1000,"
+                "  now(), now()) RETURNING id"
+            ),
+            {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+        )
+        item_id = await s.scalar(
+            text(
+                "INSERT INTO serialized_items"
+                " (store_id, item_code, name, grade, ownership_type, acquisition_cost,"
+                "  listed_price, acquisition_id, created_at, updated_at)"
+                " VALUES (:sid, :code, '測試品', 'A', 'OWNED', 1000, 1800, :aid, now(), now())"
+                " RETURNING id"
+            ),
+            {"sid": store_id, "code": f"BACK-{acq_id}", "aid": acq_id},
+        )
+        await StoreCreditService(s).credit(
+            store_id,
+            seller_id,
+            cash_equivalent=Decimal(1000),
+            premium_rate=Decimal("0.10"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=acq_id,
+            created_by=clerk_id,
+        )
+        await s.commit()  # 正常落地
+
+    try:
+        # (a) 事後把庫存成本改 0 → 背書不再等值 → COMMIT 擋
+        async with sm() as s:
+            await s.execute(
+                text("UPDATE serialized_items SET acquisition_cost=0 WHERE id=:id"),
+                {"id": item_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+
+        # (b) 事後把庫存搬離本收購（acquisition_id=NULL）→ 背書歸零 → COMMIT 擋
+        async with sm() as s:
+            await s.execute(
+                text("UPDATE serialized_items SET acquisition_id=NULL WHERE id=:id"),
+                {"id": item_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+
+        # (c) 事後刪掉庫存實體 → 背書歸零 → COMMIT 擋
+        async with sm() as s:
+            await s.execute(text("DELETE FROM serialized_items WHERE id=:id"), {"id": item_id})
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
+            await s.execute(text("DELETE FROM acquisitions"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
 async def test_concurrent_service_callers_same_key_replay() -> None:
     """並發同 key 直呼 service（Codex 第七輪 high）：兩邊都拿到同一收購單、
     帳本只入一次（輸家在 service 層轉重放，不冒 IntegrityError）。"""

@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import AcquisitionType, PayoutMethod
 
@@ -107,15 +108,53 @@ class Acquisition(Base, TimestampMixin):
 #     （第十八輪 P1：歸零/搬移會留下無主負債）；
 #   - DELETE：刪掉已產生分錄的收購（第十八輪 P1：留下孤兒負債）。
 # 分錄本身的經濟正確性由 SC-1 的帳本守衛鏈保證。
+# 庫存背書（第十九/二十輪 P2）：產生購物金負債的收購必須有等值庫存實體
+# （BUYOUT＝Σ serialized_items、BULK_LOT＝Σ bulk_lots 的 acquisition_cost＝撥款總額）。
+# 抽成共用函式 acquisitions_verify_credit_backing，於收購側與庫存側雙邊強制——
+# 庫存事後被改 acquisition_cost／搬走 acquisition_id 也在 COMMIT 時被擋（第二十輪）。
 ACQ_CREDIT_LEG_GUARD_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION acquisitions_verify_credit_backing(acq_id BIGINT) RETURNS void AS $$
+DECLARE
+  acq RECORD;
+  body_sum NUMERIC;
+  payout_total NUMERIC;
+BEGIN
+  IF acq_id IS NULL THEN
+    RETURN;
+  END IF;
+  -- 僅對「已產生購物金分錄」的收購強制庫存背書
+  PERFORM 1 FROM store_credit_ledger
+   WHERE source_type = 'ACQUISITION' AND entry_type = 'CREDIT' AND source_id = acq_id;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  SELECT type, payout_cash_amount, payout_credit_cash_equivalent INTO acq
+    FROM acquisitions WHERE id = acq_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '購物金分錄對應的收購不存在（孤兒購物金負債）';
+  END IF;
+  IF acq.type = 'BULK_LOT' THEN
+    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
+      FROM bulk_lots WHERE acquisition_id = acq_id;
+  ELSE
+    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
+      FROM serialized_items WHERE acquisition_id = acq_id;
+  END IF;
+  payout_total := COALESCE(acq.payout_cash_amount, 0)
+                + COALESCE(acq.payout_credit_cash_equivalent, 0);
+  IF body_sum <> payout_total THEN
+    RAISE EXCEPTION '收購庫存實體成本加總必須等於撥款總額（購物金負債須有等值庫存背書）';
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+""",
     """
 CREATE OR REPLACE FUNCTION acquisitions_credit_leg_guard() RETURNS trigger AS $$
 DECLARE
   led_store INT;
   led_contact INT;
   led_ce NUMERIC;
-  body_sum NUMERIC;
-  payout_total NUMERIC;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     PERFORM 1 FROM store_credit_ledger
@@ -141,21 +180,8 @@ BEGIN
      OR led_ce <> COALESCE(NEW.payout_credit_cash_equivalent, 0) THEN
     RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
   END IF;
-  -- 第十九輪 P2：產生購物金負債的收購必須有真實庫存實體，且實體成本加總等於
-  -- 撥款總額（現金腿＋購物金腿）——否則為「空殼收購憑空鑄造負債」。
-  -- 成本與撥款同源（BUYOUT＝Σ serialized_items、BULK_LOT＝Σ bulk_lots），皆整數元必相等。
-  IF NEW.type = 'BULK_LOT' THEN
-    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
-      FROM bulk_lots WHERE acquisition_id = NEW.id;
-  ELSE
-    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
-      FROM serialized_items WHERE acquisition_id = NEW.id;
-  END IF;
-  payout_total := COALESCE(NEW.payout_cash_amount, 0)
-                + COALESCE(NEW.payout_credit_cash_equivalent, 0);
-  IF body_sum <> payout_total THEN
-    RAISE EXCEPTION '收購庫存實體成本加總必須等於撥款總額（空殼收購不可鑄造購物金負債）';
-  END IF;
+  -- 庫存背書（空殼收購不可鑄造負債）
+  PERFORM acquisitions_verify_credit_backing(NEW.id);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
@@ -171,6 +197,49 @@ FOR EACH ROW EXECUTE FUNCTION acquisitions_credit_leg_guard()
 ACQ_CREDIT_LEG_GUARD_DROP_DDL: tuple[str, ...] = (
     "DROP TRIGGER IF EXISTS trg_acquisitions_credit_leg_guard ON acquisitions",
     "DROP FUNCTION IF EXISTS acquisitions_credit_leg_guard()",
+    # 共用背書函式最後刪（acq 與 inventory guard 皆依賴；本元組於 downgrade 最末執行）
+    "DROP FUNCTION IF EXISTS acquisitions_verify_credit_backing(BIGINT)",
+)
+
+# 庫存側對等守衛（Codex SC-2 第二十輪 P2）：對 serialized_items / bulk_lots 的
+# INSERT/UPDATE/DELETE，若影響到（OLD 或 NEW 的）已產生購物金分錄之收購，於 COMMIT
+# 時重驗庫存背書——擋「先正常落地、事後改 acquisition_cost／搬走 acquisition_id」
+# 破壞背書的路徑。共用 acquisitions_verify_credit_backing（隨收購側 DDL 先建）。
+INVENTORY_CREDIT_BACKING_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION inventory_credit_backing_guard() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP <> 'INSERT' THEN
+    PERFORM acquisitions_verify_credit_backing(OLD.acquisition_id);
+  END IF;
+  IF TG_OP <> 'DELETE' THEN
+    PERFORM acquisitions_verify_credit_backing(NEW.acquisition_id);
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE CONSTRAINT TRIGGER trg_serialized_items_credit_backing
+AFTER INSERT OR UPDATE OR DELETE ON serialized_items
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION inventory_credit_backing_guard()
+""",
+    """
+CREATE CONSTRAINT TRIGGER trg_bulk_lots_credit_backing
+AFTER INSERT OR UPDATE OR DELETE ON bulk_lots
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION inventory_credit_backing_guard()
+""",
+)
+
+INVENTORY_CREDIT_BACKING_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_serialized_items_credit_backing ON serialized_items",
+    "DROP TRIGGER IF EXISTS trg_bulk_lots_credit_backing ON bulk_lots",
+    "DROP FUNCTION IF EXISTS inventory_credit_backing_guard()",
 )
 
 # 反向綁定（Codex SC-2 第十七輪 P1）：帳本的 ACQUISITION CREDIT 分錄也必須對應
@@ -220,3 +289,12 @@ for _ddl in LEDGER_ACQ_SOURCE_GUARD_DDL:
     # 掛 ledger 表 after_create：trigger 本體只需 ledger 存在；plpgsql 函式對
     # acquisitions 的引用同樣於執行期才解析，不受兩表建立順序影響。
     event.listen(StoreCreditLedger.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]
+
+# 庫存側守衛：guard 函式（INVENTORY_CREDIT_BACKING_DDL[0]）以 CREATE OR REPLACE
+# 掛在兩張表（誰先建都安裝、重覆無害）；各表的 constraint trigger 各掛自己的表。
+# acquisitions_verify_credit_backing 隨 acquisitions（FK 上游、必先建）after_create
+# 先建，故此處 guard 函式建立時可解析其呼叫。
+event.listen(SerializedItem.__table__, "after_create", DDL(INVENTORY_CREDIT_BACKING_DDL[0]))  # type: ignore[no-untyped-call]
+event.listen(SerializedItem.__table__, "after_create", DDL(INVENTORY_CREDIT_BACKING_DDL[1]))  # type: ignore[no-untyped-call]
+event.listen(BulkLot.__table__, "after_create", DDL(INVENTORY_CREDIT_BACKING_DDL[0]))  # type: ignore[no-untyped-call]
+event.listen(BulkLot.__table__, "after_create", DDL(INVENTORY_CREDIT_BACKING_DDL[2]))  # type: ignore[no-untyped-call]
