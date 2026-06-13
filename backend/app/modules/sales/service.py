@@ -25,23 +25,28 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.service import InventoryService
-from app.modules.sales.inputs import SaleLineInput
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.service import StoreSettingsService
+from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     CashMovementType,
     ItemKind,
     OwnershipType,
+    PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
     StockReason,
+    StoreCreditSourceType,
+    TenderType,
 )
 from app.shared.exceptions import (
     CrossStoreReference,
     EmptySale,
     IdempotencyKeyConflict,
+    InvalidSaleTender,
     NoOpenCashSession,
     SaleAlreadyVoid,
     SaleItemNotFound,
@@ -56,8 +61,15 @@ def _member_points_for(total: Decimal) -> int:
     return int(total // _POINTS_DIVISOR)
 
 
-def _cart_fingerprint(lines: list[SaleLineInput], buyer_contact_id: int | None) -> str:
-    """購物車內容的穩定 sha256；供 idempotency 重播時比對請求是否相同。"""
+def _cart_fingerprint(
+    lines: list[SaleLineInput],
+    buyer_contact_id: int | None,
+    tenders: list[TenderInput] | None = None,
+) -> str:
+    """購物車＋收款組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
+
+    tenders 納入指紋：同 key 但收款組成不同（影響現金/帳本副作用）→ 視為不同請求。
+    """
     canonical = {
         "buyer_contact_id": buyer_contact_id,
         "lines": [
@@ -70,6 +82,15 @@ def _cart_fingerprint(lines: list[SaleLineInput], buyer_contact_id: int | None) 
             }
             for line in lines
         ],
+        # 收款組成納入指紋，但對 tender_type 正規化排序（順序不影響語意：每型別至多一筆）。
+        "tenders": (
+            None
+            if tenders is None
+            else sorted(
+                ({"tender_type": t.tender_type.value, "amount": str(t.amount)} for t in tenders),
+                key=lambda d: d["tender_type"],
+            )
+        ),
     }
     payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -85,6 +106,45 @@ class SalesService:
         self._settings = StoreSettingsService(session)
         self._users = UserService(session)
         self._contacts = ContactService(session)
+        self._storecredit = StoreCreditService(session)
+
+    @staticmethod
+    def _normalize_tenders(tenders: list[TenderInput] | None) -> list[TenderInput] | None:
+        """service 邊界守衛（直呼/raw 也擋）：非空、型別不重複、金額正整數。
+
+        省略（None）→ 維持 None，由 _resolve_tenders 預設單一 CASH 全額。
+        """
+        if tenders is None:
+            return None
+        if not tenders:
+            raise InvalidSaleTender("tenders 不可為空陣列（省略才表示預設現金全額）")
+        seen: set[TenderType] = set()
+        for t in tenders:
+            if t.tender_type in seen:
+                raise InvalidSaleTender(f"收款型別 {t.tender_type.value} 重複，每種至多一筆")
+            seen.add(t.tender_type)
+            if t.amount != t.amount.to_integral_value():
+                raise InvalidSaleTender("收款金額必須為整數元")
+            if t.amount <= 0:
+                raise InvalidSaleTender("收款金額必須為正")
+        return tenders
+
+    @staticmethod
+    def _resolve_tenders(total: Decimal, tenders: list[TenderInput] | None) -> list[TenderInput]:
+        """把收款計畫對齊 total：省略 → 單一 CASH 全額；提供 → Σ amount 必須等於 total。"""
+        if tenders is None:
+            return [TenderInput(tender_type=TenderType.CASH, amount=total)]
+        paid = sum((t.amount for t in tenders), Decimal(0))
+        if paid != total:
+            raise InvalidSaleTender(f"收款總額（{paid}）必須等於應付總額（{total}）")
+        return tenders
+
+    @staticmethod
+    def _summary_payment_method(plan: list[TenderInput]) -> PaymentMethod:
+        """sales.payment_method 摘要：單一 tender → 該型別、多 tender → MIXED。"""
+        if len(plan) == 1:
+            return PaymentMethod(plan[0].tender_type.value)
+        return PaymentMethod.MIXED
 
     async def create_sale(
         self,
@@ -93,9 +153,14 @@ class SalesService:
         *,
         lines: list[SaleLineInput],
         buyer_contact_id: int | None = None,
+        tenders: list[TenderInput] | None = None,
         idempotency_key: str | None = None,
     ) -> Sale:
-        """建立銷售單並完成扣庫存/收現/結算；任一步失敗整筆回復（不 commit）。
+        """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
+
+        收款（SC-3，docs/16 §3.2）：tenders 省略 → 單一 CASH 全額（向後相容）；提供時
+        Σ amount 必須等於 total。CASH tender → 錢櫃 SALE_IN（現金部分）；STORE_CREDIT
+        tender → 帳本 DEBIT（買方購物金，餘額不足 → InsufficientStoreCredit 整筆回滾）。
 
         idempotency（D-2）：帶 idempotency_key 時，若同 (store_id, key) 已有銷售 → 直接回原單、
         不重跑任何副作用（防網路重試重複建單/收錢）。並行重送的競態由 sales 的
@@ -104,19 +169,34 @@ class SalesService:
         if not lines:
             raise EmptySale("銷售單必須至少有一筆明細")
 
-        fingerprint = _cart_fingerprint(lines, buyer_contact_id)
+        normalized_tenders = self._normalize_tenders(tenders)
+        fingerprint = _cart_fingerprint(lines, buyer_contact_id, normalized_tenders)
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
         # 內容不同則拒絕（避免誤用/重用 key 把不同購物車的結帳靜默丟掉）。
         if idempotency_key is not None:
             replay = await self.find_idempotent_replay(
-                store_id, idempotency_key, lines=lines, buyer_contact_id=buyer_contact_id
+                store_id,
+                idempotency_key,
+                lines=lines,
+                buyer_contact_id=buyer_contact_id,
+                tenders=normalized_tenders,
             )
             if replay is not None:
                 return replay
 
-        # 收現必須在開帳中（§7.8）：最先檢查，避免動了庫存才發現不能收錢。
-        if await self._cash.get_current_session(store_id) is None:
+        has_cash = normalized_tenders is None or any(
+            t.tender_type == TenderType.CASH for t in normalized_tenders
+        )
+        has_store_credit = normalized_tenders is not None and any(
+            t.tender_type == TenderType.STORE_CREDIT for t in normalized_tenders
+        )
+        # 購物金付款必須有買方（扣誰的購物金）；於動任何庫存前就擋（§3.2、I-8）。
+        if has_store_credit and buyer_contact_id is None:
+            raise InvalidSaleTender("以購物金付款必須指定買方會員（buyer_contact_id）")
+        # 收現必須在開帳中（§7.8）：最先檢查，避免動了庫存才發現不能收錢。純購物金
+        # 付款不碰現金（I-9），不要求開帳。
+        if has_cash and await self._cash.get_current_session(store_id) is None:
             raise NoOpenCashSession("結帳收現必須在開帳中的 cash_session 下進行，請先開帳")
 
         # 多分店資料隔離（§4）：clerk 與 buyer 都必須屬於本店，擋下跨店引用。
@@ -148,23 +228,26 @@ class SalesService:
             line_total = await self._process_line(store_id, sale.id, line, consignment_sales)
             total += line_total
 
+        # 零/負總額拒（§6 金額為正整數元）：每筆 tender 金額須 >0（DB CHECK），零總額會
+        # 落到「無收款腿或 amount=0」的不合法狀態；免費出貨應走獨立流程，不借道銷售。
+        if total <= 0:
+            raise InvalidSaleTender("銷售總額必須大於 0（免費出貨請走獨立流程）")
+
+        # 收款計畫對齊 total（Σ tenders 必須 = total，否則 422）。
+        plan = self._resolve_tenders(total, normalized_tenders)
+
         # 稅於發票總額層級推算一次（§6）；不逐項算稅。
         tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
         net, tax = split_tax_inclusive(total, tax_rate)
         sale.subtotal = Decimal(net)
         sale.tax = Decimal(tax)
         sale.total = total
+        sale.payment_method = self._summary_payment_method(plan)
         await self._session.flush()
 
-        # 收現進帳（必在開帳中；上方已確認）。
-        await self._cash.record_movement(
-            store_id,
-            CashMovementType.SALE_IN,
-            total,
-            actor_user_id=clerk_user_id,
-            ref_type="sale",
-            ref_id=sale.id,
-        )
+        # 收款副作用（§3.2）：現金 tender → 錢櫃 SALE_IN（現金部分，非全額）；
+        # 購物金 tender → 帳本 DEBIT（買方）。發票/稅/點數不受 tender 組成影響。
+        await self._apply_tenders(store_id, sale, plan, clerk_user_id, buyer_contact_id)
 
         # 寄售品 → 建 PENDING 結算（店家收入只認抽成，§7.3）。
         for serialized_item_id, gross, commission_pct in consignment_sales:
@@ -186,6 +269,44 @@ class SalesService:
         await self._session.flush()
         return sale
 
+    async def _apply_tenders(
+        self,
+        store_id: int,
+        sale: Sale,
+        plan: list[TenderInput],
+        clerk_user_id: int,
+        buyer_contact_id: int | None,
+    ) -> None:
+        """落地收款：現金部分入錢櫃 SALE_IN、購物金部分扣帳本 DEBIT，並記 sale_tenders。"""
+        for tender in plan:
+            if tender.tender_type == TenderType.CASH:
+                await self._cash.record_movement(
+                    store_id,
+                    CashMovementType.SALE_IN,
+                    tender.amount,
+                    actor_user_id=clerk_user_id,
+                    ref_type="sale",
+                    ref_id=sale.id,
+                )
+            else:  # STORE_CREDIT：扣買方購物金（餘額不足 → InsufficientStoreCredit）
+                assert buyer_contact_id is not None  # 上方已於購物金付款時強制買方存在
+                await self._storecredit.debit(
+                    store_id,
+                    buyer_contact_id,
+                    amount=tender.amount,
+                    source_type=StoreCreditSourceType.SALE,
+                    source_id=sale.id,
+                    created_by=clerk_user_id,
+                )
+            await self._repo.add_tender(
+                SaleTender(
+                    store_id=store_id,
+                    sale_id=sale.id,
+                    tender_type=tender.tender_type,
+                    amount=tender.amount,
+                )
+            )
+
     async def find_idempotent_replay(
         self,
         store_id: int,
@@ -193,8 +314,9 @@ class SalesService:
         *,
         lines: list[SaleLineInput],
         buyer_contact_id: int | None,
+        tenders: list[TenderInput] | None = None,
     ) -> Sale | None:
-        """同 key 且購物車相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
+        """同 key 且購物車＋收款相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
         pre-check（create_sale）與 router 的 IntegrityError handler（並行重送）共用此處，
         避免「修一條路徑、漏另一條」導致併發同 key 不同購物車仍被靜默當成功。
@@ -202,7 +324,7 @@ class SalesService:
         existing = await self._repo.get_by_idempotency_key(store_id, idempotency_key)
         if existing is None:
             return None
-        if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id):
+        if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id, tenders):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
             )
@@ -214,6 +336,9 @@ class SalesService:
 
     async def get_lines(self, sale_id: int) -> list[SaleLine]:
         return await self._repo.list_lines(sale_id)
+
+    async def get_tenders(self, sale_id: int) -> list[SaleTender]:
+        return await self._repo.list_tenders(sale_id)
 
     async def list_sales(
         self,
@@ -260,6 +385,12 @@ class SalesService:
             await self._contacts.add_member_points(
                 sale.store_id, sale.buyer_contact_id, -sale.awarded_points
             )
+        # 購物金 tender 沖回（§3.3）：DEBIT/SALE → REVERSAL/SALE_VOID（入回買方餘額）；
+        # 無購物金 tender → no-op。沖正冪等：重複作廢路徑被 SaleAlreadyVoid 先擋，
+        # 即便走到也只入回一次（同來源回原沖正列）。現金 tender 退現屬 Phase 4 returns。
+        await self._storecredit.reverse_for_sale_void(
+            sale.store_id, sale.id, created_by=actor_user_id
+        )
         return sale
 
     async def record_print_detail(self, sale: Sale, actor_user_id: int) -> None:

@@ -363,6 +363,27 @@ class StoreCreditService:
         )
         return entry
 
+    async def reverse_for_sale_void(
+        self, store_id: int, sale_id: int, *, created_by: int
+    ) -> StoreCreditLedger | None:
+        """作廢銷售時沖回該筆的購物金扣抵（DEBIT/SALE → REVERSAL/SALE_VOID）。
+
+        無購物金 tender（找不到對應 DEBIT）→ 回 None（不作為）。沖正本身冪等
+        （同 source 重試回原沖正列），故重複作廢不會重複入回。
+        """
+        debit = await self._repo.find_by_source(
+            store_id, StoreCreditSourceType.SALE, sale_id, StoreCreditEntryType.DEBIT
+        )
+        if debit is None:
+            return None
+        return await self.reverse(
+            store_id,
+            debit.id,
+            source_type=StoreCreditSourceType.SALE_VOID,
+            source_id=sale_id,
+            created_by=created_by,
+        )
+
     async def adjust(
         self,
         store_id: int,

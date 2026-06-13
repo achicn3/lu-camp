@@ -136,9 +136,24 @@ class SaleLineType(StrEnum):
 
 
 class PaymentMethod(StrEnum):
-    """付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。"""
+    """付款方式（sales.payment_method 摘要欄；明細在 sale_tenders，docs/16 §1.6）。
+
+    單一 tender 時為該 tender 型別、多 tender 為 MIXED；既有報表/收據相容。
+    """
 
     CASH = "CASH"
+    STORE_CREDIT = "STORE_CREDIT"
+    MIXED = "MIXED"
+
+
+class TenderType(StrEnum):
+    """銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。
+
+    CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。
+    """
+
+    CASH = "CASH"
+    STORE_CREDIT = "STORE_CREDIT"
 
 
 class SaleInvoiceStatus(StrEnum):

@@ -851,10 +851,12 @@ export interface components {
         OwnershipType: "OWNED" | "CONSIGNMENT";
         /**
          * PaymentMethod
-         * @description 付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。
+         * @description 付款方式（sales.payment_method 摘要欄；明細在 sale_tenders，docs/16 §1.6）。
+         *
+         *     單一 tender 時為該 tender 型別、多 tender 為 MIXED；既有報表/收據相容。
          * @enum {string}
          */
-        PaymentMethod: "CASH";
+        PaymentMethod: "CASH" | "STORE_CREDIT" | "MIXED";
         /**
          * PayoutMethod
          * @description 收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。
@@ -880,12 +882,17 @@ export interface components {
         /**
          * SaleCreateRequest
          * @description 結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
+         *
+         *     tenders 省略 → service 預設單一 CASH 全額（向後相容）；提供時 Σ amount 必須等於
+         *     伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。
          */
         SaleCreateRequest: {
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
+            /** Tenders */
+            tenders?: components["schemas"]["SaleTenderRequest"][] | null;
         };
         /**
          * SaleInvoiceStatus
@@ -945,7 +952,7 @@ export interface components {
         SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT";
         /**
          * SaleRead
-         * @description 銷售單輸出（含明細）。
+         * @description 銷售單輸出（含明細與收款明細）。
          */
         SaleRead: {
             /** Buyer Contact Id */
@@ -973,6 +980,11 @@ export interface components {
             subtotal: string;
             /** Tax */
             tax: string;
+            /**
+             * Tenders
+             * @default []
+             */
+            tenders: components["schemas"]["SaleTenderRead"][];
             /** Total */
             total: string;
         };
@@ -1004,6 +1016,26 @@ export interface components {
             tax: string;
             /** Total */
             total: string;
+        };
+        /**
+         * SaleTenderRead
+         * @description 收款明細輸出（SC-3）。
+         */
+        SaleTenderRead: {
+            /** Amount */
+            amount: string;
+            /** Id */
+            id: number;
+            tender_type: components["schemas"]["TenderType"];
+        };
+        /**
+         * SaleTenderRequest
+         * @description 單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。
+         */
+        SaleTenderRequest: {
+            /** Amount */
+            amount: number | string;
+            tender_type: components["schemas"]["TenderType"];
         };
         /**
          * SerializedItemRead
@@ -1147,6 +1179,14 @@ export interface components {
          * @enum {string}
          */
         StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
+        /**
+         * TenderType
+         * @description 銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。
+         *
+         *     CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。
+         * @enum {string}
+         */
+        TenderType: "CASH" | "STORE_CREDIT";
         /**
          * TokenResponse
          * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。

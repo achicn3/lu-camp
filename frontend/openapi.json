@@ -1142,9 +1142,11 @@
         "type": "string"
       },
       "PaymentMethod": {
-        "description": "付款方式。本期僅收現金（docs/02 §1 約束「只收現金」），列舉預留未來擴充。",
+        "description": "付款方式（sales.payment_method 摘要欄；明細在 sale_tenders，docs/16 §1.6）。\n\n單一 tender 時為該 tender 型別、多 tender 為 MIXED；既有報表/收據相容。",
         "enum": [
-          "CASH"
+          "CASH",
+          "STORE_CREDIT",
+          "MIXED"
         ],
         "title": "PaymentMethod",
         "type": "string"
@@ -1222,7 +1224,7 @@
         "type": "object"
       },
       "SaleCreateRequest": {
-        "description": "結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。",
+        "description": "結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。\n\ntenders 省略 → service 預設單一 CASH 全額（向後相容）；提供時 Σ amount 必須等於\n伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。",
         "properties": {
           "buyer_contact_id": {
             "anyOf": [
@@ -1242,6 +1244,20 @@
             "minItems": 1,
             "title": "Lines",
             "type": "array"
+          },
+          "tenders": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleTenderRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenders"
           }
         },
         "required": [
@@ -1398,7 +1414,7 @@
         "type": "string"
       },
       "SaleRead": {
-        "description": "銷售單輸出（含明細）。",
+        "description": "銷售單輸出（含明細與收款明細）。",
         "properties": {
           "buyer_contact_id": {
             "anyOf": [
@@ -1452,6 +1468,14 @@
           "tax": {
             "title": "Tax",
             "type": "string"
+          },
+          "tenders": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleTenderRead"
+            },
+            "title": "Tenders",
+            "type": "array"
           },
           "total": {
             "title": "Total",
@@ -1529,6 +1553,55 @@
           "created_at"
         ],
         "title": "SaleSummaryRead",
+        "type": "object"
+      },
+      "SaleTenderRead": {
+        "description": "收款明細輸出（SC-3）。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "id",
+          "tender_type",
+          "amount"
+        ],
+        "title": "SaleTenderRead",
+        "type": "object"
+      },
+      "SaleTenderRequest": {
+        "description": "單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "tender_type",
+          "amount"
+        ],
+        "title": "SaleTenderRequest",
         "type": "object"
       },
       "SerializedItemRead": {
@@ -1952,6 +2025,15 @@
           "MANUAL"
         ],
         "title": "StoreCreditSourceType",
+        "type": "string"
+      },
+      "TenderType": {
+        "description": "銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。\n\nCASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。",
+        "enum": [
+          "CASH",
+          "STORE_CREDIT"
+        ],
+        "title": "TenderType",
         "type": "string"
       },
       "TokenResponse": {

@@ -98,6 +98,35 @@ async def _seed_acquisition_header(
     return resolved
 
 
+async def _seed_sale_with_sc_tender(
+    session: AsyncSession, store_id: int, user_id: int, member_id: int, amount: int
+) -> int:
+    """建購物金付款銷售（total=amount、STORE_CREDIT tender=amount、買方=member），回 sale_id。
+
+    SC-3 起 store_credit_ledger 的 DEBIT/SALE 必須對應一筆等額的 STORE_CREDIT 收款
+    （COMMIT 時驗）——real-commit 的扣抵測試需先備妥對應銷售與收款。
+    """
+    sale_id = await session.scalar(
+        text(
+            "INSERT INTO sales"
+            " (store_id, clerk_user_id, buyer_contact_id, subtotal, tax, total, awarded_points,"
+            "  payment_method, invoice_status, status, created_at, updated_at)"
+            " VALUES (:sid, :uid, :mid, :amt, 0, :amt, 0, 'STORE_CREDIT', 'NOT_ISSUED',"
+            "  'COMPLETED', now(), now()) RETURNING id"
+        ),
+        {"sid": store_id, "uid": user_id, "mid": member_id, "amt": amount},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO sale_tenders"
+            " (store_id, sale_id, tender_type, amount, created_at, updated_at)"
+            " VALUES (:sid, :saleid, 'STORE_CREDIT', :amt, now(), now())"
+        ),
+        {"sid": store_id, "saleid": sale_id, "amt": amount},
+    )
+    return int(sale_id)
+
+
 async def test_credit_applies_premium_and_records_three_values(
     db_session: AsyncSession,
 ) -> None:
@@ -1131,6 +1160,8 @@ async def test_concurrent_same_source_credits_idempotent() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM sale_tenders"))
+            await s.execute(text("DELETE FROM sales"))
             await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
@@ -1190,6 +1221,8 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM sale_tenders"))
+            await s.execute(text("DELETE FROM sales"))
             await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
@@ -1327,11 +1360,13 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
 
     try:
 
-        async def _raw_debit(src: int) -> bool:
+        async def _raw_debit(label: int) -> bool:
             from sqlalchemy.exc import DBAPIError
 
             async with sm() as s:
                 try:
+                    # 備妥對應銷售＋購物金收款（SC-3 帳本↔收款綁定），再直插 DEBIT 偽造鏈。
+                    sale_id = await _seed_sale_with_sc_tender(s, store_id, user_id, member_id, 100)
                     await s.execute(
                         text(
                             "INSERT INTO store_credit_ledger"
@@ -1345,8 +1380,8 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
                             "sid": store_id,
                             "cid": member_id,
                             "uid": user_id,
-                            "src": src,
-                            "fp": f"raw-{src}",
+                            "src": sale_id,
+                            "fp": f"raw-{label}",
                         },
                     )
                     await s.commit()
@@ -1360,6 +1395,8 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM sale_tenders"))
+            await s.execute(text("DELETE FROM sales"))
             await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
@@ -1398,15 +1435,17 @@ async def test_concurrent_debits_never_oversell() -> None:
 
     try:
 
-        async def _try_debit(source_id: int) -> bool:
+        async def _try_debit(label: int) -> bool:
             async with sm() as s:
                 try:
+                    # 對應銷售＋購物金收款於同交易備妥；輸家整筆回滾（sale/tender/debit 皆不落地）。
+                    sale_id = await _seed_sale_with_sc_tender(s, store_id, user_id, member_id, 700)
                     await StoreCreditService(s).debit(
                         store_id,
                         member_id,
                         amount=Decimal(700),
                         source_type=StoreCreditSourceType.SALE,
-                        source_id=source_id,
+                        source_id=sale_id,
                         created_by=user_id,
                     )
                     await s.commit()
@@ -1428,6 +1467,8 @@ async def test_concurrent_debits_never_oversell() -> None:
             # 帳本 insert-only trigger 連 DELETE 都擋（正確行為）；
             # 測試清理用 TRUNCATE（不觸發列級 trigger）。
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM sale_tenders"))
+            await s.execute(text("DELETE FROM sales"))
             await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))

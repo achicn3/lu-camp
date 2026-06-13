@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 
 
 class SalesRepository:
@@ -21,6 +21,16 @@ class SalesRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def add_tender(self, tender: SaleTender) -> SaleTender:
+        self._session.add(tender)
+        await self._session.flush()
+        return tender
+
+    async def list_tenders(self, sale_id: int) -> list[SaleTender]:
+        stmt = select(SaleTender).where(SaleTender.sale_id == sale_id).order_by(SaleTender.id)
+        result = await self._session.scalars(stmt)
+        return list(result)
 
     async def get_sale(self, store_id: int, sale_id: int) -> Sale | None:
         stmt = select(Sale).where(Sale.id == sale_id, Sale.store_id == store_id)
