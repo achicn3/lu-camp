@@ -98,26 +98,45 @@ class Acquisition(Base, TimestampMixin):
     note: Mapped[str | None] = mapped_column(String(500))
 
 
-# credit 腿 ↔ 帳本綁定（Codex SC-2 第十六輪 medium）：收購頭的購物金腿必須對應
-# 一筆等值的 store_credit_ledger ACQUISITION CREDIT 分錄。DEFERRABLE INITIALLY
-# DEFERRED：於 COMMIT 時驗（header 先插、分錄後插的正常時序不受影響）；
-# 直插/修復腳本偽造 credit 腿（無分錄或不等值）在提交瞬間被擋。
+# credit 腿 ↔ 帳本綁定（Codex SC-2 第十六輪 medium、第十七/十八輪 P1）：收購頭與
+# 其購物金分錄的身分（store/contact/credit 等值）必須恆等對應。DEFERRABLE INITIALLY
+# DEFERRED：於 COMMIT 時驗（header 先插、分錄後插的正常時序不受影響）。守衛全程
+# 以「分錄是否存在」為準（非看 NEW 的 credit 欄），故同時擋下：
+#   - INSERT：有 credit 腿卻無等值分錄；
+#   - UPDATE：把已產生分錄的收購改成 CASH／改 credit 為 0／改 store/contact
+#     （第十八輪 P1：歸零/搬移會留下無主負債）；
+#   - DELETE：刪掉已產生分錄的收購（第十八輪 P1：留下孤兒負債）。
 # 分錄本身的經濟正確性由 SC-1 的帳本守衛鏈保證。
 ACQ_CREDIT_LEG_GUARD_DDL: tuple[str, ...] = (
     """
 CREATE OR REPLACE FUNCTION acquisitions_credit_leg_guard() RETURNS trigger AS $$
 DECLARE
-  ledger_ce NUMERIC;
+  led_store INT;
+  led_contact INT;
+  led_ce NUMERIC;
 BEGIN
-  IF COALESCE(NEW.payout_credit_cash_equivalent, 0) = 0 THEN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM 1 FROM store_credit_ledger
+     WHERE source_type = 'ACQUISITION' AND entry_type = 'CREDIT' AND source_id = OLD.id;
+    IF FOUND THEN
+      RAISE EXCEPTION '收購已產生購物金分錄，不可刪除（會留下孤兒購物金負債）';
+    END IF;
+    RETURN OLD;
+  END IF;
+  -- 以分錄是否存在為準（不看 NEW.credit）：找到本收購對應的 CREDIT 分錄
+  SELECT store_id, contact_id, cash_equivalent INTO led_store, led_contact, led_ce
+    FROM store_credit_ledger
+   WHERE source_type = 'ACQUISITION' AND entry_type = 'CREDIT' AND source_id = NEW.id;
+  IF NOT FOUND THEN
+    -- 無分錄：僅在收購本就無 credit 腿時合法（CASH／純付現）
+    IF COALESCE(NEW.payout_credit_cash_equivalent, 0) <> 0 THEN
+      RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
+    END IF;
     RETURN NEW;
   END IF;
-  SELECT cash_equivalent INTO ledger_ce
-    FROM store_credit_ledger
-   WHERE store_id = NEW.store_id AND contact_id = NEW.contact_id
-     AND source_type = 'ACQUISITION' AND source_id = NEW.id
-     AND entry_type = 'CREDIT';
-  IF ledger_ce IS NULL OR ledger_ce <> NEW.payout_credit_cash_equivalent THEN
+  -- 有分錄：收購身分必須恆等對應（擋歸零/改 store/改 contact/改金額）
+  IF led_store <> NEW.store_id OR led_contact <> NEW.contact_id
+     OR led_ce <> COALESCE(NEW.payout_credit_cash_equivalent, 0) THEN
     RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
   END IF;
   RETURN NEW;
@@ -126,7 +145,7 @@ $$ LANGUAGE plpgsql
 """,
     """
 CREATE CONSTRAINT TRIGGER trg_acquisitions_credit_leg_guard
-AFTER INSERT OR UPDATE ON acquisitions
+AFTER INSERT OR UPDATE OR DELETE ON acquisitions
 DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION acquisitions_credit_leg_guard()
 """,
