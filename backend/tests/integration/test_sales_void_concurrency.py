@@ -21,7 +21,7 @@ from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.sales.inputs import SaleLineInput
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -85,6 +85,7 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
     finally:
         async with sm() as s:
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
             await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))

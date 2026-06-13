@@ -15,7 +15,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import SerializedItem, StockMovement
 from app.modules.inventory.service import InventoryService
 from app.modules.sales.inputs import SaleLineInput
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -93,7 +93,15 @@ async def test_concurrent_sale_of_same_serialized_only_one_succeeds() -> None:
             ) == 1
     finally:
         async with sm() as s:
-            for model in (SaleLine, StockMovement, CashMovement, Sale, SerializedItem, CashSession):
+            for model in (
+                SaleTender,
+                SaleLine,
+                StockMovement,
+                CashMovement,
+                Sale,
+                SerializedItem,
+                CashSession,
+            ):
                 await s.execute(delete(model).where(model.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))
             await s.execute(delete(Store).where(Store.id == store_id))

@@ -4,8 +4,9 @@ T11 為領域層，尚無對外 API；service 直接收這些輸入。對外 Pyd
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 
-from app.shared.enums import SaleLineType
+from app.shared.enums import SaleLineType, TenderType
 
 
 @dataclass(frozen=True)
@@ -21,3 +22,14 @@ class SaleLineInput:
     catalog_product_id: int | None = None
     bulk_lot_id: int | None = None
     qty: int = 1
+
+
+@dataclass(frozen=True)
+class TenderInput:
+    """一筆收款明細輸入（SC-3）：型別＋金額（整數元、>0）。
+
+    省略整份 tenders 時，service 預設單一 CASH 全額（向後相容）。
+    """
+
+    tender_type: TenderType
+    amount: Decimal

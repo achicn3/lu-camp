@@ -25,9 +25,9 @@ def test_sale_line_type_values() -> None:
     assert {s.value for s in SaleLineType} == {"SERIALIZED", "CATALOG", "BULK_LOT"}
 
 
-def test_payment_method_cash_only() -> None:
-    # docs/02 §1 約束：本期只收現金；列舉預留擴充但目前僅 CASH。
-    assert {s.value for s in PaymentMethod} == {"CASH"}
+def test_payment_method_values() -> None:
+    # SC-3（docs/16 §1.6）：payment_method 摘要欄擴充 STORE_CREDIT / MIXED。
+    assert {s.value for s in PaymentMethod} == {"CASH", "STORE_CREDIT", "MIXED"}
 
 
 def test_sale_invoice_status_values() -> None:

@@ -103,3 +103,7 @@ class StoreCreditMemberRequired(DomainError):
 
 class InvalidPayoutSplit(DomainError):
     """收購撥款拆分不合法（SPLIT 現金部分須 >0 且 < 應付總額）。"""
+
+
+class InvalidSaleTender(DomainError):
+    """銷售收款明細不合法（Σ tenders ≠ total、金額非正、重複型別、購物金缺會員）。"""

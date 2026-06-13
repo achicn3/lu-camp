@@ -21,7 +21,7 @@ from app.main import create_app
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import CatalogProduct, StockMovement
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
@@ -137,6 +137,7 @@ async def test_concurrent_same_key_different_cart_one_409(real_client: httpx.Asy
 async def _cleanup(sm: async_sessionmaker[AsyncSession], store_id: int) -> None:
     async with sm() as s:
         await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
+        await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
         await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
         await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
         await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))

@@ -7,11 +7,17 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
-from app.modules.sales.inputs import SaleLineInput
-from app.modules.sales.models import Sale, SaleLine
-from app.shared.enums import PaymentMethod, SaleInvoiceStatus, SaleLineType, SaleStatus
+from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.models import Sale, SaleLine, SaleTender
+from app.shared.enums import (
+    PaymentMethod,
+    SaleInvoiceStatus,
+    SaleLineType,
+    SaleStatus,
+    TenderType,
+)
 
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
 
@@ -57,14 +63,41 @@ class SaleLineCreateRequest(BaseModel):
         )
 
 
+class SaleTenderRequest(BaseModel):
+    """單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。"""
+
+    tender_type: TenderType
+    amount: NTDAmount
+
+    @field_validator("amount")
+    @classmethod
+    def _positive_whole(cls, value: Decimal) -> Decimal:
+        if value != value.to_integral_value():
+            raise ValueError("金額必須為整數元")
+        if value <= 0:
+            raise ValueError("金額必須為正")
+        return value
+
+    def to_input(self) -> TenderInput:
+        return TenderInput(tender_type=self.tender_type, amount=self.amount)
+
+
 class SaleCreateRequest(BaseModel):
-    """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。"""
+    """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
+
+    tenders 省略 → service 預設單一 CASH 全額（向後相容）；提供時 Σ amount 必須等於
+    伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。
+    """
 
     lines: list[SaleLineCreateRequest] = Field(min_length=1)
     buyer_contact_id: int | None = None
+    tenders: list[SaleTenderRequest] | None = None
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]
+
+    def to_tender_inputs(self) -> list[TenderInput] | None:
+        return None if self.tenders is None else [t.to_input() for t in self.tenders]
 
 
 class SaleLineRead(BaseModel):
@@ -83,8 +116,18 @@ class SaleLineRead(BaseModel):
     line_total: NTDAmount
 
 
+class SaleTenderRead(BaseModel):
+    """收款明細輸出（SC-3）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    tender_type: TenderType
+    amount: NTDAmount
+
+
 class SaleRead(BaseModel):
-    """銷售單輸出（含明細）。"""
+    """銷售單輸出（含明細與收款明細）。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -100,12 +143,18 @@ class SaleRead(BaseModel):
     status: SaleStatus
     created_at: datetime
     lines: list[SaleLineRead] = []
+    tenders: list[SaleTenderRead] = []
 
     @classmethod
-    def build(cls, sale: Sale, lines: list[SaleLine]) -> "SaleRead":
+    def build(
+        cls, sale: Sale, lines: list[SaleLine], tenders: list[SaleTender] | None = None
+    ) -> "SaleRead":
         data = cls.model_validate(sale)
         return data.model_copy(
-            update={"lines": [SaleLineRead.model_validate(line) for line in lines]}
+            update={
+                "lines": [SaleLineRead.model_validate(line) for line in lines],
+                "tenders": [SaleTenderRead.model_validate(t) for t in (tenders or [])],
+            }
         )
 
 
