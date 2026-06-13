@@ -1,8 +1,9 @@
-# 16 — 購物金（store credit）與點數規格草案
+# 16 — 購物金（store credit）與點數規格
 
-> 狀態：**草案，待使用者審**（2026-06-11）。核心決策見 ADR-012。
-> 任務切分：SC-1 帳本核心 → SC-2 收購撥款 → SC-3 銷售 tender + 沖正 →（SC-4 報表 ∥ SC-5 溢價設定+建議值引擎，可與 T19 前端並行）。SC-1～3 須在 T19 POS 結帳 UI 前完成。
-> G3 閘門：待會計師確認「禮券/儲值歸類、效期與履約保證、溢價稅務認列時點」；不阻擋建模，效期相關欄位最終值待確認。
+> 狀態：**已核准、實作中**（2026-06-11 核准；ADR-012 Accepted）。核心決策見 ADR-012。
+> 進度（2026-06-13）：**SC-1 帳本核心、SC-2 收購撥款、SC-3 銷售 tender + 沖正、點數（§0）皆已實作並合併進 `main`**。**SC-4 報表、SC-5 溢價設定+建議值引擎尚未動工**（可與前端 F3 POS 並行）。各任務的 DB 層守衛實況見 §8。
+> 任務切分：SC-1 帳本核心 → SC-2 收購撥款 → SC-3 銷售 tender + 沖正 →（SC-4 報表 ∥ SC-5 溢價設定+建議值引擎，可與 T19 前端並行）。SC-1～3 為 T19 POS 結帳 UI 前置（已滿足）。
+> G3 閘門（仍開）：待會計師確認「禮券/儲值歸類、效期與履約保證、溢價稅務認列時點」；不阻擋建模，效期相關欄位最終值待確認（`expires_at` 仍恆 NULL）。
 
 ## 0. 點數累積規則（併入既有點數小任務，與購物金獨立但相鄰）
 
@@ -209,3 +210,33 @@
 - 單元：I-1～I-12 全數；引擎純函數（各約束邊界、權重正規化、冷啟動、捨入）；α 代理分類；FIFO 帳齡分桶。
 - 整合：收購三種 payout（原子回滾）、銷售多 tender（不足 409、現金部分入錢櫃）、void 沖正、冪等重送、并發（同帳戶並行入帳/扣抵）。
 - 端對端：收購選購物金 → 餘額查詢 → 消費扣抵 → 作廢入回 → 對帳全綠。
+
+## 8. DB 層守衛（實作後補記，2026-06-13）
+
+§2 的不變量原規劃「以測試守護」。實作經多輪 Codex adversarial review 後，把守衛**下沉到 DB 層**：以 `DEFERRABLE INITIALLY DEFERRED` 約束觸發器在 **COMMIT 時**把關，讓「直接下原生 DML 繞過 service」也擋得住（具 DDL 權限、能停用觸發器者除外，屬範圍外）。正常路徑（header 先插、明細/分錄後插）不受影響——延遲到提交才驗，同交易內彼此可見。
+
+### 8.1 帳本本身（SC-1，`store_credit_ledger`）
+
+- **immutable**：UPDATE/DELETE 一律 RAISE（I-1）。
+- **滾動餘額鏈守衛**：先 `PERFORM … FOR UPDATE` 鎖帳戶列再驗 `balance_after = 前一列 + signed_amount` 且尾插（I-2）；快取 `AFTER INSERT` 以 `balance_after` 覆寫自癒（I-3）。
+- **CREDIT 經濟守衛**：`cash_equivalent > 0`、`premium_rate_applied ∈ [0, 0.20]`、`signed_amount = ROUND(ce × (1+p))`（I-4）。
+- **沖正守衛**：不可沖沖正列、金額為原列負值、`source_type` ↔ 原列事件綁定、`source_id` 等於原列、一列只能被沖一次（部分唯一索引）（I-6 反向）。
+- **`id` 採 `GENERATED ALWAYS`**、複合租戶 FK（`contacts(id, store_id)`、ledger→accounts、沖正三欄自參考）。
+- **ADJUSTMENT** 需 `Idempotency-Key`（MANUAL 無 source_id，以部分唯一索引防重複）。
+
+### 8.2 收購 ↔ 帳本（SC-2，`acquisitions`）
+
+- **credit 腿 ↔ 帳本雙向綁定**：收購頭的購物金腿必須對應一筆**同店、同對象、等額**的 `ACQUISITION/CREDIT` 分錄；反之該分錄也必須對應收購頭。身分恆等不可變更（擋事後改成 CASH／歸零／改 store/contact／刪除／孤兒分錄／對象錯置）。
+- **庫存背書**：產生購物金負債的收購必須有**同店、店家自有**（`serialized_items.ownership_type='OWNED'`／`bulk_lots.consignor_id IS NULL`）的庫存實體，且成本加總 = 撥款總額；收購側與庫存側（`serialized_items`/`bulk_lots` 的 INSERT/UPDATE/DELETE）雙邊強制——擋空殼收購鑄造負債、事後改成本/搬走/刪除/用他店或寄售品湊數。
+
+### 8.3 銷售 ↔ 帳本（SC-3，`sale_tenders` / `sales`）
+
+- **收款對平**：`Σ sale_tenders.amount = sales.total` 且 `total > 0`（後者改以延遲守衛，因 CHECK 不可 deferred 且建單先插 `total=0` placeholder）。
+- **購物金收款 ↔ 帳本 DEBIT 雙向綁定**：`STORE_CREDIT` 收款金額必須對應一筆**同店、同買方、等額**的 `SALE/DEBIT` 分錄；反之 `SALE/DEBIT` 也必須對應一筆等額收款（擋孤兒扣抵、跨店借殼 `source_id`、對象/金額錯置）。收款被搬到別的 sale 時，**來源 sale 也重驗**。
+- **作廢 ↔ 沖正雙向**：銷售為 `VOID` 且有購物金扣抵時，必須有對應 `SALE_VOID/REVERSAL`；反之 `SALE_VOID` 沖正只能對應**已作廢**的同店銷售。
+- **收款租戶複合 FK**：`sales` 增 `UNIQUE(id, store_id)`，`sale_tenders` 以 `(sale_id, store_id)` 複合 FK 綁定，擋跨店湊收款。
+
+### 8.4 已留痕的邊界
+
+- `Numeric(12,0)` 在 CHECK 前先捨入（全專案 §6 慣例）——service 整數守衛 + reconcile 偵測補位。
+- 上述守衛是**縱深防護**，不取代 service 層驗證與測試；service 仍是正常路徑的第一道關。
