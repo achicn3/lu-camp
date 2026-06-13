@@ -129,17 +129,21 @@ BEGIN
   IF NOT FOUND THEN
     RETURN;
   END IF;
-  SELECT type, payout_cash_amount, payout_credit_cash_equivalent INTO acq
+  SELECT store_id, type, payout_cash_amount, payout_credit_cash_equivalent INTO acq
     FROM acquisitions WHERE id = acq_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION '購物金分錄對應的收購不存在（孤兒購物金負債）';
   END IF;
+  -- 背書只認「本店、店家自有」的庫存實體（第二十一輪 P2）：他店庫存或寄售品
+  -- （consignment/有 consignor）不算數，否則數字湊得到、負債卻無真正自有資產背書。
   IF acq.type = 'BULK_LOT' THEN
     SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
-      FROM bulk_lots WHERE acquisition_id = acq_id;
+      FROM bulk_lots
+     WHERE acquisition_id = acq_id AND store_id = acq.store_id AND consignor_id IS NULL;
   ELSE
     SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
-      FROM serialized_items WHERE acquisition_id = acq_id;
+      FROM serialized_items
+     WHERE acquisition_id = acq_id AND store_id = acq.store_id AND ownership_type = 'OWNED';
   END IF;
   payout_total := COALESCE(acq.payout_cash_amount, 0)
                 + COALESCE(acq.payout_credit_cash_equivalent, 0);

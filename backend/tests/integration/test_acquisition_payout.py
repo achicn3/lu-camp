@@ -871,6 +871,77 @@ async def test_inventory_mutation_cannot_break_credit_backing() -> None:
             await s.commit()
 
 
+async def test_backing_requires_same_store_owned_inventory() -> None:
+    """第二十一輪 P2：背書只認本店、店家自有庫存。以寄售品（CONSIGNMENT）湊
+    BUYOUT 背書金額 → COMMIT 仍被擋（數字湊得到、卻無自有資產背書）。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="背書資格店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="qual", password_hash="h", role=UserRole.CLERK)
+        seller = Contact(
+            store_id=store.id, name="賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, seller])
+        await s.flush()
+        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            acq_id = await s.scalar(
+                text(
+                    "INSERT INTO acquisitions"
+                    " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                    "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, 1000,"
+                    "  now(), now()) RETURNING id"
+                ),
+                {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+            )
+            # 用寄售品（CONSIGNMENT，有 consignor）想湊背書金額——不算自有資產
+            await s.execute(
+                text(
+                    "INSERT INTO serialized_items"
+                    " (store_id, item_code, name, grade, ownership_type, acquisition_cost,"
+                    "  consignor_id, commission_pct, listed_price, acquisition_id,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, :code, '寄售品', 'A', 'CONSIGNMENT', 1000, :cons, 50,"
+                    "  1800, :aid, now(), now())"
+                ),
+                {"sid": store_id, "code": f"QUAL-{acq_id}", "cons": seller_id, "aid": acq_id},
+            )
+            await StoreCreditService(s).credit(
+                store_id,
+                seller_id,
+                cash_equivalent=Decimal(1000),
+                premium_rate=Decimal("0.10"),
+                source_type=StoreCreditSourceType.ACQUISITION,
+                source_id=acq_id,
+                created_by=clerk_id,
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
+            await s.execute(text("DELETE FROM acquisitions"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
 async def test_concurrent_service_callers_same_key_replay() -> None:
     """並發同 key 直呼 service（Codex 第七輪 high）：兩邊都拿到同一收購單、
     帳本只入一次（輸家在 service 層轉重放，不冒 IntegrityError）。"""
