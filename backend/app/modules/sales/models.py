@@ -141,6 +141,11 @@ BEGIN
   IF NOT FOUND THEN
     RETURN;  -- sale 已不存在（如刪除）：交由 FK 處理
   END IF;
+  -- 總額必為正（SC-3 第三輪 P3）：CHECK 不可 deferred、且建單先插 total=0 placeholder，
+  -- 故以延遲守衛於 COMMIT 驗——與 service 零總額拒一致，擋 raw DML 建零元單。
+  IF sale_total <= 0 THEN
+    RAISE EXCEPTION '銷售總額必須大於 0';
+  END IF;
   SELECT COALESCE(SUM(amount), 0) INTO tender_sum FROM sale_tenders WHERE sale_id = p_sale_id;
   IF tender_sum <> sale_total THEN
     RAISE EXCEPTION '收款明細加總必須等於銷售總額（sale_tenders 與 sales.total 不對平）';
@@ -154,13 +159,16 @@ RETURNS void AS $$
 DECLARE
   sale_store INT;
   sale_buyer INT;
+  sale_status TEXT;
   sc_tender NUMERIC;
   debit_abs NUMERIC;
   debit_contact INT;
 BEGIN
-  SELECT store_id, buyer_contact_id INTO sale_store, sale_buyer FROM sales WHERE id = p_sale_id;
+  SELECT store_id, buyer_contact_id, invoice_status
+    INTO sale_store, sale_buyer, sale_status
+    FROM sales WHERE id = p_sale_id;
   IF NOT FOUND THEN
-    RETURN;
+    RETURN;  -- sale 已不存在（如刪除）：交由 FK／帳本側守衛處理
   END IF;
   SELECT amount INTO sc_tender
     FROM sale_tenders WHERE sale_id = p_sale_id AND tender_type = 'STORE_CREDIT';
@@ -175,6 +183,15 @@ BEGIN
   END IF;
   IF sc_tender > 0 AND debit_contact IS DISTINCT FROM sale_buyer THEN
     RAISE EXCEPTION '購物金扣抵對象必須為該銷售的買方';
+  END IF;
+  -- 已作廢且有購物金扣抵 → 必須有對應沖正（第三輪 P2：raw UPDATE 設 VOID 不可漏沖回）
+  IF sc_tender > 0 AND sale_status = 'VOID' THEN
+    PERFORM 1 FROM store_credit_ledger
+     WHERE store_id = sale_store AND source_type = 'SALE_VOID' AND entry_type = 'REVERSAL'
+       AND source_id = p_sale_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION '已作廢的購物金銷售必須有對應的沖正分錄（SALE_VOID）';
+    END IF;
   END IF;
 END;
 $$ LANGUAGE plpgsql
@@ -221,48 +238,36 @@ SALE_TENDER_TOTAL_GUARD_DROP_DDL: tuple[str, ...] = (
     "DROP TRIGGER IF EXISTS trg_sale_tenders_total ON sale_tenders",
     "DROP FUNCTION IF EXISTS sales_tender_total_guard()",
     "DROP FUNCTION IF EXISTS sale_tenders_total_guard()",
+    "DROP FUNCTION IF EXISTS sales_verify_store_credit_consistency(BIGINT)",
     "DROP FUNCTION IF EXISTS sales_verify_tender_total(BIGINT)",
 )
 
-# 帳本側對等綁定（store_credit_ledger 的 DEBIT/SALE 必對應等額收款）。共用判斷函式
-# 以 CREATE OR REPLACE 重建（與收款側同一份；掛在 ledger 表後建，順序無虞）。
+# 帳本側對等綁定：store_credit_ledger 的 DEBIT/SALE 必對應「同店、同買方、等額」的銷售與
+# 購物金收款。自含判斷（用 NEW 的 store_id，第三輪 P1：擋跨店 source_id 借殼）；不重複定義
+# 收款側的 consistency 函式（避免 CREATE OR REPLACE 互蓋、行為依建表順序而異）。
 SALE_LEDGER_BACKING_DDL: tuple[str, ...] = (
     """
-CREATE OR REPLACE FUNCTION sales_verify_store_credit_consistency(p_sale_id BIGINT)
-RETURNS void AS $$
+CREATE OR REPLACE FUNCTION sales_ledger_sale_debit_guard() RETURNS trigger AS $$
 DECLARE
-  sale_store INT;
   sale_buyer INT;
   sc_tender NUMERIC;
-  debit_abs NUMERIC;
-  debit_contact INT;
 BEGIN
-  SELECT store_id, buyer_contact_id INTO sale_store, sale_buyer FROM sales WHERE id = p_sale_id;
+  IF NEW.entry_type <> 'DEBIT' OR NEW.source_type <> 'SALE' THEN
+    RETURN NEW;
+  END IF;
+  -- 必對應「與本扣抵同店」的銷售（NEW.store_id），擋孤兒扣抵與跨店借殼 source_id
+  SELECT buyer_contact_id INTO sale_buyer
+    FROM sales WHERE id = NEW.source_id AND store_id = NEW.store_id;
   IF NOT FOUND THEN
-    RAISE EXCEPTION '購物金 SALE 扣抵對應的銷售不存在（孤兒扣抵）';
+    RAISE EXCEPTION 'SALE 扣抵必須對應同店的銷售（孤兒或跨店扣抵）';
+  END IF;
+  IF NEW.contact_id IS DISTINCT FROM sale_buyer THEN
+    RAISE EXCEPTION 'SALE 扣抵對象必須為該銷售的買方';
   END IF;
   SELECT amount INTO sc_tender
-    FROM sale_tenders WHERE sale_id = p_sale_id AND tender_type = 'STORE_CREDIT';
-  sc_tender := COALESCE(sc_tender, 0);
-  SELECT -signed_amount, contact_id INTO debit_abs, debit_contact
-    FROM store_credit_ledger
-   WHERE store_id = sale_store AND source_type = 'SALE' AND entry_type = 'DEBIT'
-     AND source_id = p_sale_id;
-  debit_abs := COALESCE(debit_abs, 0);
-  IF sc_tender <> debit_abs THEN
-    RAISE EXCEPTION '購物金收款必須對應等額的帳本 SALE 扣抵（sale_tenders 與 ledger 不一致）';
-  END IF;
-  IF sc_tender > 0 AND debit_contact IS DISTINCT FROM sale_buyer THEN
-    RAISE EXCEPTION '購物金扣抵對象必須為該銷售的買方';
-  END IF;
-END;
-$$ LANGUAGE plpgsql
-""",
-    """
-CREATE OR REPLACE FUNCTION sales_ledger_sale_debit_guard() RETURNS trigger AS $$
-BEGIN
-  IF NEW.entry_type = 'DEBIT' AND NEW.source_type = 'SALE' THEN
-    PERFORM sales_verify_store_credit_consistency(NEW.source_id);
+    FROM sale_tenders WHERE sale_id = NEW.source_id AND tender_type = 'STORE_CREDIT';
+  IF COALESCE(sc_tender, 0) <> -NEW.signed_amount THEN
+    RAISE EXCEPTION 'SALE 扣抵金額必須等於該銷售的購物金收款';
   END IF;
   RETURN NEW;
 END;
@@ -279,7 +284,6 @@ FOR EACH ROW EXECUTE FUNCTION sales_ledger_sale_debit_guard()
 SALE_LEDGER_BACKING_DROP_DDL: tuple[str, ...] = (
     "DROP TRIGGER IF EXISTS trg_ledger_sale_debit_backing ON store_credit_ledger",
     "DROP FUNCTION IF EXISTS sales_ledger_sale_debit_guard()",
-    "DROP FUNCTION IF EXISTS sales_verify_store_credit_consistency(BIGINT)",
 )
 
 for _ddl in SALE_TENDER_TOTAL_GUARD_DDL:

@@ -626,6 +626,175 @@ async def test_cross_store_tender_blocked() -> None:
             await s.commit()
 
 
+async def test_cross_store_sale_debit_blocked() -> None:
+    """第三輪 P1：store-B 的 DEBIT/SALE 借用 store-A 的 sale_id → COMMIT 被帳本側守衛擋。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store_a = Store(name="A 店")
+        store_b = Store(name="B 店")
+        s.add_all([store_a, store_b])
+        await s.flush()
+        clerk_a = User(store_id=store_a.id, username="ca", password_hash="h", role=UserRole.CLERK)
+        clerk_b = User(store_id=store_b.id, username="cb", password_hash="h", role=UserRole.CLERK)
+        s.add_all([clerk_a, clerk_b])
+        await s.flush()
+        a_id, b_id, clerk_a_id, clerk_b_id = store_a.id, store_b.id, clerk_a.id, clerk_b.id
+        # store B 會員備妥餘額 500（帳戶存在、鏈合法），以便越過帳戶/鏈守衛、直擊跨店背書守衛
+        member_b_id = await _seed_member_with_credit(s, b_id, clerk_b_id, 500)
+        # store A 一筆合法現金銷售
+        sale_a = await s.scalar(
+            text(
+                "INSERT INTO sales (store_id, clerk_user_id, subtotal, tax, total, awarded_points,"
+                "  payment_method, invoice_status, status, created_at, updated_at)"
+                " VALUES (:sid, :uid, 100, 0, 100, 0, 'CASH', 'NOT_ISSUED', 'COMPLETED',"
+                "  now(), now()) RETURNING id"
+            ),
+            {"sid": a_id, "uid": clerk_a_id},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO sale_tenders (store_id, sale_id, tender_type, amount,"
+                "  created_at, updated_at) VALUES (:sid, :saleid, 'CASH', 100, now(), now())"
+            ),
+            {"sid": a_id, "saleid": sale_a},
+        )
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            # store B 直插 DEBIT/SALE（餘額 500→400 鏈合法），source_id 指向 store A 的 sale
+            await s.execute(
+                text(
+                    "INSERT INTO store_credit_ledger"
+                    " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                    "  source_type, source_id, fingerprint, created_by, created_at)"
+                    " VALUES (:bid, :mid, 'DEBIT', -100, 400, 'SALE', :saleid,"
+                    "  'x-store', :uid, now())"
+                ),
+                {"bid": b_id, "mid": member_b_id, "saleid": sale_a, "uid": clerk_b_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == a_id))
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": a_id})
+            await s.execute(text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": b_id})
+            await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": b_id})
+            await s.execute(delete(Contact).where(Contact.store_id == b_id))
+            await s.execute(delete(User).where(User.store_id.in_([a_id, b_id])))
+            await s.execute(delete(Store).where(Store.id.in_([a_id, b_id])))
+            await s.commit()
+
+
+async def test_void_without_reversal_blocked() -> None:
+    """第三輪 P2：raw 將購物金銷售標 VOID 卻不沖回 → COMMIT 被擋（不可留未沖回負債）。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        token, _mgr, store_id, clerk_id = await _seed(s)
+        member_id = await _seed_member_with_credit(s, store_id, clerk_id, 500)
+        await s.commit()
+
+    transport = httpx.ASGITransport(app=create_app())
+    try:
+        # 經由 service 建一筆購物金銷售（含 DEBIT），確保狀態一致
+        async with sm() as s:
+            cat = await _seed_catalog(s, store_id, price="100", qty=10)
+            await s.commit()
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            created = await c.post(
+                "/api/v1/sales",
+                json={
+                    "lines": [_catalog_line(cat, 2)],
+                    "buyer_contact_id": member_id,
+                    "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+                },
+                headers=_auth(token, "void-raw"),
+            )
+            assert created.status_code == 201, created.text
+            sale_id = created.json()["id"]
+        # 直接把 sale 標 VOID，但不寫沖正 → COMMIT 應被擋
+        async with sm() as s:
+            await s.execute(
+                text("UPDATE sales SET invoice_status='VOID' WHERE id=:id"), {"id": sale_id}
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM catalog_products WHERE store_id = :s"), {"s": store_id}
+            )
+            from app.modules.cashdrawer.models import CashSession
+
+            await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(text("DELETE FROM audit_log WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
+async def test_raw_zero_total_sale_blocked_at_commit() -> None:
+    """第三輪 P3：raw 建零元銷售 → COMMIT 被延遲守衛擋（CHECK 不可 deferred 故用 trigger）。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="零元店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="z", password_hash="h", role=UserRole.CLERK)
+        s.add(clerk)
+        await s.flush()
+        store_id, clerk_id = store.id, clerk.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO sales (store_id, clerk_user_id, subtotal, tax, total,"
+                    "  awarded_points, payment_method, invoice_status, status,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, :uid, 0, 0, 0, 0, 'CASH', 'NOT_ISSUED', 'COMPLETED',"
+                    "  now(), now())"
+                ),
+                {"sid": store_id, "uid": clerk_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
 async def test_same_key_different_tenders_conflicts(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
