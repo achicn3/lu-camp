@@ -43,6 +43,25 @@
             ],
             "title": "Note"
           },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod",
+            "default": "CASH"
+          },
+          "payout_split_cash": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Split Cash"
+          },
           "type": {
             "$ref": "#/components/schemas/AcquisitionType"
           }
@@ -240,6 +259,31 @@
             ],
             "title": "Note"
           },
+          "payout_cash_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Cash Amount"
+          },
+          "payout_credit_cash_equivalent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Credit Cash Equivalent"
+          },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -266,6 +310,9 @@
           "contact_id",
           "clerk_user_id",
           "total_cash_paid",
+          "payout_method",
+          "payout_cash_amount",
+          "payout_credit_cash_equivalent",
           "note",
           "created_at"
         ],
@@ -301,6 +348,31 @@
             ],
             "title": "Lot Code"
           },
+          "payout_cash_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Cash Amount"
+          },
+          "payout_credit_cash_equivalent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Credit Cash Equivalent"
+          },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
           "total_cash_paid": {
             "anyOf": [
               {
@@ -321,6 +393,9 @@
           "type",
           "contact_id",
           "total_cash_paid",
+          "payout_method",
+          "payout_cash_amount",
+          "payout_credit_cash_equivalent",
           "item_codes",
           "lot_code"
         ],
@@ -1074,6 +1149,16 @@
         "title": "PaymentMethod",
         "type": "string"
       },
+      "PayoutMethod": {
+        "description": "收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。",
+        "enum": [
+          "CASH",
+          "STORE_CREDIT",
+          "SPLIT"
+        ],
+        "title": "PayoutMethod",
+        "type": "string"
+      },
       "ReceiptHeaderRead": {
         "description": "收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。",
         "properties": {
@@ -1585,6 +1670,10 @@
             "title": "Einvoice Enabled",
             "type": "boolean"
           },
+          "premium_rate": {
+            "title": "Premium Rate",
+            "type": "string"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -1599,7 +1688,8 @@
           "einvoice_enabled",
           "tax_rate",
           "default_commission_pct",
-          "default_margin_pct"
+          "default_margin_pct",
+          "premium_rate"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -1643,6 +1733,23 @@
               }
             ],
             "title": "Einvoice Enabled"
+          },
+          "premium_rate": {
+            "anyOf": [
+              {
+                "maximum": 0.2,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Rate"
           },
           "tax_rate": {
             "anyOf": [
@@ -1923,7 +2030,21 @@
   "paths": {
     "/api/v1/acquisitions": {
       "post": {
+        "description": "建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複\n入庫/付現/入購物金；同 key 不同內容 409。",
         "operationId": "createAcquisition",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

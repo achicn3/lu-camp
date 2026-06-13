@@ -4,6 +4,7 @@
 API 端點見 tests/integration/test_acquisition_api.py。
 """
 
+import itertools
 from decimal import Decimal
 
 import pytest
@@ -42,6 +43,8 @@ from app.shared.exceptions import (
     InvalidCommissionPct,
     NoOpenCashSession,
 )
+
+_svc_idem = itertools.count()
 
 
 async def _seed(
@@ -88,7 +91,7 @@ def _buyout(contact_id: int) -> AcquisitionCreate:
 async def test_buyout_creates_items_stock_and_cash(db_session: AsyncSession) -> None:
     store_id, clerk_id, contact_id = await _seed(db_session)
     result = await AcquisitionService(db_session).create_acquisition(
-        store_id, clerk_id, _buyout(contact_id)
+        store_id, clerk_id, _buyout(contact_id), idempotency_key=f"svc-{next(_svc_idem)}"
     )
 
     assert result.acquisition_id > 0
@@ -139,8 +142,9 @@ async def test_consignment_creates_items_no_cash(db_session: AsyncSession) -> No
             )
         ],
     )
-    result = await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
-
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id, clerk_id, data, idempotency_key=f"svc-{next(_svc_idem)}"
+    )
     assert result.total_cash_paid is None
     item = await db_session.scalar(
         select(SerializedItem).where(SerializedItem.acquisition_id == result.acquisition_id)
@@ -170,7 +174,9 @@ async def test_consignment_without_open_drawer_succeeds(db_session: AsyncSession
             )
         ],
     )
-    result = await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id, clerk_id, data, idempotency_key=f"svc-{next(_svc_idem)}"
+    )
     assert result.acquisition_id > 0
 
 
@@ -188,8 +194,9 @@ async def test_bulk_lot_creates_lot_stock_and_cash(db_session: AsyncSession) -> 
             label="A堆",
         ),
     )
-    result = await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
-
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id, clerk_id, data, idempotency_key=f"svc-{next(_svc_idem)}"
+    )
     assert result.lot_code is not None
     assert result.item_codes == []
     assert result.total_cash_paid == Decimal("3000")
@@ -231,14 +238,16 @@ async def test_bulk_lot_creates_lot_stock_and_cash(db_session: AsyncSession) -> 
 async def test_contact_not_found(db_session: AsyncSession) -> None:
     store_id, clerk_id, _ = await _seed(db_session)
     with pytest.raises(ContactNotFound):
-        await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, _buyout(999999))
+        await AcquisitionService(db_session).create_acquisition(
+            store_id, clerk_id, _buyout(999999), idempotency_key="svc-nf"
+        )
 
 
 async def test_contact_without_national_id_rejected(db_session: AsyncSession) -> None:
     store_id, clerk_id, contact_id = await _seed(db_session, with_national_id=False)
     with pytest.raises(AcquisitionRequiresNationalId):
         await AcquisitionService(db_session).create_acquisition(
-            store_id, clerk_id, _buyout(contact_id)
+            store_id, clerk_id, _buyout(contact_id), idempotency_key=f"svc-{next(_svc_idem)}"
         )
 
 
@@ -246,7 +255,7 @@ async def test_buyout_without_open_drawer_rejected(db_session: AsyncSession) -> 
     store_id, clerk_id, contact_id = await _seed(db_session, open_drawer=False)
     with pytest.raises(NoOpenCashSession):
         await AcquisitionService(db_session).create_acquisition(
-            store_id, clerk_id, _buyout(contact_id)
+            store_id, clerk_id, _buyout(contact_id), idempotency_key=f"svc-{next(_svc_idem)}"
         )
 
 
@@ -270,14 +279,16 @@ async def test_commission_pct_out_of_range_rejected(db_session: AsyncSession) ->
         lot=None,
     )
     with pytest.raises(InvalidCommissionPct):
-        await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
+        await AcquisitionService(db_session).create_acquisition(
+            store_id, clerk_id, data, idempotency_key=f"svc-{next(_svc_idem)}"
+        )
 
 
 async def test_acquisition_writes_audit_without_pii(db_session: AsyncSession) -> None:
     """收購寫 CREATE_ACQUISITION 稽核，含彙總可溯源，但不得有 national_id 明文。"""
     store_id, clerk_id, contact_id = await _seed(db_session)
     result = await AcquisitionService(db_session).create_acquisition(
-        store_id, clerk_id, _buyout(contact_id)
+        store_id, clerk_id, _buyout(contact_id), idempotency_key=f"svc-{next(_svc_idem)}"
     )
 
     rows = list(
@@ -313,7 +324,9 @@ async def test_consignment_audit_records_no_cash(db_session: AsyncSession) -> No
             )
         ],
     )
-    result = await AcquisitionService(db_session).create_acquisition(store_id, clerk_id, data)
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id, clerk_id, data, idempotency_key=f"svc-{next(_svc_idem)}"
+    )
     entry = await db_session.scalar(
         select(AuditLog).where(
             AuditLog.action == "CREATE_ACQUISITION",

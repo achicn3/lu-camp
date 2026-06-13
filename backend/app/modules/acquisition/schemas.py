@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from app.modules.acquisition.models import Acquisition
-from app.shared.enums import AcquisitionType, BulkAcquisitionBasis, Grade
+from app.shared.enums import AcquisitionType, BulkAcquisitionBasis, Grade, PayoutMethod
 
 # 金額：輸出序列化為字串；輸入可吃字串或數字（Pydantic 轉 Decimal）。
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
@@ -32,7 +32,9 @@ def _ensure_whole_nonneg(value: Decimal, field: str) -> Decimal:
         raise ValueError(f"{field} 不可為負")
     if value != value.to_integral_value():
         raise ValueError(f"{field} 必須為整數元（無角分）")
-    return value
+    # 正規化（Codex：冪等指紋不可受 "1000.0"/"1000"/1000 形式差異影響）：
+    # 一律回整數形 Decimal，下游序列化/指紋/持久化全 canonical。
+    return Decimal(value.to_integral_value())
 
 
 class AcquisitionItemIn(BaseModel):
@@ -84,6 +86,28 @@ class AcquisitionCreate(BaseModel):
     note: str | None = None
     items: list[AcquisitionItemIn] | None = None
     lot: AcquisitionLotIn | None = None
+    # 撥款方式（SC-2）：BUYOUT/BULK_LOT 適用；SPLIT 須帶現金部分（購物金部分
+    # ＝應付總額−現金部分，由後端推導，避免兩數加總不一致）。
+    payout_method: PayoutMethod = PayoutMethod.CASH
+    payout_split_cash: NTDAmount | None = None
+
+    @field_validator("payout_split_cash")
+    @classmethod
+    def _normalize_split_cash(cls, v: Decimal | None) -> Decimal | None:
+        return v if v is None else _ensure_whole_nonneg(v, "payout_split_cash")
+
+    @model_validator(mode="after")
+    def _check_payout(self) -> Self:
+        if self.type == AcquisitionType.CONSIGNMENT:
+            if self.payout_method != PayoutMethod.CASH or self.payout_split_cash is not None:
+                raise ValueError("CONSIGNMENT 不撥款，不可指定撥款方式/拆分")
+            return self
+        if self.payout_method == PayoutMethod.SPLIT:
+            if self.payout_split_cash is None or self.payout_split_cash <= 0:
+                raise ValueError("SPLIT 必須提供大於 0 的現金部分（payout_split_cash）")
+        elif self.payout_split_cash is not None:
+            raise ValueError("僅 SPLIT 可提供 payout_split_cash")
+        return self
 
     @model_validator(mode="after")
     def _check_shape(self) -> Self:
@@ -113,6 +137,9 @@ class AcquisitionResult(BaseModel):
     type: AcquisitionType
     contact_id: int
     total_cash_paid: NTDAmount | None
+    payout_method: PayoutMethod
+    payout_cash_amount: NTDAmount | None
+    payout_credit_cash_equivalent: NTDAmount | None
     item_codes: list[str]
     lot_code: str | None
 
@@ -128,6 +155,9 @@ class AcquisitionRead(BaseModel):
     contact_id: int
     clerk_user_id: int
     total_cash_paid: NTDAmount | None
+    payout_method: PayoutMethod
+    payout_cash_amount: NTDAmount | None
+    payout_credit_cash_equivalent: NTDAmount | None
     note: str | None
     created_at: datetime
 

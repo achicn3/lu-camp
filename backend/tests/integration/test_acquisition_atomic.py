@@ -5,6 +5,7 @@
 全部都沒落地——即不會出現「庫存建了但現金沒扣」的半套。
 """
 
+import itertools
 from decimal import Decimal
 from typing import Any
 
@@ -23,6 +24,8 @@ from app.modules.inventory.models import SerializedItem, StockMovement
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import AcquisitionType, Grade, UserRole
+
+_svc_idem = itertools.count()
 
 
 async def test_acquisition_rolls_back_entirely_when_cash_step_fails(
@@ -65,7 +68,9 @@ async def test_acquisition_rolls_back_entirely_when_cash_step_fails(
     try:
         async with sm() as s:
             with pytest.raises(RuntimeError):
-                await AcquisitionService(s).create_acquisition(store_id, clerk_id, payload)
+                await AcquisitionService(s).create_acquisition(
+                    store_id, clerk_id, payload, idempotency_key=f"svc-{next(_svc_idem)}"
+                )
             await s.rollback()
 
         # 全部都沒落地：acquisition / serialized_item / stock_movement / cash_movement 皆為 0。

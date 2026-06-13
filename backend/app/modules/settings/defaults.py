@@ -10,3 +10,4 @@ DEFAULT_EINVOICE_ENABLED = False
 DEFAULT_TAX_RATE = Decimal("0.05")  # 營業稅率 5%
 DEFAULT_COMMISSION_PCT = 50  # 寄售抽成預設（整數百分數，§7.2）
 DEFAULT_MARGIN_PCT = 45  # 定價輔助目標毛利率（整數百分數，§7.9）
+DEFAULT_PREMIUM_RATE = Decimal("0.10")  # 購物金溢價率（docs/16 §1.5 起手 +10%）

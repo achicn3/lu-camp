@@ -215,3 +215,11 @@ class StoreCreditSourceType(StrEnum):
     SALE_VOID = "SALE_VOID"
     ACQUISITION_ROLLBACK = "ACQUISITION_ROLLBACK"
     MANUAL = "MANUAL"
+
+
+class PayoutMethod(StrEnum):
+    """收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。"""
+
+    CASH = "CASH"
+    STORE_CREDIT = "STORE_CREDIT"
+    SPLIT = "SPLIT"

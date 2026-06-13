@@ -4,6 +4,7 @@
 （缺 national_id / 未開帳 / 形狀錯誤 / 抽成越界），供前端顯示與安全重做。
 """
 
+import itertools
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -46,8 +47,15 @@ async def _seed_token(session: AsyncSession) -> tuple[int, str]:
     return store.id, encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
 
 
+_idem_counter = itertools.count()
+
+
 def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    """帶認證＋自動唯一冪等鍵（收購端點必帶 Idempotency-Key；各呼叫不互撞）。"""
+    return {
+        "Authorization": f"Bearer {token}",
+        "Idempotency-Key": f"test-key-{next(_idem_counter)}",
+    }
 
 
 async def _open_drawer(client: httpx.AsyncClient, token: str) -> None:
