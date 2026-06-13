@@ -644,7 +644,7 @@ async def test_committed_credit_acquisition_cannot_be_zeroed_moved_or_deleted() 
         seller_id, other_id = seller.id, other.id
         await s.commit()
 
-    # 先建一筆真實的 STORE_CREDIT 收購（header＋等值分錄，同交易；兩守衛皆過）
+    # 先建一筆真實的 STORE_CREDIT 收購（header＋庫存實體＋等值分錄，同交易；三守衛皆過）
     async with sm() as s:
         acq_id = await s.scalar(
             text(
@@ -656,6 +656,15 @@ async def test_committed_credit_acquisition_cannot_be_zeroed_moved_or_deleted() 
                 "  now(), now()) RETURNING id"
             ),
             {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+        )
+        await s.execute(
+            text(
+                "INSERT INTO serialized_items"
+                " (store_id, item_code, name, grade, ownership_type, acquisition_cost,"
+                "  listed_price, acquisition_id, created_at, updated_at)"
+                " VALUES (:sid, :code, '測試品', 'A', 'OWNED', 1000, 1800, :aid, now(), now())"
+            ),
+            {"sid": store_id, "code": f"IMMUT-{acq_id}", "aid": acq_id},
         )
         await StoreCreditService(s).credit(
             store_id,
@@ -690,9 +699,73 @@ async def test_committed_credit_acquisition_cannot_be_zeroed_moved_or_deleted() 
             with pytest.raises(DBAPIError):
                 await s.commit()
 
-        # (c) 刪除已產生分錄的收購 → COMMIT 擋（不可留孤兒負債）
+        # (c) 刪除已產生分錄的收購 → COMMIT 擋（不可留孤兒負債）。先刪庫存實體
+        # 以略過 FK、直擊 DELETE 守衛：帳本分錄仍在 → COMMIT 時被擋。
         async with sm() as s:
+            await s.execute(
+                text("DELETE FROM serialized_items WHERE acquisition_id=:id"), {"id": acq_id}
+            )
             await s.execute(text("DELETE FROM acquisitions WHERE id=:id"), {"id": acq_id})
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
+            await s.execute(text("DELETE FROM acquisitions"))
+            await s.execute(text("DELETE FROM audit_log"))
+            await s.execute(text("DELETE FROM contacts"))
+            await s.execute(text("DELETE FROM users"))
+            await s.execute(text("DELETE FROM stores"))
+            await s.commit()
+
+
+async def test_shell_acquisition_without_inventory_cannot_mint_credit() -> None:
+    """第十九輪 P2：原生 SQL 插入「空殼收購」（header＋等值分錄，但無任何庫存
+    實體）→ COMMIT 時被擋，不可憑空鑄造購物金負債。"""
+    import pytest
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="空殼店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="shell", password_hash="h", role=UserRole.CLERK)
+        seller = Contact(
+            store_id=store.id, name="賣方", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, seller])
+        await s.flush()
+        store_id, clerk_id, seller_id = store.id, clerk.id, seller.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            acq_id = await s.scalar(
+                text(
+                    "INSERT INTO acquisitions"
+                    " (store_id, type, contact_id, clerk_user_id, total_cash_paid,"
+                    "  payout_method, payout_cash_amount, payout_credit_cash_equivalent,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, 'BUYOUT', :cid, :uid, 0, 'STORE_CREDIT', 0, 1000,"
+                    "  now(), now()) RETURNING id"
+                ),
+                {"sid": store_id, "cid": seller_id, "uid": clerk_id},
+            )
+            # 無 serialized_items／bulk_lots 庫存實體就入帳
+            await StoreCreditService(s).credit(
+                store_id,
+                seller_id,
+                cash_equivalent=Decimal(1000),
+                premium_rate=Decimal("0.10"),
+                source_type=StoreCreditSourceType.ACQUISITION,
+                source_id=acq_id,
+                created_by=clerk_id,
+            )
             with pytest.raises(DBAPIError):
                 await s.commit()
     finally:

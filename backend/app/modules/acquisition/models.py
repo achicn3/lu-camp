@@ -114,6 +114,8 @@ DECLARE
   led_store INT;
   led_contact INT;
   led_ce NUMERIC;
+  body_sum NUMERIC;
+  payout_total NUMERIC;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     PERFORM 1 FROM store_credit_ledger
@@ -138,6 +140,21 @@ BEGIN
   IF led_store <> NEW.store_id OR led_contact <> NEW.contact_id
      OR led_ce <> COALESCE(NEW.payout_credit_cash_equivalent, 0) THEN
     RAISE EXCEPTION '收購購物金腿必須對應同店同對象等值的帳本 ACQUISITION CREDIT 分錄';
+  END IF;
+  -- 第十九輪 P2：產生購物金負債的收購必須有真實庫存實體，且實體成本加總等於
+  -- 撥款總額（現金腿＋購物金腿）——否則為「空殼收購憑空鑄造負債」。
+  -- 成本與撥款同源（BUYOUT＝Σ serialized_items、BULK_LOT＝Σ bulk_lots），皆整數元必相等。
+  IF NEW.type = 'BULK_LOT' THEN
+    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
+      FROM bulk_lots WHERE acquisition_id = NEW.id;
+  ELSE
+    SELECT COALESCE(SUM(acquisition_cost), 0) INTO body_sum
+      FROM serialized_items WHERE acquisition_id = NEW.id;
+  END IF;
+  payout_total := COALESCE(NEW.payout_cash_amount, 0)
+                + COALESCE(NEW.payout_credit_cash_equivalent, 0);
+  IF body_sum <> payout_total THEN
+    RAISE EXCEPTION '收購庫存實體成本加總必須等於撥款總額（空殼收購不可鑄造購物金負債）';
   END IF;
   RETURN NEW;
 END;

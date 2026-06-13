@@ -76,10 +76,26 @@ async def _seed_acquisition_header(
             },
         )
     ).scalar()
-    if inserted is not None:
-        return int(inserted)
-    assert acq_id is not None  # 衝突只可能發生在指定 id 的並發情境
-    return acq_id
+    if inserted is None:
+        assert acq_id is not None  # 衝突只可能發生在指定 id 的並發情境
+        return acq_id
+    resolved = int(inserted)
+    # 庫存實體（第十九輪 P2）：產生購物金負債的收購必須有真實庫存且成本加總＝撥款總額。
+    await session.execute(
+        text(
+            "INSERT INTO serialized_items"
+            " (store_id, item_code, name, grade, ownership_type, acquisition_cost,"
+            "  listed_price, acquisition_id, created_at, updated_at)"
+            " VALUES (:sid, :code, '測試品', 'A', 'OWNED', :cost, :cost, :aid, now(), now())"
+        ),
+        {
+            "sid": store_id,
+            "code": f"SC-SEED-{resolved}",
+            "cost": credit_cash_equivalent,
+            "aid": resolved,
+        },
+    )
+    return resolved
 
 
 async def test_credit_applies_premium_and_records_three_values(
@@ -1115,6 +1131,7 @@ async def test_concurrent_same_source_credits_idempotent() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
@@ -1173,6 +1190,7 @@ async def test_concurrent_reversals_of_same_row_safe() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
@@ -1342,6 +1360,7 @@ async def test_concurrent_raw_inserts_cannot_both_forge_chain() -> None:
     finally:
         async with sm() as s:
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
@@ -1409,6 +1428,7 @@ async def test_concurrent_debits_never_oversell() -> None:
             # 帳本 insert-only trigger 連 DELETE 都擋（正確行為）；
             # 測試清理用 TRUNCATE（不觸發列級 trigger）。
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(text("DELETE FROM serialized_items"))
             await s.execute(text("DELETE FROM acquisitions"))
             await s.execute(text("DELETE FROM audit_log"))
             await s.execute(text("DELETE FROM contacts"))
