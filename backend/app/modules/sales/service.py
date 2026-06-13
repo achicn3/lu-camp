@@ -82,10 +82,14 @@ def _cart_fingerprint(
             }
             for line in lines
         ],
+        # 收款組成納入指紋，但對 tender_type 正規化排序（順序不影響語意：每型別至多一筆）。
         "tenders": (
             None
             if tenders is None
-            else [{"tender_type": t.tender_type.value, "amount": str(t.amount)} for t in tenders]
+            else sorted(
+                ({"tender_type": t.tender_type.value, "amount": str(t.amount)} for t in tenders),
+                key=lambda d: d["tender_type"],
+            )
         ),
     }
     payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
@@ -223,6 +227,11 @@ class SalesService:
         for line in lines:
             line_total = await self._process_line(store_id, sale.id, line, consignment_sales)
             total += line_total
+
+        # 零/負總額拒（§6 金額為正整數元）：每筆 tender 金額須 >0（DB CHECK），零總額會
+        # 落到「無收款腿或 amount=0」的不合法狀態；免費出貨應走獨立流程，不借道銷售。
+        if total <= 0:
+            raise InvalidSaleTender("銷售總額必須大於 0（免費出貨請走獨立流程）")
 
         # 收款計畫對齊 total（Σ tenders 必須 = total，否則 422）。
         plan = self._resolve_tenders(total, normalized_tenders)

@@ -9,8 +9,10 @@ from collections.abc import AsyncGenerator
 from decimal import Decimal
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -413,6 +415,103 @@ async def test_idempotent_replay_with_tenders_debits_once(
     assert first.json()["id"] == second.json()["id"]
     # 只扣一次 → 餘額 300
     assert await StoreCreditService(db_session).get_balance(store_id, member_id) == Decimal(300)
+
+
+async def test_zero_total_sale_rejected_422(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """零總額銷售 → 422（不可落到 amount=0 的 tender CHECK 違反/500）。"""
+    token, _mgr, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="0", qty=10)
+    resp = await client.post(
+        "/api/v1/sales", json={"lines": [_catalog_line(cat, 1)]}, headers=_auth(token, "zero")
+    )
+    assert resp.status_code == 422, resp.text
+    assert await db_session.scalar(select(func.count()).select_from(SaleTender)) == 0
+
+
+async def test_tender_order_does_not_affect_idempotency(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收款明細順序不影響冪等指紋：同 key、相同組成但順序顛倒 → 回原單（非 409）。"""
+    token, _mgr, store_id, clerk_id = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    member_id = await _seed_member_with_credit(db_session, store_id, clerk_id, 500)
+    base = {"lines": [_catalog_line(cat, 5)], "buyer_contact_id": member_id}  # total 500
+    first = await client.post(
+        "/api/v1/sales",
+        json={
+            **base,
+            "tenders": [
+                {"tender_type": "CASH", "amount": "300"},
+                {"tender_type": "STORE_CREDIT", "amount": "200"},
+            ],
+        },
+        headers=_auth(token, "order"),
+    )
+    assert first.status_code == 201, first.text
+    second = await client.post(
+        "/api/v1/sales",
+        json={
+            **base,
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "200"},
+                {"tender_type": "CASH", "amount": "300"},
+            ],
+        },
+        headers=_auth(token, "order"),
+    )
+    assert second.status_code in (200, 201), second.text
+    assert first.json()["id"] == second.json()["id"]
+
+
+async def test_db_guard_rejects_unbalanced_tenders_at_commit() -> None:
+    """DB 對平守衛（第一輪 P3）：直插使 Σ tenders ≠ sales.total → COMMIT 被擋。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="對平店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="bal", password_hash="h", role=UserRole.CLERK)
+        s.add(clerk)
+        await s.flush()
+        store_id, clerk_id = store.id, clerk.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            sale_id = await s.scalar(
+                text(
+                    "INSERT INTO sales"
+                    " (store_id, clerk_user_id, subtotal, tax, total, awarded_points,"
+                    "  payment_method, invoice_status, status, created_at, updated_at)"
+                    " VALUES (:sid, :uid, 190, 10, 200, 0, 'CASH', 'NOT_ISSUED', 'COMPLETED',"
+                    "  now(), now()) RETURNING id"
+                ),
+                {"sid": store_id, "uid": clerk_id},
+            )
+            # 只插 150 的收款，與 total 200 不對平
+            await s.execute(
+                text(
+                    "INSERT INTO sale_tenders (store_id, sale_id, tender_type, amount,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, :saleid, 'CASH', 150, now(), now())"
+                ),
+                {"sid": store_id, "saleid": sale_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
 
 
 async def test_same_key_different_tenders_conflicts(
