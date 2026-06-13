@@ -514,6 +514,118 @@ async def test_db_guard_rejects_unbalanced_tenders_at_commit() -> None:
             await s.commit()
 
 
+async def test_store_credit_tender_without_ledger_debit_blocked() -> None:
+    """第二輪 P1（收款側）：STORE_CREDIT 收款卻無等額帳本 DEBIT → COMMIT 被擋。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="無扣抵店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="nd", password_hash="h", role=UserRole.CLERK)
+        member = Contact(store_id=store.id, name="會員", roles=["MEMBER"], national_id_enc="e")
+        s.add_all([clerk, member])
+        await s.flush()
+        store_id, clerk_id, member_id = store.id, clerk.id, member.id
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            sale_id = await s.scalar(
+                text(
+                    "INSERT INTO sales (store_id, clerk_user_id, buyer_contact_id, subtotal, tax,"
+                    "  total, awarded_points, payment_method, invoice_status, status,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, :uid, :mid, 100, 0, 100, 0, 'STORE_CREDIT', 'NOT_ISSUED',"
+                    "  'COMPLETED', now(), now()) RETURNING id"
+                ),
+                {"sid": store_id, "uid": clerk_id, "mid": member_id},
+            )
+            # 只插購物金收款、不入帳本 DEBIT
+            await s.execute(
+                text(
+                    "INSERT INTO sale_tenders (store_id, sale_id, tender_type, amount,"
+                    "  created_at, updated_at)"
+                    " VALUES (:sid, :saleid, 'STORE_CREDIT', 100, now(), now())"
+                ),
+                {"sid": store_id, "saleid": sale_id},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
+async def test_cross_store_tender_blocked() -> None:
+    """第二輪 P2：收款明細的 store_id 與其 sale 不同店 → 複合租戶 FK 擋（IntegrityError）。"""
+    from sqlalchemy.exc import IntegrityError
+
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store_a = Store(name="A 店")
+        store_b = Store(name="B 店")
+        s.add_all([store_a, store_b])
+        await s.flush()
+        clerk = User(store_id=store_a.id, username="xa", password_hash="h", role=UserRole.CLERK)
+        s.add(clerk)
+        await s.flush()
+        a_id, b_id, clerk_id = store_a.id, store_b.id, clerk.id
+        sale_id = await s.scalar(
+            text(
+                "INSERT INTO sales (store_id, clerk_user_id, subtotal, tax, total, awarded_points,"
+                "  payment_method, invoice_status, status, created_at, updated_at)"
+                " VALUES (:sid, :uid, 100, 0, 100, 0, 'CASH', 'NOT_ISSUED', 'COMPLETED',"
+                "  now(), now()) RETURNING id"
+            ),
+            {"sid": a_id, "uid": clerk_id},
+        )
+        # 對平收款（A 店現金 100）使 sale 合法落地，才能單獨驗複合 FK。
+        await s.execute(
+            text(
+                "INSERT INTO sale_tenders (store_id, sale_id, tender_type, amount,"
+                "  created_at, updated_at)"
+                " VALUES (:sid, :saleid, 'CASH', 100, now(), now())"
+            ),
+            {"sid": a_id, "saleid": sale_id},
+        )
+        await s.commit()
+
+    try:
+        async with sm() as s:
+            with pytest.raises(IntegrityError):
+                # store B 的收款掛到 store A 的 sale → 複合 FK (sale_id, store_id) 無對應，
+                # 立即（非延遲）違反，flush 即擋。
+                await s.execute(
+                    text(
+                        "INSERT INTO sale_tenders (store_id, sale_id, tender_type, amount,"
+                        "  created_at, updated_at)"
+                        " VALUES (:bid, :saleid, 'STORE_CREDIT', 100, now(), now())"
+                    ),
+                    {"bid": b_id, "saleid": sale_id},
+                )
+                await s.flush()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == a_id))
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": a_id})
+            await s.execute(delete(User).where(User.store_id == a_id))
+            await s.execute(delete(Store).where(Store.id.in_([a_id, b_id])))
+            await s.commit()
+
+
 async def test_same_key_different_tenders_conflicts(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

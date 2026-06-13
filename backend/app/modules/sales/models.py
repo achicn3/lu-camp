@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Numeric,
     String,
     UniqueConstraint,
@@ -21,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
+from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import (
     PaymentMethod,
     SaleInvoiceStatus,
@@ -46,6 +48,8 @@ class Sale(Base, TimestampMixin):
     __tablename__ = "sales"
     __table_args__ = (
         UniqueConstraint("store_id", "idempotency_key", name="uq_sales_store_idempotency_key"),
+        # 複合租戶鍵：供 sale_tenders 的 (sale_id, store_id) 複合 FK 綁定（SC-3 P2）。
+        UniqueConstraint("id", "store_id", name="uq_sales_id_store"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -105,20 +109,27 @@ class SaleTender(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("sale_id", "tender_type", name="uq_sale_tenders_sale_type"),
         CheckConstraint("amount > 0", name="ck_sale_tenders_amount_positive"),
+        # 複合租戶 FK（SC-3 P2）：收款明細必與其 sale 同店，擋跨店湊收款。
+        ForeignKeyConstraint(
+            ["sale_id", "store_id"],
+            ["sales.id", "sales.store_id"],
+            name="fk_sale_tenders_sale_tenant",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
-    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     tender_type: Mapped[TenderType] = mapped_column(_enum_col(TenderType))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
 
 
-# 收款平衡守衛（Codex SC-3 P3）：Σ sale_tenders.amount 必須等於 sales.total（負債級——
-# 現金＋購物金收款須與銷售總額對平）。DEFERRABLE INITIALLY DEFERRED：於 COMMIT 時驗
-# （建單時 header 先插、tenders 後插的正常時序不受影響）。雙邊掛 trigger：
-#   - sale_tenders 任何 INSERT/UPDATE/DELETE → 重驗該 sale；
-#   - sales INSERT/UPDATE → 重驗（擋「有銷售卻無對平 tenders」）。
+# 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：
+#  (A) 對平：Σ sale_tenders.amount 必須等於 sales.total（現金＋購物金須與總額對平）。
+#  (B) 購物金 ↔ 帳本雙向綁定（負債級）：STORE_CREDIT 收款金額必須對應一筆等額、同店、
+#      同買方的 store_credit_ledger DEBIT/SALE 分錄；反之 DEBIT/SALE 分錄也必須對應一筆
+#      等額的 STORE_CREDIT 收款——擋「有收款無扣抵」「有扣抵無收款」「對象/金額錯置」。
+# sales_verify_store_credit_consistency 為 (B) 的共用判斷，由收款側與帳本側 trigger 共呼。
 SALE_TENDER_TOTAL_GUARD_DDL: tuple[str, ...] = (
     """
 CREATE OR REPLACE FUNCTION sales_verify_tender_total(p_sale_id BIGINT) RETURNS void AS $$
@@ -138,13 +149,46 @@ END;
 $$ LANGUAGE plpgsql
 """,
     """
+CREATE OR REPLACE FUNCTION sales_verify_store_credit_consistency(p_sale_id BIGINT)
+RETURNS void AS $$
+DECLARE
+  sale_store INT;
+  sale_buyer INT;
+  sc_tender NUMERIC;
+  debit_abs NUMERIC;
+  debit_contact INT;
+BEGIN
+  SELECT store_id, buyer_contact_id INTO sale_store, sale_buyer FROM sales WHERE id = p_sale_id;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  SELECT amount INTO sc_tender
+    FROM sale_tenders WHERE sale_id = p_sale_id AND tender_type = 'STORE_CREDIT';
+  sc_tender := COALESCE(sc_tender, 0);
+  SELECT -signed_amount, contact_id INTO debit_abs, debit_contact
+    FROM store_credit_ledger
+   WHERE store_id = sale_store AND source_type = 'SALE' AND entry_type = 'DEBIT'
+     AND source_id = p_sale_id;
+  debit_abs := COALESCE(debit_abs, 0);
+  IF sc_tender <> debit_abs THEN
+    RAISE EXCEPTION '購物金收款必須對應等額的帳本 SALE 扣抵（sale_tenders 與 ledger 不一致）';
+  END IF;
+  IF sc_tender > 0 AND debit_contact IS DISTINCT FROM sale_buyer THEN
+    RAISE EXCEPTION '購物金扣抵對象必須為該銷售的買方';
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
 CREATE OR REPLACE FUNCTION sale_tenders_total_guard() RETURNS trigger AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     PERFORM sales_verify_tender_total(OLD.sale_id);
+    PERFORM sales_verify_store_credit_consistency(OLD.sale_id);
     RETURN OLD;
   END IF;
   PERFORM sales_verify_tender_total(NEW.sale_id);
+  PERFORM sales_verify_store_credit_consistency(NEW.sale_id);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
@@ -153,6 +197,7 @@ $$ LANGUAGE plpgsql
 CREATE OR REPLACE FUNCTION sales_tender_total_guard() RETURNS trigger AS $$
 BEGIN
   PERFORM sales_verify_tender_total(NEW.id);
+  PERFORM sales_verify_store_credit_consistency(NEW.id);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
@@ -179,7 +224,71 @@ SALE_TENDER_TOTAL_GUARD_DROP_DDL: tuple[str, ...] = (
     "DROP FUNCTION IF EXISTS sales_verify_tender_total(BIGINT)",
 )
 
+# 帳本側對等綁定（store_credit_ledger 的 DEBIT/SALE 必對應等額收款）。共用判斷函式
+# 以 CREATE OR REPLACE 重建（與收款側同一份；掛在 ledger 表後建，順序無虞）。
+SALE_LEDGER_BACKING_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION sales_verify_store_credit_consistency(p_sale_id BIGINT)
+RETURNS void AS $$
+DECLARE
+  sale_store INT;
+  sale_buyer INT;
+  sc_tender NUMERIC;
+  debit_abs NUMERIC;
+  debit_contact INT;
+BEGIN
+  SELECT store_id, buyer_contact_id INTO sale_store, sale_buyer FROM sales WHERE id = p_sale_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION '購物金 SALE 扣抵對應的銷售不存在（孤兒扣抵）';
+  END IF;
+  SELECT amount INTO sc_tender
+    FROM sale_tenders WHERE sale_id = p_sale_id AND tender_type = 'STORE_CREDIT';
+  sc_tender := COALESCE(sc_tender, 0);
+  SELECT -signed_amount, contact_id INTO debit_abs, debit_contact
+    FROM store_credit_ledger
+   WHERE store_id = sale_store AND source_type = 'SALE' AND entry_type = 'DEBIT'
+     AND source_id = p_sale_id;
+  debit_abs := COALESCE(debit_abs, 0);
+  IF sc_tender <> debit_abs THEN
+    RAISE EXCEPTION '購物金收款必須對應等額的帳本 SALE 扣抵（sale_tenders 與 ledger 不一致）';
+  END IF;
+  IF sc_tender > 0 AND debit_contact IS DISTINCT FROM sale_buyer THEN
+    RAISE EXCEPTION '購物金扣抵對象必須為該銷售的買方';
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE OR REPLACE FUNCTION sales_ledger_sale_debit_guard() RETURNS trigger AS $$
+BEGIN
+  IF NEW.entry_type = 'DEBIT' AND NEW.source_type = 'SALE' THEN
+    PERFORM sales_verify_store_credit_consistency(NEW.source_id);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE CONSTRAINT TRIGGER trg_ledger_sale_debit_backing
+AFTER INSERT OR UPDATE ON store_credit_ledger
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION sales_ledger_sale_debit_guard()
+""",
+)
+
+SALE_LEDGER_BACKING_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_ledger_sale_debit_backing ON store_credit_ledger",
+    "DROP FUNCTION IF EXISTS sales_ledger_sale_debit_guard()",
+    "DROP FUNCTION IF EXISTS sales_verify_store_credit_consistency(BIGINT)",
+)
+
 for _ddl in SALE_TENDER_TOTAL_GUARD_DDL:
     # 掛 sale_tenders（FK 下游、後建）after_create：此時 sales 與 sale_tenders 皆已存在，
-    # 兩個 constraint trigger 與共用函式可一次安裝完。
+    # 共用函式（含 store-credit 一致性）與兩個 constraint trigger 可一次安裝完。
     event.listen(SaleTender.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]
+
+for _ddl in SALE_LEDGER_BACKING_DDL:
+    # 帳本側對等 trigger 掛 store_credit_ledger after_create；共用判斷函式以 CREATE OR
+    # REPLACE 再建一次（與收款側同名同義，重覆無害；plpgsql 對 sales/sale_tenders 的引用
+    # 執行期才解析，不受建表順序影響）。
+    event.listen(StoreCreditLedger.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]
