@@ -756,6 +756,164 @@ async def test_void_without_reversal_blocked() -> None:
             await s.commit()
 
 
+async def test_sale_void_reversal_requires_voided_sale() -> None:
+    """第四輪 P1：銷售仍生效時 raw 寫入 SALE_VOID 沖正（憑空回補餘額）→ COMMIT 被擋。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        token, _mgr, store_id, clerk_id = await _seed(s)
+        member_id = await _seed_member_with_credit(s, store_id, clerk_id, 500)
+        cat = await _seed_catalog(s, store_id, price="100", qty=10)
+        await s.commit()
+
+    transport = httpx.ASGITransport(app=create_app())
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            created = await c.post(
+                "/api/v1/sales",
+                json={
+                    "lines": [_catalog_line(cat, 2)],
+                    "buyer_contact_id": member_id,
+                    "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+                },
+                headers=_auth(token, "rev-active"),
+            )
+            assert created.status_code == 201, created.text
+            sale_id = created.json()["id"]
+        # 銷售仍 NOT_ISSUED（未作廢）→ 直插 SALE_VOID 沖正應被擋
+        async with sm() as s:
+            debit = await s.scalar(
+                select(StoreCreditLedger).where(
+                    StoreCreditLedger.source_type == StoreCreditSourceType.SALE,
+                    StoreCreditLedger.source_id == sale_id,
+                    StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
+                )
+            )
+            assert debit is not None
+            await s.execute(
+                text(
+                    "INSERT INTO store_credit_ledger"
+                    " (store_id, contact_id, entry_type, signed_amount, balance_after,"
+                    "  source_type, source_id, reversal_of_id, fingerprint, created_by, created_at)"
+                    " VALUES (:sid, :mid, 'REVERSAL', 200, 500, 'SALE_VOID', :saleid,"
+                    "  :rid, 'rev-active', :uid, now())"
+                ),
+                {
+                    "sid": store_id,
+                    "mid": member_id,
+                    "saleid": sale_id,
+                    "rid": debit.id,
+                    "uid": clerk_id,
+                },
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            from app.modules.cashdrawer.models import CashSession
+
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM catalog_products WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(text("DELETE FROM audit_log WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
+async def test_moving_tender_rechecks_origin_sale() -> None:
+    """第四輪 P1：把收款搬到別的 sale → 原 sale 也被重驗 → COMMIT 被擋。
+
+    建兩筆購物金銷售（各 total 100、SC 收款＋DEBIT）；於同交易刪 B 的收款再把 A 的收款
+    改掛到 B：B 端對平（NEW 檢查過），但 A 被留下「有 DEBIT 無收款」——唯有原 sale 重驗
+    才擋得住。"""
+    import app.core.db as app_db
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        token, _mgr, store_id, clerk_id = await _seed(s)
+        member_id = await _seed_member_with_credit(s, store_id, clerk_id, 500)
+        cat = await _seed_catalog(s, store_id, price="100", qty=10)
+        await s.commit()
+
+    transport = httpx.ASGITransport(app=create_app())
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            sale_ids = []
+            for i in range(2):
+                r = await c.post(
+                    "/api/v1/sales",
+                    json={
+                        "lines": [_catalog_line(cat, 1)],
+                        "buyer_contact_id": member_id,
+                        "tenders": [{"tender_type": "STORE_CREDIT", "amount": "100"}],
+                    },
+                    headers=_auth(token, f"move-{i}"),
+                )
+                assert r.status_code == 201, r.text
+                sale_ids.append(r.json()["id"])
+        sale_a, sale_b = sale_ids
+        async with sm() as s:
+            # 刪 B 的收款，把 A 的收款改掛到 B → B 對平、A 留下無收款的 DEBIT
+            await s.execute(
+                text("DELETE FROM sale_tenders WHERE sale_id = :b AND tender_type='STORE_CREDIT'"),
+                {"b": sale_b},
+            )
+            await s.execute(
+                text(
+                    "UPDATE sale_tenders SET sale_id = :b"
+                    " WHERE sale_id = :a AND tender_type='STORE_CREDIT'"
+                ),
+                {"a": sale_a, "b": sale_b},
+            )
+            with pytest.raises(DBAPIError):
+                await s.commit()
+    finally:
+        async with sm() as s:
+            from sqlalchemy import delete
+
+            from app.modules.cashdrawer.models import CashSession
+
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": store_id})
+            await s.execute(
+                text("DELETE FROM catalog_products WHERE store_id = :s"), {"s": store_id}
+            )
+            await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(text("DELETE FROM audit_log WHERE store_id = :s"), {"s": store_id})
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
 async def test_raw_zero_total_sale_blocked_at_commit() -> None:
     """第三輪 P3：raw 建零元銷售 → COMMIT 被延遲守衛擋（CHECK 不可 deferred 故用 trigger）。"""
     import app.core.db as app_db

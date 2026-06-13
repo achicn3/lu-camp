@@ -206,6 +206,11 @@ BEGIN
   END IF;
   PERFORM sales_verify_tender_total(NEW.sale_id);
   PERFORM sales_verify_store_credit_consistency(NEW.sale_id);
+  -- 收款被搬到別的 sale（第四輪 P1）：原 sale 也要重驗，否則原單失衡卻無人查。
+  IF TG_OP = 'UPDATE' AND OLD.sale_id IS DISTINCT FROM NEW.sale_id THEN
+    PERFORM sales_verify_tender_total(OLD.sale_id);
+    PERFORM sales_verify_store_credit_consistency(OLD.sale_id);
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql
@@ -250,8 +255,19 @@ SALE_LEDGER_BACKING_DDL: tuple[str, ...] = (
 CREATE OR REPLACE FUNCTION sales_ledger_sale_debit_guard() RETURNS trigger AS $$
 DECLARE
   sale_buyer INT;
+  sale_status TEXT;
   sc_tender NUMERIC;
 BEGIN
+  -- SALE_VOID 沖正（第四輪 P1）：只能對應「已作廢」的同店銷售——擋 raw 在銷售仍生效時
+  -- 沖回購物金（憑空回補餘額）。與收款側「VOID 必有沖正」合為雙向不變量。
+  IF NEW.entry_type = 'REVERSAL' AND NEW.source_type = 'SALE_VOID' THEN
+    SELECT invoice_status INTO sale_status
+      FROM sales WHERE id = NEW.source_id AND store_id = NEW.store_id;
+    IF NOT FOUND OR sale_status <> 'VOID' THEN
+      RAISE EXCEPTION 'SALE_VOID 沖正只能對應已作廢的同店銷售';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.entry_type <> 'DEBIT' OR NEW.source_type <> 'SALE' THEN
     RETURN NEW;
   END IF;
