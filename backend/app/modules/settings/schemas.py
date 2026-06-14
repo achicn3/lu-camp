@@ -56,7 +56,10 @@ class SettingsUpdateRequest(BaseModel):
     premium_rate: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_min: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_max: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
-    monthly_fixed_cash_outflow: Annotated[Decimal, Field(ge=0)] | None = None
+    # 上界對齊 DB Numeric(12,0)（最多 12 位數），避免溢位 500（Codex SC-5a P2）。
+    monthly_fixed_cash_outflow: (
+        Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
+    ) = None
     store_credit_engine_params: dict[str, Any] | None = None
     # 溢價率變更事由（選填；寫入 premium_rate_history 留痕）。
     premium_change_reason: Annotated[str, Field(max_length=200)] | None = None

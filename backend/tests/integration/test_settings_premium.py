@@ -147,6 +147,13 @@ async def test_monthly_outflow_whole_only(
     )
     assert ok.status_code == 200
     assert ok.json()["monthly_fixed_cash_outflow"] == "30000"
+    # 超出 Numeric(12,0)（13 位數）→ 422，不可溢位 500（Codex P2 r2）
+    overflow = await client.patch(
+        "/api/v1/settings",
+        json={"monthly_fixed_cash_outflow": "1000000000000"},
+        headers=_auth(mgr),
+    )
+    assert overflow.status_code == 422
 
 
 async def test_explicit_null_is_ignored_not_500(
