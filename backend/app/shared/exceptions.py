@@ -107,3 +107,7 @@ class InvalidPayoutSplit(DomainError):
 
 class InvalidSaleTender(DomainError):
     """銷售收款明細不合法（Σ tenders ≠ total、金額非正、重複型別、購物金缺會員）。"""
+
+
+class InvalidPremiumRate(DomainError):
+    """溢價率設定不合法（min>max、或 premium 不在 [min, max]，docs/16 §6.1）。"""

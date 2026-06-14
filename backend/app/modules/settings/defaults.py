@@ -10,4 +10,19 @@ DEFAULT_EINVOICE_ENABLED = False
 DEFAULT_TAX_RATE = Decimal("0.05")  # 營業稅率 5%
 DEFAULT_COMMISSION_PCT = 50  # 寄售抽成預設（整數百分數，§7.2）
 DEFAULT_MARGIN_PCT = 45  # 定價輔助目標毛利率（整數百分數，§7.9）
-DEFAULT_PREMIUM_RATE = Decimal("0.10")  # 購物金溢價率（docs/16 §1.5 起手 +10%）
+DEFAULT_PREMIUM_RATE = Decimal("0.1000")  # 購物金溢價率（docs/16 §1.5 起手 +10%；4dp 與 DB 一致）
+DEFAULT_PREMIUM_RATE_MIN = Decimal("0.0000")  # 溢價率下限（docs/16 §6.1，預設 0%）
+DEFAULT_PREMIUM_RATE_MAX = Decimal("0.2000")  # 溢價率上限（docs/16 §6.1，預設 20%）
+DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW = 0  # 月固定現金支出（整數元；負債健康比分母，手動維護）
+# 建議值引擎可調參數（docs/16 §1.5/§6；SC-5b 引擎使用，本期先落地預設供未來讀取）。
+DEFAULT_STORE_CREDIT_ENGINE_PARAMS: dict[str, object] = {
+    "window_weights": {"yesterday": 0.05, "d7": 0.25, "d30": 0.40, "d90": 0.20, "yoy": 0.10},
+    "alpha_safety": 0.8,
+    "liability_ladder": [1.5, 2.0, 2.5],
+    "take_rate_band": [0.30, 0.70],
+    "take_rate_step": 0.025,
+    "beta_n_days": 180,
+    "alpha_proxy_window_days": 90,
+    "cold_start_min_days": 30,
+    "yoy_halfwidth_days": 15,
+}

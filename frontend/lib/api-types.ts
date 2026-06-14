@@ -490,6 +490,23 @@ export interface paths {
         patch: operations["updateSettings"];
         trace?: never;
     };
+    "/api/v1/settings/premium-rate/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Premium Rate History */
+        get: operations["getPremiumRateHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stores/{store_id}/receipt-header": {
         parameters: {
             query?: never;
@@ -1001,6 +1018,29 @@ export interface components {
          */
         PayoutMethod: "CASH" | "STORE_CREDIT" | "SPLIT";
         /**
+         * PremiumRateHistoryRead
+         * @description 溢價率變更留痕輸出（docs/16 §1.3）。
+         */
+        PremiumRateHistoryRead: {
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Changed By */
+            changed_by: number;
+            /** Id */
+            id: number;
+            /** New Rate */
+            new_rate: string;
+            /** Old Rate */
+            old_rate: string;
+            /** Reason */
+            reason: string | null;
+            /** Suggested Rate At Change */
+            suggested_rate_at_change: string | null;
+        };
+        /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
          */
@@ -1248,8 +1288,18 @@ export interface components {
             default_margin_pct: number;
             /** Einvoice Enabled */
             einvoice_enabled: boolean;
+            /** Monthly Fixed Cash Outflow */
+            monthly_fixed_cash_outflow: string;
             /** Premium Rate */
             premium_rate: string;
+            /** Premium Rate Max */
+            premium_rate_max: string;
+            /** Premium Rate Min */
+            premium_rate_min: string;
+            /** Store Credit Engine Params */
+            store_credit_engine_params: {
+                [key: string]: unknown;
+            };
             /** Store Id */
             store_id: number;
             /** Tax Rate */
@@ -1258,6 +1308,9 @@ export interface components {
         /**
          * SettingsUpdateRequest
          * @description PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。
+         *
+         *     溢價率相關夾在政策硬界線 [0, 20%]（與帳本 DB 守衛一致）；min≤max 與 premium∈[min,max]
+         *     的動態關係由 service 驗證（界線可被同一 PATCH 一併更動）。
          */
         SettingsUpdateRequest: {
             /** Default Commission Pct */
@@ -1266,8 +1319,20 @@ export interface components {
             default_margin_pct?: number | null;
             /** Einvoice Enabled */
             einvoice_enabled?: boolean | null;
+            /** Monthly Fixed Cash Outflow */
+            monthly_fixed_cash_outflow?: number | string | null;
+            /** Premium Change Reason */
+            premium_change_reason?: string | null;
             /** Premium Rate */
             premium_rate?: number | string | null;
+            /** Premium Rate Max */
+            premium_rate_max?: number | string | null;
+            /** Premium Rate Min */
+            premium_rate_min?: number | string | null;
+            /** Store Credit Engine Params */
+            store_credit_engine_params?: {
+                [key: string]: unknown;
+            } | null;
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
@@ -2321,6 +2386,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getPremiumRateHistory: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PremiumRateHistoryRead"][];
                 };
             };
             /** @description Validation Error */
