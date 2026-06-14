@@ -17,6 +17,12 @@ class ContactRepository:
         await self._session.flush()
         return contact
 
+    async def save(self, contact: Contact) -> Contact:
+        """持久化既有（已附掛）聯絡人的變更；flush 觸發 DB 唯一約束（最終去重防線）。"""
+        self._session.add(contact)
+        await self._session.flush()
+        return contact
+
     async def adjust_member_points(self, store_id: int, contact_id: int, delta: int) -> bool:
         """原子調整會員點數（UPDATE ... = points + delta；條件含「不得為負」）。
 
@@ -37,6 +43,19 @@ class ContactRepository:
 
     async def get(self, store_id: int, contact_id: int) -> Contact | None:
         stmt = select(Contact).where(Contact.id == contact_id, Contact.store_id == store_id)
+        result: Contact | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_for_update(self, store_id: int, contact_id: int) -> Contact | None:
+        """SELECT … FOR UPDATE 取得列並 populate_existing（D-1 模式）：序列化同列的編輯，
+        確保 roles/national_id 不變量在持鎖期間以**最新committed 狀態**重驗，杜絕併發競態
+        （Codex 對抗式審查 high：一交易清 national_id、另一交易加 SELLER 各以舊快照通過）。"""
+        stmt = (
+            select(Contact)
+            .where(Contact.id == contact_id, Contact.store_id == store_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         result: Contact | None = await self._session.scalar(stmt)
         return result
 

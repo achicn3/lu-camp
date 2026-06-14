@@ -5,6 +5,7 @@ client fixture 以 dependency_overrides 把 app 的 get_session 換成測試的�
 """
 
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -19,6 +20,7 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.store.models import Store
+from app.modules.storecredit.models import StoreCreditAccount
 from app.modules.user.models import User
 from app.shared.enums import UserRole
 
@@ -326,3 +328,317 @@ async def test_list_pagination(client: httpx.AsyncClient, db_session: AsyncSessi
     assert len(page2.json()) == 1
     over = await client.get("/api/v1/contacts", params={"limit": 201}, headers=_auth(m_token))
     assert over.status_code == 422
+
+
+# ── T21-a：PATCH /contacts/{id}（會員編輯；docs/17 §5.2、裁示 #3）──
+
+
+async def _create_contact(
+    client: httpx.AsyncClient, token: str, **fields: object
+) -> int:
+    resp = await client.post("/api/v1/contacts", json=fields, headers=_auth(token))
+    assert resp.status_code == 201, resp.text
+    return int(resp.json()["id"])
+
+
+async def test_update_contact_clerk_edits_basic_fields_and_audits(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(
+        client, m_token, name="原名", phone="0911000000", roles=["MEMBER"], source_note="x"
+    )
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"name": "新名", "phone": "0922222222", "source_note": "VIP"},
+        headers=_auth(c_token),  # CLERK 可編輯一般欄位 + 電話
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "新名"
+    assert body["phone"] == "0922222222"
+    assert body["source_note"] == "VIP"
+
+    # 電話/一般欄位變更寫 UPDATE_CONTACT 稽核（裁示 #3：電話一律留痕）。
+    rows = list(
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "UPDATE_CONTACT", AuditLog.store_id == store_id
+            )
+        )
+    )
+    assert len(rows) == 1
+    assert rows[0].entity_id == str(cid)
+
+
+async def test_update_contact_partial_leaves_unset_fields_intact(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(
+        client, m_token, name="原名", phone="0911", roles=["MEMBER"], source_note="保留"
+    )
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"phone": "0999"}, headers=_auth(c_token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["phone"] == "0999"
+    assert body["name"] == "原名"  # 未提供 → 不動
+    assert body["source_note"] == "保留"
+    assert body["roles"] == ["MEMBER"]
+
+
+async def test_update_contact_clerk_cannot_change_roles(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": ["MEMBER", "SELLER"]}, headers=_auth(c_token)
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_contact_clerk_cannot_change_national_id(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"national_id": NATIONAL_ID}, headers=_auth(c_token)
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_contact_manager_changes_roles(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    # 已有 national_id → 可加 SELLER 角色。
+    cid = await _create_contact(
+        client, m_token, name="會員", national_id=NATIONAL_ID, roles=["MEMBER"]
+    )
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": ["MEMBER", "SELLER"]}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    assert set(resp.json()["roles"]) == {"MEMBER", "SELLER"}
+
+
+async def test_update_contact_add_acquisition_role_without_national_id_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": ["MEMBER", "SELLER"]}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 422  # SELLER/CONSIGNOR 必須有 national_id
+
+
+async def test_update_contact_manager_sets_national_id_encrypts_and_audits(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"national_id": NATIONAL_ID}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["has_national_id"] is True
+    assert body["national_id_masked"] == "***"
+    assert NATIONAL_ID not in resp.text
+
+    contact = await db_session.scalar(select(Contact).where(Contact.id == cid))
+    assert contact is not None
+    assert contact.national_id_enc is not None
+    assert get_pii_cipher().decrypt(contact.national_id_enc) == NATIONAL_ID
+    assert contact.national_id_blind_index is not None
+
+    rows = list(
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "UPDATE_CONTACT_PII", AuditLog.store_id == store_id
+            )
+        )
+    )
+    assert len(rows) == 1
+    assert rows[0].is_sensitive is True
+    assert NATIONAL_ID not in str(rows[0].before)
+    assert NATIONAL_ID not in str(rows[0].after)
+
+
+async def test_update_contact_duplicate_national_id_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    await _create_contact(client, m_token, name="甲", national_id=NATIONAL_ID, roles=["SELLER"])
+    other = await _create_contact(client, m_token, name="乙", roles=["MEMBER"])
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{other}", json={"national_id": NATIONAL_ID}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 409
+
+
+async def test_update_contact_blank_national_id_with_acquisition_role_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # 空字串不可偽裝為有效 national_id 來滿足 SELLER/CONSIGNOR（Codex 對抗式審查 high）。
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"national_id": "", "roles": ["MEMBER", "SELLER"]},
+        headers=_auth(m_token),
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_contact_whitespace_national_id_treated_as_clear(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(
+        client, m_token, name="會員", national_id=NATIONAL_ID, roles=["MEMBER"]
+    )
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"national_id": "   "}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["has_national_id"] is False
+    contact = await db_session.scalar(select(Contact).where(Contact.id == cid))
+    assert contact is not None
+    assert contact.national_id_enc is None
+    assert contact.national_id_blind_index is None
+
+
+async def test_update_contact_clear_national_id(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(
+        client, m_token, name="會員", national_id=NATIONAL_ID, roles=["MEMBER"]
+    )
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"national_id": None}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["has_national_id"] is False
+    contact = await db_session.scalar(select(Contact).where(Contact.id == cid))
+    assert contact is not None
+    assert contact.national_id_enc is None
+    assert contact.national_id_blind_index is None
+
+
+async def test_update_contact_carrier_fields(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"default_carrier_type": "3J0002", "default_carrier_id": "/ABC1234"},
+        headers=_auth(c_token),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["default_carrier_type"] == "3J0002"
+    assert body["default_carrier_id"] == "/ABC1234"
+
+
+async def test_update_contact_name_null_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, c_token = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"name": None}, headers=_auth(c_token)
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_contact_cannot_remove_member_with_store_credit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # 仍持有購物金的會員不可被移除 MEMBER（否則非會員仍掛負債；Codex high）。
+    store_id, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    db_session.add(
+        StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(100))
+    )
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token)
+    )
+    # 409 即守衛生效；角色變更隨 router 的整筆 rollback 一併丟棄（不在共用 session 後驗，
+    # 因錯誤路徑 rollback 會回退共用測試 session 的狀態）。
+    assert resp.status_code == 409
+
+
+async def test_update_contact_can_remove_member_without_store_credit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    assert resp.json()["roles"] == []
+
+
+async def test_update_contact_keep_member_add_seller_with_store_credit_ok(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # 保留 MEMBER、加 SELLER（有 national_id）→ 未移除 MEMBER，不受守衛限制。
+    store_id, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(
+        client, m_token, name="會員", national_id=NATIONAL_ID, roles=["MEMBER"]
+    )
+    db_session.add(
+        StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(50))
+    )
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"roles": ["MEMBER", "SELLER"]}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200
+    assert set(resp.json()["roles"]) == {"MEMBER", "SELLER"}
+
+
+async def test_update_contact_404_when_missing(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    resp = await client.patch(
+        "/api/v1/contacts/999999", json={"name": "x"}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 404
+
+
+async def test_update_contact_cross_store_is_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # store A 建會員；store B 的使用者不可改到 A 的會員（多分店隔離）。
+    _, m_token_a, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token_a, name="A店會員", roles=["MEMBER"])
+    store_b = Store(name="B店")
+    db_session.add(store_b)
+    await db_session.flush()
+    mgr_b = User(store_id=store_b.id, username="mgrb", password_hash="h", role=UserRole.MANAGER)
+    db_session.add(mgr_b)
+    await db_session.flush()
+    token_b = encode_access_token(user_id=mgr_b.id, role="MANAGER", store_id=store_b.id)
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"name": "竄改"}, headers=_auth(token_b)
+    )
+    assert resp.status_code == 404

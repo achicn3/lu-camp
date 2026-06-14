@@ -234,7 +234,9 @@ class StoreCreditService:
         return None
 
     async def _require_member(self, store_id: int, contact_id: int) -> None:
-        contact = await self._contacts.get_contact(store_id, contact_id)
+        # FOR UPDATE 鎖定 contact 列再驗（鎖序 contact→account）：與 contacts 的 MEMBER
+        # 移除守衛在同一列互斥，關閉「移除 MEMBER ⇄ 並發首筆入帳」競態（Codex high）。
+        contact = await self._contacts.get_contact_for_update(store_id, contact_id)
         if contact is None or ContactRole.MEMBER.value not in contact.roles:
             raise StoreCreditMemberRequired(
                 f"contact {contact_id} 非本店會員，不可持有購物金（I-8）"
@@ -436,6 +438,16 @@ class StoreCreditService:
     async def get_balance(self, store_id: int, contact_id: int) -> Decimal:
         account = await self._repo.get_account(store_id, contact_id)
         return Decimal(account.balance) if account is not None else Decimal(0)
+
+    async def has_store_credit(self, store_id: int, contact_id: int) -> bool:
+        """是否已有購物金帳戶或任何帳本分錄（read-only）。
+
+        供 contacts 判定能否移除 MEMBER 角色（I-8）：仍掛帳戶/帳本即不可移除，
+        否則會留下非會員持有的購物金負債（Codex 對抗式審查 high）。
+        """
+        if await self._repo.get_account(store_id, contact_id) is not None:
+            return True
+        return bool(await self._repo.list_entries(store_id, contact_id, limit=1, offset=0))
 
     async def list_entries(
         self, store_id: int, contact_id: int, *, limit: int = 50, offset: int = 0

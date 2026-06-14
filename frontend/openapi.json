@@ -1103,6 +1103,94 @@
         "title": "ContactRole",
         "type": "string"
       },
+      "ContactUpdate": {
+        "description": "編輯聯絡人（PATCH 語意；docs/17 §5.2、裁示 #3）。\n\n所有欄位皆為選配；以 `model_fields_set` 區分「未提供」與「明確設為 null」。\n角色/national_id 變更的 RBAC（限 MANAGER）由 router 依提供欄位判定。\nmember_points 不在此編輯（走點數累積/校正路徑）。",
+        "properties": {
+          "default_carrier_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Carrier Id"
+          },
+          "default_carrier_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Carrier Type"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "national_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "National Id"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContactRole"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roles"
+          },
+          "source_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Note"
+          }
+        },
+        "title": "ContactUpdate",
+        "type": "object"
+      },
       "FlowRow": {
         "properties": {
           "issued": {
@@ -2114,6 +2202,7 @@
           "monthly_fixed_cash_outflow": {
             "anyOf": [
               {
+                "maximum": 999999999999.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -3306,6 +3395,62 @@
           }
         ],
         "summary": "Get Contact",
+        "tags": [
+          "contacts"
+        ]
+      },
+      "patch": {
+        "description": "編輯會員（docs/17 §5.2、裁示 #3）。\n\n一般欄位 + 電話：CLERK 可改；變更 national_id / roles：限 MANAGER（否則 403）。\nnational_id 變更去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。",
+        "operationId": "updateContact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Contact",
         "tags": [
           "contacts"
         ]

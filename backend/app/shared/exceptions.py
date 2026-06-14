@@ -53,6 +53,14 @@ class AcquisitionRequiresNationalId(DomainError):
     """收購/寄售對象必須有 national_id（接 T4：SELLER/CONSIGNOR 必填）。"""
 
 
+class DuplicateContact(DomainError):
+    """編輯 national_id 時與同店他人既有 blind index 撞重（重複建檔，docs/17 §4.3）。"""
+
+
+class MemberRemovalBlocked(DomainError):
+    """contact 仍持有購物金帳戶/帳本時不可移除 MEMBER 角色（會留下非會員購物金負債，I-8）。"""
+
+
 class InvalidCommissionPct(DomainError):
     """寄售抽成 commission_pct 超出合法範圍（0-100）。"""
 

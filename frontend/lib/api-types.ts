@@ -237,7 +237,14 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Contact
+         * @description 編輯會員（docs/17 §5.2、裁示 #3）。
+         *
+         *     一般欄位 + 電話：CLERK 可改；變更 national_id / roles：限 MANAGER（否則 403）。
+         *     national_id 變更去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。
+         */
+        patch: operations["updateContact"];
         trace?: never;
     };
     "/api/v1/contacts/{contact_id}/national-id": {
@@ -898,6 +905,30 @@ export interface components {
          * @enum {string}
          */
         ContactRole: "MEMBER" | "SELLER" | "CONSIGNOR";
+        /**
+         * ContactUpdate
+         * @description 編輯聯絡人（PATCH 語意；docs/17 §5.2、裁示 #3）。
+         *
+         *     所有欄位皆為選配；以 `model_fields_set` 區分「未提供」與「明確設為 null」。
+         *     角色/national_id 變更的 RBAC（限 MANAGER）由 router 依提供欄位判定。
+         *     member_points 不在此編輯（走點數累積/校正路徑）。
+         */
+        ContactUpdate: {
+            /** Default Carrier Id */
+            default_carrier_id?: string | null;
+            /** Default Carrier Type */
+            default_carrier_type?: string | null;
+            /** Name */
+            name?: string | null;
+            /** National Id */
+            national_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Roles */
+            roles?: components["schemas"]["ContactRole"][] | null;
+            /** Source Note */
+            source_note?: string | null;
+        };
         /** FlowRow */
         FlowRow: {
             /** Issued */
@@ -1879,6 +1910,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

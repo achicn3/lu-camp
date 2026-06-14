@@ -159,6 +159,16 @@ contacts (MemberService facade, read-only aggregation)
 - **電話＝明文（裁示 #1/#5）**：phone 維持 `String(30)` 明文 + B-tree 索引，查詢/去重走明文精確+模糊
   比對；**phone 無 blind index**（只有 `national_id` 有）。電話編輯僅更新明文值並寫稽核，
   **不涉 blind index 重算、不需 migration**。
+- **MEMBER 移除守衛（裁示 #3＋Codex 對抗式審查 high）**：移除 `MEMBER` 角色前，facade 以
+  `StoreCreditService.has_store_credit`（**唯讀**）確認該 contact 未持有購物金帳戶/帳本；仍持有則
+  `409` 拒絕——否則會留下「非會員仍掛購物金負債」、破壞 storecredit 的會員邊界（I-8）並使報表
+  錯分類。`SELLER`/`CONSIGNOR` 移除**不受此限**（其關聯為 `contact_id` 直接 FK、非角色閘）。
+  跨模組只經對方 service（contacts→storecredit 唯讀；以函式內 import 打破循環相依）。
+  **併發強一致（Codex 對抗式審查 high，已收緊）**：storecredit 入帳/校正的 `_require_member`
+  改以 `SELECT … FOR UPDATE` 鎖定該 contact 列再驗會員資格，與本守衛在**同一列**互斥——
+  關閉「移除 MEMBER ⇄ 並發首筆入帳」競態（兩者皆鎖 contact 列；鎖序固定 contact→account，
+  與既有帳戶鎖無循環、不致死鎖）。以確定性兩交易測試守護
+  （`test_contacts_update_concurrency.py`）。
 
 ### 3.7 跨店資料隔離（多店路線圖）
 - **沿用 CLAUDE.md §4**：每表帶 `store_id`，所有查詢以 `user.store_id` 範圍過濾；複合 FK
@@ -190,6 +200,13 @@ contacts (MemberService facade, read-only aggregation)
 
 > **【裁示，2026-06-14】Codex 重點審查項**：blind index 重算 + 去重 + 唯一性檢查必須在
 > **同一交易內原子完成**，防併發兩請求各自 pre-check 通過後雙雙寫入而繞過去重。
+>
+> **【Codex 對抗式審查補強】列鎖序列化（D-1 模式）**：`update_contact` 以
+> `SELECT … FOR UPDATE`（`populate_existing=True`）鎖定該 contact 列後才讀-改-驗，使
+> 「SELLER/CONSIGNOR ↔ national_id 必填」這個**跨欄位**不變量於持鎖期間以最新 committed
+> 狀態重驗。否則「A 交易清 national_id、B 交易加 SELLER」會各以舊快照通過檢查、最終寫出
+> 「SELLER 卻無 national_id」的壞列。空白/全空白 national_id 一律正規化為「無」（同 create
+> 的 falsy 處理），不可用空字串偽裝 `has_national_id` 繞過此不變量。
 
 - 流程（單一交易內）：解析新 `national_id` → 算 `blind_index` →
   - 服務層先查同店他人（≠ 自己）既有 blind index：命中 → `409`（重複建檔；編輯時拒而非回既有）。

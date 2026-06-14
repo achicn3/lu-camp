@@ -28,6 +28,23 @@ class ContactCreate(BaseModel):
         return self
 
 
+class ContactUpdate(BaseModel):
+    """編輯聯絡人（PATCH 語意；docs/17 §5.2、裁示 #3）。
+
+    所有欄位皆為選配；以 `model_fields_set` 區分「未提供」與「明確設為 null」。
+    角色/national_id 變更的 RBAC（限 MANAGER）由 router 依提供欄位判定。
+    member_points 不在此編輯（走點數累積/校正路徑）。
+    """
+
+    name: str | None = Field(default=None, min_length=1)
+    phone: str | None = None
+    national_id: str | None = None
+    roles: list[ContactRole] | None = None
+    default_carrier_type: str | None = None
+    default_carrier_id: str | None = None
+    source_note: str | None = None
+
+
 class ContactRead(BaseModel):
     """聯絡人輸出：national_id 一律遮罩，不回明文。"""
 
