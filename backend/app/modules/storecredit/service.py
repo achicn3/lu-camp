@@ -11,6 +11,8 @@ credit/debit/reverse；本模組不碰他模組資料表。
 """
 
 import hashlib
+from collections import OrderedDict
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.core.money import round_ntd
 from app.modules.contacts.service import ContactService
+from app.modules.reports.aging import BUCKET_KEYS, IssuedLot, age_outstanding
 from app.modules.storecredit.models import StoreCreditLedger
 from app.modules.storecredit.repository import StoreCreditRepository
 from app.shared.enums import (
@@ -506,3 +509,61 @@ class StoreCreditService:
             "cached_total_outstanding": str(await self._repo.total_outstanding(store_id)),
             "cached_total_trustworthy": not mismatches,
         }
+
+    # ── SC-4 報表資料（read-only；docs/16 §5A）──
+
+    async def per_member_balances(self, store_id: int) -> list[tuple[int, Decimal]]:
+        """各會員正餘額（balance > 0），供負債報表逐會員列示。"""
+        balances = await self._repo.balances_by_contact(store_id)
+        return [(cid, bal) for cid, bal in sorted(balances.items()) if bal > 0]
+
+    async def aging_report(self, store_id: int, *, now: datetime) -> dict[str, object]:
+        """未兌付負債帳齡分桶（FIFO 沖銷發出列；docs/16 §5A）。"""
+        lots_rows = await self._repo.positive_lots(store_id)
+        positive_sum = await self._repo.positive_sum_by_contact(store_id)
+        balances = await self._repo.balances_by_contact(store_id)
+        per_contact: dict[int, list[IssuedLot]] = {}
+        for contact_id, amount, issued_at in lots_rows:
+            per_contact.setdefault(contact_id, []).append(
+                IssuedLot(amount=amount, issued_at=issued_at)
+            )
+        buckets: OrderedDict[str, Decimal] = OrderedDict((k, Decimal(0)) for k in BUCKET_KEYS)
+        for contact_id, lots in per_contact.items():
+            balance = balances.get(contact_id, Decimal(0))
+            if balance <= 0:
+                continue  # 無未兌付餘額者不入帳齡
+            consumed = positive_sum.get(contact_id, Decimal(0)) - balance
+            contact_buckets = age_outstanding(lots, consumed, now)
+            for key, value in contact_buckets.items():
+                buckets[key] += value
+        return {
+            "total_outstanding": await self._repo.total_outstanding(store_id),
+            "buckets": buckets,
+        }
+
+    async def flows(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> list[dict[str, object]]:
+        """期間發出/兌付/淨變化彙總（granularity=day/week/month；docs/16 §5A）。"""
+        if granularity not in ("day", "week", "month"):
+            raise StoreCreditConflict("granularity 僅支援 day/week/month")
+        rows = await self._repo.flows(
+            store_id,
+            date_from=date_from,
+            date_to=date_to,
+            granularity=granularity,
+        )
+        return [
+            {
+                "period": period,
+                "issued": issued,
+                "redeemed": redeemed,
+                "net_change": issued - redeemed,
+            }
+            for period, issued, redeemed in rows
+        ]

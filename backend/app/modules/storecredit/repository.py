@@ -4,6 +4,7 @@
 沿 D-1 模式）。餘額重算（SUM）供 I-3 對帳。
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
@@ -185,3 +186,82 @@ class StoreCreditRepository:
         )
         value = await self._session.scalar(stmt)
         return Decimal(value if value is not None else 0)
+
+    # ── SC-4 報表查詢（read-only；docs/16 §5A）──
+
+    async def positive_lots(self, store_id: int) -> list[tuple[int, Decimal, datetime]]:
+        """各會員的「發出（正向）列」：(contact_id, signed_amount, created_at)，依會員、時間排序。
+
+        供帳齡 FIFO 沖銷（任何正向 entry 皆視為發出列：CREDIT／正向 ADJUSTMENT／沖正回補）。
+        """
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                StoreCreditLedger.signed_amount,
+                StoreCreditLedger.created_at,
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.signed_amount > 0,
+            )
+            .order_by(StoreCreditLedger.contact_id, StoreCreditLedger.created_at)
+        )
+        rows = await self._session.execute(stmt)
+        return [(int(c), Decimal(a), d) for c, a, d in rows]
+
+    async def positive_sum_by_contact(self, store_id: int) -> dict[int, Decimal]:
+        """各會員 Σ 正向 entry（供算 consumed = Σ正向 − 餘額）。"""
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.signed_amount > 0,
+            )
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): Decimal(s) for c, s in rows}
+
+    async def balances_by_contact(self, store_id: int) -> dict[int, Decimal]:
+        """各會員快取餘額（含 0／負，呼叫端自行過濾）。"""
+        stmt = select(StoreCreditAccount.contact_id, StoreCreditAccount.balance).where(
+            StoreCreditAccount.store_id == store_id
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): Decimal(b) for c, b in rows}
+
+    async def flows(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> list[tuple[datetime, Decimal, Decimal]]:
+        """期間內按粒度彙總：(period, issued=ΣCREDIT, redeemed=Σ|DEBIT|)。
+
+        granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
+        """
+        stmt = text(
+            "SELECT date_trunc(:gran, created_at) AS period,"
+            "  COALESCE(SUM(CASE WHEN entry_type='CREDIT'"
+            "    THEN signed_amount ELSE 0 END), 0) AS issued,"
+            "  COALESCE(SUM(CASE WHEN entry_type='DEBIT'"
+            "    THEN -signed_amount ELSE 0 END), 0) AS redeemed"
+            " FROM store_credit_ledger"
+            " WHERE store_id = :sid AND created_at >= :dfrom AND created_at < :dto"
+            " GROUP BY period ORDER BY period"
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "gran": granularity,
+                "sid": store_id,
+                "dfrom": date_from,
+                "dto": date_to,
+            },
+        )
+        return [(p, Decimal(i), Decimal(r)) for p, i, r in result]
