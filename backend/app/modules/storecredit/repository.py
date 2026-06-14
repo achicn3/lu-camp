@@ -189,9 +189,7 @@ class StoreCreditRepository:
 
     # ── SC-4 報表查詢（read-only；docs/16 §5A）──
 
-    async def positive_lots(
-        self, store_id: int
-    ) -> list[tuple[int, Decimal, datetime]]:
+    async def positive_lots(self, store_id: int) -> list[tuple[int, Decimal, datetime]]:
         """各會員的「發出（正向）列」：(contact_id, signed_amount, created_at)，依會員、時間排序。
 
         供帳齡 FIFO 沖銷（任何正向 entry 皆視為發出列：CREDIT／正向 ADJUSTMENT／沖正回補）。

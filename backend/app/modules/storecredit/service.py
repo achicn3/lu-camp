@@ -517,9 +517,7 @@ class StoreCreditService:
         balances = await self._repo.balances_by_contact(store_id)
         return [(cid, bal) for cid, bal in sorted(balances.items()) if bal > 0]
 
-    async def aging_report(
-        self, store_id: int, *, now: datetime
-    ) -> dict[str, object]:
+    async def aging_report(self, store_id: int, *, now: datetime) -> dict[str, object]:
         """未兌付負債帳齡分桶（FIFO 沖銷發出列；docs/16 §5A）。"""
         lots_rows = await self._repo.positive_lots(store_id)
         positive_sum = await self._repo.positive_sum_by_contact(store_id)
@@ -529,9 +527,7 @@ class StoreCreditService:
             per_contact.setdefault(contact_id, []).append(
                 IssuedLot(amount=amount, issued_at=issued_at)
             )
-        buckets: OrderedDict[str, Decimal] = OrderedDict(
-            (k, Decimal(0)) for k in BUCKET_KEYS
-        )
+        buckets: OrderedDict[str, Decimal] = OrderedDict((k, Decimal(0)) for k in BUCKET_KEYS)
         for contact_id, lots in per_contact.items():
             balance = balances.get(contact_id, Decimal(0))
             if balance <= 0:

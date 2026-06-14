@@ -188,6 +188,32 @@ async def test_csv_and_xlsx_export(client: httpx.AsyncClient, db_session: AsyncS
     assert xlsx_resp.content[:2] == b"PK"  # xlsx 為 zip 容器
 
 
+async def test_export_escapes_formula_injection(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """匯出防公式注入（Codex SC-4 P2）：以 = 開頭的會員姓名在 CSV 被前綴單引號。"""
+    mgr, _clerk, store_id, _member_id, mgr_id = await _seed(db_session)
+    evil = Contact(store_id=store_id, name="=cmd|' /C calc'!A1", roles=["MEMBER"])
+    db_session.add(evil)
+    await db_session.flush()
+    await StoreCreditService(db_session).credit(
+        store_id,
+        evil.id,
+        cash_equivalent=Decimal(100),
+        premium_rate=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=2,
+        created_by=mgr_id,
+    )
+    resp = await client.get(
+        "/api/v1/reports/store-credit/liability",
+        params={"format": "csv"},
+        headers=_auth(mgr),
+    )
+    text = resp.content.decode("utf-8-sig")
+    assert "'=cmd" in text  # 危險開頭值已前綴單引號
+
+
 async def test_reports_are_manager_only(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -9,6 +9,17 @@ from openpyxl import Workbook  # type: ignore[import-untyped]
 CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+# 試算表公式注入防護：以這些字元開頭的儲存格，Excel/Sheets 會當公式執行（CSV/XLSX 皆然）。
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(value: object) -> str:
+    """把不可信文字轉為安全儲存格：危險開頭字元前綴單引號，強制當純文字。"""
+    text = str(value)
+    if text and text[0] in _FORMULA_TRIGGERS:
+        return "'" + text
+    return text
+
 
 @dataclass(frozen=True)
 class TabularExport:
@@ -26,11 +37,11 @@ def to_csv(exp: TabularExport) -> bytes:
     buf = io.StringIO()
     writer = csv.writer(buf)
     for key, value in exp.meta:
-        writer.writerow([key, value])
+        writer.writerow([_safe_cell(key), _safe_cell(value)])
     writer.writerow([])
-    writer.writerow(exp.headers)
+    writer.writerow([_safe_cell(h) for h in exp.headers])
     for row in exp.rows:
-        writer.writerow(row)
+        writer.writerow([_safe_cell(cell) for cell in row])
     return buf.getvalue().encode("utf-8-sig")
 
 
@@ -40,11 +51,11 @@ def to_xlsx(exp: TabularExport) -> bytes:
     assert sheet is not None
     sheet.title = exp.sheet[:31]  # Excel 工作表名上限 31 字
     for key, value in exp.meta:
-        sheet.append([key, value])
+        sheet.append([_safe_cell(key), _safe_cell(value)])
     sheet.append([])
-    sheet.append(exp.headers)
+    sheet.append([_safe_cell(h) for h in exp.headers])
     for row in exp.rows:
-        sheet.append(row)
+        sheet.append([_safe_cell(cell) for cell in row])
     buf = io.BytesIO()
     workbook.save(buf)
     return buf.getvalue()
