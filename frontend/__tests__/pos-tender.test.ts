@@ -38,6 +38,13 @@ describe("tender 純邏輯", () => {
     ).toBe(false);
   });
 
+  it("購物金餘額未載入（null）時不放行", () => {
+    const plan = resolvePlan("STORE_CREDIT", 500, 0);
+    const v = validatePlan(plan, 500, { hasMember: true, memberBalance: null });
+    expect(v.ok).toBe(false);
+    expect(v.error).toMatch(/尚未載入/);
+  });
+
   it("MIXED：現金+購物金須等於 total、兩腿皆 >0", () => {
     const plan = resolvePlan("MIXED", 500, 300);
     expect(plan).toEqual({ mode: "MIXED", cash: 300, storeCredit: 200 });

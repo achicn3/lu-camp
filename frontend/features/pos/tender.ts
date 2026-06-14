@@ -70,6 +70,15 @@ export function validatePlan(
       needsDrawer,
     };
   }
+  // 購物金餘額未載入（查詢中或失敗）→ 不放行（不可在不知餘額時就准許扣抵）。
+  if (needsMember && opts.memberBalance === null) {
+    return {
+      ok: false,
+      error: "購物金餘額尚未載入，請稍候或重試",
+      needsMember,
+      needsDrawer,
+    };
+  }
   if (
     needsMember &&
     opts.memberBalance !== null &&

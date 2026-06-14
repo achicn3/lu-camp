@@ -481,3 +481,7 @@ body {
 .pos-dialog-actions .btn-primary {
   flex: 1;
 }
+
+.balance-error {
+  color: var(--danger);
+}

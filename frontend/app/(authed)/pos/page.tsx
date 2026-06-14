@@ -3,7 +3,7 @@
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 
 import {
   type CartLine,
@@ -68,6 +68,14 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
           maxQty: 1,
         };
       }
+      // 僅 404 才視為「非序號品」改試散裝；其他狀態（401/403/500）如實回報，
+      // 不可把後端錯誤偽裝成「找不到此條碼」（Codex F3 P3）。
+      if (serialized.response.status !== 404) {
+        throw new Error(
+          extractDetail(serialized.error) ??
+            `查詢失敗（HTTP ${serialized.response.status}）`,
+        );
+      }
       const bulk = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
         params: { path: { lot_code: code } },
       });
@@ -83,6 +91,12 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
           bulkLotId: lot.id,
           maxQty: lot.remaining_qty,
         };
+      }
+      if (bulk.response.status !== 404) {
+        throw new Error(
+          extractDetail(bulk.error) ??
+            `查詢失敗（HTTP ${bulk.response.status}）`,
+        );
       }
       throw new Error(`找不到此條碼：${code}`);
     },
@@ -168,7 +182,13 @@ function MemberPanel({
           {member.phone && <span className="hint"> · {member.phone}</span>}
           <div className="hint">
             點數 {member.member_points} · 購物金餘額{" "}
-            {bal === null ? "讀取中…" : <Money value={bal} />}
+            {balance.isError ? (
+              <span className="balance-error">讀取失敗</span>
+            ) : bal === null ? (
+              "讀取中…"
+            ) : (
+              <Money value={bal} />
+            )}
           </div>
         </div>
         <button type="button" className="btn-ghost" onClick={onClear}>
@@ -394,7 +414,11 @@ export default function PosPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
+  // 冪等鍵：以送出內容簽章決定是否換鍵（見 checkout）；放 ref 不觸發 render。
+  const idemRef = useRef<{ sig: string; key: string }>({
+    sig: "",
+    key: newIdempotencyKey(),
+  });
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -432,13 +456,20 @@ export default function PosPage() {
 
   const checkout = useMutation({
     mutationFn: async (): Promise<SaleRead> => {
+      const body = {
+        lines: toSaleLines(lines),
+        buyer_contact_id: member?.id ?? null,
+        tenders: toTenders(plan) ?? null,
+      };
+      // 冪等鍵綁定送出內容（Codex F3 P2）：同 payload 的網路重試沿用同鍵（後端冪等回原單）；
+      // 改了購物車/會員/收款再送則換新鍵，不會被「同鍵不同內容」的 409 卡死。
+      const sig = JSON.stringify(body);
+      if (sig !== idemRef.current.sig) {
+        idemRef.current = { sig, key: newIdempotencyKey() };
+      }
       const { data, error } = await api.POST("/api/v1/sales", {
-        params: { header: { "Idempotency-Key": idempotencyKey } },
-        body: {
-          lines: toSaleLines(lines),
-          buyer_contact_id: member?.id ?? null,
-          tenders: toTenders(plan) ?? null,
-        },
+        params: { header: { "Idempotency-Key": idemRef.current.key } },
+        body,
       });
       if (!data) throw new Error(extractDetail(error) ?? "結帳失敗");
       return data;
@@ -468,7 +499,7 @@ export default function PosPage() {
     setNotice(null);
     setCompleted(null);
     setShowDialog(false);
-    setIdempotencyKey(newIdempotencyKey());
+    idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
 
@@ -619,8 +650,14 @@ export default function PosPage() {
             setReceivedInput={setReceivedInput}
           />
 
-          {/* 發票區：未啟用電子發票時隱藏載具輸入，僅標示（docs/10 §5、§6 約束 §6 發票開關） */}
-          {einvoiceEnabled ? (
+          {/* 發票區（docs/10 §5/§6）：讀不到設定時不可逕自當「不開票」（Codex F3 P3）。 */}
+          {settings.isError ? (
+            <p role="alert" className="form-error pos-invoice-off">
+              無法讀取發票設定，請重試。
+            </p>
+          ) : settings.isPending ? (
+            <p className="hint pos-invoice-off">讀取發票設定中…</p>
+          ) : einvoiceEnabled ? (
             <label className="field">
               <span className="field-label">
                 雲端發票載具（掃描手機條碼，8 碼 / 開頭）
