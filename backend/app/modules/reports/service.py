@@ -18,6 +18,7 @@ from app.modules.reports.schemas import (
     MemberBalanceRow,
     ReconciliationReport,
 )
+from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 
 
@@ -25,10 +26,18 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _health_ratio(total_outstanding: Decimal, monthly_outflow: Decimal) -> str | None:
+    """負債健康比 = 未兌付總負債 ÷ 月固定現金支出（docs/16 §5A）；分母 0 → N/A（null）。"""
+    if monthly_outflow <= 0:
+        return None
+    return str((total_outstanding / monthly_outflow).quantize(Decimal("0.01")))
+
+
 class ReportsService:
     def __init__(self, session: AsyncSession) -> None:
         self._sc = StoreCreditService(session)
         self._contacts = ContactService(session)
+        self._settings = StoreSettingsService(session)
 
     async def liability(self, store_id: int) -> LiabilityReport:
         now = _now()
@@ -48,6 +57,7 @@ class ReportsService:
             )
         total = aging["total_outstanding"]
         assert isinstance(total, Decimal)
+        settings = await self._settings.get_effective_settings(store_id)
         return LiabilityReport(
             generated_at=now,
             store_id=store_id,
@@ -60,7 +70,7 @@ class ReportsService:
                 gt_365d=buckets["gt_365d"],
             ),
             per_member=per_member,
-            liability_health_ratio=None,  # 分母為 SC-5 設定 monthly_fixed_cash_outflow（待上線）
+            liability_health_ratio=_health_ratio(total, settings.monthly_fixed_cash_outflow),
         )
 
     async def flows(

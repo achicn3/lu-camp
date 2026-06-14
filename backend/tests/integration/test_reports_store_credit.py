@@ -72,8 +72,32 @@ async def test_liability_report(client: httpx.AsyncClient, db_session: AsyncSess
     assert len(body["per_member"]) == 1
     assert body["per_member"][0]["name"] == "會員甲"
     assert body["per_member"][0]["balance"] == "500"
-    # 健康比分母（SC-5）未上線 → null
+    # monthly_fixed_cash_outflow 未設（0）→ 健康比 N/A（null）
     assert body["liability_health_ratio"] is None
+
+
+async def test_liability_health_ratio_uses_monthly_outflow(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """SC-5a 接上：設了月固定現金支出後，負債健康比 = 總負債 ÷ 該值。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    await StoreCreditService(db_session).credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    patched = await client.patch(
+        "/api/v1/settings",
+        json={"monthly_fixed_cash_outflow": "1000"},
+        headers=_auth(mgr),
+    )
+    assert patched.status_code == 200, patched.text
+    body = (await client.get("/api/v1/reports/store-credit/liability", headers=_auth(mgr))).json()
+    assert body["liability_health_ratio"] == "0.50"  # 500 / 1000
 
 
 async def test_flows_report(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

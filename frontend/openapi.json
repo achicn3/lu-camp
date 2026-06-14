@@ -1341,6 +1341,65 @@
         "title": "PayoutMethod",
         "type": "string"
       },
+      "PremiumRateHistoryRead": {
+        "description": "溢價率變更留痕輸出（docs/16 §1.3）。",
+        "properties": {
+          "changed_at": {
+            "format": "date-time",
+            "title": "Changed At",
+            "type": "string"
+          },
+          "changed_by": {
+            "title": "Changed By",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "new_rate": {
+            "title": "New Rate",
+            "type": "string"
+          },
+          "old_rate": {
+            "title": "Old Rate",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "suggested_rate_at_change": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Rate At Change"
+          }
+        },
+        "required": [
+          "id",
+          "changed_by",
+          "changed_at",
+          "old_rate",
+          "new_rate",
+          "suggested_rate_at_change",
+          "reason"
+        ],
+        "title": "PremiumRateHistoryRead",
+        "type": "object"
+      },
       "ReceiptHeaderRead": {
         "description": "收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。",
         "properties": {
@@ -1967,9 +2026,26 @@
             "title": "Einvoice Enabled",
             "type": "boolean"
           },
+          "monthly_fixed_cash_outflow": {
+            "title": "Monthly Fixed Cash Outflow",
+            "type": "string"
+          },
           "premium_rate": {
             "title": "Premium Rate",
             "type": "string"
+          },
+          "premium_rate_max": {
+            "title": "Premium Rate Max",
+            "type": "string"
+          },
+          "premium_rate_min": {
+            "title": "Premium Rate Min",
+            "type": "string"
+          },
+          "store_credit_engine_params": {
+            "additionalProperties": true,
+            "title": "Store Credit Engine Params",
+            "type": "object"
           },
           "store_id": {
             "title": "Store Id",
@@ -1986,13 +2062,17 @@
           "tax_rate",
           "default_commission_pct",
           "default_margin_pct",
-          "premium_rate"
+          "premium_rate",
+          "premium_rate_min",
+          "premium_rate_max",
+          "monthly_fixed_cash_outflow",
+          "store_credit_engine_params"
         ],
         "title": "SettingsRead",
         "type": "object"
       },
       "SettingsUpdateRequest": {
-        "description": "PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。",
+        "description": "PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。\n\n溢價率相關夾在政策硬界線 [0, 20%]（與帳本 DB 守衛一致）；min≤max 與 premium∈[min,max]\n的動態關係由 service 驗證（界線可被同一 PATCH 一併更動）。",
         "properties": {
           "default_commission_pct": {
             "anyOf": [
@@ -2031,6 +2111,34 @@
             ],
             "title": "Einvoice Enabled"
           },
+          "monthly_fixed_cash_outflow": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Fixed Cash Outflow"
+          },
+          "premium_change_reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Change Reason"
+          },
           "premium_rate": {
             "anyOf": [
               {
@@ -2047,6 +2155,52 @@
               }
             ],
             "title": "Premium Rate"
+          },
+          "premium_rate_max": {
+            "anyOf": [
+              {
+                "maximum": 0.2,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Rate Max"
+          },
+          "premium_rate_min": {
+            "anyOf": [
+              {
+                "maximum": 0.2,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premium Rate Min"
+          },
+          "store_credit_engine_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Engine Params"
           },
           "tax_rate": {
             "anyOf": [
@@ -4083,6 +4237,71 @@
           }
         ],
         "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/v1/settings/premium-rate/history": {
+      "get": {
+        "operationId": "getPremiumRateHistory",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PremiumRateHistoryRead"
+                  },
+                  "title": "Response Getpremiumratehistory",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Premium Rate History",
         "tags": [
           "settings"
         ]
