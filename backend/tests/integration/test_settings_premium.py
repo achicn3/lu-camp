@@ -149,6 +149,31 @@ async def test_monthly_outflow_whole_only(
     assert ok.json()["monthly_fixed_cash_outflow"] == "30000"
 
 
+async def test_explicit_null_is_ignored_not_500(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """明確傳 null 視為不更動，不可 500（Codex SC-5a P2）。"""
+    mgr, _clerk = await _seed(db_session)
+    resp = await client.patch(
+        "/api/v1/settings",
+        json={"premium_rate": None, "monthly_fixed_cash_outflow": None},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["premium_rate"] == "0.1000"  # 未更動
+
+
+async def test_rate_more_than_4dp_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """溢價率超過四位小數 → 422（與 DB Numeric(5,4) 一致；Codex SC-5a P2）。"""
+    mgr, _clerk = await _seed(db_session)
+    resp = await client.patch(
+        "/api/v1/settings", json={"premium_rate": "0.12345"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 422
+
+
 async def test_premium_history_manager_only(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

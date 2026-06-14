@@ -8,21 +8,27 @@ SC-5a（docs/16 §1.3/§1.5/§6.1）：settings 加 premium_rate_min/max、month
 store_credit_engine_params（JSONB）；新表 premium_rate_history 留痕溢價率變更。
 """
 
-import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-from app.modules.settings.defaults import DEFAULT_STORE_CREDIT_ENGINE_PARAMS
-
 revision: str = "a7c4e9f1b2d8"
 down_revision: str | Sequence[str] | None = "f1a2b3c4d5e6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_ENGINE_PARAMS_DEFAULT = f"'{json.dumps(DEFAULT_STORE_CREDIT_ENGINE_PARAMS)}'::jsonb"
+# 內聯 JSON 字面值（不從 app 常數匯入）：migration 須不可變——日後 SC-5b 改 defaults 也不影響
+# 此歷史版本重跑時產生的 server_default（Codex SC-5a P3）。
+_ENGINE_PARAMS_DEFAULT = (
+    "'{"
+    '"window_weights": {"yesterday": 0.05, "d7": 0.25, "d30": 0.4, "d90": 0.2, "yoy": 0.1}, '
+    '"alpha_safety": 0.8, "liability_ladder": [1.5, 2.0, 2.5], '
+    '"take_rate_band": [0.3, 0.7], "take_rate_step": 0.025, "beta_n_days": 180, '
+    '"alpha_proxy_window_days": 90, "cold_start_min_days": 30, "yoy_halfwidth_days": 15'
+    "}'::jsonb"
+)
 
 
 def upgrade() -> None:

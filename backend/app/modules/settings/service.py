@@ -77,7 +77,8 @@ class StoreSettingsService:
         if settings is None:
             settings = await self._repo.add(_new_settings(store_id))
 
-        changes = patch.model_dump(exclude_unset=True)
+        # exclude_none：明確傳 null 視為「不更動」（這些設定欄皆不可為 NULL；Codex P2 防 500）。
+        changes = patch.model_dump(exclude_unset=True, exclude_none=True)
         reason = changes.pop("premium_change_reason", None)  # 非設定欄，僅供 history 留痕
         old_premium = settings.premium_rate
         before = {k: _jsonable(getattr(settings, k)) for k in changes}

@@ -63,9 +63,17 @@ class SettingsUpdateRequest(BaseModel):
 
     @field_validator("monthly_fixed_cash_outflow")
     @classmethod
-    def _whole_ntd(cls, value: Decimal) -> Decimal:
-        if value != value.to_integral_value():
+    def _whole_ntd(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and value != value.to_integral_value():
             raise ValueError("月固定現金支出必須為整數元")
+        return value
+
+    @field_validator("premium_rate", "premium_rate_min", "premium_rate_max")
+    @classmethod
+    def _rate_scale(cls, value: Decimal | None) -> Decimal | None:
+        # DB 為 Numeric(5,4)：限四位小數，避免 API/留痕記 5dp 而 DB 落 4dp 不一致（Codex P2）。
+        if value is not None and value != value.quantize(Decimal("0.0001")):
+            raise ValueError("溢價率最多四位小數")
         return value
 
 
