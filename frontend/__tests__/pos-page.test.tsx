@@ -101,6 +101,8 @@ describe("/pos 結帳頁", () => {
   it("空車：顯示提示、發票區標示本期不開票、結帳鍵停用", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
       return null;
     });
     renderPage();
@@ -116,6 +118,8 @@ describe("/pos 結帳頁", () => {
     let saleBody = "";
     stubFetch((url, method, body) => {
       if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
       if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
       if (url.endsWith("/api/v1/sales") && method === "POST") {
         saleBody = body;
@@ -169,6 +173,8 @@ describe("/pos 結帳頁", () => {
   it("掃到不存在的條碼顯示錯誤", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
       if (url.includes("/serialized-items/by-code/"))
         return json({ detail: "not found" }, 404);
       if (url.includes("/bulk-lots/by-code/"))

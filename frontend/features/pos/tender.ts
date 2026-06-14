@@ -37,7 +37,12 @@ export function resolvePlan(
 export function validatePlan(
   plan: TenderPlan,
   total: number,
-  opts: { hasMember: boolean; memberBalance: number | null },
+  opts: {
+    hasMember: boolean;
+    memberBalance: number | null;
+    /** 是否開帳中（含現金收款必須開帳，§7.8）；null = 讀取中/未知。 */
+    drawerOpen: boolean | null;
+  },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
   const needsDrawer = plan.cash > 0;
@@ -85,6 +90,18 @@ export function validatePlan(
     plan.storeCredit > opts.memberBalance
   ) {
     return { ok: false, error: "購物金餘額不足", needsMember, needsDrawer };
+  }
+  // 含現金收款必須開帳中（§7.8）：未知（讀取中）或未開帳都不放行，避免送出才吃 409。
+  if (needsDrawer && opts.drawerOpen !== true) {
+    return {
+      ok: false,
+      error:
+        opts.drawerOpen === null
+          ? "讀取開帳狀態中…"
+          : "現金結帳需先開帳（請至現金對帳開帳）",
+      needsMember,
+      needsDrawer,
+    };
   }
   return { ok: true, error: null, needsMember, needsDrawer };
 }

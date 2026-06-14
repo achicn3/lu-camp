@@ -255,6 +255,7 @@ function TenderPanel({
   total,
   hasMember,
   memberBalance,
+  drawerOpen,
   mode,
   setMode,
   cashInput,
@@ -265,6 +266,7 @@ function TenderPanel({
   total: number;
   hasMember: boolean;
   memberBalance: number | null;
+  drawerOpen: boolean | null;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -273,7 +275,11 @@ function TenderPanel({
   setReceivedInput: (v: string) => void;
 }) {
   const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
-  const validation = validatePlan(plan, total, { hasMember, memberBalance });
+  const validation = validatePlan(plan, total, {
+    hasMember,
+    memberBalance,
+    drawerOpen,
+  });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
   return (
@@ -442,16 +448,31 @@ export default function PosPage() {
       return data;
     },
   });
+  // 開帳狀態（含現金收款必須開帳，§7.8）：200 回 session|null。
+  const cashSession = useQuery({
+    queryKey: ["cash-session", "current"],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET(
+        "/api/v1/cash-sessions/current",
+      );
+      if (response.status === 200) return data ?? null;
+      throw new Error(extractDetail(error) ?? "讀取開帳狀態失敗");
+    },
+  });
 
   const total = cartTotal(lines);
   const memberBalance =
     member !== null && balanceQuery.data
       ? (parseNtd(balanceQuery.data.balance) ?? 0)
       : null;
+  // drawerOpen：讀取中/失敗 → null（未知，含現金收款先擋）；否則為是否有開帳中 session。
+  const drawerOpen =
+    cashSession.isSuccess === true ? cashSession.data !== null : null;
   const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
   const validation = validatePlan(plan, total, {
     hasMember: member !== null,
     memberBalance,
+    drawerOpen,
   });
 
   const checkout = useMutation({
@@ -642,6 +663,7 @@ export default function PosPage() {
             total={total}
             hasMember={member !== null}
             memberBalance={memberBalance}
+            drawerOpen={drawerOpen}
             mode={mode}
             setMode={setMode}
             cashInput={cashInput}
@@ -658,11 +680,21 @@ export default function PosPage() {
           ) : settings.isPending ? (
             <p className="hint pos-invoice-off">讀取發票設定中…</p>
           ) : einvoiceEnabled ? (
-            <label className="field">
+            // 版面預留載具輸入，但目前後端 /sales 尚不收發票/載具欄位（電子發票於
+            // T13/T14 開立）。停用此欄並明示，避免「看似已帶入卻被靜默丟棄」（Codex F3 P2）。
+            <label className="field pos-invoice-off">
               <span className="field-label">
                 雲端發票載具（掃描手機條碼，8 碼 / 開頭）
               </span>
-              <input name="carrier" inputMode="text" placeholder="/XXXXXXX" />
+              <input
+                name="carrier"
+                inputMode="text"
+                placeholder="/XXXXXXX"
+                disabled
+              />
+              <span className="hint">
+                電子發票開立尚未上線（T13/T14），暫不帶入載具。
+              </span>
             </label>
           ) : (
             <p className="hint pos-invoice-off">
