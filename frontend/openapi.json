@@ -412,6 +412,40 @@
         "title": "AcquisitionType",
         "type": "string"
       },
+      "AgingBuckets": {
+        "description": "未兌付負債帳齡分桶（依發出時間）。",
+        "properties": {
+          "d180_365": {
+            "title": "D180 365",
+            "type": "string"
+          },
+          "d30_90": {
+            "title": "D30 90",
+            "type": "string"
+          },
+          "d90_180": {
+            "title": "D90 180",
+            "type": "string"
+          },
+          "gt_365d": {
+            "title": "Gt 365D",
+            "type": "string"
+          },
+          "lt_30d": {
+            "title": "Lt 30D",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lt_30d",
+          "d30_90",
+          "d90_180",
+          "d180_365",
+          "gt_365d"
+        ],
+        "title": "AgingBuckets",
+        "type": "object"
+      },
       "BulkAcquisitionBasis": {
         "description": "散裝批收購計價基礎。",
         "enum": [
@@ -1069,6 +1103,80 @@
         "title": "ContactRole",
         "type": "string"
       },
+      "FlowRow": {
+        "properties": {
+          "issued": {
+            "title": "Issued",
+            "type": "string"
+          },
+          "net_change": {
+            "title": "Net Change",
+            "type": "string"
+          },
+          "period": {
+            "format": "date",
+            "title": "Period",
+            "type": "string"
+          },
+          "redeemed": {
+            "title": "Redeemed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "issued",
+          "redeemed",
+          "net_change"
+        ],
+        "title": "FlowRow",
+        "type": "object"
+      },
+      "FlowsReport": {
+        "description": "§5A 發出 vs 兌付 vs 淨變化（granularity=day/week/month）。",
+        "properties": {
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "granularity": {
+            "title": "Granularity",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FlowRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "granularity",
+          "date_from",
+          "date_to",
+          "rows"
+        ],
+        "title": "FlowsReport",
+        "type": "object"
+      },
       "Grade": {
         "description": "成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。",
         "enum": [
@@ -1109,6 +1217,55 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "LiabilityReport": {
+        "description": "§5A 購物金負債報表。",
+        "properties": {
+          "aging_buckets": {
+            "$ref": "#/components/schemas/AgingBuckets"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "liability_health_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Liability Health Ratio"
+          },
+          "per_member": {
+            "items": {
+              "$ref": "#/components/schemas/MemberBalanceRow"
+            },
+            "title": "Per Member",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_outstanding": {
+            "title": "Total Outstanding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "total_outstanding",
+          "aging_buckets",
+          "per_member",
+          "liability_health_ratio"
+        ],
+        "title": "LiabilityReport",
+        "type": "object"
+      },
       "LoginRequest": {
         "description": "登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。",
         "properties": {
@@ -1130,6 +1287,29 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MemberBalanceRow": {
+        "properties": {
+          "balance": {
+            "title": "Balance",
+            "type": "string"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact_id",
+          "name",
+          "balance"
+        ],
+        "title": "MemberBalanceRow",
         "type": "object"
       },
       "OwnershipType": {
@@ -1221,6 +1401,50 @@
           "invoice_track_info"
         ],
         "title": "ReceiptHeaderRead",
+        "type": "object"
+      },
+      "ReconciliationReport": {
+        "description": "§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。",
+        "properties": {
+          "cached_total_outstanding": {
+            "title": "Cached Total Outstanding",
+            "type": "string"
+          },
+          "cached_total_trustworthy": {
+            "title": "Cached Total Trustworthy",
+            "type": "boolean"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "ledger_total_outstanding": {
+            "title": "Ledger Total Outstanding",
+            "type": "string"
+          },
+          "mismatches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Mismatches",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "mismatches",
+          "ledger_total_outstanding",
+          "cached_total_outstanding",
+          "cached_total_trustworthy"
+        ],
+        "title": "ReconciliationReport",
         "type": "object"
       },
       "SaleCreateRequest": {
@@ -3138,6 +3362,200 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/reports/store-credit/flows": {
+      "get": {
+        "operationId": "storeCreditFlows",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "granularity",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "enum": [
+                "day",
+                "week",
+                "month"
+              ],
+              "title": "Granularity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Flows",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/store-credit/liability": {
+      "get": {
+        "operationId": "storeCreditLiability",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiabilityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Liability",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/store-credit/reconciliation": {
+      "get": {
+        "operationId": "storeCreditReconciliation",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reconciliation",
+        "tags": [
+          "reports"
         ]
       }
     },

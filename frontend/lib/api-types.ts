@@ -315,6 +315,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/store-credit/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Flows */
+        get: operations["storeCreditFlows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/liability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liability */
+        get: operations["storeCreditLiability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reconciliation */
+        get: operations["storeCreditReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales": {
         parameters: {
             query?: never;
@@ -580,6 +631,22 @@ export interface components {
          */
         AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
         /**
+         * AgingBuckets
+         * @description 未兌付負債帳齡分桶（依發出時間）。
+         */
+        AgingBuckets: {
+            /** D180 365 */
+            d180_365: string;
+            /** D30 90 */
+            d30_90: string;
+            /** D90 180 */
+            d90_180: string;
+            /** Gt 365D */
+            gt_365d: string;
+            /** Lt 30D */
+            lt_30d: string;
+        };
+        /**
          * BulkAcquisitionBasis
          * @description 散裝批收購計價基礎。
          * @enum {string}
@@ -814,6 +881,47 @@ export interface components {
          * @enum {string}
          */
         ContactRole: "MEMBER" | "SELLER" | "CONSIGNOR";
+        /** FlowRow */
+        FlowRow: {
+            /** Issued */
+            issued: string;
+            /** Net Change */
+            net_change: string;
+            /**
+             * Period
+             * Format: date
+             */
+            period: string;
+            /** Redeemed */
+            redeemed: string;
+        };
+        /**
+         * FlowsReport
+         * @description §5A 發出 vs 兌付 vs 淨變化（granularity=day/week/month）。
+         */
+        FlowsReport: {
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Granularity */
+            granularity: string;
+            /** Rows */
+            rows: components["schemas"]["FlowRow"][];
+            /** Store Id */
+            store_id: number;
+        };
         /**
          * Grade
          * @description 成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
@@ -834,6 +942,26 @@ export interface components {
             status: string;
         };
         /**
+         * LiabilityReport
+         * @description §5A 購物金負債報表。
+         */
+        LiabilityReport: {
+            aging_buckets: components["schemas"]["AgingBuckets"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Liability Health Ratio */
+            liability_health_ratio: string | null;
+            /** Per Member */
+            per_member: components["schemas"]["MemberBalanceRow"][];
+            /** Store Id */
+            store_id: number;
+            /** Total Outstanding */
+            total_outstanding: string;
+        };
+        /**
          * LoginRequest
          * @description 登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。
          */
@@ -842,6 +970,15 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** MemberBalanceRow */
+        MemberBalanceRow: {
+            /** Balance */
+            balance: string;
+            /** Contact Id */
+            contact_id: number;
+            /** Name */
+            name: string;
         };
         /**
          * OwnershipType
@@ -878,6 +1015,29 @@ export interface components {
             phone: string | null;
             /** Tax Id */
             tax_id: string | null;
+        };
+        /**
+         * ReconciliationReport
+         * @description §4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。
+         */
+        ReconciliationReport: {
+            /** Cached Total Outstanding */
+            cached_total_outstanding: string;
+            /** Cached Total Trustworthy */
+            cached_total_trustworthy: boolean;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Ledger Total Outstanding */
+            ledger_total_outstanding: string;
+            /** Mismatches */
+            mismatches: {
+                [key: string]: unknown;
+            }[];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * SaleCreateRequest
@@ -1793,6 +1953,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    storeCreditFlows: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                granularity?: "day" | "week" | "month";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowsReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditLiability: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiabilityReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditReconciliation: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

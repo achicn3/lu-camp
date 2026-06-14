@@ -1,0 +1,107 @@
+"""SC-4 購物金報表 service：彙整 storecredit / contacts service 的唯讀資料成報表。
+
+只透過對方 service 取數（不直接碰他模組資料表，CLAUDE.md §2）；數值全部從帳本推導
+（docs/16 §5），本層不寫任何資料。
+"""
+
+from datetime import UTC, datetime
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.contacts.service import ContactService
+from app.modules.reports.schemas import (
+    AgingBuckets,
+    FlowRow,
+    FlowsReport,
+    LiabilityReport,
+    MemberBalanceRow,
+    ReconciliationReport,
+)
+from app.modules.storecredit.service import StoreCreditService
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+class ReportsService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._sc = StoreCreditService(session)
+        self._contacts = ContactService(session)
+
+    async def liability(self, store_id: int) -> LiabilityReport:
+        now = _now()
+        aging = await self._sc.aging_report(store_id, now=now)
+        buckets = aging["buckets"]
+        assert isinstance(buckets, dict)
+        balances = await self._sc.per_member_balances(store_id)
+        per_member: list[MemberBalanceRow] = []
+        for contact_id, balance in balances:
+            contact = await self._contacts.get_contact(store_id, contact_id)
+            per_member.append(
+                MemberBalanceRow(
+                    contact_id=contact_id,
+                    name=contact.name if contact is not None else f"#{contact_id}",
+                    balance=balance,
+                )
+            )
+        total = aging["total_outstanding"]
+        assert isinstance(total, Decimal)
+        return LiabilityReport(
+            generated_at=now,
+            store_id=store_id,
+            total_outstanding=total,
+            aging_buckets=AgingBuckets(
+                lt_30d=buckets["lt_30d"],
+                d30_90=buckets["d30_90"],
+                d90_180=buckets["d90_180"],
+                d180_365=buckets["d180_365"],
+                gt_365d=buckets["gt_365d"],
+            ),
+            per_member=per_member,
+            liability_health_ratio=None,  # 分母為 SC-5 設定 monthly_fixed_cash_outflow（待上線）
+        )
+
+    async def flows(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> FlowsReport:
+        now = _now()
+        rows = await self._sc.flows(
+            store_id, date_from=date_from, date_to=date_to, granularity=granularity
+        )
+        return FlowsReport(
+            generated_at=now,
+            store_id=store_id,
+            granularity=granularity,
+            date_from=date_from,
+            date_to=date_to,
+            rows=[
+                FlowRow(
+                    period=row["period"].date()
+                    if isinstance(row["period"], datetime)
+                    else row["period"],
+                    issued=row["issued"],
+                    redeemed=row["redeemed"],
+                    net_change=row["net_change"],
+                )
+                for row in rows
+            ],
+        )
+
+    async def reconciliation(self, store_id: int) -> ReconciliationReport:
+        now = _now()
+        rec = await self._sc.reconcile(store_id)
+        return ReconciliationReport(
+            generated_at=now,
+            store_id=store_id,
+            mismatches=rec["mismatches"],
+            ledger_total_outstanding=Decimal(str(rec["ledger_total_outstanding"])),
+            cached_total_outstanding=Decimal(str(rec["cached_total_outstanding"])),
+            cached_total_trustworthy=bool(rec["cached_total_trustworthy"]),
+        )
