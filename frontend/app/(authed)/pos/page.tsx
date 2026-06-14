@@ -24,6 +24,7 @@ import {
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
 
 type SaleRead = components["schemas"]["SaleRead"];
 type ContactRead = components["schemas"]["ContactRead"];
@@ -393,9 +394,7 @@ export default function PosPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  const [idempotencyKey, setIdempotencyKey] = useState(() =>
-    crypto.randomUUID(),
-  );
+  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -469,7 +468,7 @@ export default function PosPage() {
     setNotice(null);
     setCompleted(null);
     setShowDialog(false);
-    setIdempotencyKey(crypto.randomUUID());
+    setIdempotencyKey(newIdempotencyKey());
     checkout.reset();
   }
 
