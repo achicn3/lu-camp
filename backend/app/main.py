@@ -19,6 +19,7 @@ from app.modules.sales.router import router as sales_router
 from app.modules.settings.router import router as settings_router
 from app.modules.store.router import router as store_router
 from app.modules.storecredit.router import router as storecredit_router
+from app.modules.storecredit.router import store_router as storecredit_store_router
 from app.modules.user.router import router as auth_router
 
 API_PREFIX = "/api/v1"
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(sales_router, prefix=API_PREFIX)
     app.include_router(store_router, prefix=API_PREFIX)
     app.include_router(storecredit_router, prefix=API_PREFIX)
+    app.include_router(storecredit_store_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
     return app
 

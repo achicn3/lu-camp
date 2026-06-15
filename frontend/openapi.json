@@ -1191,6 +1191,145 @@
         "title": "ContactUpdate",
         "type": "object"
       },
+      "EffectivenessReport": {
+        "description": "§5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。",
+        "properties": {
+          "alpha_incremental": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha Incremental"
+          },
+          "alpha_method_note": {
+            "title": "Alpha Method Note",
+            "type": "string"
+          },
+          "alpha_sample_insufficient": {
+            "title": "Alpha Sample Insufficient",
+            "type": "boolean"
+          },
+          "avg_premium_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Premium Rate"
+          },
+          "beta_retention": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta Retention"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "delta_per_1000": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Per 1000"
+          },
+          "estimate_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Estimate Fields",
+            "type": "array"
+          },
+          "excess_spend_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excess Spend Rate"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "gross_margin_m": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Margin M"
+          },
+          "redemption_count": {
+            "title": "Redemption Count",
+            "type": "integer"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "take_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Take Rate"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "take_rate",
+          "avg_premium_rate",
+          "beta_retention",
+          "excess_spend_rate",
+          "alpha_incremental",
+          "gross_margin_m",
+          "delta_per_1000",
+          "redemption_count",
+          "alpha_sample_insufficient",
+          "estimate_fields",
+          "alpha_method_note"
+        ],
+        "title": "EffectivenessReport",
+        "type": "object"
+      },
       "FlowRow": {
         "properties": {
           "issued": {
@@ -1882,6 +2021,53 @@
           "reason"
         ],
         "title": "PremiumRateHistoryRead",
+        "type": "object"
+      },
+      "PremiumSuggestionResponse": {
+        "description": "當日溢價建議值（GET /store-credit/premium-suggestion/today；docs/16 §6.2）。\n\n建議值**永不自動生效**：本回應供面板顯示與人工確認。`window_metrics`/`constraint_values`\n為審計用 JSONB 快照（各視窗指標、綜合值、正規化權重、各約束中間值）。溢價率以字串表示。",
+        "properties": {
+          "constraint_values": {
+            "additionalProperties": true,
+            "title": "Constraint Values",
+            "type": "object"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "for_date": {
+            "format": "date",
+            "title": "For Date",
+            "type": "string"
+          },
+          "insufficient_data": {
+            "title": "Insufficient Data",
+            "type": "boolean"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "suggested_rate": {
+            "title": "Suggested Rate",
+            "type": "string"
+          },
+          "window_metrics": {
+            "additionalProperties": true,
+            "title": "Window Metrics",
+            "type": "object"
+          }
+        },
+        "required": [
+          "store_id",
+          "for_date",
+          "suggested_rate",
+          "insufficient_data",
+          "engine_version",
+          "window_metrics",
+          "constraint_values"
+        ],
+        "title": "PremiumSuggestionResponse",
         "type": "object"
       },
       "ReceiptHeaderRead": {
@@ -4452,6 +4638,80 @@
         ]
       }
     },
+    "/api/v1/reports/store-credit/effectiveness": {
+      "get": {
+        "description": "§5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。",
+        "operationId": "storeCreditEffectiveness",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectivenessReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Effectiveness",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
     "/api/v1/reports/store-credit/flows": {
       "get": {
         "operationId": "storeCreditFlows",
@@ -5237,6 +5497,33 @@
         "summary": "Premium Rate History",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/store-credit/premium-suggestion/today": {
+      "get": {
+        "description": "當日溢價建議值（docs/16 §6.2）：當日首次讀取時 lazy 計算並冪等落庫，否則回既有快照。\n\n建議值僅供面板顯示與人工確認，**永不自動生效**（POS 開帳面板/設定頁皆用此端點）。",
+        "operationId": "storeCreditPremiumSuggestionToday",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PremiumSuggestionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Premium Suggestion Today",
+        "tags": [
+          "store-credit"
         ]
       }
     },

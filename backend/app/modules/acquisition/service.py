@@ -12,6 +12,7 @@
 
 import hashlib
 import json
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -76,6 +77,12 @@ class AcquisitionService:
     async def list_ids_by_contact(self, store_id: int, contact_id: int) -> list[int]:
         """某會員的所有收購單 id（供 sourced-items 反查買斷庫存；id-only；docs/17 §5.2）。"""
         return await self._repo.list_ids_by_contact(store_id, contact_id)
+
+    async def count_payouts_by_method(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[PayoutMethod, int]:
+        """期間內各撥款方式的收購筆數（供 SC-5b 報表/引擎計 take_rate；唯讀，§2 經 service）。"""
+        return await self._repo.count_payouts_by_method(store_id, date_from, date_to)
 
     @staticmethod
     def _fingerprint(data: AcquisitionCreate) -> str:

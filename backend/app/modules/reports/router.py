@@ -19,6 +19,7 @@ from app.modules.reports.export import (
     to_xlsx,
 )
 from app.modules.reports.schemas import (
+    EffectivenessReport,
     FlowsReport,
     LiabilityReport,
     ReconciliationReport,
@@ -117,6 +118,61 @@ async def flows(
             [r.period.isoformat(), str(r.issued), str(r.redeemed), str(r.net_change)]
             for r in report.rows
         ],
+    )
+    return _export_response(exp, fmt)
+
+
+def _ratio_cell(value: object) -> str:
+    return "N/A" if value is None else str(value)
+
+
+@router.get(
+    "/effectiveness", response_model=EffectivenessReport, operation_id="storeCreditEffectiveness"
+)
+async def effectiveness(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[datetime, Query(alias="from")],
+    date_to: Annotated[datetime, Query(alias="to")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> EffectivenessReport | Response:
+    """§5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。"""
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    report = await ReportsService(session).effectiveness(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
+    if fmt == "json":
+        return report
+    estimate = "估計值"
+    alpha_label = "估計值（代理法）"
+    if report.alpha_sample_insufficient:
+        alpha_label = "估計值（代理法，樣本不足）"
+    rows = [
+        ["選用率 take_rate", _ratio_cell(report.take_rate), "直接量測"],
+        ["平均溢價率 avg_premium_rate", _ratio_cell(report.avg_premium_rate), "直接量測"],
+        ["額外消費率 excess_spend_rate", _ratio_cell(report.excess_spend_rate), "直接量測"],
+        ["實際毛利率 gross_margin_m", _ratio_cell(report.gross_margin_m), "直接量測"],
+        ["沉澱率 beta_retention", _ratio_cell(report.beta_retention), estimate],
+        ["新增比例 alpha_incremental", _ratio_cell(report.alpha_incremental), alpha_label],
+        ["損益敏感度 delta_per_1000", _ratio_cell(report.delta_per_1000), estimate],
+        ["兌付筆數 redemption_count", str(report.redemption_count), "直接量測"],
+    ]
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("起", report.date_from.isoformat()),
+        ("迄", report.date_to.isoformat()),
+        ("α 代理法說明", report.alpha_method_note),
+    ]
+    exp = TabularExport(
+        sheet="購物金效益",
+        filename_stem=f"store-credit-effectiveness-{report.store_id}",
+        meta=meta,
+        headers=["指標", "值", "性質"],
+        rows=rows,
     )
     return _export_response(exp, fmt)
 

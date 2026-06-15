@@ -1,8 +1,8 @@
 """storecredit 查詢/校正 schema（金額字串整數元，§6/§11）。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
@@ -63,3 +63,21 @@ class StoreCreditAdjustRequest(BaseModel):
         if not stripped:
             raise ValueError("事由不可為空白")
         return stripped
+
+
+class PremiumSuggestionResponse(BaseModel):
+    """當日溢價建議值（GET /store-credit/premium-suggestion/today；docs/16 §6.2）。
+
+    建議值**永不自動生效**：本回應供面板顯示與人工確認。`window_metrics`/`constraint_values`
+    為審計用 JSONB 快照（各視窗指標、綜合值、正規化權重、各約束中間值）。溢價率以字串表示。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    store_id: int
+    for_date: date
+    suggested_rate: NTDAmount
+    insufficient_data: bool
+    engine_version: str
+    window_metrics: dict[str, Any]
+    constraint_values: dict[str, Any]

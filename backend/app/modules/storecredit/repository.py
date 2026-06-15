@@ -4,13 +4,17 @@
 沿 D-1 模式）。餘額重算（SUM）供 I-3 對帳。
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.storecredit.models import StoreCreditAccount, StoreCreditLedger
+from app.modules.storecredit.models import (
+    StoreCreditAccount,
+    StoreCreditLedger,
+    StoreCreditSuggestionLog,
+)
 from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType
 
 
@@ -232,6 +236,101 @@ class StoreCreditRepository:
         )
         rows = await self._session.execute(stmt)
         return {int(c): Decimal(b) for c, b in rows}
+
+    # ── SC-5b §5B 指標查詢（read-only；docs/16 §5B）──
+
+    async def credit_premium_components(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[Decimal, Decimal]:
+        """期間 CREDIT 列的 (Σ signed, Σ cash_equivalent)；avg_premium=(Σsigned−Σcash)÷Σcash。"""
+        stmt = select(
+            func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
+            func.coalesce(func.sum(StoreCreditLedger.cash_equivalent), 0),
+        ).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+            StoreCreditLedger.created_at >= date_from,
+            StoreCreditLedger.created_at < date_to,
+        )
+        row = (await self._session.execute(stmt)).one()
+        return Decimal(row[0]), Decimal(row[1])
+
+    async def debits_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[int, Decimal]]:
+        """期間 DEBIT 兌付列：(contact_id, 絕對金額)，供 α 代理逐筆分類。"""
+        stmt = select(
+            StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount
+        ).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
+            StoreCreditLedger.created_at >= date_from,
+            StoreCreditLedger.created_at < date_to,
+        )
+        rows = await self._session.execute(stmt)
+        return [(int(c), Decimal(a)) for c, a in rows]
+
+    async def earliest_credit_at_by_contacts(
+        self, store_id: int, contact_ids: list[int]
+    ) -> dict[int, datetime]:
+        """指定會員的最早 CREDIT 入帳時間（α 代理的「對應 CREDIT 入帳」參考時點，FIFO 近似）。"""
+        if not contact_ids:
+            return {}
+        stmt = (
+            select(StoreCreditLedger.contact_id, func.min(StoreCreditLedger.created_at))
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+                StoreCreditLedger.contact_id.in_(contact_ids),
+            )
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): t for c, t in rows}
+
+    async def credit_lots(self, store_id: int) -> list[tuple[int, Decimal, datetime]]:
+        """全部 CREDIT 發出列：(contact_id, 金額, 發出時間)，依會員/時間排序（β FIFO 用）。"""
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                StoreCreditLedger.signed_amount,
+                StoreCreditLedger.created_at,
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+            )
+            .order_by(StoreCreditLedger.contact_id, StoreCreditLedger.created_at)
+        )
+        rows = await self._session.execute(stmt)
+        return [(int(c), Decimal(a), t) for c, a, t in rows]
+
+    async def earliest_activity_at(self, store_id: int) -> datetime | None:
+        """本店最早一筆帳本時間（供引擎判冷啟動的資料天數；無帳本 → None）。"""
+        stmt = select(func.min(StoreCreditLedger.created_at)).where(
+            StoreCreditLedger.store_id == store_id
+        )
+        result: datetime | None = await self._session.scalar(stmt)
+        return result
+
+    # ── SC-5b 建議值落庫（docs/16 §1.4；每店每日唯一）──
+
+    async def get_suggestion_log(
+        self, store_id: int, for_date: date
+    ) -> StoreCreditSuggestionLog | None:
+        stmt = select(StoreCreditSuggestionLog).where(
+            StoreCreditSuggestionLog.store_id == store_id,
+            StoreCreditSuggestionLog.for_date == for_date,
+        )
+        result: StoreCreditSuggestionLog | None = await self._session.scalar(stmt)
+        return result
+
+    async def add_suggestion_log(
+        self, log: StoreCreditSuggestionLog
+    ) -> StoreCreditSuggestionLog:
+        self._session.add(log)
+        await self._session.flush()
+        return log
 
     async def flows(
         self,
