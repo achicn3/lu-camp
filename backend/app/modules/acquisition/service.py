@@ -67,6 +67,12 @@ class AcquisitionService:
     async def get_acquisition(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         return await self._repo.get(store_id, acquisition_id)
 
+    async def list_by_contact(
+        self, store_id: int, contact_id: int, *, limit: int = 50, offset: int = 0
+    ) -> list[Acquisition]:
+        """某會員帶來的收購單（買斷/寄售來源；會員中心；store 範圍、分頁；docs/17 §5.2）。"""
+        return await self._repo.list_by_contact(store_id, contact_id, limit=limit, offset=offset)
+
     @staticmethod
     def _fingerprint(data: AcquisitionCreate) -> str:
         """請求內容穩定 sha256（D-2 模式）：同 key 重送比對是否同一請求。"""

@@ -43,6 +43,20 @@ class AcquisitionRepository:
         )
         return list(items.all()), lot
 
+    async def list_by_contact(
+        self, store_id: int, contact_id: int, *, limit: int, offset: int
+    ) -> list[Acquisition]:
+        """某來源（賣方/寄售人）的收購單（會員帶來的商品來源；store 範圍、新到舊、分頁）。"""
+        stmt = (
+            select(Acquisition)
+            .where(Acquisition.store_id == store_id, Acquisition.contact_id == contact_id)
+            .order_by(Acquisition.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)
+
     async def get(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         stmt = select(Acquisition).where(
             Acquisition.id == acquisition_id, Acquisition.store_id == store_id

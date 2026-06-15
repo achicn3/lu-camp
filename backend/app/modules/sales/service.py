@@ -353,6 +353,26 @@ class SalesService:
             store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
         )
 
+    async def list_purchases_by_buyer(
+        self,
+        store_id: int,
+        contact_id: int,
+        *,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Sale]:
+        """某會員的消費紀錄（會員中心；store 範圍、可選日期區間、新到舊、分頁；docs/17 §5.2）。"""
+        return await self._repo.list_sales_by_buyer(
+            store_id,
+            contact_id,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+            offset=offset,
+        )
+
     # ── 作廢 ──
     async def void_sale(self, sale: Sale, actor_user_id: int) -> Sale:
         """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/現金。

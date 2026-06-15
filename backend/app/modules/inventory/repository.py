@@ -66,6 +66,7 @@ class InventoryRepository:
         *,
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
+        consignor_id: int | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -75,6 +76,8 @@ class InventoryRepository:
             stmt = stmt.where(SerializedItem.status == status)
         if ownership_type is not None:
             stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
+        if consignor_id is not None:
+            stmt = stmt.where(SerializedItem.consignor_id == consignor_id)
         if q:
             pattern = f"%{q}%"
             stmt = stmt.where(
@@ -108,6 +111,7 @@ class InventoryRepository:
         store_id: int,
         *,
         status: BulkLotStatus | None = None,
+        consignor_id: int | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -115,6 +119,8 @@ class InventoryRepository:
         stmt = select(BulkLot).where(BulkLot.store_id == store_id)
         if status is not None:
             stmt = stmt.where(BulkLot.status == status)
+        if consignor_id is not None:
+            stmt = stmt.where(BulkLot.consignor_id == consignor_id)
         if q:
             pattern = f"%{q}%"
             stmt = stmt.where(
@@ -123,6 +129,52 @@ class InventoryRepository:
                 | BulkLot.label.ilike(pattern)
             )
         stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_serialized_by_acquisitions(
+        self, store_id: int, acquisition_ids: list[int], *, limit: int, offset: int
+    ) -> list[SerializedItem]:
+        """指定收購單下的**買斷**序號品（空 ids → 空清單）。
+
+        僅回 OWNED：收購單可能是 BUYOUT 或 CONSIGNMENT，後者的寄售品另經 consignor 路徑
+        呈現；不過濾會使寄售品在「買斷來源」與「寄售」兩路重複/誤分類（Codex review P2）。
+        """
+        if not acquisition_ids:
+            return []
+        stmt = (
+            select(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.acquisition_id.in_(acquisition_ids),
+                SerializedItem.ownership_type == OwnershipType.OWNED,
+            )
+            .order_by(SerializedItem.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_bulk_lots_by_acquisitions(
+        self, store_id: int, acquisition_ids: list[int], *, limit: int, offset: int
+    ) -> list[BulkLot]:
+        """指定收購單下的**買斷/自有**散裝堆（空 ids → 空清單）。
+
+        僅回 consignor_id IS NULL（店家自有）：寄售散裝另經 consignor 路徑呈現，
+        避免重複/誤分類（Codex review P2）。
+        """
+        if not acquisition_ids:
+            return []
+        stmt = (
+            select(BulkLot)
+            .where(
+                BulkLot.store_id == store_id,
+                BulkLot.acquisition_id.in_(acquisition_ids),
+                BulkLot.consignor_id.is_(None),
+            )
+            .order_by(BulkLot.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         return list((await self._session.scalars(stmt)).all())
 
     # ── 數量型商品 ──

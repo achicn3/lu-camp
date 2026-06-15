@@ -75,3 +75,29 @@ class SalesRepository:
         stmt = select(SaleLine).where(SaleLine.sale_id == sale_id).order_by(SaleLine.id)
         result = await self._session.scalars(stmt)
         return list(result)
+
+    async def list_sales_by_buyer(
+        self,
+        store_id: int,
+        contact_id: int,
+        *,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int,
+        offset: int,
+    ) -> list[Sale]:
+        """某買方的銷售（會員消費紀錄；store 範圍、可選日期區間、新到舊、分頁）。
+
+        日期過濾在分頁**之前**套用（與 list_sales 一致）——否則分頁先作用於未過濾的
+        全部消費史，落在區間外的新單會吃掉名額、回傳短頁/空頁（Codex review P2）。
+        """
+        stmt = select(Sale).where(
+            Sale.store_id == store_id, Sale.buyer_contact_id == contact_id
+        )
+        if date_from is not None:
+            stmt = stmt.where(Sale.created_at >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Sale.created_at <= date_to)
+        stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
+        result = await self._session.scalars(stmt)
+        return list(result)

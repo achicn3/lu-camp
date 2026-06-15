@@ -166,13 +166,20 @@ class InventoryService:
         *,
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
+        consignor_id: int | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SerializedItem]:
-        """列序號品（庫存頁/POS 查件；篩 status/ownership、q 搜品名/識別碼，§4 店別範圍）。"""
+        """列序號品（庫存頁/POS 查件；篩 status/ownership/consignor、q 搜品名碼；§4 店別範圍）。"""
         return await self._repo.list_serialized(
-            store_id, status=status, ownership_type=ownership_type, q=q, limit=limit, offset=offset
+            store_id,
+            status=status,
+            ownership_type=ownership_type,
+            consignor_id=consignor_id,
+            q=q,
+            limit=limit,
+            offset=offset,
         )
 
     async def list_catalog(
@@ -194,13 +201,30 @@ class InventoryService:
         store_id: int,
         *,
         status: BulkLotStatus | None = None,
+        consignor_id: int | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BulkLot]:
-        """列散裝堆（POS 明確選堆/庫存頁；篩狀態、q 搜名稱/堆名/識別碼）。"""
+        """列散裝堆（POS 明確選堆/庫存頁；篩狀態/consignor、q 搜名稱/堆名/識別碼）。"""
         return await self._repo.list_bulk_lots(
-            store_id, status=status, q=q, limit=limit, offset=offset
+            store_id, status=status, consignor_id=consignor_id, q=q, limit=limit, offset=offset
+        )
+
+    async def list_serialized_by_acquisitions(
+        self, store_id: int, acquisition_ids: list[int], *, limit: int = 200, offset: int = 0
+    ) -> list[SerializedItem]:
+        """指定收購單下的序號品（會員中心買斷來源；空 ids → []；docs/17 §5.2）。"""
+        return await self._repo.list_serialized_by_acquisitions(
+            store_id, acquisition_ids, limit=limit, offset=offset
+        )
+
+    async def list_bulk_lots_by_acquisitions(
+        self, store_id: int, acquisition_ids: list[int], *, limit: int = 200, offset: int = 0
+    ) -> list[BulkLot]:
+        """指定收購單下的散裝堆（會員中心買斷/散裝來源；空 ids → []；docs/17 §5.2）。"""
+        return await self._repo.list_bulk_lots_by_acquisitions(
+            store_id, acquisition_ids, limit=limit, offset=offset
         )
 
     async def sell_serialized_item(self, item_id: int) -> None:

@@ -44,3 +44,17 @@ class ConsignmentService:
             payout_amount=payout,
         )
         return await self._repo.add(settlement)
+
+    async def list_settlements_by_item_ids(
+        self, store_id: int, serialized_item_ids: list[int], *, limit: int = 50, offset: int = 0
+    ) -> list[ConsignmentSettlement]:
+        """指定序號品的寄售結算列（會員中心；序號品 id 由 facade 自 inventory 取得）。"""
+        return await self._repo.list_by_item_ids(
+            store_id, serialized_item_ids, limit=limit, offset=offset
+        )
+
+    async def pending_payout_total_by_item_ids(
+        self, store_id: int, serialized_item_ids: list[int]
+    ) -> Decimal:
+        """指定序號品的 PENDING 應撥加總（會員中心 overview/consignments；docs/17 §3.4）。"""
+        return await self._repo.pending_payout_total_by_item_ids(store_id, serialized_item_ids)
