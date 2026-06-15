@@ -7,7 +7,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import ColumnElement, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -240,10 +240,20 @@ class StoreCreditRepository:
 
     # ── SC-5b §5B 指標查詢（read-only；docs/16 §5B）──
 
+    @staticmethod
+    def _not_reversed() -> ColumnElement[bool]:
+        """「該帳本列未被任何沖正列指向」的相關子查詢條件（沖正後原列不再代表有效負債/兌付）。"""
+        rev = aliased(StoreCreditLedger)
+        return ~select(rev.id).where(rev.reversal_of_id == StoreCreditLedger.id).exists()
+
     async def credit_premium_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> tuple[Decimal, Decimal]:
-        """期間 CREDIT 列的 (Σ signed, Σ cash_equivalent)；avg_premium=(Σsigned−Σcash)÷Σcash。"""
+        """期間「未被沖正」CREDIT 列的 (Σ signed, Σ cash_equivalent)，供 avg_premium 計算。
+
+        ACQUISITION_ROLLBACK 沖正後原 CREDIT 已非有效負債，須排除否則 avg_premium 被高估
+        （Codex SC-5b P2）。
+        """
         stmt = select(
             func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
             func.coalesce(func.sum(StoreCreditLedger.cash_equivalent), 0),
@@ -252,6 +262,7 @@ class StoreCreditRepository:
             StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
             StoreCreditLedger.created_at >= date_from,
             StoreCreditLedger.created_at < date_to,
+            self._not_reversed(),
         )
         row = (await self._session.execute(stmt)).one()
         return Decimal(row[0]), Decimal(row[1])
@@ -264,13 +275,12 @@ class StoreCreditRepository:
         已作廢銷售的 DEBIT 留在 append-only 帳本、另有 SALE_VOID 沖正回補——那筆兌付實際
         未發生，必須排除，否則 redemption_count / α 被灌水（Codex SC-5b P2）。
         """
-        rev = aliased(StoreCreditLedger)
         stmt = select(StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount).where(
             StoreCreditLedger.store_id == store_id,
             StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
             StoreCreditLedger.created_at >= date_from,
             StoreCreditLedger.created_at < date_to,
-            ~select(rev.id).where(rev.reversal_of_id == StoreCreditLedger.id).exists(),
+            self._not_reversed(),
         )
         rows = await self._session.execute(stmt)
         return [(int(c), Decimal(a)) for c, a in rows]
@@ -321,7 +331,11 @@ class StoreCreditRepository:
         return {int(c): t for c, t in rows}
 
     async def credit_lots(self, store_id: int) -> list[tuple[int, Decimal, datetime]]:
-        """全部 CREDIT 發出列：(contact_id, 金額, 發出時間)，依會員/時間排序（β FIFO 用）。"""
+        """「未被沖正」CREDIT 發出列：(contact_id, 金額, 發出時間)，依會員/時間排序（β FIFO 用）。
+
+        ACQUISITION_ROLLBACK 沖正後的 CREDIT 已非有效負債，排除以免 β 分母含已撤回額度
+        （Codex SC-5b P2）。
+        """
         stmt = (
             select(
                 StoreCreditLedger.contact_id,
@@ -331,6 +345,7 @@ class StoreCreditRepository:
             .where(
                 StoreCreditLedger.store_id == store_id,
                 StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+                self._not_reversed(),
             )
             .order_by(StoreCreditLedger.contact_id, StoreCreditLedger.created_at)
         )

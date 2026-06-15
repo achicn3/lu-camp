@@ -89,6 +89,15 @@ async def test_take_rate_premium_and_alpha(
     # take_rate：1 筆購物金 + 1 筆現金 → 0.5。
     await _add_acquisition(db_session, store_id, mgr_id, member_id, "STORE_CREDIT")
     await _add_acquisition(db_session, store_id, mgr_id, member_id, "CASH")
+    # 寄售收購非撥款選擇 → 不計入 take_rate 分母（仍 0.5；Codex P2）。
+    await db_session.execute(
+        text(
+            "INSERT INTO acquisitions (store_id, type, contact_id, clerk_user_id, payout_method,"
+            " created_at, updated_at)"
+            " VALUES (:sid, 'CONSIGNMENT', :cid, :uid, 'CASH', now(), now())"
+        ),
+        {"sid": store_id, "cid": member_id, "uid": mgr_id},
+    )
     # avg_premium：cash_equivalent 1000、溢價 0.1 → signed 1100 → (1100−1000)/1000 = 0.1。
     svc = StoreCreditService(db_session)
     await svc.credit(
@@ -123,6 +132,44 @@ async def test_take_rate_premium_and_alpha(
     assert body["delta_per_1000"] is None
     assert set(body["estimate_fields"]) == {"beta_retention", "alpha_incremental", "delta_per_1000"}
     assert "代理法" in body["alpha_method_note"]
+
+
+async def test_rolled_back_credit_excluded_from_avg_premium(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """ACQUISITION_ROLLBACK 沖正後的 CREDIT 非有效負債 → 不計入 avg_premium（Codex P2）。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    # 有效入帳：等值 1000、溢價 0.1 → signed 1100。
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.1"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    # 另一筆入帳後被收購回滾沖正 → 應自 avg_premium 剔除。
+    rolled = await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal("0"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=2,
+        created_by=mgr_id,
+    )
+    await svc.reverse(
+        store_id,
+        rolled.id,
+        source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+        source_id=2,
+        created_by=mgr_id,
+    )
+    body = (await client.get(EFF_URL, params=WIDE_RANGE, headers=_auth(mgr))).json()
+    # 只認有效入帳：(1100−1000)/1000 = 0.1（若含被回滾者則為 100/1500≈0.0667）。
+    assert body["avg_premium_rate"] == "0.1"
 
 
 async def test_voided_redemption_excluded_from_alpha_and_beta_consumed(
