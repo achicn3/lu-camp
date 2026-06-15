@@ -273,10 +273,14 @@ class PremiumSuggestionService:
     async def _compute_beta(
         self, store_id: int, *, now: datetime, n_days: int
     ) -> Decimal | None:
-        """β 沉澱率（點時值）：發出滿 n_days 的 CREDIT 中，FIFO 後仍未沖銷的金額比例。"""
+        """β 沉澱率（點時值）：發出滿 n_days 的 CREDIT 中，FIFO 後仍未沖銷的金額比例。
+
+        consumed 取「對 CREDIT 的淨銷售沖銷」（已作廢回補的兌付淨額為 0），而非
+        positive_sum−balance——後者會把 SALE_VOID 沖正算成正向、令已回補額度誤判為已消耗
+        （Codex SC-5b P2）。
+        """
         lots_rows = await self._repo.credit_lots(store_id)
-        positive_sum = await self._repo.positive_sum_by_contact(store_id)
-        balances = await self._repo.balances_by_contact(store_id)
+        consumed_by_contact = await self._repo.redeemed_against_credit_by_contact(store_id)
         per_contact: dict[int, list[IssuedLot]] = defaultdict(list)
         for contact_id, amount, issued_at in lots_rows:
             per_contact[contact_id].append(IssuedLot(amount=amount, issued_at=issued_at))
@@ -284,8 +288,7 @@ class PremiumSuggestionService:
         aged_unredeemed = Decimal(0)
         aged_total = Decimal(0)
         for contact_id, lots in per_contact.items():
-            balance = balances.get(contact_id, Decimal(0))
-            consumed = positive_sum.get(contact_id, Decimal(0)) - balance
+            consumed = consumed_by_contact.get(contact_id, Decimal(0))
             unredeemed, total = member_aged_unredeemed(lots, consumed, now, n_days)
             aged_unredeemed += unredeemed
             aged_total += total

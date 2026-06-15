@@ -7,8 +7,9 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.modules.storecredit.models import (
     StoreCreditAccount,
@@ -258,17 +259,48 @@ class StoreCreditRepository:
     async def debits_in_period(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[tuple[int, Decimal]]:
-        """期間 DEBIT 兌付列：(contact_id, 絕對金額)，供 α 代理逐筆分類。"""
-        stmt = select(
-            StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount
-        ).where(
+        """期間「未被沖正」的 DEBIT 兌付列：(contact_id, 絕對金額)，供 α 代理逐筆分類。
+
+        已作廢銷售的 DEBIT 留在 append-only 帳本、另有 SALE_VOID 沖正回補——那筆兌付實際
+        未發生，必須排除，否則 redemption_count / α 被灌水（Codex SC-5b P2）。
+        """
+        rev = aliased(StoreCreditLedger)
+        stmt = select(StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount).where(
             StoreCreditLedger.store_id == store_id,
             StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
             StoreCreditLedger.created_at >= date_from,
             StoreCreditLedger.created_at < date_to,
+            ~select(rev.id).where(rev.reversal_of_id == StoreCreditLedger.id).exists(),
         )
         rows = await self._session.execute(stmt)
         return [(int(c), Decimal(a)) for c, a in rows]
+
+    async def redeemed_against_credit_by_contact(self, store_id: int) -> dict[int, Decimal]:
+        """各會員對 CREDIT 的「淨沖銷額」（β 沉澱率 FIFO 的 consumed）。
+
+        = Σ|DEBIT| − Σ SALE_VOID 沖正回補 = −Σ signed(DEBIT 或 SALE_VOID REVERSAL)。
+        作廢回補的兌付淨額為 0，故 β 不會把已回補的額度誤算為已消耗（Codex SC-5b P2）。
+        人工 ADJUSTMENT 不視為對 CREDIT lot 的兌付（β 只看銷售沖銷）。
+        """
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                func.coalesce(func.sum(-StoreCreditLedger.signed_amount), 0),
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                or_(
+                    StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
+                    and_(
+                        StoreCreditLedger.entry_type == StoreCreditEntryType.REVERSAL,
+                        StoreCreditLedger.source_type == StoreCreditSourceType.SALE_VOID,
+                    ),
+                ),
+            )
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): Decimal(v) for c, v in rows}
 
     async def earliest_credit_at_by_contacts(
         self, store_id: int, contact_ids: list[int]

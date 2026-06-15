@@ -17,6 +17,7 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.store.models import Store
+from app.modules.storecredit.repository import StoreCreditRepository
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import StoreCreditSourceType, UserRole
@@ -122,6 +123,42 @@ async def test_take_rate_premium_and_alpha(
     assert body["delta_per_1000"] is None
     assert set(body["estimate_fields"]) == {"beta_retention", "alpha_incremental", "delta_per_1000"}
     assert "代理法" in body["alpha_method_note"]
+
+
+async def test_voided_redemption_excluded_from_alpha_and_beta_consumed(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢的購物金兌付（DEBIT＋SALE_VOID 沖正）不得灌水 α，且 β 的 consumed 淨額為 0（P2）。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    await svc.debit(
+        store_id,
+        member_id,
+        amount=Decimal(200),
+        source_type=StoreCreditSourceType.SALE,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    # 作廢沖正回補（DEFERRABLE 守衛於真正 COMMIT 才驗，測試以 rollback 隔離不觸發）。
+    await svc.reverse_for_sale_void(store_id, 1, created_by=mgr_id)
+
+    # α：唯一兌付已被沖正 → 不計入 → redemption_count 0、alpha null。
+    body = (await client.get(EFF_URL, params=WIDE_RANGE, headers=_auth(mgr))).json()
+    assert body["redemption_count"] == 0
+    assert body["alpha_incremental"] is None
+
+    # β consumed：DEBIT 200 − SALE_VOID 沖正 200 = 淨 0（已回補不算消耗）。
+    consumed = await StoreCreditRepository(db_session).redeemed_against_credit_by_contact(store_id)
+    assert consumed.get(member_id, Decimal(0)) == Decimal(0)
 
 
 async def test_gross_margin_and_excess_spend(
