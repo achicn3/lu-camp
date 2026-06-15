@@ -7,12 +7,15 @@ DB trigger（見 `LEDGER_IMMUTABLE_DDL`，metadata 建表與 migration 共用同
 餘額必須隨時可從帳本重算（I-3 對帳）。
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     DDL,
+    Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -26,6 +29,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -186,6 +190,32 @@ class StoreCreditAccount(Base, TimestampMixin):
     contact_id: Mapped[int] = mapped_column(index=True)  # 複合 FK 見 __table_args__
     balance: Mapped[Decimal] = mapped_column(Numeric(12, 0), default=Decimal(0))
     version: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class StoreCreditSuggestionLog(Base):
+    """每日溢價建議值落庫（docs/16 §1.4/§6.2）：每店每日一筆衍生快照。
+
+    純函數引擎 + 每店每日唯一鍵 → 當日首次讀取 lazy 計算後冪等落庫，重複觸發無害
+    （不需排程基建）。本表為可重算的衍生資料，不設不可變 trigger；`engine_version`
+    讓歷史建議可回溯到當時規則。`window_metrics`/`constraint_values` 為審計用 JSONB 快照。
+    """
+
+    __tablename__ = "store_credit_suggestion_log"
+    __table_args__ = (
+        UniqueConstraint("store_id", "for_date", name="uq_store_credit_suggestion_log_day"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    for_date: Mapped[date] = mapped_column(Date)
+    window_metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    constraint_values: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    suggested_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4))
+    engine_version: Mapped[str] = mapped_column(String(40))
+    insufficient_data: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 # 帳本不可變 trigger（I-1 雙保險）：metadata 建表（測試）與 migration 共用同一定義，
