@@ -53,6 +53,51 @@ def test_params_fills_missing_keys_with_defaults() -> None:
     assert sparse.window_weights["yesterday"] == Decimal("0.05")
 
 
+def test_params_malformed_values_fall_back_to_defaults() -> None:
+    """畸形 store_credit_engine_params（settings 任意 dict）不可 500，退回預設（SC-5b P2）。"""
+    bad = EngineParams.from_mapping(
+        {
+            "liability_ladder": [1.5],  # 長度不符
+            "take_rate_band": "nope",  # 非 list
+            "alpha_safety": "abc",  # 非數字
+            "beta_n_days": "x",  # 非整數
+            "window_weights": [1, 2, 3],  # 非 dict
+        }
+    )
+    assert bad.liability_ladder == (Decimal("1.5"), Decimal("2.0"), Decimal("2.5"))
+    assert bad.take_rate_band == (Decimal("0.30"), Decimal("0.70"))
+    assert bad.alpha_safety == Decimal("0.8")
+    assert bad.beta_n_days == 180
+    assert bad.window_weights["d30"] == Decimal("0.40")
+
+
+def test_params_non_numeric_list_element_falls_back() -> None:
+    bad = EngineParams.from_mapping({"liability_ladder": [1.5, "oops", 2.5]})
+    assert bad.liability_ladder == (Decimal("1.5"), Decimal("2.0"), Decimal("2.5"))
+
+
+def test_params_non_dict_raw_yields_all_defaults() -> None:
+    # 整個欄位被存成非 dict（理論上不該發生）也不能 500。
+    params = EngineParams.from_mapping(None)  # type: ignore[arg-type]
+    assert params.cold_start_min_days == 30
+    assert params.take_rate_band == (Decimal("0.30"), Decimal("0.70"))
+
+
+def test_malformed_params_still_produce_a_suggestion() -> None:
+    """端點層級保證：壞設定下引擎仍回有效建議（退回預設後正常計算），不丟例外。"""
+    params = EngineParams.from_mapping({"liability_ladder": [1.5], "take_rate_band": [0.3]})
+    result = suggest_premium_rate(
+        windows={"d30": WindowMetrics(take_rate=Decimal("0.5"))},
+        current_rate=Decimal("0.10"),
+        premium_min=Decimal("0.00"),
+        premium_max=Decimal("0.20"),
+        liability_ratio=Decimal("1.75"),
+        params=params,
+        data_days=400,
+    )
+    assert result.suggested_rate == Decimal("0.0500")  # 1.5<ratio≤2.0 → 現值×0.5
+
+
 # ── 冷啟動 ──
 
 

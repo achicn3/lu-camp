@@ -16,7 +16,7 @@ service 層完成後以 `WindowMetrics` 餵入。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 # 規則版本：演算法/權重語意改變時遞增，使落庫的歷史建議可回溯到當時規則。
@@ -73,26 +73,25 @@ class EngineParams:
 
     @classmethod
     def from_mapping(cls, raw: dict[str, Any]) -> EngineParams:
-        """從 JSONB（值為 JSON number/list）解析為具型別參數；缺鍵以 §1.5 預設補。
+        """從 JSONB（值為 JSON number/list）解析為具型別參數；缺鍵/格式不符以 §1.5 預設補。
 
-        以 str() 轉 Decimal，避免 float 二進位表示誤差污染決定性。
+        `store_credit_engine_params` 在 settings 為任意 dict（PATCH 不逐欄驗結構），故本解析
+        必須對畸形值（缺鍵、長度不符的 list、非數字、非 dict）一律退回文件化預設——
+        絕不可因壞設定而讓引擎/端點 500（Codex SC-5b P2）。以 str() 轉 Decimal 保決定性。
         """
-        weights_raw = raw.get("window_weights") or {}
-        weights = {
-            name: _dec(weights_raw.get(name, _DEFAULT_WEIGHTS[name])) for name in WINDOW_NAMES
-        }
-        ladder_raw = raw.get("liability_ladder") or [1.5, 2.0, 2.5]
-        band_raw = raw.get("take_rate_band") or [0.30, 0.70]
+        source = raw if isinstance(raw, dict) else {}
+        ladder = _safe_num_list(source.get("liability_ladder"), [1.5, 2.0, 2.5], 3)
+        band = _safe_num_list(source.get("take_rate_band"), [0.30, 0.70], 2)
         return cls(
-            window_weights=weights,
-            alpha_safety=_dec(raw.get("alpha_safety", 0.8)),
-            liability_ladder=(_dec(ladder_raw[0]), _dec(ladder_raw[1]), _dec(ladder_raw[2])),
-            take_rate_band=(_dec(band_raw[0]), _dec(band_raw[1])),
-            take_rate_step=_dec(raw.get("take_rate_step", 0.025)),
-            beta_n_days=int(raw.get("beta_n_days", 180)),
-            alpha_proxy_window_days=int(raw.get("alpha_proxy_window_days", 90)),
-            cold_start_min_days=int(raw.get("cold_start_min_days", 30)),
-            yoy_halfwidth_days=int(raw.get("yoy_halfwidth_days", 15)),
+            window_weights=_safe_weights(source.get("window_weights")),
+            alpha_safety=_safe_dec(source.get("alpha_safety"), Decimal("0.8")),
+            liability_ladder=(ladder[0], ladder[1], ladder[2]),
+            take_rate_band=(band[0], band[1]),
+            take_rate_step=_safe_dec(source.get("take_rate_step"), Decimal("0.025")),
+            beta_n_days=_safe_int(source.get("beta_n_days"), 180),
+            alpha_proxy_window_days=_safe_int(source.get("alpha_proxy_window_days"), 90),
+            cold_start_min_days=_safe_int(source.get("cold_start_min_days"), 30),
+            yoy_halfwidth_days=_safe_int(source.get("yoy_halfwidth_days"), 15),
         )
 
 
@@ -118,10 +117,44 @@ class EngineResult:
 
 
 def _dec(value: Any) -> Decimal:
-    """安全轉 Decimal（經 str()，避免 float 表示誤差）。"""
-    if isinstance(value, Decimal):
-        return value
+    """安全轉 Decimal（經 str()，避免 float 二進位表示誤差；Decimal 入參亦正確）。"""
     return Decimal(str(value))
+
+
+def _safe_dec(value: Any, default: Decimal) -> Decimal:
+    """轉 Decimal；缺值（None）或無法解析 → 退回 default（畸形設定不可 500）。"""
+    if value is None:
+        return default
+    try:
+        return _dec(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int) -> int:
+    """轉 int；缺值或無法解析 → 退回 default。"""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_num_list(value: Any, default: list[float], length: int) -> list[Decimal]:
+    """轉長度為 length 的 Decimal list；非 list／長度不符／含非數字 → 退回 default。"""
+    if isinstance(value, list) and len(value) == length:
+        try:
+            return [_dec(item) for item in value]
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+    return [_dec(item) for item in default]
+
+
+def _safe_weights(value: Any) -> dict[str, Decimal]:
+    """各視窗權重；非 dict 或某鍵畸形 → 該鍵退回文件化預設。"""
+    source = value if isinstance(value, dict) else {}
+    return {name: _safe_dec(source.get(name), _DEFAULT_WEIGHTS[name]) for name in WINDOW_NAMES}
 
 
 def _fmt(value: Decimal) -> str:
