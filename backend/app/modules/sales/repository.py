@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.sales.models import Sale, SaleLine, SaleTender
@@ -101,3 +101,24 @@ class SalesRepository:
         stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
         result = await self._session.scalars(stmt)
         return list(result)
+
+    async def count_sales_by_buyer(self, store_id: int, contact_id: int) -> int:
+        """某買方的銷售總筆數（會員中心 overview）。"""
+        stmt = (
+            select(func.count())
+            .select_from(Sale)
+            .where(Sale.store_id == store_id, Sale.buyer_contact_id == contact_id)
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def count_lines_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
+        """各銷售單的明細行數（單一 grouped 查詢，避免 N+1；空 → {}）。"""
+        if not sale_ids:
+            return {}
+        stmt = (
+            select(SaleLine.sale_id, func.count())
+            .where(SaleLine.sale_id.in_(sale_ids))
+            .group_by(SaleLine.sale_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {sale_id: count for sale_id, count in rows.all()}

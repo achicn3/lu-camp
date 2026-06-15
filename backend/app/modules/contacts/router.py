@@ -1,5 +1,6 @@
 """contacts 路由：I/O 與權限，業務邏輯委派 service。"""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.contacts.member_schemas import (
+    MemberConsignmentsRead,
+    MemberOverviewRead,
+    MemberPurchaseDetailRead,
+    MemberPurchaseRead,
+    MemberSourcedItemRead,
+)
+from app.modules.contacts.member_service import MemberService
 from app.modules.contacts.schemas import (
     ContactCreate,
     ContactLookupRequest,
@@ -137,3 +146,108 @@ async def reveal_national_id(
             status_code=status.HTTP_404_NOT_FOUND, detail="找不到聯絡人或無 national_id"
         )
     return ContactNationalIdRead(national_id=national_id)
+
+
+# ── 會員中心（唯讀彙整；T21-c、docs/17 §5.2）：CLERK+ 可讀，store 範圍 ──
+
+_NOT_FOUND = "找不到會員"
+
+
+@router.get(
+    "/{contact_id}/overview", response_model=MemberOverviewRead, operation_id="getMemberOverview"
+)
+async def get_member_overview(
+    contact_id: int, session: SessionDep, user: CurrentUserDep
+) -> MemberOverviewRead:
+    """會員彙整：profile + 點數 + 購物金餘額 + PENDING 寄售應撥 + 計數 + 近期消費。"""
+    overview = await MemberService(session).get_overview(user.store_id, contact_id)
+    if overview is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+    return overview
+
+
+@router.get(
+    "/{contact_id}/purchases",
+    response_model=list[MemberPurchaseRead],
+    operation_id="listMemberPurchases",
+)
+async def list_member_purchases(
+    contact_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    date_from: Annotated[datetime | None, Query(alias="from")] = None,
+    date_to: Annotated[datetime | None, Query(alias="to")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[MemberPurchaseRead]:
+    """會員消費紀錄（可選日期區間、分頁；日期過濾在分頁前套用）。"""
+    rows = await MemberService(session).list_purchases(
+        user.store_id, contact_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
+    )
+    if rows is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+    return rows
+
+
+@router.get(
+    "/{contact_id}/purchases/{sale_id}",
+    response_model=MemberPurchaseDetailRead,
+    operation_id="getMemberPurchaseDetail",
+)
+async def get_member_purchase_detail(
+    contact_id: int, sale_id: int, session: SessionDep, user: CurrentUserDep
+) -> MemberPurchaseDetailRead:
+    """單筆消費明細（lines + tenders）；非該會員的單 → 404。"""
+    detail = await MemberService(session).get_purchase_detail(user.store_id, contact_id, sale_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到該會員的消費紀錄")
+    return detail
+
+
+@router.get(
+    "/{contact_id}/consignments",
+    response_model=MemberConsignmentsRead,
+    operation_id="listMemberConsignments",
+)
+async def list_member_consignments(
+    contact_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> MemberConsignmentsRead:
+    """會員寄售品 + 結算狀態 + PENDING 應撥加總（裁示 #2）。"""
+    result = await MemberService(session).list_consignments(
+        user.store_id, contact_id, limit=limit, offset=offset
+    )
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+    return result
+
+
+@router.get(
+    "/{contact_id}/sourced-items",
+    response_model=list[MemberSourcedItemRead],
+    operation_id="listMemberSourcedItems",
+)
+async def list_member_sourced_items(
+    contact_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    source_type: Annotated[str | None, Query()] = None,
+    item_status: Annotated[str | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[MemberSourcedItemRead]:
+    """會員帶來的商品（買斷+寄售合併清單；可選 source_type/status 過濾；不含成本）。"""
+    rows = await MemberService(session).list_sourced_items(
+        user.store_id,
+        contact_id,
+        source_type=source_type,
+        status=item_status,
+        limit=limit,
+        offset=offset,
+    )
+    if rows is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_NOT_FOUND)
+    return rows

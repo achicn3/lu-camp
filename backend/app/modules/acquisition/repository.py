@@ -57,6 +57,13 @@ class AcquisitionRepository:
         result = await self._session.scalars(stmt)
         return list(result)
 
+    async def list_ids_by_contact(self, store_id: int, contact_id: int) -> list[int]:
+        """某來源的所有收購單 id（id-only，供 sourced-items 反查買斷庫存；不載全列）。"""
+        stmt = select(Acquisition.id).where(
+            Acquisition.store_id == store_id, Acquisition.contact_id == contact_id
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def get(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         stmt = select(Acquisition).where(
             Acquisition.id == acquisition_id, Acquisition.store_id == store_id

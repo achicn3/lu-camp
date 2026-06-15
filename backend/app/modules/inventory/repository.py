@@ -132,50 +132,86 @@ class InventoryRepository:
         return list((await self._session.scalars(stmt)).all())
 
     async def list_serialized_by_acquisitions(
-        self, store_id: int, acquisition_ids: list[int], *, limit: int, offset: int
+        self,
+        store_id: int,
+        acquisition_ids: list[int],
+        *,
+        status: SerializedItemStatus | None = None,
+        limit: int,
+        offset: int,
     ) -> list[SerializedItem]:
         """指定收購單下的**買斷**序號品（空 ids → 空清單）。
 
         僅回 OWNED：收購單可能是 BUYOUT 或 CONSIGNMENT，後者的寄售品另經 consignor 路徑
         呈現；不過濾會使寄售品在「買斷來源」與「寄售」兩路重複/誤分類（Codex review P2）。
+        status 於 DB 層過濾，確保分頁正確（過濾在 LIMIT 之前）。
         """
         if not acquisition_ids:
             return []
-        stmt = (
-            select(SerializedItem)
-            .where(
-                SerializedItem.store_id == store_id,
-                SerializedItem.acquisition_id.in_(acquisition_ids),
-                SerializedItem.ownership_type == OwnershipType.OWNED,
-            )
-            .order_by(SerializedItem.id.desc())
-            .limit(limit)
-            .offset(offset)
+        stmt = select(SerializedItem).where(
+            SerializedItem.store_id == store_id,
+            SerializedItem.acquisition_id.in_(acquisition_ids),
+            SerializedItem.ownership_type == OwnershipType.OWNED,
         )
+        if status is not None:
+            stmt = stmt.where(SerializedItem.status == status)
+        stmt = stmt.order_by(SerializedItem.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def list_bulk_lots_by_acquisitions(
-        self, store_id: int, acquisition_ids: list[int], *, limit: int, offset: int
+        self,
+        store_id: int,
+        acquisition_ids: list[int],
+        *,
+        status: BulkLotStatus | None = None,
+        limit: int,
+        offset: int,
     ) -> list[BulkLot]:
         """指定收購單下的**買斷/自有**散裝堆（空 ids → 空清單）。
 
         僅回 consignor_id IS NULL（店家自有）：寄售散裝另經 consignor 路徑呈現，
-        避免重複/誤分類（Codex review P2）。
+        避免重複/誤分類（Codex review P2）。status 於 DB 層過濾（分頁正確）。
         """
         if not acquisition_ids:
             return []
-        stmt = (
-            select(BulkLot)
-            .where(
-                BulkLot.store_id == store_id,
-                BulkLot.acquisition_id.in_(acquisition_ids),
-                BulkLot.consignor_id.is_(None),
-            )
-            .order_by(BulkLot.id.desc())
-            .limit(limit)
-            .offset(offset)
+        stmt = select(BulkLot).where(
+            BulkLot.store_id == store_id,
+            BulkLot.acquisition_id.in_(acquisition_ids),
+            BulkLot.consignor_id.is_(None),
+        )
+        if status is not None:
+            stmt = stmt.where(BulkLot.status == status)
+        stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_serialized_ids_by_consignor(
+        self, store_id: int, consignor_id: int
+    ) -> list[int]:
+        """某寄售人的所有寄售序號品 id（id-only，供結算 PENDING 應撥聚合；不載全列）。"""
+        stmt = select(SerializedItem.id).where(
+            SerializedItem.store_id == store_id,
+            SerializedItem.consignor_id == consignor_id,
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_serialized_by_consignor(self, store_id: int, consignor_id: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.consignor_id == consignor_id,
+            )
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def count_bulk_lots_by_consignor(self, store_id: int, consignor_id: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(BulkLot)
+            .where(BulkLot.store_id == store_id, BulkLot.consignor_id == consignor_id)
+        )
+        return int(await self._session.scalar(stmt) or 0)
 
     # ── 數量型商品 ──
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:

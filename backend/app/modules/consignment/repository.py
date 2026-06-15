@@ -41,6 +41,31 @@ class ConsignmentRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def latest_settlement_by_item_ids(
+        self, store_id: int, serialized_item_ids: list[int]
+    ) -> dict[int, ConsignmentSettlement]:
+        """每序號品**最新一筆**結算（DISTINCT ON，一 SQL 取回；空 ids → {}）。
+
+        以 DISTINCT ON (serialized_item_id) + ORDER BY id desc 取每品最新列——避免「全域
+        limit 被單一品的多筆結算吃光、餓死其他品」（Codex review P2）。
+        """
+        if not serialized_item_ids:
+            return {}
+        stmt = (
+            select(ConsignmentSettlement)
+            .where(
+                ConsignmentSettlement.store_id == store_id,
+                ConsignmentSettlement.serialized_item_id.in_(serialized_item_ids),
+            )
+            .distinct(ConsignmentSettlement.serialized_item_id)
+            .order_by(
+                ConsignmentSettlement.serialized_item_id,
+                ConsignmentSettlement.id.desc(),
+            )
+        )
+        rows = (await self._session.scalars(stmt)).all()
+        return {s.serialized_item_id: s for s in rows}
+
     async def pending_payout_total_by_item_ids(
         self, store_id: int, serialized_item_ids: list[int]
     ) -> Decimal:

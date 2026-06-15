@@ -247,6 +247,26 @@ export interface paths {
         patch: operations["updateContact"];
         trace?: never;
     };
+    "/api/v1/contacts/{contact_id}/consignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Member Consignments
+         * @description 會員寄售品 + 結算狀態 + PENDING 應撥加總（裁示 #2）。
+         */
+        get: operations["listMemberConsignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts/{contact_id}/national-id": {
         parameters: {
             query?: never;
@@ -256,6 +276,86 @@ export interface paths {
         };
         /** Reveal National Id */
         get: operations["revealContactNationalId"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Member Overview
+         * @description 會員彙整：profile + 點數 + 購物金餘額 + PENDING 寄售應撥 + 計數 + 近期消費。
+         */
+        get: operations["getMemberOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/purchases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Member Purchases
+         * @description 會員消費紀錄（可選日期區間、分頁；日期過濾在分頁前套用）。
+         */
+        get: operations["listMemberPurchases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/purchases/{sale_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Member Purchase Detail
+         * @description 單筆消費明細（lines + tenders）；非該會員的單 → 404。
+         */
+        get: operations["getMemberPurchaseDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/{contact_id}/sourced-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Member Sourced Items
+         * @description 會員帶來的商品（買斷+寄售合併清單；可選 source_type/status 過濾；不含成本）。
+         */
+        get: operations["listMemberSourcedItems"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1027,6 +1127,162 @@ export interface components {
             contact_id: number;
             /** Name */
             name: string;
+        };
+        /**
+         * MemberConsignmentRead
+         * @description 寄售品一列；若為已售序號品則帶其結算資訊。
+         */
+        MemberConsignmentRead: {
+            /** Code */
+            code: string;
+            /** Commission Amount */
+            commission_amount?: string | null;
+            /** Commission Pct */
+            commission_pct: number | null;
+            /** Gross */
+            gross?: string | null;
+            /** Item Status */
+            item_status: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Payout Amount */
+            payout_amount?: string | null;
+            /** Settlement Status */
+            settlement_status?: string | null;
+            /** Sold Date */
+            sold_date?: string | null;
+        };
+        /**
+         * MemberConsignmentsRead
+         * @description 寄售品清單 + PENDING 應撥加總（裁示 #2）。
+         */
+        MemberConsignmentsRead: {
+            /** Items */
+            items: components["schemas"]["MemberConsignmentRead"][];
+            /** Pending Payout Total */
+            pending_payout_total: string;
+        };
+        /** MemberOverviewCounts */
+        MemberOverviewCounts: {
+            /** Consigned Items */
+            consigned_items: number;
+            /** Purchases */
+            purchases: number;
+        };
+        /**
+         * MemberOverviewRead
+         * @description 會員中心彙整（非全史：計數 + 加總 + 近期摘要；裁示：勿 eager load 全史）。
+         */
+        MemberOverviewRead: {
+            contact: components["schemas"]["ContactRead"];
+            counts: components["schemas"]["MemberOverviewCounts"];
+            /** Member Points */
+            member_points: number;
+            /** Pending Consignment Payout */
+            pending_consignment_payout: string;
+            /** Recent Purchases */
+            recent_purchases: components["schemas"]["MemberPurchaseRead"][];
+            /** Store Credit Balance */
+            store_credit_balance: string;
+        };
+        /**
+         * MemberPurchaseDetailRead
+         * @description 單筆消費明細（lines + tenders）。
+         */
+        MemberPurchaseDetailRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Invoice Status */
+            invoice_status: string;
+            /** Lines */
+            lines: components["schemas"]["MemberPurchaseLineRead"][];
+            /** Payment Method */
+            payment_method: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Status */
+            status: string;
+            /** Subtotal */
+            subtotal: string;
+            /** Tax */
+            tax: string;
+            /** Tenders */
+            tenders: components["schemas"]["MemberPurchaseTenderRead"][];
+            /** Total */
+            total: string;
+        };
+        /** MemberPurchaseLineRead */
+        MemberPurchaseLineRead: {
+            /** Description */
+            description: string;
+            /** Line Total */
+            line_total: string;
+            /** Line Type */
+            line_type: string;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * MemberPurchaseRead
+         * @description 消費紀錄一列（清單摘要）。
+         */
+        MemberPurchaseRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Invoice Status */
+            invoice_status: string;
+            /** Line Count */
+            line_count: number;
+            /** Payment Method */
+            payment_method: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Status */
+            status: string;
+            /** Total */
+            total: string;
+        };
+        /** MemberPurchaseTenderRead */
+        MemberPurchaseTenderRead: {
+            /** Amount */
+            amount: string;
+            /** Tender Type */
+            tender_type: string;
+        };
+        /**
+         * MemberSourcedItemRead
+         * @description 會員帶來的商品（買斷+寄售合併清單；不含成本）。
+         */
+        MemberSourcedItemRead: {
+            /** Acquisition Id */
+            acquisition_id: number | null;
+            /** Code */
+            code: string;
+            /**
+             * Intake Date
+             * Format: date-time
+             */
+            intake_date: string;
+            /** Kind */
+            kind: string;
+            /** Listed Price */
+            listed_price: string;
+            /** Name */
+            name: string;
+            /** Source Type */
+            source_type: string;
+            /** Status */
+            status: string;
         };
         /**
          * OwnershipType
@@ -1966,6 +2222,40 @@ export interface operations {
             };
         };
     };
+    listMemberConsignments: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberConsignmentsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     revealContactNationalId: {
         parameters: {
             query?: never;
@@ -1984,6 +2274,141 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContactNationalIdRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getMemberOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOverviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMemberPurchases: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberPurchaseRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getMemberPurchaseDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contact_id: number;
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberPurchaseDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMemberSourcedItems: {
+        parameters: {
+            query?: {
+                source_type?: string | null;
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberSourcedItemRead"][];
                 };
             };
             /** @description Validation Error */

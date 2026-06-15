@@ -58,3 +58,9 @@ class ConsignmentService:
     ) -> Decimal:
         """指定序號品的 PENDING 應撥加總（會員中心 overview/consignments；docs/17 §3.4）。"""
         return await self._repo.pending_payout_total_by_item_ids(store_id, serialized_item_ids)
+
+    async def latest_settlement_by_item_ids(
+        self, store_id: int, serialized_item_ids: list[int]
+    ) -> dict[int, ConsignmentSettlement]:
+        """每序號品最新一筆結算（會員中心寄售清單；一 SQL 取回，不漏品）。"""
+        return await self._repo.latest_settlement_by_item_ids(store_id, serialized_item_ids)

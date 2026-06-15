@@ -258,6 +258,14 @@ contacts (MemberService facade, read-only aggregation)
 > **彙整端點一律分頁、嚴禁 eager load 全史（裁示）**：`overview` 僅取「計數 + 近期 N 筆摘要 +
 > 加總值（餘額、PENDING 應撥）」，各清單端點 `limit/offset` 分頁；不得在單一請求拉取會員全部
 > 消費/寄售/來源歷史。加總值（購物金餘額、PENDING 應撥）以 SQL 聚合計算，不在應用層載全部列再加總。
+>
+> **跨來源合併分頁語意（裁示 2026-06-15，務實 best-effort；Codex review）**：`sourced-items`
+> 與 `consignments` 合併「序號品 + 散裝」兩異質來源；因模組邊界不可跨表 `UNION`，採
+> 「各來源各取至 `offset+limit` → 合併 → 切片」。全序固定為 **`(intake_date desc, 來源序, id desc)`**，
+> 與各來源的 `id desc` 取列一致、且確定性可重現。**已知界線**：當大量列共用**同一 `intake_date`**
+> （如同交易建立、`now()` 交易內恆定）且恰跨分頁 `cap` 邊界時，邊界該頁的成員為 best-effort
+> （順序仍確定）。一般情況（`intake_date` 隨 `id` 單調遞增）分頁正確。若日後需嚴格精確分頁，
+> 再改為 per-source/per-kind 各自 SQL 分頁（API 分區回應）。
 
 ### 5.3 Schema（重點欄位；皆遮罩 PII）
 - `ContactUpdate`：所有欄位 optional（PATCH 語意）；`national_id` 變更走 §4；`roles` 限既有 enum。

@@ -373,6 +373,14 @@ class SalesService:
             offset=offset,
         )
 
+    async def count_purchases_by_buyer(self, store_id: int, contact_id: int) -> int:
+        """某會員的消費總筆數（會員中心 overview headline）。"""
+        return await self._repo.count_sales_by_buyer(store_id, contact_id)
+
+    async def line_counts_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
+        """各銷售單明細行數（會員中心消費清單；單一查詢避免 N+1）。"""
+        return await self._repo.count_lines_for_sales(sale_ids)
+
     # ── 作廢 ──
     async def void_sale(self, sale: Sale, actor_user_id: int) -> Sale:
         """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/現金。

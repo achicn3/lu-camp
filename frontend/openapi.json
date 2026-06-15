@@ -1400,6 +1400,402 @@
         "title": "MemberBalanceRow",
         "type": "object"
       },
+      "MemberConsignmentRead": {
+        "description": "寄售品一列；若為已售序號品則帶其結算資訊。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "commission_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Amount"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
+          "gross": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross"
+          },
+          "item_status": {
+            "title": "Item Status",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "payout_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Amount"
+          },
+          "settlement_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settlement Status"
+          },
+          "sold_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Date"
+          }
+        },
+        "required": [
+          "kind",
+          "code",
+          "name",
+          "item_status",
+          "commission_pct"
+        ],
+        "title": "MemberConsignmentRead",
+        "type": "object"
+      },
+      "MemberConsignmentsRead": {
+        "description": "寄售品清單 + PENDING 應撥加總（裁示 #2）。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemberConsignmentRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "pending_payout_total": {
+            "title": "Pending Payout Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "pending_payout_total"
+        ],
+        "title": "MemberConsignmentsRead",
+        "type": "object"
+      },
+      "MemberOverviewCounts": {
+        "properties": {
+          "consigned_items": {
+            "title": "Consigned Items",
+            "type": "integer"
+          },
+          "purchases": {
+            "title": "Purchases",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "purchases",
+          "consigned_items"
+        ],
+        "title": "MemberOverviewCounts",
+        "type": "object"
+      },
+      "MemberOverviewRead": {
+        "description": "會員中心彙整（非全史：計數 + 加總 + 近期摘要；裁示：勿 eager load 全史）。",
+        "properties": {
+          "contact": {
+            "$ref": "#/components/schemas/ContactRead"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/MemberOverviewCounts"
+          },
+          "member_points": {
+            "title": "Member Points",
+            "type": "integer"
+          },
+          "pending_consignment_payout": {
+            "title": "Pending Consignment Payout",
+            "type": "string"
+          },
+          "recent_purchases": {
+            "items": {
+              "$ref": "#/components/schemas/MemberPurchaseRead"
+            },
+            "title": "Recent Purchases",
+            "type": "array"
+          },
+          "store_credit_balance": {
+            "title": "Store Credit Balance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contact",
+          "member_points",
+          "store_credit_balance",
+          "pending_consignment_payout",
+          "counts",
+          "recent_purchases"
+        ],
+        "title": "MemberOverviewRead",
+        "type": "object"
+      },
+      "MemberPurchaseDetailRead": {
+        "description": "單筆消費明細（lines + tenders）。",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "invoice_status": {
+            "title": "Invoice Status",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/MemberPurchaseLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "payment_method": {
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "subtotal": {
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "string"
+          },
+          "tenders": {
+            "items": {
+              "$ref": "#/components/schemas/MemberPurchaseTenderRead"
+            },
+            "title": "Tenders",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "created_at",
+          "subtotal",
+          "tax",
+          "total",
+          "payment_method",
+          "status",
+          "invoice_status",
+          "lines",
+          "tenders"
+        ],
+        "title": "MemberPurchaseDetailRead",
+        "type": "object"
+      },
+      "MemberPurchaseLineRead": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "line_total": {
+            "title": "Line Total",
+            "type": "string"
+          },
+          "line_type": {
+            "title": "Line Type",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_type",
+          "description",
+          "qty",
+          "unit_price",
+          "line_total"
+        ],
+        "title": "MemberPurchaseLineRead",
+        "type": "object"
+      },
+      "MemberPurchaseRead": {
+        "description": "消費紀錄一列（清單摘要）。",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "invoice_status": {
+            "title": "Invoice Status",
+            "type": "string"
+          },
+          "line_count": {
+            "title": "Line Count",
+            "type": "integer"
+          },
+          "payment_method": {
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sale_id",
+          "created_at",
+          "total",
+          "payment_method",
+          "status",
+          "invoice_status",
+          "line_count"
+        ],
+        "title": "MemberPurchaseRead",
+        "type": "object"
+      },
+      "MemberPurchaseTenderRead": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "tender_type": {
+            "title": "Tender Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tender_type",
+          "amount"
+        ],
+        "title": "MemberPurchaseTenderRead",
+        "type": "object"
+      },
+      "MemberSourcedItemRead": {
+        "description": "會員帶來的商品（買斷+寄售合併清單；不含成本）。",
+        "properties": {
+          "acquisition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "intake_date": {
+            "format": "date-time",
+            "title": "Intake Date",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_type": {
+            "title": "Source Type",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_type",
+          "kind",
+          "code",
+          "name",
+          "status",
+          "acquisition_id",
+          "intake_date",
+          "listed_price"
+        ],
+        "title": "MemberSourcedItemRead",
+        "type": "object"
+      },
       "OwnershipType": {
         "description": "序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。",
         "enum": [
@@ -3456,6 +3852,77 @@
         ]
       }
     },
+    "/api/v1/contacts/{contact_id}/consignments": {
+      "get": {
+        "description": "會員寄售品 + 結算狀態 + PENDING 應撥加總（裁示 #2）。",
+        "operationId": "listMemberConsignments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberConsignmentsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Member Consignments",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
     "/api/v1/contacts/{contact_id}/national-id": {
       "get": {
         "operationId": "revealContactNationalId",
@@ -3498,6 +3965,327 @@
           }
         ],
         "summary": "Reveal National Id",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/overview": {
+      "get": {
+        "description": "會員彙整：profile + 點數 + 購物金餘額 + PENDING 寄售應撥 + 計數 + 近期消費。",
+        "operationId": "getMemberOverview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOverviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Member Overview",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/purchases": {
+      "get": {
+        "description": "會員消費紀錄（可選日期區間、分頁；日期過濾在分頁前套用）。",
+        "operationId": "listMemberPurchases",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberPurchaseRead"
+                  },
+                  "title": "Response Listmemberpurchases",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Member Purchases",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/purchases/{sale_id}": {
+      "get": {
+        "description": "單筆消費明細（lines + tenders）；非該會員的單 → 404。",
+        "operationId": "getMemberPurchaseDetail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberPurchaseDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Member Purchase Detail",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/{contact_id}/sourced-items": {
+      "get": {
+        "description": "會員帶來的商品（買斷+寄售合併清單；可選 source_type/status 過濾；不含成本）。",
+        "operationId": "listMemberSourcedItems",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contact_id",
+            "required": true,
+            "schema": {
+              "title": "Contact Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberSourcedItemRead"
+                  },
+                  "title": "Response Listmembersourceditems",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Member Sourced Items",
         "tags": [
           "contacts"
         ]

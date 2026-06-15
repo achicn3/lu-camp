@@ -212,20 +212,44 @@ class InventoryService:
         )
 
     async def list_serialized_by_acquisitions(
-        self, store_id: int, acquisition_ids: list[int], *, limit: int = 200, offset: int = 0
+        self,
+        store_id: int,
+        acquisition_ids: list[int],
+        *,
+        status: SerializedItemStatus | None = None,
+        limit: int = 200,
+        offset: int = 0,
     ) -> list[SerializedItem]:
-        """指定收購單下的序號品（會員中心買斷來源；空 ids → []；docs/17 §5.2）。"""
+        """指定收購單下的序號品（會員中心買斷來源；可選 status；空 ids → []；docs/17 §5.2）。"""
         return await self._repo.list_serialized_by_acquisitions(
-            store_id, acquisition_ids, limit=limit, offset=offset
+            store_id, acquisition_ids, status=status, limit=limit, offset=offset
         )
 
     async def list_bulk_lots_by_acquisitions(
-        self, store_id: int, acquisition_ids: list[int], *, limit: int = 200, offset: int = 0
+        self,
+        store_id: int,
+        acquisition_ids: list[int],
+        *,
+        status: BulkLotStatus | None = None,
+        limit: int = 200,
+        offset: int = 0,
     ) -> list[BulkLot]:
-        """指定收購單下的散裝堆（會員中心買斷/散裝來源；空 ids → []；docs/17 §5.2）。"""
+        """指定收購單下的散裝堆（會員中心買斷來源；可選 status；空 ids → []；§5.2）。"""
         return await self._repo.list_bulk_lots_by_acquisitions(
-            store_id, acquisition_ids, limit=limit, offset=offset
+            store_id, acquisition_ids, status=status, limit=limit, offset=offset
         )
+
+    async def list_serialized_ids_by_consignor(
+        self, store_id: int, consignor_id: int
+    ) -> list[int]:
+        """某寄售人的寄售序號品 id（供結算 PENDING 應撥聚合；id-only；docs/17 §3.4）。"""
+        return await self._repo.list_serialized_ids_by_consignor(store_id, consignor_id)
+
+    async def count_serialized_by_consignor(self, store_id: int, consignor_id: int) -> int:
+        return await self._repo.count_serialized_by_consignor(store_id, consignor_id)
+
+    async def count_bulk_lots_by_consignor(self, store_id: int, consignor_id: int) -> int:
+        return await self._repo.count_bulk_lots_by_consignor(store_id, consignor_id)
 
     async def sell_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.SOLD)
