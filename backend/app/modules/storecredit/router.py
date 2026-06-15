@@ -4,6 +4,7 @@
 service 進行；API 只暴露查詢與 MANAGER 校正。
 """
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -12,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.storecredit.schemas import (
+    PremiumSuggestionResponse,
     StoreCreditAdjustRequest,
     StoreCreditBalanceRead,
     StoreCreditEntryRead,
 )
 from app.modules.storecredit.service import StoreCreditService
+from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.shared.exceptions import (
     InsufficientStoreCredit,
     StoreCreditConflict,
@@ -24,6 +27,8 @@ from app.shared.exceptions import (
 )
 
 router = APIRouter(prefix="/contacts/{contact_id}/store-credit", tags=["store-credit"])
+# 店層級（非 contact 範圍）的購物金端點；與上方 router 分開掛載。
+store_router = APIRouter(prefix="/store-credit", tags=["store-credit"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
@@ -87,3 +92,24 @@ async def adjust_store_credit(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return StoreCreditEntryRead.model_validate(entry)
+
+
+@store_router.get(
+    "/premium-suggestion/today",
+    response_model=PremiumSuggestionResponse,
+    operation_id="storeCreditPremiumSuggestionToday",
+)
+async def premium_suggestion_today(
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> PremiumSuggestionResponse:
+    """當日溢價建議值（docs/16 §6.2）：當日首次讀取時 lazy 計算並冪等落庫，否則回既有快照。
+
+    建議值僅供面板顯示與人工確認，**永不自動生效**（POS 開帳面板/設定頁皆用此端點）。
+    """
+    now = datetime.now(UTC)
+    log = await PremiumSuggestionService(session).suggestion_today(
+        user.store_id, today=now.date(), now=now
+    )
+    await session.commit()
+    return PremiumSuggestionResponse.model_validate(log)

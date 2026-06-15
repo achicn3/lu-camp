@@ -79,3 +79,15 @@ class ConsignmentRepository:
         )
         total = await self._session.scalar(stmt)
         return Decimal(total if total is not None else 0)
+
+    async def commission_total_for_sales(
+        self, store_id: int, sale_ids: list[int]
+    ) -> Decimal:
+        """指定銷售集合的寄售抽成合計（SC-5b 毛利推導；唯讀，店家收入只認抽成）。"""
+        if not sale_ids:
+            return Decimal(0)
+        stmt = select(func.coalesce(func.sum(ConsignmentSettlement.commission_amount), 0)).where(
+            ConsignmentSettlement.store_id == store_id,
+            ConsignmentSettlement.sale_id.in_(sale_ids),
+        )
+        return Decimal((await self._session.scalar(stmt)) or 0)

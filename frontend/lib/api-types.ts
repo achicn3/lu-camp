@@ -422,6 +422,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/store-credit/effectiveness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Effectiveness
+         * @description §5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。
+         */
+        get: operations["storeCreditEffectiveness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/store-credit/flows": {
         parameters: {
             query?: never;
@@ -606,6 +626,28 @@ export interface paths {
         };
         /** Premium Rate History */
         get: operations["getPremiumRateHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/store-credit/premium-suggestion/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Premium Suggestion Today
+         * @description 當日溢價建議值（docs/16 §6.2）：當日首次讀取時 lazy 計算並冪等落庫，否則回既有快照。
+         *
+         *     建議值僅供面板顯示與人工確認，**永不自動生效**（POS 開帳面板/設定頁皆用此端點）。
+         */
+        get: operations["storeCreditPremiumSuggestionToday"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1029,6 +1071,51 @@ export interface components {
             /** Source Note */
             source_note?: string | null;
         };
+        /**
+         * EffectivenessReport
+         * @description §5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。
+         */
+        EffectivenessReport: {
+            /** Alpha Incremental */
+            alpha_incremental: string | null;
+            /** Alpha Method Note */
+            alpha_method_note: string;
+            /** Alpha Sample Insufficient */
+            alpha_sample_insufficient: boolean;
+            /** Avg Premium Rate */
+            avg_premium_rate: string | null;
+            /** Beta Retention */
+            beta_retention: string | null;
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /** Delta Per 1000 */
+            delta_per_1000: string | null;
+            /** Estimate Fields */
+            estimate_fields: string[];
+            /** Excess Spend Rate */
+            excess_spend_rate: string | null;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gross Margin M */
+            gross_margin_m: string | null;
+            /** Redemption Count */
+            redemption_count: number;
+            /** Store Id */
+            store_id: number;
+            /** Take Rate */
+            take_rate: string | null;
+        };
         /** FlowRow */
         FlowRow: {
             /** Issued */
@@ -1326,6 +1413,36 @@ export interface components {
             reason: string | null;
             /** Suggested Rate At Change */
             suggested_rate_at_change: string | null;
+        };
+        /**
+         * PremiumSuggestionResponse
+         * @description 當日溢價建議值（GET /store-credit/premium-suggestion/today；docs/16 §6.2）。
+         *
+         *     建議值**永不自動生效**：本回應供面板顯示與人工確認。`window_metrics`/`constraint_values`
+         *     為審計用 JSONB 快照（各視窗指標、綜合值、正規化權重、各約束中間值）。溢價率以字串表示。
+         */
+        PremiumSuggestionResponse: {
+            /** Constraint Values */
+            constraint_values: {
+                [key: string]: unknown;
+            };
+            /** Engine Version */
+            engine_version: string;
+            /**
+             * For Date
+             * Format: date
+             */
+            for_date: string;
+            /** Insufficient Data */
+            insufficient_data: boolean;
+            /** Store Id */
+            store_id: number;
+            /** Suggested Rate */
+            suggested_rate: string;
+            /** Window Metrics */
+            window_metrics: {
+                [key: string]: unknown;
+            };
         };
         /**
          * ReceiptHeaderRead
@@ -2513,6 +2630,39 @@ export interface operations {
             };
         };
     };
+    storeCreditEffectiveness: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectivenessReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     storeCreditFlows: {
         parameters: {
             query: {
@@ -2918,6 +3068,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditPremiumSuggestionToday: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PremiumSuggestionResponse"];
                 };
             };
         };

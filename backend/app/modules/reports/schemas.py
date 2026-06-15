@@ -69,3 +69,34 @@ class ReconciliationReport(BaseModel):
     ledger_total_outstanding: NTDAmount
     cached_total_outstanding: NTDAmount
     cached_total_trustworthy: bool
+
+
+# 比率欄（0–1 等小數）以字串序列化、缺樣本回 null（沿 NTDAmountOpt 風格）。
+Ratio = NTDAmountOpt
+
+# 估計值欄位（UI/報表須標示「估計值」；α 另標「代理法」）。
+ESTIMATE_FIELDS = ["beta_retention", "alpha_incremental", "delta_per_1000"]
+ALPHA_METHOD_NOTE = (
+    "α 為代理法估計值（docs/16 §5B-α）：以「兌付對應 CREDIT 入帳前的低頻/新會員消費」"
+    "近似新增傾向，無法驗證個體反事實；樣本不足時更不穩定，不得作為精確損益依據。"
+)
+
+
+class EffectivenessReport(BaseModel):
+    """§5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。"""
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    take_rate: Ratio
+    avg_premium_rate: Ratio
+    beta_retention: Ratio
+    excess_spend_rate: Ratio
+    alpha_incremental: Ratio
+    gross_margin_m: Ratio
+    delta_per_1000: Ratio
+    redemption_count: int
+    alpha_sample_insufficient: bool
+    estimate_fields: list[str]
+    alpha_method_note: str

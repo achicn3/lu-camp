@@ -4,13 +4,18 @@
 沿 D-1 模式）。餘額重算（SUM）供 I-3 對帳。
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import ColumnElement, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
-from app.modules.storecredit.models import StoreCreditAccount, StoreCreditLedger
+from app.modules.storecredit.models import (
+    StoreCreditAccount,
+    StoreCreditLedger,
+    StoreCreditSuggestionLog,
+)
 from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType
 
 
@@ -232,6 +237,147 @@ class StoreCreditRepository:
         )
         rows = await self._session.execute(stmt)
         return {int(c): Decimal(b) for c, b in rows}
+
+    # ── SC-5b §5B 指標查詢（read-only；docs/16 §5B）──
+
+    @staticmethod
+    def _not_reversed() -> ColumnElement[bool]:
+        """「該帳本列未被任何沖正列指向」的相關子查詢條件（沖正後原列不再代表有效負債/兌付）。"""
+        rev = aliased(StoreCreditLedger)
+        return ~select(rev.id).where(rev.reversal_of_id == StoreCreditLedger.id).exists()
+
+    async def credit_premium_components(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[Decimal, Decimal]:
+        """期間「未被沖正」CREDIT 列的 (Σ signed, Σ cash_equivalent)，供 avg_premium 計算。
+
+        ACQUISITION_ROLLBACK 沖正後原 CREDIT 已非有效負債，須排除否則 avg_premium 被高估
+        （Codex SC-5b P2）。
+        """
+        stmt = select(
+            func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
+            func.coalesce(func.sum(StoreCreditLedger.cash_equivalent), 0),
+        ).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+            StoreCreditLedger.created_at >= date_from,
+            StoreCreditLedger.created_at < date_to,
+            self._not_reversed(),
+        )
+        row = (await self._session.execute(stmt)).one()
+        return Decimal(row[0]), Decimal(row[1])
+
+    async def debits_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[int, Decimal]]:
+        """期間「未被沖正」的 DEBIT 兌付列：(contact_id, 絕對金額)，供 α 代理逐筆分類。
+
+        已作廢銷售的 DEBIT 留在 append-only 帳本、另有 SALE_VOID 沖正回補——那筆兌付實際
+        未發生，必須排除，否則 redemption_count / α 被灌水（Codex SC-5b P2）。
+        """
+        stmt = select(StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
+            StoreCreditLedger.created_at >= date_from,
+            StoreCreditLedger.created_at < date_to,
+            self._not_reversed(),
+        )
+        rows = await self._session.execute(stmt)
+        return [(int(c), Decimal(a)) for c, a in rows]
+
+    async def redeemed_against_credit_by_contact(self, store_id: int) -> dict[int, Decimal]:
+        """各會員對 CREDIT 的「淨沖銷額」（β 沉澱率 FIFO 的 consumed）。
+
+        = Σ|DEBIT| − Σ SALE_VOID 沖正回補 = −Σ signed(DEBIT 或 SALE_VOID REVERSAL)。
+        作廢回補的兌付淨額為 0，故 β 不會把已回補的額度誤算為已消耗（Codex SC-5b P2）。
+        人工 ADJUSTMENT 不視為對 CREDIT lot 的兌付（β 只看銷售沖銷）。
+        """
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                func.coalesce(func.sum(-StoreCreditLedger.signed_amount), 0),
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                or_(
+                    StoreCreditLedger.entry_type == StoreCreditEntryType.DEBIT,
+                    and_(
+                        StoreCreditLedger.entry_type == StoreCreditEntryType.REVERSAL,
+                        StoreCreditLedger.source_type == StoreCreditSourceType.SALE_VOID,
+                    ),
+                ),
+            )
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): Decimal(v) for c, v in rows}
+
+    async def earliest_credit_at_by_contacts(
+        self, store_id: int, contact_ids: list[int]
+    ) -> dict[int, datetime]:
+        """指定會員的最早 CREDIT 入帳時間（α 代理的「對應 CREDIT 入帳」參考時點，FIFO 近似）。"""
+        if not contact_ids:
+            return {}
+        stmt = (
+            select(StoreCreditLedger.contact_id, func.min(StoreCreditLedger.created_at))
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+                StoreCreditLedger.contact_id.in_(contact_ids),
+            )
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(c): t for c, t in rows}
+
+    async def credit_lots(self, store_id: int) -> list[tuple[int, Decimal, datetime]]:
+        """「未被沖正」CREDIT 發出列：(contact_id, 金額, 發出時間)，依會員/時間排序（β FIFO 用）。
+
+        ACQUISITION_ROLLBACK 沖正後的 CREDIT 已非有效負債，排除以免 β 分母含已撤回額度
+        （Codex SC-5b P2）。
+        """
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                StoreCreditLedger.signed_amount,
+                StoreCreditLedger.created_at,
+            )
+            .where(
+                StoreCreditLedger.store_id == store_id,
+                StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+                self._not_reversed(),
+            )
+            .order_by(StoreCreditLedger.contact_id, StoreCreditLedger.created_at)
+        )
+        rows = await self._session.execute(stmt)
+        return [(int(c), Decimal(a), t) for c, a, t in rows]
+
+    async def earliest_activity_at(self, store_id: int) -> datetime | None:
+        """本店最早一筆帳本時間（供引擎判冷啟動的資料天數；無帳本 → None）。"""
+        stmt = select(func.min(StoreCreditLedger.created_at)).where(
+            StoreCreditLedger.store_id == store_id
+        )
+        result: datetime | None = await self._session.scalar(stmt)
+        return result
+
+    # ── SC-5b 建議值落庫（docs/16 §1.4；每店每日唯一）──
+
+    async def get_suggestion_log(
+        self, store_id: int, for_date: date
+    ) -> StoreCreditSuggestionLog | None:
+        stmt = select(StoreCreditSuggestionLog).where(
+            StoreCreditSuggestionLog.store_id == store_id,
+            StoreCreditSuggestionLog.for_date == for_date,
+        )
+        result: StoreCreditSuggestionLog | None = await self._session.scalar(stmt)
+        return result
+
+    async def add_suggestion_log(
+        self, log: StoreCreditSuggestionLog
+    ) -> StoreCreditSuggestionLog:
+        self._session.add(log)
+        await self._session.flush()
+        return log
 
     async def flows(
         self,

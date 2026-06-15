@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.contacts.service import ContactService
 from app.modules.reports.schemas import (
+    ALPHA_METHOD_NOTE,
+    ESTIMATE_FIELDS,
     AgingBuckets,
+    EffectivenessReport,
     FlowRow,
     FlowsReport,
     LiabilityReport,
@@ -20,6 +23,7 @@ from app.modules.reports.schemas import (
 )
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
+from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 
 
 def _now() -> datetime:
@@ -38,6 +42,7 @@ class ReportsService:
         self._sc = StoreCreditService(session)
         self._contacts = ContactService(session)
         self._settings = StoreSettingsService(session)
+        self._suggestion = PremiumSuggestionService(session)
 
     async def liability(self, store_id: int) -> LiabilityReport:
         now = _now()
@@ -102,6 +107,32 @@ class ReportsService:
                 )
                 for row in rows
             ],
+        )
+
+    async def effectiveness(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> EffectivenessReport:
+        """§5B 效益指標（單期間）；β/α/Δ 為估計值，估計欄位於 estimate_fields 標明。"""
+        now = _now()
+        pm = await self._suggestion.effectiveness(
+            store_id, date_from=date_from, date_to=date_to, now=now
+        )
+        return EffectivenessReport(
+            generated_at=now,
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            take_rate=pm.take_rate,
+            avg_premium_rate=pm.avg_premium_rate,
+            beta_retention=pm.beta_retention,
+            excess_spend_rate=pm.excess_spend_rate,
+            alpha_incremental=pm.alpha_incremental,
+            gross_margin_m=pm.gross_margin_m,
+            delta_per_1000=pm.delta_per_1000,
+            redemption_count=pm.redemption_count,
+            alpha_sample_insufficient=pm.alpha_sample_insufficient,
+            estimate_fields=ESTIMATE_FIELDS,
+            alpha_method_note=ALPHA_METHOD_NOTE,
         )
 
     async def reconciliation(self, store_id: int) -> ReconciliationReport:

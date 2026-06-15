@@ -380,6 +380,39 @@ class SalesService:
     async def line_counts_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
         """各銷售單明細行數（會員中心消費清單；單一查詢避免 N+1）。"""
         return await self._repo.count_lines_for_sales(sale_ids)
+    # ── SC-5b §5B 唯讀彙總（供 storecredit 指標/引擎跨模組取數，§2 經 service）──
+
+    async def period_margin(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[str, Decimal]:
+        """期間毛利拆解：revenue（商品收入）、buyout_margin（買斷毛利）、寄售抽成。
+
+        買斷毛利＋商品收入由自有/寄售商品行推導（sales 經 inventory 成本，repo 唯讀 join）；
+        寄售抽成經 consignment service 依未作廢 sale_id 取（§2）。m = (買斷毛利＋抽成) ÷ 收入。
+        """
+        buyout_margin, revenue = await self._repo.goods_margin_and_revenue(
+            store_id, date_from, date_to
+        )
+        sale_ids = await self._repo.nonvoid_sale_ids(store_id, date_from, date_to)
+        commission = await self._consignment.commission_total_for_sales(store_id, sale_ids)
+        return {
+            "revenue": revenue,
+            "buyout_margin": buyout_margin,
+            "consignment_commission": commission,
+        }
+
+    async def excess_spend_components(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[str, Decimal]:
+        """含購物金 tender 的銷售：total（Σ含稅總額）、cash（Σ現金部分）；率=cash÷total。"""
+        total, cash = await self._repo.excess_spend_components(store_id, date_from, date_to)
+        return {"total": total, "cash": cash}
+
+    async def member_purchase_count(
+        self, store_id: int, contact_id: int, *, date_from: datetime, date_to: datetime
+    ) -> int:
+        """某會員在 [date_from, date_to) 的未作廢消費筆數（α 代理：CREDIT 入帳前 N 天消費紀錄）。"""
+        return await self._repo.member_purchase_count(store_id, contact_id, date_from, date_to)
 
     # ── 作廢 ──
     async def void_sale(self, sale: Sale, actor_user_id: int) -> Sale:
