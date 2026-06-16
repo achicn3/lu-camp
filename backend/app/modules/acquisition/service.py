@@ -44,6 +44,7 @@ from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     IdempotencyKeyConflict,
+    InvalidAcquisitionCategory,
     InvalidCommissionPct,
     InvalidPayoutSplit,
     NoOpenCashSession,
@@ -224,6 +225,9 @@ class AcquisitionService:
         if contact.national_id_enc is None:
             raise AcquisitionRequiresNationalId("收購/寄售對象必須有 national_id")
 
+        # F6 additive 持久化：category_id 須屬本店（跨店租戶守衛）。純讀檢查、先於任何寫入。
+        await self._validate_categories(store_id, data)
+
         payout_method = self._normalized_payout_method(data)
         if data.type == AcquisitionType.CONSIGNMENT and (
             payout_method != PayoutMethod.CASH or data.payout_split_cash is not None
@@ -349,6 +353,15 @@ class AcquisitionService:
             lot_code=lot_code,
         )
 
+    async def _validate_categories(self, store_id: int, data: AcquisitionCreate) -> None:
+        """檢查所有帶入的 category_id 屬本店（不屬→422）；FK 不分店，須在 service 守。"""
+        category_ids = {item.category_id for item in (data.items or []) if item.category_id}
+        if data.lot is not None and data.lot.category_id is not None:
+            category_ids.add(data.lot.category_id)
+        for category_id in category_ids:
+            if await self._inventory.get_category(store_id, category_id) is None:
+                raise InvalidAcquisitionCategory(f"分類 {category_id} 不屬於 store {store_id}")
+
     async def _create_serialized_items(
         self, store_id: int, contact_id: int, acquisition_id: int, data: AcquisitionCreate
     ) -> tuple[list[str], Decimal]:
@@ -387,6 +400,7 @@ class AcquisitionService:
                 consignor_id=consignor_id,
                 commission_pct=commission,
                 acquisition_id=acquisition_id,
+                category_id=item.category_id,
             )
             await self._inventory.record_stock_in(
                 store_id,
@@ -418,6 +432,7 @@ class AcquisitionService:
             brand_id=lot.brand_id,
             label=lot.label,
             acquisition_id=acquisition_id,
+            category_id=lot.category_id,
         )
         await self._inventory.record_stock_in(
             store_id,

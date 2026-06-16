@@ -102,6 +102,17 @@
             ],
             "title": "Brand Id"
           },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "commission_pct": {
             "anyOf": [
               {
@@ -183,6 +194,17 @@
               }
             ],
             "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
           },
           "label": {
             "anyOf": [
@@ -444,6 +466,41 @@
           "gt_365d"
         ],
         "title": "AgingBuckets",
+        "type": "object"
+      },
+      "BrandCreate": {
+        "description": "品牌建立（查無即建；同名 get_or_create 冪等）。",
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BrandCreate",
+        "type": "object"
+      },
+      "BrandRead": {
+        "description": "品牌輸出（收購頁 combobox）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "BrandRead",
         "type": "object"
       },
       "BulkAcquisitionBasis": {
@@ -877,6 +934,75 @@
           "reorder_point"
         ],
         "title": "CatalogProductRead",
+        "type": "object"
+      },
+      "CategoryCreate": {
+        "description": "分類建立（查無即建；未給 target 用店層級 default_margin_pct）。",
+        "properties": {
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "target_margin_pct": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Margin Pct"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CategoryCreate",
+        "type": "object"
+      },
+      "CategoryRead": {
+        "description": "分類輸出（收購頁 combobox；帶目標毛利率）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "target_margin_pct": {
+            "title": "Target Margin Pct",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "target_margin_pct"
+        ],
+        "title": "CategoryRead",
+        "type": "object"
+      },
+      "CategoryTargetUpdate": {
+        "description": "更新分類目標毛利率（manager）。",
+        "properties": {
+          "target_margin_pct": {
+            "maximum": 99.0,
+            "minimum": 0.0,
+            "title": "Target Margin Pct",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target_margin_pct"
+        ],
+        "title": "CategoryTargetUpdate",
         "type": "object"
       },
       "ContactCreate": {
@@ -2068,6 +2194,136 @@
           "constraint_values"
         ],
         "title": "PremiumSuggestionResponse",
+        "type": "object"
+      },
+      "PricingRuleRead": {
+        "description": "分類×成色帶 定價規則輸出（收購定價輔助讀取）。",
+        "properties": {
+          "condition_band": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "discount_ceiling_pct": {
+            "title": "Discount Ceiling Pct",
+            "type": "integer"
+          },
+          "min_margin_pct": {
+            "title": "Min Margin Pct",
+            "type": "integer"
+          },
+          "min_price_multiple": {
+            "title": "Min Price Multiple",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition_band",
+          "discount_ceiling_pct",
+          "min_margin_pct",
+          "min_price_multiple"
+        ],
+        "title": "PricingRuleRead",
+        "type": "object"
+      },
+      "PricingRuleUpdateItem": {
+        "properties": {
+          "condition_band": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "discount_ceiling_pct": {
+            "maximum": 99.0,
+            "minimum": 0.0,
+            "title": "Discount Ceiling Pct",
+            "type": "integer"
+          },
+          "min_margin_pct": {
+            "maximum": 99.0,
+            "minimum": 0.0,
+            "title": "Min Margin Pct",
+            "type": "integer"
+          },
+          "min_price_multiple": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Min Price Multiple"
+          }
+        },
+        "required": [
+          "condition_band",
+          "discount_ceiling_pct",
+          "min_margin_pct",
+          "min_price_multiple"
+        ],
+        "title": "PricingRuleUpdateItem",
+        "type": "object"
+      },
+      "PricingRulesUpdate": {
+        "description": "批次更新分類各成色帶規則（manager）。",
+        "properties": {
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/PricingRuleUpdateItem"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "title": "PricingRulesUpdate",
+        "type": "object"
+      },
+      "ProductModelCreate": {
+        "description": "型號建立（歸屬指定品牌；同品牌同名 get_or_create 冪等）。",
+        "properties": {
+          "brand_id": {
+            "title": "Brand Id",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "brand_id",
+          "name"
+        ],
+        "title": "ProductModelCreate",
+        "type": "object"
+      },
+      "ProductModelRead": {
+        "description": "型號輸出（收購頁 combobox；選型號帶出其品牌）。",
+        "properties": {
+          "brand_id": {
+            "title": "Brand Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "brand_id",
+          "name"
+        ],
+        "title": "ProductModelRead",
         "type": "object"
       },
       "ReceiptHeaderRead": {
@@ -3307,6 +3563,122 @@
         ]
       }
     },
+    "/api/v1/brands": {
+      "get": {
+        "operationId": "listBrands",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BrandRead"
+                  },
+                  "title": "Response Listbrands",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Brands",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "post": {
+        "description": "建立品牌（同名 get_or_create 冪等）；store 範圍。",
+        "operationId": "createBrand",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrandCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Brand",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/bulk-lots": {
       "get": {
         "operationId": "listBulkLots",
@@ -3735,6 +4107,291 @@
           }
         ],
         "summary": "List Catalog",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "operationId": "listCategories",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryRead"
+                  },
+                  "title": "Response Listcategories",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Categories",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "post": {
+        "description": "建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。",
+        "operationId": "createCategory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Category",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/categories/{category_id}": {
+      "patch": {
+        "description": "更新分類目標毛利率（MANAGER）。",
+        "operationId": "updateCategoryTarget",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category_id",
+            "required": true,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryTargetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Category Target",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/categories/{category_id}/pricing-rules": {
+      "get": {
+        "operationId": "listCategoryPricingRules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category_id",
+            "required": true,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingRuleRead"
+                  },
+                  "title": "Response Listcategorypricingrules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Pricing Rules",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "put": {
+        "description": "批次更新分類各成色帶定價規則（MANAGER）。",
+        "operationId": "updateCategoryPricingRules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category_id",
+            "required": true,
+            "schema": {
+              "title": "Category Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingRulesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingRuleRead"
+                  },
+                  "title": "Response Updatecategorypricingrules",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Pricing Rules",
         "tags": [
           "inventory"
         ]
@@ -4635,6 +5292,138 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/product-models": {
+      "get": {
+        "operationId": "listProductModels",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 150,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductModelRead"
+                  },
+                  "title": "Response Listproductmodels",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Product Models",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "post": {
+        "description": "建立型號（歸屬指定品牌；同品牌同名 get_or_create 冪等）。品牌須屬本店。",
+        "operationId": "createProductModel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductModelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Product Model",
+        "tags": [
+          "inventory"
         ]
       }
     },

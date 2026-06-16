@@ -13,11 +13,13 @@ from app.modules.inventory.models import (
     Brand,
     BulkLot,
     CatalogProduct,
+    Category,
+    CategoryPricingRule,
     ProductModel,
     SerializedItem,
     StockMovement,
 )
-from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus
+from app.shared.enums import BulkLotStatus, Grade, OwnershipType, SerializedItemStatus
 
 
 class InventoryRepository:
@@ -37,8 +39,11 @@ class InventoryRepository:
     async def get_or_create_product_model(
         self, store_id: int, brand_id: int, name: str
     ) -> ProductModel:
+        # 以 (store, brand, name) 去重：同名型號可分屬不同品牌（autocomplete 建立時按品牌歸屬）。
         stmt = select(ProductModel).where(
-            ProductModel.store_id == store_id, ProductModel.name == name
+            ProductModel.store_id == store_id,
+            ProductModel.brand_id == brand_id,
+            ProductModel.name == name,
         )
         model: ProductModel | None = await self._session.scalar(stmt)
         if model is None:
@@ -46,6 +51,83 @@ class InventoryRepository:
             self._session.add(model)
             await self._session.flush()
         return model
+
+    async def list_brands(self, store_id: int, *, q: str | None, limit: int) -> list[Brand]:
+        stmt = select(Brand).where(Brand.store_id == store_id)
+        if q:
+            stmt = stmt.where(Brand.name.ilike(f"%{q}%"))
+        stmt = stmt.order_by(Brand.name).limit(limit)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def get_brand(self, store_id: int, brand_id: int) -> Brand | None:
+        stmt = select(Brand).where(Brand.id == brand_id, Brand.store_id == store_id)
+        result: Brand | None = await self._session.scalar(stmt)
+        return result
+
+    async def list_product_models(
+        self, store_id: int, *, brand_id: int | None, q: str | None, limit: int
+    ) -> list[ProductModel]:
+        stmt = select(ProductModel).where(ProductModel.store_id == store_id)
+        if brand_id is not None:
+            stmt = stmt.where(ProductModel.brand_id == brand_id)
+        if q:
+            stmt = stmt.where(ProductModel.name.ilike(f"%{q}%"))
+        stmt = stmt.order_by(ProductModel.name).limit(limit)
+        return list((await self._session.scalars(stmt)).all())
+
+    # ── 分類 / 定價規則 ──
+    async def get_category_by_name(self, store_id: int, name: str) -> Category | None:
+        stmt = select(Category).where(Category.store_id == store_id, Category.name == name)
+        result: Category | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_category(self, store_id: int, category_id: int) -> Category | None:
+        stmt = select(Category).where(Category.id == category_id, Category.store_id == store_id)
+        result: Category | None = await self._session.scalar(stmt)
+        return result
+
+    async def add_category(self, category: Category) -> Category:
+        self._session.add(category)
+        await self._session.flush()
+        return category
+
+    async def list_categories(
+        self, store_id: int, *, q: str | None, limit: int
+    ) -> list[Category]:
+        stmt = select(Category).where(Category.store_id == store_id)
+        if q:
+            stmt = stmt.where(Category.name.ilike(f"%{q}%"))
+        stmt = stmt.order_by(Category.name).limit(limit)
+        return list((await self._session.scalars(stmt)).all())
+
+    async def add_pricing_rule(self, rule: CategoryPricingRule) -> CategoryPricingRule:
+        self._session.add(rule)
+        await self._session.flush()
+        return rule
+
+    async def list_pricing_rules(
+        self, store_id: int, category_id: int
+    ) -> list[CategoryPricingRule]:
+        stmt = (
+            select(CategoryPricingRule)
+            .where(
+                CategoryPricingRule.store_id == store_id,
+                CategoryPricingRule.category_id == category_id,
+            )
+            .order_by(CategoryPricingRule.condition_band)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def get_pricing_rule(
+        self, store_id: int, category_id: int, condition_band: Grade
+    ) -> CategoryPricingRule | None:
+        stmt = select(CategoryPricingRule).where(
+            CategoryPricingRule.store_id == store_id,
+            CategoryPricingRule.category_id == category_id,
+            CategoryPricingRule.condition_band == condition_band,
+        )
+        result: CategoryPricingRule | None = await self._session.scalar(stmt)
+        return result
 
     # ── 序號單品 ──
     async def add_serialized(self, item: SerializedItem) -> SerializedItem:

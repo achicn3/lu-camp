@@ -9,9 +9,17 @@ from app.modules.inventory.models import (
     Brand,
     BulkLot,
     CatalogProduct,
+    Category,
+    CategoryPricingRule,
     ProductModel,
     SerializedItem,
     StockMovement,
+)
+from app.modules.inventory.pricing_defaults import (
+    DEFAULT_DISCOUNT_CEILING_PCT,
+    DEFAULT_MIN_MARGIN_PCT,
+    DEFAULT_MIN_PRICE_MULTIPLE,
+    PRICING_BANDS,
 )
 from app.modules.inventory.repository import InventoryRepository
 from app.shared.enums import (
@@ -45,6 +53,96 @@ class InventoryService:
     ) -> ProductModel:
         return await self._repo.get_or_create_product_model(store_id, brand_id, name)
 
+    async def list_brands(
+        self, store_id: int, *, q: str | None = None, limit: int = 50
+    ) -> list[Brand]:
+        return await self._repo.list_brands(store_id, q=q, limit=limit)
+
+    async def get_brand(self, store_id: int, brand_id: int) -> Brand | None:
+        return await self._repo.get_brand(store_id, brand_id)
+
+    async def list_product_models(
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None = None,
+        q: str | None = None,
+        limit: int = 50,
+    ) -> list[ProductModel]:
+        return await self._repo.list_product_models(
+            store_id, brand_id=brand_id, q=q, limit=limit
+        )
+
+    # ── 分類 / 定價規則 ──
+    async def list_categories(
+        self, store_id: int, *, q: str | None = None, limit: int = 50
+    ) -> list[Category]:
+        return await self._repo.list_categories(store_id, q=q, limit=limit)
+
+    async def get_category(self, store_id: int, category_id: int) -> Category | None:
+        return await self._repo.get_category(store_id, category_id)
+
+    async def get_or_create_category(
+        self, store_id: int, name: str, *, default_target_margin_pct: int
+    ) -> Category:
+        """查無即建分類；建立時 seed 各成色帶 v1 定價規則（同名回既有，冪等）。"""
+        existing = await self._repo.get_category_by_name(store_id, name)
+        if existing is not None:
+            return existing
+        category = await self._repo.add_category(
+            Category(store_id=store_id, name=name, target_margin_pct=default_target_margin_pct)
+        )
+        for band in PRICING_BANDS:
+            await self._repo.add_pricing_rule(
+                CategoryPricingRule(
+                    store_id=store_id,
+                    category_id=category.id,
+                    condition_band=band,
+                    discount_ceiling_pct=DEFAULT_DISCOUNT_CEILING_PCT,
+                    min_margin_pct=DEFAULT_MIN_MARGIN_PCT,
+                    min_price_multiple=DEFAULT_MIN_PRICE_MULTIPLE,
+                )
+            )
+        return category
+
+    async def update_category_target(
+        self, store_id: int, category_id: int, target_margin_pct: int
+    ) -> Category | None:
+        """更新分類目標毛利率（manager；router 驗權）。不存在回 None。"""
+        category = await self._repo.get_category(store_id, category_id)
+        if category is None:
+            return None
+        category.target_margin_pct = target_margin_pct
+        await self._session.flush()
+        return category
+
+    async def list_pricing_rules(
+        self, store_id: int, category_id: int
+    ) -> list[CategoryPricingRule]:
+        return await self._repo.list_pricing_rules(store_id, category_id)
+
+    async def update_pricing_rules(
+        self,
+        store_id: int,
+        category_id: int,
+        updates: list[tuple[Grade, int, int, Decimal]],
+    ) -> list[CategoryPricingRule] | None:
+        """批次更新該分類各成色帶規則（manager）。分類不存在回 None；未知成色帶略過。
+
+        updates：(condition_band, discount_ceiling_pct, min_margin_pct, min_price_multiple)。
+        """
+        if await self._repo.get_category(store_id, category_id) is None:
+            return None
+        for band, ceiling, margin, multiple in updates:
+            rule = await self._repo.get_pricing_rule(store_id, category_id, band)
+            if rule is None:
+                continue
+            rule.discount_ceiling_pct = ceiling
+            rule.min_margin_pct = margin
+            rule.min_price_multiple = multiple
+        await self._session.flush()
+        return await self._repo.list_pricing_rules(store_id, category_id)
+
     # ── 序號單品 ──
     async def create_serialized_item(
         self,
@@ -61,6 +159,7 @@ class InventoryService:
         consignor_id: int | None = None,
         commission_pct: int | None = None,
         acquisition_id: int | None = None,
+        category_id: int | None = None,
     ) -> SerializedItem:
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
@@ -83,6 +182,7 @@ class InventoryService:
             consignor_id=consignor_id,
             commission_pct=commission_pct,
             acquisition_id=acquisition_id,
+            category_id=category_id,
         )
         return await self._repo.add_serialized(item)
 
@@ -276,6 +376,7 @@ class InventoryService:
         consignor_id: int | None = None,
         label: str | None = None,
         acquisition_id: int | None = None,
+        category_id: int | None = None,
     ) -> BulkLot:
         if grade != Grade.E:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
@@ -296,6 +397,7 @@ class InventoryService:
             consignor_id=consignor_id,
             label=label,
             acquisition_id=acquisition_id,
+            category_id=category_id,
         )
         return await self._repo.add_bulk_lot(lot)
 

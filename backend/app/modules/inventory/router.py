@@ -11,15 +11,30 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user
-from app.modules.inventory.schemas import BulkLotRead, CatalogProductRead, SerializedItemRead
+from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.inventory.schemas import (
+    BrandCreate,
+    BrandRead,
+    BulkLotRead,
+    CatalogProductRead,
+    CategoryCreate,
+    CategoryRead,
+    CategoryTargetUpdate,
+    PricingRuleRead,
+    PricingRulesUpdate,
+    ProductModelCreate,
+    ProductModelRead,
+    SerializedItemRead,
+)
 from app.modules.inventory.service import InventoryService
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus
 
 router = APIRouter(tags=["inventory"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
 
 
 @router.get(
@@ -94,6 +109,157 @@ async def get_bulk_lot_by_code(
     if lot is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此識別碼的散裝堆")
     return BulkLotRead.model_validate(lot)
+
+
+# ── 品牌 / 型號（收購頁 combobox；查無即建）──
+
+
+@router.get("/brands", response_model=list[BrandRead], operation_id="listBrands")
+async def list_brands(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[BrandRead]:
+    brands = await InventoryService(session).list_brands(user.store_id, q=q, limit=limit)
+    return [BrandRead.model_validate(brand) for brand in brands]
+
+
+@router.post("/brands", response_model=BrandRead, operation_id="createBrand")
+async def create_brand(
+    payload: BrandCreate, session: SessionDep, user: CurrentUserDep
+) -> BrandRead:
+    """建立品牌（同名 get_or_create 冪等）；store 範圍。"""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="品牌名稱不可空白"
+        )
+    brand = await InventoryService(session).get_or_create_brand(user.store_id, name)
+    await session.commit()
+    return BrandRead.model_validate(brand)
+
+
+@router.get(
+    "/product-models", response_model=list[ProductModelRead], operation_id="listProductModels"
+)
+async def list_product_models(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int | None, Query()] = None,
+    q: Annotated[str | None, Query(max_length=150)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[ProductModelRead]:
+    models = await InventoryService(session).list_product_models(
+        user.store_id, brand_id=brand_id, q=q, limit=limit
+    )
+    return [ProductModelRead.model_validate(model) for model in models]
+
+
+@router.post("/product-models", response_model=ProductModelRead, operation_id="createProductModel")
+async def create_product_model(
+    payload: ProductModelCreate, session: SessionDep, user: CurrentUserDep
+) -> ProductModelRead:
+    """建立型號（歸屬指定品牌；同品牌同名 get_or_create 冪等）。品牌須屬本店。"""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="型號名稱不可空白"
+        )
+    svc = InventoryService(session)
+    if await svc.get_brand(user.store_id, payload.brand_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到本店的此品牌")
+    model = await svc.get_or_create_product_model(user.store_id, payload.brand_id, name)
+    await session.commit()
+    return ProductModelRead.model_validate(model)
+
+
+# ── 分類 / 定價規則（收購頁定價骨幹）──
+
+
+@router.get("/categories", response_model=list[CategoryRead], operation_id="listCategories")
+async def list_categories(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[CategoryRead]:
+    cats = await InventoryService(session).list_categories(user.store_id, q=q, limit=limit)
+    return [CategoryRead.model_validate(cat) for cat in cats]
+
+
+@router.post("/categories", response_model=CategoryRead, operation_id="createCategory")
+async def create_category(
+    payload: CategoryCreate, session: SessionDep, user: CurrentUserDep
+) -> CategoryRead:
+    """建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。"""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="分類名稱不可空白"
+        )
+    default_margin = (
+        await StoreSettingsService(session).get_effective_settings(user.store_id)
+    ).default_margin_pct
+    target = payload.target_margin_pct if payload.target_margin_pct is not None else default_margin
+    category = await InventoryService(session).get_or_create_category(
+        user.store_id, name, default_target_margin_pct=target
+    )
+    await session.commit()
+    return CategoryRead.model_validate(category)
+
+
+@router.patch(
+    "/categories/{category_id}", response_model=CategoryRead, operation_id="updateCategoryTarget"
+)
+async def update_category_target(
+    category_id: int, payload: CategoryTargetUpdate, session: SessionDep, user: ManagerDep
+) -> CategoryRead:
+    """更新分類目標毛利率（MANAGER）。"""
+    category = await InventoryService(session).update_category_target(
+        user.store_id, category_id, payload.target_margin_pct
+    )
+    if category is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到本店的此分類")
+    await session.commit()
+    return CategoryRead.model_validate(category)
+
+
+@router.get(
+    "/categories/{category_id}/pricing-rules",
+    response_model=list[PricingRuleRead],
+    operation_id="listCategoryPricingRules",
+)
+async def list_pricing_rules(
+    category_id: int, session: SessionDep, user: CurrentUserDep
+) -> list[PricingRuleRead]:
+    svc = InventoryService(session)
+    if await svc.get_category(user.store_id, category_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到本店的此分類")
+    rules = await svc.list_pricing_rules(user.store_id, category_id)
+    return [PricingRuleRead.model_validate(rule) for rule in rules]
+
+
+@router.put(
+    "/categories/{category_id}/pricing-rules",
+    response_model=list[PricingRuleRead],
+    operation_id="updateCategoryPricingRules",
+)
+async def update_pricing_rules(
+    category_id: int, payload: PricingRulesUpdate, session: SessionDep, user: ManagerDep
+) -> list[PricingRuleRead]:
+    """批次更新分類各成色帶定價規則（MANAGER）。"""
+    updates = [
+        (r.condition_band, r.discount_ceiling_pct, r.min_margin_pct, r.min_price_multiple)
+        for r in payload.rules
+    ]
+    rules = await InventoryService(session).update_pricing_rules(
+        user.store_id, category_id, updates
+    )
+    if rules is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到本店的此分類")
+    await session.commit()
+    return [PricingRuleRead.model_validate(rule) for rule in rules]
 
 
 @router.get("/bulk-lots", response_model=list[BulkLotRead], operation_id="listBulkLots")

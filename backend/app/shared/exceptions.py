@@ -53,6 +53,10 @@ class AcquisitionRequiresNationalId(DomainError):
     """收購/寄售對象必須有 national_id（接 T4：SELLER/CONSIGNOR 必填）。"""
 
 
+class InvalidAcquisitionCategory(DomainError):
+    """收購品項的 category_id 不屬於本店（F6 additive 持久化的租戶守衛）。"""
+
+
 class DuplicateContact(DomainError):
     """編輯 national_id 時與同店他人既有 blind index 撞重（重複建檔，docs/17 §4.3）。"""
 

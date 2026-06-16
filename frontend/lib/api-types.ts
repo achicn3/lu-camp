@@ -59,6 +59,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/brands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Brands */
+        get: operations["listBrands"];
+        put?: never;
+        /**
+         * Create Brand
+         * @description 建立品牌（同名 get_or_create 冪等）；store 範圍。
+         */
+        post: operations["createBrand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-lots": {
         parameters: {
             query?: never;
@@ -181,6 +202,68 @@ export interface paths {
         /** List Catalog */
         get: operations["listCatalogProducts"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Categories */
+        get: operations["listCategories"];
+        put?: never;
+        /**
+         * Create Category
+         * @description 建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。
+         */
+        post: operations["createCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Category Target
+         * @description 更新分類目標毛利率（MANAGER）。
+         */
+        patch: operations["updateCategoryTarget"];
+        trace?: never;
+    };
+    "/api/v1/categories/{category_id}/pricing-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pricing Rules */
+        get: operations["listCategoryPricingRules"];
+        /**
+         * Update Pricing Rules
+         * @description 批次更新分類各成色帶定價規則（MANAGER）。
+         */
+        put: operations["updateCategoryPricingRules"];
         post?: never;
         delete?: never;
         options?: never;
@@ -416,6 +499,27 @@ export interface paths {
         get: operations["getHealth"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/product-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Product Models */
+        get: operations["listProductModels"];
+        put?: never;
+        /**
+         * Create Product Model
+         * @description 建立型號（歸屬指定品牌；同品牌同名 get_or_create 冪等）。品牌須屬本店。
+         */
+        post: operations["createProductModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -707,6 +811,8 @@ export interface components {
             acquisition_cost?: number | string | null;
             /** Brand Id */
             brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
             /** Commission Pct */
             commission_pct?: number | null;
             grade: components["schemas"]["Grade"];
@@ -727,6 +833,8 @@ export interface components {
             acquisition_cost: number | string;
             /** Brand Id */
             brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
             /** Label */
             label?: string | null;
             /** Name */
@@ -811,6 +919,24 @@ export interface components {
             gt_365d: string;
             /** Lt 30D */
             lt_30d: string;
+        };
+        /**
+         * BrandCreate
+         * @description 品牌建立（查無即建；同名 get_or_create 冪等）。
+         */
+        BrandCreate: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * BrandRead
+         * @description 品牌輸出（收購頁 combobox）。
+         */
+        BrandRead: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /**
          * BulkAcquisitionBasis
@@ -971,6 +1097,36 @@ export interface components {
             store_id: number;
             /** Unit Price */
             unit_price: string;
+        };
+        /**
+         * CategoryCreate
+         * @description 分類建立（查無即建；未給 target 用店層級 default_margin_pct）。
+         */
+        CategoryCreate: {
+            /** Name */
+            name: string;
+            /** Target Margin Pct */
+            target_margin_pct?: number | null;
+        };
+        /**
+         * CategoryRead
+         * @description 分類輸出（收購頁 combobox；帶目標毛利率）。
+         */
+        CategoryRead: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Target Margin Pct */
+            target_margin_pct: number;
+        };
+        /**
+         * CategoryTargetUpdate
+         * @description 更新分類目標毛利率（manager）。
+         */
+        CategoryTargetUpdate: {
+            /** Target Margin Pct */
+            target_margin_pct: number;
         };
         /**
          * ContactCreate
@@ -1443,6 +1599,59 @@ export interface components {
             window_metrics: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * PricingRuleRead
+         * @description 分類×成色帶 定價規則輸出（收購定價輔助讀取）。
+         */
+        PricingRuleRead: {
+            condition_band: components["schemas"]["Grade"];
+            /** Discount Ceiling Pct */
+            discount_ceiling_pct: number;
+            /** Min Margin Pct */
+            min_margin_pct: number;
+            /** Min Price Multiple */
+            min_price_multiple: string;
+        };
+        /** PricingRuleUpdateItem */
+        PricingRuleUpdateItem: {
+            condition_band: components["schemas"]["Grade"];
+            /** Discount Ceiling Pct */
+            discount_ceiling_pct: number;
+            /** Min Margin Pct */
+            min_margin_pct: number;
+            /** Min Price Multiple */
+            min_price_multiple: number | string;
+        };
+        /**
+         * PricingRulesUpdate
+         * @description 批次更新分類各成色帶規則（manager）。
+         */
+        PricingRulesUpdate: {
+            /** Rules */
+            rules: components["schemas"]["PricingRuleUpdateItem"][];
+        };
+        /**
+         * ProductModelCreate
+         * @description 型號建立（歸屬指定品牌；同品牌同名 get_or_create 冪等）。
+         */
+        ProductModelCreate: {
+            /** Brand Id */
+            brand_id: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * ProductModelRead
+         * @description 型號輸出（收購頁 combobox；選型號帶出其品牌）。
+         */
+        ProductModelRead: {
+            /** Brand Id */
+            brand_id: number;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /**
          * ReceiptHeaderRead
@@ -1951,6 +2160,71 @@ export interface operations {
             };
         };
     };
+    listBrands: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrandCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listBulkLots: {
         parameters: {
             query?: {
@@ -2160,6 +2434,172 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProductRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCategories: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCategoryTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryTargetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCategoryPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRuleRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCategoryPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingRulesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRuleRead"][];
                 };
             };
             /** @description Validation Error */
@@ -2626,6 +3066,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    listProductModels: {
+        parameters: {
+            query?: {
+                brand_id?: number | null;
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductModelRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createProductModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductModelCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductModelRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

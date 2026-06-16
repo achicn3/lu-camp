@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -47,12 +48,52 @@ class Brand(Base, TimestampMixin):
 
 class ProductModel(Base, TimestampMixin):
     __tablename__ = "product_models"
-    __table_args__ = (UniqueConstraint("store_id", "name", name="uq_product_models_store_name"),)
+    # 型號以 (store, brand, name) 唯一：不同品牌可有同名型號（F6 品牌範圍 autocomplete）。
+    __table_args__ = (
+        UniqueConstraint(
+            "store_id", "brand_id", "name", name="uq_product_models_store_brand_name"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     brand_id: Mapped[int] = mapped_column(ForeignKey("brands.id"), index=True)
     name: Mapped[str] = mapped_column(String(150))
+
+
+class Category(Base, TimestampMixin):
+    """分類（定價骨幹；docs/10 §/acquisition）：每店每名唯一，帶目標毛利率。"""
+
+    __tablename__ = "categories"
+    __table_args__ = (UniqueConstraint("store_id", "name", name="uq_categories_store_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    target_margin_pct: Mapped[int] = mapped_column()  # 目標毛利率（整數百分數）
+
+
+class CategoryPricingRule(Base, TimestampMixin):
+    """分類 × 成色帶 的收購定價規則（雙重約束參數；F6 收購定價輔助讀取）。
+
+    成色帶限 S/A/B/C/D（E 走散裝，無此規則）。manager 可批次更新。
+    """
+
+    __tablename__ = "category_pricing_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "store_id", "category_id", "condition_band", name="uq_category_pricing_rule_band"
+        ),
+        CheckConstraint("condition_band <> 'E'", name="ck_pricing_rule_band_not_e"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), index=True)
+    condition_band: Mapped[Grade] = mapped_column(_enum_col(Grade))
+    discount_ceiling_pct: Mapped[int] = mapped_column()  # 最高折讓（離轉售價的折扣上限，整數%）
+    min_margin_pct: Mapped[int] = mapped_column()  # 最低毛利率（整數百分數）
+    min_price_multiple: Mapped[Decimal] = mapped_column(Numeric(5, 2))  # 轉售價 ÷ 成本 的最低倍數
 
 
 class CatalogProduct(Base, TimestampMixin):
@@ -91,6 +132,10 @@ class SerializedItem(Base, TimestampMixin):
         server_default=SerializedItemStatus.IN_STOCK.value,
     )
     acquisition_id: Mapped[int | None] = mapped_column(ForeignKey("acquisitions.id"))
+    # 分類（F6 additive 持久化；先 nullable，日後 backfill 後收緊為 NOT NULL）。
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT")
+    )
     intake_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -121,6 +166,10 @@ class BulkLot(Base, TimestampMixin):
         server_default=BulkLotStatus.ON_SALE.value,
     )
     acquisition_id: Mapped[int | None] = mapped_column(ForeignKey("acquisitions.id"))
+    # 分類（F6 additive 持久化；散裝選填、恆 nullable）。
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT")
+    )
     intake_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

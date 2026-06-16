@@ -45,6 +45,7 @@ class AcquisitionItemIn(BaseModel):
     listed_price: NTDAmount
     brand_id: int | None = None
     product_model_id: int | None = None
+    category_id: int | None = None  # F6 additive 持久化（前端 serialized 必填，後端選填）
     acquisition_cost: NTDAmount | None = None
     commission_pct: int | None = Field(default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX)
 
@@ -70,6 +71,7 @@ class AcquisitionLotIn(BaseModel):
     total_qty: int = Field(gt=0)
     unit_price: NTDAmount
     brand_id: int | None = None
+    category_id: int | None = None  # F6 additive 持久化（散裝選填）
     label: str | None = None
 
     @field_validator("acquisition_cost", "unit_price")
