@@ -679,3 +679,112 @@ body {
   align-items: center;
   gap: var(--sp-3);
 }
+/* ── F5 庫存（/inventory）：分頁、篩選、表格、狀態 badge ── */
+.inv-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.inv-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  min-height: var(--tap-min);
+  font-size: var(--text-md);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.inv-tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.inv-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.inv-filters select,
+.inv-search {
+  min-height: var(--tap-min);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.inv-search {
+  flex: 1;
+  min-width: 160px;
+}
+.inv-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.inv-table-wrap {
+  overflow-x: auto;
+}
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.inv-table th,
+.inv-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.inv-table th {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.inv-table tbody tr:nth-child(even) {
+  background: rgba(35, 41, 31, 0.02);
+}
+.inv-code {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.inv-empty {
+  padding: 16px 12px;
+}
+.inv-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+.inv-tone-ok {
+  color: var(--success);
+  background: rgba(46, 125, 79, 0.1);
+}
+.inv-tone-warn {
+  color: var(--warn);
+  background: rgba(184, 134, 11, 0.12);
+}
+.inv-tone-muted {
+  color: var(--ink-soft);
+  background: rgba(35, 41, 31, 0.06);
+}
+.inv-tone-neutral {
+  color: var(--info);
+  background: rgba(44, 110, 143, 0.1);
+}
+.inv-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
