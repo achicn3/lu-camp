@@ -49,6 +49,9 @@ async def create_contact(
     payload: ContactCreate, session: SessionDep, user: CurrentUserDep
 ) -> ContactRead:
     contact = await ContactService(session).create_contact(user.store_id, payload)
+    # get_session 不自動 commit（各寫入端點自行 commit）；缺此行則建檔不落地（F6 E2E 抓到的
+    # 既有 bug：POST /contacts 之前未 commit，正式環境建檔即遺失）。updateContact 已有 commit。
+    await session.commit()
     return ContactRead.from_model(contact)
 
 

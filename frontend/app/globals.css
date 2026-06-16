@@ -788,3 +788,147 @@ body {
   gap: 12px;
   margin-top: 12px;
 }
+
+/* ── F6 收購（/acquisition）：分類定價輔助、combobox、鑑價列、撥款 ── */
+.acq {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.acq-types {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.acq-seller {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.acq-search,
+.acq-create-seller input {
+  min-height: var(--tap-min);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  width: 100%;
+}
+.acq-results {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.acq-create-seller {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.acq-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.acq-row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.acq-aid {
+  color: var(--info);
+  font-size: var(--text-sm);
+  margin: 8px 0 0;
+}
+.acq-warn {
+  display: block;
+  margin-top: 4px;
+}
+.acq-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 0 0 8px;
+}
+.acq-payout-modes {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.acq-payout-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-min);
+}
+.acq-premium {
+  color: var(--accent);
+  font-weight: 600;
+}
+.acq-errors {
+  list-style: disc;
+  margin: 0;
+  padding-left: 20px;
+}
+.acq-submit {
+  align-self: flex-start;
+}
+.combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.combo-input {
+  min-height: var(--tap-min);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+.combo-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.combo-option,
+.combo-create {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+.combo-option:hover,
+.combo-create:hover {
+  background: rgba(47, 93, 58, 0.08);
+}
+.combo-create {
+  color: var(--accent);
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+}
+.combo-hint {
+  padding: 8px 12px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
