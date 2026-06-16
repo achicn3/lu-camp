@@ -12,7 +12,7 @@ const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
   { href: "/", label: "首頁", ready: true },
   { href: "/pos", label: "POS 結帳", ready: true },
   { href: "/cash", label: "現金對帳", ready: true },
-  { href: "/contacts", label: "會員/賣方", ready: false },
+  { href: "/contacts", label: "會員/賣方", ready: true },
   { href: "/inventory", label: "庫存", ready: false },
   { href: "/acquisition", label: "收購", ready: false },
 ];

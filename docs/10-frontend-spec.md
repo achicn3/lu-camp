@@ -121,6 +121,12 @@ flowchart LR
 - **型別**：`tsc --strict` 全綠；API 型別由後端 OpenAPI 產生。
 - 不變量：金額顯示無 float 誤差；`einvoice_enabled=false` 時前端不顯示發票欄位但結帳仍成立。
 
+### 8.1 前端任務交付：截圖（強制）
+
+- **任何前端任務（頁面/流程/元件）完成後，必須以瀏覽器實跑並附上截圖**，存於 **`~/tmp/lu-camp-shots/`**（即 `/home/test/tmp/lu-camp-shots/`），檔名語意化、依流程編號（如 `f4-01-member-list.png`、`f4-02-member-overview.png`）。
+- 截圖須對著**真實後端**（非假資料）跑，涵蓋該任務的主要畫面與關鍵狀態（空狀態、錯誤、角色差異等）。沿用 `frontend/scripts/*-smoke.mjs`（Playwright）的方式產生；`SMOKE_SHOTS` 預設可指向 `~/tmp/lu-camp-shots`。
+- 目的：作為「畫面真的會動、排版正確」的客觀證據（與後端四道門互補）；截圖無法產出（環境缺瀏覽器/服務）時須明確說明原因，不可宣稱已驗。
+
 ## 9. 裝置與環境
 
 - 桌機/觸控櫃檯螢幕為主；版面在常見 POS 解析度可用。

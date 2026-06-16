@@ -354,6 +354,10 @@ contacts (MemberService facade, read-only aggregation)
 2. **T21-b**：各模組唯讀查詢方法（sales by-buyer、acquisition by-contact、inventory by-consignor、consignment by-consignor）。可並行（不同模組、不碰共用檔）。
 3. **T21-c**：`MemberService` facade + 彙整端點（overview/purchases/consignments/sourced-items）。相依 T21-b。
 4. **T21-d**：前端 F4 會員中心（Next.js，zh-TW，OpenAPI client；用 `ui-ux-pro-max` skill）。相依 T21-a/c 的契約。
+   - 交付：`/contacts`（搜尋＋清單＋建檔）、`/contacts/[id]`（總覽／消費紀錄／寄售／帶來的商品／編輯五分頁）；
+     沿用既有設計 token、新增 member-center class；national_id/roles 編輯限 MANAGER。
+   - 截圖驗證（docs/10 §8.1）：`frontend/scripts/member-smoke.mjs`（docker Playwright，8/8 通過），
+     輸出於 `~/tmp/lu-camp-shots/f4-*.png`。
 
 ---
 

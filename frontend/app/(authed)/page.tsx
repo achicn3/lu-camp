@@ -4,7 +4,7 @@ import Link from "next/link";
 const MODULES: { title: string; description: string; href?: string }[] = [
   { title: "POS 結帳", description: "掃碼、購物車、收現找零、列印" },
   { title: "現金對帳", description: "開帳／異動／結帳差異", href: "/cash" },
-  { title: "會員/賣方", description: "查詢、建檔、點數" },
+  { title: "會員/賣方", description: "查詢、建檔、點數、寄售與往來", href: "/contacts" },
   { title: "庫存", description: "序號品、數量品、散裝堆" },
   { title: "收購", description: "買斷／寄售／散裝入庫" },
   { title: "裝置狀態", description: "印表機、錢櫃連線" },
