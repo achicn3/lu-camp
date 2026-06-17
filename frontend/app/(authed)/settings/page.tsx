@@ -69,9 +69,10 @@ function GeneralSettingsCard({
       setError("稅率請輸入有效百分比數字");
       return;
     }
+    // 寄售抽成允許 0-100（後端契約 le=100）；與定價毛利（0-99，避免除以零）不同。
     const commission = parseInt(commissionRaw, 10);
-    if (isNaN(commission) || commission < 0 || commission >= 100) {
-      setError("寄售抽成請輸入 0-99 的整數");
+    if (isNaN(commission) || commission < 0 || commission > 100) {
+      setError("寄售抽成請輸入 0-100 的整數");
       return;
     }
     const margin = parseInt(marginRaw, 10);

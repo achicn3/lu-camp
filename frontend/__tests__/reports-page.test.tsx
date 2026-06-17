@@ -223,4 +223,44 @@ describe("ReportsPage", () => {
       expect(moneyElements.length).toBeGreaterThanOrEqual(2); // at least ledger + cached
     });
   });
+
+  it("reconciliation tab exports CSV with Authorization header", async () => {
+    loginAs("MANAGER");
+    const downloads: { url: string; auth: string | null }[] = [];
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    URL.revokeObjectURL = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("format=csv") || url.includes("format=xlsx")) {
+          const headers = new Headers(
+            init?.headers ?? (input instanceof Request ? input.headers : undefined),
+          );
+          downloads.push({ url, auth: headers.get("Authorization") });
+          return new Response("a,b\n1,2", { status: 200 });
+        }
+        if (url.includes("/store-credit/liability")) return json(LIABILITY_DATA);
+        if (url.includes("/store-credit/flows")) return json(FLOWS_DATA);
+        if (url.includes("/store-credit/effectiveness")) return json(EFFECTIVENESS_DATA);
+        if (url.includes("/store-credit/reconciliation")) return json(RECONCILIATION_DATA);
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("58,000");
+    await userEvent.click(screen.getByRole("tab", { name: "對帳" }));
+    await screen.findByText("所有帳戶一致，無異常。");
+
+    await userEvent.click(screen.getByRole("button", { name: "CSV" }));
+    await waitFor(() => expect(downloads).toHaveLength(1));
+    expect(downloads[0].url).toContain("/store-credit/reconciliation");
+    expect(downloads[0].url).toContain("format=csv");
+    expect(downloads[0].auth).toMatch(/^Bearer /);
+
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+  });
 });

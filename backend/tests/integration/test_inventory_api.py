@@ -17,12 +17,14 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.store.models import Store
+from app.modules.user.models import User
 from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
     Grade,
     OwnershipType,
     SerializedItemStatus,
+    UserRole,
 )
 
 
@@ -40,15 +42,31 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
     app.dependency_overrides.clear()
 
 
+# store_id -> 該店一名 CLERK 的 user_id：認證已回 DB 覆核（D-4），token 的 user 必須真實存在。
+_STORE_CLERKS: dict[int, int] = {}
+
+
 async def _seed_store(session: AsyncSession, name: str = "測試門市") -> int:
     store = Store(name=name)
     session.add(store)
     await session.flush()
+    clerk = User(
+        store_id=store.id,
+        username=f"clk-{store.id}",
+        password_hash="h",
+        role=UserRole.CLERK,
+        is_active=True,
+    )
+    session.add(clerk)
+    await session.flush()
+    _STORE_CLERKS[store.id] = clerk.id
     return store.id
 
 
 def _auth(store_id: int) -> dict[str, str]:
-    token = encode_access_token(user_id=1, role="CLERK", store_id=store_id)
+    token = encode_access_token(
+        user_id=_STORE_CLERKS[store_id], role="CLERK", store_id=store_id
+    )
     return {"Authorization": f"Bearer {token}"}
 
 

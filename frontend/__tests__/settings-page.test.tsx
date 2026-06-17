@@ -202,6 +202,29 @@ describe("/settings", () => {
     expect(parsed).not.toHaveProperty("premium_rate");
   });
 
+  it("寄售抽成允許 100（後端契約 le=100，不被前端誤擋）", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json({ ...SETTINGS, default_commission_pct: 100 });
+      }
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    await userEvent.clear(commissionInput);
+    await userEvent.type(commissionInput, "100");
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect((JSON.parse(bodies[0]) as Record<string, unknown>).default_commission_pct).toBe(100);
+    expect(screen.queryByText(/寄售抽成請輸入/)).toBeNull();
+  });
+
   it("溢價率變更需二次確認後送 PATCH", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];

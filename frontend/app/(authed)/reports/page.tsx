@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { getToken } from "@/lib/token";
 
 import "./reports.css";
 
@@ -72,12 +73,17 @@ function ErrorBlock({ message }: { message: string }) {
 
 // -- Download helper --
 
-async function downloadReport(
-  fetchFn: () => Promise<Response>,
-  filename: string,
-): Promise<void> {
-  const response = await fetchFn();
-  if (!response.ok) return;
+// 匯出走原生 fetch（非 api client）下載二進位檔，故必須自行帶上 Bearer——
+// 報表匯出端點為 MANAGER 限定，缺 token 會 401 且靜默無檔。
+async function downloadReport(url: string, filename: string): Promise<void> {
+  const token = getToken();
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) {
+    window.alert(`下載失敗（${response.status}）`);
+    return;
+  }
   const blob = await response.blob();
   triggerDownload(blob, filename);
 }
@@ -114,7 +120,7 @@ function LiabilityPanel() {
 
   function handleDownload(fmt: "csv" | "xlsx") {
     const url = buildExportUrl("/api/v1/reports/store-credit/liability", fmt);
-    void downloadReport(() => fetch(url), `store-credit-liability.${fmt}`);
+    void downloadReport(url, `store-credit-liability.${fmt}`);
   }
 
   return (
@@ -213,7 +219,7 @@ function FlowsPanel() {
       to: `${to}T23:59:59`,
       granularity,
     });
-    void downloadReport(() => fetch(url), `store-credit-flows.${fmt}`);
+    void downloadReport(url, `store-credit-flows.${fmt}`);
   }
 
   return (
@@ -317,7 +323,7 @@ function EffectivenessPanel() {
       from: `${from}T00:00:00`,
       to: `${to}T23:59:59`,
     });
-    void downloadReport(() => fetch(url), `store-credit-effectiveness.${fmt}`);
+    void downloadReport(url, `store-credit-effectiveness.${fmt}`);
   }
 
   function metricValue(key: string): string | null {
@@ -404,6 +410,11 @@ function ReconciliationPanel() {
 
   const report: ReconciliationReport = query.data;
 
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/store-credit/reconciliation", fmt);
+    void downloadReport(url, `store-credit-reconciliation.${fmt}`);
+  }
+
   return (
     <div>
       <dl className="rpt-summary">
@@ -449,6 +460,8 @@ function ReconciliationPanel() {
       {report.mismatches.length === 0 && (
         <p className="hint rpt-ok">所有帳戶一致，無異常。</p>
       )}
+
+      <DownloadButtons onDownload={handleDownload} />
     </div>
   );
 }
