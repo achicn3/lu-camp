@@ -12,8 +12,8 @@
 
 > 先把「防呆的地基」蓋好，後面每一步才會被自動檢查。
 
-1. **Phase 0 地基先做完**（見 `07-roadmap.md`）：建立 `store-system/` 骨架、固定並安裝相依套件、設定好 `ruff`/`mypy`/`pytest`（前端 `eslint`/`tsc`/測試）、跑通一個「最小的會過的測試」、把 CI 的四道門（lint→type→test→coverage）接起來。
-2. **確認地基會擋人**：故意寫一個 import 不存在模組的測試，確認 `ruff`/`mypy`/CI 會紅燈，證明防呆有效，再刪掉。
+1. **Phase 0 地基先做完**（見 `07-roadmap.md`）：在 repo 根目錄 `lu-camp/` 建立/確認骨架、固定並安裝相依套件、設定好 `ruff`/`mypy`/`pytest`（前端 `eslint`/`tsc`/測試）、跑通一個「最小的會過的測試」、把本機四道門（lint→type→test→coverage/合約漂移）接起來。
+2. **確認地基會擋人**：故意寫一個 import 不存在模組的測試，確認 `ruff`/`mypy`/本機檢查會紅燈，證明防呆有效，再刪掉。
 3. 之後才開始 Phase 1、2…，每個 Phase 內再按「單一模組 → 單一能力」往下切。
 
 > 為什麼先做地基：`mypy`/`ruff`/`tsc` 與「真的會跑的測試」就是擋「幻想 code、錯 import、不存在的函式」的機制。地基沒好，後面寫的東西沒人檢查，幻想就會混進去。
@@ -44,14 +44,14 @@
 
 分三層，由機器到人，由便宜到貴：
 
-**Layer 1 — 自動門（CI，必過）**
-`ruff` + `mypy`（前端 `eslint` + `tsc`）→ `pytest` + 覆蓋率門檻 → 關鍵流程 e2e。任一紅燈不可合併。
+**Layer 1 — 本機自動門（必過）**
+`ruff` + `mypy`（前端 `eslint` + `tsc`）→ `pytest` + 覆蓋率門檻 → 合約漂移檢查 → 關鍵流程 e2e。任一紅燈不可合併。
 
 **Layer 2 — AI 審查（提交前）**
 把這一步的 git diff 拿去做一次獨立審查，對照檢查清單（見下）。可用 Claude Code 的審查模式，或另開一個對話貼上 diff 與 `CLAUDE.md` 請它挑問題。重點是「換一個視角看」，不要讓寫的人自己說自己對。
 
 **Layer 3 — 人工審查（你，預設不需要）**
-預設核准交給 Layer 2 的 code-reviewer 子代理（回 `APPROVE` 才合併）。你可選擇性抽查，尤其金額/發票/現金/PII 相關的 PR；想加回強制人工核准也可以。
+預設依 `CLAUDE.md` 交給 Codex review 作為 Layer 2 審查。你可選擇性抽查，尤其金額/發票/現金/PII 相關的 PR；想加回強制人工核准也可以。
 
 ### Review 檢查清單
 - [ ] 對照 `CLAUDE.md`：分層方向、跨模組只經 service、`store_id` 齊全、PII 加密與遮罩與稽核、金額用 Decimal、發票開關解耦。
@@ -65,7 +65,7 @@
 
 ## 6. 每個 Phase 的「完成定義（DoD）」
 - 該 Phase 在 `07-roadmap.md` 的驗收項目全數達成。
-- CI 四道門全綠、覆蓋率達標。
+- 本機四道門全綠、覆蓋率達標。
 - 該 Phase 的關鍵不變量（`06`）都有測試守護。
 - 經過 §5 三層審查。
 - 一個能 `docker compose up` 跑起來的可運行狀態（地基 Phase 之後）。
@@ -74,5 +74,5 @@
 - 一次只交辦一個小步，明確說「先寫失敗測試、跑給我看紅燈，再實作」。
 - 要求它**貼出實際執行結果**（pytest/ruff/mypy 輸出），不接受「應該會過」。
 - 每步結束要它列出「改了哪些檔、對照檢查清單的結果」。
-- 金額/發票/現金/PII 的步驟由 code-reviewer 從嚴把關；你可選擇性抽看 diff（非必要）。
+- 金額/發票/現金/PII 的步驟用 Codex adversarial review 從嚴把關；你可選擇性抽看 diff（非必要）。
 - 每個 Phase 結束做一次 §5 Layer 2 的獨立 AI 審查，再進下一個 Phase。

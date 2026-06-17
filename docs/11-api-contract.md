@@ -44,11 +44,11 @@ frontend/lib/api.ts  ← 以 openapi-fetch 包成型別化 client（手寫一次
 - **日期時間**：ISO 8601、UTC 字串。
 - **列舉**：狀態列舉（如 invoice_status、serialized_item.status）由 OpenAPI 帶出，前端直接用生成型別，不自行定義。
 
-## 5. CI 防漂移（強制）
+## 5. 本機防漂移（強制）
 
-- CI 在 backend 變更後**重新生成** `openapi.json` 與 `api-types.ts`，與版控中的檔案比對：**有差異即失敗**，逼迫「改了後端就要更新合約與前端型別」。
+- 本機合併前檢查在 backend 變更後**重新生成** `openapi.json` 與 `api-types.ts`，與版控中的檔案比對：**有差異即失敗**，逼迫「改了後端就要更新合約與前端型別」。
 - 前端 `tsc --strict` 對著生成型別檢查：呼叫不存在的端點/欄位、型別不符，編譯期直接紅燈。
-- 因此「前端呼叫了一個後端沒有的 API」這種幻想，在 CI/編譯期就被擋下。
+- 因此「前端呼叫了一個後端沒有的 API」這種幻想，在本機合約檢查/編譯期就被擋下。
 
 ## 6. 指令（Phase 0 設定，實作後補實際指令）
 
@@ -61,7 +61,7 @@ pnpm add -D openapi-typescript
 pnpm add openapi-fetch
 pnpm gen:api      # = openapi-typescript openapi.json -o lib/api-types.ts
 
-# CI：生成後比對，有 diff 就 fail
+# 本機合約漂移檢查：生成後比對，有 diff 就 fail
 git diff --exit-code frontend/openapi.json frontend/lib/api-types.ts
 ```
 

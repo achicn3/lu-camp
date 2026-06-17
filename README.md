@@ -30,8 +30,9 @@
 | `09-claude-code-kickoff.md` | 驅動 Claude Code 的開工 playbook（可貼的提示詞、並行、審查） |
 | `10-frontend-spec.md` | 前端規格：畫面、流程、資料策略、硬體整合、角色差異、前端測試、設計 token |
 | `11-api-contract.md` | 前後端 API 合約：OpenAPI 生成型別化 client（省 token、防漂移） |
-| `.claude/agents/code-reviewer.md` | 現成的審查 subagent（複製到專案根目錄 `.claude/agents/`） |
+| `current-status.md` | 輕量目前狀態索引：只供規劃與避衝突，仍以分支 diff/測試/OpenAPI 為準 |
 | `.claude/agents/tdd-implementer.md` | 現成的 TDD 實作 subagent（供並行獨立任務使用） |
+| Codex review（見 `CLAUDE.md`） | 目前主要審查流程；取代舊 `code-reviewer` 子代理作為合併門 |
 
 ## 技術選型摘要
 

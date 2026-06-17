@@ -1,4 +1,8 @@
-# Phase 0 — 狀態（chore/phase0-scaffold）
+# Phase 0 — 歷史狀態（chore/phase0-scaffold）
+
+> **歷史紀錄，非目前專案狀態。** 本檔保留當時 Phase 0 腳手架與環境問題的紀錄；
+> 目前 repo 已有後續模組、`frontend/lib/api-types.ts` 也已存在。判斷當前進度請以
+> `docs/07-roadmap.md`、`docs/deferred-items.md`、目前分支 diff 與實際本機檢查輸出為準。
 
 > **未合併 main。** 後端關卡全綠；前端關卡因本機環境 0xC0000005 無法在此驗證。
 > 待前端關卡在本機（或排除 AV 干擾後）跑綠，再合併。
