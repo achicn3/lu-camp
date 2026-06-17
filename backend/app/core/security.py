@@ -38,21 +38,23 @@ def encode_access_token(
     store_id: int,
     expires_delta: timedelta | None = None,
 ) -> str:
-    """簽發 access token；payload 含 sub(user_id)、role、store_id。"""
+    """簽發 access token；payload 含 sub(user_id)、role、store_id。
+
+    過期策略：明確帶入 ``expires_delta`` 時一律據以設定 ``exp``；否則，當設定
+    ``auth_session_never_expires`` 為真（預設，使用者裁示）則**省略 exp（永不過期）**，
+    否則套用 ``ACCESS_TOKEN_EXPIRE_MINUTES`` 短效（CLAUDE.md §5 的原設計）。
+    """
     now = datetime.now(UTC)
-    ttl = (
-        expires_delta
-        if expires_delta is not None
-        else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    expire = now + ttl
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "role": role,
         "store_id": store_id,
         "iat": now,
-        "exp": expire,
     }
+    if expires_delta is not None:
+        payload["exp"] = now + expires_delta
+    elif not get_settings().auth_session_never_expires:
+        payload["exp"] = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(payload, get_settings().secret_key, algorithm=ALGORITHM)
 
 

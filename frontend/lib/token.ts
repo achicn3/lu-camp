@@ -1,8 +1,14 @@
-// access token 儲存：記憶體 + sessionStorage（docs/10 §2「token 不落不安全儲存」的
-// 折衷裁示 2026-06-12：sessionStorage 重開瀏覽器即失效；refresh token 屬 D-4）。
+// access token 儲存：記憶體 + localStorage（使用者裁示 2026-06-18「登入永不過期」）。
+// ⚠️ 改用 localStorage（先前為 sessionStorage）讓 session 跨瀏覽器重開仍保留——與後端
+// 永不過期 token 搭配，達成「永不登出」。安全代價（token 落磁碟、不隨關閉清除）由 D-4
+// 伺服器端重驗緩解；設後端 auth_session_never_expires=false 並改回 sessionStorage 即恢復短效。
 // 獨立成小模組（無相依），讓 lib/api 與 lib/auth 都能引用而不形成循環。
 
 const STORAGE_KEY = "lu-camp.access-token";
+
+function store(): Storage | null {
+  return typeof window === "undefined" ? null : window.localStorage;
+}
 
 let inMemoryToken: string | null = null;
 
@@ -21,14 +27,14 @@ export function subscribeToken(listener: () => void): () => void {
 export function getToken(): string | null {
   if (inMemoryToken !== null) return inMemoryToken;
   if (typeof window === "undefined") return null;
-  inMemoryToken = window.sessionStorage.getItem(STORAGE_KEY);
+  inMemoryToken = store()?.getItem(STORAGE_KEY) ?? null;
   return inMemoryToken;
 }
 
 export function setToken(token: string): void {
   inMemoryToken = token;
   if (typeof window !== "undefined") {
-    window.sessionStorage.setItem(STORAGE_KEY, token);
+    store()?.setItem(STORAGE_KEY, token);
   }
   emitChange();
 }
@@ -36,7 +42,7 @@ export function setToken(token: string): void {
 export function clearToken(): void {
   inMemoryToken = null;
   if (typeof window !== "undefined") {
-    window.sessionStorage.removeItem(STORAGE_KEY);
+    store()?.removeItem(STORAGE_KEY);
   }
   emitChange();
 }

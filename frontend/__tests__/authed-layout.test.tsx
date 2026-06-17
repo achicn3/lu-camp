@@ -29,8 +29,8 @@ describe("(authed) layout", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it("token 只在 sessionStorage（重新整理情境）：仍渲染內容、不誤導去登入", async () => {
-    window.sessionStorage.setItem("lu-camp.access-token", "persisted");
+  it("token 只在 localStorage（重新整理情境）：仍渲染內容、不誤導去登入", async () => {
+    window.localStorage.setItem("lu-camp.access-token", "persisted");
     render(
       <AuthedLayout>
         <p>受保護內容</p>
