@@ -22,11 +22,11 @@ graph TD
 > **發票解耦**：電子發票（T13/T14）已從 Phase 3 抽出，集中於最末「發票收尾階段」（見文末）。`einvoice_enabled=false` 時銷售照常完整記錄（NOT_ISSUED），故其延後不阻擋 P3–P7。
 
 ## Phase 0 — 地基
-- Monorepo、docker-compose、PostgreSQL、Alembic、CI（lint/type/test/coverage gate）。
+- Monorepo、docker-compose、PostgreSQL、Alembic、本機品質關卡（lint/type/test/coverage/合約漂移）。
 - `core/`：config、db（async session）、security（JWT、雜湊）、crypto（PII 加密）、audit、money（Decimal）、deps（角色/store 範圍）。
 - `auth` 模組、`settings` 模組（含 `einvoice_enabled`、`default_commission_pct=50`）、`store`/`user` 基礎、`audit_log`。
-- 測試骨架（testcontainers Postgres、factories）。
-- **驗收**：可登入、RBAC 生效、設定可讀寫、稽核可寫、CI 全綠。
+- 測試骨架（真實 Postgres；目前以本機開發 DB + 交易回滾隔離，見 `docs/06`）。
+- **驗收**：可登入、RBAC 生效、設定可讀寫、稽核可寫、本機品質關卡全綠。
 
 ## Phase 1 — 聯絡人 + 庫存
 - `contacts`（統一主檔、角色、PII 加密與遮罩、解密查看寫稽核）。

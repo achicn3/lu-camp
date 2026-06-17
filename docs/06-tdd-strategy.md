@@ -28,10 +28,10 @@
 - **整合（API + DB）**：端點正確性、權限、交易、錯誤格式、`store_id` 範圍過濾。
 - **端對端**：收購→入庫→上架→銷售→（寄售結算/開票/退貨）→現金對帳的完整路徑。
 
-## 覆蓋率門檻（CI 強制）
+## 覆蓋率門檻（本機關卡強制）
 
 - `services/`、領域邏輯：**≥ 90%**。
-- 整體：**≥ 80%**。未達標 CI 失敗。
+- 整體：**≥ 80%**。未達標本機關卡失敗。
 
 ## 必測的關鍵不變量（對應 CLAUDE.md §7）
 
@@ -64,7 +64,7 @@ def test_serialized_item_cannot_be_sold_twice(sold_item, sales_service):
         sales_service.sell(item_code=sold_item.item_code)
 ```
 
-## CI 流程
+## 本機檢查流程
 
 1. lint + format check（ruff / eslint / prettier）
 2. type check（mypy strict / tsc）
