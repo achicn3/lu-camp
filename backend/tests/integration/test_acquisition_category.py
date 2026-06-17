@@ -33,14 +33,16 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
     app.dependency_overrides.clear()
 
 
-async def _store_token(session: AsyncSession, name: str) -> tuple[int, str]:
+async def _store_token(
+    session: AsyncSession, name: str, *, role: UserRole = UserRole.MANAGER
+) -> tuple[int, str]:
     store = Store(name=name)
     session.add(store)
     await session.flush()
-    clerk = User(store_id=store.id, username=f"c{store.id}", password_hash="h", role=UserRole.CLERK)
-    session.add(clerk)
+    user = User(store_id=store.id, username=f"u{store.id}", password_hash="h", role=role)
+    session.add(user)
     await session.flush()
-    return store.id, encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
+    return store.id, encode_access_token(user_id=user.id, role=role.value, store_id=store.id)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -59,6 +61,22 @@ async def _seller(client: httpx.AsyncClient, token: str) -> int:
 
 async def _category(client: httpx.AsyncClient, token: str, name: str) -> int:
     resp = await client.post("/api/v1/categories", json={"name": name}, headers=_auth(token))
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["id"])
+
+
+async def _brand(client: httpx.AsyncClient, token: str, name: str) -> int:
+    resp = await client.post("/api/v1/brands", json={"name": name}, headers=_auth(token))
+    assert resp.status_code == 200, resp.text
+    return int(resp.json()["id"])
+
+
+async def _model(client: httpx.AsyncClient, token: str, brand_id: int, name: str) -> int:
+    resp = await client.post(
+        "/api/v1/product-models",
+        json={"brand_id": brand_id, "name": name},
+        headers=_auth(token),
+    )
     assert resp.status_code == 200, resp.text
     return int(resp.json()["id"])
 
@@ -99,6 +117,9 @@ async def test_buyout_persists_category_id(
     code = resp.json()["item_codes"][0]
     item = await db_session.scalar(select(SerializedItem).where(SerializedItem.item_code == code))
     assert item is not None and item.category_id == cat
+    read = await client.get(f"/api/v1/serialized-items/by-code/{code}", headers=_auth(token))
+    assert read.status_code == 200, read.text
+    assert read.json()["category_id"] == cat
 
 
 async def test_buyout_without_category_still_works(
@@ -146,6 +167,65 @@ async def test_cross_store_category_rejected(
     assert resp.status_code == 422  # InvalidAcquisitionCategory
 
 
+async def test_cross_store_brand_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _a, token_a = await _store_token(db_session, "店A")
+    _b, token_b = await _store_token(db_session, "店B")
+    brand_b = await _brand(client, token_b, "他店品牌")
+    await _open_drawer(client, token_a)
+    seller_a = await _seller(client, token_a)
+
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": seller_a,
+            "items": [
+                {
+                    "name": "外套",
+                    "grade": "A",
+                    "listed_price": "3000",
+                    "acquisition_cost": "1200",
+                    "brand_id": brand_b,
+                }
+            ],
+        },
+        headers=_auth(token_a),
+    )
+    assert resp.status_code == 422
+
+
+async def test_cross_store_product_model_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _a, token_a = await _store_token(db_session, "店A")
+    _b, token_b = await _store_token(db_session, "店B")
+    brand_b = await _brand(client, token_b, "他店品牌")
+    model_b = await _model(client, token_b, brand_b, "他店型號")
+    await _open_drawer(client, token_a)
+    seller_a = await _seller(client, token_a)
+
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": seller_a,
+            "items": [
+                {
+                    "name": "外套",
+                    "grade": "A",
+                    "listed_price": "3000",
+                    "acquisition_cost": "1200",
+                    "product_model_id": model_b,
+                }
+            ],
+        },
+        headers=_auth(token_a),
+    )
+    assert resp.status_code == 422
+
+
 async def test_bulk_lot_category_optional(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -174,3 +254,6 @@ async def test_bulk_lot_category_optional(
     lot_code = resp.json()["lot_code"]
     lot = await db_session.scalar(select(BulkLot).where(BulkLot.lot_code == lot_code))
     assert lot is not None and lot.category_id == cat
+    read = await client.get(f"/api/v1/bulk-lots/by-code/{lot_code}", headers=_auth(token))
+    assert read.status_code == 200, read.text
+    assert read.json()["category_id"] == cat

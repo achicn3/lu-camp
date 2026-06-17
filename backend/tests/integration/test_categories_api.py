@@ -81,6 +81,30 @@ async def test_create_category_explicit_target(
     assert body["target_margin_pct"] == 55
 
 
+async def test_clerk_create_category_requires_setting(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _sid, mgr, clerk = await _store(db_session, "店A")
+
+    denied = await client.post(
+        "/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk)
+    )
+    assert denied.status_code == 403
+
+    settings = await client.patch(
+        "/api/v1/settings",
+        json={"allow_clerk_manage_categories": True},
+        headers=_auth(mgr),
+    )
+    assert settings.status_code == 200, settings.text
+
+    created = await client.post(
+        "/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk)
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["name"] == "包款"
+
+
 async def test_update_target_and_rules_manager_only(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

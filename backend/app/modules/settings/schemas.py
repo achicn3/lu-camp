@@ -31,6 +31,7 @@ class SettingsRead(BaseModel):
     tax_rate: RateOut
     default_commission_pct: int
     default_margin_pct: int
+    allow_clerk_manage_categories: bool
     premium_rate: RateOut
     premium_rate_min: RateOut
     premium_rate_max: RateOut
@@ -53,6 +54,7 @@ class SettingsUpdateRequest(BaseModel):
     tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
     default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
     default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
+    allow_clerk_manage_categories: bool | None = None
     premium_rate: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_min: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_max: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None

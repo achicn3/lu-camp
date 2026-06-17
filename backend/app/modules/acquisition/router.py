@@ -20,6 +20,7 @@ from app.modules.acquisition.service import AcquisitionService
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
+    CrossStoreReference,
     DomainError,
     IdempotencyKeyConflict,
     InvalidAcquisitionCategory,
@@ -44,6 +45,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InvalidPayoutSplit: status.HTTP_422_UNPROCESSABLE_CONTENT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditConflict: status.HTTP_409_CONFLICT,
 }
 

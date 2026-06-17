@@ -33,6 +33,7 @@ from app.shared.enums import (
     StockReason,
 )
 from app.shared.exceptions import (
+    CrossStoreReference,
     InsufficientStock,
     InvalidStateTransition,
     OwnershipValidationError,
@@ -51,6 +52,8 @@ class InventoryService:
     async def get_or_create_product_model(
         self, store_id: int, brand_id: int, name: str
     ) -> ProductModel:
+        if await self._repo.get_brand(store_id, brand_id) is None:
+            raise CrossStoreReference(f"品牌 {brand_id} 不屬於 store {store_id}")
         return await self._repo.get_or_create_product_model(store_id, brand_id, name)
 
     async def list_brands(
@@ -60,6 +63,9 @@ class InventoryService:
 
     async def get_brand(self, store_id: int, brand_id: int) -> Brand | None:
         return await self._repo.get_brand(store_id, brand_id)
+
+    async def get_product_model(self, store_id: int, product_model_id: int) -> ProductModel | None:
+        return await self._repo.get_product_model(store_id, product_model_id)
 
     async def list_product_models(
         self,
@@ -169,6 +175,13 @@ class InventoryService:
         elif consignor_id is None or commission_pct is None:
             raise OwnershipValidationError("CONSIGNMENT 必須有 consignor_id 與 commission_pct")
 
+        await self._validate_item_references(
+            store_id,
+            brand_id=brand_id,
+            product_model_id=product_model_id,
+            category_id=category_id,
+        )
+
         item = SerializedItem(
             store_id=store_id,
             item_code=item_code,
@@ -185,6 +198,26 @@ class InventoryService:
             category_id=category_id,
         )
         return await self._repo.add_serialized(item)
+
+    async def _validate_item_references(
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None,
+        product_model_id: int | None = None,
+        category_id: int | None = None,
+    ) -> None:
+        """Validate optional inventory references are owned by this store before insert."""
+        if brand_id is not None and await self._repo.get_brand(store_id, brand_id) is None:
+            raise CrossStoreReference(f"品牌 {brand_id} 不屬於 store {store_id}")
+        if product_model_id is not None:
+            model = await self._repo.get_product_model(store_id, product_model_id)
+            if model is None:
+                raise CrossStoreReference(f"型號 {product_model_id} 不屬於 store {store_id}")
+            if brand_id is not None and model.brand_id != brand_id:
+                raise CrossStoreReference(f"型號 {product_model_id} 不屬於品牌 {brand_id}")
+        if category_id is not None and await self._repo.get_category(store_id, category_id) is None:
+            raise CrossStoreReference(f"分類 {category_id} 不屬於 store {store_id}")
 
     # ── 庫存異動帳 ──
     async def record_stock_in(
@@ -382,6 +415,8 @@ class InventoryService:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
         if total_qty <= 0:
             raise OwnershipValidationError("散裝批 total_qty 必須 > 0")
+
+        await self._validate_item_references(store_id, brand_id=brand_id, category_id=category_id)
 
         lot = BulkLot(
             store_id=store_id,

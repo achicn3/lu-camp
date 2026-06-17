@@ -534,6 +534,17 @@
             ],
             "title": "Brand Id"
           },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "grade": {
             "$ref": "#/components/schemas/Grade"
           },
@@ -587,6 +598,7 @@
           "label",
           "name",
           "brand_id",
+          "category_id",
           "grade",
           "acquisition_cost",
           "acquisition_basis",
@@ -2827,6 +2839,17 @@
             ],
             "title": "Brand Id"
           },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "commission_pct": {
             "anyOf": [
               {
@@ -2914,6 +2937,7 @@
           "name",
           "brand_id",
           "product_model_id",
+          "category_id",
           "grade",
           "ownership_type",
           "consignor_id",
@@ -2940,6 +2964,10 @@
       "SettingsRead": {
         "description": "單店設定輸出。",
         "properties": {
+          "allow_clerk_manage_categories": {
+            "title": "Allow Clerk Manage Categories",
+            "type": "boolean"
+          },
           "default_commission_pct": {
             "title": "Default Commission Pct",
             "type": "integer"
@@ -2988,6 +3016,7 @@
           "tax_rate",
           "default_commission_pct",
           "default_margin_pct",
+          "allow_clerk_manage_categories",
           "premium_rate",
           "premium_rate_min",
           "premium_rate_max",
@@ -3000,6 +3029,17 @@
       "SettingsUpdateRequest": {
         "description": "PATCH 設定：所有欄位可選，僅更新有帶入者（exclude_unset）。\n\n溢價率相關夾在政策硬界線 [0, 20%]（與帳本 DB 守衛一致）；min≤max 與 premium∈[min,max]\n的動態關係由 service 驗證（界線可被同一 PATCH 一併更動）。",
         "properties": {
+          "allow_clerk_manage_categories": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Clerk Manage Categories"
+          },
           "default_commission_pct": {
             "anyOf": [
               {

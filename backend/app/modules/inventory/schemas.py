@@ -115,6 +115,7 @@ class SerializedItemRead(BaseModel):
     name: str
     brand_id: int | None
     product_model_id: int | None
+    category_id: int | None
     grade: Grade
     ownership_type: OwnershipType
     consignor_id: int | None
@@ -151,6 +152,7 @@ class BulkLotRead(BaseModel):
     label: str | None
     name: str
     brand_id: int | None
+    category_id: int | None
     grade: Grade
     acquisition_cost: NTDAmount
     acquisition_basis: BulkAcquisitionBasis

@@ -28,13 +28,22 @@ from app.modules.inventory.schemas import (
 )
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
-from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus
+from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus, UserRole
 
 router = APIRouter(tags=["inventory"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
+
+
+async def _ensure_category_create_allowed(session: AsyncSession, user: CurrentUser) -> None:
+    """MANAGER always manages categories; CLERK needs the store setting enabled."""
+    if user.role == UserRole.MANAGER.value:
+        return
+    settings = await StoreSettingsService(session).get_effective_settings(user.store_id)
+    if not settings.allow_clerk_manage_categories:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="權限不足")
 
 
 @router.get(
@@ -193,6 +202,7 @@ async def create_category(
     payload: CategoryCreate, session: SessionDep, user: CurrentUserDep
 ) -> CategoryRead:
     """建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。"""
+    await _ensure_category_create_allowed(session, user)
     name = payload.name.strip()
     if not name:
         raise HTTPException(

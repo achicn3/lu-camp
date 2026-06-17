@@ -64,6 +64,13 @@ class InventoryRepository:
         result: Brand | None = await self._session.scalar(stmt)
         return result
 
+    async def get_product_model(self, store_id: int, product_model_id: int) -> ProductModel | None:
+        stmt = select(ProductModel).where(
+            ProductModel.id == product_model_id, ProductModel.store_id == store_id
+        )
+        result: ProductModel | None = await self._session.scalar(stmt)
+        return result
+
     async def list_product_models(
         self, store_id: int, *, brand_id: int | None, q: str | None, limit: int
     ) -> list[ProductModel]:

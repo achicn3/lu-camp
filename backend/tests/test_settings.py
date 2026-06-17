@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog
 from app.modules.settings.defaults import (
+    DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
     DEFAULT_COMMISSION_PCT,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
@@ -44,6 +45,7 @@ async def test_get_effective_returns_defaults_without_persisting(db_session: Asy
     assert s.tax_rate == DEFAULT_TAX_RATE
     assert s.default_commission_pct == DEFAULT_COMMISSION_PCT
     assert s.default_margin_pct == DEFAULT_MARGIN_PCT
+    assert s.allow_clerk_manage_categories is DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES
     # 未持久化：DB 尚無該店 settings 列。
     assert await svc.get_persisted(store_id) is None
 
@@ -54,10 +56,15 @@ async def test_update_creates_row_and_applies_patch(db_session: AsyncSession) ->
     updated = await svc.update_settings(
         store_id,
         actor_user_id=user_id,
-        patch=SettingsUpdateRequest(einvoice_enabled=True, default_commission_pct=40),
+        patch=SettingsUpdateRequest(
+            einvoice_enabled=True,
+            default_commission_pct=40,
+            allow_clerk_manage_categories=True,
+        ),
     )
     assert updated.einvoice_enabled is True
     assert updated.default_commission_pct == 40
+    assert updated.allow_clerk_manage_categories is True
     # 未提供的欄位維持預設。
     assert updated.tax_rate == DEFAULT_TAX_RATE
     assert updated.default_margin_pct == DEFAULT_MARGIN_PCT

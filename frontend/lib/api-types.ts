@@ -954,6 +954,8 @@ export interface components {
             acquisition_cost: string;
             /** Brand Id */
             brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
             grade: components["schemas"]["Grade"];
             /** Id */
             id: number;
@@ -1857,6 +1859,8 @@ export interface components {
         SerializedItemRead: {
             /** Brand Id */
             brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
             /** Commission Pct */
             commission_pct: number | null;
             /** Consignor Id */
@@ -1895,6 +1899,8 @@ export interface components {
          * @description 單店設定輸出。
          */
         SettingsRead: {
+            /** Allow Clerk Manage Categories */
+            allow_clerk_manage_categories: boolean;
             /** Default Commission Pct */
             default_commission_pct: number;
             /** Default Margin Pct */
@@ -1926,6 +1932,8 @@ export interface components {
          *     的動態關係由 service 驗證（界線可被同一 PATCH 一併更動）。
          */
         SettingsUpdateRequest: {
+            /** Allow Clerk Manage Categories */
+            allow_clerk_manage_categories?: boolean | null;
             /** Default Commission Pct */
             default_commission_pct?: number | null;
             /** Default Margin Pct */

@@ -47,6 +47,9 @@ class StoreSettings(Base, TimestampMixin):
     default_margin_pct: Mapped[int] = mapped_column(
         Integer, server_default=text("45"), nullable=False
     )
+    allow_clerk_manage_categories: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     # 購物金溢價率與政策界線（docs/16 §1.5/§6.1）：premium_rate 夾在 [min, max]。
     premium_rate: Mapped[Decimal] = mapped_column(
         Numeric(5, 4), server_default=text("0.10"), nullable=False

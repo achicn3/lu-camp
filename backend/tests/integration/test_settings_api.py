@@ -51,6 +51,7 @@ async def test_get_returns_defaults(client: httpx.AsyncClient, db_session: Async
     assert body["tax_rate"] == "0.05"  # 字串傳輸（§11）
     assert body["default_commission_pct"] == 50
     assert body["default_margin_pct"] == 45
+    assert body["allow_clerk_manage_categories"] is False
 
 
 async def test_manager_patch_updates_and_persists(
@@ -59,16 +60,22 @@ async def test_manager_patch_updates_and_persists(
     token = await _seed_user(db_session, UserRole.MANAGER)
     patch = await client.patch(
         "/api/v1/settings",
-        json={"einvoice_enabled": True, "default_margin_pct": 30},
+        json={
+            "einvoice_enabled": True,
+            "default_margin_pct": 30,
+            "allow_clerk_manage_categories": True,
+        },
         headers=_auth(token),
     )
     assert patch.status_code == 200
     assert patch.json()["einvoice_enabled"] is True
     assert patch.json()["default_margin_pct"] == 30
+    assert patch.json()["allow_clerk_manage_categories"] is True
     # 再 GET 應反映已持久化的變更。
     got = await client.get("/api/v1/settings", headers=_auth(token))
     assert got.json()["einvoice_enabled"] is True
     assert got.json()["default_margin_pct"] == 30
+    assert got.json()["allow_clerk_manage_categories"] is True
     # 未動到的維持預設。
     assert got.json()["default_commission_pct"] == 50
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
 from app.modules.settings.defaults import (
+    DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
     DEFAULT_COMMISSION_PCT,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
@@ -40,6 +41,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         tax_rate=DEFAULT_TAX_RATE,
         default_commission_pct=DEFAULT_COMMISSION_PCT,
         default_margin_pct=DEFAULT_MARGIN_PCT,
+        allow_clerk_manage_categories=DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
         premium_rate=DEFAULT_PREMIUM_RATE,
         premium_rate_min=DEFAULT_PREMIUM_RATE_MIN,
         premium_rate_max=DEFAULT_PREMIUM_RATE_MAX,
