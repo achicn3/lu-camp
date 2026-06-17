@@ -15,6 +15,7 @@ const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
   { href: "/contacts", label: "會員/賣方", ready: true },
   { href: "/inventory", label: "庫存", ready: true },
   { href: "/acquisition", label: "收購", ready: true },
+  { href: "/reports", label: "報表", ready: true },
   { href: "/settings", label: "設定", ready: true },
 ];
 
