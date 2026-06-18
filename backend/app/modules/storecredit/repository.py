@@ -198,6 +198,8 @@ class StoreCreditRepository:
         """各會員的「發出（正向）列」：(contact_id, signed_amount, created_at)，依會員、時間排序。
 
         供帳齡 FIFO 沖銷（任何正向 entry 皆視為發出列：CREDIT／正向 ADJUSTMENT／沖正回補）。
+        已被沖正的原始 CREDIT（如 ACQUISITION_ROLLBACK 沖正的作廢收購入帳）排除——該額度已取消、
+        非有效負債，不可續列入帳齡，否則作廢收購仍被當成有效發出列誤算帳齡（Codex F6.5）。
         """
         stmt = (
             select(
@@ -208,6 +210,7 @@ class StoreCreditRepository:
             .where(
                 StoreCreditLedger.store_id == store_id,
                 StoreCreditLedger.signed_amount > 0,
+                self._not_reversed(),
             )
             .order_by(StoreCreditLedger.contact_id, StoreCreditLedger.created_at)
         )
@@ -215,7 +218,11 @@ class StoreCreditRepository:
         return [(int(c), Decimal(a), d) for c, a, d in rows]
 
     async def positive_sum_by_contact(self, store_id: int) -> dict[int, Decimal]:
-        """各會員 Σ 正向 entry（供算 consumed = Σ正向 − 餘額）。"""
+        """各會員 Σ 正向 entry（供算 consumed = Σ正向 − 餘額）。
+
+        與 positive_lots 一致排除已被沖正的原始 CREDIT，否則作廢收購入帳會灌大 Σ正向、
+        使 consumed 被高估（餘額已扣掉沖正額，Σ正向卻仍含原額）（Codex F6.5）。
+        """
         stmt = (
             select(
                 StoreCreditLedger.contact_id,
@@ -224,6 +231,7 @@ class StoreCreditRepository:
             .where(
                 StoreCreditLedger.store_id == store_id,
                 StoreCreditLedger.signed_amount > 0,
+                self._not_reversed(),
             )
             .group_by(StoreCreditLedger.contact_id)
         )

@@ -389,7 +389,10 @@ class AcquisitionService:
         if cash_back > 0 and await self._cash.get_current_session(store_id) is None:
             raise NoOpenCashSession("作廢付現收購的退款需在開帳中的 cash_session 下進行，請先開帳")
 
-        # 寫入（單一交易，router commit/rollback）
+        # 寫入（單一交易，router commit/rollback）。
+        # 鎖序與 sales 一致：先鎖/轉移庫存列，再記現金/沖購物金。sale 為先鎖品列再鎖收銀，
+        # 本作廢若反序會與並行銷售互卡 → DB 死結 500（Codex 高風險），故庫存退場置前。
+        await self._inventory.void_acquisition_inventory(store_id, acquisition_id)
         if cash_back > 0:
             await self._cash.record_movement(
                 store_id,
@@ -408,7 +411,6 @@ class AcquisitionService:
                 raise AcquisitionCreditSpent(
                     f"收購 {acquisition_id} 的購物金已被花用，無法作廢，請改用人工更正"
                 ) from exc
-        await self._inventory.void_acquisition_inventory(store_id, acquisition_id)
 
         acquisition.voided_at = datetime.now(UTC)
         acquisition.voided_by = actor_user_id

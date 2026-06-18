@@ -25,6 +25,7 @@ from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import SerializedItem, StockMovement
+from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import AcquisitionType, CashMovementType, Grade, UserRole
@@ -100,6 +101,87 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
             assert audit_count == 1  # 稽核恰一筆
     finally:
         async with sm() as s:
+            await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
+            await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
+            await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
+            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
+async def test_concurrent_sale_vs_void_no_deadlock(real_client: httpx.AsyncClient) -> None:
+    """並行『售出該品』vs『作廢其收購』：鎖序與 sales 一致(先庫存後現金)，不得 DB 死結 500；
+    同一序號品不可既賣出又作廢——恰一方成功、另一方乾淨被擋。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="並行銷售作廢店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="svv-clk", password_hash="h", role=UserRole.CLERK)
+        mgr = User(store_id=store.id, username="svv-mgr", password_hash="h", role=UserRole.MANAGER)
+        seller = Contact(store_id=store.id, name="賣方", roles=["SELLER"], national_id_enc="enc")
+        s.add_all([clerk, mgr, seller])
+        await s.flush()
+        await CashDrawerService(s).open_session(store.id, clerk.id, Decimal("5000"))
+        result = await AcquisitionService(s).create_acquisition(
+            store.id,
+            clerk.id,
+            AcquisitionCreate(
+                type=AcquisitionType.BUYOUT,
+                contact_id=seller.id,
+                items=[
+                    AcquisitionItemIn(
+                        name="帳篷",
+                        grade=Grade.A,
+                        listed_price=Decimal("1800"),
+                        acquisition_cost=Decimal("1000"),
+                    )
+                ],
+            ),
+            idempotency_key="svv-create",
+        )
+        store_id, acq_id = store.id, result.acquisition_id
+        item = await s.scalar(
+            select(SerializedItem).where(SerializedItem.acquisition_id == acq_id)
+        )
+        assert item is not None
+        item_code = item.item_code
+        clerk_token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
+        mgr_token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+        await s.commit()
+
+    try:
+        sale_headers = {"Authorization": f"Bearer {clerk_token}", "Idempotency-Key": "svv-sale"}
+        void_headers = {"Authorization": f"Bearer {mgr_token}"}
+        r_sale, r_void = await asyncio.gather(
+            real_client.post(
+                "/api/v1/sales",
+                json={"lines": [{"line_type": "SERIALIZED", "item_code": item_code, "qty": 1}]},
+                headers=sale_headers,
+            ),
+            real_client.post(
+                f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=void_headers
+            ),
+        )
+        # 無 DB 死結 500
+        assert r_sale.status_code != 500, r_sale.text
+        assert r_void.status_code != 500, r_void.text
+        sale_ok = r_sale.status_code == 201
+        void_ok = r_void.status_code == 200
+        assert sale_ok ^ void_ok  # 恰一方成功
+        if void_ok:
+            assert r_sale.status_code >= 400  # 品已退場 → 銷售被擋
+        else:
+            assert r_void.status_code == 409  # 品已售出 → 作廢被擋
+    finally:
+        async with sm() as s:
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
+            await s.execute(delete(Sale).where(Sale.store_id == store_id))
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))

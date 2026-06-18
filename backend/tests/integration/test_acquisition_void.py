@@ -26,6 +26,7 @@ from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.store.models import Store
+from app.modules.storecredit.repository import StoreCreditRepository
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import (
@@ -537,3 +538,29 @@ async def test_voided_acquisition_excluded_from_take_rate(
     assert resp.status_code == 200, resp.text
     after = await repo.count_payouts_by_method(store_id, lo, hi)
     assert after.get(PayoutMethod.STORE_CREDIT, 0) == 0  # 作廢後排除
+
+
+async def test_voided_credit_excluded_from_liability_aging(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已作廢的 STORE_CREDIT 收購入帳不再列為帳齡發出列/Σ正向（_not_reversed；Codex F6.5）。
+
+    同一會員另有一筆未作廢的有效購物金；作廢其一後，Σ正向應等於餘額（consumed=0，
+    排除已沖正的原始 CREDIT），且發出列只剩未作廢那一筆。
+    """
+    clerk, mgr, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    voided = await _create_buyout(client, clerk, seller_id, payout_method="STORE_CREDIT")
+    await _create_buyout(client, clerk, seller_id, payout_method="STORE_CREDIT")  # 有效、不作廢
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{voided}/void", json={"reason": "x"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+
+    sc = StoreCreditService(db_session)
+    balance = await sc.get_balance(store_id, seller_id)
+    repo = StoreCreditRepository(db_session)
+    psum = await repo.positive_sum_by_contact(store_id)
+    seller_lots = [amt for c, amt, _ in await repo.positive_lots(store_id) if c == seller_id]
+    assert psum.get(seller_id) == balance  # consumed=0：Σ正向==餘額（已排除作廢入帳）
+    assert len(seller_lots) == 1  # 只剩未作廢那筆發出列
