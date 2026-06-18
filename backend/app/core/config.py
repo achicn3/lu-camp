@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # CORS 允許來源（逗號分隔）：瀏覽器前端與 API 不同埠/主機時必須列入，
     # 否則瀏覽器一律擋（實測發現：docs/10 架構即為 LAN 前端打 FastAPI）。
     cors_origins: str = "http://localhost:3000"
+    # 登入永不過期（使用者裁示 2026-06-18）：簽發 access token 時省略 exp。
+    # ⚠️ 此舉與 CLAUDE.md §5「JWT 短效」相牴觸——被降權/停用/離職者在登出前可永久存取，
+    # 故 D-4（敏感操作於伺服器端重驗 role/is_active）成為必要緩解。設 false 即恢復短效 token。
+    auth_session_never_expires: bool = True
     # 金鑰皆無預設、由 env 注入。pii_enc_key 為 base64 of 32 bytes；secret_key 供 JWT 簽章。
     pii_enc_key: str
     hmac_key: str

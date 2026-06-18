@@ -1,0 +1,71 @@
+/* /settings 頁專用樣式（co-located；不編輯 globals.css） */
+.settings-premium-info {
+  display: flex;
+  gap: 2rem;
+  margin-bottom: 1rem;
+}
+
+.settings-suggestion {
+  background: var(--surface-raised, #f8f9fa);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.settings-constraints {
+  margin-top: 0.5rem;
+}
+
+.settings-constraints ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin: 0.25rem 0;
+}
+
+.settings-constraints li {
+  font-size: 0.9rem;
+  margin: 0.25rem 0;
+}
+
+.settings-confirm-dialog {
+  border: 2px solid var(--danger, #dc3545);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.5rem;
+}
+
+.settings-confirm-title {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.settings-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.settings-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.settings-history-table th,
+.settings-history-table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border, #dee2e6);
+}
+
+.settings-history-table th {
+  font-weight: 600;
+}
+
+.field-toggle {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+}

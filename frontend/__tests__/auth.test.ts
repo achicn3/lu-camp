@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// lib/auth 單元測試：token 存取（記憶體＋sessionStorage）、JWT payload 解碼、登入流程錯誤映射。
+// lib/auth 單元測試：token 存取（記憶體＋localStorage）、JWT payload 解碼、登入流程錯誤映射。
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -22,21 +22,21 @@ afterEach(() => {
 });
 
 describe("token 儲存", () => {
-  it("set 後可 get，並落 sessionStorage（重開瀏覽器須重登；refresh 屬 D-4）", () => {
+  it("set 後可 get，並落 localStorage（永不過期裁示：跨重開保留）", () => {
     setToken("tok-123");
     expect(getToken()).toBe("tok-123");
-    expect(window.sessionStorage.getItem("lu-camp.access-token")).toBe("tok-123");
+    expect(window.localStorage.getItem("lu-camp.access-token")).toBe("tok-123");
   });
 
   it("clear 後兩處皆空", () => {
     setToken("tok-123");
     clearToken();
     expect(getToken()).toBeNull();
-    expect(window.sessionStorage.getItem("lu-camp.access-token")).toBeNull();
+    expect(window.localStorage.getItem("lu-camp.access-token")).toBeNull();
   });
 
-  it("記憶體空時從 sessionStorage 復原（頁面重新整理情境）", () => {
-    window.sessionStorage.setItem("lu-camp.access-token", "persisted");
+  it("記憶體空時從 localStorage 復原（頁面重新整理情境）", () => {
+    window.localStorage.setItem("lu-camp.access-token", "persisted");
     expect(getToken()).toBe("persisted");
   });
 });

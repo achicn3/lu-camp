@@ -1,0 +1,110 @@
+/* /reports page co-located styles (docs/10 convention: co-located CSS, not globals). */
+
+.rpt-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.rpt-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  min-width: 160px;
+  flex: 1;
+}
+
+.rpt-stat dt {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin-bottom: var(--sp-1);
+}
+
+.rpt-stat dd {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  margin: 0;
+}
+
+.rpt-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: flex-end;
+  margin-bottom: var(--sp-4);
+}
+
+.rpt-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+
+.rpt-filters input,
+.rpt-filters select {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: var(--text-md);
+}
+
+.rpt-download-bar {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.rpt-badge-estimate {
+  display: inline-block;
+  background: var(--warn);
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: var(--sp-2);
+  vertical-align: middle;
+}
+
+.rpt-badge-proxy {
+  display: inline-block;
+  background: var(--info);
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: var(--sp-1);
+  vertical-align: middle;
+}
+
+.rpt-note {
+  background: #fdf6e3;
+  border-left: 3px solid var(--warn);
+  padding: var(--sp-3);
+  margin-top: var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+
+.rpt-ok {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.rpt-mismatch {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.rpt-other-note {
+  margin-top: var(--sp-6);
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}

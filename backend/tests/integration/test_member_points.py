@@ -199,11 +199,14 @@ async def test_void_with_insufficient_points_returns_409_not_500(
     cat = await _seed_catalog(db_session, store_id, price="800")
     sale = await _checkout(client, token, cat, buyer=member.id)
     assert sale.status_code == 201
-    member.member_points = 3  # 外力改動：低於該筆累積的 8 點
-    await db_session.flush()
     from tests.integration.test_sales_api import _seed_manager
 
+    # 先建並 commit 操作者（manager）：認證已回 DB 覆核（D-4），故 void 失敗時的「整筆回滾」
+    # 只應回退竄改與作廢本身，不可連帶清掉操作者帳號（否則回滾後的 check 會 401）。
     mgr_token = await _seed_manager(db_session, store_id)
+    await db_session.commit()
+    member.member_points = 3  # 外力改動：低於該筆累積的 8 點（仍在 savepoint 內，會被 void 回滾）
+    await db_session.flush()
     void = await client.post(
         f"/api/v1/sales/{sale.json()['id']}/void",
         headers={"Authorization": f"Bearer {mgr_token}"},
