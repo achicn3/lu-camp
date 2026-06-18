@@ -224,6 +224,15 @@ class SalesService:
         # 售出的寄售品 → 稍後建 PENDING 結算：(序號品 id, 售價, 抽成百分數)
         consignment_sales: list[tuple[int, Decimal, int]] = []
 
+        # 並發鎖序：先依 id 升冪鎖定本單序號品列，與作廢的 id 序退場一致；之後逐行（購物車序）
+        # 的 sell 只再觸碰已持有的鎖。避免多件、反序銷售與並行作廢互卡 AB-BA 死結（Codex F6.5）。
+        serialized_codes = [
+            line.item_code
+            for line in lines
+            if line.line_type == SaleLineType.SERIALIZED and line.item_code is not None
+        ]
+        await self._inventory.prelock_serialized_for_sale(store_id, serialized_codes)
+
         for line in lines:
             line_total = await self._process_line(store_id, sale.id, line, consignment_sales)
             total += line_total

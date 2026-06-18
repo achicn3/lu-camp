@@ -394,6 +394,16 @@ class InventoryService:
     async def write_off_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.WRITTEN_OFF)
 
+    async def prelock_serialized_for_sale(self, store_id: int, item_codes: list[str]) -> None:
+        """銷售前置：依 id 升冪鎖定本單所有序號品列，建立與收購作廢一致的全域鎖序（防 AB-BA）。
+
+        解析→排序→逐列 FOR UPDATE；之後逐行（購物車序）的 sell 只是再觸碰已持有的鎖，不另以
+        購物車序取鎖。與作廢的 id 序退場一致，避免多件、購物車反序的銷售與作廢互卡死結。
+        """
+        ids = await self._repo.list_serialized_ids_by_codes(store_id, item_codes)
+        for item_id in ids:  # list_serialized_ids_by_codes 已升冪
+            await self._repo.lock_serialized_row(store_id, item_id)
+
     async def has_sold_items(self, store_id: int, acquisition_id: int) -> bool:
         """該收購入庫的庫存是否已有任一售出/動用（read-only，作廢前置擋下用，F6.5）。
 

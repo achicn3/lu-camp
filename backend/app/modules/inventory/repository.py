@@ -307,6 +307,31 @@ class InventoryRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def list_serialized_ids_by_codes(
+        self, store_id: int, item_codes: list[str]
+    ) -> list[int]:
+        """解析 item_codes → 序號品 id（升冪；供銷售前置依 id 序鎖定，與作廢一致防 AB-BA）。"""
+        if not item_codes:
+            return []
+        stmt = (
+            select(SerializedItem.id)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.item_code.in_(item_codes),
+            )
+            .order_by(SerializedItem.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def lock_serialized_row(self, store_id: int, item_id: int) -> None:
+        """無條件 row lock（FOR UPDATE）單一序號品列（依 id 序前置鎖定，防銷售/作廢 AB-BA）。"""
+        stmt = (
+            select(SerializedItem.id)
+            .where(SerializedItem.store_id == store_id, SerializedItem.id == item_id)
+            .with_for_update()
+        )
+        await self._session.scalar(stmt)
+
     async def list_serialized_ids_by_consignor(
         self, store_id: int, consignor_id: int
     ) -> list[int]:
