@@ -1,5 +1,6 @@
 "use client";
 // /login：帳密登入 → 取 JWT（docs/10 §5）。錯誤訊息 inline 呈現（401 帳密錯誤/429 節流）。
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
@@ -7,6 +8,7 @@ import { login } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -18,6 +20,9 @@ export default function LoginPage() {
     const result = await login(String(form.get("username")), String(form.get("password")));
     setSubmitting(false);
     if (result.ok) {
+      // 登入即清空快取：即使未先登出（直接在 /login 換人登入），新身分也不會沿用前一位的
+      // 快取資料/授權結果（跨使用者、跨分店皆然）。
+      queryClient.clear();
       router.replace("/");
       return;
     }

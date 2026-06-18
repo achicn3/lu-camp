@@ -78,8 +78,28 @@ try {
   await page.screenshot({ path: `${SHOTS}/settings.png`, fullPage: true });
   console.log("  shot: settings.png");
 
-  // --- CLERK is blocked from manager-only pages (server-driven gate) ---
+  // --- SAME-context relogin must not leak cached manager data (Codex round-6/7 P1) ---
   const clerkUser = process.env.CLERK_USER;
+  if (clerkUser) {
+    // manager already viewed /reports above (data cached). Re-login as clerk in the SAME SPA
+    // session WITHOUT clicking 登出 (navigate straight to /login) — exercises clear-on-login.
+    await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(500);
+    await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+    // log in as clerk in the same context, go straight to /reports
+    await page.fill('input[name="username"], input#username', clerkUser);
+    await page.fill('input[name="password"], input#password', PASS);
+    await page.click('button[type="submit"]');
+    await page.waitForURL((u) => !u.pathname.endsWith("/login"), { timeout: 15000 });
+    await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1200);
+    const afterRelogin = await page.innerText("body");
+    assert(/需管理者權限/.test(afterRelogin), "clerk blocked after same-context relogin");
+    assert(!/1,?980|報表測試客/.test(afterRelogin), "no leaked manager report data after relogin");
+    console.log("  ok: cache cleared on logout (no cross-user leak)");
+  }
+
+  // --- CLERK is blocked from manager-only pages (fresh context, server-driven gate) ---
   if (clerkUser) {
     const clerkCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const cp = await clerkCtx.newPage();

@@ -463,7 +463,9 @@ export default function SettingsPage() {
     void queryClient.invalidateQueries({ queryKey: ["premium-rate-history"] });
   }
 
-  if (settingsQuery.isPending || historyQuery.isPending) return <p>載入中...</p>;
+  // 以 historyQuery.isFetching（含背景重新驗證）把關：有前一身分的快取歷史時 isPending 為
+  // false，但仍在 refetch——若以 isPending 把關會先渲染快取設定/歷史才等到 403。
+  if (settingsQuery.isPending || historyQuery.isFetching) return <p>載入中...</p>;
   if (historyQuery.error instanceof ForbiddenError) {
     return (
       <section>

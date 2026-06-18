@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// /login 頁元件測試：欄位、登入成功導向、錯誤訊息呈現。
+// /login 頁元件測試：欄位、登入成功導向、錯誤訊息呈現、登入清空 query 快取。
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +13,15 @@ vi.mock("next/navigation", () => ({
 import LoginPage from "@/app/login/page";
 import { clearToken, getToken } from "@/lib/auth";
 
+function renderLogin(queryClient = new QueryClient()) {
+  render(
+    <QueryClientProvider client={queryClient}>
+      <LoginPage />
+    </QueryClientProvider>,
+  );
+  return queryClient;
+}
+
 afterEach(() => {
   cleanup();
   clearToken();
@@ -21,7 +31,7 @@ afterEach(() => {
 
 describe("/login", () => {
   it("有帳號/密碼欄位與登入主行動", () => {
-    render(<LoginPage />);
+    renderLogin();
     expect(screen.getByLabelText("帳號")).toBeDefined();
     expect(screen.getByLabelText("密碼")).toBeDefined();
     expect(screen.getByRole("button", { name: "登入" })).toBeDefined();
@@ -37,12 +47,33 @@ describe("/login", () => {
         ),
       ),
     );
-    render(<LoginPage />);
+    renderLogin();
     await userEvent.type(screen.getByLabelText("帳號"), "clerk1");
     await userEvent.type(screen.getByLabelText("密碼"), "pw-123456");
     await userEvent.click(screen.getByRole("button", { name: "登入" }));
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
     expect(getToken()).toBe("tok");
+  });
+
+  it("登入成功 → 清空 query 快取（換人登入不沿用前一身分資料）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ access_token: "tok", token_type: "bearer" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const qc = new QueryClient();
+    qc.setQueryData(["reports", "access"], "granted");
+    qc.setQueryData(["premium-rate-history"], [{ id: 1 }]);
+    renderLogin(qc);
+    await userEvent.type(screen.getByLabelText("帳號"), "clerk1");
+    await userEvent.type(screen.getByLabelText("密碼"), "pw-123456");
+    await userEvent.click(screen.getByRole("button", { name: "登入" }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
+    expect(qc.getQueryCache().getAll()).toHaveLength(0);
   });
 
   it("登入失敗 → 顯示後端錯誤訊息、不導向", async () => {
@@ -55,7 +86,7 @@ describe("/login", () => {
         }),
       ),
     );
-    render(<LoginPage />);
+    renderLogin();
     await userEvent.type(screen.getByLabelText("帳號"), "clerk1");
     await userEvent.type(screen.getByLabelText("密碼"), "wrong");
     await userEvent.click(screen.getByRole("button", { name: "登入" }));
@@ -66,7 +97,7 @@ describe("/login", () => {
   it("空欄位不可送出（required）", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    render(<LoginPage />);
+    renderLogin();
     await userEvent.click(screen.getByRole("button", { name: "登入" }));
     expect(fetchSpy).not.toHaveBeenCalled();
   });

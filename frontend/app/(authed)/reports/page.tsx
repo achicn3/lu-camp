@@ -499,7 +499,10 @@ export default function ReportsPage() {
     retry: false, // gate 探測：權限/錯誤即時決斷，不重試
   });
 
-  if (access.isPending) {
+  // 以 isFetching（含背景重新驗證）而非 isPending 把關：當有前一身分的快取 "granted" 時，
+  // isPending 為 false 但仍在 refetch——若以 isPending 把關會先渲染快取資料才等到 401/403。
+  // 故只要尚在驗證就顯示載入，待這一輪授權確定再決定。
+  if (access.isFetching) {
     return (
       <section>
         <h1 className="page-title">報表</h1>
