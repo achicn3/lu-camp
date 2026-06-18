@@ -60,6 +60,15 @@ try {
   console.log("  download ok:", download.suggestedFilename());
   console.log("  shot: reports-reconciliation.png");
 
+  // --- /reports 流量 tab (validates timezone-aware date bounds end-to-end) ---
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(500);
+  await page.click('[role="tab"]:has-text("流量")');
+  await page.waitForTimeout(1000);
+  const flowsText = await page.innerText("body");
+  assert(/起始日期|粒度|發行|期間/.test(flowsText), "flows tab renders (tz-aware date query succeeds)");
+  assert(!/讀取流量報表失敗/.test(flowsText), "flows query did not error");
+
   // --- /settings ---
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);

@@ -44,7 +44,12 @@ describe("badge maps", () => {
   it("ownership + grade", () => {
     expect(ownershipBadge("CONSIGNMENT").label).toBe("寄售");
     expect(ownershipBadge("OWNED").label).toBe("自有");
-    expect(gradeLabel("A")).toBe("A 級");
+    expect(gradeLabel("S")).toBe("S 超熱門搶手貨");
+    expect(gradeLabel("A")).toBe("A 近全新/精品");
+    expect(gradeLabel("B")).toBe("B 良好");
+    expect(gradeLabel("C")).toBe("C 普通");
+    expect(gradeLabel("D")).toBe("D 較差");
+    expect(gradeLabel("E")).toBe("E 散裝");
   });
 });
 

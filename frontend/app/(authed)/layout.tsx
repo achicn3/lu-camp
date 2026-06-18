@@ -1,6 +1,7 @@
 "use client";
 // 受保護區殼層：無 token 導回 /login；監聽 401 廣播；頂欄導覽＋身分/登出。
 // 前端隱藏不等於安全——後端對每個請求仍驗權（docs/10 §4）。
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
@@ -23,7 +24,8 @@ const emptySubscribe = () => () => {};
 
 export default function AuthedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
-  // token 為外部 store（記憶體＋sessionStorage）；SSR 快照為 null → 客戶端水合後同步。
+  const queryClient = useQueryClient();
+  // token 為外部 store（記憶體＋localStorage）；SSR 快照為 null → 客戶端水合後同步。
   const token = useSyncExternalStore(subscribeToken, getToken, () => null);
   // 水合完成偵測（伺服器快照 false / 客戶端 true；無 setState-in-effect）：
   // 水合首輪 token 必為 null（server 快照），不可在還原 sessionStorage 前就誤導去登入。
@@ -38,10 +40,14 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   }, [hydrated, token, router]);
 
   useEffect(() => {
-    const onUnauthorized = () => router.replace("/login");
+    // 401 即清空 React Query 快取：避免被降權/換人後，仍以前一身分的快取資料/授權結果渲染。
+    const onUnauthorized = () => {
+      queryClient.clear();
+      router.replace("/login");
+    };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  }, [router]);
+  }, [router, queryClient]);
 
   if (!hydrated || token === null) return null;
   const session = decodeSession();
@@ -73,6 +79,8 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
             className="btn-ghost"
             onClick={() => {
               logout();
+              // 清空快取，確保下一位登入者不會短暫看到前一位的報表/設定資料或授權結果。
+              queryClient.clear();
               router.replace("/login");
             }}
           >

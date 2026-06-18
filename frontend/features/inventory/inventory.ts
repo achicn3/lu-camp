@@ -1,11 +1,11 @@
 // F5 庫存畫面純邏輯（docs/10 §/inventory）：低庫存判定、售出進度、狀態 badge 對應、
 // 清單 query 組裝。無 React/DOM 依賴 → 可單元測試。型別一律由 OpenAPI 生成型別帶出。
 import type { components } from "@/lib/api-types";
+import { gradeLabel } from "@/features/inventory/grades";
 
 type SerializedStatus = components["schemas"]["SerializedItemStatus"];
 type BulkStatus = components["schemas"]["BulkLotStatus"];
 type Ownership = components["schemas"]["OwnershipType"];
-type Grade = components["schemas"]["Grade"];
 
 export type BadgeTone = "neutral" | "ok" | "warn" | "muted";
 export interface Badge {
@@ -51,9 +51,7 @@ export function bulkStatusBadge(status: BulkStatus): Badge {
 export function ownershipBadge(ownership: Ownership): Badge {
   return OWNERSHIP[ownership];
 }
-export function gradeLabel(grade: Grade): string {
-  return `${grade} 級`;
-}
+export { gradeLabel };
 
 /** 空字串 → undefined（openapi-fetch 會略過 undefined query 參數；型別安全地「不送空篩選」）。 */
 export function orUndefined<T extends string>(value: T | ""): T | undefined {
