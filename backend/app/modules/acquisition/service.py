@@ -46,6 +46,7 @@ from app.shared.exceptions import (
     AcquisitionHasSoldItems,
     AcquisitionNotFound,
     AcquisitionRequiresNationalId,
+    AcquisitionVoidUnsupported,
     ContactNotFound,
     IdempotencyKeyConflict,
     InsufficientStoreCredit,
@@ -370,6 +371,12 @@ class AcquisitionService:
         acquisition = await self._repo.lock(store_id, acquisition_id)
         if acquisition is None:
             raise AcquisitionNotFound(f"找不到收購 {acquisition_id}")
+        if acquisition.type == AcquisitionType.CONSIGNMENT:
+            # 寄售品仍屬寄售人，作廢須走寄售退貨＋結算反轉（invariant #7），與買斷對稱反轉不同；
+            # 寄售庫存為 CONSIGNMENT 持有、不在本作廢的 OWNED 讀層，故一律擋下（另立任務）。
+            raise AcquisitionVoidUnsupported(
+                f"收購 {acquisition_id} 為寄售類型，不支援作廢；請走寄售退貨/結算反轉流程"
+            )
         if acquisition.voided_at is not None:
             raise AcquisitionAlreadyVoid(f"收購 {acquisition_id} 已作廢，不可重複作廢")
 
@@ -416,8 +423,9 @@ class AcquisitionService:
             entity_id=str(acquisition_id),
             before={"voided_at": None},
             after={
+                # 不寫 free-form reason：可能含 PII（賣方姓名/電話/身分證），稽核必須無 PII（§5）。
+                # 作廢原因保存在 acquisitions.void_reason 欄（其設計歸屬），不複製進不可變稽核。
                 "voided_at": acquisition.voided_at.isoformat(),
-                "reason": reason.strip(),
                 "reversed_cash": str(cash_back),
                 "reversed_credit": str(credit_back),
             },

@@ -27,6 +27,7 @@ from app.shared.exceptions import (
     AcquisitionHasSoldItems,
     AcquisitionNotFound,
     AcquisitionRequiresNationalId,
+    AcquisitionVoidUnsupported,
     ContactNotFound,
     CrossStoreReference,
     DomainError,
@@ -61,6 +62,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     AcquisitionAlreadyVoid: status.HTTP_409_CONFLICT,
     AcquisitionHasSoldItems: status.HTTP_409_CONFLICT,
     AcquisitionCreditSpent: status.HTTP_409_CONFLICT,
+    AcquisitionVoidUnsupported: status.HTTP_422_UNPROCESSABLE_CONTENT,
 }
 
 

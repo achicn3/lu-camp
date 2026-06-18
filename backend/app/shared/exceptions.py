@@ -139,3 +139,11 @@ class AcquisitionHasSoldItems(DomainError):
 
 class AcquisitionCreditSpent(DomainError):
     """該收購入帳的購物金已被花用，沖回會使餘額為負——擋作廢轉人工更正（F6.5，永不負餘額）。"""
+
+
+class AcquisitionVoidUnsupported(DomainError):
+    """此收購類型不支援作廢（F6.5 僅支援 BUYOUT／BULK_LOT）。
+
+    寄售（CONSIGNMENT）入庫的寄售品仍屬寄售人，作廢須走寄售退貨＋結算反轉
+    （invariant #7），與買斷對稱反轉不同，另立任務實作前一律擋下。
+    """

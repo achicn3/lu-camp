@@ -13,6 +13,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
@@ -377,3 +378,72 @@ async def test_void_closed_session_lands_in_current_open(
         select(CashMovement).where(CashMovement.type == CashMovementType.ACQUISITION_VOID_IN)
     )
     assert void_in is not None and void_in.session_id == s2.id
+
+
+# ── 寄售類型不支援作廢（Codex 高風險①）──
+
+
+async def test_void_consignment_is_unsupported_422_no_side_effects(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """寄售收購不支援作廢（寄售品仍屬寄售人、不在 OWNED 庫存讀層）→ 422 且零副作用。"""
+    clerk, mgr, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    payload = {
+        "type": "CONSIGNMENT",
+        "contact_id": seller_id,
+        "items": [
+            {"name": "睡袋", "grade": "B", "listed_price": "1200", "commission_pct": 50}
+        ],
+    }
+    create = await client.post("/api/v1/acquisitions", json=payload, headers=_auth(clerk))
+    assert create.status_code == 201, create.text
+    acq_id = int(create.json()["acquisition_id"])
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 422, resp.text
+    # 零副作用：寄售品仍在庫、收購未作廢、無退款、無稽核
+    item = await db_session.scalar(
+        select(SerializedItem).where(SerializedItem.acquisition_id == acq_id)
+    )
+    assert item is not None and item.status == SerializedItemStatus.IN_STOCK
+    acq = await db_session.get(Acquisition, acq_id)
+    assert acq is not None and acq.voided_at is None
+    assert await _void_in(db_session, store_id) == Decimal(0)
+    audit_count = await db_session.scalar(
+        select(func.count())
+        .select_from(AuditLog)
+        .where(AuditLog.store_id == store_id, AuditLog.action == "VOID_ACQUISITION")
+    )
+    assert audit_count == 0
+
+
+# ── 稽核不含 free-form 原因（避免 PII 落入不可變稽核；Codex ②）──
+
+
+async def test_void_audit_excludes_free_form_reason(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢原因可能含 PII（姓名/身分證/電話）；稽核 before/after 不得出現，僅存 void_reason 欄。"""
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout(client, clerk, seller_id)
+    reason = "賣方 王小明 A123456789 0912345678 反悔"
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": reason}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+
+    audit = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.store_id == store_id, AuditLog.action == "VOID_ACQUISITION"
+        )
+    )
+    assert audit is not None
+    blob = f"{audit.before} {audit.after}"
+    for pii in ("王小明", "A123456789", "0912345678", reason):
+        assert pii not in blob
+    # 原因仍保存在其設計歸屬欄位（acquisitions.void_reason）
+    acq = await db_session.get(Acquisition, acq_id)
+    assert acq is not None and acq.void_reason == reason
