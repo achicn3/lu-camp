@@ -120,13 +120,49 @@ afterEach(() => {
 });
 
 describe("/settings", () => {
-  it("非 MANAGER 顯示權限不足提示", async () => {
+  it("後端 403 顯示權限不足提示（server-driven gate）", async () => {
     loginAs("CLERK");
-    defaultStub();
+    stubFetch((url) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/settings")) return json({ detail: "權限不足" }, 403);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      return null;
+    });
     renderPage();
     expect(await screen.findByText("需管理者權限")).toBeDefined();
     // 不應出現設定表單
     expect(screen.queryByText("一般設定")).toBeNull();
+  });
+
+  it("過時 CLERK token 但後端授權（升權）→ 渲染設定，不被擋", async () => {
+    loginAs("CLERK");
+    defaultStub();
+    renderPage();
+    // gate 以後端授權為準：token=CLERK 但 /settings 回 200 → 應看得到一般設定。
+    expect(await screen.findByText("一般設定")).toBeDefined();
+    expect(screen.queryByText("需管理者權限")).toBeNull();
+  });
+
+  it("寄售抽成/毛利非整數輸入（50.5）被擋、不靜默存錯值", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json(SETTINGS);
+      }
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    await userEvent.clear(commissionInput);
+    await userEvent.type(commissionInput, "50.5");
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    expect(await screen.findByText("寄售抽成請輸入 0-100 的整數")).toBeDefined();
+    expect(bodies).toHaveLength(0); // 未送出（不會把 50.5 截成 50）
   });
 
   it("MANAGER 渲染一般設定區、顯示目前值", async () => {

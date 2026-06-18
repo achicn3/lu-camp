@@ -6,15 +6,17 @@ import "./settings.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
-import { clampRate, formatPct, parseRateInput } from "@/features/settings/helpers";
+import { clampRate, formatPct, parsePctInput, parseRateInput } from "@/features/settings/helpers";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type SettingsRead = components["schemas"]["SettingsRead"];
 type PremiumSuggestionResponse = components["schemas"]["PremiumSuggestionResponse"];
 type PremiumRateHistoryRead = components["schemas"]["PremiumRateHistoryRead"];
+
+/** 後端回 401/403 時用以標記「無權限」，與一般讀取失敗區分（驅動「需管理者權限」提示）。 */
+class ForbiddenError extends Error {}
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -69,14 +71,15 @@ function GeneralSettingsCard({
       setError("稅率請輸入有效百分比數字");
       return;
     }
-    // 寄售抽成允許 0-100（後端契約 le=100）；與定價毛利（0-99，避免除以零）不同。
-    const commission = parseInt(commissionRaw, 10);
-    if (isNaN(commission) || commission < 0 || commission > 100) {
+    // 嚴格整數解析（"50.5"/"50abc" → null，不可前綴解析成 50 存錯值）。
+    // 寄售抽成允許 0-100（後端契約 le=100）；定價毛利 0-99（避免除以零）。
+    const commission = parsePctInput(commissionRaw, 100);
+    if (commission === null) {
       setError("寄售抽成請輸入 0-100 的整數");
       return;
     }
-    const margin = parseInt(marginRaw, 10);
-    if (isNaN(margin) || margin < 0 || margin >= 100) {
+    const margin = parsePctInput(marginRaw);
+    if (margin === null) {
       setError("定價目標毛利請輸入 0-99 的整數");
       return;
     }
@@ -398,18 +401,22 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
-  const session = decodeSession();
 
+  // 不以 token 的 role 把關：永不過期 token 的 role claim 可能過時（升/降權後未重新登入）。
+  // 以後端授權為準——settings 端點為 MANAGER-only，401/403 即視為無權限。
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/settings");
+      const { data, error, response } = await api.GET("/api/v1/settings");
+      if (response.status === 401 || response.status === 403) throw new ForbiddenError();
       if (!data) throw new Error(extractDetail(error) ?? "讀取設定失敗");
       return data;
     },
-    enabled: session?.role === "MANAGER",
+    retry: (failureCount, error) => !(error instanceof ForbiddenError) && failureCount < 2,
   });
 
+  // 建議值/歷史與 settings 並行取；無權限者的這兩個請求會在背景失敗但不渲染
+  // （下方 ForbiddenError gate 會先回「需管理者權限」），故不需額外把關。
   const suggestionQuery = useQuery({
     queryKey: ["premium-suggestion"],
     queryFn: async () => {
@@ -417,7 +424,6 @@ export default function SettingsPage() {
       if (!data) throw new Error(extractDetail(error) ?? "讀取建議值失敗");
       return data;
     },
-    enabled: session?.role === "MANAGER",
   });
 
   const historyQuery = useQuery({
@@ -427,17 +433,7 @@ export default function SettingsPage() {
       if (!data) throw new Error(extractDetail(error) ?? "讀取溢價率歷史失敗");
       return data;
     },
-    enabled: session?.role === "MANAGER",
   });
-
-  if (session?.role !== "MANAGER") {
-    return (
-      <section>
-        <h1 className="page-title">設定</h1>
-        <p className="hint">需管理者權限</p>
-      </section>
-    );
-  }
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["settings"] });
@@ -446,6 +442,14 @@ export default function SettingsPage() {
   }
 
   if (settingsQuery.isPending) return <p>載入中...</p>;
+  if (settingsQuery.error instanceof ForbiddenError) {
+    return (
+      <section>
+        <h1 className="page-title">設定</h1>
+        <p className="hint">需管理者權限</p>
+      </section>
+    );
+  }
   if (settingsQuery.isError) {
     return (
       <p role="alert" className="form-error">

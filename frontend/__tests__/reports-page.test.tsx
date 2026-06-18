@@ -118,10 +118,24 @@ afterEach(() => {
 });
 
 describe("ReportsPage", () => {
-  it("non-manager sees permission notice", () => {
+  it("backend 403 sees permission notice (server-driven gate)", async () => {
     loginAs("CLERK");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ detail: "權限不足" }, 403)),
+    );
     renderPage();
-    expect(screen.getByText("需管理者權限")).toBeTruthy();
+    expect(await screen.findByText("需管理者權限")).toBeTruthy();
+  });
+
+  it("stale CLERK token but backend authorizes (promoted) → renders page, not blocked", async () => {
+    // 永不過期 token 的 role claim 可能過時：token 說 CLERK 但後端已升權 → 應看得到報表。
+    loginAs("CLERK");
+    stubReportsFetch();
+    renderPage();
+    // gate 以後端授權為準，故即使 token=CLERK 也應渲染負債資料、不顯示權限提示。
+    expect(await screen.findByText("58,000")).toBeTruthy();
+    expect(screen.queryByText("需管理者權限")).toBeNull();
   });
 
   it("manager sees liability tab with totals and per-member table", async () => {

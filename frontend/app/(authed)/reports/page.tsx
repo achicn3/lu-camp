@@ -9,11 +9,11 @@ import {
   EFFECTIVENESS_LABELS,
   GRANULARITY_OPTIONS,
   defaultDateRange,
+  exclusiveEnd,
   triggerDownload,
 } from "@/features/reports/reports";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { getToken } from "@/lib/token";
 
@@ -201,7 +201,7 @@ function FlowsPanel() {
         params: {
           query: {
             from: `${from}T00:00:00`,
-            to: `${to}T23:59:59`,
+            to: exclusiveEnd(to),
             granularity,
           },
         },
@@ -216,7 +216,7 @@ function FlowsPanel() {
   function handleDownload(fmt: "csv" | "xlsx") {
     const url = buildExportUrl("/api/v1/reports/store-credit/flows", fmt, {
       from: `${from}T00:00:00`,
-      to: `${to}T23:59:59`,
+      to: exclusiveEnd(to),
       granularity,
     });
     void downloadReport(url, `store-credit-flows.${fmt}`);
@@ -306,7 +306,7 @@ function EffectivenessPanel() {
           params: {
             query: {
               from: `${from}T00:00:00`,
-              to: `${to}T23:59:59`,
+              to: exclusiveEnd(to),
             },
           },
         },
@@ -321,7 +321,7 @@ function EffectivenessPanel() {
   function handleDownload(fmt: "csv" | "xlsx") {
     const url = buildExportUrl("/api/v1/reports/store-credit/effectiveness", fmt, {
       from: `${from}T00:00:00`,
-      to: `${to}T23:59:59`,
+      to: exclusiveEnd(to),
     });
     void downloadReport(url, `store-credit-effectiveness.${fmt}`);
   }
@@ -485,9 +485,25 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>("liability");
-  const session = decodeSession();
+  // 不以 token 的 role 把關：永不過期 token 的 role claim 可能過時（升/降權後未重新登入）。
+  // 改以後端授權為準——探測一個 MANAGER-only 端點，依其 401/403 決定是否顯示「需管理者權限」。
+  const access = useQuery({
+    queryKey: ["reports", "access"],
+    queryFn: async () => {
+      const { response } = await api.GET("/api/v1/reports/store-credit/liability");
+      return response.status === 401 || response.status === 403 ? "denied" : "granted";
+    },
+  });
 
-  if (!session || session.role !== "MANAGER") {
+  if (access.isPending) {
+    return (
+      <section>
+        <h1 className="page-title">報表</h1>
+        <p className="hint">載入中...</p>
+      </section>
+    );
+  }
+  if (access.data !== "granted") {
     return (
       <section>
         <h1 className="page-title">報表</h1>

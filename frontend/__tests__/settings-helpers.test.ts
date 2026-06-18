@@ -79,7 +79,19 @@ describe("parsePctInput", () => {
   it("小數 → null", () => {
     expect(parsePctInput("45.5")).toBeNull();
   });
+  it("數字後綴雜字（50abc）→ null（不前綴解析成 50）", () => {
+    expect(parsePctInput("50abc")).toBeNull();
+  });
   it("空字串 → null", () => {
     expect(parsePctInput("")).toBeNull();
+  });
+  it("max=100：100 → 100（寄售抽成允許滿額）", () => {
+    expect(parsePctInput("100", 100)).toBe(100);
+  });
+  it("max=100：101 → null", () => {
+    expect(parsePctInput("101", 100)).toBeNull();
+  });
+  it("max=100：仍拒小數（100.0）", () => {
+    expect(parsePctInput("100.0", 100)).toBeNull();
   });
 });

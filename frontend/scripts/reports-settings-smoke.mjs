@@ -43,6 +43,23 @@ try {
   await page.screenshot({ path: `${SHOTS}/reports.png`, fullPage: true });
   console.log("  shot: reports.png");
 
+  // --- /reports 對帳 tab + authenticated CSV export (Codex P2/P3) ---
+  await page.click('[role="tab"]:has-text("對帳")');
+  await page.waitForTimeout(800);
+  const reconText = await page.innerText("body");
+  assert(/帳本總負債|快取/.test(reconText), "reconciliation tab renders");
+  const csvBtn = page.locator('button:has-text("CSV")');
+  assert((await csvBtn.count()) > 0, "reconciliation tab has CSV export button (P3)");
+  await page.screenshot({ path: `${SHOTS}/reports-reconciliation.png`, fullPage: true });
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 10000 }),
+    csvBtn.first().click(),
+  ]);
+  const path = await download.path();
+  assert(path != null, "CSV export downloads a file with auth attached (P2a)");
+  console.log("  download ok:", download.suggestedFilename());
+  console.log("  shot: reports-reconciliation.png");
+
   // --- /settings ---
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
   await page.waitForTimeout(1200);

@@ -37,14 +37,15 @@ export function parseRateInput(input: string): string | null {
 }
 
 /**
- * 解析百分比整數輸入（0-99，如寄售抽成/毛利率）。
- * 非整數、負數、>=100 回 null。
+ * 解析百分比整數輸入（如毛利率 0-99、寄售抽成 0-100）。
+ * **嚴格整數**：`"50.5"`/`"50abc"` 一律回 null（不可前綴解析成 50 而靜默存錯值）。
+ * 負數或超過 `max` 亦回 null。`max` 預設 99（毛利率：避免 ÷0）；寄售抽成傳 100。
  */
-export function parsePctInput(input: string): number | null {
+export function parsePctInput(input: string, max = 99): number | null {
   const trimmed = input.trim();
   if (trimmed === "") return null;
   if (!/^\d+$/.test(trimmed)) return null;
   const n = parseInt(trimmed, 10);
-  if (n < 0 || n >= 100) return null;
+  if (n < 0 || n > max) return null;
   return n;
 }

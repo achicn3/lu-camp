@@ -39,6 +39,17 @@ export function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * 結束日期（YYYY-MM-DD）→「隔日 00:00:00」作為半開區間的排他上界。
+ * 後端用 `created_at < date_to`，故送整日的最後一刻（T23:59:59）會漏掉該秒內含小數秒的交易；
+ * 改送隔日零時，讓整個結束日（含最後一秒）都被納入、又不含隔日任何資料。
+ */
+export function exclusiveEnd(isoDateStr: string): string {
+  const d = new Date(`${isoDateStr}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  return `${isoDate(d)}T00:00:00`;
+}
+
 /** Labels for effectiveness metrics (zh-TW). */
 export const EFFECTIVENESS_LABELS: Record<string, string> = {
   take_rate: "選用率",
