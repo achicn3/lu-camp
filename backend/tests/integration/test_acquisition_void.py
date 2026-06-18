@@ -330,10 +330,15 @@ async def test_void_reason_required(
 ) -> None:
     clerk, mgr, _store_id, seller_id = await _seed(db_session)
     acq_id = await _create_buyout(client, clerk, seller_id)
-    resp = await client.post(
+    empty = await client.post(
         f"/api/v1/acquisitions/{acq_id}/void", json={"reason": ""}, headers=_auth(mgr)
     )
-    assert resp.status_code == 422
+    assert empty.status_code == 422
+    # 純空白字元也須擋下（通過 min_length 卻 strip 後為空；Codex F6.5）
+    blank = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "   "}, headers=_auth(mgr)
+    )
+    assert blank.status_code == 422
 
 
 async def test_void_not_found_404(

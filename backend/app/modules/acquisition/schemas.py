@@ -151,6 +151,15 @@ class AcquisitionVoidRequest(BaseModel):
 
     reason: str = Field(min_length=1, max_length=500)
 
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        """去頭尾空白後不得為空——避免純空白字元通過 min_length 卻留下無效原因（Codex F6.5）。"""
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("作廢原因不可為空白")
+        return stripped
+
 
 class AcquisitionVoidResult(BaseModel):
     """作廢成功結果：回傳作廢時間與反轉金額摘要。"""
