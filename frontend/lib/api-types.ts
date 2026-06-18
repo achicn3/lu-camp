@@ -42,6 +42,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/acquisitions/{acquisition_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void Acquisition
+         * @description 作廢收購（限 MANAGER，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；整筆原子、失敗回滾。
+         *
+         *     冪等/併發：以收購列鎖＋ voided_at 狀態為準——重複作廢回 409（不雙重沖回）。
+         *     已作廢/含已售庫存/購物金已花 → 409；付現但無開帳 → 409；找不到 → 404；非 MANAGER → 403。
+         */
+        post: operations["voidAcquisition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -872,6 +895,10 @@ export interface components {
             /** Total Cash Paid */
             total_cash_paid: string | null;
             type: components["schemas"]["AcquisitionType"];
+            /** Void Reason */
+            void_reason: string | null;
+            /** Voided At */
+            voided_at: string | null;
         };
         /**
          * AcquisitionResult
@@ -904,6 +931,31 @@ export interface components {
          * @enum {string}
          */
         AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
+        /**
+         * AcquisitionVoidRequest
+         * @description 作廢收購（F6.5）：必填原因（稽核留痕）。
+         */
+        AcquisitionVoidRequest: {
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * AcquisitionVoidResult
+         * @description 作廢成功結果：回傳作廢時間與反轉金額摘要。
+         */
+        AcquisitionVoidResult: {
+            /** Acquisition Id */
+            acquisition_id: number;
+            /** Reversed Cash */
+            reversed_cash: string;
+            /** Reversed Credit */
+            reversed_credit: string;
+            /**
+             * Voided At
+             * Format: date-time
+             */
+            voided_at: string;
+        };
         /**
          * AgingBuckets
          * @description 未兌付負債帳齡分桶（依發出時間）。
@@ -1022,10 +1074,11 @@ export interface components {
          * CashMovementType
          * @description 現金異動類型。
          *
-         *     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。
+         *     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
+         *     ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。
          * @enum {string}
          */
-        CashMovementType: "SALE_IN" | "BUYOUT_OUT" | "CONSIGNMENT_PAYOUT_OUT" | "MANUAL_ADJUST";
+        CashMovementType: "SALE_IN" | "BUYOUT_OUT" | "CONSIGNMENT_PAYOUT_OUT" | "MANUAL_ADJUST" | "ACQUISITION_VOID_IN";
         /**
          * CashSessionCloseRequest
          * @description 結帳：點數後的實際現金。
@@ -2122,6 +2175,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voidAcquisition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionVoidResult"];
                 };
             };
             /** @description Validation Error */

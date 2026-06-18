@@ -389,6 +389,31 @@ class StoreCreditService:
             created_by=created_by,
         )
 
+    async def reverse_for_acquisition_void(
+        self, store_id: int, acquisition_id: int, *, created_by: int
+    ) -> StoreCreditLedger | None:
+        """作廢收購時沖回該筆的購物金入帳（CREDIT/ACQUISITION → REVERSAL/ACQUISITION_ROLLBACK）。
+
+        無購物金入帳（純現金收購，找不到 CREDIT）→ 回 None（不作為）。沖正冪等（同 source 重試
+        回原沖正列），故重複作廢不會重複扣回。若會員已花用、沖回後餘額會 < 0 → reverse 內部丟
+        InsufficientStoreCredit，由呼叫端擋作廢轉人工更正（F6.5：絕不允許負餘額）。
+        """
+        credit = await self._repo.find_by_source(
+            store_id,
+            StoreCreditSourceType.ACQUISITION,
+            acquisition_id,
+            StoreCreditEntryType.CREDIT,
+        )
+        if credit is None:
+            return None
+        return await self.reverse(
+            store_id,
+            credit.id,
+            source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+            source_id=acquisition_id,
+            created_by=created_by,
+        )
+
     async def adjust(
         self,
         store_id: int,

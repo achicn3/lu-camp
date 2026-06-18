@@ -5,11 +5,13 @@
 金額用 NUMERIC(scale 0) → Decimal（NT$ 整數元）。
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     DDL,
     CheckConstraint,
+    DateTime,
     Enum,
     ForeignKey,
     Numeric,
@@ -97,6 +99,11 @@ class Acquisition(Base, TimestampMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(80))
     idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     note: Mapped[str | None] = mapped_column(String(500))
+    # 作廢（F6.5）：voided_at IS NOT NULL 即「已作廢」（不另立 status 列舉）。作廢時對稱反轉
+    # 庫存/現金/購物金；只加這三欄、不動 credit 腿/成本/ownership，故既有背書守衛仍成立。
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    void_reason: Mapped[str | None] = mapped_column(String(500))
 
 
 # credit 腿 ↔ 帳本綁定（Codex SC-2 第十六輪 medium、第十七/十八輪 P1）：收購頭與

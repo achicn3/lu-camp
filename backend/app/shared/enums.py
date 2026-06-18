@@ -71,13 +71,15 @@ class CashSessionStatus(StrEnum):
 class CashMovementType(StrEnum):
     """現金異動類型。
 
-    SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。
+    SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
+    ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。
     """
 
     SALE_IN = "SALE_IN"
     BUYOUT_OUT = "BUYOUT_OUT"
     CONSIGNMENT_PAYOUT_OUT = "CONSIGNMENT_PAYOUT_OUT"
     MANUAL_ADJUST = "MANUAL_ADJUST"
+    ACQUISITION_VOID_IN = "ACQUISITION_VOID_IN"
 
 
 class AcquisitionType(StrEnum):

@@ -123,3 +123,19 @@ class InvalidSaleTender(DomainError):
 
 class InvalidPremiumRate(DomainError):
     """溢價率設定不合法（min>max、或 premium 不在 [min, max]，docs/16 §6.1）。"""
+
+
+class AcquisitionNotFound(DomainError):
+    """指定的收購單不存在（或不屬於本店）。"""
+
+
+class AcquisitionAlreadyVoid(DomainError):
+    """收購已作廢，不可重複作廢（F6.5；冪等重送同 key 回既成，非此例外）。"""
+
+
+class AcquisitionHasSoldItems(DomainError):
+    """收購含已售出的庫存（序號品非 IN_STOCK／散裝批已部分售出），不可作廢（F6.5）。"""
+
+
+class AcquisitionCreditSpent(DomainError):
+    """該收購入帳的購物金已被花用，沖回會使餘額為負——擋作廢轉人工更正（F6.5，永不負餘額）。"""

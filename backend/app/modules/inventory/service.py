@@ -33,6 +33,7 @@ from app.shared.enums import (
     StockReason,
 )
 from app.shared.exceptions import (
+    AcquisitionHasSoldItems,
     CrossStoreReference,
     InsufficientStock,
     InvalidStateTransition,
@@ -392,6 +393,64 @@ class InventoryService:
 
     async def write_off_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.WRITTEN_OFF)
+
+    async def has_sold_items(self, store_id: int, acquisition_id: int) -> bool:
+        """該收購入庫的庫存是否已有任一售出/動用（read-only，作廢前置擋下用，F6.5）。
+
+        序號品：任一非 IN_STOCK（已售/已退寄售人/已下架）即視為動用；
+        散裝批：任一非 ON_SALE 或 remaining_qty < total_qty（已部分/全部售出）即視為動用。
+        """
+        items = await self.list_serialized_by_acquisitions(store_id, [acquisition_id])
+        if any(it.status != SerializedItemStatus.IN_STOCK for it in items):
+            return True
+        lots = await self.list_bulk_lots_by_acquisitions(store_id, [acquisition_id])
+        return any(
+            lot.status != BulkLotStatus.ON_SALE or lot.remaining_qty != lot.total_qty
+            for lot in lots
+        )
+
+    async def void_acquisition_inventory(self, store_id: int, acquisition_id: int) -> None:
+        """作廢收購：將該收購入庫的序號品/散裝批全部退場（WRITTEN_OFF＋出庫帳）。
+
+        以原子條件式轉移為併發後盾——任一品在前置檢查後才被售出，轉移失敗即丟
+        AcquisitionHasSoldItems、整筆回滾，不留半套。stock_movement 以 ref 溯源到本作廢。
+        """
+        items = await self.list_serialized_by_acquisitions(store_id, [acquisition_id])
+        for it in items:
+            ok = await self._repo.transition_serialized_status(
+                it.id,
+                SerializedItemStatus.IN_STOCK,
+                SerializedItemStatus.WRITTEN_OFF,
+                set_sold_date=False,
+            )
+            if not ok:
+                raise AcquisitionHasSoldItems(
+                    f"序號品 {it.item_code} 已售出/已下架，無法作廢收購"
+                )
+            await self.record_stock_out(
+                store_id,
+                ItemKind.SERIALIZED,
+                qty=1,
+                reason=StockReason.WRITE_OFF,
+                ref_type="acquisition_void",
+                ref_id=acquisition_id,
+                serialized_item_id=it.id,
+            )
+        lots = await self.list_bulk_lots_by_acquisitions(store_id, [acquisition_id])
+        for lot in lots:
+            if not await self._repo.write_off_bulk_lot(lot.id):
+                raise AcquisitionHasSoldItems(
+                    f"散裝批 {lot.lot_code} 已部分/全部售出，無法作廢收購"
+                )
+            await self.record_stock_out(
+                store_id,
+                ItemKind.BULK_LOT,
+                qty=lot.total_qty,
+                reason=StockReason.WRITE_OFF,
+                ref_type="acquisition_void",
+                ref_id=acquisition_id,
+                bulk_lot_id=lot.id,
+            )
 
     # ── 散裝批 ──
     async def create_bulk_lot(

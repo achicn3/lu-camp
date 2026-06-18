@@ -146,6 +146,21 @@ class AcquisitionResult(BaseModel):
     lot_code: str | None
 
 
+class AcquisitionVoidRequest(BaseModel):
+    """作廢收購（F6.5）：必填原因（稽核留痕）。"""
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class AcquisitionVoidResult(BaseModel):
+    """作廢成功結果：回傳作廢時間與反轉金額摘要。"""
+
+    acquisition_id: int
+    voided_at: datetime
+    reversed_cash: NTDAmount
+    reversed_credit: NTDAmount
+
+
 class AcquisitionRead(BaseModel):
     """收購單查詢輸出。"""
 
@@ -162,6 +177,8 @@ class AcquisitionRead(BaseModel):
     payout_credit_cash_equivalent: NTDAmount | None
     note: str | None
     created_at: datetime
+    voided_at: datetime | None
+    void_reason: str | None
 
     @classmethod
     def from_model(cls, acquisition: Acquisition) -> "AcquisitionRead":

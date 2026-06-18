@@ -74,6 +74,17 @@ class AcquisitionRepository:
         result: Acquisition | None = await self._session.scalar(stmt)
         return result
 
+    async def lock(self, store_id: int, acquisition_id: int) -> Acquisition | None:
+        """收購列上 row lock 並刷新到已提交狀態（作廢前序列化、擋併發重複作廢；比照 lock_sale）。"""
+        stmt = (
+            select(Acquisition)
+            .where(Acquisition.id == acquisition_id, Acquisition.store_id == store_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        result: Acquisition | None = await self._session.scalar(stmt)
+        return result
+
     async def count_payouts_by_method(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> dict[PayoutMethod, int]:

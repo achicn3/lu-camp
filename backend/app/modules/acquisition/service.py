@@ -12,7 +12,7 @@
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -41,9 +41,14 @@ from app.shared.enums import (
     StoreCreditSourceType,
 )
 from app.shared.exceptions import (
+    AcquisitionAlreadyVoid,
+    AcquisitionCreditSpent,
+    AcquisitionHasSoldItems,
+    AcquisitionNotFound,
     AcquisitionRequiresNationalId,
     ContactNotFound,
     IdempotencyKeyConflict,
+    InsufficientStoreCredit,
     InvalidAcquisitionCategory,
     InvalidCommissionPct,
     InvalidPayoutSplit,
@@ -352,6 +357,73 @@ class AcquisitionService:
             item_codes=item_codes,
             lot_code=lot_code,
         )
+
+    async def void_acquisition(
+        self, store_id: int, acquisition_id: int, *, actor_user_id: int, reason: str
+    ) -> Acquisition:
+        """作廢收購（manager，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；單交易整筆成立/回滾。
+
+        擋下（任一成立即拒，皆先於任何寫入）：已作廢、含已售庫存、付現但無開帳、購物金已花用沖回會負。
+        併發：FOR UPDATE 鎖收購列＋刷新已提交——兩並行作廢只一成功（另一見已作廢）、稽核一筆。
+        庫存以原子條件式轉移為後盾、購物金沖正餘額不足即整筆回滾。
+        """
+        acquisition = await self._repo.lock(store_id, acquisition_id)
+        if acquisition is None:
+            raise AcquisitionNotFound(f"找不到收購 {acquisition_id}")
+        if acquisition.voided_at is not None:
+            raise AcquisitionAlreadyVoid(f"收購 {acquisition_id} 已作廢，不可重複作廢")
+
+        # 讀層前置擋（清楚錯誤、早於任何寫入）：含已售庫存 → 不可作廢
+        if await self._inventory.has_sold_items(store_id, acquisition_id):
+            raise AcquisitionHasSoldItems(f"收購 {acquisition_id} 含已售出庫存，無法作廢")
+        cash_back = acquisition.payout_cash_amount or Decimal(0)
+        credit_back = acquisition.payout_credit_cash_equivalent or Decimal(0)
+        # 付現的退款須落當前開帳 session（現行紅字，不改歷史）；無開帳 → 擋
+        if cash_back > 0 and await self._cash.get_current_session(store_id) is None:
+            raise NoOpenCashSession("作廢付現收購的退款需在開帳中的 cash_session 下進行，請先開帳")
+
+        # 寫入（單一交易，router commit/rollback）
+        if cash_back > 0:
+            await self._cash.record_movement(
+                store_id,
+                CashMovementType.ACQUISITION_VOID_IN,
+                cash_back,
+                actor_user_id=actor_user_id,
+                ref_type="acquisition_void",
+                ref_id=acquisition_id,
+            )
+        if credit_back > 0:
+            try:
+                await self._storecredit.reverse_for_acquisition_void(
+                    store_id, acquisition_id, created_by=actor_user_id
+                )
+            except InsufficientStoreCredit as exc:
+                raise AcquisitionCreditSpent(
+                    f"收購 {acquisition_id} 的購物金已被花用，無法作廢，請改用人工更正"
+                ) from exc
+        await self._inventory.void_acquisition_inventory(store_id, acquisition_id)
+
+        acquisition.voided_at = datetime.now(UTC)
+        acquisition.voided_by = actor_user_id
+        acquisition.void_reason = reason.strip()
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="VOID_ACQUISITION",
+            entity_type="acquisition",
+            entity_id=str(acquisition_id),
+            before={"voided_at": None},
+            after={
+                "voided_at": acquisition.voided_at.isoformat(),
+                "reason": reason.strip(),
+                "reversed_cash": str(cash_back),
+                "reversed_credit": str(credit_back),
+            },
+            is_sensitive=True,
+        )
+        return acquisition
 
     async def _validate_categories(self, store_id: int, data: AcquisitionCreate) -> None:
         """檢查所有帶入的 category_id 屬本店（不屬→422）；FK 不分店，須在 service 守。"""

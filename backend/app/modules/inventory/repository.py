@@ -378,3 +378,18 @@ class InventoryRepository:
         )
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1
+
+    async def write_off_bulk_lot(self, lot_id: int) -> bool:
+        """作廢收購時退場散裝批：原子地僅當「ON_SALE 且全未售（remaining = total）」才轉
+        WRITTEN_OFF、remaining 歸 0。已部分/全部售出（或已下架）→ 不動作回 False（擋作廢）。"""
+        stmt = (
+            update(BulkLot)
+            .where(
+                BulkLot.id == lot_id,
+                BulkLot.status == BulkLotStatus.ON_SALE,
+                BulkLot.remaining_qty == BulkLot.total_qty,
+            )
+            .values(status=BulkLotStatus.WRITTEN_OFF, remaining_qty=0)
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1

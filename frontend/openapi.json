@@ -323,6 +323,29 @@
           },
           "type": {
             "$ref": "#/components/schemas/AcquisitionType"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
           }
         },
         "required": [
@@ -336,7 +359,9 @@
           "payout_cash_amount",
           "payout_credit_cash_equivalent",
           "note",
-          "created_at"
+          "created_at",
+          "voided_at",
+          "void_reason"
         ],
         "title": "AcquisitionRead",
         "type": "object"
@@ -433,6 +458,52 @@
         ],
         "title": "AcquisitionType",
         "type": "string"
+      },
+      "AcquisitionVoidRequest": {
+        "description": "作廢收購（F6.5）：必填原因（稽核留痕）。",
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AcquisitionVoidRequest",
+        "type": "object"
+      },
+      "AcquisitionVoidResult": {
+        "description": "作廢成功結果：回傳作廢時間與反轉金額摘要。",
+        "properties": {
+          "acquisition_id": {
+            "title": "Acquisition Id",
+            "type": "integer"
+          },
+          "reversed_cash": {
+            "title": "Reversed Cash",
+            "type": "string"
+          },
+          "reversed_credit": {
+            "title": "Reversed Credit",
+            "type": "string"
+          },
+          "voided_at": {
+            "format": "date-time",
+            "title": "Voided At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acquisition_id",
+          "voided_at",
+          "reversed_cash",
+          "reversed_credit"
+        ],
+        "title": "AcquisitionVoidResult",
+        "type": "object"
       },
       "AgingBuckets": {
         "description": "未兌付負債帳齡分桶（依發出時間）。",
@@ -729,12 +800,13 @@
         "type": "object"
       },
       "CashMovementType": {
-        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負。",
+        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；\nACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。",
         "enum": [
           "SALE_IN",
           "BUYOUT_OUT",
           "CONSIGNMENT_PAYOUT_OUT",
-          "MANUAL_ADJUST"
+          "MANUAL_ADJUST",
+          "ACQUISITION_VOID_IN"
         ],
         "title": "CashMovementType",
         "type": "string"
@@ -3557,6 +3629,64 @@
           }
         ],
         "summary": "Get Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}/void": {
+      "post": {
+        "description": "作廢收購（限 MANAGER，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；整筆原子、失敗回滾。\n\n冪等/併發：以收購列鎖＋ voided_at 狀態為準——重複作廢回 409（不雙重沖回）。\n已作廢/含已售庫存/購物金已花 → 409；付現但無開帳 → 409；找不到 → 404；非 MANAGER → 403。",
+        "operationId": "voidAcquisition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquisitionVoidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionVoidResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Void Acquisition",
         "tags": [
           "acquisition"
         ]
