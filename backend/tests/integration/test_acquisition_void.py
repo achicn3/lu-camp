@@ -6,6 +6,7 @@
 
 import itertools
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -18,6 +19,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.acquisition.models import Acquisition
+from app.modules.acquisition.repository import AcquisitionRepository
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
@@ -29,6 +31,7 @@ from app.modules.user.models import User
 from app.shared.enums import (
     BulkLotStatus,
     CashMovementType,
+    PayoutMethod,
     SerializedItemStatus,
     StoreCreditSourceType,
     UserRole,
@@ -447,3 +450,90 @@ async def test_void_audit_excludes_free_form_reason(
     # 原因仍保存在其設計歸屬欄位（acquisitions.void_reason）
     acq = await db_session.get(Acquisition, acq_id)
     assert acq is not None and acq.void_reason == reason
+
+
+# ── 作廢須涵蓋整批、不可只看分頁首頁（Codex 高風險②）──
+
+
+async def _create_buyout_n_items(
+    client: httpx.AsyncClient, token: str, contact_id: int, n: int
+) -> int:
+    items = [
+        {"name": f"item{i}", "grade": "A", "acquisition_cost": "1", "listed_price": "2"}
+        for i in range(n)
+    ]
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={"type": "BUYOUT", "contact_id": contact_id, "items": items},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    return int(resp.json()["acquisition_id"])
+
+
+async def test_void_guard_catches_sold_item_beyond_first_page(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """201 件 BUYOUT：售出最小 id（最早建立）那件——舊分頁讀層 id.desc().limit(200) 會漏看；
+    無分頁讀層應擋下 → 409，整筆不動。"""
+    clerk, mgr, store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 201)
+    first_item = await db_session.scalar(
+        select(SerializedItem)
+        .where(SerializedItem.acquisition_id == acq_id)
+        .order_by(SerializedItem.id)
+        .limit(1)
+    )
+    assert first_item is not None
+    await InventoryService(db_session).sell_serialized_item(first_item.id)
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 409, resp.text
+    acq = await db_session.get(Acquisition, acq_id)
+    assert acq is not None and acq.voided_at is None
+    assert await _void_in(db_session, store_id) == Decimal(0)
+
+
+async def test_void_writes_off_all_items_beyond_first_page(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """201 件 BUYOUT 作廢 → 全部 201 件 WRITTEN_OFF（不漏分頁第 2 頁）。"""
+    clerk, mgr, _store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout_n_items(client, clerk, seller_id, 201)
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+    rows = (
+        await db_session.scalars(
+            select(SerializedItem).where(SerializedItem.acquisition_id == acq_id)
+        )
+    ).all()
+    assert len(rows) == 201
+    assert all(r.status == SerializedItemStatus.WRITTEN_OFF for r in rows)
+
+
+# ── 已作廢收購不得污染 take_rate 報表（Codex ②）──
+
+
+async def test_voided_acquisition_excluded_from_take_rate(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已作廢的 STORE_CREDIT 收購撥款已沖回、零效果，不得計入 take_rate 分母。"""
+    clerk, mgr, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    acq_id = await _create_buyout(client, clerk, seller_id, payout_method="STORE_CREDIT")
+    repo = AcquisitionRepository(db_session)
+    lo = datetime.now(UTC) - timedelta(days=1)
+    hi = datetime.now(UTC) + timedelta(days=1)
+    before = await repo.count_payouts_by_method(store_id, lo, hi)
+    assert before.get(PayoutMethod.STORE_CREDIT, 0) >= 1  # 作廢前計入
+
+    resp = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+    after = await repo.count_payouts_by_method(store_id, lo, hi)
+    assert after.get(PayoutMethod.STORE_CREDIT, 0) == 0  # 作廢後排除

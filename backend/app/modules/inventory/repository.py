@@ -273,6 +273,40 @@ class InventoryRepository:
         stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    async def list_owned_serialized_for_void(
+        self, store_id: int, acquisition_id: int
+    ) -> list[SerializedItem]:
+        """該收購單下**全部**買斷(OWNED)序號品（無分頁，F6.5 作廢）。
+
+        作廢的前置擋下與退場必須涵蓋整批；不可用會員中心的分頁讀層（預設 limit=200，
+        201+ 件時只看到首頁、漏檢/漏退場——Codex 高風險）。
+        """
+        stmt = (
+            select(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.acquisition_id == acquisition_id,
+                SerializedItem.ownership_type == OwnershipType.OWNED,
+            )
+            .order_by(SerializedItem.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def list_owned_bulk_lots_for_void(
+        self, store_id: int, acquisition_id: int
+    ) -> list[BulkLot]:
+        """該收購單下**全部**自有(consignor_id IS NULL)散裝批（無分頁，F6.5 作廢）。"""
+        stmt = (
+            select(BulkLot)
+            .where(
+                BulkLot.store_id == store_id,
+                BulkLot.acquisition_id == acquisition_id,
+                BulkLot.consignor_id.is_(None),
+            )
+            .order_by(BulkLot.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_serialized_ids_by_consignor(
         self, store_id: int, consignor_id: int
     ) -> list[int]:

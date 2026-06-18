@@ -92,12 +92,14 @@ class AcquisitionRepository:
 
         只計「有撥款選擇」的收購（BUYOUT／BULK_LOT）；寄售（CONSIGNMENT）撥款屬結算階段、
         固定為 CASH 形狀但非現金 vs 購物金的選擇，計入會灌大分母、壓低 take_rate（Codex P2）。
+        已作廢（voided_at 非空）者撥款已沖回、零效果，亦排除以免污染 take_rate（F6.5 Codex P2）。
         """
         stmt = (
             select(Acquisition.payout_method, func.count())
             .where(
                 Acquisition.store_id == store_id,
                 Acquisition.type != AcquisitionType.CONSIGNMENT,
+                Acquisition.voided_at.is_(None),
                 Acquisition.created_at >= date_from,
                 Acquisition.created_at < date_to,
             )

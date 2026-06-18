@@ -399,11 +399,12 @@ class InventoryService:
 
         序號品：任一非 IN_STOCK（已售/已退寄售人/已下架）即視為動用；
         散裝批：任一非 ON_SALE 或 remaining_qty < total_qty（已部分/全部售出）即視為動用。
+        以無分頁讀層涵蓋整批（不可漏看 201+ 件之後的頁，Codex 高風險）。
         """
-        items = await self.list_serialized_by_acquisitions(store_id, [acquisition_id])
+        items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
         if any(it.status != SerializedItemStatus.IN_STOCK for it in items):
             return True
-        lots = await self.list_bulk_lots_by_acquisitions(store_id, [acquisition_id])
+        lots = await self._repo.list_owned_bulk_lots_for_void(store_id, acquisition_id)
         return any(
             lot.status != BulkLotStatus.ON_SALE or lot.remaining_qty != lot.total_qty
             for lot in lots
@@ -414,8 +415,9 @@ class InventoryService:
 
         以原子條件式轉移為併發後盾——任一品在前置檢查後才被售出，轉移失敗即丟
         AcquisitionHasSoldItems、整筆回滾，不留半套。stock_movement 以 ref 溯源到本作廢。
+        以無分頁讀層涵蓋整批（不可漏退 201+ 件之後的頁，Codex 高風險）。
         """
-        items = await self.list_serialized_by_acquisitions(store_id, [acquisition_id])
+        items = await self._repo.list_owned_serialized_for_void(store_id, acquisition_id)
         for it in items:
             ok = await self._repo.transition_serialized_status(
                 it.id,
@@ -436,7 +438,7 @@ class InventoryService:
                 ref_id=acquisition_id,
                 serialized_item_id=it.id,
             )
-        lots = await self.list_bulk_lots_by_acquisitions(store_id, [acquisition_id])
+        lots = await self._repo.list_owned_bulk_lots_for_void(store_id, acquisition_id)
         for lot in lots:
             if not await self._repo.write_off_bulk_lot(lot.id):
                 raise AcquisitionHasSoldItems(
