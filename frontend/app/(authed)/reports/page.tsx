@@ -10,6 +10,7 @@ import {
   GRANULARITY_OPTIONS,
   defaultDateRange,
   exclusiveEnd,
+  startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
 import { api } from "@/lib/api";
@@ -200,7 +201,7 @@ function FlowsPanel() {
       const { data, error, response } = await api.GET("/api/v1/reports/store-credit/flows", {
         params: {
           query: {
-            from: `${from}T00:00:00`,
+            from: startOfDay(from),
             to: exclusiveEnd(to),
             granularity,
           },
@@ -215,7 +216,7 @@ function FlowsPanel() {
 
   function handleDownload(fmt: "csv" | "xlsx") {
     const url = buildExportUrl("/api/v1/reports/store-credit/flows", fmt, {
-      from: `${from}T00:00:00`,
+      from: startOfDay(from),
       to: exclusiveEnd(to),
       granularity,
     });
@@ -305,7 +306,7 @@ function EffectivenessPanel() {
         {
           params: {
             query: {
-              from: `${from}T00:00:00`,
+              from: startOfDay(from),
               to: exclusiveEnd(to),
             },
           },
@@ -320,7 +321,7 @@ function EffectivenessPanel() {
 
   function handleDownload(fmt: "csv" | "xlsx") {
     const url = buildExportUrl("/api/v1/reports/store-credit/effectiveness", fmt, {
-      from: `${from}T00:00:00`,
+      from: startOfDay(from),
       to: exclusiveEnd(to),
     });
     void downloadReport(url, `store-credit-effectiveness.${fmt}`);

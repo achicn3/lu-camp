@@ -40,14 +40,23 @@ export function isoDate(d: Date): string {
 }
 
 /**
- * 結束日期（YYYY-MM-DD）→「隔日 00:00:00」作為半開區間的排他上界。
- * 後端用 `created_at < date_to`，故送整日的最後一刻（T23:59:59）會漏掉該秒內含小數秒的交易；
- * 改送隔日零時，讓整個結束日（含最後一秒）都被納入、又不含隔日任何資料。
+ * 起始日期（YYYY-MM-DD）→ 該地當日 00:00 的 UTC 瞬時（帶時區的 ISO，結尾 Z）。
+ * 後端 `created_at` 為 timezone-aware；若送 naive datetime 會被當成伺服器時區解讀，
+ * 造成報表視窗邊界偏移（如 +08:00 最多差 8 小時）。以本地零時轉 UTC 瞬時即對齊使用者當日。
+ */
+export function startOfDay(isoDateStr: string): string {
+  return new Date(`${isoDateStr}T00:00:00`).toISOString();
+}
+
+/**
+ * 結束日期（YYYY-MM-DD）→ 該地「隔日 00:00」的 UTC 瞬時，作為半開區間的排他上界。
+ * 後端用 `created_at < date_to`：送隔日零時讓整個結束日（含最後一刻、小數秒）都納入、
+ * 又不含隔日任何資料。同樣帶時區（Z），避免 naive datetime 的時區偏移。
  */
 export function exclusiveEnd(isoDateStr: string): string {
   const d = new Date(`${isoDateStr}T00:00:00`);
   d.setDate(d.getDate() + 1);
-  return `${isoDate(d)}T00:00:00`;
+  return d.toISOString();
 }
 
 /** Labels for effectiveness metrics (zh-TW). */

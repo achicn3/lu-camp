@@ -7,6 +7,7 @@ import {
   defaultDateRange,
   exclusiveEnd,
   isoDate,
+  startOfDay,
 } from "@/features/reports/reports";
 
 describe("isoDate", () => {
@@ -32,13 +33,19 @@ describe("defaultDateRange", () => {
   });
 });
 
-describe("exclusiveEnd", () => {
-  it("returns next-day 00:00:00 (half-open upper bound, includes whole end date)", () => {
-    expect(exclusiveEnd("2026-06-18")).toBe("2026-06-19T00:00:00");
+describe("date bounds (timezone-aware)", () => {
+  it("startOfDay / exclusiveEnd return timezone-aware UTC instants (end with Z)", () => {
+    expect(startOfDay("2026-06-18").endsWith("Z")).toBe(true);
+    expect(exclusiveEnd("2026-06-18").endsWith("Z")).toBe(true);
   });
-  it("rolls over month/year boundaries", () => {
-    expect(exclusiveEnd("2026-01-31")).toBe("2026-02-01T00:00:00");
-    expect(exclusiveEnd("2026-12-31")).toBe("2027-01-01T00:00:00");
+  it("exclusiveEnd is exactly 24h after startOfDay (covers whole local day, half-open)", () => {
+    const start = new Date(startOfDay("2026-06-18")).getTime();
+    const end = new Date(exclusiveEnd("2026-06-18")).getTime();
+    expect(end - start).toBe(24 * 60 * 60 * 1000);
+  });
+  it("both equal the same local-midnight instant the backend expects", () => {
+    expect(startOfDay("2026-06-18")).toBe(new Date("2026-06-18T00:00:00").toISOString());
+    expect(exclusiveEnd("2026-06-18")).toBe(new Date("2026-06-19T00:00:00").toISOString());
   });
 });
 
