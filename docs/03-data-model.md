@@ -139,4 +139,4 @@ erDiagram
 
 ### setting（系統設定，**單列具型別**，每店一列、Pydantic 驗證）
 `einvoice_enabled(bool), default_commission_pct(int,=50), default_margin_pct(int,=45,定價輔助目標毛利率), tax_rate(=0.05), default_reorder_point, einvoice_print_proof_when_carrier(bool,預設 false), ...`
-- `grade_enum`：S/A/B/C/D/E 六級（可設定用語）。預設語意：S=熱門/搶手、A=近全新/精品、B=良好、C=普通、D=較差出清、**E=散裝（秤斤/整袋收，走 bulk_lot）**。S–D 為序號單品，E 為散裝批。
+- `grade_enum`：S/A/B/C/D/E 六級（可設定用語）。預設語意：S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、**E=散裝（秤斤/整袋收，走 bulk_lot）**。S–D 為序號單品，E 為散裝批。
