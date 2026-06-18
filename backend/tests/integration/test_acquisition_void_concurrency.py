@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import httpx
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 
 import app.core.db as app_db
 from app.core.audit import AuditLog
@@ -24,11 +24,17 @@ from app.modules.acquisition.service import AcquisitionService
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
-from app.modules.inventory.models import SerializedItem, StockMovement
+from app.modules.inventory.models import CatalogProduct, SerializedItem, StockMovement
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import AcquisitionType, CashMovementType, Grade, UserRole
+from app.shared.enums import (
+    AcquisitionType,
+    CashMovementType,
+    Grade,
+    PayoutMethod,
+    UserRole,
+)
 
 
 @pytest_asyncio.fixture
@@ -185,6 +191,125 @@ async def test_concurrent_sale_vs_void_no_deadlock(real_client: httpx.AsyncClien
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
+            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+            await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
+            await s.execute(delete(Contact).where(Contact.store_id == store_id))
+            await s.execute(delete(User).where(User.store_id == store_id))
+            await s.execute(delete(Store).where(Store.id == store_id))
+            await s.commit()
+
+
+async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
+    real_client: httpx.AsyncClient,
+) -> None:
+    """SPLIT 作廢(cash_session→account) vs『購物金-先』混合銷售(account→cash_session) 同一 contact：
+    sales _apply_tenders 已固定 CASH 先於 STORE_CREDIT，與作廢 cash→credit 同一全域鎖序，不得 AB-BA
+    死結 500。給足獨立購物金 → 兩者皆乾淨成功（餘額不相爭）。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="混合收款作廢店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="mx-clk", password_hash="h", role=UserRole.CLERK)
+        mgr = User(store_id=store.id, username="mx-mgr", password_hash="h", role=UserRole.MANAGER)
+        member = Contact(
+            store_id=store.id, name="會員", roles=["SELLER", "MEMBER"], national_id_enc="enc"
+        )
+        s.add_all([clerk, mgr, member])
+        await s.flush()
+        await CashDrawerService(s).open_session(store.id, clerk.id, Decimal("5000"))
+        acq_svc = AcquisitionService(s)
+        # SPLIT 收購：作廢須同時沖回現金與購物金（鎖 cash_session 與 account）
+        acq = await acq_svc.create_acquisition(
+            store.id,
+            clerk.id,
+            AcquisitionCreate(
+                type=AcquisitionType.BUYOUT,
+                contact_id=member.id,
+                payout_method=PayoutMethod.SPLIT,
+                payout_split_cash=Decimal("600"),
+                items=[
+                    AcquisitionItemIn(
+                        name="帳篷",
+                        grade=Grade.A,
+                        listed_price=Decimal("1800"),
+                        acquisition_cost=Decimal("1000"),
+                    )
+                ],
+            ),
+            idempotency_key="mx-create",
+        )
+        # 另一筆獨立 STORE_CREDIT 收購給足購物金（作廢只沖回上面那筆 SPLIT 的入帳，這筆不動），
+        # 確保銷售扣抵與作廢沖回都不會讓餘額為負——隔離「鎖序」與「餘額相爭」。
+        await acq_svc.create_acquisition(
+            store.id,
+            clerk.id,
+            AcquisitionCreate(
+                type=AcquisitionType.BUYOUT,
+                contact_id=member.id,
+                payout_method=PayoutMethod.STORE_CREDIT,
+                items=[
+                    AcquisitionItemIn(
+                        name="睡袋",
+                        grade=Grade.A,
+                        listed_price=Decimal("3000"),
+                        acquisition_cost=Decimal("2000"),
+                    )
+                ],
+            ),
+            idempotency_key="mx-credit",
+        )
+        catalog = CatalogProduct(
+            store_id=store.id,
+            sku="MX1",
+            name="飲料",
+            unit_price=Decimal("150"),
+            quantity_on_hand=10,
+        )
+        s.add(catalog)
+        await s.flush()
+        store_id, acq_id = store.id, acq.acquisition_id
+        catalog_id, member_id = catalog.id, member.id
+        clerk_token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
+        mgr_token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+        await s.commit()
+
+    try:
+        sale_headers = {"Authorization": f"Bearer {clerk_token}", "Idempotency-Key": "mx-sale"}
+        void_headers = {"Authorization": f"Bearer {mgr_token}"}
+        r_sale, r_void = await asyncio.gather(
+            real_client.post(
+                "/api/v1/sales",
+                json={
+                    "buyer_contact_id": member_id,
+                    "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 1}],
+                    # 客戶端送『購物金-先』：未修前會先鎖 account 再鎖 cash_session
+                    "tenders": [
+                        {"tender_type": "STORE_CREDIT", "amount": "100"},
+                        {"tender_type": "CASH", "amount": "50"},
+                    ],
+                },
+                headers=sale_headers,
+            ),
+            real_client.post(
+                f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=void_headers
+            ),
+        )
+        # 無 DB 死結 500；餘額充足 → 兩者皆乾淨成功
+        assert r_sale.status_code == 201, r_sale.text
+        assert r_void.status_code == 200, r_void.text
+    finally:
+        async with sm() as s:
+            # 帳本 insert-only（ADR-012）連 DELETE 都擋；清理用 TRUNCATE（不觸發列級 trigger）。
+            await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
+            await s.execute(delete(Sale).where(Sale.store_id == store_id))
+            await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
+            await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
+            await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
+            await s.execute(delete(CatalogProduct).where(CatalogProduct.store_id == store_id))
             await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))

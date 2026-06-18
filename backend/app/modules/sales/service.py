@@ -277,8 +277,13 @@ class SalesService:
         clerk_user_id: int,
         buyer_contact_id: int | None,
     ) -> None:
-        """落地收款：現金部分入錢櫃 SALE_IN、購物金部分扣帳本 DEBIT，並記 sale_tenders。"""
-        for tender in plan:
+        """落地收款：現金部分入錢櫃 SALE_IN、購物金部分扣帳本 DEBIT，並記 sale_tenders。
+
+        固定 CASH 先於 STORE_CREDIT 落地：建立 cash_session 與 store_credit_account 的**全域唯一
+        鎖序**（與收購作廢的 cash→credit 一致），避免「購物金-先的混合銷售」與並行 SPLIT 作廢在同一
+        contact 形成 AB-BA 死結（Codex F6.5 高風險）。各 tender 金額已固定、改順序不影響金額/紀錄。
+        """
+        for tender in sorted(plan, key=lambda t: 0 if t.tender_type == TenderType.CASH else 1):
             if tender.tender_type == TenderType.CASH:
                 await self._cash.record_movement(
                     store_id,
