@@ -453,6 +453,28 @@ async def test_void_audit_excludes_free_form_reason(
     assert acq is not None and acq.void_reason == reason
 
 
+async def test_void_reason_not_exposed_via_acquisition_read(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """GET /acquisitions/{id}（店員可讀）不得回傳 void_reason——自由文字可能含 PII（§5）。"""
+    clerk, mgr, _store_id, seller_id = await _seed(db_session)
+    acq_id = await _create_buyout(client, clerk, seller_id)
+    reason = "賣方 王小明 A123456789 0912345678 反悔"
+    void = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void", json={"reason": reason}, headers=_auth(mgr)
+    )
+    assert void.status_code == 200, void.text
+
+    # 店員讀取已作廢收購：voided_at 可見，但原因不外洩
+    read = await client.get(f"/api/v1/acquisitions/{acq_id}", headers=_auth(clerk))
+    assert read.status_code == 200, read.text
+    body = read.json()
+    assert body["voided_at"] is not None
+    assert "void_reason" not in body
+    for pii in ("王小明", "A123456789", "0912345678"):
+        assert pii not in read.text
+
+
 # ── 作廢須涵蓋整批、不可只看分頁首頁（Codex 高風險②）──
 
 

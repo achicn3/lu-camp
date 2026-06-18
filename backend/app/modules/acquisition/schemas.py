@@ -178,7 +178,9 @@ class AcquisitionRead(BaseModel):
     note: str | None
     created_at: datetime
     voided_at: datetime | None
-    void_reason: str | None
+    # void_reason 為自由文字、可能含賣方 PII（姓名/身分證/電話），不放一般查詢回應（§5
+    # 「PII 禁止出現在一般 API 回應」）。GET /acquisitions/{id} 為 CurrentUserDep（店員可讀），
+    # 暴露會讓非授權者看到 PII；原因僅留存 DB 欄供記錄，必要時另以 manager-only 欄位/端點呈現。
 
     @classmethod
     def from_model(cls, acquisition: Acquisition) -> "AcquisitionRead":

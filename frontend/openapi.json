@@ -324,17 +324,6 @@
           "type": {
             "$ref": "#/components/schemas/AcquisitionType"
           },
-          "void_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Void Reason"
-          },
           "voided_at": {
             "anyOf": [
               {
@@ -360,8 +349,7 @@
           "payout_credit_cash_equivalent",
           "note",
           "created_at",
-          "voided_at",
-          "void_reason"
+          "voided_at"
         ],
         "title": "AcquisitionRead",
         "type": "object"

@@ -895,8 +895,6 @@ export interface components {
             /** Total Cash Paid */
             total_cash_paid: string | null;
             type: components["schemas"]["AcquisitionType"];
-            /** Void Reason */
-            void_reason: string | null;
             /** Voided At */
             voided_at: string | null;
         };
