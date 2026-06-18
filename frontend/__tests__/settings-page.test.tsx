@@ -144,6 +144,32 @@ describe("/settings", () => {
     expect(screen.queryByText("需管理者權限")).toBeNull();
   });
 
+  it("建議值載入失敗（500）顯示錯誤、不誤呈現為「無建議/資料不足」", async () => {
+    loginAs("MANAGER");
+    stubFetch((url) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json({ detail: "boom" }, 500);
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    expect(await screen.findByText(/讀取當日建議值失敗/)).toBeDefined();
+    expect(screen.queryByText("資料不足，採用預設值")).toBeNull();
+  });
+
+  it("變更紀錄載入失敗（500）顯示錯誤、不誤呈現為空白稽核紀錄", async () => {
+    loginAs("MANAGER");
+    stubFetch((url) => {
+      if (url.includes("/settings/premium-rate/history")) return json({ detail: "boom" }, 500);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings")) return json(SETTINGS);
+      return null;
+    });
+    renderPage();
+    expect(await screen.findByText("讀取變更紀錄失敗，請稍後再試")).toBeDefined();
+    expect(screen.queryByText("尚無變更紀錄")).toBeNull();
+  });
+
   it("tax_rate 非標準字串（0.05）不被誤判為變更、不送空操作 PATCH", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];

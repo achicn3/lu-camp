@@ -491,8 +491,11 @@ export default function ReportsPage() {
     queryKey: ["reports", "access"],
     queryFn: async () => {
       const { response } = await api.GET("/api/v1/reports/store-credit/liability");
-      return response.status === 401 || response.status === 403 ? "denied" : "granted";
+      if (response.status === 401 || response.status === 403) return "denied" as const;
+      if (!response.ok) throw new Error(`報表服務暫時無法使用（${response.status}）`);
+      return "granted" as const;
     },
+    retry: false, // gate 探測：權限/錯誤即時決斷，不重試
   });
 
   if (access.isPending) {
@@ -503,7 +506,16 @@ export default function ReportsPage() {
       </section>
     );
   }
-  if (access.data !== "granted") {
+  // 連線/伺服器錯誤（探測 throw）與「無權限」分流：不可把斷線誤報為權限不足。
+  if (access.isError) {
+    return (
+      <section>
+        <h1 className="page-title">報表</h1>
+        <ErrorBlock message="無法連線報表服務，請稍後再試" />
+      </section>
+    );
+  }
+  if (access.data === "denied") {
     return (
       <section>
         <h1 className="page-title">報表</h1>

@@ -178,10 +178,12 @@ function GeneralSettingsCard({
 function PremiumRateCard({
   settings,
   suggestion,
+  suggestionError,
   onSaved,
 }: {
   settings: SettingsRead;
   suggestion: PremiumSuggestionResponse | null;
+  suggestionError: boolean;
   onSaved: () => void;
 }) {
   const [rateInput, setRateInput] = useState<string>(
@@ -265,7 +267,13 @@ function PremiumRateCard({
         </div>
       </div>
 
-      {suggestion !== null && (
+      {suggestionError && (
+        <p role="alert" className="form-error">
+          讀取當日建議值失敗，請稍後再試（非無資料）
+        </p>
+      )}
+
+      {!suggestionError && suggestion !== null && (
         <div className="settings-suggestion">
           {suggestion.insufficient_data ? (
             <p className="hint">資料不足，採用預設值</p>
@@ -367,6 +375,18 @@ function PremiumRateCard({
   );
 }
 
+/** 區塊載入失敗時用：明確顯示「讀取失敗」，避免把錯誤狀態誤呈現為「無資料/空」。 */
+function ErrorCard({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      <p role="alert" className="form-error">
+        {message}
+      </p>
+    </div>
+  );
+}
+
 function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) {
   return (
     <div className="card">
@@ -434,7 +454,7 @@ export default function SettingsPage() {
       if (!data) throw new Error(extractDetail(error) ?? "讀取溢價率歷史失敗");
       return data;
     },
-    retry: (failureCount, error) => !(error instanceof ForbiddenError) && failureCount < 2,
+    retry: false, // gate 查詢：權限/錯誤即時決斷，不重試（403 立即顯示提示）
   });
 
   function refresh() {
@@ -461,16 +481,24 @@ export default function SettingsPage() {
   }
 
   const settings = settingsQuery.data;
-  const suggestion = suggestionQuery.data ?? null;
-  const history = historyQuery.data ?? [];
 
   return (
     <section>
       <h1 className="page-title">設定</h1>
       <div className="card-stack">
         <GeneralSettingsCard settings={settings} onSaved={refresh} />
-        <PremiumRateCard settings={settings} suggestion={suggestion} onSaved={refresh} />
-        <PremiumHistoryCard history={history} />
+        <PremiumRateCard
+          settings={settings}
+          suggestion={suggestionQuery.data ?? null}
+          suggestionError={suggestionQuery.isError}
+          onSaved={refresh}
+        />
+        {/* 歷史載入失敗（非權限，權限已於上方 gate 處理）時明確顯示錯誤，不可呈現為空白稽核紀錄 */}
+        {historyQuery.isError ? (
+          <ErrorCard title="溢價率變更紀錄" message="讀取變更紀錄失敗，請稍後再試" />
+        ) : (
+          <PremiumHistoryCard history={historyQuery.data ?? []} />
+        )}
       </div>
     </section>
   );

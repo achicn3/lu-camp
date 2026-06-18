@@ -69,6 +69,28 @@ try {
   await page.screenshot({ path: `${SHOTS}/settings.png`, fullPage: true });
   console.log("  shot: settings.png");
 
+  // --- CLERK is blocked from manager-only pages (server-driven gate) ---
+  const clerkUser = process.env.CLERK_USER;
+  if (clerkUser) {
+    const clerkCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const cp = await clerkCtx.newPage();
+    await cp.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+    await cp.fill('input[name="username"], input#username', clerkUser);
+    await cp.fill('input[name="password"], input#password', PASS);
+    await cp.click('button[type="submit"]');
+    await cp.waitForURL((u) => !u.pathname.endsWith("/login"), { timeout: 15000 });
+    for (const path of ["/settings", "/reports"]) {
+      await cp.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
+      await cp.waitForTimeout(1000);
+      const t = await cp.innerText("body");
+      assert(/需管理者權限/.test(t), `CLERK blocked from ${path} (需管理者權限)`);
+      assert(!/一般設定|帳齡分桶/.test(t), `CLERK sees no manager content on ${path}`);
+    }
+    await cp.screenshot({ path: `${SHOTS}/settings-clerk-blocked.png`, fullPage: true });
+    console.log("  shot: settings-clerk-blocked.png");
+    await clerkCtx.close();
+  }
+
   console.log("\nSMOKE PASS");
 } catch (e) {
   failed = true;

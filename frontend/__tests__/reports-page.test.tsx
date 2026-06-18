@@ -128,6 +128,17 @@ describe("ReportsPage", () => {
     expect(await screen.findByText("需管理者權限")).toBeTruthy();
   });
 
+  it("access probe server error (500) → load error, NOT permission notice", async () => {
+    loginAs("MANAGER");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ detail: "boom" }, 500)),
+    );
+    renderPage();
+    expect(await screen.findByText("無法連線報表服務，請稍後再試")).toBeTruthy();
+    expect(screen.queryByText("需管理者權限")).toBeNull();
+  });
+
   it("stale CLERK token but backend authorizes (promoted) → renders page, not blocked", async () => {
     // 永不過期 token 的 role claim 可能過時：token 說 CLERK 但後端已升權 → 應看得到報表。
     loginAs("CLERK");
