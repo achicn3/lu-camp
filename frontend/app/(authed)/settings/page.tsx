@@ -94,10 +94,12 @@ function GeneralSettingsCard({
     if (einvoiceEnabled !== settings.einvoice_enabled) body.einvoice_enabled = einvoiceEnabled;
     if (allowClerkManageCategories !== settings.allow_clerk_manage_categories)
       body.allow_clerk_manage_categories = allowClerkManageCategories;
-    if (taxRate !== settings.tax_rate) body.tax_rate = taxRate;
+    // 以數值比較（非字串）：後端預設可能回 "0.05"，前端顯示 5% 會重組成 "0.0500"，
+    // 字串不等但數值相同 → 否則會誤判為變更、送出空操作 PATCH 並產生假稽核紀錄。
+    if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
     if (commission !== settings.default_commission_pct) body.default_commission_pct = commission;
     if (margin !== settings.default_margin_pct) body.default_margin_pct = margin;
-    if (String(outflow) !== settings.monthly_fixed_cash_outflow)
+    if (outflow !== parseNtd(settings.monthly_fixed_cash_outflow))
       body.monthly_fixed_cash_outflow = outflow;
 
     if (Object.keys(body).length === 0) {
@@ -402,21 +404,17 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
 
-  // 不以 token 的 role 把關：永不過期 token 的 role claim 可能過時（升/降權後未重新登入）。
-  // 以後端授權為準——settings 端點為 MANAGER-only，401/403 即視為無權限。
+  // 注意：GET /settings 與 premium-suggestion 皆為 clerk 可讀（POS/收購需讀稅率/溢價率），
+  // 不能拿來把關。權限以「唯一的 MANAGER-only 端點」溢價率歷史為準（見下 historyQuery）。
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
-      const { data, error, response } = await api.GET("/api/v1/settings");
-      if (response.status === 401 || response.status === 403) throw new ForbiddenError();
+      const { data, error } = await api.GET("/api/v1/settings");
       if (!data) throw new Error(extractDetail(error) ?? "讀取設定失敗");
       return data;
     },
-    retry: (failureCount, error) => !(error instanceof ForbiddenError) && failureCount < 2,
   });
 
-  // 建議值/歷史與 settings 並行取；無權限者的這兩個請求會在背景失敗但不渲染
-  // （下方 ForbiddenError gate 會先回「需管理者權限」），故不需額外把關。
   const suggestionQuery = useQuery({
     queryKey: ["premium-suggestion"],
     queryFn: async () => {
@@ -426,13 +424,17 @@ export default function SettingsPage() {
     },
   });
 
+  // 不以 token 的 role 把關（永不過期 token 的 role claim 可能過時）：改以後端授權為準。
+  // 溢價率歷史是本頁唯一的 MANAGER-only 端點，故以它的 401/403 作為「需管理者權限」判準。
   const historyQuery = useQuery({
     queryKey: ["premium-rate-history"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/settings/premium-rate/history");
+      const { data, error, response } = await api.GET("/api/v1/settings/premium-rate/history");
+      if (response.status === 401 || response.status === 403) throw new ForbiddenError();
       if (!data) throw new Error(extractDetail(error) ?? "讀取溢價率歷史失敗");
       return data;
     },
+    retry: (failureCount, error) => !(error instanceof ForbiddenError) && failureCount < 2,
   });
 
   function refresh() {
@@ -441,8 +443,8 @@ export default function SettingsPage() {
     void queryClient.invalidateQueries({ queryKey: ["premium-rate-history"] });
   }
 
-  if (settingsQuery.isPending) return <p>載入中...</p>;
-  if (settingsQuery.error instanceof ForbiddenError) {
+  if (settingsQuery.isPending || historyQuery.isPending) return <p>載入中...</p>;
+  if (historyQuery.error instanceof ForbiddenError) {
     return (
       <section>
         <h1 className="page-title">設定</h1>

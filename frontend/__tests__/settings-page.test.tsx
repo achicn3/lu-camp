@@ -120,17 +120,18 @@ afterEach(() => {
 });
 
 describe("/settings", () => {
-  it("後端 403 顯示權限不足提示（server-driven gate）", async () => {
+  it("後端 403（manager-only 歷史端點）顯示權限不足提示（server-driven gate）", async () => {
     loginAs("CLERK");
+    // /settings 與 premium-suggestion 為 clerk 可讀（回 200），唯獨溢價率歷史 MANAGER-only → 403。
     stubFetch((url) => {
-      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
-      if (url.includes("/settings")) return json({ detail: "權限不足" }, 403);
+      if (url.includes("/settings/premium-rate/history")) return json({ detail: "權限不足" }, 403);
+      if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
       return null;
     });
     renderPage();
     expect(await screen.findByText("需管理者權限")).toBeDefined();
-    // 不應出現設定表單
+    // clerk 雖能讀 /settings，但無 manager 權限 → 不得出現設定表單
     expect(screen.queryByText("一般設定")).toBeNull();
   });
 
@@ -138,9 +139,34 @@ describe("/settings", () => {
     loginAs("CLERK");
     defaultStub();
     renderPage();
-    // gate 以後端授權為準：token=CLERK 但 /settings 回 200 → 應看得到一般設定。
+    // gate 以後端授權為準：token=CLERK 但 manager-only 歷史端點回 200 → 應看得到一般設定。
     expect(await screen.findByText("一般設定")).toBeDefined();
     expect(screen.queryByText("需管理者權限")).toBeNull();
+  });
+
+  it("tax_rate 非標準字串（0.05）不被誤判為變更、不送空操作 PATCH", async () => {
+    loginAs("MANAGER");
+    const bodies: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        bodies.push(String(init.body));
+        return json(SETTINGS);
+      }
+      if (url.includes("/settings")) return json({ ...SETTINGS, tax_rate: "0.05" });
+      return null;
+    });
+    renderPage();
+    // 只改抽成觸發 PATCH；稅率未動，body 不應含 tax_rate（0.0500 vs 0.05 數值相同）。
+    const commissionInput = await screen.findByLabelText("寄售抽成預設 (%)");
+    await userEvent.clear(commissionInput);
+    await userEvent.type(commissionInput, "60");
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const parsed = JSON.parse(bodies[0]) as Record<string, unknown>;
+    expect(parsed.default_commission_pct).toBe(60);
+    expect(parsed).not.toHaveProperty("tax_rate");
   });
 
   it("寄售抽成/毛利非整數輸入（50.5）被擋、不靜默存錯值", async () => {
