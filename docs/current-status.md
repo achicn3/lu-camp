@@ -24,8 +24,8 @@
 | Cash drawer | Backend and frontend cash page exist; D-1 race item is resolved. | `docs/deferred-items.md` |
 | Sales / POS / tenders | Backend sales, idempotency, void, member points, and store-credit tenders exist; frontend POS page exists. | `docs/07`, `docs/16`, tests |
 | Store credit | SC-1 to SC-5 implementation appears represented in code/tests, including reports, settings, suggestion engine, and DB guards. Re-verify with current tests before depending on it. | `docs/16-store-credit.md`, ADR-012, tests |
-| Reports | Store-credit reports exist. General Phase 6 financial reports from `docs/04`/`docs/07` are still separate future work unless implemented on another branch. | `docs/04`, `docs/07`, reports module |
-| Returns / consignment payout / purchasing / stocktake | Still future or partial unless a branch explicitly implements them. Avoid assuming completion from roadmap order alone. | `docs/07` |
+| Reports | Store-credit reports exist. General Phase 6 financial reports from `docs/04`/`docs/07` are still separate future work unless implemented on another branch. F6.5 後的報表 v1 拆分、購物金沖正一致性、匯出/交叉驗證規則見 docs/19. | `docs/04`, `docs/07`, `docs/19`, reports module |
+| Returns / consignment payout / purchasing / stocktake | Still future or partial unless a branch explicitly implements them. Avoid assuming completion from roadmap order alone. Consignment payout / purchasing / stocktake 動工前使用 docs/19 的高風險審查清單。 | `docs/07`, `docs/19` |
 | E-invoice / Turnkey | Deferred to final e-invoice stage. Use `docs/14` as the canonical version/spec research source. | `docs/07`, `docs/14` |
 
 ## Low-Conflict Work Guidance
@@ -34,5 +34,7 @@
   generated OpenAPI, frontend `/acquisition`, frontend `/inventory`, layout, and global CSS.
 - Low-conflict candidates are documentation-only cleanups, isolated deferred-item planning, or
   review-only work.
+- F6.5 收斂期間可先做的低衝突輸出：`docs/19-reports-and-risk-review-plan.md`
+  的報表 v1 前置設計與高風險任務審查清單。
 - D-4 auth hardening is important but cross-cutting; schedule it after the active acquisition UI branch
   lands unless the user explicitly prioritizes it.

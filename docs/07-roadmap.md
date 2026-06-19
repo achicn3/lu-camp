@@ -72,6 +72,7 @@ graph TD
 
 ## Phase 6 — 財務報表分析
 - `reporting`：每日現金對帳、營收/成本/毛利（買斷成本 vs 寄售只認抽成）、庫存價值與庫齡、寄售應付、趨勢、匯出 CSV/Excel。
+- v1 拆分、購物金報表沖正一致性與匯出交叉驗證規則見 `docs/19-reports-and-risk-review-plan.md`。
 - **驗收**：報表數字與底層交易一致（用既有測資交叉驗證）。
 
 ## Phase 7 — 強化與部署
