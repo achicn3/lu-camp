@@ -11,6 +11,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.contacts.models import Contact
+from app.modules.inventory.models import CatalogProduct
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
@@ -38,7 +39,12 @@ async def _seed(session: AsyncSession) -> tuple[str, str, int, int, int]:
     await session.flush()
     mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
     clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
-    member = Contact(store_id=store.id, name="會員甲", roles=["MEMBER"])
+    member = Contact(
+        store_id=store.id,
+        name="會員甲",
+        roles=["MEMBER", "SELLER"],
+        national_id_enc="enc",
+    )
     session.add_all([mgr, clerk, member])
     await session.flush()
     mgr_token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
@@ -48,6 +54,52 @@ async def _seed(session: AsyncSession) -> tuple[str, str, int, int, int]:
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _auth_idem(token: str, key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Idempotency-Key": key}
+
+
+async def _seed_catalog(session: AsyncSession, store_id: int, *, price: str, qty: int) -> int:
+    product = CatalogProduct(
+        store_id=store_id,
+        sku=f"FLOW-SKU-{store_id}",
+        name="報表測試商品",
+        unit_price=Decimal(price),
+        quantity_on_hand=qty,
+    )
+    session.add(product)
+    await session.flush()
+    return product.id
+
+
+async def _create_store_credit_buyout(
+    client: httpx.AsyncClient,
+    token: str,
+    contact_id: int,
+    *,
+    key: str,
+    amount: str = "500",
+) -> int:
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": contact_id,
+            "payout_method": "STORE_CREDIT",
+            "items": [
+                {
+                    "name": "購物金報表測試品",
+                    "grade": "A",
+                    "acquisition_cost": amount,
+                    "listed_price": amount,
+                }
+            ],
+        },
+        headers=_auth_idem(token, key),
+    )
+    assert resp.status_code == 201, resp.text
+    return int(resp.json()["acquisition_id"])
 
 
 async def test_liability_report(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
@@ -135,6 +187,78 @@ async def test_flows_report(client: httpx.AsyncClient, db_session: AsyncSession)
     assert rows[0]["issued"] == "500"
     assert rows[0]["redeemed"] == "200"
     assert rows[0]["net_change"] == "300"
+
+
+async def test_flows_report_nets_acquisition_rollback_reversal(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, _store_id, member_id, _mgr_id = await _seed(db_session)
+    acq_id = await _create_store_credit_buyout(client, clerk, member_id, key="flows-acq-rollback")
+    voided = await client.post(
+        f"/api/v1/acquisitions/{acq_id}/void",
+        json={"reason": "報表沖正測試"},
+        headers=_auth(mgr),
+    )
+    assert voided.status_code == 200, voided.text
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2100-01-01T00:00:00Z",
+            "granularity": "month",
+        },
+        headers=_auth(mgr),
+    )
+
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["issued"] == "0"
+    assert rows[0]["redeemed"] == "0"
+    assert rows[0]["net_change"] == "0"
+
+
+async def test_flows_report_nets_sale_void_reversal(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, member_id, _mgr_id = await _seed(db_session)
+    await _create_store_credit_buyout(client, clerk, member_id, key="flows-sale-credit")
+    issued = await StoreCreditService(db_session).get_balance(store_id, member_id)
+    catalog_id = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 2}],
+            "buyer_contact_id": member_id,
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+        },
+        headers=_auth_idem(clerk, "flows-sale-void"),
+    )
+    assert sale.status_code == 201, sale.text
+    sale_id = int(sale.json()["id"])
+    voided = await client.post(
+        f"/api/v1/sales/{sale_id}/void",
+        headers=_auth(mgr),
+    )
+    assert voided.status_code == 200, voided.text
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2100-01-01T00:00:00Z",
+            "granularity": "month",
+        },
+        headers=_auth(mgr),
+    )
+
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["issued"] == str(issued)
+    assert rows[0]["redeemed"] == "0"
+    assert rows[0]["net_change"] == str(issued)
 
 
 async def test_flows_rejects_bad_range_and_granularity(

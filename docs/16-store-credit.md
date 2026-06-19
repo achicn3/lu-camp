@@ -133,7 +133,7 @@
 | `/sales`（擴充 tenders） | POST | SC-3 | 多 tender；冪等沿用 Idempotency-Key |
 | `/sales/{id}/void`（擴充沖正） | POST | SC-3 | 購物金 REVERSAL + 點數沖回 |
 | `/reports/store-credit/liability` | GET | SC-4 | §5A 負債/餘額/帳齡 |
-| `/reports/store-credit/flows` | GET | SC-4 | §5A 發出 vs 兌付 vs 淨變化（granularity=daily/weekly/monthly） |
+| `/reports/store-credit/flows` | GET | SC-4 | §5A 發出 vs 兌付 vs 淨變化（granularity=`day`/`week`/`month`） |
 | `/reports/store-credit/effectiveness` | GET | SC-4 | §5B 效益指標 |
 | `/reports/store-credit/reconciliation` | GET | SC-4 | 對帳狀態（I-3 全帳戶 + 全域總負債） |
 | 上述各報表 `?format=csv|xlsx` | GET | SC-4 | 匯出；檔內含產生時間/區間/店別 |
@@ -152,7 +152,7 @@
 | `total_outstanding` | 即時未兌付總負債 = Σ 各帳戶正餘額 |
 | `per_member` | 各會員餘額 + 異動歷史（同 SC-1 查詢） |
 | `aging_buckets` | 未兌付餘額按**發出時間**分桶：<30 / 30–90 / 90–180 / 180–365 / >365 天；扣抵以 FIFO 沖銷發出列（報表推導用，不入帳本） |
-| `issued` / `redeemed` / `net_change` | 期間內 Σ CREDIT、Σ DEBIT（絕對值）、兩者差；granularity=daily/weekly/monthly |
+| `issued` / `redeemed` / `net_change` | 期間內購物金流量淨額：`issued` = CREDIT + ACQUISITION_ROLLBACK 沖正額；`redeemed` = DEBIT（絕對值）+ SALE_VOID 沖正額（會抵銷已作廢兌付）；沖正依自身 `created_at` 歸屬發生期間，不回寫原始期間；`net_change = issued − redeemed`；granularity=`day`/`week`/`month` |
 | `liability_health_ratio` | `total_outstanding ÷ monthly_fixed_cash_outflow`（分母為 settings 手動值；=0 時顯示 N/A） |
 | `distributable_cash`（供分潤安全水位） | `現金水位 − total_outstanding`（現金水位來源於現金對帳；此欄為展示公式，現金水位輸入屬報表參數） |
 

@@ -380,9 +380,7 @@ class StoreCreditRepository:
         result: StoreCreditSuggestionLog | None = await self._session.scalar(stmt)
         return result
 
-    async def add_suggestion_log(
-        self, log: StoreCreditSuggestionLog
-    ) -> StoreCreditSuggestionLog:
+    async def add_suggestion_log(self, log: StoreCreditSuggestionLog) -> StoreCreditSuggestionLog:
         self._session.add(log)
         await self._session.flush()
         return log
@@ -395,15 +393,20 @@ class StoreCreditRepository:
         date_to: datetime,
         granularity: str,
     ) -> list[tuple[datetime, Decimal, Decimal]]:
-        """期間內按粒度彙總：(period, issued=ΣCREDIT, redeemed=Σ|DEBIT|)。
+        """期間內按粒度彙總淨流量：(period, issued, redeemed)。
+
+        REVERSAL 併回原業務流向：ACQUISITION_ROLLBACK 抵銷 issued；
+        SALE_VOID 抵銷 redeemed。ADJUSTMENT 維持不納入本流量報表。
 
         granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
         """
         stmt = text(
             "SELECT date_trunc(:gran, created_at) AS period,"
             "  COALESCE(SUM(CASE WHEN entry_type='CREDIT'"
+            "      OR (entry_type='REVERSAL' AND source_type='ACQUISITION_ROLLBACK')"
             "    THEN signed_amount ELSE 0 END), 0) AS issued,"
             "  COALESCE(SUM(CASE WHEN entry_type='DEBIT'"
+            "      OR (entry_type='REVERSAL' AND source_type='SALE_VOID')"
             "    THEN -signed_amount ELSE 0 END), 0) AS redeemed"
             " FROM store_credit_ledger"
             " WHERE store_id = :sid AND created_at >= :dfrom AND created_at < :dto"
