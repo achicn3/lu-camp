@@ -147,3 +147,14 @@ class AcquisitionVoidUnsupported(DomainError):
     寄售（CONSIGNMENT）入庫的寄售品仍屬寄售人，作廢須走寄售退貨＋結算反轉
     （invariant #7），與買斷對稱反轉不同，另立任務實作前一律擋下。
     """
+
+
+class SettlementNotFound(DomainError):
+    """指定的寄售結算不存在（或不屬於本店）。"""
+
+
+class SettlementNotPending(DomainError):
+    """寄售結算非 PENDING（已付款 PAID／已取消 CANCELLED），不可再付款（Phase 4）。
+
+    付款以 settlement 列鎖＋狀態為準：重送/併發只一筆成功，其餘回此例外（不重複出帳）。
+    """

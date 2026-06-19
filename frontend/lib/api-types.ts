@@ -294,6 +294,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consignment/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Settlements
+         * @description 店內寄售結算列（可篩 status，新到舊、分頁；§4 店別範圍）。
+         */
+        get: operations["listConsignmentSettlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consignment/settlements/{settlement_id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay Settlement
+         * @description 付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。
+         *
+         *     需開帳中（invariant #8）→ 否則 409；已付/已取消 → 409；找不到/他店 → 404。
+         *     併發/重送以結算列鎖為準，只一筆成功、不重複出帳。
+         */
+        post: operations["payConsignmentSettlement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts": {
         parameters: {
             query?: never;
@@ -1181,6 +1224,46 @@ export interface components {
             /** Target Margin Pct */
             target_margin_pct: number;
         };
+        /**
+         * ConsignmentSettlementRead
+         * @description 寄售結算查詢輸出（付款工作清單／應付查詢／付款結果）。
+         */
+        ConsignmentSettlementRead: {
+            /** Commission Amount */
+            commission_amount: string;
+            /** Commission Pct */
+            commission_pct: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Gross */
+            gross: string;
+            /** Id */
+            id: number;
+            /** Paid At */
+            paid_at: string | null;
+            /** Paid By */
+            paid_by: number | null;
+            /** Payout Amount */
+            payout_amount: string;
+            /** Reclaim Needed */
+            reclaim_needed: boolean;
+            /** Sale Id */
+            sale_id: number;
+            /** Serialized Item Id */
+            serialized_item_id: number;
+            status: components["schemas"]["ConsignmentSettlementStatus"];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * ConsignmentSettlementStatus
+         * @description 寄售結算狀態。售出時建 PENDING；付款（Phase 4）轉 PAID；退貨反轉為 CANCELLED。
+         * @enum {string}
+         */
+        ConsignmentSettlementStatus: "PENDING" | "PAID" | "CANCELLED";
         /**
          * ContactCreate
          * @description 建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。
@@ -2694,6 +2777,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingRuleRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listConsignmentSettlements: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ConsignmentSettlementStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentSettlementRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    payConsignmentSettlement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                settlement_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentSettlementRead"];
                 };
             };
             /** @description Validation Error */

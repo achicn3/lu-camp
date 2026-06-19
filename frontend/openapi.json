@@ -1077,6 +1077,105 @@
         "title": "CategoryTargetUpdate",
         "type": "object"
       },
+      "ConsignmentSettlementRead": {
+        "description": "寄售結算查詢輸出（付款工作清單／應付查詢／付款結果）。",
+        "properties": {
+          "commission_amount": {
+            "title": "Commission Amount",
+            "type": "string"
+          },
+          "commission_pct": {
+            "title": "Commission Pct",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "gross": {
+            "title": "Gross",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "paid_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid By"
+          },
+          "payout_amount": {
+            "title": "Payout Amount",
+            "type": "string"
+          },
+          "reclaim_needed": {
+            "title": "Reclaim Needed",
+            "type": "boolean"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "serialized_item_id": {
+            "title": "Serialized Item Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConsignmentSettlementStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "serialized_item_id",
+          "sale_id",
+          "gross",
+          "commission_pct",
+          "commission_amount",
+          "payout_amount",
+          "status",
+          "paid_at",
+          "paid_by",
+          "reclaim_needed",
+          "created_at"
+        ],
+        "title": "ConsignmentSettlementRead",
+        "type": "object"
+      },
+      "ConsignmentSettlementStatus": {
+        "description": "寄售結算狀態。售出時建 PENDING；付款（Phase 4）轉 PAID；退貨反轉為 CANCELLED。",
+        "enum": [
+          "PENDING",
+          "PAID",
+          "CANCELLED"
+        ],
+        "title": "ConsignmentSettlementStatus",
+        "type": "string"
+      },
       "ContactCreate": {
         "description": "建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。",
         "properties": {
@@ -4552,6 +4651,136 @@
         "summary": "Update Pricing Rules",
         "tags": [
           "inventory"
+        ]
+      }
+    },
+    "/api/v1/consignment/settlements": {
+      "get": {
+        "description": "店內寄售結算列（可篩 status，新到舊、分頁；§4 店別範圍）。",
+        "operationId": "listConsignmentSettlements",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConsignmentSettlementStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsignmentSettlementRead"
+                  },
+                  "title": "Response Listconsignmentsettlements",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Settlements",
+        "tags": [
+          "consignment"
+        ]
+      }
+    },
+    "/api/v1/consignment/settlements/{settlement_id}/pay": {
+      "post": {
+        "description": "付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。\n\n需開帳中（invariant #8）→ 否則 409；已付/已取消 → 409；找不到/他店 → 404。\n併發/重送以結算列鎖為準，只一筆成功、不重複出帳。",
+        "operationId": "payConsignmentSettlement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "settlement_id",
+            "required": true,
+            "schema": {
+              "title": "Settlement Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsignmentSettlementRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Pay Settlement",
+        "tags": [
+          "consignment"
         ]
       }
     },

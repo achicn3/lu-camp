@@ -23,6 +23,36 @@ class ConsignmentRepository:
         await self._session.flush()
         return settlement
 
+    async def get_for_update(
+        self, store_id: int, settlement_id: int
+    ) -> ConsignmentSettlement | None:
+        """取單筆結算並上行鎖（FOR UPDATE）；store 範圍。付款併發/重送互斥用（Phase 4）。"""
+        stmt = (
+            select(ConsignmentSettlement)
+            .where(
+                ConsignmentSettlement.id == settlement_id,
+                ConsignmentSettlement.store_id == store_id,
+            )
+            .with_for_update()
+        )
+        result: ConsignmentSettlement | None = await self._session.scalar(stmt)
+        return result
+
+    async def list_settlements(
+        self,
+        store_id: int,
+        *,
+        status: ConsignmentSettlementStatus | None = None,
+        limit: int,
+        offset: int,
+    ) -> list[ConsignmentSettlement]:
+        """店內寄售結算列（可篩 status、新到舊、分頁）；付款工作清單與應付查詢用。"""
+        stmt = select(ConsignmentSettlement).where(ConsignmentSettlement.store_id == store_id)
+        if status is not None:
+            stmt = stmt.where(ConsignmentSettlement.status == status)
+        stmt = stmt.order_by(ConsignmentSettlement.id.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_by_item_ids(
         self, store_id: int, serialized_item_ids: list[int], *, limit: int, offset: int
     ) -> list[ConsignmentSettlement]:
@@ -80,9 +110,7 @@ class ConsignmentRepository:
         total = await self._session.scalar(stmt)
         return Decimal(total if total is not None else 0)
 
-    async def commission_total_for_sales(
-        self, store_id: int, sale_ids: list[int]
-    ) -> Decimal:
+    async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的寄售抽成合計（SC-5b 毛利推導；唯讀，店家收入只認抽成）。"""
         if not sale_ids:
             return Decimal(0)
