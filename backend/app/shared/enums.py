@@ -131,6 +131,13 @@ class PurchaseOrderStatus(StrEnum):
     CLOSED = "CLOSED"
 
 
+class StocktakeStatus(StrEnum):
+    """盤點單狀態。建立即 DRAFT（已快照 system_qty）；確認調整後轉 CONFIRMED（僅一次）。"""
+
+    DRAFT = "DRAFT"
+    CONFIRMED = "CONFIRMED"
+
+
 class SaleStatus(StrEnum):
     """銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。"""
 

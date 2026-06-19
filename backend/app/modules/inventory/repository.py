@@ -369,6 +369,19 @@ class InventoryRepository:
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
+    async def get_catalog_for_update(
+        self, store_id: int, catalog_id: int
+    ) -> CatalogProduct | None:
+        """取數量型商品並上行鎖（FOR UPDATE）+ 刷新；盤點確認時即時重讀現量、原子校正用。"""
+        stmt = (
+            select(CatalogProduct)
+            .where(CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        result: CatalogProduct | None = await self._session.scalar(stmt)
+        return result
+
     async def decrement_catalog(self, catalog_id: int, qty: int) -> bool:
         """原子扣減 quantity_on_hand；不足則不動作。回傳是否成功一筆。"""
         stmt = (

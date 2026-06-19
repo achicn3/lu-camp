@@ -174,3 +174,15 @@ class InvalidPurchaseOrder(DomainError):
 
 class DuplicateSupplier(DomainError):
     """同店供應商名稱重複。"""
+
+
+class StocktakeNotFound(DomainError):
+    """指定的盤點單不存在（或不屬於本店）。"""
+
+
+class StocktakeNotDraft(DomainError):
+    """盤點單非 DRAFT（已確認），不可再確認（Phase 5；確認僅一次）。"""
+
+
+class StocktakeLineInvalid(DomainError):
+    """盤點確認的實點明細不合法（實點數為負、或商品不在本盤點單）。"""

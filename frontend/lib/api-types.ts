@@ -856,6 +856,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stocktakes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Stocktakes */
+        get: operations["listStocktakes"];
+        put?: never;
+        /**
+         * Create Stocktake
+         * @description 建立盤點單並快照店內所有數量型商品的 system_qty。
+         */
+        post: operations["createStocktake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stocktakes/{stocktake_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stocktake */
+        get: operations["getStocktake"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stocktakes/{stocktake_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Stocktake
+         * @description 確認盤點：依實點數即時校正現量並寫 ADJUST 帳；DRAFT→CONFIRMED（僅一次）。
+         */
+        post: operations["confirmStocktake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/store-credit/premium-suggestion/today": {
         parameters: {
             query?: never;
@@ -2249,6 +2307,64 @@ export interface components {
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
+        /**
+         * StocktakeConfirmRequest
+         * @description 確認盤點輸入：各商品實點數（未列入者不調整）。
+         */
+        StocktakeConfirmRequest: {
+            /** Counts */
+            counts: components["schemas"]["StocktakeCountInput"][];
+        };
+        /**
+         * StocktakeCountInput
+         * @description 單筆實點：商品 + 實點數（不可為負）。
+         */
+        StocktakeCountInput: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Counted Qty */
+            counted_qty: number;
+        };
+        /** StocktakeLineRead */
+        StocktakeLineRead: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Counted Qty */
+            counted_qty: number | null;
+            /** Id */
+            id: number;
+            /** System Qty */
+            system_qty: number;
+            /** Variance */
+            variance: number | null;
+        };
+        /** StocktakeRead */
+        StocktakeRead: {
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: number;
+            /** Id */
+            id: number;
+            /** Lines */
+            lines: components["schemas"]["StocktakeLineRead"][];
+            status: components["schemas"]["StocktakeStatus"];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * StocktakeStatus
+         * @description 盤點單狀態。建立即 DRAFT（已快照 system_qty）；確認調整後轉 CONFIRMED（僅一次）。
+         * @enum {string}
+         */
+        StocktakeStatus: "DRAFT" | "CONFIRMED";
         /**
          * StoreCreditAdjustRequest
          * @description 人工校正輸入（限 MANAGER；可正可負、非零；事由必填留痕）。
@@ -4125,6 +4241,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PremiumRateHistoryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listStocktakes: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createStocktake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeRead"];
+                };
+            };
+        };
+    };
+    getStocktake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stocktake_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirmStocktake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stocktake_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StocktakeConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeRead"];
                 };
             };
             /** @description Validation Error */

@@ -3619,6 +3619,165 @@
         "title": "SettingsUpdateRequest",
         "type": "object"
       },
+      "StocktakeConfirmRequest": {
+        "description": "確認盤點輸入：各商品實點數（未列入者不調整）。",
+        "properties": {
+          "counts": {
+            "items": {
+              "$ref": "#/components/schemas/StocktakeCountInput"
+            },
+            "title": "Counts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "counts"
+        ],
+        "title": "StocktakeConfirmRequest",
+        "type": "object"
+      },
+      "StocktakeCountInput": {
+        "description": "單筆實點：商品 + 實點數（不可為負）。",
+        "properties": {
+          "catalog_product_id": {
+            "title": "Catalog Product Id",
+            "type": "integer"
+          },
+          "counted_qty": {
+            "minimum": 0.0,
+            "title": "Counted Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "catalog_product_id",
+          "counted_qty"
+        ],
+        "title": "StocktakeCountInput",
+        "type": "object"
+      },
+      "StocktakeLineRead": {
+        "properties": {
+          "catalog_product_id": {
+            "title": "Catalog Product Id",
+            "type": "integer"
+          },
+          "counted_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counted Qty"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "system_qty": {
+            "title": "System Qty",
+            "type": "integer"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variance"
+          }
+        },
+        "required": [
+          "id",
+          "catalog_product_id",
+          "system_qty",
+          "counted_qty",
+          "variance"
+        ],
+        "title": "StocktakeLineRead",
+        "type": "object"
+      },
+      "StocktakeRead": {
+        "properties": {
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "confirmed_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed By"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/StocktakeLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StocktakeStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "status",
+          "created_by",
+          "created_at",
+          "confirmed_by",
+          "confirmed_at",
+          "lines"
+        ],
+        "title": "StocktakeRead",
+        "type": "object"
+      },
+      "StocktakeStatus": {
+        "description": "盤點單狀態。建立即 DRAFT（已快照 system_qty）；確認調整後轉 CONFIRMED（僅一次）。",
+        "enum": [
+          "DRAFT",
+          "CONFIRMED"
+        ],
+        "title": "StocktakeStatus",
+        "type": "string"
+      },
       "StoreCreditAdjustRequest": {
         "description": "人工校正輸入（限 MANAGER；可正可負、非零；事由必填留痕）。",
         "properties": {
@@ -7255,6 +7414,201 @@
         "summary": "Premium Rate History",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/stocktakes": {
+      "get": {
+        "operationId": "listStocktakes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StocktakeRead"
+                  },
+                  "title": "Response Liststocktakes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Stocktakes",
+        "tags": [
+          "stocktake"
+        ]
+      },
+      "post": {
+        "description": "建立盤點單並快照店內所有數量型商品的 system_qty。",
+        "operationId": "createStocktake",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StocktakeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Stocktake",
+        "tags": [
+          "stocktake"
+        ]
+      }
+    },
+    "/api/v1/stocktakes/{stocktake_id}": {
+      "get": {
+        "operationId": "getStocktake",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stocktake_id",
+            "required": true,
+            "schema": {
+              "title": "Stocktake Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StocktakeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Stocktake",
+        "tags": [
+          "stocktake"
+        ]
+      }
+    },
+    "/api/v1/stocktakes/{stocktake_id}/confirm": {
+      "post": {
+        "description": "確認盤點：依實點數即時校正現量並寫 ADJUST 帳；DRAFT→CONFIRMED（僅一次）。",
+        "operationId": "confirmStocktake",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stocktake_id",
+            "required": true,
+            "schema": {
+              "title": "Stocktake Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StocktakeConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StocktakeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Stocktake",
+        "tags": [
+          "stocktake"
         ]
       }
     },

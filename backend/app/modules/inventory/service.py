@@ -558,6 +558,36 @@ class InventoryService:
             catalog_product_id=catalog_id,
         )
 
+    async def adjust_catalog_to_count(
+        self, store_id: int, catalog_id: int, counted_qty: int, *, ref_type: str, ref_id: int
+    ) -> int:
+        """盤點調整：把數量型商品 quantity_on_hand 即時校正為實點數，寫 ADJUST(STOCKTAKE) 帳。
+
+        以 FOR UPDATE 重讀現量計差額（delta = counted − current），避免清掉盤點期間的銷售；
+        差額 0 不寫帳。回傳 delta（正＝盤盈、負＝盤虧）。實點數不可為負。
+        """
+        if counted_qty < 0:
+            raise OwnershipValidationError("實點數不可為負")
+        product = await self._repo.get_catalog_for_update(store_id, catalog_id)
+        if product is None:
+            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+        delta = counted_qty - product.quantity_on_hand
+        if delta != 0:
+            product.quantity_on_hand = counted_qty
+            await self._repo.add_stock_movement(
+                StockMovement(
+                    store_id=store_id,
+                    item_kind=ItemKind.CATALOG,
+                    direction=StockDirection.ADJUST,
+                    qty=delta,
+                    reason=StockReason.STOCKTAKE,
+                    ref_type=ref_type,
+                    ref_id=ref_id,
+                    catalog_product_id=catalog_id,
+                )
+            )
+        return delta
+
     @staticmethod
     def per_piece_cost(lot: BulkLot) -> Decimal:
         """每件成本 = acquisition_cost / total_qty。"""
