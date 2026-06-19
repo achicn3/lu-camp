@@ -26,7 +26,12 @@ class ConsignmentRepository:
     async def get_for_update(
         self, store_id: int, settlement_id: int
     ) -> ConsignmentSettlement | None:
-        """取單筆結算並上行鎖（FOR UPDATE）；store 範圍。付款併發/重送互斥用（Phase 4）。"""
+        """取單筆結算並上行鎖（FOR UPDATE）+ 刷新已提交狀態；store 範圍。
+
+        併發/重送互斥用（Phase 4）。`populate_existing=True` 必要：若本 session 先前已把該
+        結算載入身分映射為 PENDING，少了它則鎖後仍可能回到記憶體中的舊狀態而重複付款
+        （比照 cashdrawer.get_open_session / F6.5 void 的「鎖列＋刷新」，Codex adversarial）。
+        """
         stmt = (
             select(ConsignmentSettlement)
             .where(
@@ -34,6 +39,7 @@ class ConsignmentRepository:
                 ConsignmentSettlement.store_id == store_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         result: ConsignmentSettlement | None = await self._session.scalar(stmt)
         return result
