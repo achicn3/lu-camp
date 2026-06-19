@@ -394,6 +394,7 @@ class SalesService:
     async def line_counts_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
         """各銷售單明細行數（會員中心消費清單；單一查詢避免 N+1）。"""
         return await self._repo.count_lines_for_sales(sale_ids)
+
     # ── SC-5b §5B 唯讀彙總（供 storecredit 指標/引擎跨模組取數，§2 經 service）──
 
     async def period_margin(
@@ -430,10 +431,12 @@ class SalesService:
 
     # ── 作廢 ──
     async def void_sale(self, sale: Sale, actor_user_id: int) -> Sale:
-        """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/現金。
+        """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/退現。
 
         若原銷售已開發票（invoice_status=ISSUED），此 VOID 為「作廢發票流程」的接縫——實際
-        電子發票作廢 XML 由 T13/T14 處理。實體退貨/退現/折讓屬 Phase 4 returns（§7.5），不在此。
+        電子發票作廢 XML 由 T13/T14 處理。退現/折讓/庫存回補屬 Phase 4 returns（§7.5），不在此；
+        但**寄售結算反轉**於此一併處理（invariant #7：未付→CANCELLED、已付→reclaim_needed），
+        否則作廢後該結算仍 PENDING、可被付款給寄售人造成現金漏出（Codex adversarial round-2）。
 
         併發保證：先以 FOR UPDATE 鎖 sale 列並刷新到已提交狀態，再檢查/轉移（比照 D-1）；
         兩個並行作廢只一個成功，另一個鎖後見 VOID → SaleAlreadyVoid，稽核也只寫一筆。
@@ -465,6 +468,11 @@ class SalesService:
         # 即便走到也只入回一次（同來源回原沖正列）。現金 tender 退現屬 Phase 4 returns。
         await self._storecredit.reverse_for_sale_void(
             sale.store_id, sale.id, created_by=actor_user_id
+        )
+        # 寄售結算反轉（invariant #7，Phase 4）：未付→CANCELLED、已付→reclaim_needed，
+        # 否則作廢後仍可付款給寄售人造成現金漏出（Codex adversarial）。非寄售單 → no-op。
+        await self._consignment.cancel_settlements_for_sale(
+            sale.store_id, sale.id, actor_user_id=actor_user_id
         )
         return sale
 

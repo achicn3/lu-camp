@@ -1,7 +1,9 @@
 """consignment 業務邏輯：賣出寄售品時建立 PENDING 結算；付款給寄售人（Phase 4 / 4A）。
 
 抽成與應付以 core/money 在整數元域計算（§7.2）。付款＝應付（售價−抽成）現金出帳並轉 PAID，
-須在開帳中的 cash_session 下進行（invariant #8、#4）。退貨反轉（invariant #7）屬後續切片。
+須在開帳中的 cash_session 下進行（invariant #8、#4）。作廢銷售時的結算反轉（invariant #7：
+未付→CANCELLED、已付→reclaim_needed）由 cancel_settlements_for_sale 處理（供 void_sale 呼叫）；
+退貨退現/庫存回補屬後續切片（4B）。
 """
 
 from datetime import UTC, datetime
@@ -70,6 +72,45 @@ class ConsignmentService:
         )
         await self._session.flush()
         return settlement
+
+    async def cancel_settlements_for_sale(
+        self, store_id: int, sale_id: int, *, actor_user_id: int
+    ) -> list[ConsignmentSettlement]:
+        """作廢/退回該銷售時反轉其寄售結算（invariant #7）。
+
+        未付（PENDING）→ CANCELLED（不再列為應付）；已付（PAID）→ reclaim_needed=True
+        （錢已付出，須向寄售人追回，不可靜默抹除已實現抽成/應付）；已 CANCELLED / 已標
+        reclaim → no-op。供 sales.void_sale 在同一交易內呼叫；以結算列鎖（FOR UPDATE）與
+        pay_settlement 互斥——作廢/付款競態只一方生效，不會「既付款又取消」。
+        """
+        settlements = await self._repo.list_for_sale_for_update(store_id, sale_id)
+        reversed_rows: list[ConsignmentSettlement] = []
+        for settlement in settlements:
+            before_status = settlement.status
+            if before_status == ConsignmentSettlementStatus.PENDING:
+                settlement.status = ConsignmentSettlementStatus.CANCELLED
+                after: dict[str, object] = {"status": ConsignmentSettlementStatus.CANCELLED.value}
+            elif (
+                before_status == ConsignmentSettlementStatus.PAID and not settlement.reclaim_needed
+            ):
+                settlement.reclaim_needed = True
+                after = {"status": before_status.value, "reclaim_needed": True}
+            else:
+                continue
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="CONSIGNMENT_SETTLEMENT_REVERSE",
+                entity_type="consignment_settlement",
+                entity_id=str(settlement.id),
+                before={"status": before_status.value},
+                after=after,
+            )
+            reversed_rows.append(settlement)
+        if reversed_rows:
+            await self._session.flush()
+        return reversed_rows
 
     async def list_settlements(
         self,

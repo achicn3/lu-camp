@@ -20,6 +20,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.service import InventoryService
 from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.models import Sale
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -177,3 +178,50 @@ async def test_pay_cross_store_not_found(db_session: AsyncSession) -> None:
         await ConsignmentService(db_session).pay_settlement(
             999999, settlement.id, actor_user_id=clerk_id
         )
+
+
+async def _payout_count(session: AsyncSession, store_id: int) -> int:
+    n = await session.scalar(
+        select(func.count())
+        .select_from(CashMovement)
+        .where(
+            CashMovement.store_id == store_id,
+            CashMovement.type == CashMovementType.CONSIGNMENT_PAYOUT_OUT,
+        )
+    )
+    return n or 0
+
+
+async def test_void_before_pay_cancels_settlement_and_blocks_payout(
+    db_session: AsyncSession,
+) -> None:
+    """作廢寄售銷售 → 結算 CANCELLED → 之後付款被擋（不付給已作廢銷售的寄售人，無出帳）。"""
+    store_id, clerk_id, settlement = await _seed_consignment_sale(db_session)
+    sale = await db_session.get(Sale, settlement.sale_id)
+    assert sale is not None
+    await SalesService(db_session).void_sale(sale, clerk_id)
+
+    await db_session.refresh(settlement)
+    assert settlement.status == ConsignmentSettlementStatus.CANCELLED
+
+    with pytest.raises(SettlementNotPending):
+        await ConsignmentService(db_session).pay_settlement(
+            store_id, settlement.id, actor_user_id=clerk_id
+        )
+    assert await _payout_count(db_session, store_id) == 0
+
+
+async def test_void_after_pay_flags_reclaim_not_double_reverse(db_session: AsyncSession) -> None:
+    """已付款後作廢：結算維持 PAID 但標 reclaim_needed（須向寄售人追回）；不再出帳。"""
+    store_id, clerk_id, settlement = await _seed_consignment_sale(db_session)
+    await ConsignmentService(db_session).pay_settlement(
+        store_id, settlement.id, actor_user_id=clerk_id
+    )
+    sale = await db_session.get(Sale, settlement.sale_id)
+    assert sale is not None
+    await SalesService(db_session).void_sale(sale, clerk_id)
+
+    await db_session.refresh(settlement)
+    assert settlement.status == ConsignmentSettlementStatus.PAID
+    assert settlement.reclaim_needed is True
+    assert await _payout_count(db_session, store_id) == 1

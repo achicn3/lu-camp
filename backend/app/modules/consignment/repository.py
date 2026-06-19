@@ -44,6 +44,25 @@ class ConsignmentRepository:
         result: ConsignmentSettlement | None = await self._session.scalar(stmt)
         return result
 
+    async def list_for_sale_for_update(
+        self, store_id: int, sale_id: int
+    ) -> list[ConsignmentSettlement]:
+        """取某銷售的所有結算並上行鎖（FOR UPDATE + 刷新）；作廢/退貨反轉用（invariant #7）。
+
+        以 id 升序鎖（確定順序，避免多結算時與他流程交錯死結）；store 範圍。
+        """
+        stmt = (
+            select(ConsignmentSettlement)
+            .where(
+                ConsignmentSettlement.store_id == store_id,
+                ConsignmentSettlement.sale_id == sale_id,
+            )
+            .order_by(ConsignmentSettlement.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_settlements(
         self,
         store_id: int,

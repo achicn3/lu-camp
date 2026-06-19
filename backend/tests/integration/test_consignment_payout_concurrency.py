@@ -223,3 +223,76 @@ async def test_stale_identity_map_does_not_double_pay() -> None:
             assert payout_count == 1
     finally:
         await _cleanup(sm, store_id)
+
+
+async def test_concurrent_void_vs_pay_consistent(real_client: httpx.AsyncClient) -> None:
+    """併發『作廢銷售』vs『付款給寄售人』：無死結 500、終態一致。
+
+    pay 贏 → 結算 PAID + reclaim_needed（作廢追回）+ 出帳恰一筆；void 贏 → 結算 CANCELLED +
+    無出帳。任一情況都不得「對已作廢銷售付現金給寄售人」。鎖序：pay 鎖 settlement→cash_session、
+    void 鎖 sale→…→settlement，pay 不鎖 sale → 無 AB-BA 死結。
+    """
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="併發作廢付款店")
+        s.add(store)
+        await s.flush()
+        mgr = User(store_id=store.id, username="cvp-mgr", password_hash="h", role=UserRole.MANAGER)
+        consignor = Contact(store_id=store.id, name="寄售人", national_id_enc="enc")
+        s.add_all([mgr, consignor])
+        await s.flush()
+        await CashDrawerService(s).open_session(store.id, mgr.id, Decimal("1000"))
+        await InventoryService(s).create_serialized_item(
+            store.id,
+            item_code="CVP1",
+            name="寄售帳篷",
+            grade=Grade.A,
+            ownership_type=OwnershipType.CONSIGNMENT,
+            listed_price=Decimal("1800"),
+            consignor_id=consignor.id,
+            commission_pct=40,
+        )
+        sale = await SalesService(s).create_sale(
+            store.id,
+            mgr.id,
+            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="CVP1")],
+        )
+        settlement = await s.scalar(
+            select(ConsignmentSettlement).where(ConsignmentSettlement.sale_id == sale.id)
+        )
+        assert settlement is not None
+        store_id, sid, sale_id = store.id, settlement.id, sale.id
+        token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+        await s.commit()
+
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        r_void, r_pay = await asyncio.gather(
+            real_client.post(f"/api/v1/sales/{sale_id}/void", headers=headers),
+            real_client.post(f"/api/v1/consignment/settlements/{sid}/pay", headers=headers),
+        )
+        assert r_void.status_code != 500, r_void.text
+        assert r_pay.status_code != 500, r_pay.text
+        assert r_void.status_code == 200, r_void.text  # 作廢本身一定成功
+
+        async with sm() as s:
+            settlement = await s.get(ConsignmentSettlement, sid)
+            assert settlement is not None
+            payout_count = await s.scalar(
+                select(func.count())
+                .select_from(CashMovement)
+                .where(
+                    CashMovement.store_id == store_id,
+                    CashMovement.type == CashMovementType.CONSIGNMENT_PAYOUT_OUT,
+                )
+            )
+            if r_pay.status_code == 200:
+                assert settlement.status == ConsignmentSettlementStatus.PAID
+                assert settlement.reclaim_needed is True
+                assert payout_count == 1
+            else:
+                assert r_pay.status_code == 409, r_pay.text
+                assert settlement.status == ConsignmentSettlementStatus.CANCELLED
+                assert payout_count == 0
+    finally:
+        await _cleanup(sm, store_id)
