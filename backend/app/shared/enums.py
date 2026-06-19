@@ -122,6 +122,15 @@ class StockReason(StrEnum):
     STOCKTAKE = "STOCKTAKE"
 
 
+class PurchaseOrderStatus(StrEnum):
+    """採購單狀態。第一版建立即 ORDERED，收貨後轉 RECEIVED。"""
+
+    DRAFT = "DRAFT"
+    ORDERED = "ORDERED"
+    RECEIVED = "RECEIVED"
+    CLOSED = "CLOSED"
+
+
 class SaleStatus(StrEnum):
     """銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。"""
 

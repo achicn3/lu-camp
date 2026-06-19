@@ -158,3 +158,19 @@ class SettlementNotPending(DomainError):
 
     付款以 settlement 列鎖＋狀態為準：重送/併發只一筆成功，其餘回此例外（不重複出帳）。
     """
+
+
+class PurchaseOrderNotFound(DomainError):
+    """指定的採購單不存在（或不屬於本店）。"""
+
+
+class PurchaseOrderNotReceivable(DomainError):
+    """採購單目前不可收貨（已收貨/關閉/仍為草稿）。"""
+
+
+class InvalidPurchaseOrder(DomainError):
+    """採購單內容不合法（空白、重複商品、金額非整數元等）。"""
+
+
+class DuplicateSupplier(DomainError):
+    """同店供應商名稱重複。"""

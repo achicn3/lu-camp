@@ -592,6 +592,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Purchase Orders */
+        get: operations["listPurchaseOrders"];
+        put?: never;
+        /** Create Purchase Order */
+        post: operations["createPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Purchase Order */
+        get: operations["getPurchaseOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive Purchase Order */
+        post: operations["receivePurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/store-credit/effectiveness": {
         parameters: {
             query?: never;
@@ -840,6 +892,24 @@ export interface paths {
         get: operations["getStoreReceiptHeader"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Suppliers */
+        get: operations["listSuppliers"];
+        put?: never;
+        /** Create Supplier */
+        post: operations["createSupplier"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1801,6 +1871,76 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** PurchaseOrderCreate */
+        PurchaseOrderCreate: {
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineCreate"][];
+            /** Supplier Id */
+            supplier_id: number;
+        };
+        /** PurchaseOrderLineCreate */
+        PurchaseOrderLineCreate: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Qty */
+            qty: number;
+            /** Unit Cost */
+            unit_cost: number | string;
+        };
+        /** PurchaseOrderLineRead */
+        PurchaseOrderLineRead: {
+            /** Catalog Product Id */
+            catalog_product_id: number;
+            /** Id */
+            id: number;
+            /** Line Total */
+            line_total: string;
+            /** Qty */
+            qty: number;
+            /** Unit Cost */
+            unit_cost: string;
+        };
+        /** PurchaseOrderRead */
+        PurchaseOrderRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineRead"][];
+            /**
+             * Ordered At
+             * Format: date-time
+             */
+            ordered_at: string;
+            /** Ordered By */
+            ordered_by: number;
+            /** Received At */
+            received_at: string | null;
+            /** Received By */
+            received_by: number | null;
+            status: components["schemas"]["PurchaseOrderStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Total Cost */
+            total_cost: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * PurchaseOrderStatus
+         * @description 採購單狀態。第一版建立即 ORDERED，收貨後轉 RECEIVED。
+         * @enum {string}
+         */
+        PurchaseOrderStatus: "DRAFT" | "ORDERED" | "RECEIVED" | "CLOSED";
         /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
@@ -1816,6 +1956,12 @@ export interface components {
             phone: string | null;
             /** Tax Id */
             tax_id: string | null;
+        };
+        /** ReceivePurchaseOrderResult */
+        ReceivePurchaseOrderResult: {
+            purchase_order: components["schemas"]["PurchaseOrderRead"];
+            /** Receipt Id */
+            receipt_id: number;
         };
         /**
          * ReconciliationReport
@@ -2171,6 +2317,38 @@ export interface components {
          * @enum {string}
          */
         StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
+        /** SupplierCreate */
+        SupplierCreate: {
+            /** Contact */
+            contact?: string | null;
+            /** Name */
+            name: string;
+            /** Tax Id */
+            tax_id?: string | null;
+        };
+        /** SupplierRead */
+        SupplierRead: {
+            /** Contact */
+            contact: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Store Id */
+            store_id: number;
+            /** Tax Id */
+            tax_id: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * TenderType
          * @description 銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。
@@ -3391,6 +3569,133 @@ export interface operations {
             };
         };
     };
+    listPurchaseOrders: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurchaseOrderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    receivePurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     storeCreditEffectiveness: {
         parameters: {
             query: {
@@ -3871,6 +4176,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceiptHeaderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listSuppliers: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createSupplier: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupplierCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */

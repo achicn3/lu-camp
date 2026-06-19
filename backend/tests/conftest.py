@@ -23,6 +23,7 @@ import app.modules.cashdrawer.models  # 註冊模型到 Base.metadata
 import app.modules.consignment.models  # 註冊模型到 Base.metadata
 import app.modules.contacts.models  # 註冊模型到 Base.metadata
 import app.modules.inventory.models  # 註冊模型到 Base.metadata
+import app.modules.purchasing.models  # 註冊模型到 Base.metadata
 import app.modules.sales.models  # 註冊模型到 Base.metadata
 import app.modules.settings.models  # 註冊模型到 Base.metadata
 import app.modules.store.models  # 註冊模型到 Base.metadata

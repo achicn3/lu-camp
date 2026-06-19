@@ -379,6 +379,16 @@ class InventoryRepository:
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1
 
+    async def increment_catalog(self, store_id: int, catalog_id: int, qty: int) -> bool:
+        """原子增加 quantity_on_hand；以 store_id 守住跨店範圍。回傳是否成功一筆。"""
+        stmt = (
+            update(CatalogProduct)
+            .where(CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id)
+            .values(quantity_on_hand=CatalogProduct.quantity_on_hand + qty)
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1
+
     async def transition_serialized_status(
         self,
         item_id: int,

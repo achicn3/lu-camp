@@ -533,6 +533,31 @@ class InventoryService:
         if not ok:
             raise InsufficientStock("數量型商品庫存不足，無法售出")
 
+    async def restock_catalog_items(
+        self,
+        store_id: int,
+        catalog_id: int,
+        qty: int,
+        *,
+        ref_type: str,
+        ref_id: int,
+    ) -> None:
+        """數量型商品補貨入庫：加庫存並寫 PURCHASE stock_movement（同一交易）。"""
+        if qty <= 0:
+            raise OwnershipValidationError("入庫數量必須 > 0")
+        ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
+        if not ok:
+            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+        await self.record_stock_in(
+            store_id,
+            ItemKind.CATALOG,
+            qty=qty,
+            reason=StockReason.PURCHASE,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            catalog_product_id=catalog_id,
+        )
+
     @staticmethod
     def per_piece_cost(lot: BulkLot) -> Decimal:
         """每件成本 = acquisition_cost / total_qty。"""
