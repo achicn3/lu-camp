@@ -21,8 +21,11 @@ import {
   type LotDraft,
   validateDraft,
 } from "@/features/acquisition/validation";
+import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
+import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
@@ -398,9 +401,18 @@ export default function AcquisitionPage() {
   const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("CASH");
   const [splitCash, setSplitCash] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
-  const [result, setResult] = useState<{ codes: string[]; lot: string | null } | null>(null);
+  const [result, setResult] = useState<{
+    acquisitionId: number;
+    codes: string[];
+    lot: string | null;
+  } | null>(null);
+  // 作廢剛建立的這筆（限管理者）：開啟確認對話框／顯示作廢結果。
+  const [voidTarget, setVoidTarget] = useState<number | null>(null);
+  const [voidedNote, setVoidedNote] = useState<string | null>(null);
   // 送出成功後遞增 → 重掛鑑價列/散裝表單，連同 combobox 內部文字一併清空（避免顯示舊值卻無 id）。
   const [formKey, setFormKey] = useState(0);
+  // 管理者才顯示作廢入口（後端 ManagerDep 為最終權威；前端隱藏僅為 UX）。token 在頁面生命週期內不變。
+  const isManager = useMemo(() => decodeSession()?.role === "MANAGER", []);
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -486,7 +498,8 @@ export default function AcquisitionPage() {
       return data;
     },
     onSuccess: (data) => {
-      setResult({ codes: data.item_codes, lot: data.lot_code });
+      setResult({ acquisitionId: data.acquisition_id, codes: data.item_codes, lot: data.lot_code });
+      setVoidedNote(null);
       setRows([emptyItem()]);
       setLot(emptyLot());
       setSeller(null);
@@ -625,12 +638,37 @@ export default function AcquisitionPage() {
 
       {result !== null && (
         <div className="card form-success acq-result">
-          <p>收購完成。</p>
+          <p>收購完成（單號 #{result.acquisitionId}）。</p>
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
           {result.lot !== null && <p>散裝批號：{result.lot}</p>}
           <p className="hint">標籤列印功能待後端端點上線後提供。</p>
+          {voidedNote === null && isManager && (
+            <button
+              type="button"
+              className="btn-danger acq-void-after-create"
+              onClick={() => setVoidTarget(result.acquisitionId)}
+            >
+              這筆有誤？作廢收購
+            </button>
+          )}
+          {voidedNote !== null && <p className="form-error">{voidedNote}</p>}
         </div>
       )}
+
+      {voidTarget !== null && (
+        <VoidConfirmDialog
+          acquisitionId={voidTarget}
+          onClose={() => setVoidTarget(null)}
+          onVoided={(r) => {
+            setVoidTarget(null);
+            setVoidedNote(
+              `已作廢收購單 #${r.acquisition_id}（退回現金 ${formatNtd(parseNtd(r.reversed_cash) ?? 0)}、沖回購物金 ${formatNtd(parseNtd(r.reversed_credit) ?? 0)}）。`,
+            );
+          }}
+        />
+      )}
+
+      {isManager && <VoidAcquisitionSection />}
     </section>
   );
 }

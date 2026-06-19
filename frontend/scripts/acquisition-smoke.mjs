@@ -1,12 +1,14 @@
-// 收購瀏覽器煙霧測試（F6 整合驗證）：登入 → /acquisition → 建立賣方 → 買斷一件
-// （品牌/分類查無即建、定價輔助、現金收購）→ 序號條碼。需 backend:8002 + frontend:3000
-// 已起、lucamp_f6 已 seed（dev-manager + 開帳）。執行：mcr playwright 容器內 node scripts/acquisition-smoke.mjs
+// 收購瀏覽器煙霧測試（F6＋F6.5 整合驗證）：登入 → /acquisition → 建立賣方 → 買斷一件
+// （品牌/分類查無即建、定價輔助、現金收購）→ 序號條碼 →（F6.5 管理者）作廢這筆收購 → 以單號查詢確認已作廢。
+// 需 backend + frontend 已起、已 seed（dev-manager + 開帳）。執行：mcr playwright 容器內 node scripts/acquisition-smoke.mjs
 import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { chromium } from "playwright";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
-const SHOTS = process.env.SMOKE_SHOTS ?? "/tmp/acq-shots";
+const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
 mkdirSync(SHOTS, { recursive: true });
 const results = [];
 function ok(name, pass, detail = "") {
@@ -72,6 +74,30 @@ try {
   ok("現金收購送出完成", true);
   ok("顯示序號條碼", await page.locator("text=序號條碼").isVisible());
   await page.screenshot({ path: `${SHOTS}/02-buyout-done.png` });
+
+  // 7) F6.5：管理者作廢剛建立的收購（這筆有誤？作廢收購 → 填原因 → 二次確認）
+  const orderText = (await page.locator(".acq-result").textContent()) ?? "";
+  const orderId = orderText.match(/#(\d+)/)?.[1] ?? "";
+  ok("取得收購單號", orderId !== "", `#${orderId}`);
+  await page.click('button:has-text("這筆有誤？作廢收購")');
+  await page.waitForSelector('[role="dialog"][aria-label="作廢收購確認"]');
+  ok("作廢確認對話框跳出", true);
+  await page.fill('textarea[aria-label="作廢原因"]', "煙霧測試誤建，作廢");
+  await page.click('[role="dialog"] button:has-text("確認作廢")');
+  await page.waitForSelector("text=已作廢收購單");
+  ok("作廢完成並顯示反轉摘要", true);
+  await page.screenshot({ path: `${SHOTS}/03-void-done.png` });
+
+  // 8) F6.5：以單號查詢確認已作廢、且不再出現作廢入口
+  await page.fill('input[aria-label="收購單號"]', orderId);
+  await page.click('button:has-text("查詢")');
+  await page.waitForSelector("text=作廢時間");
+  ok("查詢顯示已作廢（作廢時間）", true);
+  ok(
+    "已作廢單不再出現作廢入口",
+    (await page.locator('.acq-void-section button:has-text("作廢收購")').count()) === 0,
+  );
+  await page.screenshot({ path: `${SHOTS}/04-void-lookup.png` });
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {
