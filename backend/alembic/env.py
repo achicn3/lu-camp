@@ -12,6 +12,7 @@ import app.modules.cashdrawer.models  # 註冊模型到 metadata（autogenerate 
 import app.modules.consignment.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.contacts.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.inventory.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.purchasing.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.sales.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.settings.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.store.models  # 註冊模型到 metadata（autogenerate 用）
