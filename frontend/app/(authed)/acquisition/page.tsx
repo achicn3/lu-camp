@@ -21,6 +21,7 @@ import {
   type LotDraft,
   validateDraft,
 } from "@/features/acquisition/validation";
+import { canVoid } from "@/features/acquisition/void";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { api } from "@/lib/api";
@@ -34,6 +35,7 @@ type Category = components["schemas"]["CategoryRead"];
 type PricingRule = components["schemas"]["PricingRuleRead"];
 type Grade = components["schemas"]["Grade"];
 type PayoutMethod = components["schemas"]["PayoutMethod"];
+type AcquisitionType = components["schemas"]["AcquisitionType"];
 
 function detail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -403,6 +405,7 @@ export default function AcquisitionPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [result, setResult] = useState<{
     acquisitionId: number;
+    type: AcquisitionType;
     codes: string[];
     lot: string | null;
   } | null>(null);
@@ -498,7 +501,12 @@ export default function AcquisitionPage() {
       return data;
     },
     onSuccess: (data) => {
-      setResult({ acquisitionId: data.acquisition_id, codes: data.item_codes, lot: data.lot_code });
+      setResult({
+        acquisitionId: data.acquisition_id,
+        type: data.type,
+        codes: data.item_codes,
+        lot: data.lot_code,
+      });
       setVoidedNote(null);
       setRows([emptyItem()]);
       setLot(emptyLot());
@@ -642,7 +650,7 @@ export default function AcquisitionPage() {
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
           {result.lot !== null && <p>散裝批號：{result.lot}</p>}
           <p className="hint">標籤列印功能待後端端點上線後提供。</p>
-          {voidedNote === null && isManager && (
+          {voidedNote === null && isManager && canVoid({ voided_at: null, type: result.type }) && (
             <button
               type="button"
               className="btn-danger acq-void-after-create"

@@ -22,6 +22,7 @@ export function VoidAcquisitionSection() {
   const queryClient = useQueryClient();
   const [idInput, setIdInput] = useState("");
   const [queryId, setQueryId] = useState<number | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [voidResult, setVoidResult] = useState<VoidResult | null>(null);
 
@@ -45,9 +46,17 @@ export function VoidAcquisitionSection() {
   });
 
   function onLookup() {
-    const parsed = Number.parseInt(idInput.trim(), 10);
+    // 作廢屬破壞性操作、以輸入單號為鍵：拒絕部分解析（如 "12abc"→12 會誤指他單），
+    // 僅接受純數字且 > 0 的單號。
+    const trimmed = idInput.trim();
     setVoidResult(null);
-    setQueryId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    if (!/^\d+$/.test(trimmed) || Number(trimmed) <= 0) {
+      setQueryId(null);
+      setInputError("請輸入有效的收購單號（純數字）");
+      return;
+    }
+    setInputError(null);
+    setQueryId(Number.parseInt(trimmed, 10));
   }
 
   const acq = acqQuery.data ?? null;
@@ -77,6 +86,12 @@ export function VoidAcquisitionSection() {
           查詢
         </button>
       </form>
+
+      {inputError !== null && (
+        <p role="alert" className="form-error">
+          {inputError}
+        </p>
+      )}
 
       {acqQuery.isError && (
         <p role="alert" className="form-error">

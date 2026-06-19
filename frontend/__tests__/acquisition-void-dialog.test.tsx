@@ -137,4 +137,14 @@ describe("VoidAcquisitionSection", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("找不到收購單");
   });
+
+  it("非數字單號（如 12abc）→ 擋下並提示，不發查詢", async () => {
+    const fetchMock = vi.fn(async () => json(acquisition()));
+    vi.stubGlobal("fetch", fetchMock);
+    wrap(<VoidAcquisitionSection />);
+    await lookup("12abc");
+    expect(await screen.findByText(/有效的收購單號/)).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "作廢收購" })).toBeNull();
+  });
 });
