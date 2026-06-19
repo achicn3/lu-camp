@@ -84,7 +84,7 @@ async def test_pay_marks_paid_and_records_cash_out_and_audit(db_session: AsyncSe
     store_id, clerk_id, settlement = await _seed_consignment_sale(db_session)
 
     paid = await ConsignmentService(db_session).pay_settlement(
-        store_id, settlement.id, actor_user_id=clerk_id
+        store_id, settlement.id, actor_user_id=clerk_id, idempotency_key="svc-pay-audit"
     )
 
     assert paid.status == ConsignmentSettlementStatus.PAID
@@ -125,7 +125,7 @@ async def test_pay_reconciliation_net_drawer_is_commission(db_session: AsyncSess
     assert before == _OPENING + _PRICE  # 開帳 + 全額現金入帳（SALE_IN）
 
     await ConsignmentService(db_session).pay_settlement(
-        store_id, settlement.id, actor_user_id=clerk_id
+        store_id, settlement.id, actor_user_id=clerk_id, idempotency_key="svc-pay-reconcile"
     )
 
     after = await drawer.expected_amount(cs)
@@ -137,10 +137,14 @@ async def test_pay_reconciliation_net_drawer_is_commission(db_session: AsyncSess
 async def test_pay_already_paid_raises_not_pending(db_session: AsyncSession) -> None:
     store_id, clerk_id, settlement = await _seed_consignment_sale(db_session)
     svc = ConsignmentService(db_session)
-    await svc.pay_settlement(store_id, settlement.id, actor_user_id=clerk_id)
+    await svc.pay_settlement(
+        store_id, settlement.id, actor_user_id=clerk_id, idempotency_key="svc-pay-once"
+    )
 
     with pytest.raises(SettlementNotPending):
-        await svc.pay_settlement(store_id, settlement.id, actor_user_id=clerk_id)
+        await svc.pay_settlement(
+            store_id, settlement.id, actor_user_id=clerk_id, idempotency_key="svc-pay-again"
+        )
 
     # 不得重複出帳：CONSIGNMENT_PAYOUT_OUT 仍只有一筆。
     count = await db_session.scalar(
@@ -163,7 +167,10 @@ async def test_pay_without_open_session_raises(db_session: AsyncSession) -> None
 
     with pytest.raises(NoOpenCashSession):
         await ConsignmentService(db_session).pay_settlement(
-            store_id, settlement.id, actor_user_id=clerk_id
+            store_id,
+            settlement.id,
+            actor_user_id=clerk_id,
+            idempotency_key="svc-pay-no-drawer",
         )
 
     # 付款被擋 → settlement 仍 PENDING。
@@ -176,7 +183,10 @@ async def test_pay_cross_store_not_found(db_session: AsyncSession) -> None:
 
     with pytest.raises(SettlementNotFound):
         await ConsignmentService(db_session).pay_settlement(
-            999999, settlement.id, actor_user_id=clerk_id
+            999999,
+            settlement.id,
+            actor_user_id=clerk_id,
+            idempotency_key="svc-pay-cross-store",
         )
 
 
@@ -206,7 +216,10 @@ async def test_void_before_pay_cancels_settlement_and_blocks_payout(
 
     with pytest.raises(SettlementNotPending):
         await ConsignmentService(db_session).pay_settlement(
-            store_id, settlement.id, actor_user_id=clerk_id
+            store_id,
+            settlement.id,
+            actor_user_id=clerk_id,
+            idempotency_key="svc-pay-after-void",
         )
     assert await _payout_count(db_session, store_id) == 0
 
@@ -215,7 +228,7 @@ async def test_void_after_pay_flags_reclaim_not_double_reverse(db_session: Async
     """已付款後作廢：結算維持 PAID 但標 reclaim_needed（須向寄售人追回）；不再出帳。"""
     store_id, clerk_id, settlement = await _seed_consignment_sale(db_session)
     await ConsignmentService(db_session).pay_settlement(
-        store_id, settlement.id, actor_user_id=clerk_id
+        store_id, settlement.id, actor_user_id=clerk_id, idempotency_key="svc-pay-before-void"
     )
     sale = await db_session.get(Sale, settlement.sale_id)
     assert sale is not None

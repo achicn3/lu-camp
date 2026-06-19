@@ -1088,6 +1088,39 @@
             "title": "Commission Pct",
             "type": "integer"
           },
+          "consignor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Id"
+          },
+          "consignor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Name"
+          },
+          "consignor_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Phone"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1100,6 +1133,28 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "item_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Code"
+          },
+          "item_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Name"
           },
           "paid_at": {
             "anyOf": [
@@ -1131,6 +1186,18 @@
           "reclaim_needed": {
             "title": "Reclaim Needed",
             "type": "boolean"
+          },
+          "sale_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Created At"
           },
           "sale_id": {
             "title": "Sale Id",
@@ -4748,6 +4815,17 @@
             "schema": {
               "title": "Settlement Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],

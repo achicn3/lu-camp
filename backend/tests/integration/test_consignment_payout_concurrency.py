@@ -138,12 +138,13 @@ async def test_concurrent_pay_only_one_succeeds(real_client: httpx.AsyncClient) 
         token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
         await s.commit()
 
-    headers = {"Authorization": f"Bearer {token}"}
+    headers_a = {"Authorization": f"Bearer {token}", "Idempotency-Key": "pay-race-a"}
+    headers_b = {"Authorization": f"Bearer {token}", "Idempotency-Key": "pay-race-b"}
     try:
         url = f"/api/v1/consignment/settlements/{sid}/pay"
         r1, r2 = await asyncio.gather(
-            real_client.post(url, headers=headers),
-            real_client.post(url, headers=headers),
+            real_client.post(url, headers=headers_a),
+            real_client.post(url, headers=headers_b),
         )
         assert sorted([r1.status_code, r2.status_code]) == [200, 409]  # 恰一成功、一被擋
 
@@ -185,6 +186,82 @@ async def test_concurrent_pay_only_one_succeeds(real_client: httpx.AsyncClient) 
             await s.commit()
 
 
+async def test_same_idempotency_key_cannot_pay_two_settlements(
+    real_client: httpx.AsyncClient,
+) -> None:
+    """同一 Idempotency-Key 即使同時誤用在兩筆付款，也只能落一筆現金出帳。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        store = Store(name="同 key 寄售付款店")
+        s.add(store)
+        await s.flush()
+        clerk = User(store_id=store.id, username="cpsk-clk", password_hash="h", role=UserRole.CLERK)
+        consignor = Contact(store_id=store.id, name="寄售人", national_id_enc="enc")
+        s.add_all([clerk, consignor])
+        await s.flush()
+        await CashDrawerService(s).open_session(store.id, clerk.id, Decimal("1000"))
+        for idx in (1, 2):
+            await InventoryService(s).create_serialized_item(
+                store.id,
+                item_code=f"CPSK{idx}",
+                name=f"寄售帳篷 {idx}",
+                grade=Grade.A,
+                ownership_type=OwnershipType.CONSIGNMENT,
+                listed_price=Decimal("1800"),
+                consignor_id=consignor.id,
+                commission_pct=40,
+            )
+            await SalesService(s).create_sale(
+                store.id,
+                clerk.id,
+                lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=f"CPSK{idx}")],
+            )
+        settlements = (
+            await s.scalars(
+                select(ConsignmentSettlement).where(ConsignmentSettlement.store_id == store.id)
+            )
+        ).all()
+        assert len(settlements) == 2
+        store_id = store.id
+        settlement_ids = [settlement.id for settlement in settlements]
+        token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
+        await s.commit()
+
+    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "same-key-two-payouts"}
+    try:
+        r1, r2 = await asyncio.gather(
+            real_client.post(
+                f"/api/v1/consignment/settlements/{settlement_ids[0]}/pay", headers=headers
+            ),
+            real_client.post(
+                f"/api/v1/consignment/settlements/{settlement_ids[1]}/pay", headers=headers
+            ),
+        )
+        assert sorted([r1.status_code, r2.status_code]) == [200, 409]
+
+        async with sm() as s:
+            rows = (
+                await s.scalars(
+                    select(ConsignmentSettlement).where(
+                        ConsignmentSettlement.id.in_(settlement_ids)
+                    )
+                )
+            ).all()
+            assert [row.status for row in rows].count(ConsignmentSettlementStatus.PAID) == 1
+            assert [row.status for row in rows].count(ConsignmentSettlementStatus.PENDING) == 1
+            payout_count = await s.scalar(
+                select(func.count())
+                .select_from(CashMovement)
+                .where(
+                    CashMovement.store_id == store_id,
+                    CashMovement.type == CashMovementType.CONSIGNMENT_PAYOUT_OUT,
+                )
+            )
+            assert payout_count == 1
+    finally:
+        await _cleanup(sm, store_id)
+
+
 async def test_stale_identity_map_does_not_double_pay() -> None:
     """身分映射舊狀態不得重複付款（Codex adversarial high）。
 
@@ -202,13 +279,13 @@ async def test_stale_identity_map_does_not_double_pay() -> None:
             assert preloaded.status == ConsignmentSettlementStatus.PENDING
             # B 付款並提交（DB 內已 PAID、現金出帳一筆）。
             await ConsignmentService(session_b).pay_settlement(
-                store_id, sid, actor_user_id=clerk_id
+                store_id, sid, actor_user_id=clerk_id, idempotency_key="stale-pay-b"
             )
             await session_b.commit()
             # A 再付款：鎖列＋刷新後應見 PAID → 擋下，不重複出帳。
             with pytest.raises(SettlementNotPending):
                 await ConsignmentService(session_a).pay_settlement(
-                    store_id, sid, actor_user_id=clerk_id
+                    store_id, sid, actor_user_id=clerk_id, idempotency_key="stale-pay-a"
                 )
 
         async with sm() as s:
@@ -265,7 +342,7 @@ async def test_concurrent_void_vs_pay_consistent(real_client: httpx.AsyncClient)
         token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
         await s.commit()
 
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": "pay-vs-void"}
     try:
         r_void, r_pay = await asyncio.gather(
             real_client.post(f"/api/v1/sales/{sale_id}/void", headers=headers),

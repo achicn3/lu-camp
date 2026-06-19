@@ -1,16 +1,20 @@
 """consignment 資料存取層（唯一直接碰 ORM 的層）。
 
 T11 售出時新增 PENDING 結算；T21-b 加會員中心唯讀查詢。付款（→PAID）等屬 Phase 4。
-跨模組邊界：本層只碰 consignment_settlements 自身；寄售人↔結算的關聯由 facade 以
-inventory 提供的 serialized_item_ids 串接（不直接查 inventory 表）。
+跨模組邊界：會員中心既有查詢由 facade 以 inventory 提供的 serialized_item_ids 串接；
+4A 付款工作清單需要一次回寄售人與商品摘要，因此 list_settlements 做唯讀 join，不寫入外模組。
 """
 
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.consignment.models import ConsignmentSettlement
+from app.modules.contacts.models import Contact
+from app.modules.inventory.models import SerializedItem
+from app.modules.sales.models import Sale
 from app.shared.enums import ConsignmentSettlementStatus
 
 
@@ -70,13 +74,39 @@ class ConsignmentRepository:
         status: ConsignmentSettlementStatus | None = None,
         limit: int,
         offset: int,
-    ) -> list[ConsignmentSettlement]:
+    ) -> list[dict[str, Any]]:
         """店內寄售結算列（可篩 status、新到舊、分頁）；付款工作清單與應付查詢用。"""
-        stmt = select(ConsignmentSettlement).where(ConsignmentSettlement.store_id == store_id)
+        stmt = (
+            select(
+                ConsignmentSettlement.id,
+                ConsignmentSettlement.store_id,
+                ConsignmentSettlement.serialized_item_id,
+                ConsignmentSettlement.sale_id,
+                ConsignmentSettlement.gross,
+                ConsignmentSettlement.commission_pct,
+                ConsignmentSettlement.commission_amount,
+                ConsignmentSettlement.payout_amount,
+                ConsignmentSettlement.status,
+                ConsignmentSettlement.paid_at,
+                ConsignmentSettlement.paid_by,
+                ConsignmentSettlement.reclaim_needed,
+                ConsignmentSettlement.created_at,
+                SerializedItem.item_code.label("item_code"),
+                SerializedItem.name.label("item_name"),
+                Contact.id.label("consignor_id"),
+                Contact.name.label("consignor_name"),
+                Contact.phone.label("consignor_phone"),
+                Sale.created_at.label("sale_created_at"),
+            )
+            .join(SerializedItem, SerializedItem.id == ConsignmentSettlement.serialized_item_id)
+            .outerjoin(Contact, Contact.id == SerializedItem.consignor_id)
+            .join(Sale, Sale.id == ConsignmentSettlement.sale_id)
+            .where(ConsignmentSettlement.store_id == store_id)
+        )
         if status is not None:
             stmt = stmt.where(ConsignmentSettlement.status == status)
         stmt = stmt.order_by(ConsignmentSettlement.id.desc()).limit(limit).offset(offset)
-        return list((await self._session.scalars(stmt)).all())
+        return [dict(row) for row in (await self._session.execute(stmt)).mappings().all()]
 
     async def list_by_item_ids(
         self, store_id: int, serialized_item_ids: list[int], *, limit: int, offset: int

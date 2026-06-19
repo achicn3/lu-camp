@@ -6,18 +6,21 @@
 退貨退現/庫存回補屬後續切片（4B）。
 """
 
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any, cast
 
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit import write_audit_log
+from app.core.audit import AuditLog, write_audit_log
 from app.core.money import commission
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.repository import ConsignmentRepository
 from app.shared.enums import CashMovementType, ConsignmentSettlementStatus
-from app.shared.exceptions import SettlementNotFound, SettlementNotPending
+from app.shared.exceptions import IdempotencyKeyConflict, SettlementNotFound, SettlementNotPending
 
 
 class ConsignmentService:
@@ -27,24 +30,42 @@ class ConsignmentService:
         self._cashdrawer = CashDrawerService(session)
 
     async def pay_settlement(
-        self, store_id: int, settlement_id: int, *, actor_user_id: int
+        self,
+        store_id: int,
+        settlement_id: int,
+        *,
+        actor_user_id: int,
+        idempotency_key: str,
     ) -> ConsignmentSettlement:
         """付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID（Phase 4 / 4A）。
 
         - 不存在/他店 → SettlementNotFound；非 PENDING（已付/已取消）→ SettlementNotPending。
         - 無開帳 cash_session → NoOpenCashSession（record_movement 內擋；invariant #8）。
+        - idempotency_key 必填；同 key 重送回同一 PAID 結果，不重複出帳。
         - 現金出帳走 CONSIGNMENT_PAYOUT_OUT，對帳 expected 已內含此型之扣減（invariant #4），
           故付款後抽屜淨增 = 抽成（店家真正收入），不是全額售價（§7.3）。
         - 併發/重送：以 settlement 列鎖（get_for_update）+ 狀態為準，只一筆成功、不重複出帳。
           鎖順序：settlement 列 → cash_session（record_movement 內鎖），全程同一交易。
         """
+        key = self._normalize_idempotency_key(idempotency_key)
+        await self._lock_idempotency_key(store_id, key)
         settlement = await self._repo.get_for_update(store_id, settlement_id)
         if settlement is None:
             raise SettlementNotFound(f"找不到寄售結算 {settlement_id}")
         if settlement.status != ConsignmentSettlementStatus.PENDING:
+            replay = await self._payout_audit_for_key(store_id, key)
+            if settlement.status == ConsignmentSettlementStatus.PAID and self._audit_matches_payout(
+                replay, settlement_id
+            ):
+                return settlement
             raise SettlementNotPending(
                 f"寄售結算 {settlement_id} 狀態為 {settlement.status.value}，不可付款"
             )
+        replay = await self._payout_audit_for_key(store_id, key)
+        if replay is not None:
+            if self._audit_matches_payout(replay, settlement_id):
+                return settlement
+            raise IdempotencyKeyConflict("Idempotency-Key 已用於不同寄售付款")
         # 現金出帳（無開帳即於此擋下，settlement 尚未變更 → 整筆回滾不留半套）。
         await self._cashdrawer.record_movement(
             store_id,
@@ -68,10 +89,44 @@ class ConsignmentService:
             after={
                 "status": ConsignmentSettlementStatus.PAID.value,
                 "payout_amount": str(settlement.payout_amount),
+                "idempotency_key": key,
             },
         )
         await self._session.flush()
         return settlement
+
+    @staticmethod
+    def _normalize_idempotency_key(idempotency_key: str) -> str:
+        if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+            raise IdempotencyKeyConflict("idempotency_key 必須為非空字串")
+        return idempotency_key.strip()
+
+    async def _payout_audit_for_key(self, store_id: int, idempotency_key: str) -> AuditLog | None:
+        stmt = (
+            select(AuditLog)
+            .where(
+                AuditLog.store_id == store_id,
+                AuditLog.action == "CONSIGNMENT_PAYOUT",
+                AuditLog.after["idempotency_key"].as_string() == idempotency_key,
+            )
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+        return cast(AuditLog | None, await self._session.scalar(stmt))
+
+    async def _lock_idempotency_key(self, store_id: int, idempotency_key: str) -> None:
+        seed = f"consignment-payout:{store_id}:{idempotency_key}".encode()
+        digest = hashlib.sha256(seed).digest()
+        lock_key = int.from_bytes(digest[:8], byteorder="big", signed=True)
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key}
+        )
+
+    @staticmethod
+    def _audit_matches_payout(audit: AuditLog | None, settlement_id: int) -> bool:
+        if audit is None:
+            return False
+        return audit.entity_id == str(settlement_id)
 
     async def cancel_settlements_for_sale(
         self, store_id: int, sale_id: int, *, actor_user_id: int
@@ -119,7 +174,7 @@ class ConsignmentService:
         status: ConsignmentSettlementStatus | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[ConsignmentSettlement]:
+    ) -> list[dict[str, Any]]:
         """店內寄售結算列（可篩 status；付款工作清單/應付查詢；§4 店別範圍）。"""
         return await self._repo.list_settlements(
             store_id, status=status, limit=limit, offset=offset

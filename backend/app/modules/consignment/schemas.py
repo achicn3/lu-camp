@@ -33,3 +33,9 @@ class ConsignmentSettlementRead(BaseModel):
     paid_by: int | None
     reclaim_needed: bool
     created_at: datetime
+    item_code: str | None = None
+    item_name: str | None = None
+    consignor_id: int | None = None
+    consignor_name: str | None = None
+    consignor_phone: str | None = None
+    sale_created_at: datetime | None = None

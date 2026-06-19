@@ -7,7 +7,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -17,6 +17,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.shared.enums import ConsignmentSettlementStatus
 from app.shared.exceptions import (
     DomainError,
+    IdempotencyKeyConflict,
     NoOpenCashSession,
     SettlementNotFound,
     SettlementNotPending,
@@ -28,6 +29,7 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 
 _STATUS_BY_EXC: dict[type[DomainError], int] = {
+    IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     SettlementNotFound: status.HTTP_404_NOT_FOUND,
     SettlementNotPending: status.HTTP_409_CONFLICT,
     NoOpenCashSession: status.HTTP_409_CONFLICT,
@@ -59,7 +61,10 @@ async def list_settlements(
     operation_id="payConsignmentSettlement",
 )
 async def pay_settlement(
-    settlement_id: int, session: SessionDep, user: CurrentUserDep
+    settlement_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
 ) -> ConsignmentSettlementRead:
     """付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。
 
@@ -68,7 +73,12 @@ async def pay_settlement(
     """
     svc = ConsignmentService(session)
     try:
-        settlement = await svc.pay_settlement(user.store_id, settlement_id, actor_user_id=user.id)
+        settlement = await svc.pay_settlement(
+            user.store_id,
+            settlement_id,
+            actor_user_id=user.id,
+            idempotency_key=idempotency_key,
+        )
     except DomainError as exc:
         await session.rollback()
         raise HTTPException(

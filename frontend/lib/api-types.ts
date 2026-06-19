@@ -1233,6 +1233,12 @@ export interface components {
             commission_amount: string;
             /** Commission Pct */
             commission_pct: number;
+            /** Consignor Id */
+            consignor_id?: number | null;
+            /** Consignor Name */
+            consignor_name?: string | null;
+            /** Consignor Phone */
+            consignor_phone?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -1242,6 +1248,10 @@ export interface components {
             gross: string;
             /** Id */
             id: number;
+            /** Item Code */
+            item_code?: string | null;
+            /** Item Name */
+            item_name?: string | null;
             /** Paid At */
             paid_at: string | null;
             /** Paid By */
@@ -1250,6 +1260,8 @@ export interface components {
             payout_amount: string;
             /** Reclaim Needed */
             reclaim_needed: boolean;
+            /** Sale Created At */
+            sale_created_at?: string | null;
             /** Sale Id */
             sale_id: number;
             /** Serialized Item Id */
@@ -2826,7 +2838,9 @@ export interface operations {
     payConsignmentSettlement: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 settlement_id: number;
             };
