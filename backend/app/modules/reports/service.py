@@ -5,6 +5,7 @@
 """
 
 import calendar
+from collections import OrderedDict
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -13,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money import round_ntd, split_tax_inclusive
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
+from app.modules.inventory.service import InventoryService
+from app.modules.reports.aging import BUCKET_KEYS as INVENTORY_BUCKET_KEYS
+from app.modules.reports.aging import _bucket_for_age
 from app.modules.reports.schemas import (
     ALPHA_METHOD_NOTE,
     ESTIMATE_FIELDS,
@@ -23,6 +27,7 @@ from app.modules.reports.schemas import (
     EffectivenessReport,
     FlowRow,
     FlowsReport,
+    InventoryValueReport,
     LiabilityReport,
     MemberBalanceRow,
     ReconciliationReport,
@@ -34,6 +39,7 @@ from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
+from app.shared.enums import OwnershipType
 from app.shared.exceptions import DomainError
 
 
@@ -71,6 +77,12 @@ def _bucket_bounds(granularity: str, dt: datetime) -> tuple[datetime, datetime]:
     return start, nxt
 
 
+def _age_bucket(now: datetime, intake: datetime) -> str:
+    """入庫至今的帳齡桶 key（<30/30-90/90-180/180-365/>365 天；沿用 aging.py 邊界）。"""
+    age_days = (now - intake).total_seconds() / 86400
+    return _bucket_for_age(age_days)
+
+
 def _health_ratio(total_outstanding: Decimal, monthly_outflow: Decimal) -> str | None:
     """負債健康比 = 未兌付總負債 ÷ 月固定現金支出（docs/16 §5A）；分母 0 → N/A（null）。"""
     if monthly_outflow <= 0:
@@ -86,6 +98,89 @@ class ReportsService:
         self._suggestion = PremiumSuggestionService(session)
         self._cash = CashDrawerService(session)
         self._sales = SalesService(session)
+        self._inventory = InventoryService(session)
+
+    async def inventory_value(self, store_id: int) -> InventoryValueReport:
+        """庫存價值與庫齡（docs/19 §2.4）：自有計成本、寄售另列售價、catalog 成本 N/A。
+
+        aging = 自有在庫成本價值按入庫時間（intake_date）分桶（Σ = total_owned_cost_value）。
+        已售/退場（IN_STOCK 以外、bulk remaining=0）不入；唯讀。
+        """
+        now = _now()
+        owned_ser_count = 0
+        owned_ser_cost = Decimal(0)
+        owned_ser_retail = Decimal(0)
+        consign_ser_count = 0
+        consign_gross = Decimal(0)
+        aging = OrderedDict((k, Decimal(0)) for k in INVENTORY_BUCKET_KEYS)
+
+        for item in await self._inventory.serialized_for_valuation(store_id):
+            if item.ownership_type == OwnershipType.CONSIGNMENT:
+                consign_ser_count += 1
+                consign_gross += item.listed_price
+                continue
+            cost = item.acquisition_cost or Decimal(0)
+            owned_ser_count += 1
+            owned_ser_cost += cost
+            owned_ser_retail += item.listed_price
+            aging[_age_bucket(now, item.intake_date)] += cost
+
+        owned_bulk_qty = 0
+        owned_bulk_cost = Decimal(0)
+        owned_bulk_retail = Decimal(0)
+        consign_bulk_qty = 0
+        for lot in await self._inventory.bulk_for_valuation(store_id):
+            remaining = lot.remaining_qty
+            retail = lot.unit_price * Decimal(remaining)
+            if lot.consignor_id is not None:
+                consign_bulk_qty += remaining
+                consign_gross += retail
+                continue
+            cost = (
+                Decimal(
+                    round_ntd(lot.acquisition_cost * Decimal(remaining) / Decimal(lot.total_qty))
+                )
+                if lot.total_qty > 0
+                else Decimal(0)
+            )
+            owned_bulk_qty += remaining
+            owned_bulk_cost += cost
+            owned_bulk_retail += retail
+            aging[_age_bucket(now, lot.intake_date)] += cost
+
+        catalog_qty = 0
+        catalog_retail = Decimal(0)
+        for product in await self._inventory.catalog_for_valuation(store_id):
+            catalog_qty += product.quantity_on_hand
+            catalog_retail += product.unit_price * Decimal(product.quantity_on_hand)
+
+        total_owned_cost = owned_ser_cost + owned_bulk_cost
+        total_owned_retail = owned_ser_retail + owned_bulk_retail
+        return InventoryValueReport(
+            generated_at=now,
+            store_id=store_id,
+            owned_serialized_count=owned_ser_count,
+            owned_serialized_cost=owned_ser_cost,
+            owned_serialized_retail=owned_ser_retail,
+            owned_bulk_remaining_qty=owned_bulk_qty,
+            owned_bulk_cost=owned_bulk_cost,
+            owned_bulk_retail=owned_bulk_retail,
+            total_owned_cost_value=total_owned_cost,
+            total_owned_retail_value=total_owned_retail,
+            consignment_serialized_count=consign_ser_count,
+            consignment_bulk_remaining_qty=consign_bulk_qty,
+            consignment_inventory_gross=consign_gross,
+            catalog_total_qty=catalog_qty,
+            catalog_retail_value=catalog_retail,
+            catalog_cost_value=None,
+            owned_cost_aging=AgingBuckets(
+                lt_30d=aging["lt_30d"],
+                d30_90=aging["d30_90"],
+                d90_180=aging["d90_180"],
+                d180_365=aging["d180_365"],
+                gt_365d=aging["gt_365d"],
+            ),
+        )
 
     async def sales_margin(
         self, store_id: int, *, date_from: datetime, date_to: datetime

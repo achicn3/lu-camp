@@ -199,6 +199,39 @@ class TrendsReport(BaseModel):
     rows: list[TrendRow]
 
 
+class InventoryValueReport(BaseModel):
+    """庫存價值與庫齡（docs/19 §2.4）。
+
+    自有（owned）才計成本價值；寄售在庫另列售價總額、不當自有資產；catalog 成本未建模 → cost=null。
+    aging 為「自有在庫成本價值」按入庫時間分桶（catalog 無入庫時間、寄售非自有，皆不入 aging）。
+    已售/退場（SOLD/SOLD_OUT/RETURNED/WRITTEN_OFF、remaining=0）不入在庫。
+    """
+
+    generated_at: datetime
+    store_id: int
+    # 自有序號
+    owned_serialized_count: int
+    owned_serialized_cost: NTDAmount
+    owned_serialized_retail: NTDAmount
+    # 自有散裝（count = 剩餘件數）
+    owned_bulk_remaining_qty: int
+    owned_bulk_cost: NTDAmount
+    owned_bulk_retail: NTDAmount
+    # 自有在庫成本/售價總計
+    total_owned_cost_value: NTDAmount
+    total_owned_retail_value: NTDAmount
+    # 寄售在庫（另列，非自有資產；售價總額）
+    consignment_serialized_count: int
+    consignment_bulk_remaining_qty: int
+    consignment_inventory_gross: NTDAmount
+    # 數量型商品（成本未建模 → cost N/A）
+    catalog_total_qty: int
+    catalog_retail_value: NTDAmount
+    catalog_cost_value: NTDAmountOpt  # 恆 null（成本未建模）
+    # 庫齡：自有在庫成本價值按入庫時間分桶（Σ = total_owned_cost_value）
+    owned_cost_aging: AgingBuckets
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 

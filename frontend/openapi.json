@@ -2209,6 +2209,107 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InventoryValueReport": {
+        "description": "庫存價值與庫齡（docs/19 §2.4）。\n\n自有（owned）才計成本價值；寄售在庫另列售價總額、不當自有資產；catalog 成本未建模 → cost=null。\naging 為「自有在庫成本價值」按入庫時間分桶（catalog 無入庫時間、寄售非自有，皆不入 aging）。\n已售/退場（SOLD/SOLD_OUT/RETURNED/WRITTEN_OFF、remaining=0）不入在庫。",
+        "properties": {
+          "catalog_cost_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Cost Value"
+          },
+          "catalog_retail_value": {
+            "title": "Catalog Retail Value",
+            "type": "string"
+          },
+          "catalog_total_qty": {
+            "title": "Catalog Total Qty",
+            "type": "integer"
+          },
+          "consignment_bulk_remaining_qty": {
+            "title": "Consignment Bulk Remaining Qty",
+            "type": "integer"
+          },
+          "consignment_inventory_gross": {
+            "title": "Consignment Inventory Gross",
+            "type": "string"
+          },
+          "consignment_serialized_count": {
+            "title": "Consignment Serialized Count",
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "owned_bulk_cost": {
+            "title": "Owned Bulk Cost",
+            "type": "string"
+          },
+          "owned_bulk_remaining_qty": {
+            "title": "Owned Bulk Remaining Qty",
+            "type": "integer"
+          },
+          "owned_bulk_retail": {
+            "title": "Owned Bulk Retail",
+            "type": "string"
+          },
+          "owned_cost_aging": {
+            "$ref": "#/components/schemas/AgingBuckets"
+          },
+          "owned_serialized_cost": {
+            "title": "Owned Serialized Cost",
+            "type": "string"
+          },
+          "owned_serialized_count": {
+            "title": "Owned Serialized Count",
+            "type": "integer"
+          },
+          "owned_serialized_retail": {
+            "title": "Owned Serialized Retail",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_owned_cost_value": {
+            "title": "Total Owned Cost Value",
+            "type": "string"
+          },
+          "total_owned_retail_value": {
+            "title": "Total Owned Retail Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "owned_serialized_count",
+          "owned_serialized_cost",
+          "owned_serialized_retail",
+          "owned_bulk_remaining_qty",
+          "owned_bulk_cost",
+          "owned_bulk_retail",
+          "total_owned_cost_value",
+          "total_owned_retail_value",
+          "consignment_serialized_count",
+          "consignment_bulk_remaining_qty",
+          "consignment_inventory_gross",
+          "catalog_total_qty",
+          "catalog_retail_value",
+          "catalog_cost_value",
+          "owned_cost_aging"
+        ],
+        "title": "InventoryValueReport",
+        "type": "object"
+      },
       "LiabilityReport": {
         "description": "§5A 購物金負債報表。",
         "properties": {
@@ -7413,6 +7514,60 @@
           }
         ],
         "summary": "Daily Summary",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/inventory-value": {
+      "get": {
+        "description": "庫存價值與庫齡（docs/19 §2.4）：自有成本/售價、寄售在庫另列、catalog 成本 N/A、自有庫齡。",
+        "operationId": "inventoryValueReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryValueReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Inventory Value",
         "tags": [
           "reports"
         ]

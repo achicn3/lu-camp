@@ -218,6 +218,43 @@ class InventoryRepository:
         stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:
+        """在庫序號品（IN_STOCK，全部、不分頁；庫存價值/庫齡報表用）。"""
+        stmt = (
+            select(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.status == SerializedItemStatus.IN_STOCK,
+            )
+            .order_by(SerializedItem.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def bulk_for_valuation(self, store_id: int) -> list[BulkLot]:
+        """在售且有餘量的散裝堆（ON_SALE 且 remaining_qty>0，全部；庫存價值/庫齡報表用）。"""
+        stmt = (
+            select(BulkLot)
+            .where(
+                BulkLot.store_id == store_id,
+                BulkLot.status == BulkLotStatus.ON_SALE,
+                BulkLot.remaining_qty > 0,
+            )
+            .order_by(BulkLot.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def catalog_for_valuation(self, store_id: int) -> list[CatalogProduct]:
+        """有庫存的數量型商品（quantity_on_hand>0，全部；庫存價值報表用，成本未建模）。"""
+        stmt = (
+            select(CatalogProduct)
+            .where(
+                CatalogProduct.store_id == store_id,
+                CatalogProduct.quantity_on_hand > 0,
+            )
+            .order_by(CatalogProduct.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_serialized_by_acquisitions(
         self,
         store_id: int,

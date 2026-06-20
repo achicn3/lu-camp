@@ -343,6 +343,18 @@ class InventoryService:
             store_id, status=status, consignor_id=consignor_id, q=q, limit=limit, offset=offset
         )
 
+    async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:
+        """在庫序號品（IN_STOCK，全部；庫存價值/庫齡報表唯讀用）。"""
+        return await self._repo.serialized_for_valuation(store_id)
+
+    async def bulk_for_valuation(self, store_id: int) -> list[BulkLot]:
+        """在售且有餘量散裝堆（ON_SALE 且 remaining>0；庫存價值/庫齡報表唯讀用）。"""
+        return await self._repo.bulk_for_valuation(store_id)
+
+    async def catalog_for_valuation(self, store_id: int) -> list[CatalogProduct]:
+        """有庫存數量型商品（quantity_on_hand>0；庫存價值報表唯讀用，成本未建模）。"""
+        return await self._repo.catalog_for_valuation(store_id)
+
     async def list_serialized_by_acquisitions(
         self,
         store_id: int,

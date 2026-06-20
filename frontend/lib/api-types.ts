@@ -684,6 +684,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/inventory-value": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inventory Value
+         * @description 庫存價值與庫齡（docs/19 §2.4）：自有成本/售價、寄售在庫另列、catalog 成本 N/A、自有庫齡。
+         */
+        get: operations["inventoryValueReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/sales-margin": {
         parameters: {
             query?: never;
@@ -1883,6 +1903,52 @@ export interface components {
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /**
+         * InventoryValueReport
+         * @description 庫存價值與庫齡（docs/19 §2.4）。
+         *
+         *     自有（owned）才計成本價值；寄售在庫另列售價總額、不當自有資產；catalog 成本未建模 → cost=null。
+         *     aging 為「自有在庫成本價值」按入庫時間分桶（catalog 無入庫時間、寄售非自有，皆不入 aging）。
+         *     已售/退場（SOLD/SOLD_OUT/RETURNED/WRITTEN_OFF、remaining=0）不入在庫。
+         */
+        InventoryValueReport: {
+            /** Catalog Cost Value */
+            catalog_cost_value: string | null;
+            /** Catalog Retail Value */
+            catalog_retail_value: string;
+            /** Catalog Total Qty */
+            catalog_total_qty: number;
+            /** Consignment Bulk Remaining Qty */
+            consignment_bulk_remaining_qty: number;
+            /** Consignment Inventory Gross */
+            consignment_inventory_gross: string;
+            /** Consignment Serialized Count */
+            consignment_serialized_count: number;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Owned Bulk Cost */
+            owned_bulk_cost: string;
+            /** Owned Bulk Remaining Qty */
+            owned_bulk_remaining_qty: number;
+            /** Owned Bulk Retail */
+            owned_bulk_retail: string;
+            owned_cost_aging: components["schemas"]["AgingBuckets"];
+            /** Owned Serialized Cost */
+            owned_serialized_cost: string;
+            /** Owned Serialized Count */
+            owned_serialized_count: number;
+            /** Owned Serialized Retail */
+            owned_serialized_retail: string;
+            /** Store Id */
+            store_id: number;
+            /** Total Owned Cost Value */
+            total_owned_cost_value: string;
+            /** Total Owned Retail Value */
+            total_owned_retail_value: string;
         };
         /**
          * LiabilityReport
@@ -4292,6 +4358,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailySummaryReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inventoryValueReport: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryValueReport"];
                 };
             };
             /** @description Validation Error */

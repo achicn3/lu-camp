@@ -17,6 +17,7 @@ from app.modules.reports.export import ExportFormat, TabularExport, export_respo
 from app.modules.reports.schemas import (
     DailyCashReport,
     DailySummaryReport,
+    InventoryValueReport,
     SalesMarginReport,
     TrendsReport,
 )
@@ -218,6 +219,72 @@ async def trends(
                 str(r.transaction_count),
             ]
             for r in report.rows
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get(
+    "/inventory-value", response_model=InventoryValueReport, operation_id="inventoryValueReport"
+)
+async def inventory_value(
+    session: SessionDep,
+    user: ManagerDep,
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> InventoryValueReport | Response:
+    """庫存價值與庫齡（docs/19 §2.4）：自有成本/售價、寄售在庫另列、catalog 成本 N/A、自有庫齡。"""
+    report = await ReportsService(session).inventory_value(user.store_id)
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("自有在庫成本", str(report.total_owned_cost_value)),
+        ("自有在庫售價", str(report.total_owned_retail_value)),
+        ("寄售在庫售價(非自有資產)", str(report.consignment_inventory_gross)),
+        ("數量品成本", "N/A"),
+        ("庫齡<30天", str(report.owned_cost_aging.lt_30d)),
+        ("庫齡30-90天", str(report.owned_cost_aging.d30_90)),
+        ("庫齡90-180天", str(report.owned_cost_aging.d90_180)),
+        ("庫齡180-365天", str(report.owned_cost_aging.d180_365)),
+        ("庫齡>365天", str(report.owned_cost_aging.gt_365d)),
+    ]
+    exp = TabularExport(
+        sheet="庫存價值",
+        filename_stem=f"inventory-value-{report.store_id}",
+        meta=meta,
+        headers=["類別", "數量", "成本價值", "售價價值"],
+        rows=[
+            [
+                "自有序號",
+                str(report.owned_serialized_count),
+                str(report.owned_serialized_cost),
+                str(report.owned_serialized_retail),
+            ],
+            [
+                "自有散裝(剩餘件)",
+                str(report.owned_bulk_remaining_qty),
+                str(report.owned_bulk_cost),
+                str(report.owned_bulk_retail),
+            ],
+            [
+                "寄售序號",
+                str(report.consignment_serialized_count),
+                "N/A",
+                str(report.consignment_inventory_gross),
+            ],
+            [
+                "寄售散裝(剩餘件)",
+                str(report.consignment_bulk_remaining_qty),
+                "N/A",
+                "",
+            ],
+            [
+                "數量型商品",
+                str(report.catalog_total_qty),
+                "N/A",
+                str(report.catalog_retail_value),
+            ],
         ],
     )
     return export_response(exp, fmt)
