@@ -87,15 +87,9 @@ class ConsignmentRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
-    async def list_settlements(
-        self,
-        store_id: int,
-        *,
-        status: ConsignmentSettlementStatus | None = None,
-        limit: int,
-        offset: int,
-    ) -> list[dict[str, Any]]:
-        """店內寄售結算列（可篩 status、新到舊、分頁）；付款工作清單與應付查詢用。"""
+    @staticmethod
+    def _settlements_select(store_id: int, status: ConsignmentSettlementStatus | None) -> Any:
+        """寄售結算明細 select（join 序號品/寄售人/銷售；只輸出姓名/電話，不含 national_id）。"""
         stmt = (
             select(
                 ConsignmentSettlement.id,
@@ -125,7 +119,28 @@ class ConsignmentRepository:
         )
         if status is not None:
             stmt = stmt.where(ConsignmentSettlement.status == status)
-        stmt = stmt.order_by(ConsignmentSettlement.id.desc()).limit(limit).offset(offset)
+        return stmt
+
+    async def list_settlements(
+        self,
+        store_id: int,
+        *,
+        status: ConsignmentSettlementStatus | None = None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        """店內寄售結算列（可篩 status、新到舊、分頁）；付款工作清單與應付查詢用。"""
+        stmt = (
+            self._settlements_select(store_id, status)
+            .order_by(ConsignmentSettlement.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return [dict(row) for row in (await self._session.execute(stmt)).mappings().all()]
+
+    async def all_settlements_for_report(self, store_id: int) -> list[dict[str, Any]]:
+        """店內所有寄售結算（不分頁、不篩狀態；應付報表用，呈現/合計由 service 決定）。"""
+        stmt = self._settlements_select(store_id, None).order_by(ConsignmentSettlement.id.desc())
         return [dict(row) for row in (await self._session.execute(stmt)).mappings().all()]
 
     async def list_by_item_ids(

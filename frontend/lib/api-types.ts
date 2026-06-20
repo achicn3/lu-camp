@@ -644,6 +644,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/consignment-payables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Consignment Payables
+         * @description 寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。
+         */
+        get: operations["consignmentPayablesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/daily-cash": {
         parameters: {
             query?: never;
@@ -1486,6 +1506,69 @@ export interface components {
         CategoryTargetUpdate: {
             /** Target Margin Pct */
             target_margin_pct: number;
+        };
+        /**
+         * ConsignmentPayableRow
+         * @description 寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。
+         */
+        ConsignmentPayableRow: {
+            /** Commission Amount */
+            commission_amount: string;
+            /** Consignor Id */
+            consignor_id: number | null;
+            /** Consignor Name */
+            consignor_name: string | null;
+            /** Consignor Phone */
+            consignor_phone: string | null;
+            /** Gross */
+            gross: string;
+            /** Item Code */
+            item_code: string;
+            /** Item Name */
+            item_name: string;
+            /** Payout Amount */
+            payout_amount: string;
+            /** Reclaim Needed */
+            reclaim_needed: boolean;
+            /**
+             * Sale Created At
+             * Format: date-time
+             */
+            sale_created_at: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Settlement Id */
+            settlement_id: number;
+            /** Status */
+            status: string;
+        };
+        /**
+         * ConsignmentPayablesReport
+         * @description 寄售應付報表（docs/19 §2.5）。
+         *
+         *     只計 PENDING 入待付合計；PAID/CANCELLED 分欄；reclaim_needed（已付後退貨需追回）獨立分欄，
+         *     不以負數沖抵 pending。status_filter 只影響明細列，合計恆涵蓋全部狀態。
+         */
+        ConsignmentPayablesReport: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Rows */
+            rows: components["schemas"]["ConsignmentPayableRow"][];
+            /** Status Filter */
+            status_filter: string;
+            /** Store Id */
+            store_id: number;
+            /** Total Cancelled Payout */
+            total_cancelled_payout: string;
+            /** Total Paid Payout */
+            total_paid_payout: string;
+            /** Total Pending Payout */
+            total_pending_payout: string;
+            /** Total Reclaim Needed Payout */
+            total_reclaim_needed_payout: string;
         };
         /**
          * ConsignmentSettlementRead
@@ -4294,6 +4377,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consignmentPayablesReport: {
+        parameters: {
+            query?: {
+                status?: "PENDING" | "PAID" | "CANCELLED" | "ALL";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentPayablesReport"];
                 };
             };
             /** @description Validation Error */

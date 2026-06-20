@@ -232,6 +232,41 @@ class InventoryValueReport(BaseModel):
     owned_cost_aging: AgingBuckets
 
 
+class ConsignmentPayableRow(BaseModel):
+    """寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。"""
+
+    settlement_id: int
+    consignor_id: int | None
+    consignor_name: str | None
+    consignor_phone: str | None
+    sale_id: int
+    item_code: str
+    item_name: str
+    gross: NTDAmount
+    commission_amount: NTDAmount
+    payout_amount: NTDAmount
+    status: str
+    reclaim_needed: bool
+    sale_created_at: datetime
+
+
+class ConsignmentPayablesReport(BaseModel):
+    """寄售應付報表（docs/19 §2.5）。
+
+    只計 PENDING 入待付合計；PAID/CANCELLED 分欄；reclaim_needed（已付後退貨需追回）獨立分欄，
+    不以負數沖抵 pending。status_filter 只影響明細列，合計恆涵蓋全部狀態。
+    """
+
+    generated_at: datetime
+    store_id: int
+    status_filter: str
+    rows: list[ConsignmentPayableRow]
+    total_pending_payout: NTDAmount
+    total_paid_payout: NTDAmount
+    total_cancelled_payout: NTDAmount
+    total_reclaim_needed_payout: NTDAmount
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 

@@ -205,6 +205,10 @@ class ConsignmentService:
             store_id, status=status, limit=limit, offset=offset
         )
 
+    async def all_settlements_for_report(self, store_id: int) -> list[dict[str, Any]]:
+        """店內所有寄售結算（不分頁、不篩狀態；R4 應付報表唯讀用）。"""
+        return await self._repo.all_settlements_for_report(store_id)
+
     async def create_settlement(
         self,
         store_id: int,

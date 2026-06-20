@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd, split_tax_inclusive
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.service import InventoryService
 from app.modules.reports.aging import BUCKET_KEYS as INVENTORY_BUCKET_KEYS
@@ -21,6 +22,8 @@ from app.modules.reports.schemas import (
     ALPHA_METHOD_NOTE,
     ESTIMATE_FIELDS,
     AgingBuckets,
+    ConsignmentPayableRow,
+    ConsignmentPayablesReport,
     DailyCashReport,
     DailyCashSessionRow,
     DailySummaryReport,
@@ -99,6 +102,62 @@ class ReportsService:
         self._cash = CashDrawerService(session)
         self._sales = SalesService(session)
         self._inventory = InventoryService(session)
+        self._consignment = ConsignmentService(session)
+
+    async def consignment_payables(
+        self, store_id: int, *, status_filter: str
+    ) -> ConsignmentPayablesReport:
+        """寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄、不沖抵。
+
+        合計恆涵蓋全部狀態；status_filter（PENDING/PAID/CANCELLED/ALL）只決定明細列。唯讀；
+        只輸出寄售人姓名/電話，不含 national_id。
+        """
+        all_rows = await self._consignment.all_settlements_for_report(store_id)
+        total_pending = Decimal(0)
+        total_paid = Decimal(0)
+        total_cancelled = Decimal(0)
+        total_reclaim = Decimal(0)
+        rows: list[ConsignmentPayableRow] = []
+        for r in all_rows:
+            status = r["status"].value if hasattr(r["status"], "value") else str(r["status"])
+            payout = Decimal(r["payout_amount"])
+            if status == "PENDING":
+                total_pending += payout
+            elif status == "PAID":
+                total_paid += payout
+            elif status == "CANCELLED":
+                total_cancelled += payout
+            if r["reclaim_needed"]:
+                total_reclaim += payout
+            if status_filter != "ALL" and status != status_filter:
+                continue
+            rows.append(
+                ConsignmentPayableRow(
+                    settlement_id=r["id"],
+                    consignor_id=r["consignor_id"],
+                    consignor_name=r["consignor_name"],
+                    consignor_phone=r["consignor_phone"],
+                    sale_id=r["sale_id"],
+                    item_code=r["item_code"],
+                    item_name=r["item_name"],
+                    gross=Decimal(r["gross"]),
+                    commission_amount=Decimal(r["commission_amount"]),
+                    payout_amount=payout,
+                    status=status,
+                    reclaim_needed=bool(r["reclaim_needed"]),
+                    sale_created_at=r["sale_created_at"],
+                )
+            )
+        return ConsignmentPayablesReport(
+            generated_at=_now(),
+            store_id=store_id,
+            status_filter=status_filter,
+            rows=rows,
+            total_pending_payout=total_pending,
+            total_paid_payout=total_paid,
+            total_cancelled_payout=total_cancelled,
+            total_reclaim_needed_payout=total_reclaim,
+        )
 
     async def inventory_value(self, store_id: int) -> InventoryValueReport:
         """庫存價值與庫齡（docs/19 §2.4）：自有計成本、寄售另列售價、catalog 成本 N/A。

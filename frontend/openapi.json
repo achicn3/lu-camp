@@ -1078,6 +1078,155 @@
         "title": "CategoryTargetUpdate",
         "type": "object"
       },
+      "ConsignmentPayableRow": {
+        "description": "寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。",
+        "properties": {
+          "commission_amount": {
+            "title": "Commission Amount",
+            "type": "string"
+          },
+          "consignor_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Id"
+          },
+          "consignor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Name"
+          },
+          "consignor_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consignor Phone"
+          },
+          "gross": {
+            "title": "Gross",
+            "type": "string"
+          },
+          "item_code": {
+            "title": "Item Code",
+            "type": "string"
+          },
+          "item_name": {
+            "title": "Item Name",
+            "type": "string"
+          },
+          "payout_amount": {
+            "title": "Payout Amount",
+            "type": "string"
+          },
+          "reclaim_needed": {
+            "title": "Reclaim Needed",
+            "type": "boolean"
+          },
+          "sale_created_at": {
+            "format": "date-time",
+            "title": "Sale Created At",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "settlement_id": {
+            "title": "Settlement Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "settlement_id",
+          "consignor_id",
+          "consignor_name",
+          "consignor_phone",
+          "sale_id",
+          "item_code",
+          "item_name",
+          "gross",
+          "commission_amount",
+          "payout_amount",
+          "status",
+          "reclaim_needed",
+          "sale_created_at"
+        ],
+        "title": "ConsignmentPayableRow",
+        "type": "object"
+      },
+      "ConsignmentPayablesReport": {
+        "description": "寄售應付報表（docs/19 §2.5）。\n\n只計 PENDING 入待付合計；PAID/CANCELLED 分欄；reclaim_needed（已付後退貨需追回）獨立分欄，\n不以負數沖抵 pending。status_filter 只影響明細列，合計恆涵蓋全部狀態。",
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ConsignmentPayableRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "status_filter": {
+            "title": "Status Filter",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_cancelled_payout": {
+            "title": "Total Cancelled Payout",
+            "type": "string"
+          },
+          "total_paid_payout": {
+            "title": "Total Paid Payout",
+            "type": "string"
+          },
+          "total_pending_payout": {
+            "title": "Total Pending Payout",
+            "type": "string"
+          },
+          "total_reclaim_needed_payout": {
+            "title": "Total Reclaim Needed Payout",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "status_filter",
+          "rows",
+          "total_pending_payout",
+          "total_paid_payout",
+          "total_cancelled_payout",
+          "total_reclaim_needed_payout"
+        ],
+        "title": "ConsignmentPayablesReport",
+        "type": "object"
+      },
       "ConsignmentSettlementRead": {
         "description": "寄售結算查詢輸出（付款工作清單／應付查詢／付款結果）。",
         "properties": {
@@ -7388,6 +7537,76 @@
         "summary": "Receive Purchase Order",
         "tags": [
           "purchasing"
+        ]
+      }
+    },
+    "/api/v1/reports/consignment-payables": {
+      "get": {
+        "description": "寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。",
+        "operationId": "consignmentPayablesReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "ALL",
+              "enum": [
+                "PENDING",
+                "PAID",
+                "CANCELLED",
+                "ALL"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsignmentPayablesReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Consignment Payables",
+        "tags": [
+          "reports"
         ]
       }
     },

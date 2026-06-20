@@ -15,6 +15,7 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
+    ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
     InventoryValueReport,
@@ -285,6 +286,73 @@ async def inventory_value(
                 "N/A",
                 str(report.catalog_retail_value),
             ],
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get(
+    "/consignment-payables",
+    response_model=ConsignmentPayablesReport,
+    operation_id="consignmentPayablesReport",
+)
+async def consignment_payables(
+    session: SessionDep,
+    user: ManagerDep,
+    status_filter: Annotated[
+        Literal["PENDING", "PAID", "CANCELLED", "ALL"], Query(alias="status")
+    ] = "ALL",
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> ConsignmentPayablesReport | Response:
+    """寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。"""
+    report = await ReportsService(session).consignment_payables(
+        user.store_id, status_filter=status_filter
+    )
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("狀態篩選", report.status_filter),
+        ("待付合計(PENDING)", str(report.total_pending_payout)),
+        ("已付合計(PAID)", str(report.total_paid_payout)),
+        ("取消合計(CANCELLED)", str(report.total_cancelled_payout)),
+        ("需追回合計(reclaim)", str(report.total_reclaim_needed_payout)),
+    ]
+    exp = TabularExport(
+        sheet="寄售應付",
+        filename_stem=f"consignment-payables-{report.store_id}",
+        meta=meta,
+        headers=[
+            "結算ID",
+            "寄售人",
+            "電話",
+            "銷售ID",
+            "品號",
+            "品名",
+            "售價",
+            "抽成",
+            "應付",
+            "狀態",
+            "需追回",
+            "售出時間",
+        ],
+        rows=[
+            [
+                str(r.settlement_id),
+                r.consignor_name or "",
+                r.consignor_phone or "",
+                str(r.sale_id),
+                r.item_code,
+                r.item_name,
+                str(r.gross),
+                str(r.commission_amount),
+                str(r.payout_amount),
+                r.status,
+                "是" if r.reclaim_needed else "否",
+                r.sale_created_at.isoformat(),
+            ]
+            for r in report.rows
         ],
     )
     return export_response(exp, fmt)
