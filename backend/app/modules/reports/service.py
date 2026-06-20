@@ -108,6 +108,7 @@ class ReportsService:
                     issued_reversed=row["issued_reversed"],
                     redeemed_gross=row["redeemed_gross"],
                     redeemed_reversed=row["redeemed_reversed"],
+                    adjustment_net=row["adjustment_net"],
                 )
                 for row in rows
             ],

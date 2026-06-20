@@ -392,16 +392,19 @@ class StoreCreditRepository:
         date_from: datetime,
         date_to: datetime,
         granularity: str,
-    ) -> list[tuple[datetime, Decimal, Decimal, Decimal, Decimal]]:
+    ) -> list[tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]]:
         """期間內按粒度彙總流量的毛/沖正分量：
-        (period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed)。
+        (period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed, adjustment_net)。
 
         - issued_gross：CREDIT 發出毛額（>0）。
         - issued_reversed：ACQUISITION_ROLLBACK 沖正的發出額（取 -signed 轉正，>0）。
         - redeemed_gross：DEBIT 兌付毛額（取 -signed 轉正，>0）。
         - redeemed_reversed：SALE_VOID 沖正回補的兌付額（取 signed 轉正，>0）。
-        淨額由 service 以 gross - reversed 推得（issued_net / redeemed_net）。沖正落在沖正當期，
-        毛額落發出/兌付當期（docs/19 §3.3）。ADJUSTMENT 不納入本流量報表。
+        - adjustment_net：人工 ADJUSTMENT 的 signed 淨額（可正可負）。
+        淨額由 service 推得：issued_net=gross-reversed、redeemed_net=gross-reversed、
+        net_change=issued_net-redeemed_net+adjustment_net；如此 net_change 恰等於該期帳本完整
+        signed 淨變化（CREDIT+DEBIT+REVERSAL+ADJUSTMENT 全涵蓋），可與 liability 差額對上
+        （docs/19 §3.1）。沖正落在沖正當期、毛額落發出/兌付當期（§3.3）。
 
         granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
         """
@@ -416,7 +419,9 @@ class StoreCreditRepository:
             "    THEN -signed_amount ELSE 0 END), 0) AS redeemed_gross,"
             "  COALESCE(SUM(CASE WHEN entry_type='REVERSAL'"
             "      AND source_type='SALE_VOID'"
-            "    THEN signed_amount ELSE 0 END), 0) AS redeemed_reversed"
+            "    THEN signed_amount ELSE 0 END), 0) AS redeemed_reversed,"
+            "  COALESCE(SUM(CASE WHEN entry_type='ADJUSTMENT'"
+            "    THEN signed_amount ELSE 0 END), 0) AS adjustment_net"
             " FROM store_credit_ledger"
             " WHERE store_id = :sid AND created_at >= :dfrom AND created_at < :dto"
             " GROUP BY period ORDER BY period"
@@ -431,5 +436,6 @@ class StoreCreditRepository:
             },
         )
         return [
-            (p, Decimal(ig), Decimal(ir), Decimal(rg), Decimal(rr)) for p, ig, ir, rg, rr in result
+            (p, Decimal(ig), Decimal(ir), Decimal(rg), Decimal(rr), Decimal(adj))
+            for p, ig, ir, rg, rr, adj in result
         ]

@@ -1585,6 +1585,8 @@ export interface components {
         };
         /** FlowRow */
         FlowRow: {
+            /** Adjustment Net */
+            adjustment_net: string;
             /** Issued */
             issued: string;
             /** Issued Gross */

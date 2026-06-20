@@ -346,6 +346,56 @@ async def test_flows_breakdown_cross_period_reconciles(
     assert Decimal(jan["issued"]) + Decimal(feb["issued"]) == Decimal(0)
 
 
+async def test_flows_net_change_includes_manual_adjustment(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """R0 review F1（docs/19 §3.1）：net_change 須含人工 ADJUSTMENT，恰等於該期帳本 signed
+    淨變化、可與 liability 餘額對上。issued/redeemed 仍只計發出/兌付，adjustment 另列。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    # 人工校正 -100（MANAGER 校正）
+    await svc.adjust(
+        store_id,
+        member_id,
+        amount=Decimal(-100),
+        reason="盤點校正",
+        created_by=mgr_id,
+        idempotency_key="adj-flows-1",
+    )
+    balance = await svc.get_balance(store_id, member_id)
+    assert balance == Decimal(400)  # 500 - 100
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2100-01-01T00:00:00Z",
+            "granularity": "month",
+        },
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    row = rows[0]
+    # 發出/兌付不含 adjustment；adjustment 另列；net_change 含之
+    assert row["issued"] == "500"
+    assert row["redeemed"] == "0"
+    assert row["adjustment_net"] == "-100"
+    assert row["net_change"] == "400"
+    # net_change 對上帳本淨變化（= 當前餘額，本店唯一會員、單期）
+    assert Decimal(row["net_change"]) == balance
+
+
 async def test_flows_rejects_bad_range_and_granularity(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -398,6 +448,7 @@ async def test_flows_csv_carries_gross_reversed_columns(
     text = resp.content.decode("utf-8-sig")
     assert "發出毛額" in text and "發出沖正" in text
     assert "兌付毛額" in text and "兌付沖正" in text
+    assert "人工調整" in text
 
 
 async def test_reconciliation_report(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

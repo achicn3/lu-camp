@@ -1697,6 +1697,10 @@
       },
       "FlowRow": {
         "properties": {
+          "adjustment_net": {
+            "title": "Adjustment Net",
+            "type": "string"
+          },
           "issued": {
             "title": "Issued",
             "type": "string"
@@ -1739,7 +1743,8 @@
           "issued_gross",
           "issued_reversed",
           "redeemed_gross",
-          "redeemed_reversed"
+          "redeemed_reversed",
+          "adjustment_net"
         ],
         "title": "FlowRow",
         "type": "object"

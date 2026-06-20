@@ -122,6 +122,7 @@ async def flows(
             "發出沖正",
             "兌付毛額",
             "兌付沖正",
+            "人工調整",
         ],
         rows=[
             [
@@ -133,6 +134,7 @@ async def flows(
                 str(r.issued_reversed),
                 str(r.redeemed_gross),
                 str(r.redeemed_reversed),
+                str(r.adjustment_net),
             ]
             for r in report.rows
         ],

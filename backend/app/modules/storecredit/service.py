@@ -588,9 +588,11 @@ class StoreCreditService:
     ) -> list[dict[str, object]]:
         """期間發出/兌付/淨變化彙總（granularity=day/week/month；docs/16 §5A）。
 
-        每期回毛額/沖正/淨額三組（docs/19 §3.2 稽核分欄）：
+        每期回毛額/沖正/淨額分欄（docs/19 §3.2 稽核分欄）：
         issued = issued_gross - issued_reversed、redeemed = redeemed_gross - redeemed_reversed、
-        net_change = issued - redeemed。issued/redeemed 為 net 欄（與既有語意一致）。
+        net_change = issued - redeemed + adjustment_net。issued/redeemed 為 net 欄；
+        net_change 納入人工 ADJUSTMENT，恰等於該期帳本 signed 淨變化、可與 liability 差額對上
+        （docs/19 §3.1）。
         """
         if granularity not in ("day", "week", "month"):
             raise StoreCreditConflict("granularity 僅支援 day/week/month")
@@ -601,7 +603,7 @@ class StoreCreditService:
             granularity=granularity,
         )
         result: list[dict[str, object]] = []
-        for period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed in rows:
+        for period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed, adj in rows:
             issued = issued_gross - issued_reversed
             redeemed = redeemed_gross - redeemed_reversed
             result.append(
@@ -609,11 +611,12 @@ class StoreCreditService:
                     "period": period,
                     "issued": issued,
                     "redeemed": redeemed,
-                    "net_change": issued - redeemed,
+                    "net_change": issued - redeemed + adj,
                     "issued_gross": issued_gross,
                     "issued_reversed": issued_reversed,
                     "redeemed_gross": redeemed_gross,
                     "redeemed_reversed": redeemed_reversed,
+                    "adjustment_net": adj,
                 }
             )
         return result

@@ -44,15 +44,17 @@ class LiabilityReport(BaseModel):
 
 class FlowRow(BaseModel):
     period: date
-    # issued/redeemed 為 net 欄（毛額 − 沖正）；net_change = issued − redeemed。
+    # issued/redeemed 為 net 欄（毛額 − 沖正）；net_change = issued − redeemed + adjustment_net,
+    # 恰等於該期帳本 signed 淨變化、可與 liability 差額對上（docs/19 §3.1）。
     issued: NTDAmount
     redeemed: NTDAmount
     net_change: NTDAmount
-    # R0 稽核分欄（docs/19 §3.2）：毛額落發出/兌付當期、沖正落沖正當期。
+    # R0 稽核分欄（docs/19 §3.2）：毛額落發出/兌付當期、沖正落沖正當期；adjustment_net 為人工校正。
     issued_gross: NTDAmount
     issued_reversed: NTDAmount
     redeemed_gross: NTDAmount
     redeemed_reversed: NTDAmount
+    adjustment_net: NTDAmount
 
 
 class FlowsReport(BaseModel):
