@@ -27,15 +27,48 @@ from app.modules.reports.schemas import (
     MemberBalanceRow,
     ReconciliationReport,
     SalesMarginReport,
+    TrendRow,
+    TrendsReport,
 )
 from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
+from app.shared.exceptions import DomainError
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
+
+
+def _bucket_bounds(granularity: str, dt: datetime) -> tuple[datetime, datetime]:
+    """回傳 dt 所屬桶的 [起, 下一桶起)（UTC、aligned）。granularity=day/week/month/quarter。"""
+    day = datetime(dt.year, dt.month, dt.day, tzinfo=UTC)
+    if granularity == "day":
+        return day, day + timedelta(days=1)
+    if granularity == "week":  # ISO 週，週一為起
+        start = day - timedelta(days=day.weekday())
+        return start, start + timedelta(days=7)
+    if granularity == "month":
+        start = datetime(dt.year, dt.month, 1, tzinfo=UTC)
+        nxt = (
+            datetime(dt.year + 1, 1, 1, tzinfo=UTC)
+            if dt.month == 12
+            else datetime(dt.year, dt.month + 1, 1, tzinfo=UTC)
+        )
+        return start, nxt
+    # quarter：季首月 = 1/4/7/10
+    q_month = ((dt.month - 1) // 3) * 3 + 1
+    start = datetime(dt.year, q_month, 1, tzinfo=UTC)
+    nxt = (
+        datetime(dt.year + 1, 1, 1, tzinfo=UTC)
+        if q_month == 10
+        else datetime(dt.year, q_month + 3, 1, tzinfo=UTC)
+    )
+    return start, nxt
 
 
 def _health_ratio(total_outstanding: Decimal, monthly_outflow: Decimal) -> str | None:
@@ -162,6 +195,72 @@ class ReportsService:
             total_counted=totals["counted"],
             total_variance=totals["variance"],
             total_store_credit_redeemed_display_only=sc_redeemed,
+        )
+
+    async def _sum_flows(
+        self, store_id: int, start: datetime, end: datetime
+    ) -> tuple[Decimal, Decimal]:
+        """[start, end) 購物金發出/兌付 net 合計（經 flows；任意視窗）。"""
+        rows = await self._sc.flows(store_id, date_from=start, date_to=end, granularity="day")
+        issued = Decimal(0)
+        redeemed = Decimal(0)
+        for row in rows:
+            i = row["issued"]
+            r = row["redeemed"]
+            assert isinstance(i, Decimal)
+            assert isinstance(r, Decimal)
+            issued += i
+            redeemed += r
+        return issued, redeemed
+
+    async def trends(
+        self, store_id: int, *, date_from: datetime, date_to: datetime, granularity: str
+    ) -> TrendsReport:
+        """財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；桶與 [from,to) 交集。
+
+        各桶 KPI 由 margin_breakdown（毛利）、flows（購物金）、cash_out_in_range（現金支出）算得，
+        與 R2/R5 同源；故各桶加總 = 全期 margin_breakdown，可交叉驗證。空桶補 0。
+        """
+        if granularity not in ("day", "week", "month", "quarter"):
+            raise DomainError("granularity 僅支援 day/week/month/quarter")
+        now = _now()
+        rows: list[TrendRow] = []
+        cursor, _ = _bucket_bounds(granularity, date_from)
+        count = 0
+        while cursor < date_to:
+            _, nxt = _bucket_bounds(granularity, cursor)
+            count += 1
+            if count > MAX_TREND_BUCKETS:
+                raise DomainError(
+                    f"期間/粒度產生過多分桶（>{MAX_TREND_BUCKETS}）；請縮小區間或放大粒度"
+                )
+            bstart = max(cursor, date_from)
+            bend = min(nxt, date_to)
+            margin = await self._sales.margin_breakdown(store_id, bstart, bend)
+            issued, redeemed = await self._sum_flows(store_id, bstart, bend)
+            cash_out = await self._cash.cash_out_in_range(store_id, bstart, bend)
+            rows.append(
+                TrendRow(
+                    period=cursor.date(),
+                    gross_turnover=margin.gross_turnover,
+                    recognized_revenue=margin.recognized_revenue,
+                    gross_margin=margin.gross_margin,
+                    gross_margin_rate=margin.gross_margin_rate,
+                    cogs=margin.owned_cogs + margin.bulk_cogs,
+                    total_cash_out=cash_out,
+                    store_credit_issued=issued,
+                    store_credit_redeemed=redeemed,
+                    transaction_count=margin.transaction_count,
+                )
+            )
+            cursor = nxt
+        return TrendsReport(
+            generated_at=now,
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            granularity=granularity,
+            rows=rows,
         )
 
     async def daily_summary(self, store_id: int, report_date: date) -> DailySummaryReport:

@@ -775,6 +775,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trends
+         * @description 財務趨勢時間序列（docs/19 R6）：daily/weekly/monthly/quarterly KPI，餵趨勢圖。半開區間。
+         */
+        get: operations["financeTrendsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/returns": {
         parameters: {
             query?: never;
@@ -2837,6 +2857,65 @@ export interface components {
              */
             token_type: "bearer";
         };
+        /**
+         * TrendRow
+         * @description 財務趨勢單一期間（docs/19 R6）。period 為桶起始日。
+         */
+        TrendRow: {
+            /** Cogs */
+            cogs: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /**
+             * Period
+             * Format: date
+             */
+            period: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /** Store Credit Issued */
+            store_credit_issued: string;
+            /** Store Credit Redeemed */
+            store_credit_redeemed: string;
+            /** Total Cash Out */
+            total_cash_out: string;
+            /** Transaction Count */
+            transaction_count: number;
+        };
+        /**
+         * TrendsReport
+         * @description 財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。
+         *
+         *     桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，
+         *     可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。
+         */
+        TrendsReport: {
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Granularity */
+            granularity: string;
+            /** Rows */
+            rows: components["schemas"]["TrendRow"][];
+            /** Store Id */
+            store_id: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -4375,6 +4454,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReconciliationReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    financeTrendsReport: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                granularity?: "day" | "week" | "month" | "quarter";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrendsReport"];
                 };
             };
             /** @description Validation Error */

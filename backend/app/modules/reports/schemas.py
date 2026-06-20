@@ -169,6 +169,36 @@ class DailySummaryReport(BaseModel):
     estimated_net_income_note: str  # 明確標註為估計（固定營業費用未逐日記錄）
 
 
+class TrendRow(BaseModel):
+    """財務趨勢單一期間（docs/19 R6）。period 為桶起始日。"""
+
+    period: date
+    gross_turnover: NTDAmount
+    recognized_revenue: NTDAmount
+    gross_margin: NTDAmount
+    gross_margin_rate: NTDAmountOpt
+    cogs: NTDAmount
+    total_cash_out: NTDAmount
+    store_credit_issued: NTDAmount
+    store_credit_redeemed: NTDAmount
+    transaction_count: int
+
+
+class TrendsReport(BaseModel):
+    """財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。
+
+    桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，
+    可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。
+    """
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    granularity: str
+    rows: list[TrendRow]
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 

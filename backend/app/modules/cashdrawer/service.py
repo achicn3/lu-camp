@@ -147,6 +147,10 @@ class CashDrawerService:
         """opened_at ∈ [start, end) 的本店 session（唯讀，每日現金報表用）。"""
         return await self._repo.list_sessions_in_range(store_id, start, end)
 
+    async def cash_out_in_range(self, store_id: int, start: datetime, end: datetime) -> Decimal:
+        """[start, end)（依事件時間）現金出帳合計＝收購付現＋寄售付款（唯讀，趨勢報表用）。"""
+        return await self._repo.cash_out_in_range(store_id, start, end)
+
     async def session_breakdown(self, session: CashSession) -> CashSessionBreakdown:
         """單一 session 的現金組成與 expected（唯讀）。
 

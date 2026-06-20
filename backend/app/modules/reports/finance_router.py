@@ -6,7 +6,7 @@
 """
 
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
-from app.modules.reports.schemas import DailyCashReport, DailySummaryReport, SalesMarginReport
+from app.modules.reports.schemas import (
+    DailyCashReport,
+    DailySummaryReport,
+    SalesMarginReport,
+    TrendsReport,
+)
 from app.modules.reports.service import ReportsService
+from app.shared.exceptions import DomainError
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -146,6 +152,72 @@ async def daily_summary(
             ["交易筆數", str(report.transaction_count)],
             ["客單價", avg],
             ["估算淨利", net_income],
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get("/trends", response_model=TrendsReport, operation_id="financeTrendsReport")
+async def trends(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[datetime, Query(alias="from")],
+    date_to: Annotated[datetime, Query(alias="to")],
+    granularity: Annotated[Literal["day", "week", "month", "quarter"], Query()] = "month",
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> TrendsReport | Response:
+    """財務趨勢時間序列（docs/19 R6）：daily/weekly/monthly/quarterly KPI，餵趨勢圖。半開區間。"""
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    try:
+        report = await ReportsService(session).trends(
+            user.store_id, date_from=date_from, date_to=date_to, granularity=granularity
+        )
+    except DomainError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("粒度", report.granularity),
+        ("起", report.date_from.isoformat()),
+        ("迄", report.date_to.isoformat()),
+    ]
+    exp = TabularExport(
+        sheet="財務趨勢",
+        filename_stem=f"trends-{report.store_id}-{report.granularity}",
+        meta=meta,
+        headers=[
+            "期間",
+            "營業額",
+            "認列營收",
+            "毛利",
+            "毛利率",
+            "銷貨成本",
+            "現金支出",
+            "購物金發出",
+            "購物金兌付",
+            "交易筆數",
+        ],
+        rows=[
+            [
+                r.period.isoformat(),
+                str(r.gross_turnover),
+                str(r.recognized_revenue),
+                str(r.gross_margin),
+                "N/A" if r.gross_margin_rate is None else str(r.gross_margin_rate),
+                str(r.cogs),
+                str(r.total_cash_out),
+                str(r.store_credit_issued),
+                str(r.store_credit_redeemed),
+                str(r.transaction_count),
+            ]
+            for r in report.rows
         ],
     )
     return export_response(exp, fmt)

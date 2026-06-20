@@ -1,12 +1,13 @@
 """cashdrawer 資料存取層（唯一直接碰 ORM 的層）。"""
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.models import CashMovement, CashSession
-from app.shared.enums import CashSessionStatus
+from app.shared.enums import CashMovementType, CashSessionStatus
 
 
 class CashDrawerRepository:
@@ -62,6 +63,21 @@ class CashDrawerRepository:
         stmt = select(CashMovement).where(CashMovement.session_id == session_id)
         result = await self._session.scalars(stmt)
         return list(result)
+
+    async def cash_out_in_range(self, store_id: int, start: datetime, end: datetime) -> Decimal:
+        """本店在 [start, end)（依 movement.created_at）的現金出帳合計 = BUYOUT_OUT + 寄售付款。
+
+        供趨勢報表以任意時間桶彙整現金支出（與 session 無關，依事件時間落桶）。
+        """
+        stmt = select(func.coalesce(func.sum(CashMovement.amount), 0)).where(
+            CashMovement.store_id == store_id,
+            CashMovement.created_at >= start,
+            CashMovement.created_at < end,
+            CashMovement.type.in_(
+                (CashMovementType.BUYOUT_OUT, CashMovementType.CONSIGNMENT_PAYOUT_OUT)
+            ),
+        )
+        return Decimal((await self._session.scalar(stmt)) or 0)
 
     async def list_sessions_in_range(
         self, store_id: int, start: datetime, end: datetime

@@ -4710,6 +4710,118 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TrendRow": {
+        "description": "財務趨勢單一期間（docs/19 R6）。period 為桶起始日。",
+        "properties": {
+          "cogs": {
+            "title": "Cogs",
+            "type": "string"
+          },
+          "gross_margin": {
+            "title": "Gross Margin",
+            "type": "string"
+          },
+          "gross_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Margin Rate"
+          },
+          "gross_turnover": {
+            "title": "Gross Turnover",
+            "type": "string"
+          },
+          "period": {
+            "format": "date",
+            "title": "Period",
+            "type": "string"
+          },
+          "recognized_revenue": {
+            "title": "Recognized Revenue",
+            "type": "string"
+          },
+          "store_credit_issued": {
+            "title": "Store Credit Issued",
+            "type": "string"
+          },
+          "store_credit_redeemed": {
+            "title": "Store Credit Redeemed",
+            "type": "string"
+          },
+          "total_cash_out": {
+            "title": "Total Cash Out",
+            "type": "string"
+          },
+          "transaction_count": {
+            "title": "Transaction Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period",
+          "gross_turnover",
+          "recognized_revenue",
+          "gross_margin",
+          "gross_margin_rate",
+          "cogs",
+          "total_cash_out",
+          "store_credit_issued",
+          "store_credit_redeemed",
+          "transaction_count"
+        ],
+        "title": "TrendRow",
+        "type": "object"
+      },
+      "TrendsReport": {
+        "description": "財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。\n\n桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，\n可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。",
+        "properties": {
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "granularity": {
+            "title": "Granularity",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TrendRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "granularity",
+          "rows"
+        ],
+        "title": "TrendsReport",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -7643,6 +7755,96 @@
           }
         ],
         "summary": "Reconciliation",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/trends": {
+      "get": {
+        "description": "財務趨勢時間序列（docs/19 R6）：daily/weekly/monthly/quarterly KPI，餵趨勢圖。半開區間。",
+        "operationId": "financeTrendsReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "granularity",
+            "required": false,
+            "schema": {
+              "default": "month",
+              "enum": [
+                "day",
+                "week",
+                "month",
+                "quarter"
+              ],
+              "title": "Granularity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrendsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trends",
         "tags": [
           "reports"
         ]
