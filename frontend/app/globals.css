@@ -679,6 +679,115 @@ body {
   align-items: center;
   gap: var(--sp-3);
 }
+
+/* ── Phase 4A-2 寄售付款（/consignment）：待撥工作台＋付款確認 ── */
+.settle-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.settle-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  align-items: flex-start;
+}
+.settle-head .page-title {
+  margin-bottom: var(--sp-2);
+}
+.settle-drawer {
+  min-width: 180px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-weight: 600;
+}
+.settle-drawer a {
+  color: inherit;
+  font-size: var(--text-sm);
+}
+.settle-drawer-open {
+  color: var(--success);
+}
+.settle-drawer-closed {
+  color: var(--danger);
+}
+.settle-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.settle-card {
+  max-width: none;
+}
+.settle-table-wrap {
+  overflow-x: auto;
+}
+.settle-table th,
+.settle-table td {
+  white-space: nowrap;
+}
+.settle-table td:nth-child(4),
+.settle-table td:nth-child(5),
+.settle-table td:nth-child(6) {
+  text-align: right;
+}
+.settle-payout {
+  color: var(--accent);
+  font-weight: 700;
+}
+.settle-actions {
+  text-align: right;
+}
+.settle-badge {
+  display: inline-block;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settle-pending {
+  color: var(--warn);
+  background: rgba(184, 134, 11, 0.12);
+}
+.settle-paid {
+  color: var(--success);
+  background: rgba(46, 125, 79, 0.1);
+}
+.settle-cancelled {
+  color: var(--ink-soft);
+  background: rgba(35, 41, 31, 0.06);
+}
+.settle-reclaim {
+  color: var(--danger);
+  background: rgba(178, 58, 46, 0.1);
+  margin-left: var(--sp-1);
+}
+.settle-confirm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+.settle-confirm dt {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.settle-confirm dd {
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .settle-head {
+    flex-direction: column;
+  }
+  .settle-drawer {
+    width: 100%;
+  }
+}
 /* ── F5 庫存（/inventory）：分頁、篩選、表格、狀態 badge ── */
 .inv-tabs {
   display: flex;

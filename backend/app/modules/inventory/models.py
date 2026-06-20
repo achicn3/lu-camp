@@ -50,9 +50,7 @@ class ProductModel(Base, TimestampMixin):
     __tablename__ = "product_models"
     # 型號以 (store, brand, name) 唯一：不同品牌可有同名型號（F6 品牌範圍 autocomplete）。
     __table_args__ = (
-        UniqueConstraint(
-            "store_id", "brand_id", "name", name="uq_product_models_store_brand_name"
-        ),
+        UniqueConstraint("store_id", "brand_id", "name", name="uq_product_models_store_brand_name"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

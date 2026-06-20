@@ -788,13 +788,14 @@
         "type": "object"
       },
       "CashMovementType": {
-        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；\nACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。",
+        "description": "現金異動類型。\n\nSALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；\nACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；\nSALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。",
         "enum": [
           "SALE_IN",
           "BUYOUT_OUT",
           "CONSIGNMENT_PAYOUT_OUT",
           "MANUAL_ADJUST",
-          "ACQUISITION_VOID_IN"
+          "ACQUISITION_VOID_IN",
+          "SALE_REFUND_OUT"
         ],
         "title": "CashMovementType",
         "type": "string"
@@ -2871,6 +2872,134 @@
           "cached_total_trustworthy"
         ],
         "title": "ReconciliationReport",
+        "type": "object"
+      },
+      "ReturnCreateRequest": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReturnLineRequest"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sale_id",
+          "reason",
+          "lines"
+        ],
+        "title": "ReturnCreateRequest",
+        "type": "object"
+      },
+      "ReturnLineRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "refund_amount": {
+            "title": "Refund Amount",
+            "type": "string"
+          },
+          "sale_line_id": {
+            "title": "Sale Line Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "sale_line_id",
+          "qty",
+          "refund_amount"
+        ],
+        "title": "ReturnLineRead",
+        "type": "object"
+      },
+      "ReturnLineRequest": {
+        "properties": {
+          "qty": {
+            "exclusiveMinimum": 0.0,
+            "title": "Qty",
+            "type": "integer"
+          },
+          "sale_line_id": {
+            "title": "Sale Line Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sale_line_id",
+          "qty"
+        ],
+        "title": "ReturnLineRequest",
+        "type": "object"
+      },
+      "ReturnRead": {
+        "properties": {
+          "clerk_user_id": {
+            "title": "Clerk User Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReturnLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "refund_amount": {
+            "title": "Refund Amount",
+            "type": "string"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "sale_id",
+          "refund_amount",
+          "reason",
+          "clerk_user_id",
+          "created_at",
+          "lines"
+        ],
+        "title": "ReturnRead",
         "type": "object"
       },
       "SaleCreateRequest": {
@@ -6820,6 +6949,112 @@
         "summary": "Reconciliation",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/api/v1/returns": {
+      "post": {
+        "operationId": "createReturn",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Return",
+        "tags": [
+          "returns"
+        ]
+      }
+    },
+    "/api/v1/returns/{return_id}": {
+      "get": {
+        "operationId": "getReturn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "return_id",
+            "required": true,
+            "schema": {
+              "title": "Return Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Return",
+        "tags": [
+          "returns"
         ]
       }
     },

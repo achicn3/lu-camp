@@ -350,9 +350,7 @@ async def test_effectiveness_csv_export(
 ) -> None:
     mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
     await _add_acquisition(db_session, store_id, mgr_id, member_id, "STORE_CREDIT")
-    resp = await client.get(
-        EFF_URL, params={**WIDE_RANGE, "format": "csv"}, headers=_auth(mgr)
-    )
+    resp = await client.get(EFF_URL, params={**WIDE_RANGE, "format": "csv"}, headers=_auth(mgr))
     assert resp.status_code == 200
     assert "text/csv" in resp.headers["content-type"]
     text_body = resp.content.decode("utf-8-sig")

@@ -340,7 +340,11 @@ def test_combine_returns_none_when_only_zero_weight_window_has_field() -> None:
         {
             **DEFAULT_STORE_CREDIT_ENGINE_PARAMS,
             "window_weights": {
-                "yesterday": 0.05, "d7": 0.0, "d30": 0.40, "d90": 0.20, "yoy": 0.10,
+                "yesterday": 0.05,
+                "d7": 0.0,
+                "d30": 0.40,
+                "d90": 0.20,
+                "yoy": 0.10,
             },
         }
     )

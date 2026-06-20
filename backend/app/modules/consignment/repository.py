@@ -67,6 +67,26 @@ class ConsignmentRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def list_for_sale_item_for_update(
+        self, store_id: int, sale_id: int, serialized_item_id: int
+    ) -> list[ConsignmentSettlement]:
+        """取某銷售中某序號品的結算並上行鎖（FOR UPDATE + 刷新）；部分退貨反轉用（invariant #7）。
+
+        以 id 升序鎖（確定順序）；store 範圍。非寄售品（無結算）→ 空清單（呼叫端 no-op）。
+        """
+        stmt = (
+            select(ConsignmentSettlement)
+            .where(
+                ConsignmentSettlement.store_id == store_id,
+                ConsignmentSettlement.sale_id == sale_id,
+                ConsignmentSettlement.serialized_item_id == serialized_item_id,
+            )
+            .order_by(ConsignmentSettlement.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_settlements(
         self,
         store_id: int,

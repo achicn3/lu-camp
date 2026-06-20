@@ -50,9 +50,7 @@ async def get_current_user(
         store_id=int(payload["store_id"]), user_id=int(payload["sub"])
     )
     if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="使用者已停用或不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="使用者已停用或不存在")
     return CurrentUser(id=user.id, role=user.role.value, store_id=user.store_id)
 
 

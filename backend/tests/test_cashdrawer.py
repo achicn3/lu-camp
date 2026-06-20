@@ -77,17 +77,18 @@ async def test_expected_formula_and_variance_recorded(db_session: AsyncSession) 
     await svc.record_movement(store_id, CashMovementType.SALE_IN, Decimal("300"))
     await svc.record_movement(store_id, CashMovementType.BUYOUT_OUT, Decimal("200"))
     await svc.record_movement(store_id, CashMovementType.CONSIGNMENT_PAYOUT_OUT, Decimal("100"))
+    await svc.record_movement(store_id, CashMovementType.SALE_REFUND_OUT, Decimal("120"))
     await svc.record_movement(store_id, CashMovementType.MANUAL_ADJUST, Decimal("50"))
     await svc.record_movement(store_id, CashMovementType.MANUAL_ADJUST, Decimal("-30"))
 
-    # 1000 + (500+300) - 200 - 100 + (50-30) = 1520
+    # 1000 + (500+300) - 200 - 100 - 120 + (50-30) = 1400
     expected = await svc.expected_amount(cs)
-    assert expected == Decimal("1520")
+    assert expected == Decimal("1400")
 
     closed = await svc.close_session(cs, counted_amount=Decimal("1500"), closed_by=user_id)
     assert closed.status == CashSessionStatus.CLOSED
-    assert closed.expected_amount == Decimal("1520")
-    assert closed.variance == Decimal("-20")  # 短少 20
+    assert closed.expected_amount == Decimal("1400")
+    assert closed.variance == Decimal("100")  # 多出 100
     assert closed.closed_at is not None
 
 

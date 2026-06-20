@@ -86,9 +86,7 @@ async def test_clerk_create_category_requires_setting(
 ) -> None:
     _sid, mgr, clerk = await _store(db_session, "店A")
 
-    denied = await client.post(
-        "/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk)
-    )
+    denied = await client.post("/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk))
     assert denied.status_code == 403
 
     settings = await client.patch(
@@ -98,9 +96,7 @@ async def test_clerk_create_category_requires_setting(
     )
     assert settings.status_code == 200, settings.text
 
-    created = await client.post(
-        "/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk)
-    )
+    created = await client.post("/api/v1/categories", json={"name": "包款"}, headers=_auth(clerk))
     assert created.status_code == 200, created.text
     assert created.json()["name"] == "包款"
 
@@ -126,8 +122,16 @@ async def test_update_target_and_rules_manager_only(
     assert patched.json()["target_margin_pct"] == 50
 
     # PUT rules：manager 改 S 帶，clerk 403
-    put_body = {"rules": [{"condition_band": "S", "discount_ceiling_pct": 30,
-                           "min_margin_pct": 25, "min_price_multiple": 1.5}]}
+    put_body = {
+        "rules": [
+            {
+                "condition_band": "S",
+                "discount_ceiling_pct": 30,
+                "min_margin_pct": 25,
+                "min_price_multiple": 1.5,
+            }
+        ]
+    }
     assert (
         await client.put(
             f"/api/v1/categories/{cat_id}/pricing-rules", json=put_body, headers=_auth(clerk)
@@ -141,9 +145,7 @@ async def test_update_target_and_rules_manager_only(
     assert s_rule["discount_ceiling_pct"] == 30 and s_rule["min_price_multiple"] == "1.5"
 
 
-async def test_unknown_category_404(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_unknown_category_404(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _sid, mgr, _clerk = await _store(db_session, "店A")
     assert (
         await client.get("/api/v1/categories/99999/pricing-rules", headers=_auth(mgr))

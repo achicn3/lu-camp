@@ -2,8 +2,8 @@
 
 抽成與應付以 core/money 在整數元域計算（§7.2）。付款＝應付（售價−抽成）現金出帳並轉 PAID，
 須在開帳中的 cash_session 下進行（invariant #8、#4）。作廢銷售時的結算反轉（invariant #7：
-未付→CANCELLED、已付→reclaim_needed）由 cancel_settlements_for_sale 處理（供 void_sale 呼叫）；
-退貨退現/庫存回補屬後續切片（4B）。
+未付→CANCELLED、已付→reclaim_needed）由 cancel_settlements_for_sale 處理（供 void_sale /
+returns 呼叫）。
 """
 
 import hashlib
@@ -139,6 +139,31 @@ class ConsignmentService:
         pay_settlement 互斥——作廢/付款競態只一方生效，不會「既付款又取消」。
         """
         settlements = await self._repo.list_for_sale_for_update(store_id, sale_id)
+        return await self._reverse_settlements(store_id, settlements, actor_user_id=actor_user_id)
+
+    async def cancel_settlement_for_sale_item(
+        self, store_id: int, sale_id: int, serialized_item_id: int, *, actor_user_id: int
+    ) -> list[ConsignmentSettlement]:
+        """退回該銷售中某寄售序號品時反轉其結算（invariant #7；部分退貨用）。
+
+        多品項銷售只退寄售品時，整張單尚未 RETURNED，但該寄售品已退回，其結算必須反轉
+        （未付→CANCELLED、已付→reclaim_needed），否則仍可被付款給寄售人、對已退商品漏付現金
+        （Codex High）。非寄售序號品（無結算）→ no-op。退貨流程在**現金出帳前**先取得結算列鎖，
+        建立『結算 → cash_session』鎖序與 pay_settlement 一致，避免退貨↔付款死結（Codex High）。
+        """
+        settlements = await self._repo.list_for_sale_item_for_update(
+            store_id, sale_id, serialized_item_id
+        )
+        return await self._reverse_settlements(store_id, settlements, actor_user_id=actor_user_id)
+
+    async def _reverse_settlements(
+        self,
+        store_id: int,
+        settlements: list[ConsignmentSettlement],
+        *,
+        actor_user_id: int,
+    ) -> list[ConsignmentSettlement]:
+        """反轉已鎖定的結算列（PENDING→CANCELLED；PAID→reclaim_needed；其餘 no-op）並留痕。"""
         reversed_rows: list[ConsignmentSettlement] = []
         for settlement in settlements:
             before_status = settlement.status

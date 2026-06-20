@@ -67,31 +67,40 @@ def test_aged_unredeemed_no_aged_lots() -> None:
 
 
 def test_is_new_leaning_low_frequency() -> None:
-    assert is_new_leaning(
-        purchase_count=1,
-        credit_issued_at=_days_ago(10),
-        member_created_at=_days_ago(400),
-        window_days=90,
-    ) is True
+    assert (
+        is_new_leaning(
+            purchase_count=1,
+            credit_issued_at=_days_ago(10),
+            member_created_at=_days_ago(400),
+            window_days=90,
+        )
+        is True
+    )
 
 
 def test_is_new_leaning_new_member() -> None:
     # 消費筆數足夠，但建檔距入帳 < 90 天 → 仍判新增傾向高。
-    assert is_new_leaning(
-        purchase_count=5,
-        credit_issued_at=_days_ago(10),
-        member_created_at=_days_ago(40),
-        window_days=90,
-    ) is True
+    assert (
+        is_new_leaning(
+            purchase_count=5,
+            credit_issued_at=_days_ago(10),
+            member_created_at=_days_ago(40),
+            window_days=90,
+        )
+        is True
+    )
 
 
 def test_is_new_leaning_established_member() -> None:
-    assert is_new_leaning(
-        purchase_count=5,
-        credit_issued_at=_days_ago(10),
-        member_created_at=_days_ago(400),
-        window_days=90,
-    ) is False
+    assert (
+        is_new_leaning(
+            purchase_count=5,
+            credit_issued_at=_days_ago(10),
+            member_created_at=_days_ago(400),
+            window_days=90,
+        )
+        is False
+    )
 
 
 def test_alpha_ratio() -> None:
@@ -115,6 +124,9 @@ def test_delta_per_1000() -> None:
 
 
 def test_delta_per_1000_missing_input_is_none() -> None:
-    assert delta_per_1000(
-        beta=None, avg_premium=Decimal("0.1"), alpha=Decimal("0.4"), margin=Decimal("0.5")
-    ) is None
+    assert (
+        delta_per_1000(
+            beta=None, avg_premium=Decimal("0.1"), alpha=Decimal("0.4"), margin=Decimal("0.5")
+        )
+        is None
+    )

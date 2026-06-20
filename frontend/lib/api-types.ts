@@ -715,6 +715,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Return */
+        post: operations["createReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/{return_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Return */
+        get: operations["getReturn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales": {
         parameters: {
             query?: never;
@@ -1244,10 +1278,11 @@ export interface components {
          * @description 現金異動類型。
          *
          *     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
-         *     ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。
+         *     ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；
+         *     SALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。
          * @enum {string}
          */
-        CashMovementType: "SALE_IN" | "BUYOUT_OUT" | "CONSIGNMENT_PAYOUT_OUT" | "MANUAL_ADJUST" | "ACQUISITION_VOID_IN";
+        CashMovementType: "SALE_IN" | "BUYOUT_OUT" | "CONSIGNMENT_PAYOUT_OUT" | "MANUAL_ADJUST" | "ACQUISITION_VOID_IN" | "SALE_REFUND_OUT";
         /**
          * CashSessionCloseRequest
          * @description 結帳：點數後的實際現金。
@@ -2041,6 +2076,55 @@ export interface components {
             mismatches: {
                 [key: string]: unknown;
             }[];
+            /** Store Id */
+            store_id: number;
+        };
+        /** ReturnCreateRequest */
+        ReturnCreateRequest: {
+            /** Lines */
+            lines: components["schemas"]["ReturnLineRequest"][];
+            /** Reason */
+            reason: string;
+            /** Sale Id */
+            sale_id: number;
+        };
+        /** ReturnLineRead */
+        ReturnLineRead: {
+            /** Id */
+            id: number;
+            /** Qty */
+            qty: number;
+            /** Refund Amount */
+            refund_amount: string;
+            /** Sale Line Id */
+            sale_line_id: number;
+        };
+        /** ReturnLineRequest */
+        ReturnLineRequest: {
+            /** Qty */
+            qty: number;
+            /** Sale Line Id */
+            sale_line_id: number;
+        };
+        /** ReturnRead */
+        ReturnRead: {
+            /** Clerk User Id */
+            clerk_user_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Lines */
+            lines: components["schemas"]["ReturnLineRead"][];
+            /** Reason */
+            reason: string;
+            /** Refund Amount */
+            refund_amount: string;
+            /** Sale Id */
+            sale_id: number;
             /** Store Id */
             store_id: number;
         };
@@ -3928,6 +4012,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReconciliationReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createReturn: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                return_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnRead"];
                 };
             };
             /** @description Validation Error */

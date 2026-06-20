@@ -76,9 +76,7 @@ class InventoryService:
         q: str | None = None,
         limit: int = 50,
     ) -> list[ProductModel]:
-        return await self._repo.list_product_models(
-            store_id, brand_id=brand_id, q=q, limit=limit
-        )
+        return await self._repo.list_product_models(store_id, brand_id=brand_id, q=q, limit=limit)
 
     # ── 分類 / 定價規則 ──
     async def list_categories(
@@ -373,9 +371,7 @@ class InventoryService:
             store_id, acquisition_ids, status=status, limit=limit, offset=offset
         )
 
-    async def list_serialized_ids_by_consignor(
-        self, store_id: int, consignor_id: int
-    ) -> list[int]:
+    async def list_serialized_ids_by_consignor(self, store_id: int, consignor_id: int) -> list[int]:
         """某寄售人的寄售序號品 id（供結算 PENDING 應撥聚合；id-only；docs/17 §3.4）。"""
         return await self._repo.list_serialized_ids_by_consignor(store_id, consignor_id)
 
@@ -387,6 +383,28 @@ class InventoryService:
 
     async def sell_serialized_item(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.SOLD)
+
+    async def return_serialized_sale_item(
+        self,
+        store_id: int,
+        item_id: int,
+        *,
+        ref_type: str,
+        ref_id: int,
+    ) -> None:
+        """銷售退貨回補序號品：SOLD → IN_STOCK，清 sold_date，寫 RETURN 入庫帳。"""
+        ok = await self._repo.return_serialized_to_stock(store_id, item_id)
+        if not ok:
+            raise InvalidStateTransition(f"序號品 {item_id} 非 SOLD，無法退貨回庫")
+        await self.record_stock_in(
+            store_id,
+            ItemKind.SERIALIZED,
+            qty=1,
+            reason=StockReason.RETURN,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            serialized_item_id=item_id,
+        )
 
     async def return_serialized_to_consignor(self, item_id: int) -> None:
         await self._transition(item_id, SerializedItemStatus.RETURNED_TO_CONSIGNOR)
@@ -436,9 +454,7 @@ class InventoryService:
                 set_sold_date=False,
             )
             if not ok:
-                raise AcquisitionHasSoldItems(
-                    f"序號品 {it.item_code} 已售出/已下架，無法作廢收購"
-                )
+                raise AcquisitionHasSoldItems(f"序號品 {it.item_code} 已售出/已下架，無法作廢收購")
             await self.record_stock_out(
                 store_id,
                 ItemKind.SERIALIZED,
@@ -521,6 +537,31 @@ class InventoryService:
         if not ok:
             raise InsufficientStock("散裝批庫存不足，無法售出")
 
+    async def return_bulk_lot_items(
+        self,
+        store_id: int,
+        lot_id: int,
+        qty: int,
+        *,
+        ref_type: str,
+        ref_id: int,
+    ) -> None:
+        """銷售退貨回補散裝批：加回 remaining_qty，必要時 SOLD_OUT → ON_SALE，寫 RETURN 入庫帳。"""
+        if qty <= 0:
+            raise InsufficientStock("退貨數量必須 > 0")
+        ok = await self._repo.increment_bulk_lot(store_id, lot_id, qty)
+        if not ok:
+            raise InsufficientStock("散裝批可回補數量不足，無法退貨回庫")
+        await self.record_stock_in(
+            store_id,
+            ItemKind.BULK_LOT,
+            qty=qty,
+            reason=StockReason.RETURN,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            bulk_lot_id=lot_id,
+        )
+
     # ── 數量型商品 ──
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         return await self._repo.get_catalog(store_id, catalog_id)
@@ -553,6 +594,31 @@ class InventoryService:
             ItemKind.CATALOG,
             qty=qty,
             reason=StockReason.PURCHASE,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            catalog_product_id=catalog_id,
+        )
+
+    async def return_catalog_items(
+        self,
+        store_id: int,
+        catalog_id: int,
+        qty: int,
+        *,
+        ref_type: str,
+        ref_id: int,
+    ) -> None:
+        """銷售退貨回補數量型商品：加回現量並寫 RETURN stock_movement（同一交易）。"""
+        if qty <= 0:
+            raise OwnershipValidationError("退貨數量必須 > 0")
+        ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
+        if not ok:
+            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+        await self.record_stock_in(
+            store_id,
+            ItemKind.CATALOG,
+            qty=qty,
+            reason=StockReason.RETURN,
             ref_type=ref_type,
             ref_id=ref_id,
             catalog_product_id=catalog_id,

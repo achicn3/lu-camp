@@ -186,3 +186,19 @@ class StocktakeNotDraft(DomainError):
 
 class StocktakeLineInvalid(DomainError):
     """盤點確認的實點明細不合法（實點數為負、或商品不在本盤點單）。"""
+
+
+class ReturnNotFound(DomainError):
+    """指定的退貨單不存在（或不屬於本店）。"""
+
+
+class ReturnSaleNotFound(DomainError):
+    """退貨指定的原銷售單不存在（或不屬於本店）。"""
+
+
+class ReturnLineInvalid(DomainError):
+    """退貨明細不合法（不屬於原銷售、數量超出可退量、或暫不支援的品項型別）。"""
+
+
+class ReturnConflict(DomainError):
+    """退貨與目前狀態衝突（已全退、已作廢、或付款型態暫不支援）。"""

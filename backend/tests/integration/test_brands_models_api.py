@@ -115,9 +115,7 @@ async def test_product_model_unknown_brand_404(
     assert resp.status_code == 404
 
 
-async def test_cross_store_isolation(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_cross_store_isolation(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _a, token_a = await _store_token(db_session, "店A")
     _b, token_b = await _store_token(db_session, "店B")
     brand_a = (

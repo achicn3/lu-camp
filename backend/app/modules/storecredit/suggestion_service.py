@@ -147,9 +147,7 @@ class PremiumSuggestionService:
 
         monthly_outflow = Decimal(settings.monthly_fixed_cash_outflow)
         total_outstanding = await self._repo.total_outstanding(store_id)
-        liability_ratio = (
-            total_outstanding / monthly_outflow if monthly_outflow > 0 else None
-        )
+        liability_ratio = total_outstanding / monthly_outflow if monthly_outflow > 0 else None
         data_days = await self._data_days(store_id, now=now)
 
         result = suggest_premium_rate(
@@ -212,9 +210,7 @@ class PremiumSuggestionService:
 
         # gross_margin_m：（買斷毛利＋寄售抽成）÷ 商品收入。
         pm = await self._sales.period_margin(store_id, date_from, date_to)
-        margin = safe_ratio(
-            pm["buyout_margin"] + pm["consignment_commission"], pm["revenue"]
-        )
+        margin = safe_ratio(pm["buyout_margin"] + pm["consignment_commission"], pm["revenue"])
 
         # alpha_incremental：代理法（§5B-α）。
         alpha, redemption_count = await self._compute_alpha(
@@ -270,9 +266,7 @@ class PremiumSuggestionService:
         classified = [(amount, new_leaning_by_contact[contact_id]) for contact_id, amount in debits]
         return alpha_ratio(classified), len(debits)
 
-    async def _compute_beta(
-        self, store_id: int, *, now: datetime, n_days: int
-    ) -> Decimal | None:
+    async def _compute_beta(self, store_id: int, *, now: datetime, n_days: int) -> Decimal | None:
         """β 沉澱率（點時值）：發出滿 n_days 的 CREDIT 中，FIFO 後仍未沖銷的金額比例。
 
         consumed 取「對 CREDIT 的淨銷售沖銷」（已作廢回補的兌付淨額為 0），而非

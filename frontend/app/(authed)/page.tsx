@@ -7,6 +7,7 @@ const MODULES: { title: string; description: string; href?: string }[] = [
   { title: "會員/賣方", description: "查詢、建檔、點數、寄售與往來", href: "/contacts" },
   { title: "庫存", description: "序號品、數量品、散裝堆" },
   { title: "收購", description: "買斷／寄售／散裝入庫" },
+  { title: "寄售付款", description: "待撥清單、付款、追回提示", href: "/consignment" },
   { title: "裝置狀態", description: "印表機、錢櫃連線" },
 ];
 

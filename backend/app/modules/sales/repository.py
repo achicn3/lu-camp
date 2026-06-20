@@ -99,9 +99,7 @@ class SalesRepository:
         日期過濾在分頁**之前**套用（與 list_sales 一致）——否則分頁先作用於未過濾的
         全部消費史，落在區間外的新單會吃掉名額、回傳短頁/空頁（Codex review P2）。
         """
-        stmt = select(Sale).where(
-            Sale.store_id == store_id, Sale.buyer_contact_id == contact_id
-        )
+        stmt = select(Sale).where(Sale.store_id == store_id, Sale.buyer_contact_id == contact_id)
         if date_from is not None:
             stmt = stmt.where(Sale.created_at >= date_from)
         if date_to is not None:
@@ -130,6 +128,7 @@ class SalesRepository:
         )
         rows = await self._session.execute(stmt)
         return {sale_id: count for sale_id, count in rows.all()}
+
     # ── SC-5b §5B 唯讀彙總 ──
 
     async def nonvoid_sale_ids(

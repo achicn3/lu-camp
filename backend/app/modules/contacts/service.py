@@ -148,8 +148,7 @@ class ContactService:
         不受此限（其關聯為 contact_id 直接 FK、非角色閘）。
         """
         removed_member = (
-            ContactRole.MEMBER.value in roles_before
-            and ContactRole.MEMBER.value not in roles_after
+            ContactRole.MEMBER.value in roles_before and ContactRole.MEMBER.value not in roles_after
         )
         if not removed_member:
             return

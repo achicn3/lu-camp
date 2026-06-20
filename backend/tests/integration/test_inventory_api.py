@@ -64,9 +64,7 @@ async def _seed_store(session: AsyncSession, name: str = "測試門市") -> int:
 
 
 def _auth(store_id: int) -> dict[str, str]:
-    token = encode_access_token(
-        user_id=_STORE_CLERKS[store_id], role="CLERK", store_id=store_id
-    )
+    token = encode_access_token(user_id=_STORE_CLERKS[store_id], role="CLERK", store_id=store_id)
     return {"Authorization": f"Bearer {token}"}
 
 

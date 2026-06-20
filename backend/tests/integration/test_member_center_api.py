@@ -124,9 +124,7 @@ async def test_member_purchases_list_and_detail(
     assert body[0]["line_count"] == 1
     assert body[1]["line_count"] == 0
 
-    detail = await client.get(
-        f"/api/v1/contacts/{member}/purchases/{s2.id}", headers=_auth(token)
-    )
+    detail = await client.get(f"/api/v1/contacts/{member}/purchases/{s2.id}", headers=_auth(token))
     assert detail.status_code == 200
     dbody = detail.json()
     assert dbody["total"] == "200"
@@ -361,9 +359,7 @@ async def test_member_consignments_pagination_merges_then_slices(
 ) -> None:
     # 兩來源各 2 列、limit=2 → 合併後正好 2 列（非 2×limit；Codex review P2）。
     store_id, token, _, member = await _setup(db_session)
-    db_session.add_all(
-        [_consigned_serialized(store_id, f"SER-{i}", member) for i in range(2)]
-    )
+    db_session.add_all([_consigned_serialized(store_id, f"SER-{i}", member) for i in range(2)])
     db_session.add_all(
         [
             BulkLot(

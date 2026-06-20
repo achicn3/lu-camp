@@ -52,9 +52,7 @@ class WindowMetrics:
 
     def has_any(self) -> bool:
         """該視窗是否有任一指標可用（全 None → 視為無資料視窗）。"""
-        return any(
-            getattr(self, field) is not None for field in _METRIC_FIELDS
-        )
+        return any(getattr(self, field) is not None for field in _METRIC_FIELDS)
 
 
 @dataclass(frozen=True)
@@ -204,8 +202,9 @@ def _normalized_weights(
     return {name: weight / total for name, weight in raw.items()}
 
 
-def _p_max1(alpha_hat: Decimal | None, margin: Decimal | None, params: EngineParams,
-            premium_max: Decimal) -> tuple[Decimal, bool]:
+def _p_max1(
+    alpha_hat: Decimal | None, margin: Decimal | None, params: EngineParams, premium_max: Decimal
+) -> tuple[Decimal, bool]:
     """毛利約束上限：p_max1 = c·m/(1−c·m)，c = alpha_safety×α̂。
 
     回 (上限, 是否套用)。α̂ 或 m 缺值 → 不套用（回 max，視為無此約束）。

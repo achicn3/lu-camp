@@ -101,8 +101,8 @@ class CashDrawerService:
         return saved
 
     async def expected_amount(self, session: CashSession) -> Decimal:
-        """結帳應有現金 = 開帳零用金 + Σ(SALE_IN, ACQUISITION_VOID_IN) − Σ(BUYOUT_OUT, PAYOUT_OUT)
-        ± ΣMANUAL_ADJUST。ACQUISITION_VOID_IN＝作廢收購退回的原付現（進帳；F6.5）。"""
+        """結帳應有現金 = 開帳零用金 + Σ(SALE_IN, ACQUISITION_VOID_IN)
+        − Σ(BUYOUT_OUT, PAYOUT_OUT, SALE_REFUND_OUT) ± ΣMANUAL_ADJUST。"""
         total = session.opening_float
         for movement in await self._repo.list_movements(session.id):
             if movement.type in (
@@ -113,6 +113,7 @@ class CashDrawerService:
             elif movement.type in (
                 CashMovementType.BUYOUT_OUT,
                 CashMovementType.CONSIGNMENT_PAYOUT_OUT,
+                CashMovementType.SALE_REFUND_OUT,
             ):
                 total -= movement.amount
             elif movement.type == CashMovementType.MANUAL_ADJUST:

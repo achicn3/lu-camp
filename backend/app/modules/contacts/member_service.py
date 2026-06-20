@@ -86,9 +86,7 @@ class MemberService:
             member_points=contact.member_points,
             store_credit_balance=balance,
             pending_consignment_payout=pending,
-            counts=MemberOverviewCounts(
-                purchases=purchases_count, consigned_items=consigned_count
-            ),
+            counts=MemberOverviewCounts(purchases=purchases_count, consigned_items=consigned_count),
             recent_purchases=[
                 self._purchase_row(s, line_counts.get(s.id, 0)) for s in recent_sales
             ],
@@ -185,9 +183,7 @@ class MemberService:
             (i.intake_date, 0, i.id, self._consignment_serialized_row(i, latest.get(i.id)))
             for i in serialized
         ]
-        keyed += [
-            (lot.intake_date, 1, lot.id, self._consignment_bulk_row(lot)) for lot in bulk
-        ]
+        keyed += [(lot.intake_date, 1, lot.id, self._consignment_bulk_row(lot)) for lot in bulk]
         # intake_date desc、來源序 asc、id desc（來源序保持遞增、不被整體 reverse 反轉）。
         keyed.sort(key=lambda t: (-t[0].timestamp(), t[1], -t[2]))
         items = [row for *_, row in keyed][offset : offset + limit]
@@ -198,9 +194,7 @@ class MemberService:
         self, store_id: int, serialized_item_ids: list[int]
     ) -> dict[int, ConsignmentSettlement]:
         """每序號品最新一筆結算（DISTINCT ON，一 SQL 取回，不會餓死其他品）。"""
-        return await self._consignment.latest_settlement_by_item_ids(
-            store_id, serialized_item_ids
-        )
+        return await self._consignment.latest_settlement_by_item_ids(store_id, serialized_item_ids)
 
     async def _pending_consignment_payout(self, store_id: int, contact_id: int) -> Decimal:
         item_ids = await self._inventory.list_serialized_ids_by_consignor(store_id, contact_id)
@@ -258,9 +252,7 @@ class MemberService:
         want_buyout = source_type in (None, "BUYOUT")
         want_consignment = source_type in (None, "CONSIGNMENT")
         acq_ids = (
-            await self._acquisition.list_ids_by_contact(store_id, contact_id)
-            if want_buyout
-            else []
+            await self._acquisition.list_ids_by_contact(store_id, contact_id) if want_buyout else []
         )
         # 確定性全序 (intake_date, 來源序, id)，與各來源 id desc 取列一致（避免 tie-break
         # 與截斷序不符；Codex review P2）。來源序：買斷序號=0、買斷散裝=1、寄售序號=2、寄售散裝=3。

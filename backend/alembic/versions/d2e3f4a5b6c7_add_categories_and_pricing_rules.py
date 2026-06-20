@@ -50,7 +50,12 @@ def upgrade() -> None:
         sa.Column(
             "condition_band",
             sa.Enum(
-                "S", "A", "B", "C", "D", "E",
+                "S",
+                "A",
+                "B",
+                "C",
+                "D",
+                "E",
                 name="grade",
                 native_enum=False,
                 create_constraint=True,

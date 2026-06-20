@@ -1,10 +1,11 @@
 """core/security.py — JWT access token 編/解碼。"""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
 
+from app.core.config import get_settings
 from app.core.security import decode_access_token, encode_access_token
 
 
@@ -29,6 +30,21 @@ def test_expired_token_rejected() -> None:
     )
     with pytest.raises(jwt.ExpiredSignatureError):
         decode_access_token(token)
+
+
+def test_future_iat_is_allowed_as_clock_skew_metadata() -> None:
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "role": "CLERK",
+            "store_id": 1,
+            "iat": datetime.now(UTC) + timedelta(seconds=5),
+        },
+        get_settings().secret_key,
+        algorithm="HS256",
+    )
+    payload = decode_access_token(token)
+    assert payload["sub"] == "1"
 
 
 def test_tampered_token_rejected() -> None:

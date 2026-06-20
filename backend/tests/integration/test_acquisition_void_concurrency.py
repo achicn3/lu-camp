@@ -151,9 +151,7 @@ async def test_concurrent_sale_vs_void_no_deadlock(real_client: httpx.AsyncClien
             idempotency_key="svv-create",
         )
         store_id, acq_id = store.id, result.acquisition_id
-        item = await s.scalar(
-            select(SerializedItem).where(SerializedItem.acquisition_id == acq_id)
-        )
+        item = await s.scalar(select(SerializedItem).where(SerializedItem.acquisition_id == acq_id))
         assert item is not None
         item_code = item.item_code
         clerk_token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)

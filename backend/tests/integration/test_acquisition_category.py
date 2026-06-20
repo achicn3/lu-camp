@@ -134,8 +134,9 @@ async def test_buyout_without_category_still_works(
         json={
             "type": "BUYOUT",
             "contact_id": seller,
-            "items": [{"name": "相機", "grade": "A", "listed_price": "3000",
-                       "acquisition_cost": "1800"}],
+            "items": [
+                {"name": "相機", "grade": "A", "listed_price": "3000", "acquisition_cost": "1800"}
+            ],
         },
         headers=_auth(token),
     )
@@ -159,8 +160,15 @@ async def test_cross_store_category_rejected(
         json={
             "type": "BUYOUT",
             "contact_id": seller_a,
-            "items": [{"name": "外套", "grade": "A", "listed_price": "3000",
-                       "acquisition_cost": "1200", "category_id": cat_b}],
+            "items": [
+                {
+                    "name": "外套",
+                    "grade": "A",
+                    "listed_price": "3000",
+                    "acquisition_cost": "1200",
+                    "category_id": cat_b,
+                }
+            ],
         },
         headers=_auth(token_a),
     )

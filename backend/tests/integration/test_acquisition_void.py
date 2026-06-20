@@ -297,9 +297,7 @@ async def test_void_cash_buyout_blocked_without_open_session(
 # ── 冪等／權限／跨店 ──
 
 
-async def test_double_void_returns_409(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_double_void_returns_409(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     clerk, mgr, store_id, seller_id = await _seed(db_session)
     acq_id = await _create_buyout(client, clerk, seller_id)
     first = await client.post(
@@ -314,9 +312,7 @@ async def test_double_void_returns_409(
     assert await _void_in(db_session, store_id) == Decimal("1000")
 
 
-async def test_void_requires_manager(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_void_requires_manager(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     clerk, _mgr, _store_id, seller_id = await _seed(db_session)
     acq_id = await _create_buyout(client, clerk, seller_id)
     resp = await client.post(
@@ -325,9 +321,7 @@ async def test_void_requires_manager(
     assert resp.status_code == 403
 
 
-async def test_void_reason_required(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_void_reason_required(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     clerk, mgr, _store_id, seller_id = await _seed(db_session)
     acq_id = await _create_buyout(client, clerk, seller_id)
     empty = await client.post(
@@ -341,9 +335,7 @@ async def test_void_reason_required(
     assert blank.status_code == 422
 
 
-async def test_void_not_found_404(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_void_not_found_404(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _clerk, mgr, _store_id, _seller_id = await _seed(db_session)
     resp = await client.post(
         "/api/v1/acquisitions/99999/void", json={"reason": "x"}, headers=_auth(mgr)
@@ -351,9 +343,7 @@ async def test_void_not_found_404(
     assert resp.status_code == 404
 
 
-async def test_void_cross_store_is_404(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_void_cross_store_is_404(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     clerk_a, _mgr_a, _store_a, seller_a = await _seed(db_session)
     acq_id = await _create_buyout(client, clerk_a, seller_a)
     # B 店經理（另一 store）不可作廢 A 店收購 → 查無（store 範圍）
@@ -400,9 +390,7 @@ async def test_void_consignment_is_unsupported_422_no_side_effects(
     payload = {
         "type": "CONSIGNMENT",
         "contact_id": seller_id,
-        "items": [
-            {"name": "睡袋", "grade": "B", "listed_price": "1200", "commission_pct": 50}
-        ],
+        "items": [{"name": "睡袋", "grade": "B", "listed_price": "1200", "commission_pct": 50}],
     }
     create = await client.post("/api/v1/acquisitions", json=payload, headers=_auth(clerk))
     assert create.status_code == 201, create.text
@@ -445,9 +433,7 @@ async def test_void_audit_excludes_free_form_reason(
     assert resp.status_code == 200, resp.text
 
     audit = await db_session.scalar(
-        select(AuditLog).where(
-            AuditLog.store_id == store_id, AuditLog.action == "VOID_ACQUISITION"
-        )
+        select(AuditLog).where(AuditLog.store_id == store_id, AuditLog.action == "VOID_ACQUISITION")
     )
     assert audit is not None
     blob = f"{audit.before} {audit.after}"

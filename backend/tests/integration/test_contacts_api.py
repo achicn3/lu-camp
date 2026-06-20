@@ -333,9 +333,7 @@ async def test_list_pagination(client: httpx.AsyncClient, db_session: AsyncSessi
 # ── T21-a：PATCH /contacts/{id}（會員編輯；docs/17 §5.2、裁示 #3）──
 
 
-async def _create_contact(
-    client: httpx.AsyncClient, token: str, **fields: object
-) -> int:
+async def _create_contact(client: httpx.AsyncClient, token: str, **fields: object) -> int:
     resp = await client.post("/api/v1/contacts", json=fields, headers=_auth(token))
     assert resp.status_code == 201, resp.text
     return int(resp.json()["id"])
@@ -569,14 +567,10 @@ async def test_update_contact_cannot_remove_member_with_store_credit(
     # 仍持有購物金的會員不可被移除 MEMBER（否則非會員仍掛負債；Codex high）。
     store_id, m_token, _ = await _setup_store_and_tokens(db_session)
     cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
-    db_session.add(
-        StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(100))
-    )
+    db_session.add(StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(100)))
     await db_session.flush()
 
-    resp = await client.patch(
-        f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token)
-    )
+    resp = await client.patch(f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token))
     # 409 即守衛生效；角色變更隨 router 的整筆 rollback 一併丟棄（不在共用 session 後驗，
     # 因錯誤路徑 rollback 會回退共用測試 session 的狀態）。
     assert resp.status_code == 409
@@ -587,9 +581,7 @@ async def test_update_contact_can_remove_member_without_store_credit(
 ) -> None:
     _, m_token, _ = await _setup_store_and_tokens(db_session)
     cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
-    resp = await client.patch(
-        f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token)
-    )
+    resp = await client.patch(f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token))
     assert resp.status_code == 200
     assert resp.json()["roles"] == []
 
@@ -602,9 +594,7 @@ async def test_update_contact_keep_member_add_seller_with_store_credit_ok(
     cid = await _create_contact(
         client, m_token, name="會員", national_id=NATIONAL_ID, roles=["MEMBER"]
     )
-    db_session.add(
-        StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(50))
-    )
+    db_session.add(StoreCreditAccount(store_id=store_id, contact_id=cid, balance=Decimal(50)))
     await db_session.flush()
 
     resp = await client.patch(
@@ -618,9 +608,7 @@ async def test_update_contact_404_when_missing(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     _, m_token, _ = await _setup_store_and_tokens(db_session)
-    resp = await client.patch(
-        "/api/v1/contacts/999999", json={"name": "x"}, headers=_auth(m_token)
-    )
+    resp = await client.patch("/api/v1/contacts/999999", json={"name": "x"}, headers=_auth(m_token))
     assert resp.status_code == 404
 
 

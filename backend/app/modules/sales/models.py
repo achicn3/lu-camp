@@ -84,6 +84,10 @@ class SaleLine(Base, TimestampMixin):
     """銷售明細行。依 line_type 指向 serialized / catalog / bulk_lot 其一。"""
 
     __tablename__ = "sale_lines"
+    __table_args__ = (
+        # 複合租戶鍵：供 return_lines 的 (sale_line_id, store_id) 複合 FK 綁定（退貨租戶完整性）。
+        UniqueConstraint("id", "store_id", name="uq_sale_lines_id_store"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)

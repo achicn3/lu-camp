@@ -98,9 +98,7 @@ class InventoryRepository:
         await self._session.flush()
         return category
 
-    async def list_categories(
-        self, store_id: int, *, q: str | None, limit: int
-    ) -> list[Category]:
+    async def list_categories(self, store_id: int, *, q: str | None, limit: int) -> list[Category]:
         stmt = select(Category).where(Category.store_id == store_id)
         if q:
             stmt = stmt.where(Category.name.ilike(f"%{q}%"))
@@ -307,9 +305,7 @@ class InventoryRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
-    async def list_serialized_ids_by_codes(
-        self, store_id: int, item_codes: list[str]
-    ) -> list[int]:
+    async def list_serialized_ids_by_codes(self, store_id: int, item_codes: list[str]) -> list[int]:
         """解析 item_codes → 序號品 id（升冪；供銷售前置依 id 序鎖定，與作廢一致防 AB-BA）。"""
         if not item_codes:
             return []
@@ -332,9 +328,7 @@ class InventoryRepository:
         )
         await self._session.scalar(stmt)
 
-    async def list_serialized_ids_by_consignor(
-        self, store_id: int, consignor_id: int
-    ) -> list[int]:
+    async def list_serialized_ids_by_consignor(self, store_id: int, consignor_id: int) -> list[int]:
         """某寄售人的所有寄售序號品 id（id-only，供結算 PENDING 應撥聚合；不載全列）。"""
         stmt = select(SerializedItem.id).where(
             SerializedItem.store_id == store_id,
@@ -369,9 +363,7 @@ class InventoryRepository:
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
-    async def get_catalog_for_update(
-        self, store_id: int, catalog_id: int
-    ) -> CatalogProduct | None:
+    async def get_catalog_for_update(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         """取數量型商品並上行鎖（FOR UPDATE）+ 刷新；盤點確認時即時重讀現量、原子校正用。"""
         stmt = (
             select(CatalogProduct)
@@ -422,6 +414,20 @@ class InventoryRepository:
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1
 
+    async def return_serialized_to_stock(self, store_id: int, item_id: int) -> bool:
+        """銷售退貨：僅當序號品仍為 SOLD 時，原子轉回 IN_STOCK 並清掉 sold_date。"""
+        stmt = (
+            update(SerializedItem)
+            .where(
+                SerializedItem.id == item_id,
+                SerializedItem.store_id == store_id,
+                SerializedItem.status == SerializedItemStatus.SOLD,
+            )
+            .values(status=SerializedItemStatus.IN_STOCK, sold_date=None)
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1
+
     # ── 庫存異動帳 ──
     async def add_stock_movement(self, movement: StockMovement) -> StockMovement:
         self._session.add(movement)
@@ -457,6 +463,22 @@ class InventoryRepository:
                     else_=BulkLot.status,
                 ),
             )
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1
+
+    async def increment_bulk_lot(self, store_id: int, lot_id: int, qty: int) -> bool:
+        """銷售退貨：原子加回 remaining_qty；SOLD_OUT 加回後重新變 ON_SALE。"""
+        new_remaining = BulkLot.remaining_qty + qty
+        stmt = (
+            update(BulkLot)
+            .where(
+                BulkLot.id == lot_id,
+                BulkLot.store_id == store_id,
+                BulkLot.status.in_([BulkLotStatus.ON_SALE, BulkLotStatus.SOLD_OUT]),
+                new_remaining <= BulkLot.total_qty,
+            )
+            .values(remaining_qty=new_remaining, status=BulkLotStatus.ON_SALE)
         )
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1

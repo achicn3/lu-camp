@@ -72,7 +72,8 @@ class CashMovementType(StrEnum):
     """現金異動類型。
 
     SALE_IN 進帳；BUYOUT_OUT / CONSIGNMENT_PAYOUT_OUT 出帳；MANUAL_ADJUST 可正可負；
-    ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）。
+    ACQUISITION_VOID_IN 作廢收購時退回原付現（進帳，落當前開帳 session；F6.5）；
+    SALE_REFUND_OUT 銷售退貨退現（出帳，Phase 4B）。
     """
 
     SALE_IN = "SALE_IN"
@@ -80,6 +81,7 @@ class CashMovementType(StrEnum):
     CONSIGNMENT_PAYOUT_OUT = "CONSIGNMENT_PAYOUT_OUT"
     MANUAL_ADJUST = "MANUAL_ADJUST"
     ACQUISITION_VOID_IN = "ACQUISITION_VOID_IN"
+    SALE_REFUND_OUT = "SALE_REFUND_OUT"
 
 
 class AcquisitionType(StrEnum):

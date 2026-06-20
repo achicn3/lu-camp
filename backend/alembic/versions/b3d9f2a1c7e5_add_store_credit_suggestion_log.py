@@ -46,7 +46,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index(
-        "ix_store_credit_suggestion_log_store_id", "store_credit_suggestion_log"
-    )
+    op.drop_index("ix_store_credit_suggestion_log_store_id", "store_credit_suggestion_log")
     op.drop_table("store_credit_suggestion_log")
