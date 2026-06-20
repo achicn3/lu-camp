@@ -23,7 +23,9 @@ from app.modules.reports.schemas import (
     LiabilityReport,
     MemberBalanceRow,
     ReconciliationReport,
+    SalesMarginReport,
 )
+from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
@@ -47,6 +49,30 @@ class ReportsService:
         self._settings = StoreSettingsService(session)
         self._suggestion = PremiumSuggestionService(session)
         self._cash = CashDrawerService(session)
+        self._sales = SalesService(session)
+
+    async def sales_margin(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> SalesMarginReport:
+        """銷售 / 毛利報表（docs/19 §2.3）：未作廢；買斷認成本、寄售只認抽成、catalog 成本 N/A。"""
+        bd = await self._sales.margin_breakdown(store_id, date_from, date_to)
+        return SalesMarginReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            gross_turnover=bd.gross_turnover,
+            recognized_revenue=bd.recognized_revenue,
+            owned_cogs=bd.owned_cogs,
+            bulk_cogs=bd.bulk_cogs,
+            consignment_commission_income=bd.consignment_commission_income,
+            gross_margin=bd.gross_margin,
+            gross_margin_rate=bd.gross_margin_rate,
+            unknown_cost_sales=bd.unknown_cost_sales,
+            cash_received=bd.cash_received,
+            store_credit_redeemed=bd.store_credit_redeemed,
+            transaction_count=bd.transaction_count,
+        )
 
     async def daily_cash(self, store_id: int, report_date: date) -> DailyCashReport:
         """每日現金對帳（docs/19 §2.2）：依 opened_at 的 UTC 日 [date, date+1) 取本店 session。

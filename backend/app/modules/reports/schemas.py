@@ -110,6 +110,26 @@ class DailyCashReport(BaseModel):
     total_store_credit_redeemed_display_only: NTDAmount
 
 
+class SalesMarginReport(BaseModel):
+    """銷售 / 毛利報表（docs/19 §2.3）。未作廢銷售；買斷認成本、寄售只認抽成、catalog 成本 N/A。"""
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    gross_turnover: NTDAmount  # 營業額（所有成交全額，含寄售全額）
+    recognized_revenue: NTDAmount  # 認列營收（自有全額 + 寄售抽成）
+    owned_cogs: NTDAmount  # 自有序號成本
+    bulk_cogs: NTDAmount  # 自有散裝成本
+    consignment_commission_income: NTDAmount
+    gross_margin: NTDAmount
+    gross_margin_rate: NTDAmountOpt  # 毛利 ÷ 已知成本營收；分母 0 → null
+    unknown_cost_sales: NTDAmount  # 成本未知營收（catalog + 缺成本自有），不假造毛利
+    cash_received: NTDAmount
+    store_credit_redeemed: NTDAmount
+    transaction_count: int
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 

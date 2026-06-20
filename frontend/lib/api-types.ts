@@ -664,6 +664,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/sales-margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Margin
+         * @description 銷售 / 毛利（docs/19 §2.3）。半開區間 [from, to)；to<=from → 422。
+         */
+        get: operations["salesMarginReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/store-credit/effectiveness": {
         parameters: {
             query?: never;
@@ -2400,6 +2420,51 @@ export interface components {
             tender_type: components["schemas"]["TenderType"];
         };
         /**
+         * SalesMarginReport
+         * @description 銷售 / 毛利報表（docs/19 §2.3）。未作廢銷售；買斷認成本、寄售只認抽成、catalog 成本 N/A。
+         */
+        SalesMarginReport: {
+            /** Bulk Cogs */
+            bulk_cogs: string;
+            /** Cash Received */
+            cash_received: string;
+            /** Consignment Commission Income */
+            consignment_commission_income: string;
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /** Owned Cogs */
+            owned_cogs: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /** Store Credit Redeemed */
+            store_credit_redeemed: string;
+            /** Store Id */
+            store_id: number;
+            /** Transaction Count */
+            transaction_count: number;
+            /** Unknown Cost Sales */
+            unknown_cost_sales: string;
+        };
+        /**
          * SerializedItemRead
          * @description 序號品輸出（POS 掃碼查件/庫存列表；不含 acquisition_cost）。
          */
@@ -4028,6 +4093,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyCashReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    salesMarginReport: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesMarginReport"];
                 };
             };
             /** @description Validation Error */
