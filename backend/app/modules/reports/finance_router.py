@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
-from app.modules.reports.schemas import DailyCashReport, SalesMarginReport
+from app.modules.reports.schemas import DailyCashReport, DailySummaryReport, SalesMarginReport
 from app.modules.reports.service import ReportsService
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -92,6 +92,60 @@ async def daily_cash(
                 str(r.variance) if r.variance is not None else "",
             ]
             for r in report.sessions
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get("/daily-summary", response_model=DailySummaryReport, operation_id="dailySummaryReport")
+async def daily_summary(
+    session: SessionDep,
+    user: ManagerDep,
+    report_date: Annotated[date, Query(alias="date")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> DailySummaryReport | Response:
+    """每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。"""
+    report = await ReportsService(session).daily_summary(user.store_id, report_date)
+    if fmt == "json":
+        return report
+    rate = "N/A" if report.gross_margin_rate is None else str(report.gross_margin_rate)
+    avg = "N/A" if report.avg_ticket is None else str(report.avg_ticket)
+    net_income = "N/A" if report.estimated_net_income is None else str(report.estimated_net_income)
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("日期", report.date.isoformat()),
+        ("估算淨利說明", report.estimated_net_income_note),
+    ]
+    exp = TabularExport(
+        sheet="每日營運",
+        filename_stem=f"daily-summary-{report.store_id}-{report.date.isoformat()}",
+        meta=meta,
+        headers=["指標", "值"],
+        rows=[
+            ["營業額", str(report.gross_turnover)],
+            ["認列營收", str(report.recognized_revenue)],
+            ["除稅淨額", str(report.net_sales_ex_tax)],
+            ["稅額", str(report.tax)],
+            ["寄售抽成收入", str(report.consignment_commission_income)],
+            ["銷貨成本", str(report.cogs)],
+            ["毛利", str(report.gross_margin)],
+            ["毛利率", rate],
+            ["成本未知營收", str(report.unknown_cost_sales)],
+            ["現金銷售", str(report.cash_sales_in)],
+            ["作廢收購退現", str(report.acquisition_void_in)],
+            ["收購付現", str(report.buyout_out)],
+            ["寄售付款", str(report.consignment_payout_out)],
+            ["人工調整", str(report.manual_adjust)],
+            ["當日現金支出", str(report.total_cash_out)],
+            ["應有現金", str(report.expected_cash)],
+            ["實點現金", str(report.counted_cash)],
+            ["現金差異", str(report.cash_variance)],
+            ["購物金發出", str(report.store_credit_issued)],
+            ["購物金兌付", str(report.store_credit_redeemed)],
+            ["交易筆數", str(report.transaction_count)],
+            ["客單價", avg],
+            ["估算淨利", net_income],
         ],
     )
     return export_response(exp, fmt)

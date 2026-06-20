@@ -664,6 +664,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/daily-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily Summary
+         * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。
+         */
+        get: operations["dailySummaryReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/sales-margin": {
         parameters: {
             query?: never;
@@ -1660,6 +1680,74 @@ export interface components {
             status: string;
             /** Variance */
             variance: string | null;
+        };
+        /**
+         * DailySummaryReport
+         * @description 每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。
+         *
+         *     營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。
+         */
+        DailySummaryReport: {
+            /** Acquisition Void In */
+            acquisition_void_in: string;
+            /** Avg Ticket */
+            avg_ticket: string | null;
+            /** Buyout Out */
+            buyout_out: string;
+            /** Cash Sales In */
+            cash_sales_in: string;
+            /** Cash Variance */
+            cash_variance: string;
+            /** Cogs */
+            cogs: string;
+            /** Consignment Commission Income */
+            consignment_commission_income: string;
+            /** Consignment Payout Out */
+            consignment_payout_out: string;
+            /** Counted Cash */
+            counted_cash: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Estimated Net Income */
+            estimated_net_income: string | null;
+            /** Estimated Net Income Note */
+            estimated_net_income_note: string;
+            /** Expected Cash */
+            expected_cash: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /** Manual Adjust */
+            manual_adjust: string;
+            /** Net Sales Ex Tax */
+            net_sales_ex_tax: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /** Store Credit Issued */
+            store_credit_issued: string;
+            /** Store Credit Redeemed */
+            store_credit_redeemed: string;
+            /** Store Id */
+            store_id: number;
+            /** Tax */
+            tax: string;
+            /** Total Cash Out */
+            total_cash_out: string;
+            /** Transaction Count */
+            transaction_count: number;
+            /** Unknown Cost Sales */
+            unknown_cost_sales: string;
         };
         /**
          * EffectivenessReport
@@ -4093,6 +4181,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyCashReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dailySummaryReport: {
+        parameters: {
+            query: {
+                date: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailySummaryReport"];
                 };
             };
             /** @description Validation Error */

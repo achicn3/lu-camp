@@ -1764,6 +1764,173 @@
         "title": "DailyCashSessionRow",
         "type": "object"
       },
+      "DailySummaryReport": {
+        "description": "每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。\n\n營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。",
+        "properties": {
+          "acquisition_void_in": {
+            "title": "Acquisition Void In",
+            "type": "string"
+          },
+          "avg_ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Ticket"
+          },
+          "buyout_out": {
+            "title": "Buyout Out",
+            "type": "string"
+          },
+          "cash_sales_in": {
+            "title": "Cash Sales In",
+            "type": "string"
+          },
+          "cash_variance": {
+            "title": "Cash Variance",
+            "type": "string"
+          },
+          "cogs": {
+            "title": "Cogs",
+            "type": "string"
+          },
+          "consignment_commission_income": {
+            "title": "Consignment Commission Income",
+            "type": "string"
+          },
+          "consignment_payout_out": {
+            "title": "Consignment Payout Out",
+            "type": "string"
+          },
+          "counted_cash": {
+            "title": "Counted Cash",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "estimated_net_income": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Net Income"
+          },
+          "estimated_net_income_note": {
+            "title": "Estimated Net Income Note",
+            "type": "string"
+          },
+          "expected_cash": {
+            "title": "Expected Cash",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "gross_margin": {
+            "title": "Gross Margin",
+            "type": "string"
+          },
+          "gross_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Margin Rate"
+          },
+          "gross_turnover": {
+            "title": "Gross Turnover",
+            "type": "string"
+          },
+          "manual_adjust": {
+            "title": "Manual Adjust",
+            "type": "string"
+          },
+          "net_sales_ex_tax": {
+            "title": "Net Sales Ex Tax",
+            "type": "string"
+          },
+          "recognized_revenue": {
+            "title": "Recognized Revenue",
+            "type": "string"
+          },
+          "store_credit_issued": {
+            "title": "Store Credit Issued",
+            "type": "string"
+          },
+          "store_credit_redeemed": {
+            "title": "Store Credit Redeemed",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "string"
+          },
+          "total_cash_out": {
+            "title": "Total Cash Out",
+            "type": "string"
+          },
+          "transaction_count": {
+            "title": "Transaction Count",
+            "type": "integer"
+          },
+          "unknown_cost_sales": {
+            "title": "Unknown Cost Sales",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date",
+          "gross_turnover",
+          "recognized_revenue",
+          "net_sales_ex_tax",
+          "tax",
+          "consignment_commission_income",
+          "cogs",
+          "gross_margin",
+          "gross_margin_rate",
+          "unknown_cost_sales",
+          "cash_sales_in",
+          "acquisition_void_in",
+          "buyout_out",
+          "consignment_payout_out",
+          "manual_adjust",
+          "total_cash_out",
+          "expected_cash",
+          "counted_cash",
+          "cash_variance",
+          "store_credit_issued",
+          "store_credit_redeemed",
+          "transaction_count",
+          "avg_ticket",
+          "estimated_net_income",
+          "estimated_net_income_note"
+        ],
+        "title": "DailySummaryReport",
+        "type": "object"
+      },
       "EffectivenessReport": {
         "description": "§5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。",
         "properties": {
@@ -7070,6 +7237,70 @@
           }
         ],
         "summary": "Daily Cash",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/daily-summary": {
+      "get": {
+        "description": "每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。",
+        "operationId": "dailySummaryReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailySummaryReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Daily Summary",
         "tags": [
           "reports"
         ]

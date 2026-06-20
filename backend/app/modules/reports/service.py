@@ -4,11 +4,13 @@
 （docs/16 §5），本層不寫任何資料。
 """
 
+import calendar
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.money import round_ntd, split_tax_inclusive
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.reports.schemas import (
@@ -17,6 +19,7 @@ from app.modules.reports.schemas import (
     AgingBuckets,
     DailyCashReport,
     DailyCashSessionRow,
+    DailySummaryReport,
     EffectivenessReport,
     FlowRow,
     FlowsReport,
@@ -159,6 +162,81 @@ class ReportsService:
             total_counted=totals["counted"],
             total_variance=totals["variance"],
             total_store_credit_redeemed_display_only=sc_redeemed,
+        )
+
+    async def daily_summary(self, store_id: int, report_date: date) -> DailySummaryReport:
+        """每日營運儀表板（docs/19 R5）：組合 daily_cash（R1）+ margin_breakdown（R2）的同源數字。
+
+        稅以認列營收在總額層級推一次（§6）。估算淨利＝毛利 − 當日攤提固定支出，明確標註為估計
+        （固定營業費用系統未逐日記錄）；月固定支出未設 → null。
+        """
+        now = _now()
+        start = datetime(report_date.year, report_date.month, report_date.day, tzinfo=UTC)
+        end = start + timedelta(days=1)
+        cash = await self.daily_cash(store_id, report_date)
+        margin = await self._sales.margin_breakdown(store_id, start, end)
+        settings = await self._settings.get_effective_settings(store_id)
+
+        flows = await self._sc.flows(store_id, date_from=start, date_to=end, granularity="day")
+        sc_issued = Decimal(0)
+        sc_redeemed = Decimal(0)
+        for row in flows:
+            issued = row["issued"]
+            redeemed = row["redeemed"]
+            assert isinstance(issued, Decimal)
+            assert isinstance(redeemed, Decimal)
+            sc_issued += issued
+            sc_redeemed += redeemed
+
+        net_ex_tax, tax = split_tax_inclusive(margin.recognized_revenue, settings.tax_rate)
+        cogs = margin.owned_cogs + margin.bulk_cogs
+        total_cash_out = cash.total_buyout_out + cash.total_consignment_payout_out
+        avg_ticket: Decimal | None = (
+            Decimal(round_ntd(margin.gross_turnover / Decimal(margin.transaction_count)))
+            if margin.transaction_count > 0
+            else None
+        )
+
+        days_in_month = calendar.monthrange(report_date.year, report_date.month)[1]
+        monthly = settings.monthly_fixed_cash_outflow
+        estimated_net_income: Decimal | None = (
+            margin.gross_margin - Decimal(round_ntd(monthly / Decimal(days_in_month)))
+            if monthly > 0
+            else None
+        )
+        note = (
+            "估算淨利＝毛利 − 當日攤提固定支出（月固定現金支出 ÷ 當月天數）；固定營業費用"
+            "（租金/薪資）未逐日記錄，僅供概估、非精確損益。未設定月固定支出 → N/A。"
+        )
+
+        return DailySummaryReport(
+            generated_at=now,
+            store_id=store_id,
+            date=report_date,
+            gross_turnover=margin.gross_turnover,
+            recognized_revenue=margin.recognized_revenue,
+            net_sales_ex_tax=Decimal(net_ex_tax),
+            tax=Decimal(tax),
+            consignment_commission_income=margin.consignment_commission_income,
+            cogs=cogs,
+            gross_margin=margin.gross_margin,
+            gross_margin_rate=margin.gross_margin_rate,
+            unknown_cost_sales=margin.unknown_cost_sales,
+            cash_sales_in=cash.total_cash_sales,
+            acquisition_void_in=cash.total_acquisition_void_in,
+            buyout_out=cash.total_buyout_out,
+            consignment_payout_out=cash.total_consignment_payout_out,
+            manual_adjust=cash.total_manual_adjust,
+            total_cash_out=total_cash_out,
+            expected_cash=cash.total_expected,
+            counted_cash=cash.total_counted,
+            cash_variance=cash.total_variance,
+            store_credit_issued=sc_issued,
+            store_credit_redeemed=sc_redeemed,
+            transaction_count=margin.transaction_count,
+            avg_ticket=avg_ticket,
+            estimated_net_income=estimated_net_income,
+            estimated_net_income_note=note,
         )
 
     async def liability(self, store_id: int) -> LiabilityReport:

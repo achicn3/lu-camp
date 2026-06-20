@@ -130,6 +130,45 @@ class SalesMarginReport(BaseModel):
     transaction_count: int
 
 
+class DailySummaryReport(BaseModel):
+    """每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。
+
+    營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。
+    """
+
+    generated_at: datetime
+    store_id: int
+    date: date
+    # 營收面
+    gross_turnover: NTDAmount  # 營業額（含寄售全額）
+    recognized_revenue: NTDAmount  # 認列營收（自有全額 + 寄售抽成）
+    net_sales_ex_tax: NTDAmount  # 認列營收除稅（總額層級推稅一次）
+    tax: NTDAmount
+    consignment_commission_income: NTDAmount
+    # 成本/毛利面
+    cogs: NTDAmount  # 自有序號 + 散裝成本
+    gross_margin: NTDAmount
+    gross_margin_rate: NTDAmountOpt  # 分母 0 → null
+    unknown_cost_sales: NTDAmount
+    # 現金/支出面（與 R1 同源）
+    cash_sales_in: NTDAmount
+    acquisition_void_in: NTDAmount
+    buyout_out: NTDAmount
+    consignment_payout_out: NTDAmount
+    manual_adjust: NTDAmount
+    total_cash_out: NTDAmount  # buyout + consignment payout（店家真實掏現）
+    expected_cash: NTDAmount
+    counted_cash: NTDAmount
+    cash_variance: NTDAmount
+    store_credit_issued: NTDAmount  # 購物金發出（非現金）
+    store_credit_redeemed: NTDAmount  # 購物金兌付（非現金）
+    # 概覽
+    transaction_count: int
+    avg_ticket: NTDAmountOpt  # 客單價＝營業額 ÷ 筆數；0 筆 → null
+    estimated_net_income: NTDAmountOpt  # 估算淨利＝毛利 − 當日攤提固定支出；未設 → null
+    estimated_net_income_note: str  # 明確標註為估計（固定營業費用未逐日記錄）
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 
