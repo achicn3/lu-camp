@@ -4,16 +4,19 @@
 （docs/16 §5），本層不寫任何資料。
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.reports.schemas import (
     ALPHA_METHOD_NOTE,
     ESTIMATE_FIELDS,
     AgingBuckets,
+    DailyCashReport,
+    DailyCashSessionRow,
     EffectivenessReport,
     FlowRow,
     FlowsReport,
@@ -43,6 +46,94 @@ class ReportsService:
         self._contacts = ContactService(session)
         self._settings = StoreSettingsService(session)
         self._suggestion = PremiumSuggestionService(session)
+        self._cash = CashDrawerService(session)
+
+    async def daily_cash(self, store_id: int, report_date: date) -> DailyCashReport:
+        """每日現金對帳（docs/19 §2.2）：依 opened_at 的 UTC 日 [date, date+1) 取本店 session。
+
+        每 session 的 expected 與關帳同源（cashdrawer `session_breakdown`）。購物金兌付總額另計、
+        只展示不進現金 expected（CLAUDE.md §6）。無 session 日回空 sessions + 全 0 合計（非 500）。
+        """
+        now = _now()
+        start = datetime(report_date.year, report_date.month, report_date.day, tzinfo=UTC)
+        end = start + timedelta(days=1)
+        sessions = await self._cash.list_sessions_in_range(store_id, start, end)
+
+        rows: list[DailyCashSessionRow] = []
+        totals = dict.fromkeys(
+            (
+                "opening_float",
+                "cash_sales",
+                "acquisition_void_in",
+                "buyout_out",
+                "consignment_payout_out",
+                "sale_refund_out",
+                "manual_adjust",
+                "expected",
+                "counted",
+                "variance",
+            ),
+            Decimal(0),
+        )
+        for session in sessions:
+            bd = await self._cash.session_breakdown(session)
+            rows.append(
+                DailyCashSessionRow(
+                    session_id=session.id,
+                    status=session.status.value,
+                    opened_at=session.opened_at,
+                    closed_at=session.closed_at,
+                    opened_by=session.opened_by,
+                    closed_by=session.closed_by,
+                    opening_float=session.opening_float,
+                    cash_sales=bd.cash_sales,
+                    acquisition_void_in=bd.acquisition_void_in,
+                    buyout_out=bd.buyout_out,
+                    consignment_payout_out=bd.consignment_payout_out,
+                    sale_refund_out=bd.sale_refund_out,
+                    manual_adjust_total=bd.manual_adjust_total,
+                    expected_amount=bd.expected,
+                    counted_amount=session.counted_amount,
+                    variance=session.variance,
+                )
+            )
+            totals["opening_float"] += session.opening_float
+            totals["cash_sales"] += bd.cash_sales
+            totals["acquisition_void_in"] += bd.acquisition_void_in
+            totals["buyout_out"] += bd.buyout_out
+            totals["consignment_payout_out"] += bd.consignment_payout_out
+            totals["sale_refund_out"] += bd.sale_refund_out
+            totals["manual_adjust"] += bd.manual_adjust_total
+            totals["expected"] += bd.expected
+            if session.counted_amount is not None:
+                totals["counted"] += session.counted_amount
+            if session.variance is not None:
+                totals["variance"] += session.variance
+
+        sc_rows = await self._sc.flows(store_id, date_from=start, date_to=end, granularity="day")
+        sc_redeemed = Decimal(0)
+        for row in sc_rows:
+            redeemed = row["redeemed"]
+            assert isinstance(redeemed, Decimal)
+            sc_redeemed += redeemed
+
+        return DailyCashReport(
+            generated_at=now,
+            store_id=store_id,
+            date=report_date,
+            sessions=rows,
+            total_opening_float=totals["opening_float"],
+            total_cash_sales=totals["cash_sales"],
+            total_acquisition_void_in=totals["acquisition_void_in"],
+            total_buyout_out=totals["buyout_out"],
+            total_consignment_payout_out=totals["consignment_payout_out"],
+            total_sale_refund_out=totals["sale_refund_out"],
+            total_manual_adjust=totals["manual_adjust"],
+            total_expected=totals["expected"],
+            total_counted=totals["counted"],
+            total_variance=totals["variance"],
+            total_store_credit_redeemed_display_only=sc_redeemed,
+        )
 
     async def liability(self, store_id: int) -> LiabilityReport:
         now = _now()

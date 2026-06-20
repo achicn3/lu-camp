@@ -1,5 +1,7 @@
 """cashdrawer 資料存取層（唯一直接碰 ORM 的層）。"""
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,5 +60,21 @@ class CashDrawerRepository:
 
     async def list_movements(self, session_id: int) -> list[CashMovement]:
         stmt = select(CashMovement).where(CashMovement.session_id == session_id)
+        result = await self._session.scalars(stmt)
+        return list(result)
+
+    async def list_sessions_in_range(
+        self, store_id: int, start: datetime, end: datetime
+    ) -> list[CashSession]:
+        """opened_at 落在 [start, end) 的本店 session（唯讀報表用，依 id 排序）。"""
+        stmt = (
+            select(CashSession)
+            .where(
+                CashSession.store_id == store_id,
+                CashSession.opened_at >= start,
+                CashSession.opened_at < end,
+            )
+            .order_by(CashSession.id)
+        )
         result = await self._session.scalars(stmt)
         return list(result)

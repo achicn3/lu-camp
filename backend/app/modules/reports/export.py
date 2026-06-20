@@ -3,11 +3,15 @@
 import csv
 import io
 from dataclasses import dataclass
+from typing import Literal
 
+from fastapi import Response
 from openpyxl import Workbook  # type: ignore[import-untyped]
 
 CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+ExportFormat = Literal["json", "csv", "xlsx"]
 
 # 試算表公式注入防護：以這些字元開頭的儲存格，Excel/Sheets 會當公式執行（CSV/XLSX 皆然）。
 _FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
@@ -43,6 +47,21 @@ def to_csv(exp: TabularExport) -> bytes:
     for row in exp.rows:
         writer.writerow([_safe_cell(cell) for cell in row])
     return buf.getvalue().encode("utf-8-sig")
+
+
+def export_response(exp: TabularExport, fmt: Literal["csv", "xlsx"]) -> Response:
+    """把 TabularExport 渲染成附檔下載回應（CSV 或 XLSX）；供各報表端點共用。"""
+    if fmt == "csv":
+        return Response(
+            content=to_csv(exp),
+            media_type=CSV_MEDIA_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{exp.filename_stem}.csv"'},
+        )
+    return Response(
+        content=to_xlsx(exp),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{exp.filename_stem}.xlsx"'},
+    )
 
 
 def to_xlsx(exp: TabularExport) -> bytes:

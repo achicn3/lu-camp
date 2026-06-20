@@ -1556,6 +1556,214 @@
         "title": "ContactUpdate",
         "type": "object"
       },
+      "DailyCashReport": {
+        "description": "每日現金對帳報表（docs/19 §2.2）。expected 與關帳 expected_amount 同源。",
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/DailyCashSessionRow"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total_acquisition_void_in": {
+            "title": "Total Acquisition Void In",
+            "type": "string"
+          },
+          "total_buyout_out": {
+            "title": "Total Buyout Out",
+            "type": "string"
+          },
+          "total_cash_sales": {
+            "title": "Total Cash Sales",
+            "type": "string"
+          },
+          "total_consignment_payout_out": {
+            "title": "Total Consignment Payout Out",
+            "type": "string"
+          },
+          "total_counted": {
+            "title": "Total Counted",
+            "type": "string"
+          },
+          "total_expected": {
+            "title": "Total Expected",
+            "type": "string"
+          },
+          "total_manual_adjust": {
+            "title": "Total Manual Adjust",
+            "type": "string"
+          },
+          "total_opening_float": {
+            "title": "Total Opening Float",
+            "type": "string"
+          },
+          "total_sale_refund_out": {
+            "title": "Total Sale Refund Out",
+            "type": "string"
+          },
+          "total_store_credit_redeemed_display_only": {
+            "title": "Total Store Credit Redeemed Display Only",
+            "type": "string"
+          },
+          "total_variance": {
+            "title": "Total Variance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date",
+          "sessions",
+          "total_opening_float",
+          "total_cash_sales",
+          "total_acquisition_void_in",
+          "total_buyout_out",
+          "total_consignment_payout_out",
+          "total_sale_refund_out",
+          "total_manual_adjust",
+          "total_expected",
+          "total_counted",
+          "total_variance",
+          "total_store_credit_redeemed_display_only"
+        ],
+        "title": "DailyCashReport",
+        "type": "object"
+      },
+      "DailyCashSessionRow": {
+        "description": "每日現金對帳——單一 session 列（docs/19 §2.2）。",
+        "properties": {
+          "acquisition_void_in": {
+            "title": "Acquisition Void In",
+            "type": "string"
+          },
+          "buyout_out": {
+            "title": "Buyout Out",
+            "type": "string"
+          },
+          "cash_sales": {
+            "title": "Cash Sales",
+            "type": "string"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed By"
+          },
+          "consignment_payout_out": {
+            "title": "Consignment Payout Out",
+            "type": "string"
+          },
+          "counted_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counted Amount"
+          },
+          "expected_amount": {
+            "title": "Expected Amount",
+            "type": "string"
+          },
+          "manual_adjust_total": {
+            "title": "Manual Adjust Total",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "opened_by": {
+            "title": "Opened By",
+            "type": "integer"
+          },
+          "opening_float": {
+            "title": "Opening Float",
+            "type": "string"
+          },
+          "sale_refund_out": {
+            "title": "Sale Refund Out",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "variance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variance"
+          }
+        },
+        "required": [
+          "session_id",
+          "status",
+          "opened_at",
+          "closed_at",
+          "opened_by",
+          "closed_by",
+          "opening_float",
+          "cash_sales",
+          "acquisition_void_in",
+          "buyout_out",
+          "consignment_payout_out",
+          "sale_refund_out",
+          "manual_adjust_total",
+          "expected_amount",
+          "counted_amount",
+          "variance"
+        ],
+        "title": "DailyCashSessionRow",
+        "type": "object"
+      },
       "EffectivenessReport": {
         "description": "§5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。",
         "properties": {
@@ -6706,6 +6914,70 @@
         "summary": "Receive Purchase Order",
         "tags": [
           "purchasing"
+        ]
+      }
+    },
+    "/api/v1/reports/daily-cash": {
+      "get": {
+        "description": "每日現金對帳（docs/19 §2.2）：依 session 分列 + 當日合計；expected 與關帳同公式。",
+        "operationId": "dailyCashReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyCashReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Daily Cash",
+        "tags": [
+          "reports"
         ]
       }
     },

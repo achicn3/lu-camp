@@ -68,6 +68,48 @@ class FlowsReport(BaseModel):
     rows: list[FlowRow]
 
 
+class DailyCashSessionRow(BaseModel):
+    """每日現金對帳——單一 session 列（docs/19 §2.2）。"""
+
+    session_id: int
+    status: str
+    opened_at: datetime
+    closed_at: datetime | None
+    opened_by: int
+    closed_by: int | None
+    opening_float: NTDAmount
+    cash_sales: NTDAmount  # SALE_IN（僅現金 leg）
+    acquisition_void_in: NTDAmount  # 作廢收購退現（F6.5，進帳）
+    buyout_out: NTDAmount
+    consignment_payout_out: NTDAmount
+    sale_refund_out: NTDAmount  # 退貨退現（出帳）
+    manual_adjust_total: NTDAmount  # 可正可負
+    expected_amount: NTDAmount  # 與關帳同公式
+    counted_amount: NTDAmountOpt  # 未關帳 → null
+    variance: NTDAmountOpt  # 未關帳 → null
+
+
+class DailyCashReport(BaseModel):
+    """每日現金對帳報表（docs/19 §2.2）。expected 與關帳 expected_amount 同源。"""
+
+    generated_at: datetime
+    store_id: int
+    date: date
+    sessions: list[DailyCashSessionRow]
+    # 當日合計（counted/variance 僅含已關帳 session）。
+    total_opening_float: NTDAmount
+    total_cash_sales: NTDAmount
+    total_acquisition_void_in: NTDAmount
+    total_buyout_out: NTDAmount
+    total_consignment_payout_out: NTDAmount
+    total_sale_refund_out: NTDAmount
+    total_manual_adjust: NTDAmount
+    total_expected: NTDAmount
+    total_counted: NTDAmount
+    total_variance: NTDAmount
+    total_store_credit_redeemed_display_only: NTDAmount
+
+
 class ReconciliationReport(BaseModel):
     """§4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。"""
 

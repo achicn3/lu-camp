@@ -644,6 +644,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/daily-cash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily Cash
+         * @description 每日現金對帳（docs/19 §2.2）：依 session 分列 + 當日合計；expected 與關帳同公式。
+         */
+        get: operations["dailyCashReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/store-credit/effectiveness": {
         parameters: {
             query?: never;
@@ -1537,6 +1557,89 @@ export interface components {
             roles?: components["schemas"]["ContactRole"][] | null;
             /** Source Note */
             source_note?: string | null;
+        };
+        /**
+         * DailyCashReport
+         * @description 每日現金對帳報表（docs/19 §2.2）。expected 與關帳 expected_amount 同源。
+         */
+        DailyCashReport: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Sessions */
+            sessions: components["schemas"]["DailyCashSessionRow"][];
+            /** Store Id */
+            store_id: number;
+            /** Total Acquisition Void In */
+            total_acquisition_void_in: string;
+            /** Total Buyout Out */
+            total_buyout_out: string;
+            /** Total Cash Sales */
+            total_cash_sales: string;
+            /** Total Consignment Payout Out */
+            total_consignment_payout_out: string;
+            /** Total Counted */
+            total_counted: string;
+            /** Total Expected */
+            total_expected: string;
+            /** Total Manual Adjust */
+            total_manual_adjust: string;
+            /** Total Opening Float */
+            total_opening_float: string;
+            /** Total Sale Refund Out */
+            total_sale_refund_out: string;
+            /** Total Store Credit Redeemed Display Only */
+            total_store_credit_redeemed_display_only: string;
+            /** Total Variance */
+            total_variance: string;
+        };
+        /**
+         * DailyCashSessionRow
+         * @description 每日現金對帳——單一 session 列（docs/19 §2.2）。
+         */
+        DailyCashSessionRow: {
+            /** Acquisition Void In */
+            acquisition_void_in: string;
+            /** Buyout Out */
+            buyout_out: string;
+            /** Cash Sales */
+            cash_sales: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: number | null;
+            /** Consignment Payout Out */
+            consignment_payout_out: string;
+            /** Counted Amount */
+            counted_amount: string | null;
+            /** Expected Amount */
+            expected_amount: string;
+            /** Manual Adjust Total */
+            manual_adjust_total: string;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Opened By */
+            opened_by: number;
+            /** Opening Float */
+            opening_float: string;
+            /** Sale Refund Out */
+            sale_refund_out: string;
+            /** Session Id */
+            session_id: number;
+            /** Status */
+            status: string;
+            /** Variance */
+            variance: string | null;
         };
         /**
          * EffectivenessReport
@@ -3893,6 +3996,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dailyCashReport: {
+        parameters: {
+            query: {
+                date: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyCashReport"];
                 };
             };
             /** @description Validation Error */

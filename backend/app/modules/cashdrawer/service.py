@@ -5,6 +5,7 @@
 expected 一律以 core/money 在 Decimal/整數元域計算，無 float。
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -22,6 +23,24 @@ from app.shared.exceptions import (
     NoOpenCashSession,
     UnknownCashMovementType,
 )
+
+
+@dataclass(frozen=True)
+class CashSessionBreakdown:
+    """單一 session 的現金組成與 expected（唯讀報表用）。
+
+    expected 以與關帳同一公式由各組成推得，故報表 expected 與關帳 `expected_amount` 同源
+    （docs/19 §2.2）。purchasing/sales 等現金流皆已落 cash_movement，這裡只彙整、不重算業務。
+    """
+
+    session: CashSession
+    cash_sales: Decimal
+    acquisition_void_in: Decimal
+    buyout_out: Decimal
+    consignment_payout_out: Decimal
+    sale_refund_out: Decimal
+    manual_adjust_total: Decimal
+    expected: Decimal
 
 
 class CashDrawerService:
@@ -121,6 +140,36 @@ class CashDrawerService:
             else:  # 未知類型：拒絕靜默計算，以免算錯現金
                 raise UnknownCashMovementType(f"未知現金異動類型：{movement.type!r}")
         return Decimal(round_ntd(total))
+
+    async def list_sessions_in_range(
+        self, store_id: int, start: datetime, end: datetime
+    ) -> list[CashSession]:
+        """opened_at ∈ [start, end) 的本店 session（唯讀，每日現金報表用）。"""
+        return await self._repo.list_sessions_in_range(store_id, start, end)
+
+    async def session_breakdown(self, session: CashSession) -> CashSessionBreakdown:
+        """單一 session 的現金組成與 expected（唯讀）。
+
+        expected：OPEN 即時以 `expected_amount` 重算（與關帳同公式）；CLOSED 取結帳當下落帳的
+        `expected_amount`（已反映的對帳事實）。組成欄僅供呈現，不另驅動 expected，避免雙重口徑漂移。
+        """
+        sums = {t: Decimal(0) for t in CashMovementType}
+        for movement in await self._repo.list_movements(session.id):
+            sums[movement.type] += movement.amount
+        if session.status == CashSessionStatus.CLOSED and session.expected_amount is not None:
+            expected = session.expected_amount
+        else:
+            expected = await self.expected_amount(session)
+        return CashSessionBreakdown(
+            session=session,
+            cash_sales=sums[CashMovementType.SALE_IN],
+            acquisition_void_in=sums[CashMovementType.ACQUISITION_VOID_IN],
+            buyout_out=sums[CashMovementType.BUYOUT_OUT],
+            consignment_payout_out=sums[CashMovementType.CONSIGNMENT_PAYOUT_OUT],
+            sale_refund_out=sums[CashMovementType.SALE_REFUND_OUT],
+            manual_adjust_total=sums[CashMovementType.MANUAL_ADJUST],
+            expected=expected,
+        )
 
     async def close_session(
         self, session: CashSession, counted_amount: Decimal, closed_by: int
