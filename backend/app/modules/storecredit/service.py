@@ -586,7 +586,12 @@ class StoreCreditService:
         date_to: datetime,
         granularity: str,
     ) -> list[dict[str, object]]:
-        """期間發出/兌付/淨變化彙總（granularity=day/week/month；docs/16 §5A）。"""
+        """期間發出/兌付/淨變化彙總（granularity=day/week/month；docs/16 §5A）。
+
+        每期回毛額/沖正/淨額三組（docs/19 §3.2 稽核分欄）：
+        issued = issued_gross - issued_reversed、redeemed = redeemed_gross - redeemed_reversed、
+        net_change = issued - redeemed。issued/redeemed 為 net 欄（與既有語意一致）。
+        """
         if granularity not in ("day", "week", "month"):
             raise StoreCreditConflict("granularity 僅支援 day/week/month")
         rows = await self._repo.flows(
@@ -595,12 +600,20 @@ class StoreCreditService:
             date_to=date_to,
             granularity=granularity,
         )
-        return [
-            {
-                "period": period,
-                "issued": issued,
-                "redeemed": redeemed,
-                "net_change": issued - redeemed,
-            }
-            for period, issued, redeemed in rows
-        ]
+        result: list[dict[str, object]] = []
+        for period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed in rows:
+            issued = issued_gross - issued_reversed
+            redeemed = redeemed_gross - redeemed_reversed
+            result.append(
+                {
+                    "period": period,
+                    "issued": issued,
+                    "redeemed": redeemed,
+                    "net_change": issued - redeemed,
+                    "issued_gross": issued_gross,
+                    "issued_reversed": issued_reversed,
+                    "redeemed_gross": redeemed_gross,
+                    "redeemed_reversed": redeemed_reversed,
+                }
+            )
+        return result

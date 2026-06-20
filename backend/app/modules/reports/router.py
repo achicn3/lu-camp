@@ -113,9 +113,27 @@ async def flows(
         sheet="購物金流量",
         filename_stem=f"store-credit-flows-{report.store_id}",
         meta=meta,
-        headers=["期間", "發出", "兌付", "淨變化"],
+        headers=[
+            "期間",
+            "發出",
+            "兌付",
+            "淨變化",
+            "發出毛額",
+            "發出沖正",
+            "兌付毛額",
+            "兌付沖正",
+        ],
         rows=[
-            [r.period.isoformat(), str(r.issued), str(r.redeemed), str(r.net_change)]
+            [
+                r.period.isoformat(),
+                str(r.issued),
+                str(r.redeemed),
+                str(r.net_change),
+                str(r.issued_gross),
+                str(r.issued_reversed),
+                str(r.redeemed_gross),
+                str(r.redeemed_reversed),
+            ]
             for r in report.rows
         ],
     )

@@ -44,9 +44,15 @@ class LiabilityReport(BaseModel):
 
 class FlowRow(BaseModel):
     period: date
+    # issued/redeemed 為 net 欄（毛額 − 沖正）；net_change = issued − redeemed。
     issued: NTDAmount
     redeemed: NTDAmount
     net_change: NTDAmount
+    # R0 稽核分欄（docs/19 §3.2）：毛額落發出/兌付當期、沖正落沖正當期。
+    issued_gross: NTDAmount
+    issued_reversed: NTDAmount
+    redeemed_gross: NTDAmount
+    redeemed_reversed: NTDAmount
 
 
 class FlowsReport(BaseModel):

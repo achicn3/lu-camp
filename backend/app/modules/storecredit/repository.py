@@ -392,22 +392,31 @@ class StoreCreditRepository:
         date_from: datetime,
         date_to: datetime,
         granularity: str,
-    ) -> list[tuple[datetime, Decimal, Decimal]]:
-        """期間內按粒度彙總淨流量：(period, issued, redeemed)。
+    ) -> list[tuple[datetime, Decimal, Decimal, Decimal, Decimal]]:
+        """期間內按粒度彙總流量的毛/沖正分量：
+        (period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed)。
 
-        REVERSAL 併回原業務流向：ACQUISITION_ROLLBACK 抵銷 issued；
-        SALE_VOID 抵銷 redeemed。ADJUSTMENT 維持不納入本流量報表。
+        - issued_gross：CREDIT 發出毛額（>0）。
+        - issued_reversed：ACQUISITION_ROLLBACK 沖正的發出額（取 -signed 轉正，>0）。
+        - redeemed_gross：DEBIT 兌付毛額（取 -signed 轉正，>0）。
+        - redeemed_reversed：SALE_VOID 沖正回補的兌付額（取 signed 轉正，>0）。
+        淨額由 service 以 gross - reversed 推得（issued_net / redeemed_net）。沖正落在沖正當期，
+        毛額落發出/兌付當期（docs/19 §3.3）。ADJUSTMENT 不納入本流量報表。
 
         granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
         """
         stmt = text(
             "SELECT date_trunc(:gran, created_at) AS period,"
             "  COALESCE(SUM(CASE WHEN entry_type='CREDIT'"
-            "      OR (entry_type='REVERSAL' AND source_type='ACQUISITION_ROLLBACK')"
-            "    THEN signed_amount ELSE 0 END), 0) AS issued,"
+            "    THEN signed_amount ELSE 0 END), 0) AS issued_gross,"
+            "  COALESCE(SUM(CASE WHEN entry_type='REVERSAL'"
+            "      AND source_type='ACQUISITION_ROLLBACK'"
+            "    THEN -signed_amount ELSE 0 END), 0) AS issued_reversed,"
             "  COALESCE(SUM(CASE WHEN entry_type='DEBIT'"
-            "      OR (entry_type='REVERSAL' AND source_type='SALE_VOID')"
-            "    THEN -signed_amount ELSE 0 END), 0) AS redeemed"
+            "    THEN -signed_amount ELSE 0 END), 0) AS redeemed_gross,"
+            "  COALESCE(SUM(CASE WHEN entry_type='REVERSAL'"
+            "      AND source_type='SALE_VOID'"
+            "    THEN signed_amount ELSE 0 END), 0) AS redeemed_reversed"
             " FROM store_credit_ledger"
             " WHERE store_id = :sid AND created_at >= :dfrom AND created_at < :dto"
             " GROUP BY period ORDER BY period"
@@ -421,4 +430,6 @@ class StoreCreditRepository:
                 "dto": date_to,
             },
         )
-        return [(p, Decimal(i), Decimal(r)) for p, i, r in result]
+        return [
+            (p, Decimal(ig), Decimal(ir), Decimal(rg), Decimal(rr)) for p, ig, ir, rg, rr in result
+        ]

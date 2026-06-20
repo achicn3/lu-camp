@@ -187,13 +187,19 @@ async def test_flows_report(client: httpx.AsyncClient, db_session: AsyncSession)
     assert rows[0]["issued"] == "500"
     assert rows[0]["redeemed"] == "200"
     assert rows[0]["net_change"] == "300"
+    # 無沖正 → gross == net、reversed == 0（R0 稽核分欄）
+    assert rows[0]["issued_gross"] == "500"
+    assert rows[0]["issued_reversed"] == "0"
+    assert rows[0]["redeemed_gross"] == "200"
+    assert rows[0]["redeemed_reversed"] == "0"
 
 
 async def test_flows_report_nets_acquisition_rollback_reversal(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    mgr, clerk, _store_id, member_id, _mgr_id = await _seed(db_session)
+    mgr, clerk, store_id, member_id, _mgr_id = await _seed(db_session)
     acq_id = await _create_store_credit_buyout(client, clerk, member_id, key="flows-acq-rollback")
+    credited = await StoreCreditService(db_session).get_balance(store_id, member_id)
     voided = await client.post(
         f"/api/v1/acquisitions/{acq_id}/void",
         json={"reason": "報表沖正測試"},
@@ -217,6 +223,9 @@ async def test_flows_report_nets_acquisition_rollback_reversal(
     assert rows[0]["issued"] == "0"
     assert rows[0]["redeemed"] == "0"
     assert rows[0]["net_change"] == "0"
+    # 同期沖正：issued_gross 仍記錄原發出（含溢價）、issued_reversed 抵銷 → net 0（稽核可見毛額）
+    assert rows[0]["issued_gross"] == str(credited)
+    assert rows[0]["issued_reversed"] == str(credited)
 
 
 async def test_flows_report_nets_sale_void_reversal(
@@ -259,6 +268,82 @@ async def test_flows_report_nets_sale_void_reversal(
     assert rows[0]["issued"] == str(issued)
     assert rows[0]["redeemed"] == "0"
     assert rows[0]["net_change"] == str(issued)
+    # 兌付後作廢：redeemed_gross 記原兌付、redeemed_reversed 抵銷 → redeemed_net 0
+    assert rows[0]["redeemed_gross"] == "200"
+    assert rows[0]["redeemed_reversed"] == "200"
+
+
+async def test_flows_breakdown_cross_period_reconciles(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """跨期沖正（docs/19 §3.3）：gross 落發出月、reversed 落沖正月；各期 net 可解釋、
+    全期 issued_net 合計 = 0。以 service 直接注入不同月份的帳本列驗證。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    from datetime import UTC, datetime
+
+    from app.modules.storecredit.models import StoreCreditAccount, StoreCreditLedger
+    from app.shared.enums import StoreCreditEntryType
+
+    db_session.add(StoreCreditAccount(store_id=store_id, contact_id=member_id, balance=Decimal(0)))
+    await db_session.flush()
+    # 1 月發出 500（CREDIT）
+    credit = StoreCreditLedger(
+        store_id=store_id,
+        contact_id=member_id,
+        entry_type=StoreCreditEntryType.CREDIT,
+        signed_amount=Decimal(500),
+        balance_after=Decimal(500),
+        cash_equivalent=Decimal(500),
+        premium_rate_applied=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        fingerprint="x" * 64,
+        created_by=mgr_id,
+        created_at=datetime(2026, 1, 15, tzinfo=UTC),
+    )
+    db_session.add(credit)
+    await db_session.flush()
+    # 2 月沖正（ACQUISITION_ROLLBACK，signed = -500）
+    db_session.add(
+        StoreCreditLedger(
+            store_id=store_id,
+            contact_id=member_id,
+            entry_type=StoreCreditEntryType.REVERSAL,
+            signed_amount=Decimal(-500),
+            balance_after=Decimal(0),
+            source_type=StoreCreditSourceType.ACQUISITION_ROLLBACK,
+            source_id=1,
+            reversal_of_id=credit.id,
+            fingerprint="y" * 64,
+            created_by=mgr_id,
+            created_at=datetime(2026, 2, 10, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2026-01-01T00:00:00Z",
+            "to": "2026-03-01T00:00:00Z",
+            "granularity": "month",
+        },
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 2
+    jan, feb = rows[0], rows[1]
+    # 1 月：毛額發出 500、net +500、未沖正
+    assert jan["issued_gross"] == "500"
+    assert jan["issued_reversed"] == "0"
+    assert jan["issued"] == "500"
+    # 2 月：發出毛額 0、沖正 500、net -500
+    assert feb["issued_gross"] == "0"
+    assert feb["issued_reversed"] == "500"
+    assert feb["issued"] == "-500"
+    # 全期 issued_net 合計 = 0（沖正後無有效負債）
+    assert Decimal(jan["issued"]) + Decimal(feb["issued"]) == Decimal(0)
 
 
 async def test_flows_rejects_bad_range_and_granularity(
@@ -283,6 +368,36 @@ async def test_flows_rejects_bad_range_and_granularity(
         headers=_auth(mgr),
     )
     assert badg.status_code == 422
+
+
+async def test_flows_csv_carries_gross_reversed_columns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """R0：flows CSV 須含 gross/reversed 稽核欄，與 JSON 同源。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    await StoreCreditService(db_session).credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2100-01-01T00:00:00Z",
+            "granularity": "month",
+            "format": "csv",
+        },
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    text = resp.content.decode("utf-8-sig")
+    assert "發出毛額" in text and "發出沖正" in text
+    assert "兌付毛額" in text and "兌付沖正" in text
 
 
 async def test_reconciliation_report(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

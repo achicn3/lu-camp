@@ -1587,6 +1587,10 @@ export interface components {
         FlowRow: {
             /** Issued */
             issued: string;
+            /** Issued Gross */
+            issued_gross: string;
+            /** Issued Reversed */
+            issued_reversed: string;
             /** Net Change */
             net_change: string;
             /**
@@ -1596,6 +1600,10 @@ export interface components {
             period: string;
             /** Redeemed */
             redeemed: string;
+            /** Redeemed Gross */
+            redeemed_gross: string;
+            /** Redeemed Reversed */
+            redeemed_reversed: string;
         };
         /**
          * FlowsReport

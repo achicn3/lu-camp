@@ -1701,6 +1701,14 @@
             "title": "Issued",
             "type": "string"
           },
+          "issued_gross": {
+            "title": "Issued Gross",
+            "type": "string"
+          },
+          "issued_reversed": {
+            "title": "Issued Reversed",
+            "type": "string"
+          },
           "net_change": {
             "title": "Net Change",
             "type": "string"
@@ -1713,13 +1721,25 @@
           "redeemed": {
             "title": "Redeemed",
             "type": "string"
+          },
+          "redeemed_gross": {
+            "title": "Redeemed Gross",
+            "type": "string"
+          },
+          "redeemed_reversed": {
+            "title": "Redeemed Reversed",
+            "type": "string"
           }
         },
         "required": [
           "period",
           "issued",
           "redeemed",
-          "net_change"
+          "net_change",
+          "issued_gross",
+          "issued_reversed",
+          "redeemed_gross",
+          "redeemed_reversed"
         ],
         "title": "FlowRow",
         "type": "object"
