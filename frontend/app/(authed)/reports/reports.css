@@ -99,12 +99,64 @@
   font-weight: 600;
 }
 
-.rpt-other-note {
-  margin-top: var(--sp-6);
-  padding: var(--sp-4);
-  background: var(--surface);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  color: var(--ink-soft);
+/* -- Phase 6: Dashboard hero cards -- */
+
+.rpt-dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-4);
+}
+
+.rpt-stat-hero {
+  border-left: 4px solid var(--accent);
+}
+
+.rpt-stat-hero dd {
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.rpt-stat-estimate {
+  border-left: 4px solid var(--warn);
+}
+
+.rpt-rate {
   font-size: var(--text-sm);
+  color: var(--ink-soft);
+  font-weight: 400;
+  margin-left: var(--sp-1);
+}
+
+.rpt-note-inline {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  font-weight: 400;
+  margin-top: var(--sp-1);
+}
+
+/* -- Phase 6: Tabs wrap (scrollable for many tabs) -- */
+
+.rpt-tabs-wrap {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
+}
+
+/* -- Phase 6: Trend chart -- */
+
+.rpt-chart-wrap {
+  margin-bottom: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  overflow-x: auto;
+}
+
+.rpt-trend-chart {
+  width: 100%;
+  max-width: 700px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
 }

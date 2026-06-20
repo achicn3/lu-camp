@@ -1,15 +1,18 @@
 "use client";
-// /reports 報表頁（MANAGER 專用）：購物金報表區（docs/10 §/reports、docs/16 §5）。
-// 四個分頁：負債（liability）、流量（flows）、效益指標（effectiveness）、對帳（reconciliation）。
-// 其他報表（現金對帳/營收成本/庫存/寄售/趨勢）待後端端點完成後補齊。
+// /reports 報表頁（MANAGER 專用）。
+// 10 個分頁：今日營運（dashboard）、趨勢、現金對帳、銷售毛利、庫存價值、寄售應付
+//           + 購物金 4 分頁（負債/流量/效益指標/對帳）。
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 
 import {
   EFFECTIVENESS_LABELS,
+  FINANCIAL_GRANULARITY_OPTIONS,
   GRANULARITY_OPTIONS,
+  computeChartScaling,
   defaultDateRange,
   exclusiveEnd,
+  isoDate,
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
@@ -25,10 +28,32 @@ type LiabilityReport = components["schemas"]["LiabilityReport"];
 type FlowsReport = components["schemas"]["FlowsReport"];
 type EffectivenessReport = components["schemas"]["EffectivenessReport"];
 type ReconciliationReport = components["schemas"]["ReconciliationReport"];
+type DailySummaryReport = components["schemas"]["DailySummaryReport"];
+type TrendsReport = components["schemas"]["TrendsReport"];
+type DailyCashReport = components["schemas"]["DailyCashReport"];
+type SalesMarginReport = components["schemas"]["SalesMarginReport"];
+type InventoryValueReport = components["schemas"]["InventoryValueReport"];
+type ConsignmentPayablesReport = components["schemas"]["ConsignmentPayablesReport"];
 
-type Tab = "liability" | "flows" | "effectiveness" | "reconciliation";
+type Tab =
+  | "dashboard"
+  | "trends"
+  | "daily-cash"
+  | "sales-margin"
+  | "inventory-value"
+  | "consignment-payables"
+  | "liability"
+  | "flows"
+  | "effectiveness"
+  | "reconciliation";
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: "dashboard", label: "今日營運" },
+  { key: "trends", label: "趨勢" },
+  { key: "daily-cash", label: "現金對帳" },
+  { key: "sales-margin", label: "銷售毛利" },
+  { key: "inventory-value", label: "庫存價值" },
+  { key: "consignment-payables", label: "寄售應付" },
   { key: "liability", label: "負債" },
   { key: "flows", label: "流量" },
   { key: "effectiveness", label: "效益指標" },
@@ -74,8 +99,6 @@ function ErrorBlock({ message }: { message: string }) {
 
 // -- Download helper --
 
-// 匯出走原生 fetch（非 api client）下載二進位檔，故必須自行帶上 Bearer——
-// 報表匯出端點為 MANAGER 限定，缺 token 會 401 且靜默無檔。
 async function downloadReport(url: string, filename: string): Promise<void> {
   const token = getToken();
   const response = await fetch(url, {
@@ -100,6 +123,774 @@ function buildExportUrl(basePath: string, format: "csv" | "xlsx", params?: Recor
   }
   return url.toString();
 }
+
+// -- SVG Trend Chart Component (lightweight, zero-dependency) --
+
+interface TrendChartProps {
+  rows: { period: string; recognized_revenue: string; gross_margin: string }[];
+}
+
+function TrendChart({ rows }: TrendChartProps) {
+  if (rows.length === 0) return <p className="hint">查無資料，無法繪圖</p>;
+
+  const revenueValues = rows.map((r) => parseNtd(r.recognized_revenue) ?? 0);
+  const marginValues = rows.map((r) => parseNtd(r.gross_margin) ?? 0);
+  const allValues = [...revenueValues, ...marginValues];
+
+  const { min: yMin, max: yMax, ticks } = computeChartScaling(allValues);
+
+  const chartWidth = 600;
+  const chartHeight = 300;
+  const padding = { top: 20, right: 20, bottom: 60, left: 80 };
+  const innerWidth = chartWidth - padding.left - padding.right;
+  const innerHeight = chartHeight - padding.top - padding.bottom;
+
+  const yRange = yMax - yMin || 1;
+  const toY = (v: number) => padding.top + innerHeight - ((v - yMin) / yRange) * innerHeight;
+  const toX = (i: number) =>
+    padding.left + (rows.length === 1 ? innerWidth / 2 : (i / (rows.length - 1)) * innerWidth);
+
+  const revenuePath = rows
+    .map((_, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(revenueValues[i]).toFixed(1)}`)
+    .join(" ");
+  const marginPath = rows
+    .map((_, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(marginValues[i]).toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <div className="rpt-chart-wrap">
+      <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="rpt-trend-chart" role="img" aria-label="趨勢圖">
+        {/* Y-axis grid lines and labels */}
+        {ticks.map((tick) => (
+          <g key={tick}>
+            <line
+              x1={padding.left}
+              x2={chartWidth - padding.right}
+              y1={toY(tick)}
+              y2={toY(tick)}
+              stroke="var(--border)"
+              strokeDasharray="4 2"
+            />
+            <text x={padding.left - 8} y={toY(tick) + 4} textAnchor="end" fontSize="11" fill="var(--ink-soft)">
+              {formatNtd(tick)}
+            </text>
+          </g>
+        ))}
+
+        {/* X-axis labels */}
+        {rows.map((row, i) => (
+          <text
+            key={row.period}
+            x={toX(i)}
+            y={chartHeight - padding.bottom + 18}
+            textAnchor="middle"
+            fontSize="10"
+            fill="var(--ink-soft)"
+            transform={rows.length > 7 ? `rotate(-45, ${toX(i)}, ${chartHeight - padding.bottom + 18})` : undefined}
+          >
+            {row.period}
+          </text>
+        ))}
+
+        {/* Revenue line */}
+        <path d={revenuePath} fill="none" stroke="var(--accent)" strokeWidth="2.5" />
+        {rows.map((_, i) => (
+          <circle key={`rev-${revenueValues[i]}-${i}`} cx={toX(i)} cy={toY(revenueValues[i])} r="3.5" fill="var(--accent)" />
+        ))}
+
+        {/* Margin line */}
+        <path d={marginPath} fill="none" stroke="var(--info)" strokeWidth="2.5" />
+        {rows.map((_, i) => (
+          <circle key={`mar-${marginValues[i]}-${i}`} cx={toX(i)} cy={toY(marginValues[i])} r="3.5" fill="var(--info)" />
+        ))}
+
+        {/* Legend */}
+        <rect x={chartWidth - padding.right - 150} y={padding.top} width="12" height="12" fill="var(--accent)" rx="2" />
+        <text x={chartWidth - padding.right - 134} y={padding.top + 11} fontSize="12" fill="var(--ink)">
+          認列營收
+        </text>
+        <rect x={chartWidth - padding.right - 70} y={padding.top} width="12" height="12" fill="var(--info)" rx="2" />
+        <text x={chartWidth - padding.right - 54} y={padding.top + 11} fontSize="12" fill="var(--ink)">
+          毛利
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+// ============================================================
+// Phase 6 Financial Report Panels
+// ============================================================
+
+// -- Dashboard Panel (Today's Operations) --
+
+function DashboardPanel() {
+  const [date, setDate] = useState(isoDate(new Date()));
+
+  const query = useQuery({
+    queryKey: ["reports", "daily-summary", date],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/daily-summary", {
+        params: { query: { date } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取每日營運報表失敗");
+    },
+  });
+
+  if (query.isPending) return <p className="hint">載入中...</p>;
+  if (query.isError) return <ErrorBlock message={query.error.message} />;
+
+  const report: DailySummaryReport = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/daily-summary", fmt, { date });
+    void downloadReport(url, `daily-summary-${date}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          日期
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      </div>
+
+      <dl className="rpt-summary rpt-dashboard-cards">
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>營業額</dt>
+          <dd><MoneyText value={report.gross_turnover} /></dd>
+        </div>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>認列營收</dt>
+          <dd><MoneyText value={report.recognized_revenue} /></dd>
+        </div>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>毛利</dt>
+          <dd>
+            <MoneyText value={report.gross_margin} />
+            {report.gross_margin_rate && (
+              <span className="rpt-rate"> ({report.gross_margin_rate})</span>
+            )}
+          </dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>當日現金支出</dt>
+          <dd><MoneyText value={report.total_cash_out} /></dd>
+        </div>
+        <div className="rpt-stat rpt-stat-estimate">
+          <dt>
+            估算淨利
+            <span className="rpt-badge-estimate">估計值</span>
+          </dt>
+          <dd><MoneyText value={report.estimated_net_income} /></dd>
+          <dd className="rpt-note-inline">{report.estimated_net_income_note}</dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>客單價</dt>
+          <dd><MoneyText value={report.avg_ticket} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>交易筆數</dt>
+          <dd className="money">{report.transaction_count}</dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>購物金發出</dt>
+          <dd><MoneyText value={report.store_credit_issued} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>購物金兌付</dt>
+          <dd><MoneyText value={report.store_credit_redeemed} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>現金差異</dt>
+          <dd><MoneyText value={report.cash_variance} /></dd>
+        </div>
+      </dl>
+
+      <DownloadButtons onDownload={handleDownload} />
+    </div>
+  );
+}
+
+// -- Trends Panel --
+
+function TrendsPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+  const [granularity, setGranularity] = useState<"day" | "week" | "month" | "quarter">("day");
+
+  const query = useQuery({
+    queryKey: ["reports", "trends", { from, to, granularity }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/trends", {
+        params: {
+          query: {
+            from: startOfDay(from),
+            to: exclusiveEnd(to),
+            granularity,
+          },
+        },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取趨勢報表失敗");
+    },
+  });
+
+  const report: TrendsReport | undefined = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/trends", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+      granularity,
+    });
+    void downloadReport(url, `trends-${from}-${to}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <label>
+          粒度
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as "day" | "week" | "month" | "quarter")}
+          >
+            {FINANCIAL_GRANULARITY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && (
+        <>
+          <TrendChart rows={report.rows} />
+
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>期間</th>
+                  <th>認列營收</th>
+                  <th>毛利</th>
+                  <th>毛利率</th>
+                  <th>營業額</th>
+                  <th>交易數</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.rows.map((row) => (
+                  <tr key={row.period}>
+                    <td>{row.period}</td>
+                    <td><MoneyText value={row.recognized_revenue} /></td>
+                    <td><MoneyText value={row.gross_margin} /></td>
+                    <td>{row.gross_margin_rate ?? "N/A"}</td>
+                    <td><MoneyText value={row.gross_turnover} /></td>
+                    <td className="money">{row.transaction_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {report.rows.length === 0 && <p className="hint">查無資料</p>}
+          </div>
+
+          <DownloadButtons onDownload={handleDownload} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// -- Daily Cash Panel --
+
+function DailyCashPanel() {
+  const [date, setDate] = useState(isoDate(new Date()));
+
+  const query = useQuery({
+    queryKey: ["reports", "daily-cash", date],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/daily-cash", {
+        params: { query: { date } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取現金對帳報表失敗");
+    },
+  });
+
+  if (query.isPending) return <p className="hint">載入中...</p>;
+  if (query.isError) return <ErrorBlock message={query.error.message} />;
+
+  const report: DailyCashReport = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/daily-cash", fmt, { date });
+    void downloadReport(url, `daily-cash-${date}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          日期
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      </div>
+
+      <h3>各 Session</h3>
+      <div className="inv-table-wrap">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>狀態</th>
+              <th>開帳時間</th>
+              <th>零用金</th>
+              <th>現金銷售</th>
+              <th>買斷支出</th>
+              <th>寄售付款</th>
+              <th>退貨退現</th>
+              <th>作廢收回</th>
+              <th>手動調整</th>
+              <th>應有現金</th>
+              <th>實點現金</th>
+              <th>差異</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.sessions.map((s) => (
+              <tr key={s.session_id}>
+                <td className="money">{s.session_id}</td>
+                <td>{s.status}</td>
+                <td>{s.opened_at}</td>
+                <td><MoneyText value={s.opening_float} /></td>
+                <td><MoneyText value={s.cash_sales} /></td>
+                <td><MoneyText value={s.buyout_out} /></td>
+                <td><MoneyText value={s.consignment_payout_out} /></td>
+                <td><MoneyText value={s.sale_refund_out} /></td>
+                <td><MoneyText value={s.acquisition_void_in} /></td>
+                <td><MoneyText value={s.manual_adjust_total} /></td>
+                <td><MoneyText value={s.expected_amount} /></td>
+                <td><MoneyText value={s.counted_amount} /></td>
+                <td><MoneyText value={s.variance} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {report.sessions.length === 0 && <p className="hint">當日無 session</p>}
+      </div>
+
+      <h3>當日合計</h3>
+      <dl className="rpt-summary">
+        <div className="rpt-stat">
+          <dt>零用金</dt>
+          <dd><MoneyText value={report.total_opening_float} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>現金銷售</dt>
+          <dd><MoneyText value={report.total_cash_sales} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>買斷支出</dt>
+          <dd><MoneyText value={report.total_buyout_out} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>寄售付款</dt>
+          <dd><MoneyText value={report.total_consignment_payout_out} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>退貨退現</dt>
+          <dd><MoneyText value={report.total_sale_refund_out} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>作廢收回</dt>
+          <dd><MoneyText value={report.total_acquisition_void_in} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>手動調整</dt>
+          <dd><MoneyText value={report.total_manual_adjust} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>應有現金</dt>
+          <dd><MoneyText value={report.total_expected} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>實點現金</dt>
+          <dd><MoneyText value={report.total_counted} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>差異</dt>
+          <dd><MoneyText value={report.total_variance} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>購物金兌付（參考）</dt>
+          <dd><MoneyText value={report.total_store_credit_redeemed_display_only} /></dd>
+        </div>
+      </dl>
+
+      <DownloadButtons onDownload={handleDownload} />
+    </div>
+  );
+}
+
+// -- Sales Margin Panel --
+
+function SalesMarginPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+
+  const query = useQuery({
+    queryKey: ["reports", "sales-margin", { from, to }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/sales-margin", {
+        params: {
+          query: {
+            from: startOfDay(from),
+            to: exclusiveEnd(to),
+          },
+        },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取銷售毛利報表失敗");
+    },
+  });
+
+  const report: SalesMarginReport | undefined = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/sales-margin", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+    });
+    void downloadReport(url, `sales-margin-${from}-${to}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && (
+        <>
+          <dl className="rpt-summary">
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>營業額</dt>
+              <dd><MoneyText value={report.gross_turnover} /></dd>
+            </div>
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>認列營收</dt>
+              <dd><MoneyText value={report.recognized_revenue} /></dd>
+            </div>
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>毛利</dt>
+              <dd>
+                <MoneyText value={report.gross_margin} />
+                {report.gross_margin_rate && (
+                  <span className="rpt-rate"> ({report.gross_margin_rate})</span>
+                )}
+              </dd>
+            </div>
+          </dl>
+
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>指標</th>
+                  <th>金額</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>買斷成本 (COGS)</td>
+                  <td><MoneyText value={report.owned_cogs} /></td>
+                </tr>
+                <tr>
+                  <td>散裝成本</td>
+                  <td><MoneyText value={report.bulk_cogs} /></td>
+                </tr>
+                <tr>
+                  <td>寄售抽成收入</td>
+                  <td><MoneyText value={report.consignment_commission_income} /></td>
+                </tr>
+                <tr>
+                  <td>成本不明銷售額</td>
+                  <td><MoneyText value={report.unknown_cost_sales} /></td>
+                </tr>
+                <tr>
+                  <td>現金收入</td>
+                  <td><MoneyText value={report.cash_received} /></td>
+                </tr>
+                <tr>
+                  <td>購物金兌付</td>
+                  <td><MoneyText value={report.store_credit_redeemed} /></td>
+                </tr>
+                <tr>
+                  <td>交易筆數</td>
+                  <td className="money">{report.transaction_count}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <DownloadButtons onDownload={handleDownload} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// -- Inventory Value Panel --
+
+function InventoryValuePanel() {
+  const query = useQuery({
+    queryKey: ["reports", "inventory-value"],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/inventory-value");
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取庫存價值報表失敗");
+    },
+  });
+
+  if (query.isPending) return <p className="hint">載入中...</p>;
+  if (query.isError) return <ErrorBlock message={query.error.message} />;
+
+  const report: InventoryValueReport = query.data;
+  const aging = report.owned_cost_aging;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/inventory-value", fmt);
+    void downloadReport(url, `inventory-value.${fmt}`);
+  }
+
+  return (
+    <div>
+      <h3>自有庫存</h3>
+      <dl className="rpt-summary">
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>總成本</dt>
+          <dd><MoneyText value={report.total_owned_cost_value} /></dd>
+        </div>
+        <div className="rpt-stat rpt-stat-hero">
+          <dt>總售價</dt>
+          <dd><MoneyText value={report.total_owned_retail_value} /></dd>
+        </div>
+      </dl>
+      <div className="inv-table-wrap">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>類型</th>
+              <th>數量</th>
+              <th>成本</th>
+              <th>售價</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>序號品</td>
+              <td className="money">{report.owned_serialized_count}</td>
+              <td><MoneyText value={report.owned_serialized_cost} /></td>
+              <td><MoneyText value={report.owned_serialized_retail} /></td>
+            </tr>
+            <tr>
+              <td>散裝批</td>
+              <td className="money">{report.owned_bulk_remaining_qty}</td>
+              <td><MoneyText value={report.owned_bulk_cost} /></td>
+              <td><MoneyText value={report.owned_bulk_retail} /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>庫齡（自有成本價值）</h3>
+      <div className="inv-table-wrap">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>&lt;30 天</th>
+              <th>30-90 天</th>
+              <th>90-180 天</th>
+              <th>180-365 天</th>
+              <th>&gt;365 天</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><MoneyText value={aging.lt_30d} /></td>
+              <td><MoneyText value={aging.d30_90} /></td>
+              <td><MoneyText value={aging.d90_180} /></td>
+              <td><MoneyText value={aging.d180_365} /></td>
+              <td><MoneyText value={aging.gt_365d} /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>寄售在庫</h3>
+      <dl className="rpt-summary">
+        <div className="rpt-stat">
+          <dt>序號品</dt>
+          <dd className="money">{report.consignment_serialized_count} 件</dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>散裝剩餘</dt>
+          <dd className="money">{report.consignment_bulk_remaining_qty} 件</dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>售價總額</dt>
+          <dd><MoneyText value={report.consignment_inventory_gross} /></dd>
+        </div>
+      </dl>
+
+      <h3>Catalog 商品</h3>
+      <dl className="rpt-summary">
+        <div className="rpt-stat">
+          <dt>數量</dt>
+          <dd className="money">{report.catalog_total_qty} 件</dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>售價</dt>
+          <dd><MoneyText value={report.catalog_retail_value} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>成本</dt>
+          <dd><MoneyText value={report.catalog_cost_value} /></dd>
+        </div>
+      </dl>
+
+      <DownloadButtons onDownload={handleDownload} />
+    </div>
+  );
+}
+
+// -- Consignment Payables Panel --
+
+function ConsignmentPayablesPanel() {
+  const [status, setStatus] = useState<"PENDING" | "PAID" | "CANCELLED" | "ALL">("ALL");
+
+  const query = useQuery({
+    queryKey: ["reports", "consignment-payables", status],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/consignment-payables", {
+        params: { query: { status } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取寄售應付報表失敗");
+    },
+  });
+
+  if (query.isPending) return <p className="hint">載入中...</p>;
+  if (query.isError) return <ErrorBlock message={query.error.message} />;
+
+  const report: ConsignmentPayablesReport = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/consignment-payables", fmt, { status });
+    void downloadReport(url, `consignment-payables-${status}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          狀態篩選
+          <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
+            <option value="ALL">ALL</option>
+            <option value="PENDING">PENDING</option>
+            <option value="PAID">PAID</option>
+            <option value="CANCELLED">CANCELLED</option>
+          </select>
+        </label>
+      </div>
+
+      <dl className="rpt-summary">
+        <div className="rpt-stat">
+          <dt>待付</dt>
+          <dd><MoneyText value={report.total_pending_payout} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>已付</dt>
+          <dd><MoneyText value={report.total_paid_payout} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>取消</dt>
+          <dd><MoneyText value={report.total_cancelled_payout} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>需追回</dt>
+          <dd><MoneyText value={report.total_reclaim_needed_payout} /></dd>
+        </div>
+      </dl>
+
+      <div className="inv-table-wrap">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>結算 ID</th>
+              <th>商品</th>
+              <th>寄售人</th>
+              <th>電話</th>
+              <th>售價</th>
+              <th>抽成</th>
+              <th>應付</th>
+              <th>狀態</th>
+              <th>需追回</th>
+              <th>銷售時間</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.rows.map((row) => (
+              <tr key={row.settlement_id}>
+                <td className="money">{row.settlement_id}</td>
+                <td>{row.item_name}</td>
+                <td>{row.consignor_name ?? "-"}</td>
+                <td>{row.consignor_phone ?? "-"}</td>
+                <td><MoneyText value={row.gross} /></td>
+                <td><MoneyText value={row.commission_amount} /></td>
+                <td><MoneyText value={row.payout_amount} /></td>
+                <td>{row.status}</td>
+                <td>{row.reclaim_needed ? "是" : "否"}</td>
+                <td>{row.sale_created_at}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {report.rows.length === 0 && <p className="hint">查無資料</p>}
+      </div>
+
+      <DownloadButtons onDownload={handleDownload} />
+    </div>
+  );
+}
+
+// ============================================================
+// Store Credit Report Panels (existing)
+// ============================================================
 
 // -- Liability Panel --
 
@@ -471,6 +1262,18 @@ function ReconciliationPanel() {
 
 function TabContent({ tab }: { tab: Tab }): ReactNode {
   switch (tab) {
+    case "dashboard":
+      return <DashboardPanel />;
+    case "trends":
+      return <TrendsPanel />;
+    case "daily-cash":
+      return <DailyCashPanel />;
+    case "sales-margin":
+      return <SalesMarginPanel />;
+    case "inventory-value":
+      return <InventoryValuePanel />;
+    case "consignment-payables":
+      return <ConsignmentPayablesPanel />;
     case "liability":
       return <LiabilityPanel />;
     case "flows":
@@ -485,7 +1288,7 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
 // -- Main Page --
 
 export default function ReportsPage() {
-  const [tab, setTab] = useState<Tab>("liability");
+  const [tab, setTab] = useState<Tab>("dashboard");
   // 不以 token 的 role 把關：永不過期 token 的 role claim 可能過時（升/降權後未重新登入）。
   // 改以後端授權為準——探測一個 MANAGER-only 端點，依其 401/403 決定是否顯示「需管理者權限」。
   const access = useQuery({
@@ -496,12 +1299,9 @@ export default function ReportsPage() {
       if (!response.ok) throw new Error(`報表服務暫時無法使用（${response.status}）`);
       return "granted" as const;
     },
-    retry: false, // gate 探測：權限/錯誤即時決斷，不重試
+    retry: false,
   });
 
-  // 以 isFetching（含背景重新驗證）而非 isPending 把關：當有前一身分的快取 "granted" 時，
-  // isPending 為 false 但仍在 refetch——若以 isPending 把關會先渲染快取資料才等到 401/403。
-  // 故只要尚在驗證就顯示載入，待這一輪授權確定再決定。
   if (access.isFetching) {
     return (
       <section>
@@ -510,7 +1310,6 @@ export default function ReportsPage() {
       </section>
     );
   }
-  // 連線/伺服器錯誤（探測 throw）與「無權限」分流：不可把斷線誤報為權限不足。
   if (access.isError) {
     return (
       <section>
@@ -532,7 +1331,7 @@ export default function ReportsPage() {
     <section>
       <h1 className="page-title">報表</h1>
 
-      <div className="inv-tabs" role="tablist">
+      <div className="inv-tabs rpt-tabs-wrap" role="tablist">
         {TABS.map(({ key, label }) => (
           <button
             key={key}
@@ -548,10 +1347,6 @@ export default function ReportsPage() {
       </div>
 
       <TabContent tab={tab} />
-
-      <div className="rpt-other-note">
-        （其他報表待後端端點：每日現金對帳、營收/成本/毛利、庫存價值/庫齡、寄售應付、趨勢。）
-      </div>
     </section>
   );
 }

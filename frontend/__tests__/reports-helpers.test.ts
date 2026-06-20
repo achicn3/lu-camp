@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   EFFECTIVENESS_LABELS,
+  FINANCIAL_GRANULARITY_OPTIONS,
   GRANULARITY_OPTIONS,
+  computeChartScaling,
   defaultDateRange,
   exclusiveEnd,
   isoDate,
@@ -60,5 +62,51 @@ describe("EFFECTIVENESS_LABELS", () => {
 describe("GRANULARITY_OPTIONS", () => {
   it("has day/week/month", () => {
     expect(GRANULARITY_OPTIONS.map((o) => o.value)).toEqual(["day", "week", "month"]);
+  });
+});
+
+describe("FINANCIAL_GRANULARITY_OPTIONS", () => {
+  it("has day/week/month/quarter with zh-TW labels", () => {
+    expect(FINANCIAL_GRANULARITY_OPTIONS.map((o) => o.value)).toEqual(["day", "week", "month", "quarter"]);
+    expect(FINANCIAL_GRANULARITY_OPTIONS[3].label).toBe("季");
+  });
+});
+
+describe("computeChartScaling", () => {
+  it("computes min/max/step for positive values", () => {
+    const result = computeChartScaling([10, 50, 30, 80]);
+    expect(result.min).toBe(0);
+    expect(result.max).toBeGreaterThanOrEqual(80);
+    expect(result.step).toBeGreaterThan(0);
+    // ticks should cover from min to max
+    expect(result.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(result.ticks[0]).toBe(0);
+    expect(result.ticks[result.ticks.length - 1]).toBe(result.max);
+  });
+
+  it("handles all zeros", () => {
+    const result = computeChartScaling([0, 0, 0]);
+    expect(result.min).toBe(0);
+    expect(result.max).toBeGreaterThan(0);
+    expect(result.step).toBeGreaterThan(0);
+  });
+
+  it("handles negative values", () => {
+    const result = computeChartScaling([-20, 50, -10, 30]);
+    expect(result.min).toBeLessThanOrEqual(-20);
+    expect(result.max).toBeGreaterThanOrEqual(50);
+  });
+
+  it("handles empty array", () => {
+    const result = computeChartScaling([]);
+    expect(result.min).toBe(0);
+    expect(result.max).toBeGreaterThan(0);
+    expect(result.ticks.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("handles single value", () => {
+    const result = computeChartScaling([100]);
+    expect(result.min).toBeLessThanOrEqual(0);
+    expect(result.max).toBeGreaterThanOrEqual(100);
   });
 });

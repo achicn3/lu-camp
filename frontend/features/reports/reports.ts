@@ -76,3 +76,74 @@ export const GRANULARITY_OPTIONS: { value: "day" | "week" | "month"; label: stri
   { value: "week", label: "週" },
   { value: "month", label: "月" },
 ];
+
+/** Granularity options for financial trends report (includes quarter). */
+export const FINANCIAL_GRANULARITY_OPTIONS: {
+  value: "day" | "week" | "month" | "quarter";
+  label: string;
+}[] = [
+  { value: "day", label: "日" },
+  { value: "week", label: "週" },
+  { value: "month", label: "月" },
+  { value: "quarter", label: "季" },
+];
+
+// -- SVG chart helpers (lightweight, zero-dependency; coordinate scaling only) --
+
+interface ChartScaling {
+  min: number;
+  max: number;
+  step: number;
+  ticks: number[];
+}
+
+/**
+ * Compute a "nice" Y-axis scaling for a set of numeric values.
+ * Returns min, max, step, and an array of tick values.
+ * Uses a simple "nice numbers" algorithm for human-readable tick marks.
+ */
+export function computeChartScaling(values: number[]): ChartScaling {
+  if (values.length === 0) {
+    return { min: 0, max: 100, step: 20, ticks: [0, 20, 40, 60, 80, 100] };
+  }
+
+  let dataMin = Math.min(...values);
+  let dataMax = Math.max(...values);
+
+  // Handle all-same or all-zero
+  if (dataMin === dataMax) {
+    if (dataMin === 0) {
+      dataMin = 0;
+      dataMax = 100;
+    } else if (dataMin > 0) {
+      dataMin = 0;
+      dataMax = dataMin === 0 ? 100 : Math.max(...values) * 1.2;
+    } else {
+      dataMax = 0;
+    }
+  }
+
+  // Include 0 in range when all positive
+  if (dataMin > 0) dataMin = 0;
+
+  const range = dataMax - dataMin;
+  const roughStep = range / 5;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const residual = roughStep / magnitude;
+
+  let niceStep: number;
+  if (residual <= 1.5) niceStep = 1 * magnitude;
+  else if (residual <= 3) niceStep = 2 * magnitude;
+  else if (residual <= 7) niceStep = 5 * magnitude;
+  else niceStep = 10 * magnitude;
+
+  const niceMin = Math.floor(dataMin / niceStep) * niceStep;
+  const niceMax = Math.ceil(dataMax / niceStep) * niceStep;
+
+  const ticks: number[] = [];
+  for (let t = niceMin; t <= niceMax + niceStep * 0.5; t += niceStep) {
+    ticks.push(Math.round(t * 1e10) / 1e10); // avoid float artifacts
+  }
+
+  return { min: niceMin, max: niceMax, step: niceStep, ticks };
+}
