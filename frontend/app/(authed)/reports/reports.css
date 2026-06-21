@@ -129,13 +129,17 @@
   margin-left: var(--sp-1);
 }
 
-.rpt-note-inline {
+/* 估算淨利長說明移至卡片下方註腳，讓儀表板卡片高度一致、不被撐高。 */
+.rpt-dashboard-footnote {
   font-family: var(--font-sans, system-ui, sans-serif);
   font-size: var(--text-xs, 0.75rem);
-  line-height: 1.4;
+  line-height: 1.5;
   color: var(--ink-soft);
-  font-weight: 400;
-  margin-top: var(--sp-1);
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-4);
+}
+
+.rpt-dashboard-footnote .rpt-badge-estimate {
+  margin-right: var(--sp-2);
 }
 
 /* -- Phase 6: Tabs wrap (scrollable for many tabs) -- */

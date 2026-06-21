@@ -33,6 +33,8 @@ from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.sales.inputs import SaleLineInput
 from app.modules.sales.service import SalesService
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
@@ -75,6 +77,15 @@ async def _seed() -> None:
         if await cash.get_current_session(store_id) is None:
             await cash.open_session(store_id, clerk_id, Decimal(5000))
             await session.commit()
+
+        # 設「月固定現金支出」（房租+薪資+水電…），讓每日儀表板「估算淨利」帶得出數字（否則 N/A）。
+        # 正式環境由店主於「設定」頁的「月固定現金支出」欄維護。
+        await StoreSettingsService(session).update_settings(
+            store_id,
+            actor_user_id=clerk_id,
+            patch=SettingsUpdateRequest(monthly_fixed_cash_outflow=Decimal(90000)),
+        )
+        await session.commit()
 
         tag = _NOW.strftime("%H%M%S")
         # 寄售人（供寄售序號品 consignor_id）。

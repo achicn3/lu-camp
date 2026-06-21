@@ -288,7 +288,6 @@ function DashboardPanel() {
             <span className="rpt-badge-estimate">估計值</span>
           </dt>
           <dd><MoneyText value={report.estimated_net_income} /></dd>
-          <dd className="rpt-note-inline">{report.estimated_net_income_note}</dd>
         </div>
         <div className="rpt-stat">
           <dt>客單價</dt>
@@ -311,6 +310,13 @@ function DashboardPanel() {
           <dd><MoneyText value={report.cash_variance} /></dd>
         </div>
       </dl>
+
+      {report.estimated_net_income_note && (
+        <p className="rpt-dashboard-footnote">
+          <span className="rpt-badge-estimate">估計值</span>
+          估算淨利說明：{report.estimated_net_income_note}
+        </p>
+      )}
 
       <DownloadButtons onDownload={handleDownload} />
     </div>
