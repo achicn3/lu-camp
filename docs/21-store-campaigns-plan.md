@@ -113,12 +113,19 @@
 店主裁示：**整百分比折扣、不疊加**。同店至多一個生效活動；購物金為**付款方式**非折扣、照常可用。
 固定金額／買N送N／會員專屬 → v2。
 
-## 9. 實作拆分（待 §8 拍板後）
+## 9. 實作拆分（§8 已拍板）
 
-- **C1 後端核心**：`campaigns` 模型 + migration + 折扣引擎（core，純函數測試）+ campaign CRUD/啟用/結束 service+API（MANAGER、稽核）。
-- **C2 POS 整合**：`create_sale` 套折扣、`sale_line` 擴欄、寄售 gross 依決策、序號/catalog/bulk 三路徑 + 不變量測試（含寄售結算金額正確）。
-- **C3 前端**：活動管理頁（建/啟用/結束）+ POS 折扣顯示 + 收據折扣（純 UI 可委派）。
-- **C4（可選）活動成效報表**：沿 Phase 6 同源。
+- **C1 後端核心** ✅（main 7fa544f）：`campaigns` 模型 + migration + 折扣引擎（core，純函數測試）+
+  campaign CRUD/啟用/結束 service+API（MANAGER、稽核、單一 ACTIVE 守衛）。
+- **C2 POS 整合** ✅：`create_sale` 載生效活動套折扣、`sale_line` 擴欄（original_unit_price/
+  discount_amount/campaign_id, migration d6b2c3e4f5a7）、序號/catalog/bulk 三路徑、寄售 gross 依
+  §8.1 開關（STORE_ABSORBS 含「折讓>抽成→擋下虧損」守衛 / PROPORTIONAL 按折後）+ 不變量測試。
+  - **已知報表口徑（v1 限制）**：STORE_ABSORBS 下，R2/R5 的寄售抽成收入讀 settlement.commission
+    （認原價抽成），未扣掉店家吸收的折讓；該折讓另存於 `sale_line.discount_amount` 可查。精確 P&L
+    需自認列收入再減「寄售吸收折讓」——v1 不做（寄售折扣為 opt-in、預設關），日後報表 task 補。
+- **C3 前端**：活動管理頁（建/啟用/結束）+ POS 折扣顯示 + 收據折扣（純 UI 可委派）；**依 docs/08 §6.1
+  必跑瀏覽器 e2e + 截圖**（新增 campaigns-smoke.mjs）。
+- **C4（可選）活動成效報表**：沿 Phase 6 同源（含修正上述 STORE_ABSORBS 口徑）。
 - 每步 TDD + 本機四道門 + 自我 adversarial review（金流：折扣 rounding、寄售金額、退貨退實付、並發、稽核）。
 
 ## 10. 不變量（以測試守護）

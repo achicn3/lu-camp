@@ -98,8 +98,16 @@ class SaleLine(Base, TimestampMixin):
     bulk_lot_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_lots.id"))
     description: Mapped[str] = mapped_column(String(150))
     qty: Mapped[int] = mapped_column()
+    # unit_price/line_total 為**實際成交（折後）**值——退貨退實付、報表認實收皆以此為準。
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     line_total: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 門市活動折扣留痕（docs/21 C2）：original_unit_price 為折前單價（無折扣→NULL）、
+    # discount_amount 為該行折讓總額（=(原−折)×qty，預設 0）、campaign_id 指向套用的活動。
+    original_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 0), default=Decimal(0), server_default=text("0")
+    )
+    campaign_id: Mapped[int | None] = mapped_column(ForeignKey("campaigns.id"))
 
 
 class SaleTender(Base, TimestampMixin):
