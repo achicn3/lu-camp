@@ -37,7 +37,7 @@ export function scopeSummary(flags: {
   const parts: string[] = [];
   if (flags.applies_owned_serialized) parts.push("自有序號");
   if (flags.applies_owned_bulk) parts.push("自有散裝");
-  if (flags.applies_catalog) parts.push("Catalog");
+  if (flags.applies_catalog) parts.push("數量型商品");
   if (flags.applies_consignment) parts.push("寄售");
   return parts.length > 0 ? parts.join("、") : "-";
 }

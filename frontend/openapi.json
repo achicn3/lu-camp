@@ -4006,6 +4006,131 @@
         "title": "SaleLineType",
         "type": "string"
       },
+      "SaleQuoteLineRead": {
+        "description": "試算單行輸出：折後實際成交＋折讓留痕。",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "line_total": {
+            "title": "Line Total",
+            "type": "string"
+          },
+          "line_type": {
+            "$ref": "#/components/schemas/SaleLineType"
+          },
+          "original_unit_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Unit Price"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line_type",
+          "description",
+          "qty",
+          "unit_price",
+          "line_total",
+          "original_unit_price",
+          "discount_amount"
+        ],
+        "title": "SaleQuoteLineRead",
+        "type": "object"
+      },
+      "SaleQuoteRequest": {
+        "description": "結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。",
+        "properties": {
+          "buyer_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Contact Id"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SaleLineCreateRequest"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "SaleQuoteRequest",
+        "type": "object"
+      },
+      "SaleQuoteResponse": {
+        "description": "結帳前試算輸出：套生效活動後的折後總額與各行折讓；唯讀。",
+        "properties": {
+          "campaign_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SaleQuoteLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "campaign_id",
+          "campaign_name",
+          "lines"
+        ],
+        "title": "SaleQuoteResponse",
+        "type": "object"
+      },
       "SaleRead": {
         "description": "銷售單輸出（含明細與收款明細）。",
         "properties": {
@@ -8935,6 +9060,53 @@
           }
         ],
         "summary": "Create Sale",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/sales/quote": {
+      "post": {
+        "description": "結帳前試算（docs/21 C2b）：套生效活動回折後總額與各行折讓。唯讀——不扣庫存、不收款。\n\n供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額導致收款不對齊 → 422）。",
+        "operationId": "quoteSale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaleQuoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleQuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Quote Sale",
         "tags": [
           "sales"
         ]

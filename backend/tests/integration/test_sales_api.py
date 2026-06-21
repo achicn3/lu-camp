@@ -356,3 +356,47 @@ async def test_create_unexpected_error_rolls_back(
             json={"lines": [_catalog_line(cat, 1)]},
             headers=_auth(token, idem="k"),
         )
+
+
+async def test_quote_endpoint_returns_discounted_total(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """POST /sales/quote（唯讀）：生效活動下回折後總額；數量品庫存不被扣（試算不動庫存）。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.campaigns.service import CampaignService
+    from app.shared.enums import ConsignmentDiscountBearing
+
+    token, store_id, clerk_id = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    now = datetime.now(UTC)
+    camp = await CampaignService(db_session).create_campaign(
+        store_id,
+        name="開幕九折",
+        discount_pct=10,
+        starts_at=now - timedelta(days=1),
+        ends_at=now + timedelta(days=1),
+        applies_owned_serialized=True,
+        applies_owned_bulk=True,
+        applies_catalog=True,
+        applies_consignment=False,
+        consignment_discount_bearing=ConsignmentDiscountBearing.STORE_ABSORBS,
+        created_by=clerk_id,
+    )
+    await CampaignService(db_session).activate(store_id, camp.id, actor_user_id=clerk_id)
+
+    resp = await client.post(
+        "/api/v1/sales/quote",
+        json={"lines": [_catalog_line(cat, 2)]},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == "180"  # 90 × 2（九折）
+    assert body["campaign_name"] == "開幕九折"
+    assert body["lines"][0]["discount_amount"] == "20"
+    # 試算唯讀：庫存未變
+    product = await db_session.get(CatalogProduct, cat)
+    assert product is not None
+    await db_session.refresh(product)
+    assert product.quantity_on_hand == 10

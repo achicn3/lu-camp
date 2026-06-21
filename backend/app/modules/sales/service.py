@@ -105,6 +105,49 @@ def _compute_discount(
     return _AppliedDiscount(disc, original_unit, original_unit - disc, campaign.id)
 
 
+def _campaign_applies(
+    campaign: Campaign | None, *, line_type: SaleLineType, is_consignment: bool
+) -> bool:
+    """該活動是否套用到此明細（docs/21 §8.2；process 與 quote 共用，避免口徑漂移）。
+
+    序號：自有→applies_owned_serialized、寄售→applies_consignment；數量品→applies_catalog；
+    散裝：只折自有（applies_owned_bulk），寄售散裝無抽成模型、永不折。
+    """
+    if campaign is None:
+        return False
+    if line_type == SaleLineType.SERIALIZED:
+        return campaign.applies_consignment if is_consignment else campaign.applies_owned_serialized
+    if line_type == SaleLineType.CATALOG:
+        return campaign.applies_catalog
+    return campaign.applies_owned_bulk and not is_consignment
+
+
+@dataclass(frozen=True)
+class QuoteLine:
+    """結帳前試算的單行（唯讀；折後實際成交）。"""
+
+    line_type: SaleLineType
+    description: str
+    qty: int
+    unit_price: Decimal
+    line_total: Decimal
+    original_unit_price: Decimal | None
+    discount_amount: Decimal
+
+
+@dataclass(frozen=True)
+class SaleQuote:
+    """結帳前試算（docs/21 C2b）：套用生效活動後的折後總額與各行折讓；唯讀，不動庫存/不收款。
+
+    供 POS 顯示折後價並送出對齊折後總額的收款（前端不自算金額）。
+    """
+
+    total: Decimal
+    campaign_id: int | None
+    campaign_name: str | None
+    lines: list[QuoteLine]
+
+
 def _member_points_for(total: Decimal) -> int:
     """該筆銷售累積的會員點數（floor；total 為含稅整數元，與 tender 組成無關）。"""
     return int(total // _POINTS_DIVISOR)
@@ -587,6 +630,102 @@ class SalesService:
             entity_id=str(sale.id),
         )
 
+    async def quote_sale(
+        self,
+        store_id: int,
+        *,
+        lines: list[SaleLineInput],
+        buyer_contact_id: int | None = None,
+    ) -> SaleQuote:
+        """結帳前試算（docs/21 C2b）：套生效活動後的折後總額與各行折讓。唯讀——不扣庫存、不收款、
+        不建單。供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額、收款不對齊 → 422）。
+
+        不執行 STORE_ABSORBS 的「折讓>抽成」虧損守衛（那是收款側守衛，由 create_sale 把關）；
+        quote 只回客人實付的折後金額（兩種 bearing 客人實付相同）。
+        """
+        if not lines:
+            raise EmptySale("結帳試算必須至少有一筆明細")
+        campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
+        quoted: list[QuoteLine] = []
+        total = Decimal(0)
+        for line in lines:
+            ql = await self._quote_line(store_id, line, campaign)
+            quoted.append(ql)
+            total += ql.line_total
+        return SaleQuote(
+            total=total,
+            campaign_id=campaign.id if campaign is not None else None,
+            campaign_name=campaign.name if campaign is not None else None,
+            lines=quoted,
+        )
+
+    async def _quote_line(
+        self, store_id: int, line: SaleLineInput, campaign: Campaign | None
+    ) -> QuoteLine:
+        """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。"""
+        if line.line_type == SaleLineType.SERIALIZED:
+            if line.item_code is None:
+                raise SaleLineInvalid("SERIALIZED 明細必須帶 item_code")
+            item = await self._inventory.get_serialized_by_code(store_id, line.item_code)
+            if item is None:
+                raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
+            applies = _campaign_applies(
+                campaign,
+                line_type=SaleLineType.SERIALIZED,
+                is_consignment=item.ownership_type == OwnershipType.CONSIGNMENT,
+            )
+            disc = _compute_discount(campaign, item.listed_price, applies=applies)
+            return QuoteLine(
+                line_type=SaleLineType.SERIALIZED,
+                description=item.name,
+                qty=1,
+                unit_price=disc.unit_price,
+                line_total=disc.unit_price,
+                original_unit_price=disc.original_unit_price,
+                discount_amount=disc.discount_per_unit,
+            )
+        if line.line_type == SaleLineType.CATALOG:
+            if line.catalog_product_id is None:
+                raise SaleLineInvalid("CATALOG 明細必須帶 catalog_product_id")
+            if line.qty <= 0:
+                raise SaleLineInvalid("CATALOG 明細數量必須 > 0")
+            product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
+            if product is None:
+                raise SaleItemNotFound(f"找不到數量型商品 {line.catalog_product_id}")
+            applies = _campaign_applies(
+                campaign, line_type=SaleLineType.CATALOG, is_consignment=False
+            )
+            disc = _compute_discount(campaign, product.unit_price, applies=applies)
+            return QuoteLine(
+                line_type=SaleLineType.CATALOG,
+                description=product.name,
+                qty=line.qty,
+                unit_price=disc.unit_price,
+                line_total=disc.unit_price * line.qty,
+                original_unit_price=disc.original_unit_price,
+                discount_amount=disc.discount_per_unit * line.qty,
+            )
+        if line.bulk_lot_id is None:
+            raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
+        if line.qty <= 0:
+            raise SaleLineInvalid("BULK_LOT 明細數量必須 > 0")
+        lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
+        if lot is None:
+            raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
+        applies = _campaign_applies(
+            campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
+        )
+        disc = _compute_discount(campaign, lot.unit_price, applies=applies)
+        return QuoteLine(
+            line_type=SaleLineType.BULK_LOT,
+            description=lot.name,
+            qty=line.qty,
+            unit_price=disc.unit_price,
+            line_total=disc.unit_price * line.qty,
+            original_unit_price=disc.original_unit_price,
+            discount_amount=disc.discount_per_unit * line.qty,
+        )
+
     async def _process_line(
         self,
         store_id: int,
@@ -620,8 +759,8 @@ class SalesService:
         if item is None:
             raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
         is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
-        applies = campaign is not None and (
-            campaign.applies_consignment if is_consignment else campaign.applies_owned_serialized
+        applies = _campaign_applies(
+            campaign, line_type=SaleLineType.SERIALIZED, is_consignment=is_consignment
         )
         disc = _compute_discount(campaign, item.listed_price, applies=applies)  # qty 固定 1
         # 原子轉移 IN_STOCK→SOLD（已售出/併發競態 → 拋 InvalidStateTransition）。
@@ -700,7 +839,7 @@ class SalesService:
         product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
         if product is None:
             raise SaleItemNotFound(f"找不到數量型商品 {line.catalog_product_id}")
-        applies = campaign is not None and campaign.applies_catalog
+        applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
         disc = _compute_discount(campaign, product.unit_price, applies=applies)
         await self._inventory.sell_catalog_items(product.id, line.qty)
         await self._inventory.record_stock_out(
@@ -736,7 +875,9 @@ class SalesService:
         if lot is None:
             raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
         # 折扣只套自有散裝（applies_owned_bulk）；寄售散裝無抽成模型、不折（docs/21 §2）。
-        applies = campaign is not None and campaign.applies_owned_bulk and lot.consignor_id is None
+        applies = _campaign_applies(
+            campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
+        )
         disc = _compute_discount(campaign, lot.unit_price, applies=applies)
         # 原子扣減 remaining_qty（不足 → InsufficientStock；歸零自動轉 SOLD_OUT）。
         await self._inventory.sell_bulk_lot_items(lot.id, line.qty)

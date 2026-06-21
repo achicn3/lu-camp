@@ -163,7 +163,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
             checked={appliesCatalog}
             onChange={(e) => setAppliesCatalog(e.target.checked)}
           />
-          Catalog 商品
+          數量型商品
         </label>
       </fieldset>
 

@@ -973,6 +973,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote Sale
+         * @description 結帳前試算（docs/21 C2b）：套生效活動回折後總額與各行折讓。唯讀——不扣庫存、不收款。
+         *
+         *     供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額導致收款不對齊 → 422）。
+         */
+        post: operations["quoteSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales/{sale_id}": {
         parameters: {
             query?: never;
@@ -2775,6 +2797,49 @@ export interface components {
          * @enum {string}
          */
         SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT";
+        /**
+         * SaleQuoteLineRead
+         * @description 試算單行輸出：折後實際成交＋折讓留痕。
+         */
+        SaleQuoteLineRead: {
+            /** Description */
+            description: string;
+            /** Discount Amount */
+            discount_amount: string;
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
+            /** Original Unit Price */
+            original_unit_price: string | null;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * SaleQuoteRequest
+         * @description 結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。
+         */
+        SaleQuoteRequest: {
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
+            /** Lines */
+            lines: components["schemas"]["SaleLineCreateRequest"][];
+        };
+        /**
+         * SaleQuoteResponse
+         * @description 結帳前試算輸出：套生效活動後的折後總額與各行折讓；唯讀。
+         */
+        SaleQuoteResponse: {
+            /** Campaign Id */
+            campaign_id: number | null;
+            /** Campaign Name */
+            campaign_name: string | null;
+            /** Lines */
+            lines: components["schemas"]["SaleQuoteLineRead"][];
+            /** Total */
+            total: string;
+        };
         /**
          * SaleRead
          * @description 銷售單輸出（含明細與收款明細）。
@@ -5209,6 +5274,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quoteSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleQuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleQuoteResponse"];
                 };
             };
             /** @description Validation Error */

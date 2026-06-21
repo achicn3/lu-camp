@@ -100,6 +100,42 @@ class SaleCreateRequest(BaseModel):
         return None if self.tenders is None else [t.to_input() for t in self.tenders]
 
 
+NTDAmountOpt = Annotated[
+    Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
+]
+
+
+class SaleQuoteRequest(BaseModel):
+    """結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。"""
+
+    lines: list[SaleLineCreateRequest] = Field(min_length=1)
+    buyer_contact_id: int | None = None
+
+    def to_inputs(self) -> list[SaleLineInput]:
+        return [line.to_input() for line in self.lines]
+
+
+class SaleQuoteLineRead(BaseModel):
+    """試算單行輸出：折後實際成交＋折讓留痕。"""
+
+    line_type: SaleLineType
+    description: str
+    qty: int
+    unit_price: NTDAmount
+    line_total: NTDAmount
+    original_unit_price: NTDAmountOpt
+    discount_amount: NTDAmount
+
+
+class SaleQuoteResponse(BaseModel):
+    """結帳前試算輸出：套生效活動後的折後總額與各行折讓；唯讀。"""
+
+    total: NTDAmount
+    campaign_id: int | None
+    campaign_name: str | None
+    lines: list[SaleQuoteLineRead]
+
+
 class SaleLineRead(BaseModel):
     """銷售明細輸出。"""
 

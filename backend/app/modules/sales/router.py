@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
-from app.modules.sales.schemas import SaleCreateRequest, SaleRead, SaleSummaryRead
+from app.modules.sales.schemas import (
+    SaleCreateRequest,
+    SaleQuoteLineRead,
+    SaleQuoteRequest,
+    SaleQuoteResponse,
+    SaleRead,
+    SaleSummaryRead,
+)
 from app.modules.sales.service import SalesService
 from app.shared.enums import UserRole
 from app.shared.exceptions import (
@@ -120,6 +127,41 @@ async def create_sale(
     tenders = await svc.get_tenders(sale.id)
     await session.commit()
     return SaleRead.build(sale, lines, tenders)
+
+
+@router.post("/quote", response_model=SaleQuoteResponse, operation_id="quoteSale")
+async def quote_sale(
+    payload: SaleQuoteRequest, session: SessionDep, user: CurrentUserDep
+) -> SaleQuoteResponse:
+    """結帳前試算（docs/21 C2b）：套生效活動回折後總額與各行折讓。唯讀——不扣庫存、不收款。
+
+    供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額導致收款不對齊 → 422）。
+    """
+    try:
+        quote = await SalesService(session).quote_sale(
+            user.store_id,
+            lines=payload.to_inputs(),
+            buyer_contact_id=payload.buyer_contact_id,
+        )
+    except DomainError as exc:
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
+    return SaleQuoteResponse(
+        total=quote.total,
+        campaign_id=quote.campaign_id,
+        campaign_name=quote.campaign_name,
+        lines=[
+            SaleQuoteLineRead(
+                line_type=ql.line_type,
+                description=ql.description,
+                qty=ql.qty,
+                unit_price=ql.unit_price,
+                line_total=ql.line_total,
+                original_unit_price=ql.original_unit_price,
+                discount_amount=ql.discount_amount,
+            )
+            for ql in quote.lines
+        ],
+    )
 
 
 @router.get("", response_model=list[SaleSummaryRead], operation_id="listSales")

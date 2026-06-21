@@ -18,7 +18,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
-from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.models import SaleLine
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
@@ -32,9 +32,10 @@ from app.shared.enums import (
     OwnershipType,
     SaleLineType,
     SerializedItemStatus,
+    TenderType,
     UserRole,
 )
-from app.shared.exceptions import SaleLineInvalid
+from app.shared.exceptions import InvalidSaleTender, SaleLineInvalid
 
 _SEQ = 0
 
@@ -185,6 +186,52 @@ async def test_owned_serialized_discounted(ctx: dict[str, int], db_session: Asyn
     assert lines[0].original_unit_price == Decimal(1000)
     assert lines[0].discount_amount == Decimal(100)
     assert lines[0].campaign_id is not None
+
+
+async def test_quote_returns_discounted_total_for_pos(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """POS 結帳前以 quote 取折後總額（唯讀，不動庫存）→ 前端據此顯示折後價並送對齊的收款。"""
+    await _make_campaign(db_session, ctx["store_id"], ctx["clerk_id"], pct=10)
+    code = await _serialized(
+        db_session, ctx["store_id"], ownership=OwnershipType.OWNED, price="1000"
+    )
+    quote = await SalesService(db_session).quote_sale(
+        ctx["store_id"],
+        lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+    )
+    assert quote.total == Decimal(900)
+    assert quote.campaign_name is not None
+    assert quote.lines[0].line_total == Decimal(900)
+    assert quote.lines[0].discount_amount == Decimal(100)
+    # quote 唯讀：序號品仍在庫（未被 quote 售出）
+    item = await db_session.scalar(select(SerializedItem).where(SerializedItem.item_code == code))
+    assert item is not None and item.status == SerializedItemStatus.IN_STOCK
+    # 用 quote 的折後總額付款 → 結帳成功（POS 正解）
+    sale = await SalesService(db_session).create_sale(
+        ctx["store_id"],
+        ctx["clerk_id"],
+        lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=quote.total)],
+    )
+    assert sale.total == Decimal(900)
+
+
+async def test_full_price_tender_under_campaign_is_rejected(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """回歸：活動生效時若用『折前全額』付款（POS 未取 quote 的舊行為）→ 收款不對齊 → 422。"""
+    await _make_campaign(db_session, ctx["store_id"], ctx["clerk_id"], pct=10)
+    code = await _serialized(
+        db_session, ctx["store_id"], ownership=OwnershipType.OWNED, price="1000"
+    )
+    with pytest.raises(InvalidSaleTender):
+        await SalesService(db_session).create_sale(
+            ctx["store_id"],
+            ctx["clerk_id"],
+            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+            tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(1000))],
+        )
 
 
 async def test_no_campaign_no_discount(ctx: dict[str, int], db_session: AsyncSession) -> None:

@@ -57,7 +57,7 @@ describe("scopeSummary", () => {
     });
     expect(result).toContain("自有序號");
     expect(result).toContain("自有散裝");
-    expect(result).toContain("Catalog");
+    expect(result).toContain("數量型商品");
     expect(result).toContain("寄售");
   });
 

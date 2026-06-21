@@ -767,7 +767,7 @@ function InventoryValuePanel() {
         </div>
       </dl>
 
-      <h3>Catalog 商品</h3>
+      <h3>數量型商品</h3>
       <dl className="rpt-summary">
         <div className="rpt-stat">
           <dt>數量</dt>
