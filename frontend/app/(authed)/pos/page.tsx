@@ -22,6 +22,7 @@ import {
   toTenders,
   validatePlan,
 } from "@/features/pos/tender";
+import { printSaleDetail } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -351,24 +352,23 @@ function TenderPanel({
 // ── 完成後：列印商品明細對話框 ──
 function PrintDialog({
   sale,
+  campaignName,
   onClose,
 }: {
   sale: SaleRead;
+  campaignName: string | null;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [printed, setPrinted] = useState(false);
   const print = useMutation({
     mutationFn: async () => {
-      const { data, error: apiError } = await api.POST(
-        "/api/v1/sales/{sale_id}/print-detail",
-        {
-          params: { path: { sale_id: sale.id } },
-        },
-      );
-      if (!data)
-        throw new Error(extractDetail(apiError) ?? "列印失敗（請確認明細機）");
-      return data;
+      // 1) 實體列印：把 SaleRead（含折扣留痕）轉送硬體代理 → EPSON 印明細聯。
+      await printSaleDetail(sale, campaignName);
+      // 2) 列印成功後補稽核（後端記錄補印明細）；稽核失敗不影響已印出的事實。
+      await api.POST("/api/v1/sales/{sale_id}/print-detail", {
+        params: { path: { sale_id: sale.id } },
+      });
     },
     onSuccess: () => {
       setError(null);
@@ -449,6 +449,8 @@ export default function PosPage() {
   const [receivedInput, setReceivedInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
+  // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
+  const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   // 冪等鍵：以送出內容簽章決定是否換鍵（見 checkout）；放 ref 不觸發 render。
   const idemRef = useRef<{ sig: string; key: string }>({
@@ -545,6 +547,7 @@ export default function PosPage() {
     },
     onSuccess: (sale) => {
       setCompleted(sale);
+      setCompletedCampaign(campaignNote);
       setShowDialog(true);
     },
   });
@@ -567,6 +570,7 @@ export default function PosPage() {
     setReceivedInput("");
     setNotice(null);
     setCompleted(null);
+    setCompletedCampaign(null);
     setShowDialog(false);
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
@@ -613,7 +617,11 @@ export default function PosPage() {
           </div>
         </div>
         {showDialog && (
-          <PrintDialog sale={completed} onClose={() => setShowDialog(false)} />
+          <PrintDialog
+            sale={completed}
+            campaignName={completedCampaign}
+            onClose={() => setShowDialog(false)}
+          />
         )}
       </section>
     );

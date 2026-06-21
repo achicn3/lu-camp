@@ -16,6 +16,7 @@ import os
 
 import anyio.to_thread
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -51,6 +52,18 @@ class LabelRequest(BaseModel):
 def create_app(devices: AgentDevices | None = None) -> FastAPI:
     """建立硬體代理應用程式；可注入裝置組合（預設全 Fake）。"""
     app = FastAPI(title="lu-camp hardware-agent", version="0.1.0")
+    # CORS：POS 前端（瀏覽器）直接呼叫代理列印，須允許其來源。來源由 AGENT_CORS_ORIGINS
+    # （逗號分隔）提供，預設前端開發位址 http://localhost:3000。無認證、僅列印/狀態端點。
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            o.strip()
+            for o in os.environ.get("AGENT_CORS_ORIGINS", "http://localhost:3000").split(",")
+            if o.strip()
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     resolved = devices if devices is not None else default_fake_devices()
     if not isinstance(resolved, AgentDevices):
         # 早失敗、明確指路：Phase 0 的 create_app(printer: SupportsWrite) 介面已由

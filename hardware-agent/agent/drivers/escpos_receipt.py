@@ -40,12 +40,13 @@ _BOLD_ON = ESC + b"E" + bytes([1])
 _BOLD_OFF = ESC + b"E" + bytes([0])
 
 # 品項表格欄寬（半形單位）：此台 TM-T82III 實機量得一行可印 34 半形（中文全形佔 2，
-# 實機尺規驗證 2026-06-08）。品名靠左（過長截斷），單價/總價靠右對齊成固定欄，標題列
-# 同寬，欄位才對得齊；超出 34 的內容會掉出可印範圍（金額消失），故欄寬合計須 = 34。
+# 實機尺規驗證 2026-06-08）。欄序：品名靠左（過長截斷）、單價/數量/總價靠右對齊成固定欄，
+# 標題列同寬，欄位才對得齊；欄寬合計須 = 34。數量獨立成欄，品名不再帶「x數量」後綴。
 _WIDTH = 34
 _UNIT_W = 7
+_QTY_W = 5  # 數量欄（右靠）：標題「數量」佔 4 半形 + 1 空白與單價分隔；數量值至 9999 容得下
 _TOTAL_W = 7
-_NAME_W = _WIDTH - _UNIT_W - _TOTAL_W
+_NAME_W = _WIDTH - _UNIT_W - _QTY_W - _TOTAL_W  # 15：較窄，長品名截斷更早
 # 列印區寬度：與 escpos_raster.PRINT_WIDTH_DOTS 共用（408 = 34 半形 × 12 dots，實機
 # 尺規量測）。此台裝 58mm 紙、但印表機印區仍照 80mm（576 dots）設定，置中會以 576
 # 為基準 → 內容整體右偏且右側遭裁切（實機驗證 2026-06-10）；證明聯以 GS W 將印區
@@ -85,30 +86,12 @@ def _pad_right_field(text: str, width: int) -> str:
     return " " * max(0, width - _disp_width(text)) + text
 
 
-def _name_field(description: str, qty: int) -> str:
-    """品名欄（靠左，固定 _NAME_W 半形）：保證保留「 x數量」後綴；過長只截斷品名、不截數量。"""
-    suffix = f" x{qty}"
-    suffix_w = _disp_width(suffix)
-    if _disp_width(description) + suffix_w <= _NAME_W:
-        body = description + suffix
-        return body + " " * (_NAME_W - _disp_width(body))
-    keep = max(0, _NAME_W - suffix_w - len(_TRUNCATE_MARK))
-    out, used = "", 0
-    for char in description:
-        char_w = 2 if unicodedata.east_asian_width(char) in ("F", "W") else 1
-        if used + char_w > keep:
-            break
-        out += char
-        used += char_w
-    body = out + _TRUNCATE_MARK + suffix
-    return body + " " * max(0, _NAME_W - _disp_width(body))
-
-
 def _item_row(line: SaleLinePayload) -> str:
-    """一列品項：品名（含 x數量）靠左、單價/總價靠右，固定欄寬對齊。"""
+    """一列品項：品名靠左（過長截斷），單價／數量／總價靠右，固定欄寬對齊。"""
     return (
-        _name_field(line.description, line.qty)
+        _pad_left_field(line.description, _NAME_W)
         + _pad_right_field(line.unit_price, _UNIT_W)
+        + _pad_right_field(str(line.qty), _QTY_W)
         + _pad_right_field(line.line_total, _TOTAL_W)
     )
 
@@ -123,6 +106,7 @@ def _discount_sub_rows(line: SaleLinePayload) -> bytes:
 _ITEM_HEADER = (
     _pad_left_field("品項", _NAME_W)
     + _pad_right_field("單價", _UNIT_W)
+    + _pad_right_field("數量", _QTY_W)
     + _pad_right_field("總價", _TOTAL_W)
 )
 

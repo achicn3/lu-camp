@@ -16,6 +16,9 @@ from agent.config import MissingDeviceConfigError
 from agent.devices import AgentDevices, default_fake_devices
 from agent.drivers.escpos_receipt import (
     _ITEM_HEADER,
+    _QTY_W,
+    _TOTAL_W,
+    _UNIT_W,
     _WIDTH,
     EscposReceiptPrinter,
     _disp_width,
@@ -29,6 +32,9 @@ from agent.routers.print import get_store_header_client
 from agent.store_client import StoreHeaderClient, StoreHeaderUnavailable
 
 _AGENT_ROOT = Path(__file__).resolve().parent.parent
+
+# 單價/數量/總價三個右靠欄皆 ASCII（字元數 = 顯示寬），可由列尾固定寬度切出。
+_NUMERIC_TAIL = _UNIT_W + _QTY_W + _TOTAL_W
 
 
 def test_print_router_importable_in_isolation() -> None:
@@ -316,12 +322,13 @@ def test_escpos_receipt_driver_renders_header_and_totals() -> None:
     assert "路營二手".encode("big5") in buf  # 抬頭以 Big5 編碼
     assert "路營二手".encode() not in buf  # 不再送 UTF-8（預設）——會在 TM-T82III 亂碼
     assert b"12345678" in buf  # 統編（ASCII 不變）
-    assert "帳篷 x1".encode("big5") in buf
+    assert "帳篷".encode("big5") in buf  # 品名（數量獨立成欄，不再帶 xN 後綴）
     assert "總計".encode("big5") in buf
     assert b"1000" in buf
-    # 品項區欄位標題列
+    # 品項區欄位標題列：品項 / 單價 / 數量 / 總價
     assert "品項".encode("big5") in buf
     assert "單價".encode("big5") in buf
+    assert "數量".encode("big5") in buf
     assert "總價".encode("big5") in buf
     # 切紙前需進紙，讓結尾（總計區）通過切刀、不被切掉/殘留到下一張
     assert b"\n\n\n\n\x1dV\x00" in buf  # >=4 行進紙緊接 GS V 0 全切
@@ -333,12 +340,14 @@ def test_item_header_is_fixed_width() -> None:
 
 def test_item_row_columns_are_fixed_width_and_right_aligned() -> None:
     line = SaleLinePayload(
-        line_type="ITEM", description="防水外套（男款）", qty=2, unit_price="800", line_total="1600"
+        line_type="ITEM", description="防水外套", qty=2, unit_price="800", line_total="1600"
     )
     row = _item_row(line)
     assert _disp_width(row) == _WIDTH  # 整列固定寬，欄位對齊
-    assert row.startswith("防水外套（男款） x2")  # 品名靠左
-    assert row.endswith("1600")  # 總價靠右
+    assert row.startswith("防水外套")  # 品名靠左（不再帶 xN）
+    assert "x2" not in row  # 數量改獨立成欄，不再以 xN 黏在品名後
+    # 品名欄之後依序為「單價 / 數量 / 總價」三個右靠欄
+    assert row[-_NUMERIC_TAIL:].split() == ["800", "2", "1600"]
 
 
 def test_item_row_truncates_overlong_name_keeping_width() -> None:
@@ -351,8 +360,8 @@ def test_item_row_truncates_overlong_name_keeping_width() -> None:
     assert row.endswith(" 1")  # 單價/總價欄仍靠右對齊（不溢出）
 
 
-def test_item_row_overlong_name_preserves_qty_suffix() -> None:
-    """長品名截斷時仍保留「 x數量」（截品名、不截數量）；整列固定寬不跑版。"""
+def test_item_row_overlong_name_truncates_with_qty_column() -> None:
+    """長品名截斷不跑版；數量為獨立欄（非 xN 後綴），單價/數量/總價仍對齊。"""
     line = SaleLinePayload(
         line_type="CATALOG",
         description="LED 露營燈 暖白光 可調光 USB-C 充電 IPX4 防潑水",
@@ -363,8 +372,8 @@ def test_item_row_overlong_name_preserves_qty_suffix() -> None:
     row = _item_row(line)
     assert _disp_width(row) == _WIDTH  # 多筆長品名也不跑版
     assert ".." in row  # 品名被截
-    assert "x12" in row  # 數量未被截掉
-    assert row.endswith("12960")  # 總價欄仍靠右
+    assert "x12" not in row  # 不再以 xN 表示數量
+    assert row[-_NUMERIC_TAIL:].split() == ["1080", "12", "12960"]  # 單價/數量/總價三欄
 
 
 def test_escpos_receipt_driver_detail_title() -> None:

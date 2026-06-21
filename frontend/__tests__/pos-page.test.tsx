@@ -138,7 +138,8 @@ describe("/pos 結帳頁", () => {
           201,
         );
       }
-      if (url.includes("/print-detail")) return json({ id: 7 });
+      if (url.includes("/print/detail")) return json({ status: "ok" }); // 硬體代理列印
+      if (url.includes("/print-detail")) return json({ id: 7 }); // 後端稽核
       return null;
     });
     const user = userEvent.setup();
@@ -173,8 +174,9 @@ describe("/pos 結帳頁", () => {
     );
   });
 
-  it("活動生效：總額顯示折後、結帳送折後收款（docs/21 C2b）", async () => {
+  it("活動生效：總額顯示折後、結帳送折後收款、明細送印帶折扣與活動（docs/21 C2b）", async () => {
     let saleBody = "";
+    let agentBody = "";
     stubFetch((url, method, body) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
@@ -192,10 +194,34 @@ describe("/pos 結帳頁", () => {
       if (url.endsWith("/api/v1/sales") && method === "POST") {
         saleBody = body;
         return json(
-          { id: 8, store_id: 1, total: "1620", payment_method: "CASH", lines: [], tenders: [] },
+          {
+            id: 8,
+            store_id: 1,
+            total: "1620",
+            total_discount: "180",
+            payment_method: "CASH",
+            lines: [
+              {
+                id: 1,
+                line_type: "SERIALIZED",
+                description: "雙人帳篷(測試)",
+                qty: 1,
+                unit_price: "1620",
+                line_total: "1620",
+                original_unit_price: "1800",
+                discount_amount: "180",
+              },
+            ],
+            tenders: [],
+          },
           201,
         );
       }
+      if (url.includes("/print/detail") && method === "POST") {
+        agentBody = body; // 硬體代理收到的明細 payload
+        return json({ status: "ok" });
+      }
+      if (url.includes("/print-detail")) return json({ id: 8 }); // 後端稽核
       return null;
     });
     const user = userEvent.setup();
@@ -218,6 +244,15 @@ describe("/pos 結帳頁", () => {
     expect(JSON.parse(saleBody).tenders).toEqual([
       { tender_type: "CASH", amount: "1620" },
     ]);
+
+    // 列印明細 → 硬體代理收到含折扣留痕 + 活動名的 SaleRead
+    await user.click(screen.getByRole("button", { name: "列印明細" }));
+    await waitFor(() => expect(screen.getByText(/已送出列印/)).toBeTruthy());
+    const printed = JSON.parse(agentBody);
+    expect(printed.campaign_name).toBe("開幕九折");
+    expect(printed.total_discount).toBe("180");
+    expect(printed.lines[0].discount_amount).toBe("180");
+    expect(printed.lines[0].original_unit_price).toBe("1800");
   });
 
   it("生效活動橫幅顯示活動名稱與折扣", async () => {
