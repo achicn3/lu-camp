@@ -218,9 +218,7 @@ async def test_draft_or_out_of_window_not_applied(
     )
     assert sale.total == Decimal(1000)
     # ACTIVE 但視窗尚未開始（now < starts_at）→ get_effective 不取、亦不折
-    await _make_campaign(
-        db_session, ctx["store_id"], ctx["clerk_id"], active=True, window=False
-    )
+    await _make_campaign(db_session, ctx["store_id"], ctx["clerk_id"], active=True, window=False)
     code2 = await _serialized(
         db_session, ctx["store_id"], ownership=OwnershipType.OWNED, price="1000"
     )
