@@ -146,7 +146,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
 
-    const scan = screen.getByLabelText("掃描或輸入條碼");
+    const scan = screen.getByLabelText("掃描或輸入商品條碼");
     await user.type(scan, "TENT1{Enter}");
     await waitFor(() =>
       expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(),
@@ -228,7 +228,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
 
-    await user.type(screen.getByLabelText("掃描或輸入條碼"), "TENT1{Enter}");
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     // 應付總額顯示折後 1,620（非折前 1,800）
     await waitFor(() =>
@@ -287,6 +287,25 @@ describe("/pos 結帳頁", () => {
     expect(screen.getByText(/結帳會自動套用折扣/)).toBeTruthy();
   });
 
+  it("掃到完整碼制自動加入購物車（免按 Enter）", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/S1-ABCDEF0123"))
+        return json({ ...TENT, item_code: "S1-ABCDEF0123" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    // 不打 {Enter}：輸入到符合碼制即自動送出加入購物車
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "S1-ABCDEF0123");
+    await waitFor(() =>
+      expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(),
+    );
+  });
+
   it("掃到不存在的條碼顯示錯誤", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
@@ -301,7 +320,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入條碼"), "NOPE{Enter}");
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "NOPE{Enter}");
     await waitFor(() =>
       expect(screen.getByText(/找不到此條碼：NOPE/)).toBeTruthy(),
     );

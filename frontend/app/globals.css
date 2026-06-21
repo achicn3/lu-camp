@@ -349,6 +349,25 @@ body {
 .pos-scan input {
   font-size: var(--text-lg);
 }
+/* 掃碼框做明顯些（櫃檯核心操作）：大字、加高、聚焦時綠框。 */
+.pos-scan-input {
+  font-size: var(--text-xl);
+  padding: var(--sp-3) var(--sp-4);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.pos-scan-hint {
+  display: block;
+  margin-top: var(--sp-1);
+}
+/* 逐行折後：原價以刪除線淡化，折後價接其後。 */
+.pos-price-original {
+  color: var(--text-muted, #888);
+  margin-right: var(--sp-1);
+}
+.pos-price-discounted {
+  white-space: nowrap;
+}
 .pos-empty {
   padding: var(--sp-8);
   text-align: center;

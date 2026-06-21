@@ -3,7 +3,7 @@
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type FormEvent, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
@@ -45,7 +45,11 @@ function Money({ value }: { value: number }) {
 }
 
 // ── 掃碼加入購物車 ──
+// 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）；掃描到完整碼即自動加入購物車。
+const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
+
 function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: async (code: string): Promise<CartLine> => {
@@ -105,33 +109,54 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
     },
     onSuccess: (line) => {
       setError(null);
+      setCode("");
       onResolved(line);
     },
     onError: (err: Error) => setError(err.message),
   });
 
+  function submit(raw: string) {
+    const value = raw.trim();
+    if (!value || mutation.isPending) return;
+    mutation.mutate(value);
+  }
+
+  function onChange(event: ChangeEvent<HTMLInputElement>) {
+    const value = event.target.value;
+    // 掃碼槍：輸入到完整碼制即自動送出、清空（免按 Enter）；清空後若掃碼槍補送 Enter 也是空字串、無副作用。
+    if (ITEM_CODE_RE.test(value.trim())) {
+      setCode("");
+      submit(value);
+      return;
+    }
+    setCode(value);
+  }
+
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const code = String(new FormData(form).get("code")).trim();
-    if (!code) return;
-    mutation.mutate(code);
-    form.reset();
+    submit(code);
   }
 
   return (
     <form className="pos-scan" onSubmit={onSubmit}>
       <label className="field">
-        <span className="field-label">掃描或輸入條碼</span>
-        {/* 櫃檯掃碼槍輸入，聚焦為核心操作（docs/10 §3）。 */}
+        <span className="field-label">掃描或輸入商品條碼</span>
+        {/* 櫃檯掃碼槍輸入，聚焦為核心操作（docs/10 §3）：掃到完整碼自動加入，免按 Enter。 */}
         <input
           name="code"
+          className="pos-scan-input"
+          value={code}
+          onChange={onChange}
           autoFocus
           inputMode="text"
           autoComplete="off"
+          placeholder="掃描商品條碼，或手動輸入後按 Enter"
           disabled={mutation.isPending}
         />
       </label>
+      <span className="hint pos-scan-hint">
+        {mutation.isPending ? "查詢中…" : "掃描後自動加入購物車（免按 Enter）。"}
+      </span>
       {error !== null && (
         <p role="alert" className="form-error">
           {error}
@@ -510,6 +535,9 @@ export default function PosPage() {
   const quotedTotal = parseNtd(quote.data?.total ?? "") ?? 0;
   // 應付總額：就緒用後端折後 quotedTotal；試算中暫顯折前估計（結帳鍵另以 quoteReady 鎖住）。
   const total = quoteReady && lines.length > 0 ? quotedTotal : cartTotal(lines);
+  // 逐行折後（docs/21）：試算就緒時 quote.lines 與購物車同序，逐行顯示折後單價/小計與原價；
+  // 試算中（refetch）暫無 → 退回折前估計。
+  const quotedLines = quoteReady && quote.data ? quote.data.lines : null;
   const campaignNote = quote.data?.campaign_name ?? null;
   const memberBalance =
     member !== null && balanceQuery.data
@@ -655,48 +683,75 @@ export default function PosPage() {
                 </tr>
               </thead>
               <tbody>
-                {lines.map((line) => (
-                  <tr key={line.key}>
-                    <td>{line.description}</td>
-                    <td>
-                      <Money value={line.unitPrice} />
-                    </td>
-                    <td>
-                      {line.lineType === "SERIALIZED" ? (
-                        1
-                      ) : (
-                        <input
-                          className="pos-qty"
-                          inputMode="numeric"
-                          value={line.qty}
-                          aria-label={`${line.description} 數量`}
-                          onChange={(e) =>
-                            setLines(
-                              setQty(
-                                lines,
-                                line.key,
-                                parseNtd(e.target.value) ?? 1,
-                              ),
-                            )
-                          }
-                        />
-                      )}
-                    </td>
-                    <td>
-                      <Money value={lineTotal(line)} />
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        aria-label={`移除 ${line.description}`}
-                        onClick={() => setLines(removeLine(lines, line.key))}
-                      >
-                        移除
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {lines.map((line, i) => {
+                  // 逐行折後：試算就緒時用 quote 同序行的折後單價/小計；有折扣則加顯原價刪除線。
+                  const ql = quotedLines?.[i];
+                  const discounted =
+                    ql != null &&
+                    ql.discount_amount !== "0" &&
+                    ql.original_unit_price != null;
+                  const unitVal = ql
+                    ? (parseNtd(ql.unit_price) ?? line.unitPrice)
+                    : line.unitPrice;
+                  const subtotalVal = ql
+                    ? (parseNtd(ql.line_total) ?? lineTotal(line))
+                    : lineTotal(line);
+                  const originalUnit =
+                    discounted && ql?.original_unit_price != null
+                      ? (parseNtd(ql.original_unit_price) ?? line.unitPrice)
+                      : null;
+                  return (
+                    <tr key={line.key}>
+                      <td>{line.description}</td>
+                      <td>
+                        {originalUnit !== null ? (
+                          <span className="pos-price-discounted">
+                            <s className="pos-price-original">
+                              <Money value={originalUnit} />
+                            </s>{" "}
+                            <Money value={unitVal} />
+                          </span>
+                        ) : (
+                          <Money value={unitVal} />
+                        )}
+                      </td>
+                      <td>
+                        {line.lineType === "SERIALIZED" ? (
+                          1
+                        ) : (
+                          <input
+                            className="pos-qty"
+                            inputMode="numeric"
+                            value={line.qty}
+                            aria-label={`${line.description} 數量`}
+                            onChange={(e) =>
+                              setLines(
+                                setQty(
+                                  lines,
+                                  line.key,
+                                  parseNtd(e.target.value) ?? 1,
+                                ),
+                              )
+                            }
+                          />
+                        )}
+                      </td>
+                      <td>
+                        <Money value={subtotalVal} />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          aria-label={`移除 ${line.description}`}
+                          onClick={() => setLines(removeLine(lines, line.key))}
+                        >
+                          移除
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}

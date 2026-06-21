@@ -105,9 +105,13 @@ try {
   await page.waitForURL(`${BASE}/pos`);
   await page.waitForSelector("text=本期不開票");
 
+  // 自動送出：只填入完整碼制、不按 Enter，應自動加入購物車
   await page.fill('input[name="code"]', code);
-  await page.press('input[name="code"]', "Enter");
   await page.waitForSelector(`text=折扣帳篷 ${runId}`);
+  ok("掃碼自動加入購物車（免按 Enter）", true);
+  // 逐行折後：購物車該行顯示原價 1,000（刪除線）+ 折後 900
+  const rowText = (await page.locator(".pos-cart tbody tr").first().innerText()).replace(/\s+/g, " ");
+  ok("購物車逐行顯折後（原價1,000 / 折後900）", rowText.includes("900") && rowText.includes("1,000"), rowText);
 
   // 應付總額顯示折後 900（非折前 1000）
   await page.waitForFunction(
