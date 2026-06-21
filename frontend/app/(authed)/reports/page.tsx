@@ -34,12 +34,14 @@ type DailyCashReport = components["schemas"]["DailyCashReport"];
 type SalesMarginReport = components["schemas"]["SalesMarginReport"];
 type InventoryValueReport = components["schemas"]["InventoryValueReport"];
 type ConsignmentPayablesReport = components["schemas"]["ConsignmentPayablesReport"];
+type CampaignPerformanceReport = components["schemas"]["CampaignPerformanceReport"];
 
 type Tab =
   | "dashboard"
   | "trends"
   | "daily-cash"
   | "sales-margin"
+  | "campaign-performance"
   | "inventory-value"
   | "consignment-payables"
   | "liability"
@@ -52,6 +54,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "trends", label: "趨勢" },
   { key: "daily-cash", label: "現金對帳" },
   { key: "sales-margin", label: "銷售毛利" },
+  { key: "campaign-performance", label: "活動成效" },
   { key: "inventory-value", label: "庫存價值" },
   { key: "consignment-payables", label: "寄售應付" },
   { key: "liability", label: "負債" },
@@ -888,6 +891,90 @@ function ConsignmentPayablesPanel() {
   );
 }
 
+// -- Campaign Performance Panel (C4，docs/21) --
+
+function CampaignPerformancePanel() {
+  const query = useQuery({
+    queryKey: ["reports", "campaign-performance"],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET(
+        "/api/v1/reports/campaign-performance",
+      );
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取活動成效報表失敗");
+    },
+  });
+
+  if (query.isPending) return <p className="hint">載入中...</p>;
+  if (query.isError) return <ErrorBlock message={query.error.message} />;
+
+  const report: CampaignPerformanceReport = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/campaign-performance", fmt);
+    void downloadReport(url, `campaign-performance.${fmt}`);
+  }
+
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("zh-TW");
+
+  return (
+    <div>
+      <p className="hint">
+        每檔生效中／已結束活動的成效：成效指標取活動期間（與「銷售毛利」同源），活動折讓總額為該活動實際發出的折讓。
+      </p>
+      <div className="inv-table-wrap">
+        <table className="inv-table">
+          <thead>
+            <tr>
+              <th>活動</th>
+              <th>狀態</th>
+              <th>折扣</th>
+              <th>期間</th>
+              <th>活動折讓</th>
+              <th>營業額</th>
+              <th>認列營收</th>
+              <th>毛利</th>
+              <th>毛利率</th>
+              <th>筆數</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.rows.map((row) => (
+              <tr key={row.campaign_id}>
+                <td>{row.name}</td>
+                <td>{row.status}</td>
+                <td>{row.discount_pct}%</td>
+                <td>
+                  {fmtDate(row.starts_at)} ~ {fmtDate(row.ends_at)}
+                </td>
+                <td>
+                  <MoneyText value={row.campaign_discount_total} />
+                </td>
+                <td>
+                  <MoneyText value={row.gross_turnover} />
+                </td>
+                <td>
+                  <MoneyText value={row.recognized_revenue} />
+                </td>
+                <td>
+                  <MoneyText value={row.gross_margin} />
+                </td>
+                <td>
+                  {row.gross_margin_rate === null ? "N/A" : row.gross_margin_rate}
+                </td>
+                <td className="money">{row.transaction_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {report.rows.length === 0 && <p className="hint">尚無生效中／已結束的活動</p>}
+      </div>
+
+      <DownloadButtons onDownload={handleDownload} />
+    </div>
+  );
+}
+
 // ============================================================
 // Store Credit Report Panels (existing)
 // ============================================================
@@ -1274,6 +1361,8 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
       return <InventoryValuePanel />;
     case "consignment-payables":
       return <ConsignmentPayablesPanel />;
+    case "campaign-performance":
+      return <CampaignPerformancePanel />;
     case "liability":
       return <LiabilityPanel />;
     case "flows":
