@@ -128,6 +128,12 @@ try {
   const completeText = await page.locator(".pos-complete").innerText();
   ok("折後結帳完成（total 900）", /900/.test(completeText), completeText.replace(/\s+/g, " ").slice(0, 120));
   await page.screenshot({ path: `${SHOTS}/02-pos-discount-complete.png`, fullPage: true });
+
+  // 列印明細 → 串接硬體代理（真的送印到 EPSON，含折扣/數量欄）
+  await page.getByRole("button", { name: "列印明細" }).click();
+  await page.waitForSelector("text=已送出列印", { timeout: 10000 });
+  ok("列印明細送印成功（串接硬體代理 → EPSON）", true);
+  await page.screenshot({ path: `${SHOTS}/03-pos-print-sent.png`, fullPage: true });
 } catch (e) {
   ok("流程中斷", false, String(e));
   if (browser) {
