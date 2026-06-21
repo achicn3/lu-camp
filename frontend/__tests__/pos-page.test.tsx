@@ -170,6 +170,39 @@ describe("/pos 結帳頁", () => {
     );
   });
 
+  it("生效活動橫幅顯示活動名稱與折扣", async () => {
+    const ACTIVE_CAMPAIGN = {
+      id: 1,
+      store_id: 1,
+      name: "開幕九折",
+      discount_pct: 10,
+      starts_at: "2026-06-20T00:00:00Z",
+      ends_at: "2026-06-30T23:59:59Z",
+      status: "ACTIVE",
+      applies_owned_serialized: true,
+      applies_owned_bulk: true,
+      applies_catalog: false,
+      applies_consignment: false,
+      consignment_discount_bearing: "STORE_ABSORBS",
+      created_by: 1,
+      created_at: "2026-06-19T10:00:00Z",
+      updated_at: "2026-06-19T10:00:00Z",
+    };
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/campaigns")) return json([ACTIVE_CAMPAIGN]);
+      return null;
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/開幕九折/)).toBeTruthy(),
+    );
+    expect(screen.getByText(/9 折/)).toBeTruthy();
+    expect(screen.getByText(/結帳會自動套用折扣/)).toBeTruthy();
+  });
+
   it("掃到不存在的條碼顯示錯誤", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);

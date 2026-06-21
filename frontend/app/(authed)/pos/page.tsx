@@ -5,6 +5,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type FormEvent, useRef, useState } from "react";
 
+import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
   type CartLine,
   addLine,
@@ -28,6 +29,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 
 type SaleRead = components["schemas"]["SaleRead"];
 type ContactRead = components["schemas"]["ContactRead"];
+type CampaignRead = components["schemas"]["CampaignRead"];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -411,6 +413,34 @@ function PrintDialog({
   );
 }
 
+// -- 生效活動橫幅（純顯示，不算折扣） --
+function ActiveCampaignBanner() {
+  const query = useQuery({
+    queryKey: ["campaigns", "ACTIVE"],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/campaigns", {
+        params: { query: { status: "ACTIVE" } },
+      });
+      return (data ?? []) as CampaignRead[];
+    },
+    refetchInterval: 60_000, // 每分鐘刷新一次
+  });
+
+  const active = query.data ?? [];
+  if (active.length === 0) return null;
+
+  return (
+    <div className="pos-campaign-banner" role="status">
+      {active.map((c) => (
+        <span key={c.id} className="pos-campaign-tag">
+          活動進行中：{c.name}（{discountDisplay(c.discount_pct)}／折扣 {c.discount_pct}%）
+        </span>
+      ))}
+      <span className="pos-campaign-hint">結帳會自動套用折扣</span>
+    </div>
+  );
+}
+
 export default function PosPage() {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [member, setMember] = useState<ContactRead | null>(null);
@@ -576,6 +606,7 @@ export default function PosPage() {
   return (
     <section>
       <h1 className="page-title">POS 結帳</h1>
+      <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">
           <ScanBar onResolved={addToCart} />
