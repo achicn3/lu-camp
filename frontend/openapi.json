@@ -679,6 +679,161 @@
         "title": "BulkLotStatus",
         "type": "string"
       },
+      "CampaignCreateRequest": {
+        "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。",
+        "properties": {
+          "applies_catalog": {
+            "default": false,
+            "title": "Applies Catalog",
+            "type": "boolean"
+          },
+          "applies_consignment": {
+            "default": false,
+            "title": "Applies Consignment",
+            "type": "boolean"
+          },
+          "applies_owned_bulk": {
+            "default": true,
+            "title": "Applies Owned Bulk",
+            "type": "boolean"
+          },
+          "applies_owned_serialized": {
+            "default": true,
+            "title": "Applies Owned Serialized",
+            "type": "boolean"
+          },
+          "consignment_discount_bearing": {
+            "$ref": "#/components/schemas/ConsignmentDiscountBearing",
+            "default": "STORE_ABSORBS"
+          },
+          "discount_pct": {
+            "maximum": 99.0,
+            "minimum": 1.0,
+            "title": "Discount Pct",
+            "type": "integer"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "discount_pct",
+          "starts_at",
+          "ends_at"
+        ],
+        "title": "CampaignCreateRequest",
+        "type": "object"
+      },
+      "CampaignRead": {
+        "properties": {
+          "applies_catalog": {
+            "title": "Applies Catalog",
+            "type": "boolean"
+          },
+          "applies_consignment": {
+            "title": "Applies Consignment",
+            "type": "boolean"
+          },
+          "applies_owned_bulk": {
+            "title": "Applies Owned Bulk",
+            "type": "boolean"
+          },
+          "applies_owned_serialized": {
+            "title": "Applies Owned Serialized",
+            "type": "boolean"
+          },
+          "consignment_discount_bearing": {
+            "$ref": "#/components/schemas/ConsignmentDiscountBearing"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "integer"
+          },
+          "discount_pct": {
+            "title": "Discount Pct",
+            "type": "integer"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CampaignStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "name",
+          "discount_pct",
+          "applies_owned_serialized",
+          "applies_owned_bulk",
+          "applies_catalog",
+          "applies_consignment",
+          "consignment_discount_bearing",
+          "starts_at",
+          "ends_at",
+          "status",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CampaignRead",
+        "type": "object"
+      },
+      "CampaignStatus": {
+        "description": "門市活動狀態機（docs/21）。DRAFT→ACTIVE→ENDED；DRAFT/ACTIVE→CANCELLED。",
+        "enum": [
+          "DRAFT",
+          "ACTIVE",
+          "ENDED",
+          "CANCELLED"
+        ],
+        "title": "CampaignStatus",
+        "type": "string"
+      },
       "CashMovementCreateRequest": {
         "description": "記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。",
         "properties": {
@@ -1077,6 +1232,15 @@
         ],
         "title": "CategoryTargetUpdate",
         "type": "object"
+      },
+      "ConsignmentDiscountBearing": {
+        "description": "活動折扣套用寄售品時，折讓由誰吸收（docs/21 §8.1；applies_consignment=true 時生效）。\n\nSTORE_ABSORBS：寄售人 payout 認原 listed_price、抽成吸收折讓（且抽成不得 < 0）。\nPROPORTIONAL：gross=折後價，抽成與 payout 按折後縮水（等於替寄售人打折）。",
+        "enum": [
+          "STORE_ABSORBS",
+          "PROPORTIONAL"
+        ],
+        "title": "ConsignmentDiscountBearing",
+        "type": "string"
       },
       "ConsignmentPayableRow": {
         "description": "寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。",
@@ -5594,6 +5758,296 @@
         ]
       }
     },
+    "/api/v1/campaigns": {
+      "get": {
+        "operationId": "listCampaigns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CampaignStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignRead"
+                  },
+                  "title": "Response Listcampaigns",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Campaigns",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "post": {
+        "operationId": "createCampaign",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CampaignCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}": {
+      "get": {
+        "operationId": "getCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/activate": {
+      "post": {
+        "operationId": "activateCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Activate Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cancel": {
+      "post": {
+        "operationId": "cancelCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/end": {
+      "post": {
+        "operationId": "endCampaign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "End Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/api/v1/cash-sessions/current": {
       "get": {
         "operationId": "getCurrentCashSession",
@@ -7542,7 +7996,7 @@
     },
     "/api/v1/reports/consignment-payables": {
       "get": {
-        "description": "寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。",
+        "description": "寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄；不輸出身分證。",
         "operationId": "consignmentPayablesReport",
         "parameters": [
           {

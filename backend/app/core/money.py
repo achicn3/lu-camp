@@ -6,17 +6,37 @@
 
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.shared.exceptions import InvalidCommissionPct, InvalidMargin, InvalidTaxRate
+from app.shared.exceptions import (
+    InvalidCommissionPct,
+    InvalidDiscountPct,
+    InvalidMargin,
+    InvalidTaxRate,
+)
 
 MARGIN_MIN = 0
 MARGIN_MAX = 99
 COMMISSION_PCT_MIN = 0
 COMMISSION_PCT_MAX = 100
+DISCOUNT_PCT_MIN = 1
+DISCOUNT_PCT_MAX = 99
 
 
 def round_ntd(value: Decimal) -> int:
     """四捨五入（ROUND_HALF_UP）到整數元。"""
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def discounted_price(unit_price: Decimal, discount_pct: int) -> int:
+    """折後含稅單價 = round_ntd(unit_price × (100 − discount_pct) / 100)（docs/21 門市活動）。
+
+    discount_pct 為整數百分數，限 1–99（0 無意義、100＝免費不允許）。
+    unit_price ≥ 0 時保證 0 ≤ 折後 ≤ 原價。每行折讓由呼叫端以 (原 − 折後) × qty 計。
+    """
+    if not DISCOUNT_PCT_MIN <= discount_pct <= DISCOUNT_PCT_MAX:
+        raise InvalidDiscountPct(
+            f"discount_pct 須介於 {DISCOUNT_PCT_MIN}-{DISCOUNT_PCT_MAX}，收到 {discount_pct}"
+        )
+    return round_ntd(unit_price * Decimal(100 - discount_pct) / Decimal(100))
 
 
 def suggested_price(acquisition_cost: Decimal, margin_pct: int) -> int:

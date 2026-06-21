@@ -140,6 +140,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Campaigns */
+        get: operations["listCampaigns"];
+        put?: never;
+        /** Create Campaign */
+        post: operations["createCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Campaign */
+        get: operations["getCampaign"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Campaign */
+        post: operations["activateCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Campaign */
+        post: operations["cancelCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End Campaign */
+        post: operations["endCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cash-sessions/current": {
         parameters: {
             query?: never;
@@ -653,7 +739,7 @@ export interface paths {
         };
         /**
          * Consignment Payables
-         * @description 寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。
+         * @description 寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄；不輸出身分證。
          */
         get: operations["consignmentPayablesReport"];
         put?: never;
@@ -1357,6 +1443,97 @@ export interface components {
          */
         BulkLotStatus: "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
         /**
+         * CampaignCreateRequest
+         * @description 建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。
+         */
+        CampaignCreateRequest: {
+            /**
+             * Applies Catalog
+             * @default false
+             */
+            applies_catalog: boolean;
+            /**
+             * Applies Consignment
+             * @default false
+             */
+            applies_consignment: boolean;
+            /**
+             * Applies Owned Bulk
+             * @default true
+             */
+            applies_owned_bulk: boolean;
+            /**
+             * Applies Owned Serialized
+             * @default true
+             */
+            applies_owned_serialized: boolean;
+            /** @default STORE_ABSORBS */
+            consignment_discount_bearing: components["schemas"]["ConsignmentDiscountBearing"];
+            /** Discount Pct */
+            discount_pct: number;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Name */
+            name: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+        };
+        /** CampaignRead */
+        CampaignRead: {
+            /** Applies Catalog */
+            applies_catalog: boolean;
+            /** Applies Consignment */
+            applies_consignment: boolean;
+            /** Applies Owned Bulk */
+            applies_owned_bulk: boolean;
+            /** Applies Owned Serialized */
+            applies_owned_serialized: boolean;
+            consignment_discount_bearing: components["schemas"]["ConsignmentDiscountBearing"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: number;
+            /** Discount Pct */
+            discount_pct: number;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            status: components["schemas"]["CampaignStatus"];
+            /** Store Id */
+            store_id: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CampaignStatus
+         * @description 門市活動狀態機（docs/21）。DRAFT→ACTIVE→ENDED；DRAFT/ACTIVE→CANCELLED。
+         * @enum {string}
+         */
+        CampaignStatus: "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED";
+        /**
          * CashMovementCreateRequest
          * @description 記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。
          */
@@ -1507,6 +1684,15 @@ export interface components {
             /** Target Margin Pct */
             target_margin_pct: number;
         };
+        /**
+         * ConsignmentDiscountBearing
+         * @description 活動折扣套用寄售品時，折讓由誰吸收（docs/21 §8.1；applies_consignment=true 時生效）。
+         *
+         *     STORE_ABSORBS：寄售人 payout 認原 listed_price、抽成吸收折讓（且抽成不得 < 0）。
+         *     PROPORTIONAL：gross=折後價，抽成與 payout 按折後縮水（等於替寄售人打折）。
+         * @enum {string}
+         */
+        ConsignmentDiscountBearing: "STORE_ABSORBS" | "PROPORTIONAL";
         /**
          * ConsignmentPayableRow
          * @description 寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。
@@ -3338,6 +3524,194 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCampaigns: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CampaignStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activateCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    endCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
                 };
             };
             /** @description Validation Error */

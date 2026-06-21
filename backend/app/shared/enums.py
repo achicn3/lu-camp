@@ -258,3 +258,23 @@ class PayoutMethod(StrEnum):
     CASH = "CASH"
     STORE_CREDIT = "STORE_CREDIT"
     SPLIT = "SPLIT"
+
+
+class CampaignStatus(StrEnum):
+    """門市活動狀態機（docs/21）。DRAFT→ACTIVE→ENDED；DRAFT/ACTIVE→CANCELLED。"""
+
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    ENDED = "ENDED"
+    CANCELLED = "CANCELLED"
+
+
+class ConsignmentDiscountBearing(StrEnum):
+    """活動折扣套用寄售品時，折讓由誰吸收（docs/21 §8.1；applies_consignment=true 時生效）。
+
+    STORE_ABSORBS：寄售人 payout 認原 listed_price、抽成吸收折讓（且抽成不得 < 0）。
+    PROPORTIONAL：gross=折後價，抽成與 payout 按折後縮水（等於替寄售人打折）。
+    """
+
+    STORE_ABSORBS = "STORE_ABSORBS"
+    PROPORTIONAL = "PROPORTIONAL"

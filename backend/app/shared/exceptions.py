@@ -13,6 +13,18 @@ class InvalidMargin(DomainError):
     """定價 margin_pct 超出合法範圍（0-99）。"""
 
 
+class InvalidDiscountPct(DomainError):
+    """活動折扣 discount_pct 超出合法範圍（1-99）。"""
+
+
+class CampaignConflict(DomainError):
+    """門市活動衝突（同店已有生效活動、非法狀態轉移、區間/欄位不合法）。"""
+
+
+class CampaignNotFound(DomainError):
+    """指定的門市活動不存在（或非本店）。"""
+
+
 class InvalidStateTransition(DomainError):
     """狀態機不允許的轉移（如已 SOLD 又要售出）。"""
 

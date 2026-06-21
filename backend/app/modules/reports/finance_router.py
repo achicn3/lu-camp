@@ -304,7 +304,7 @@ async def consignment_payables(
     ] = "ALL",
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> ConsignmentPayablesReport | Response:
-    """寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄不沖抵；不輸出身分證。"""
+    """寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄；不輸出身分證。"""
     report = await ReportsService(session).consignment_payables(
         user.store_id, status_filter=status_filter
     )

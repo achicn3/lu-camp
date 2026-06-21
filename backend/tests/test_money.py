@@ -4,8 +4,19 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.money import commission, round_ntd, split_tax_inclusive, suggested_price
-from app.shared.exceptions import InvalidCommissionPct, InvalidMargin, InvalidTaxRate
+from app.core.money import (
+    commission,
+    discounted_price,
+    round_ntd,
+    split_tax_inclusive,
+    suggested_price,
+)
+from app.shared.exceptions import (
+    InvalidCommissionPct,
+    InvalidDiscountPct,
+    InvalidMargin,
+    InvalidTaxRate,
+)
 
 
 def test_round_ntd_half_up() -> None:
@@ -99,3 +110,36 @@ def test_commission_bounds(gross: Decimal, pct: int, expected: int) -> None:
 def test_commission_invalid_pct_raises(pct: int) -> None:
     with pytest.raises(InvalidCommissionPct):
         commission(Decimal("1000"), pct)
+
+
+def test_discounted_price_nine_tenths() -> None:
+    # 九折（10% off）：1000 × 90% = 900
+    assert discounted_price(Decimal("1000"), 10) == 900
+
+
+def test_discounted_price_rounds_half_up() -> None:
+    # 999 × 95% = 949.05 → 949；333 × 85% = 283.05 → 283
+    assert discounted_price(Decimal("999"), 5) == 949
+    # 1 × 50% = 0.5 → ROUND_HALF_UP → 1（折後不為 0）
+    assert discounted_price(Decimal("1"), 50) == 1
+
+
+@pytest.mark.parametrize(
+    ("price", "pct", "expected"),
+    [
+        (Decimal("1000"), 1, 990),
+        (Decimal("1000"), 99, 10),
+        (Decimal("0"), 50, 0),
+        (Decimal("250"), 20, 200),
+    ],
+)
+def test_discounted_price_bounds(price: Decimal, pct: int, expected: int) -> None:
+    result = discounted_price(price, pct)
+    assert result == expected
+    assert 0 <= result <= price  # 折後介於 0 與原價之間
+
+
+@pytest.mark.parametrize("pct", [0, 100, -1, 150])
+def test_discounted_price_invalid_pct_raises(pct: int) -> None:
+    with pytest.raises(InvalidDiscountPct):
+        discounted_price(Decimal("1000"), pct)
