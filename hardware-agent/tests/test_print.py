@@ -386,37 +386,40 @@ def test_escpos_receipt_driver_detail_title() -> None:
 
 
 def test_escpos_receipt_shows_campaign_discount() -> None:
-    """門市活動折扣（docs/21）：明細聯印出每行原價/折讓 + 折讓總額與活動名（代理只印）。"""
+    """門市活動折扣（docs/21）：明細聯印出每行原價×數量/整行折讓 + 折讓總額與活動名（代理只印）。
+
+    用 qty=12 守住「整行折讓 = 每件折讓×數量」語意：原價1200 x12 折-1440（不是每件 120）。
+    """
     discounted = SalePayload(
         id=2,
         store_id=7,
-        subtotal="857",
-        tax="43",
-        total="900",
+        subtotal="12343",
+        tax="617",
+        total="12960",
         payment_method="CASH",
         invoice_status="NOT_ISSUED",
         created_at="2026-06-21T00:00:00Z",
-        total_discount="100",
+        total_discount="1440",
         campaign_name="開幕九折",
         lines=[
             SaleLinePayload(
-                line_type="SERIALIZED",
-                description="帳篷",
-                qty=1,
-                unit_price="900",
-                line_total="900",
-                original_unit_price="1000",
-                discount_amount="100",
+                line_type="CATALOG",
+                description="LED 露營燈",
+                qty=12,
+                unit_price="1080",
+                line_total="12960",
+                original_unit_price="1200",
+                discount_amount="1440",  # = 每件 120 × 12（整行折讓）
             )
         ],
     )
     writer = FakePrinter()
     EscposReceiptPrinter(writer).print_detail(discounted, _HEADER)
     buf = bytes(writer.buffer)
-    assert "原價1000 折-100".encode("big5") in buf  # 逐行原價/折讓
-    assert "活動折扣 -100".encode("big5") in buf  # 折讓總額
+    assert "原價1200 x12 折-1440".encode("big5") in buf  # 逐行原價×數量/整行折讓
+    assert "活動折扣 -1440".encode("big5") in buf  # 折讓總額
     assert "開幕九折".encode("big5") in buf  # 活動名
-    assert "900".encode("big5") in buf  # 折後總計
+    assert "12960".encode("big5") in buf  # 折後總計（=原價14400 − 折讓1440）
 
 
 def test_escpos_receipt_no_discount_omits_discount_rows() -> None:

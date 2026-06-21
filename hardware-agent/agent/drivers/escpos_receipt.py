@@ -97,10 +97,14 @@ def _item_row(line: SaleLinePayload) -> str:
 
 
 def _discount_sub_rows(line: SaleLinePayload) -> bytes:
-    """有活動折扣的品項，於下方加一列原價/折讓（代理只印、不算）。無折扣 → 空。"""
+    """有活動折扣的品項，於下方加一列「原價{單價} x{數量} 折-{整行折讓}」（代理只印、不算）。
+
+    discount_amount 為**整行**折讓（後端＝每件折讓×數量），故連同數量一起印，讓
+    「原價×數量 − 折讓 = 總價」對得起來；qty>1 不會被誤讀成每件折讓。無折扣 → 空。
+    """
     if line.discount_amount in ("", "0") or line.original_unit_price is None:
         return b""
-    return _line(f"  原價{line.original_unit_price} 折-{line.discount_amount}")
+    return _line(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
 
 
 _ITEM_HEADER = (
