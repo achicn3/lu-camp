@@ -105,6 +105,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--sp-4);
+  /* 卡片各自依內容高度（勿被「估算淨利」的長說明撐高整列、造成大空白方塊跑版）。 */
+  align-items: start;
 }
 
 .rpt-stat-hero {
@@ -128,7 +130,9 @@
 }
 
 .rpt-note-inline {
-  font-size: var(--text-sm);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.4;
   color: var(--ink-soft);
   font-weight: 400;
   margin-top: var(--sp-1);
