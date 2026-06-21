@@ -730,6 +730,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/campaign-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Campaign Performance
+         * @description 活動成效（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 其發出的折讓。唯讀。
+         */
+        get: operations["campaignPerformanceReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/consignment-payables": {
         parameters: {
             query?: never;
@@ -1505,6 +1525,60 @@ export interface components {
              * Format: date-time
              */
             starts_at: string;
+        };
+        /**
+         * CampaignPerformanceReport
+         * @description 活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。
+         */
+        CampaignPerformanceReport: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Rows */
+            rows: components["schemas"]["CampaignPerformanceRow"][];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * CampaignPerformanceRow
+         * @description 單檔活動成效（docs/21 C4）。
+         *
+         *     營運指標取活動排定區間 [starts_at, ends_at) 的銷售（與 R2 sales-margin 同源、半開區間）；
+         *     campaign_discount_total 為此活動實際發出的折讓（依 sale_line.campaign_id 歸屬，非區間概算）。
+         *     gross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。
+         */
+        CampaignPerformanceRow: {
+            /** Campaign Discount Total */
+            campaign_discount_total: string;
+            /** Campaign Id */
+            campaign_id: number;
+            /** Discount Pct */
+            discount_pct: number;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /** Name */
+            name: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            status: components["schemas"]["CampaignStatus"];
+            /** Transaction Count */
+            transaction_count: number;
         };
         /** CampaignRead */
         CampaignRead: {
@@ -4818,6 +4892,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    campaignPerformanceReport: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignPerformanceReport"];
                 };
             };
             /** @description Validation Error */

@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd, split_tax_inclusive
+from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
@@ -22,6 +23,8 @@ from app.modules.reports.schemas import (
     ALPHA_METHOD_NOTE,
     ESTIMATE_FIELDS,
     AgingBuckets,
+    CampaignPerformanceReport,
+    CampaignPerformanceRow,
     ConsignmentPayableRow,
     ConsignmentPayablesReport,
     DailyCashReport,
@@ -42,7 +45,7 @@ from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
-from app.shared.enums import OwnershipType
+from app.shared.enums import CampaignStatus, OwnershipType
 from app.shared.exceptions import DomainError
 
 
@@ -103,6 +106,7 @@ class ReportsService:
         self._sales = SalesService(session)
         self._inventory = InventoryService(session)
         self._consignment = ConsignmentService(session)
+        self._campaigns = CampaignService(session)
 
     async def consignment_payables(
         self, store_id: int, *, status_filter: str
@@ -263,6 +267,40 @@ class ReportsService:
             store_credit_redeemed=bd.store_credit_redeemed,
             transaction_count=bd.transaction_count,
         )
+
+    async def campaign_performance(self, store_id: int) -> CampaignPerformanceReport:
+        """活動成效報表（docs/21 C4）：每檔生效中/已結束活動的營運成效 + 其發出的折讓。唯讀。
+
+        營運指標以活動排定區間 [starts_at, ends_at) 取 margin_breakdown（與 R2 同源、半開區間）；
+        折讓總額依 sale_line.campaign_id 精確歸屬（非區間概算）。DRAFT/CANCELLED 無成交、不列。
+        依 starts_at 新到舊排序。
+        """
+        campaigns = await self._campaigns.list_campaigns(store_id)
+        discount_totals = await self._sales.discount_totals_by_campaign(store_id)
+        rows: list[CampaignPerformanceRow] = []
+        for c in campaigns:
+            if c.status not in (CampaignStatus.ACTIVE, CampaignStatus.ENDED):
+                continue
+            # 區間 [starts_at, ends_at)；模型 CHECK 保證 ends_at > starts_at（滿足 from<to）。
+            bd = await self._sales.margin_breakdown(store_id, c.starts_at, c.ends_at)
+            rows.append(
+                CampaignPerformanceRow(
+                    campaign_id=c.id,
+                    name=c.name,
+                    status=c.status,
+                    discount_pct=c.discount_pct,
+                    starts_at=c.starts_at,
+                    ends_at=c.ends_at,
+                    campaign_discount_total=discount_totals.get(c.id, Decimal(0)),
+                    gross_turnover=bd.gross_turnover,
+                    recognized_revenue=bd.recognized_revenue,
+                    gross_margin=bd.gross_margin,
+                    gross_margin_rate=bd.gross_margin_rate,
+                    transaction_count=bd.transaction_count,
+                )
+            )
+        rows.sort(key=lambda r: r.starts_at, reverse=True)
+        return CampaignPerformanceReport(generated_at=_now(), store_id=store_id, rows=rows)
 
     async def daily_cash(self, store_id: int, report_date: date) -> DailyCashReport:
         """每日現金對帳（docs/19 §2.2）：依 opened_at 的 UTC 日 [date, date+1) 取本店 session。

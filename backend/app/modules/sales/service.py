@@ -514,6 +514,10 @@ class SalesService:
             "consignment_commission": commission,
         }
 
+    async def discount_totals_by_campaign(self, store_id: int) -> dict[int, Decimal]:
+        """各活動實際造成的折讓總額（非作廢；供活動成效報表 C4，依 sale_line.campaign_id 歸屬）。"""
+        return await self._repo.discount_totals_by_campaign(store_id)
+
     async def margin_breakdown(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> MarginBreakdown:

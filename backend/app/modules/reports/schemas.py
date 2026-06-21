@@ -6,6 +6,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, PlainSerializer
 
+from app.shared.enums import CampaignStatus
+
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
 NTDAmountOpt = Annotated[
     Decimal | None,
@@ -307,3 +309,33 @@ class EffectivenessReport(BaseModel):
     alpha_sample_insufficient: bool
     estimate_fields: list[str]
     alpha_method_note: str
+
+
+class CampaignPerformanceRow(BaseModel):
+    """單檔活動成效（docs/21 C4）。
+
+    營運指標取活動排定區間 [starts_at, ends_at) 的銷售（與 R2 sales-margin 同源、半開區間）；
+    campaign_discount_total 為此活動實際發出的折讓（依 sale_line.campaign_id 歸屬，非區間概算）。
+    gross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。
+    """
+
+    campaign_id: int
+    name: str
+    status: CampaignStatus
+    discount_pct: int
+    starts_at: datetime
+    ends_at: datetime
+    campaign_discount_total: NTDAmount
+    gross_turnover: NTDAmount
+    recognized_revenue: NTDAmount
+    gross_margin: NTDAmount
+    gross_margin_rate: NTDAmountOpt
+    transaction_count: int
+
+
+class CampaignPerformanceReport(BaseModel):
+    """活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。"""
+
+    generated_at: datetime
+    store_id: int
+    rows: list[CampaignPerformanceRow]

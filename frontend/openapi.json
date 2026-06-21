@@ -734,6 +734,111 @@
         "title": "CampaignCreateRequest",
         "type": "object"
       },
+      "CampaignPerformanceReport": {
+        "description": "活動成效報表（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 該活動發出的折讓。唯讀。",
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignPerformanceRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "rows"
+        ],
+        "title": "CampaignPerformanceReport",
+        "type": "object"
+      },
+      "CampaignPerformanceRow": {
+        "description": "單檔活動成效（docs/21 C4）。\n\n營運指標取活動排定區間 [starts_at, ends_at) 的銷售（與 R2 sales-margin 同源、半開區間）；\ncampaign_discount_total 為此活動實際發出的折讓（依 sale_line.campaign_id 歸屬，非區間概算）。\ngross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。",
+        "properties": {
+          "campaign_discount_total": {
+            "title": "Campaign Discount Total",
+            "type": "string"
+          },
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "discount_pct": {
+            "title": "Discount Pct",
+            "type": "integer"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "gross_margin": {
+            "title": "Gross Margin",
+            "type": "string"
+          },
+          "gross_margin_rate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Margin Rate"
+          },
+          "gross_turnover": {
+            "title": "Gross Turnover",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "recognized_revenue": {
+            "title": "Recognized Revenue",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CampaignStatus"
+          },
+          "transaction_count": {
+            "title": "Transaction Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "name",
+          "status",
+          "discount_pct",
+          "starts_at",
+          "ends_at",
+          "campaign_discount_total",
+          "gross_turnover",
+          "recognized_revenue",
+          "gross_margin",
+          "gross_margin_rate",
+          "transaction_count"
+        ],
+        "title": "CampaignPerformanceRow",
+        "type": "object"
+      },
       "CampaignRead": {
         "properties": {
           "applies_catalog": {
@@ -8120,6 +8225,60 @@
         "summary": "Receive Purchase Order",
         "tags": [
           "purchasing"
+        ]
+      }
+    },
+    "/api/v1/reports/campaign-performance": {
+      "get": {
+        "description": "活動成效（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 其發出的折讓。唯讀。",
+        "operationId": "campaignPerformanceReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignPerformanceReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Campaign Performance",
+        "tags": [
+          "reports"
         ]
       }
     },

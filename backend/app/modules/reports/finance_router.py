@@ -15,6 +15,7 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
+    CampaignPerformanceReport,
     ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
@@ -400,6 +401,61 @@ async def sales_margin(
             ["現金收款", str(report.cash_received)],
             ["購物金收款", str(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get(
+    "/campaign-performance",
+    response_model=CampaignPerformanceReport,
+    operation_id="campaignPerformanceReport",
+)
+async def campaign_performance(
+    session: SessionDep,
+    user: ManagerDep,
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> CampaignPerformanceReport | Response:
+    """活動成效（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 其發出的折讓。唯讀。"""
+    report = await ReportsService(session).campaign_performance(user.store_id)
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+    ]
+    exp = TabularExport(
+        sheet="活動成效",
+        filename_stem=f"campaign-performance-{report.store_id}",
+        meta=meta,
+        headers=[
+            "活動",
+            "狀態",
+            "折扣%",
+            "開始",
+            "結束",
+            "活動折讓總額",
+            "營業額",
+            "認列營收",
+            "毛利",
+            "毛利率",
+            "交易筆數",
+        ],
+        rows=[
+            [
+                r.name,
+                r.status.value,
+                str(r.discount_pct),
+                r.starts_at.isoformat(),
+                r.ends_at.isoformat(),
+                str(r.campaign_discount_total),
+                str(r.gross_turnover),
+                str(r.recognized_revenue),
+                str(r.gross_margin),
+                "N/A" if r.gross_margin_rate is None else str(r.gross_margin_rate),
+                str(r.transaction_count),
+            ]
+            for r in report.rows
         ],
     )
     return export_response(exp, fmt)
