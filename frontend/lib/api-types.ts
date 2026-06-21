@@ -2779,11 +2779,18 @@ export interface components {
             catalog_product_id: number | null;
             /** Description */
             description: string;
+            /**
+             * Discount Amount
+             * @default 0
+             */
+            discount_amount: string;
             /** Id */
             id: number;
             /** Line Total */
             line_total: string;
             line_type: components["schemas"]["SaleLineType"];
+            /** Original Unit Price */
+            original_unit_price?: string | null;
             /** Qty */
             qty: number;
             /** Serialized Item Id */
@@ -2877,6 +2884,11 @@ export interface components {
             tenders: components["schemas"]["SaleTenderRead"][];
             /** Total */
             total: string;
+            /**
+             * Total Discount
+             * @default 0
+             */
+            total_discount: string;
         };
         /**
          * SaleStatus

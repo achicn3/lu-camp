@@ -3951,6 +3951,11 @@
             "title": "Description",
             "type": "string"
           },
+          "discount_amount": {
+            "default": "0",
+            "title": "Discount Amount",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -3961,6 +3966,17 @@
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
+          },
+          "original_unit_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Unit Price"
           },
           "qty": {
             "title": "Qty",
@@ -4197,6 +4213,11 @@
           },
           "total": {
             "title": "Total",
+            "type": "string"
+          },
+          "total_discount": {
+            "default": "0",
+            "title": "Total Discount",
             "type": "string"
           }
         },

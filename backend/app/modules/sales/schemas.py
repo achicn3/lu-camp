@@ -150,6 +150,9 @@ class SaleLineRead(BaseModel):
     qty: int
     unit_price: NTDAmount
     line_total: NTDAmount
+    # 門市活動折扣留痕（docs/21）：供明細聯/收據顯示原價與折讓。
+    original_unit_price: NTDAmountOpt = None
+    discount_amount: NTDAmount = Decimal(0)
 
 
 class SaleTenderRead(BaseModel):
@@ -180,16 +183,21 @@ class SaleRead(BaseModel):
     created_at: datetime
     lines: list[SaleLineRead] = []
     tenders: list[SaleTenderRead] = []
+    # 本單活動折讓總額（docs/21）＝Σ 各行 discount_amount；供明細聯/收據顯示。
+    total_discount: NTDAmount = Decimal(0)
 
     @classmethod
     def build(
         cls, sale: Sale, lines: list[SaleLine], tenders: list[SaleTender] | None = None
     ) -> "SaleRead":
         data = cls.model_validate(sale)
+        line_reads = [SaleLineRead.model_validate(line) for line in lines]
+        total_discount = sum((line.discount_amount for line in line_reads), Decimal(0))
         return data.model_copy(
             update={
-                "lines": [SaleLineRead.model_validate(line) for line in lines],
+                "lines": line_reads,
                 "tenders": [SaleTenderRead.model_validate(t) for t in (tenders or [])],
+                "total_discount": total_discount,
             }
         )
 

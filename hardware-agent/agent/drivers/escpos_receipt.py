@@ -95,6 +95,13 @@ def _item_row(line: SaleLinePayload) -> str:
     )
 
 
+def _discount_sub_rows(line: SaleLinePayload) -> bytes:
+    """有活動折扣的品項，於下方加一列原價/折讓（代理只印、不算）。無折扣 → 空。"""
+    if line.discount_amount in ("", "0") or line.original_unit_price is None:
+        return b""
+    return _line(f"  原價{line.original_unit_price} 折-{line.discount_amount}")
+
+
 _ITEM_HEADER = (
     _pad_left_field("品項", _NAME_W)
     + _pad_right_field("單價", _UNIT_W)
@@ -120,6 +127,11 @@ def _header_block(header: StoreHeader) -> bytes:
 def _totals_block(sale: SalePayload) -> bytes:
     out = bytearray()
     out += _line(_SEP)
+    # 活動折扣（docs/21）：有折讓時顯示折讓總額與活動名（代理只印後端算好的值）。
+    if sale.total_discount not in ("", "0"):
+        out += _line(f"活動折扣 -{sale.total_discount}")
+        if sale.campaign_name:
+            out += _line(f"活動：{sale.campaign_name}")
     out += _line(f"未稅　 {sale.subtotal}")
     out += _line(f"營業稅 {sale.tax}")
     out += _line(f"總計　 {sale.total}")
@@ -150,6 +162,7 @@ class EscposReceiptPrinter:
         out += _line(_SEP)
         for line in sale.lines:
             out += _line(_item_row(line))
+            out += _discount_sub_rows(line)
         out += _totals_block(sale)
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT

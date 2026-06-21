@@ -360,6 +360,49 @@ def test_escpos_receipt_driver_detail_title() -> None:
     assert "商品明細聯".encode("big5") in detail_buf
 
 
+def test_escpos_receipt_shows_campaign_discount() -> None:
+    """門市活動折扣（docs/21）：明細聯印出每行原價/折讓 + 折讓總額與活動名（代理只印）。"""
+    discounted = SalePayload(
+        id=2,
+        store_id=7,
+        subtotal="857",
+        tax="43",
+        total="900",
+        payment_method="CASH",
+        invoice_status="NOT_ISSUED",
+        created_at="2026-06-21T00:00:00Z",
+        total_discount="100",
+        campaign_name="開幕九折",
+        lines=[
+            SaleLinePayload(
+                line_type="SERIALIZED",
+                description="帳篷",
+                qty=1,
+                unit_price="900",
+                line_total="900",
+                original_unit_price="1000",
+                discount_amount="100",
+            )
+        ],
+    )
+    writer = FakePrinter()
+    EscposReceiptPrinter(writer).print_detail(discounted, _HEADER)
+    buf = bytes(writer.buffer)
+    assert "原價1000 折-100".encode("big5") in buf  # 逐行原價/折讓
+    assert "活動折扣 -100".encode("big5") in buf  # 折讓總額
+    assert "開幕九折".encode("big5") in buf  # 活動名
+    assert "900".encode("big5") in buf  # 折後總計
+
+
+def test_escpos_receipt_no_discount_omits_discount_rows() -> None:
+    """無折扣（預設欄位）→ 不印原價/折讓列，版面與原本一致。"""
+    writer = FakePrinter()
+    EscposReceiptPrinter(writer).print_detail(_SALE, _HEADER)
+    buf = bytes(writer.buffer)
+    assert "折-".encode("big5") not in buf
+    assert "活動折扣".encode("big5") not in buf
+
+
 def test_escpos_einvoice_renders_official_layout() -> None:
     """證明聯版面（附件一格式一）：標題/年期別/字軌/日期/隨機碼/總計/賣方 + 兩塊點陣。"""
     writer = FakePrinter()

@@ -40,13 +40,19 @@ class PaperStatus(StrEnum):
 
 
 class SaleLinePayload(BaseModel):
-    """銷售明細行（鏡射後端 `SaleLineRead` JSON）。金額為字串整數元。"""
+    """銷售明細行（鏡射後端 `SaleLineRead` JSON）。金額為字串整數元。
+
+    original_unit_price/discount_amount 為門市活動折扣留痕（docs/21）：有折扣時於明細聯顯示
+    原價與折讓；無折扣時 original_unit_price=None、discount_amount="0"。代理只如實排版。
+    """
 
     line_type: str
     description: str
     qty: int
     unit_price: str
     line_total: str
+    original_unit_price: str | None = None
+    discount_amount: str = "0"
 
 
 class SalePayload(BaseModel):
@@ -66,6 +72,10 @@ class SalePayload(BaseModel):
     invoice_status: str
     created_at: datetime
     lines: list[SaleLinePayload]
+    # 門市活動折扣（docs/21）：total_discount 為本單折讓總額（後端算好、代理只印），
+    # campaign_name 為套用的活動名；無折扣時 "0"/None。代理不做金額運算。
+    total_discount: str = "0"
+    campaign_name: str | None = None
 
 
 class StoreHeader(BaseModel):
