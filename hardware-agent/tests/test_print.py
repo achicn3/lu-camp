@@ -351,6 +351,22 @@ def test_item_row_truncates_overlong_name_keeping_width() -> None:
     assert row.endswith(" 1")  # 單價/總價欄仍靠右對齊（不溢出）
 
 
+def test_item_row_overlong_name_preserves_qty_suffix() -> None:
+    """長品名截斷時仍保留「 x數量」（截品名、不截數量）；整列固定寬不跑版。"""
+    line = SaleLinePayload(
+        line_type="CATALOG",
+        description="LED 露營燈 暖白光 可調光 USB-C 充電 IPX4 防潑水",
+        qty=12,
+        unit_price="1080",
+        line_total="12960",
+    )
+    row = _item_row(line)
+    assert _disp_width(row) == _WIDTH  # 多筆長品名也不跑版
+    assert ".." in row  # 品名被截
+    assert "x12" in row  # 數量未被截掉
+    assert row.endswith("12960")  # 總價欄仍靠右
+
+
 def test_escpos_receipt_driver_detail_title() -> None:
     writer = FakePrinter()
     driver = EscposReceiptPrinter(writer)

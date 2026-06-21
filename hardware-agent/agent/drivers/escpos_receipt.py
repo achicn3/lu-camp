@@ -85,11 +85,29 @@ def _pad_right_field(text: str, width: int) -> str:
     return " " * max(0, width - _disp_width(text)) + text
 
 
+def _name_field(description: str, qty: int) -> str:
+    """品名欄（靠左，固定 _NAME_W 半形）：保證保留「 x數量」後綴；過長只截斷品名、不截數量。"""
+    suffix = f" x{qty}"
+    suffix_w = _disp_width(suffix)
+    if _disp_width(description) + suffix_w <= _NAME_W:
+        body = description + suffix
+        return body + " " * (_NAME_W - _disp_width(body))
+    keep = max(0, _NAME_W - suffix_w - len(_TRUNCATE_MARK))
+    out, used = "", 0
+    for char in description:
+        char_w = 2 if unicodedata.east_asian_width(char) in ("F", "W") else 1
+        if used + char_w > keep:
+            break
+        out += char
+        used += char_w
+    body = out + _TRUNCATE_MARK + suffix
+    return body + " " * max(0, _NAME_W - _disp_width(body))
+
+
 def _item_row(line: SaleLinePayload) -> str:
     """一列品項：品名（含 x數量）靠左、單價/總價靠右，固定欄寬對齊。"""
-    name = f"{line.description} x{line.qty}"
     return (
-        _pad_left_field(name, _NAME_W)
+        _name_field(line.description, line.qty)
         + _pad_right_field(line.unit_price, _UNIT_W)
         + _pad_right_field(line.line_total, _TOTAL_W)
     )
