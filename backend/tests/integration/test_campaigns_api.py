@@ -83,7 +83,6 @@ async def test_create_campaign_defaults(
     assert body["applies_owned_bulk"] is True
     assert body["applies_catalog"] is False
     assert body["applies_consignment"] is False
-    assert body["consignment_discount_bearing"] == "STORE_ABSORBS"
 
 
 async def test_create_invalid_discount_pct(
@@ -175,20 +174,14 @@ async def test_list_and_filter(client: httpx.AsyncClient, db_session: AsyncSessi
     assert len(rows) == 1 and rows[0]["name"] == "A"
 
 
-async def test_consignment_toggle_and_bearing_configurable(
+async def test_consignment_toggle_configurable(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """寄售折扣為可設定開關（docs/21 §8.1）：可開啟並選 bearing。"""
+    """寄售折扣為可設定開關（docs/21 §8.1）：可開啟（開啟後一律按比例分攤、無 bearing 選項）。"""
     mgr, _clerk, _store = await _seed(db_session)
-    body = await _create(
-        client,
-        mgr,
-        name="週年慶",
-        applies_consignment=True,
-        consignment_discount_bearing="PROPORTIONAL",
-    )
+    body = await _create(client, mgr, name="週年慶", applies_consignment=True)
     assert body["applies_consignment"] is True
-    assert body["consignment_discount_bearing"] == "PROPORTIONAL"
+    assert "consignment_discount_bearing" not in body
 
 
 async def test_cross_store_isolation(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

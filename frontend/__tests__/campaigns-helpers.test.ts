@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  bearingLabel,
   discountDisplay,
   scopeSummary,
   statusLabel,
@@ -79,12 +78,5 @@ describe("scopeSummary", () => {
       applies_consignment: false,
     });
     expect(result).toBe("-");
-  });
-});
-
-describe("bearingLabel", () => {
-  it("returns correct zh-TW labels", () => {
-    expect(bearingLabel("STORE_ABSORBS")).toBe("店家吸收");
-    expect(bearingLabel("PROPORTIONAL")).toBe("比例分攤");
   });
 });

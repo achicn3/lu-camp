@@ -4,7 +4,6 @@
 import type { components } from "@/lib/api-types";
 
 type CampaignStatus = components["schemas"]["CampaignStatus"];
-type ConsignmentDiscountBearing = components["schemas"]["ConsignmentDiscountBearing"];
 
 /** Convert discount_pct (% off) to traditional zh-TW "X 折" display. */
 export function discountDisplay(discountPct: number): string {
@@ -40,14 +39,4 @@ export function scopeSummary(flags: {
   if (flags.applies_catalog) parts.push("數量型商品");
   if (flags.applies_consignment) parts.push("寄售");
   return parts.length > 0 ? parts.join("、") : "-";
-}
-
-const BEARING_LABELS: Record<ConsignmentDiscountBearing, string> = {
-  STORE_ABSORBS: "店家吸收",
-  PROPORTIONAL: "比例分攤",
-};
-
-/** Return zh-TW label for consignment discount bearing mode. */
-export function bearingLabel(bearing: ConsignmentDiscountBearing): string {
-  return BEARING_LABELS[bearing];
 }

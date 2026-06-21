@@ -6,7 +6,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
 import {
-  bearingLabel,
   discountDisplay,
   scopeSummary,
   statusLabel,
@@ -16,7 +15,6 @@ import type { components } from "@/lib/api-types";
 
 type CampaignRead = components["schemas"]["CampaignRead"];
 type CampaignStatus = components["schemas"]["CampaignStatus"];
-type ConsignmentDiscountBearing = components["schemas"]["ConsignmentDiscountBearing"];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -37,7 +35,6 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
   const [appliesOwnedBulk, setAppliesOwnedBulk] = useState(true);
   const [appliesCatalog, setAppliesCatalog] = useState(false);
   const [appliesConsignment, setAppliesConsignment] = useState(false);
-  const [bearing, setBearing] = useState<ConsignmentDiscountBearing>("STORE_ABSORBS");
   const [formError, setFormError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -62,7 +59,6 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
           applies_consignment: appliesConsignment,
-          consignment_discount_bearing: bearing,
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立活動失敗");
@@ -78,7 +74,6 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
       setAppliesOwnedBulk(true);
       setAppliesCatalog(false);
       setAppliesConsignment(false);
-      setBearing("STORE_ABSORBS");
       onCreated();
     },
     onError: (err: Error) => setFormError(err.message),
@@ -178,32 +173,9 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           對寄售品套用折扣
         </label>
         {appliesConsignment && (
-          <div className="campaign-bearing">
-            <p className="hint">
-              寄售品折扣影響抽成計算方式：「店家吸收」= 寄售人照原價結算、店家吸收折讓；
-              「比例分攤」= 以折後價計算抽成與應付（寄售人也承擔折扣）。
-            </p>
-            <label className="campaign-checkbox">
-              <input
-                type="radio"
-                name="bearing"
-                value="STORE_ABSORBS"
-                checked={bearing === "STORE_ABSORBS"}
-                onChange={() => setBearing("STORE_ABSORBS")}
-              />
-              店家吸收（預設）
-            </label>
-            <label className="campaign-checkbox">
-              <input
-                type="radio"
-                name="bearing"
-                value="PROPORTIONAL"
-                checked={bearing === "PROPORTIONAL"}
-                onChange={() => setBearing("PROPORTIONAL")}
-              />
-              比例分攤
-            </label>
-          </div>
+          <p className="hint">
+            寄售品折扣一律按比例分攤：以折後價計算抽成與應付，寄售人也承擔折扣（不會由店家吸收）。
+          </p>
         )}
       </fieldset>
 
@@ -394,7 +366,6 @@ export default function CampaignsPage() {
                 <th>結束</th>
                 <th>狀態</th>
                 <th>適用範圍</th>
-                <th>寄售折扣</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -411,11 +382,6 @@ export default function CampaignsPage() {
                     </span>
                   </td>
                   <td>{scopeSummary(c)}</td>
-                  <td>
-                    {c.applies_consignment
-                      ? bearingLabel(c.consignment_discount_bearing)
-                      : "-"}
-                  </td>
                   <td>
                     <CampaignActions
                       campaign={c}

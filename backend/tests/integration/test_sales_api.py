@@ -365,7 +365,6 @@ async def test_quote_endpoint_returns_discounted_total(
     from datetime import UTC, datetime, timedelta
 
     from app.modules.campaigns.service import CampaignService
-    from app.shared.enums import ConsignmentDiscountBearing
 
     token, store_id, clerk_id = await _seed(db_session)
     cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
@@ -380,7 +379,6 @@ async def test_quote_endpoint_returns_discounted_total(
         applies_owned_bulk=True,
         applies_catalog=True,
         applies_consignment=False,
-        consignment_discount_bearing=ConsignmentDiscountBearing.STORE_ABSORBS,
         created_by=clerk_id,
     )
     await CampaignService(db_session).activate(store_id, camp.id, actor_user_id=clerk_id)

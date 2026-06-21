@@ -27,7 +27,6 @@ const CAMPAIGN_DRAFT = {
   applies_owned_bulk: true,
   applies_catalog: false,
   applies_consignment: false,
-  consignment_discount_bearing: "STORE_ABSORBS" as const,
   created_by: 1,
   created_at: "2026-06-19T10:00:00Z",
   updated_at: "2026-06-19T10:00:00Z",

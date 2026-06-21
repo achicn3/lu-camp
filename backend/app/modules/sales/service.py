@@ -21,7 +21,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import commission, discounted_price, split_tax_inclusive
+from app.core.money import discounted_price, split_tax_inclusive
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
@@ -36,7 +36,6 @@ from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     CashMovementType,
-    ConsignmentDiscountBearing,
     ItemKind,
     OwnershipType,
     PaymentMethod,
@@ -789,34 +788,10 @@ class SalesService:
             # 寄售品建檔時保證有 commission_pct（inventory 已驗），此處防呆。
             if item.commission_pct is None:
                 raise SaleLineInvalid(f"寄售品 {line.item_code} 缺 commission_pct")
-            gross = self._consignment_gross(campaign, item, disc, applies=applies)
-            consignment_sales.append((item.id, gross, item.commission_pct))
+            # 寄售結算 gross＝實際成交（折後）價：有折扣時寄售人按折後分潤、無折扣即原價
+            # （disc.unit_price 在未折時等於原 listed_price）。docs/21 §8.1：折扣一律按比例分攤。
+            consignment_sales.append((item.id, disc.unit_price, item.commission_pct))
         return disc.unit_price
-
-    def _consignment_gross(
-        self,
-        campaign: Campaign | None,
-        item: object,
-        disc: _AppliedDiscount,
-        *,
-        applies: bool,
-    ) -> Decimal:
-        """寄售結算 gross（docs/21 §8.1）：未折→原價；STORE_ABSORBS→原價（且抽成扣折讓不得<0）；
-        PROPORTIONAL→折後價。"""
-        listed = (
-            disc.original_unit_price if disc.original_unit_price is not None else disc.unit_price
-        )
-        if not applies or campaign is None:
-            return listed
-        if campaign.consignment_discount_bearing == ConsignmentDiscountBearing.STORE_ABSORBS:
-            pct = item.commission_pct  # type: ignore[attr-defined]
-            assert pct is not None
-            if disc.discount_per_unit > Decimal(commission(listed, pct)):
-                raise SaleLineInvalid(
-                    "活動折扣超過寄售抽成，店家將虧損；請降低折扣或將活動排除寄售品"
-                )
-            return listed
-        return disc.unit_price  # PROPORTIONAL
 
     @staticmethod
     def _line_amounts(disc: _AppliedDiscount, *, qty: int) -> dict[str, object]:

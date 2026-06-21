@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
-from app.shared.enums import CampaignStatus, ConsignmentDiscountBearing
+from app.shared.enums import CampaignStatus
 
 
 def _enum_col(enum_type: type) -> Enum:
@@ -59,13 +59,9 @@ class Campaign(Base, TimestampMixin):
     applies_catalog: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
     )
+    # 寄售折扣（applies_consignment=true 時）一律按比例分攤：寄售人按折後價分潤（docs/21 §8.1）。
     applies_consignment: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false")
-    )
-    consignment_discount_bearing: Mapped[ConsignmentDiscountBearing] = mapped_column(
-        _enum_col(ConsignmentDiscountBearing),
-        default=ConsignmentDiscountBearing.STORE_ABSORBS,
-        server_default=ConsignmentDiscountBearing.STORE_ABSORBS.value,
     )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

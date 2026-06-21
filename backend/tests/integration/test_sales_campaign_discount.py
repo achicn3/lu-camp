@@ -27,7 +27,6 @@ from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
     CampaignStatus,
-    ConsignmentDiscountBearing,
     Grade,
     OwnershipType,
     SaleLineType,
@@ -35,7 +34,7 @@ from app.shared.enums import (
     TenderType,
     UserRole,
 )
-from app.shared.exceptions import InvalidSaleTender, SaleLineInvalid
+from app.shared.exceptions import InvalidSaleTender
 
 _SEQ = 0
 
@@ -63,7 +62,6 @@ async def _make_campaign(
     owned_bulk: bool = True,
     catalog: bool = False,
     consignment: bool = False,
-    bearing: ConsignmentDiscountBearing = ConsignmentDiscountBearing.STORE_ABSORBS,
     active: bool = True,
     window: bool = True,
 ) -> int:
@@ -81,7 +79,6 @@ async def _make_campaign(
         applies_owned_bulk=owned_bulk,
         applies_catalog=catalog,
         applies_consignment=consignment,
-        consignment_discount_bearing=bearing,
         created_by=clerk_id,
     )
     if active:
@@ -350,15 +347,19 @@ async def test_consignment_not_discounted_by_default(
     assert s.payout_amount == Decimal(500)
 
 
-async def test_consignment_store_absorbs(ctx: dict[str, int], db_session: AsyncSession) -> None:
-    """STORE_ABSORBS：客人付折後 900，寄售人 payout 認原價（commission/payout on 1000）。"""
+async def test_consignment_discount_pays_consignor_on_discounted_price(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """寄售折扣一律按比例分攤（docs/21 §8.1）：客人付折後 900，寄售人也按折後價分潤。
+
+    gross=折後 900、抽成與應付一起縮水（50% → 450/450）；店家不吸收、不會虧損。
+    """
     await _make_campaign(
         db_session,
         ctx["store_id"],
         ctx["clerk_id"],
         pct=10,
         consignment=True,
-        bearing=ConsignmentDiscountBearing.STORE_ABSORBS,
     )
     code = await _serialized(
         db_session,
@@ -375,24 +376,25 @@ async def test_consignment_store_absorbs(ctx: dict[str, int], db_session: AsyncS
     )
     assert sale.total == Decimal(900)  # 客人付折後
     s = await _settlement(db_session, sale.id)
-    assert s.gross == Decimal(1000)  # 寄售人認原價
-    assert s.commission_amount == Decimal(500)
-    assert s.payout_amount == Decimal(500)  # 店家收 900、付 500、淨 400 = 抽成500 − 折讓100
+    assert s.gross == Decimal(900)  # 寄售人按折後分潤（非原價）
+    assert s.commission_amount == Decimal(450)  # 50% of 900
+    assert s.payout_amount == Decimal(450)
 
 
-async def test_consignment_store_absorbs_loss_guard(
+async def test_consignment_low_commission_discount_no_loss(
     ctx: dict[str, int], db_session: AsyncSession
 ) -> None:
-    """折讓 > 原抽成 → 店家虧損 → 擋下（SaleLineInvalid）。"""
+    """即使抽成率低、折扣高，按比例分攤也不會讓店家虧損（無需虧損守衛）。
+
+    抽成 5%、折扣 10%：gross=折後 900、抽成 45、應付 855；店家淨 900−855=45=抽成，恆 ≥0。
+    """
     await _make_campaign(
         db_session,
         ctx["store_id"],
         ctx["clerk_id"],
         pct=10,
         consignment=True,
-        bearing=ConsignmentDiscountBearing.STORE_ABSORBS,
     )
-    # 抽成 5% of 1000 = 50；折讓 10% = 100 > 50 → 虧損
     code = await _serialized(
         db_session,
         ctx["store_id"],
@@ -401,32 +403,6 @@ async def test_consignment_store_absorbs_loss_guard(
         consignor_id=ctx["consignor_id"],
         pct=5,
     )
-    with pytest.raises(SaleLineInvalid):
-        await SalesService(db_session).create_sale(
-            ctx["store_id"],
-            ctx["clerk_id"],
-            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
-        )
-
-
-async def test_consignment_proportional(ctx: dict[str, int], db_session: AsyncSession) -> None:
-    """PROPORTIONAL：gross=折後，抽成與 payout 一起縮水。"""
-    await _make_campaign(
-        db_session,
-        ctx["store_id"],
-        ctx["clerk_id"],
-        pct=10,
-        consignment=True,
-        bearing=ConsignmentDiscountBearing.PROPORTIONAL,
-    )
-    code = await _serialized(
-        db_session,
-        ctx["store_id"],
-        ownership=OwnershipType.CONSIGNMENT,
-        price="1000",
-        consignor_id=ctx["consignor_id"],
-        pct=50,
-    )
     sale = await SalesService(db_session).create_sale(
         ctx["store_id"],
         ctx["clerk_id"],
@@ -434,9 +410,9 @@ async def test_consignment_proportional(ctx: dict[str, int], db_session: AsyncSe
     )
     assert sale.total == Decimal(900)
     s = await _settlement(db_session, sale.id)
-    assert s.gross == Decimal(900)  # 折後
-    assert s.commission_amount == Decimal(450)  # 50% of 900
-    assert s.payout_amount == Decimal(450)
+    assert s.gross == Decimal(900)
+    assert s.commission_amount == Decimal(45)  # 5% of 900
+    assert s.payout_amount == Decimal(855)
 
 
 async def test_campaign_status_draft_after_create(

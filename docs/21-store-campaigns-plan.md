@@ -38,8 +38,7 @@
 | applies_owned_serialized | bool | **預設 true**（店主裁示） |
 | applies_owned_bulk | bool | **預設 true**（店主裁示） |
 | applies_catalog | bool | **預設 false**（店主裁示，可開） |
-| applies_consignment | bool | **預設 false**；可動態切換是否折寄售品（店主裁示，不 hardcode） |
-| consignment_discount_bearing | enum | 當 applies_consignment=true 時生效：`STORE_ABSORBS`(預設) / `PROPORTIONAL`；見 §8.1 |
+| applies_consignment | bool | **預設 false**；可動態切換是否折寄售品（開啟時一律按比例分攤，見 §8.1） |
 | starts_at / ends_at | timestamptz | 生效窗 `[starts_at, ends_at)`（UTC，與系統一致） |
 | status | enum | DRAFT / ACTIVE / ENDED / CANCELLED（狀態機，§3.3） |
 | created_by / created_at / updated_at | | 稽核 |
@@ -97,13 +96,11 @@
 
 ## 8. 政策決策（**店主已拍板 2026-06-21**）
 
-### 8.1 寄售品折扣 — 可設定開關（不 hardcode）
-店主裁示：要有**設定可動態決定是否把折扣套到寄售品上**。實作為 per-campaign 欄位：
+### 8.1 寄售品折扣 — 開關 + 一律按比例分攤（店主裁示 2026-06-21 更新）
 - `applies_consignment`（預設 false）：是否對寄售品套折扣；店主每檔活動自行切換。
-- `consignment_discount_bearing`（當上者 true 時生效）：
-  - `STORE_ABSORBS`（**預設**）：客人享折扣，但寄售人 `payout` 仍以**原 listed_price** 計、抽成吸收折讓。
-    **不變量：抽成扣折讓後不得 < 0**（折讓 > 原抽成則擋下／或抽成歸零由店家全吸，需測試明確）。
-  - `PROPORTIONAL`：`gross=折後價`，抽成與 payout 按折後縮水（等於替寄售人打折；店主自負與寄售人之約定）。
+- **開啟時一律按比例分攤**：`gross=折後價`，抽成與 payout 都按折後縮水——**寄售人按折後價分潤、承擔折扣**
+  （店主與寄售人之約定）。不再提供「店家吸收（STORE_ABSORBS）」模式（已移除 `consignment_discount_bearing`
+  欄位與選項，migration e1f2a3b4c5d6 移欄）。按比例分攤下店家淨收恆 = 折後抽成 ≥ 0，**無需虧損守衛**。
 - 關閉（預設）時：寄售品**不折、原價結帳**，`gross=listed_price`、結算照舊。
 
 ### 8.2 適用品項種類（預設）
@@ -119,20 +116,19 @@
   campaign CRUD/啟用/結束 service+API（MANAGER、稽核、單一 ACTIVE 守衛）。
 - **C2 POS 整合** ✅：`create_sale` 載生效活動套折扣、`sale_line` 擴欄（original_unit_price/
   discount_amount/campaign_id, migration d6b2c3e4f5a7）、序號/catalog/bulk 三路徑、寄售 gross 依
-  §8.1 開關（STORE_ABSORBS 含「折讓>抽成→擋下虧損」守衛 / PROPORTIONAL 按折後）+ 不變量測試。
-  - **已知報表口徑（v1 限制）**：STORE_ABSORBS 下，R2/R5 的寄售抽成收入讀 settlement.commission
-    （認原價抽成），未扣掉店家吸收的折讓；該折讓另存於 `sale_line.discount_amount` 可查。精確 P&L
-    需自認列收入再減「寄售吸收折讓」——v1 不做（寄售折扣為 opt-in、預設關），日後報表 task 補。
+  §8.1 開關 + 一律按比例分攤（gross=折後、寄售人按折後分潤）+ 不變量測試。
+  - **報表口徑（2026-06-21 更新）**：寄售折扣改為一律按比例分攤後，settlement.commission 本即按折後算，
+    **R2/R5/C4 認列營收/毛利不再高估**，無口徑修正需求（先前 STORE_ABSORBS 高估問題隨該模式移除而消失）。
 - **C3 前端**：活動管理頁（建/啟用/結束）+ POS 折扣顯示 + 收據折扣（純 UI 可委派）；**依 docs/08 §6.1
   必跑瀏覽器 e2e + 截圖**（新增 campaigns-smoke.mjs）。
-- **C4（可選）活動成效報表**：沿 Phase 6 同源（含修正上述 STORE_ABSORBS 口徑）。
+- **C4 活動成效報表**：沿 Phase 6 同源（每檔活動期間的營業額/折讓/認列營收/毛利/毛利率；唯讀、CSV/XLSX）。
 - 每步 TDD + 本機四道門 + 自我 adversarial review（金流：折扣 rounding、寄售金額、退貨退實付、並發、稽核）。
 
 ## 10. 不變量（以測試守護）
 
 1. 折後單價 = round_ntd(原價 ×(100−pct)/100)，0 ≤ 折後 ≤ 原價；pct 限 1–99。
 2. 稅仍於總額層級推一次：`net+tax=折後總額`，不差一元。
-3. 寄售結算金額與 §8 決策一致（A：不折；B：payout 認原價、店家吸收；C：按折後）——且**抽成/payout 不為負**（B 需防護）。
+3. 寄售結算金額與 §8 決策一致（不折→原價；開折→一律按折後價算抽成與 payout）——抽成/payout 恆 ≥ 0（按比例分攤天然成立）。
 4. 退貨退實付（折後）金額；報表營收/毛利認折後；點數依折後總額。
 5. 活動生效以結帳交易讀到的狀態為準；同店至多一個 ACTIVE。
 6. 建立/改/啟用/結束/作廢活動皆寫 audit_log；MANAGER 限定。

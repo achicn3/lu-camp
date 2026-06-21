@@ -680,7 +680,7 @@
         "type": "string"
       },
       "CampaignCreateRequest": {
-        "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。",
+        "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。\n\n寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。",
         "properties": {
           "applies_catalog": {
             "default": false,
@@ -701,10 +701,6 @@
             "default": true,
             "title": "Applies Owned Serialized",
             "type": "boolean"
-          },
-          "consignment_discount_bearing": {
-            "$ref": "#/components/schemas/ConsignmentDiscountBearing",
-            "default": "STORE_ABSORBS"
           },
           "discount_pct": {
             "maximum": 99.0,
@@ -755,9 +751,6 @@
           "applies_owned_serialized": {
             "title": "Applies Owned Serialized",
             "type": "boolean"
-          },
-          "consignment_discount_bearing": {
-            "$ref": "#/components/schemas/ConsignmentDiscountBearing"
           },
           "created_at": {
             "format": "date-time",
@@ -812,7 +805,6 @@
           "applies_owned_bulk",
           "applies_catalog",
           "applies_consignment",
-          "consignment_discount_bearing",
           "starts_at",
           "ends_at",
           "status",
@@ -1232,15 +1224,6 @@
         ],
         "title": "CategoryTargetUpdate",
         "type": "object"
-      },
-      "ConsignmentDiscountBearing": {
-        "description": "活動折扣套用寄售品時，折讓由誰吸收（docs/21 §8.1；applies_consignment=true 時生效）。\n\nSTORE_ABSORBS：寄售人 payout 認原 listed_price、抽成吸收折讓（且抽成不得 < 0）。\nPROPORTIONAL：gross=折後價，抽成與 payout 按折後縮水（等於替寄售人打折）。",
-        "enum": [
-          "STORE_ABSORBS",
-          "PROPORTIONAL"
-        ],
-        "title": "ConsignmentDiscountBearing",
-        "type": "string"
       },
       "ConsignmentPayableRow": {
         "description": "寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。",

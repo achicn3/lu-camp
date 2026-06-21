@@ -47,7 +47,6 @@ async def create_campaign(
             applies_owned_bulk=body.applies_owned_bulk,
             applies_catalog=body.applies_catalog,
             applies_consignment=body.applies_consignment,
-            consignment_discount_bearing=body.consignment_discount_bearing,
             created_by=user.id,
         )
     except InvalidDiscountPct as exc:

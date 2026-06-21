@@ -14,7 +14,7 @@ from app.core.audit import write_audit_log
 from app.core.money import DISCOUNT_PCT_MAX, DISCOUNT_PCT_MIN
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.repository import CampaignRepository
-from app.shared.enums import CampaignStatus, ConsignmentDiscountBearing
+from app.shared.enums import CampaignStatus
 from app.shared.exceptions import (
     CampaignConflict,
     CampaignNotFound,
@@ -39,7 +39,6 @@ class CampaignService:
         applies_owned_bulk: bool,
         applies_catalog: bool,
         applies_consignment: bool,
-        consignment_discount_bearing: ConsignmentDiscountBearing,
         created_by: int,
     ) -> Campaign:
         """建立活動（DRAFT）。驗證折扣 1-99、區間 ends>starts、名稱非空；寫稽核。"""
@@ -61,7 +60,6 @@ class CampaignService:
             applies_owned_bulk=applies_owned_bulk,
             applies_catalog=applies_catalog,
             applies_consignment=applies_consignment,
-            consignment_discount_bearing=consignment_discount_bearing,
             status=CampaignStatus.DRAFT,
             created_by=created_by,
         )

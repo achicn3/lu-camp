@@ -1467,6 +1467,8 @@ export interface components {
         /**
          * CampaignCreateRequest
          * @description 建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。
+         *
+         *     寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。
          */
         CampaignCreateRequest: {
             /**
@@ -1489,8 +1491,6 @@ export interface components {
              * @default true
              */
             applies_owned_serialized: boolean;
-            /** @default STORE_ABSORBS */
-            consignment_discount_bearing: components["schemas"]["ConsignmentDiscountBearing"];
             /** Discount Pct */
             discount_pct: number;
             /**
@@ -1516,7 +1516,6 @@ export interface components {
             applies_owned_bulk: boolean;
             /** Applies Owned Serialized */
             applies_owned_serialized: boolean;
-            consignment_discount_bearing: components["schemas"]["ConsignmentDiscountBearing"];
             /**
              * Created At
              * Format: date-time
@@ -1706,15 +1705,6 @@ export interface components {
             /** Target Margin Pct */
             target_margin_pct: number;
         };
-        /**
-         * ConsignmentDiscountBearing
-         * @description 活動折扣套用寄售品時，折讓由誰吸收（docs/21 §8.1；applies_consignment=true 時生效）。
-         *
-         *     STORE_ABSORBS：寄售人 payout 認原 listed_price、抽成吸收折讓（且抽成不得 < 0）。
-         *     PROPORTIONAL：gross=折後價，抽成與 payout 按折後縮水（等於替寄售人打折）。
-         * @enum {string}
-         */
-        ConsignmentDiscountBearing: "STORE_ABSORBS" | "PROPORTIONAL";
         /**
          * ConsignmentPayableRow
          * @description 寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。
