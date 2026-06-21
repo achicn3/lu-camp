@@ -121,6 +121,9 @@ describe("/pos 結帳頁", () => {
       if (url.includes("/cash-sessions/current"))
         return json({ id: 1, status: "OPEN" });
       if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({ total: "1800", campaign_id: null, campaign_name: null, lines: [] });
+      }
       if (url.endsWith("/api/v1/sales") && method === "POST") {
         saleBody = body;
         return json(
@@ -168,6 +171,53 @@ describe("/pos 結帳頁", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/已送出列印/)).toBeTruthy(),
     );
+  });
+
+  it("活動生效：總額顯示折後、結帳送折後收款（docs/21 C2b）", async () => {
+    let saleBody = "";
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      // 後端試算：九折 → 1800 × 0.9 = 1620（前端不自算，照單顯示/收款）。
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1620",
+          campaign_id: 1,
+          campaign_name: "開幕九折",
+          lines: [],
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleBody = body;
+        return json(
+          { id: 8, store_id: 1, total: "1620", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+
+    await user.type(screen.getByLabelText("掃描或輸入條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    // 應付總額顯示折後 1,620（非折前 1,800）
+    await waitFor(() =>
+      expect(screen.getAllByText(/1,620/).length).toBeGreaterThan(0),
+    );
+    expect(screen.getByText(/已套用活動折扣：開幕九折/)).toBeTruthy();
+
+    const checkout = screen.getByRole("button", { name: "結帳" });
+    await waitFor(() => expect(checkout).toHaveProperty("disabled", false));
+    await user.click(checkout);
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+    // 送出的現金收款為折後金額 1620（對齊後端折後 total）
+    expect(JSON.parse(saleBody).tenders).toEqual([
+      { tender_type: "CASH", amount: "1620" },
+    ]);
   });
 
   it("生效活動橫幅顯示活動名稱與折扣", async () => {

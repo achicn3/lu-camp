@@ -490,7 +490,25 @@ export default function PosPage() {
     },
   });
 
-  const total = cartTotal(lines);
+  const saleLines = toSaleLines(lines);
+  // 結帳前向後端試算折後總額（docs/21 C2b）：活動生效時 total=折後，收款據此對齊（否則 422）。
+  const quote = useQuery({
+    queryKey: ["sale-quote", JSON.stringify(saleLines), member?.id ?? null],
+    enabled: lines.length > 0,
+    queryFn: async () => {
+      const { data, error } = await api.POST("/api/v1/sales/quote", {
+        body: { lines: saleLines, buyer_contact_id: member?.id ?? null },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "試算失敗");
+      return data;
+    },
+  });
+  // 試算就緒：空車視為就緒；否則查詢成功且非重抓中（避免用折前/過期金額結帳）。
+  const quoteReady = lines.length === 0 || (quote.isSuccess && !quote.isFetching);
+  const quotedTotal = parseNtd(quote.data?.total ?? "") ?? 0;
+  // 應付總額：就緒用後端折後 quotedTotal；試算中暫顯折前估計（結帳鍵另以 quoteReady 鎖住）。
+  const total = quoteReady && lines.length > 0 ? quotedTotal : cartTotal(lines);
+  const campaignNote = quote.data?.campaign_name ?? null;
   const memberBalance =
     member !== null && balanceQuery.data
       ? (parseNtd(balanceQuery.data.balance) ?? 0)
@@ -683,6 +701,14 @@ export default function PosPage() {
               <Money value={total} />
             </strong>
           </div>
+          {campaignNote && (
+            <p className="hint pos-campaign-note">已套用活動折扣：{campaignNote}</p>
+          )}
+          {lines.length > 0 && quote.isError && (
+            <p role="alert" className="form-error">
+              試算失敗：{(quote.error as Error).message}
+            </p>
+          )}
 
           <MemberPanel
             member={member}
@@ -742,10 +768,14 @@ export default function PosPage() {
           <button
             type="button"
             className="btn-primary pos-checkout"
-            disabled={!validation.ok || checkout.isPending}
+            disabled={!validation.ok || checkout.isPending || !quoteReady}
             onClick={() => checkout.mutate()}
           >
-            {checkout.isPending ? "結帳中…" : "結帳"}
+            {checkout.isPending
+              ? "結帳中…"
+              : lines.length > 0 && !quoteReady
+                ? "試算中…"
+                : "結帳"}
           </button>
         </aside>
       </div>
