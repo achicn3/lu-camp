@@ -69,6 +69,17 @@
 - 該 Phase 的關鍵不變量（`06`）都有測試守護。
 - 經過 §5 三層審查。
 - 一個能 `docker compose up` 跑起來的可運行狀態（地基 Phase 之後）。
+- **凡有前端 UI 變更（新頁面/新流程/改動既有畫面）：必跑瀏覽器 E2E 煙霧測試並截圖**（見 §6.1）。
+
+### 6.1 瀏覽器 E2E 煙霧測試（UI 變更強制；見 `docs/20`）
+- **觸發條件**：任何 task 動到前端可見畫面/流程，DoD 即包含「對真 backend + 真 Postgres 跑一次
+  Playwright 煙霧並截圖」。純後端 task 不需要。
+- **配方固定在 `docs/20-browser-e2e-smoke.md`**：`setup-browser-e2e.sh`（無 root WSL 補庫+字型）→
+  起 E2E DB + 後端(:8000, seed) + 前端(:3000) → 跑 `frontend/scripts/<feature>-smoke.mjs` → 截圖。
+- **每個有 UI 的 Phase/功能都應有對應 `*-smoke.mjs`**（如 reports/campaigns…），覆蓋該畫面主要路徑。
+- **截圖留存並於回報附上**（路徑或縮圖）；中文若變方框代表字型沒裝（重跑 setup）。
+- 環境真的跑不起來（無 Docker/瀏覽器庫）時：仍須提供可跑的 smoke 腳本、誠實回報卡點與已嘗試步驟，
+  不可宣稱「已 e2e」。
 
 ## 7. 給人的操作建議（你怎麼驅動 Claude Code）
 - 一次只交辦一個小步，明確說「先寫失敗測試、跑給我看紅燈，再實作」。

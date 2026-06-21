@@ -20,6 +20,10 @@
 - 領域邏輯（services）與金額計算必須有單元測試；API 端點必須有整合測試；關鍵流程（收購、結帳、寄售結算、現金對帳）必須有端對端測試。
 - 覆蓋率門檻：`services/`、`domain/` ≥ 90%；整體 ≥ 80%。本機關卡未達標即失敗（本專案不使用 GitHub CI）。
 - 詳見 `06-tdd-strategy.md`。
+- **前端 UI 變更必跑瀏覽器 E2E（強制）**：任何動到前端可見畫面/流程的 task，完成定義都包含「依
+  `docs/20-browser-e2e-smoke.md` 對真 backend + 真 Postgres 跑一次 Playwright 煙霧並截圖」，且每個
+  有 UI 的功能要有對應 `frontend/scripts/<feature>-smoke.mjs`、回報附上截圖（見 `docs/08` §6.1）。
+  純後端 task 不需要；環境跑不起來須誠實回報卡點、不得宣稱「已 e2e」。
 
 ## 2. 專案結構（強制，不得擅自更動）
 
