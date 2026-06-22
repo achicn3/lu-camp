@@ -44,6 +44,19 @@ try {
 
   await page.fill('input[aria-label="品名"]', "標籤測試外套");
   await page.locator(".acq-row select").first().selectOption("A");
+
+  const brand = page.getByLabel("品牌");
+  await brand.click();
+  await brand.fill("TestBrand");
+  await page.click('button:has-text("建立「TestBrand」")');
+
+  const cat = page.getByLabel("分類");
+  await cat.click();
+  await cat.fill("登山服飾");
+  await page.click('button:has-text("建立「登山服飾」")');
+
+  await page.fill('input[aria-label="估計轉售價"]', "3000");
+  await page.waitForSelector("text=建議最高收購成本");
   await page.fill('input[aria-label="收購價"]', "1000");
   await page.fill('input[aria-label="上架售價"]', "3000");
   await page.click('button:has-text("送出收購")');
