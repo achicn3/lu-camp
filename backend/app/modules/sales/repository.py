@@ -35,7 +35,8 @@ class SalesMarginComponents:
     consignment_serialized_revenue: Decimal
     consignment_bulk_revenue: Decimal
     catalog_revenue: Decimal
-    unknown_cost_revenue: Decimal  # catalog + 缺成本自有序號（營收認列但成本未知）
+    menu_revenue: Decimal  # 餐飲/內用（全額認列、成本未建模 → 計入 unknown_cost）
+    unknown_cost_revenue: Decimal  # catalog + 餐飲 + 缺成本自有序號（營收認列但成本未知）
     cash_received: Decimal
     store_credit_redeemed: Decimal
     transaction_count: int
@@ -327,6 +328,23 @@ class SalesRepository:
             ).scalar_one()
         )
 
+        # 餐飲/內用營收：全額認列但成本未建模（同 catalog，計入 unknown_cost、不灌毛利率）。
+        menu_revenue = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(SaleLine.line_total), 0))
+                    .join(Sale, SaleLine.sale_id == Sale.id)
+                    .where(
+                        Sale.store_id == store_id,
+                        Sale.invoice_status != SaleInvoiceStatus.VOID,
+                        Sale.created_at >= date_from,
+                        Sale.created_at < date_to,
+                        SaleLine.line_type == SaleLineType.MENU,
+                    )
+                )
+            ).scalar_one()
+        )
+
         tender_rows = await self._session.execute(
             select(SaleTender.tender_type, func.coalesce(func.sum(SaleTender.amount), 0))
             .join(Sale, SaleTender.sale_id == Sale.id)
@@ -359,7 +377,7 @@ class SalesRepository:
             ).scalar_one()
         )
 
-        unknown_cost_revenue += catalog_revenue
+        unknown_cost_revenue += catalog_revenue + menu_revenue
         return SalesMarginComponents(
             owned_serialized_revenue=owned_serialized_revenue,
             owned_serialized_cogs=owned_serialized_cogs,
@@ -368,6 +386,7 @@ class SalesRepository:
             consignment_serialized_revenue=consignment_serialized_revenue,
             consignment_bulk_revenue=consignment_bulk_revenue,
             catalog_revenue=catalog_revenue,
+            menu_revenue=menu_revenue,
             unknown_cost_revenue=unknown_cost_revenue,
             cash_received=cash_received,
             store_credit_redeemed=store_credit_redeemed,

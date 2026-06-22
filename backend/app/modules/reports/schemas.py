@@ -126,7 +126,10 @@ class SalesMarginReport(BaseModel):
     consignment_commission_income: NTDAmount
     gross_margin: NTDAmount
     gross_margin_rate: NTDAmountOpt  # 毛利 ÷ 已知成本營收；分母 0 → null
-    unknown_cost_sales: NTDAmount  # 成本未知營收（catalog + 缺成本自有），不假造毛利
+    unknown_cost_sales: NTDAmount  # 成本未知營收（catalog + 餐飲 + 缺成本自有），不假造毛利
+    # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
+    food_revenue: NTDAmount
+    secondhand_revenue: NTDAmount
     cash_received: NTDAmount
     store_credit_redeemed: NTDAmount
     transaction_count: int
@@ -152,6 +155,9 @@ class DailySummaryReport(BaseModel):
     gross_margin: NTDAmount
     gross_margin_rate: NTDAmountOpt  # 分母 0 → null
     unknown_cost_sales: NTDAmount
+    # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
+    food_revenue: NTDAmount
+    secondhand_revenue: NTDAmount
     # 現金/支出面（與 R1 同源）
     cash_sales_in: NTDAmount
     acquisition_void_in: NTDAmount

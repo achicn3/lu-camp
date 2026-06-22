@@ -269,6 +269,14 @@ function DashboardPanel() {
           <dt>認列營收</dt>
           <dd><MoneyText value={report.recognized_revenue} /></dd>
         </div>
+        <div className="rpt-stat">
+          <dt>二手營收</dt>
+          <dd><MoneyText value={report.secondhand_revenue} /></dd>
+        </div>
+        <div className="rpt-stat">
+          <dt>餐飲營收</dt>
+          <dd><MoneyText value={report.food_revenue} /></dd>
+        </div>
         <div className="rpt-stat rpt-stat-hero">
           <dt>毛利</dt>
           <dd>
@@ -645,6 +653,14 @@ function SalesMarginPanel() {
                 <tr>
                   <td>寄售抽成收入</td>
                   <td><MoneyText value={report.consignment_commission_income} /></td>
+                </tr>
+                <tr>
+                  <td>二手營收</td>
+                  <td><MoneyText value={report.secondhand_revenue} /></td>
+                </tr>
+                <tr>
+                  <td>餐飲營收</td>
+                  <td><MoneyText value={report.food_revenue} /></td>
                 </tr>
                 <tr>
                   <td>成本不明銷售額</td>

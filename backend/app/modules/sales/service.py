@@ -86,6 +86,10 @@ class MarginBreakdown:
     cash_received: Decimal
     store_credit_redeemed: Decimal
     transaction_count: int
+    # 餐飲/二手分列（裁示）：food_revenue=餐飲認列營收；secondhand_revenue=非餐飲認列營收
+    # （＝recognized_revenue − food_revenue，含二手買斷/寄售抽成/數量品）。
+    food_revenue: Decimal
+    secondhand_revenue: Decimal
 
 
 @dataclass(frozen=True)
@@ -586,6 +590,8 @@ class SalesService:
             cash_received=comp.cash_received,
             store_credit_redeemed=comp.store_credit_redeemed,
             transaction_count=comp.transaction_count,
+            food_revenue=comp.menu_revenue,
+            secondhand_revenue=recognized_revenue - comp.menu_revenue,
         )
 
     async def excess_spend_components(

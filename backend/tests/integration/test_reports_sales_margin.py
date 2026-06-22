@@ -18,6 +18,7 @@ from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
+from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -151,6 +152,13 @@ async def _add_catalog(session: AsyncSession, store_id: int, *, price: str, qty:
     return product.id
 
 
+async def _add_menu(session: AsyncSession, store_id: int, *, name: str, price: str) -> int:
+    item = MenuItem(store_id=store_id, name=name, unit_price=Decimal(price))
+    session.add(item)
+    await session.flush()
+    return item.id
+
+
 async def _sell(
     client: httpx.AsyncClient, token: str, lines: list[dict[str, object]], *, key: str
 ) -> dict[str, object]:
@@ -180,6 +188,33 @@ async def test_owned_serialized_margin(client: httpx.AsyncClient, db_session: As
     assert body["gross_margin_rate"] == "0.4000"  # 200 / 500
     assert body["unknown_cost_sales"] == "0"
     assert body["transaction_count"] == 1
+
+
+async def test_menu_revenue_recognized_and_split(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """餐飲：全額認列、計入 gross/recognized 但成本未知→unknown_cost；report 分列餐飲/二手。"""
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
+    menu_id = await _add_menu(db_session, store_id, name="手沖-耶加", price="180")
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "SERIALIZED", "item_code": "OWN-1"},
+            {"line_type": "MENU", "menu_item_id": menu_id, "qty": 2},
+        ],
+        key="mix1",
+    )
+
+    body = await _margin(client, mgr)
+    assert body["gross_turnover"] == "860"  # 500 二手 + 360 餐飲
+    assert body["recognized_revenue"] == "860"  # 餐飲全額認列
+    assert body["food_revenue"] == "360"
+    assert body["secondhand_revenue"] == "500"  # recognized − food
+    assert body["unknown_cost_sales"] == "360"  # 餐飲無成本，不灌毛利
+    assert body["gross_margin"] == "200"  # 僅二手 500−300
+    assert body["gross_margin_rate"] == "0.4000"  # 餐飲排除於分母（200/500）
 
 
 async def test_consignment_recognizes_commission_only(

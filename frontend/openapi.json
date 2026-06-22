@@ -2235,6 +2235,10 @@
             "title": "Expected Cash",
             "type": "string"
           },
+          "food_revenue": {
+            "title": "Food Revenue",
+            "type": "string"
+          },
           "generated_at": {
             "format": "date-time",
             "title": "Generated At",
@@ -2269,6 +2273,10 @@
           },
           "recognized_revenue": {
             "title": "Recognized Revenue",
+            "type": "string"
+          },
+          "secondhand_revenue": {
+            "title": "Secondhand Revenue",
             "type": "string"
           },
           "store_credit_issued": {
@@ -2313,6 +2321,8 @@
           "gross_margin",
           "gross_margin_rate",
           "unknown_cost_sales",
+          "food_revenue",
+          "secondhand_revenue",
           "cash_sales_in",
           "acquisition_void_in",
           "buyout_out",
@@ -4656,6 +4666,10 @@
             "title": "Date To",
             "type": "string"
           },
+          "food_revenue": {
+            "title": "Food Revenue",
+            "type": "string"
+          },
           "generated_at": {
             "format": "date-time",
             "title": "Generated At",
@@ -4688,6 +4702,10 @@
             "title": "Recognized Revenue",
             "type": "string"
           },
+          "secondhand_revenue": {
+            "title": "Secondhand Revenue",
+            "type": "string"
+          },
           "store_credit_redeemed": {
             "title": "Store Credit Redeemed",
             "type": "string"
@@ -4718,6 +4736,8 @@
           "gross_margin",
           "gross_margin_rate",
           "unknown_cost_sales",
+          "food_revenue",
+          "secondhand_revenue",
           "cash_received",
           "store_credit_redeemed",
           "transaction_count"

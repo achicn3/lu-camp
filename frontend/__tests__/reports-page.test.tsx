@@ -25,6 +25,8 @@ const DAILY_SUMMARY_DATA = {
   cogs: "50000",
   consignment_commission_income: "15000",
   unknown_cost_sales: "5000",
+  food_revenue: "21000",
+  secondhand_revenue: "74000",
   net_sales_ex_tax: "90476",
   tax: "4524",
   total_cash_out: "30000",
@@ -128,6 +130,8 @@ const SALES_MARGIN_DATA = {
   gross_margin: "170000",
   gross_margin_rate: "0.425",
   unknown_cost_sales: "20000",
+  food_revenue: "88000",
+  secondhand_revenue: "312000",
   cash_received: "450000",
   store_credit_redeemed: "50000",
   transaction_count: 200,
@@ -521,6 +525,9 @@ describe("ReportsPage", () => {
     expect(screen.getByText("2,400")).toBeTruthy();
     // estimated_net_income
     expect(screen.getByText("35,000")).toBeTruthy();
+    // 餐飲/二手分列
+    expect(screen.getByText("74,000")).toBeTruthy(); // secondhand_revenue
+    expect(screen.getByText("21,000")).toBeTruthy(); // food_revenue
     // estimated_net_income_note shown in footnote (prefixed by 估算淨利說明：, alongside 估計值 badge)
     expect(
       screen.getByText(
@@ -584,6 +591,9 @@ describe("ReportsPage", () => {
     expect(screen.getByText("400,000")).toBeTruthy();
     // gross_margin
     expect(screen.getByText("170,000")).toBeTruthy();
+    // 餐飲/二手分列
+    expect(screen.getByText("88,000")).toBeTruthy(); // food_revenue
+    expect(screen.getByText("312,000")).toBeTruthy(); // secondhand_revenue
     // transaction_count
     expect(screen.getByText("200")).toBeTruthy();
   });

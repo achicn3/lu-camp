@@ -2148,6 +2148,8 @@ export interface components {
             estimated_net_income_note: string;
             /** Expected Cash */
             expected_cash: string;
+            /** Food Revenue */
+            food_revenue: string;
             /**
              * Generated At
              * Format: date-time
@@ -2165,6 +2167,8 @@ export interface components {
             net_sales_ex_tax: string;
             /** Recognized Revenue */
             recognized_revenue: string;
+            /** Secondhand Revenue */
+            secondhand_revenue: string;
             /** Store Credit Issued */
             store_credit_issued: string;
             /** Store Credit Redeemed */
@@ -3115,6 +3119,8 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /** Food Revenue */
+            food_revenue: string;
             /**
              * Generated At
              * Format: date-time
@@ -3130,6 +3136,8 @@ export interface components {
             owned_cogs: string;
             /** Recognized Revenue */
             recognized_revenue: string;
+            /** Secondhand Revenue */
+            secondhand_revenue: string;
             /** Store Credit Redeemed */
             store_credit_redeemed: string;
             /** Store Id */
