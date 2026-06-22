@@ -41,3 +41,14 @@ export async function printSaleDetail(
 ): Promise<void> {
   await postAgent("/print/detail", { ...sale, campaign_name: campaignName });
 }
+
+/**
+ * 送商品標籤（Brother 標籤機）：條碼=code（序號品 item_code / 散裝 lot_code）、品名、整數元售價。
+ */
+export async function printLabel(
+  code: string,
+  name: string,
+  price: number,
+): Promise<void> {
+  await postAgent("/print/label", { code, name, price });
+}

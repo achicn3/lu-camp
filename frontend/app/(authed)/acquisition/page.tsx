@@ -24,6 +24,7 @@ import {
 import { canVoid } from "@/features/acquisition/void";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
+import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -394,6 +395,55 @@ function ItemRowCard({
   );
 }
 
+// ── 標籤列印（Brother 標籤機）：收購完成後，逐一補印序號品 / 散裝批的條碼標籤 ──
+function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null }) {
+  const total = codes.length + (lot !== null ? 1 : 0);
+
+  const print = useMutation({
+    mutationFn: async () => {
+      let sent = 0;
+      for (const code of codes) {
+        const { data, error } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
+          params: { path: { item_code: code } },
+        });
+        if (!data) throw new Error(detail(error) ?? `查無序號品 ${code}`);
+        await printLabel(code, data.name, parseNtd(data.listed_price) ?? 0);
+        sent += 1;
+      }
+      if (lot !== null) {
+        const { data, error } = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
+          params: { path: { lot_code: lot } },
+        });
+        if (!data) throw new Error(detail(error) ?? `查無散裝批 ${lot}`);
+        await printLabel(lot, data.name, parseNtd(data.unit_price) ?? 0);
+        sent += 1;
+      }
+      return sent;
+    },
+  });
+
+  if (total === 0) return null;
+
+  return (
+    <div className="acq-print-labels">
+      <button
+        type="button"
+        className="btn-secondary"
+        onClick={() => print.mutate()}
+        disabled={print.isPending}
+      >
+        {print.isPending ? "列印中…" : `列印標籤（${total} 張）`}
+      </button>
+      {print.isSuccess && (
+        <p className="form-success">已送出 {print.data} 張標籤。</p>
+      )}
+      {print.isError && (
+        <p className="form-error">列印失敗：{print.error.message}</p>
+      )}
+    </div>
+  );
+}
+
 export default function AcquisitionPage() {
   const queryClient = useQueryClient();
   const [type, setType] = useState<AcqType>("BUYOUT");
@@ -649,7 +699,7 @@ export default function AcquisitionPage() {
           <p>收購完成（單號 #{result.acquisitionId}）。</p>
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
           {result.lot !== null && <p>散裝批號：{result.lot}</p>}
-          <p className="hint">標籤列印功能待後端端點上線後提供。</p>
+          <PrintLabelsAction codes={result.codes} lot={result.lot} />
           {voidedNote === null && isManager && canVoid({ voided_at: null, type: result.type }) && (
             <button
               type="button"

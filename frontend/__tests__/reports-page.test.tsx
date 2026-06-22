@@ -521,8 +521,14 @@ describe("ReportsPage", () => {
     expect(screen.getByText("2,400")).toBeTruthy();
     // estimated_net_income
     expect(screen.getByText("35,000")).toBeTruthy();
-    // estimated_net_income_note shown (label contains badge + note text)
-    expect(screen.getByText(DAILY_SUMMARY_DATA.estimated_net_income_note)).toBeTruthy();
+    // estimated_net_income_note shown in footnote (prefixed by 估算淨利說明：, alongside 估計值 badge)
+    expect(
+      screen.getByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          el.textContent?.includes(DAILY_SUMMARY_DATA.estimated_net_income_note) === true,
+      ),
+    ).toBeTruthy();
   });
 
   it("trends tab shows data table and has granularity selector", async () => {

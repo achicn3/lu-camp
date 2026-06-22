@@ -1008,6 +1008,12 @@ body {
 .acq-submit {
   align-self: flex-start;
 }
+.acq-print-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
 .combo {
   position: relative;
   display: flex;
