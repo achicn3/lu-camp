@@ -103,7 +103,7 @@ async def _seed() -> None:
 
         # 數量型商品（高庫存，可重複售）。
         catalog_ids: list[int] = []
-        for sku, name, price in [
+        for sku, name, price_str in [
             ("D-GAS", "高山瓦斯罐 230g", "150"),
             ("D-LAMP", "USB 露營燈", "590"),
             ("D-PEG", "鍛造營釘四入", "180"),
@@ -117,7 +117,7 @@ async def _seed() -> None:
                 store_id=store_id,
                 sku=f"{sku}-{tag}",
                 name=name,
-                unit_price=Decimal(price),
+                unit_price=Decimal(price_str),
                 quantity_on_hand=100000,
             )
             session.add(p)

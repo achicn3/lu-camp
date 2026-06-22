@@ -230,8 +230,10 @@ async def restore_database(
                     f"資料表 {table.name} 非空；還原請加 --truncate（會先清空所有表）。"
                 )
     else:
-        names = ", ".join(t.name for t in reversed(tables))
-        await conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
+        # 反向（子表先）DELETE 清空：FK 安全，且不像 TRUNCATE 會被同交易內的
+        # pending trigger events 擋下；identity 由還原後 _reset_sequence 推進。
+        for table in reversed(tables):
+            await conn.execute(table.delete())
 
     inserted: dict[str, int] = {}
     for table in tables:
