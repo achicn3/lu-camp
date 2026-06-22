@@ -121,6 +121,48 @@ describe("InventoryPage", () => {
     expect(screen.getByText("販售中", { selector: ".inv-badge" })).toBeTruthy();
   });
 
+  it("serialized row reprints a label via the hardware agent", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/print/label")) {
+          calls.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+          return json({ ok: true });
+        }
+        if (url.includes("/serialized-items")) return json(SERIALIZED);
+        if (url.includes("/catalog-products")) return json(CATALOG);
+        if (url.includes("/bulk-lots")) return json(BULK);
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "補印標籤" }));
+    expect(await screen.findByText("✓ 已送出")).toBeTruthy();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain("/print/label");
+    expect(calls[0].body).toEqual({ code: "SER-001", name: "登山帳篷", price: 3500 });
+  });
+
+  it("sold serialized item shows no reprint button", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/serialized-items"))
+          return json([{ ...SERIALIZED[0], status: "SOLD", sold_date: "2026-06-10T00:00:00Z" }]);
+        if (url.includes("/catalog-products")) return json(CATALOG);
+        if (url.includes("/bulk-lots")) return json(BULK);
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("SER-001");
+    expect(screen.queryByRole("button", { name: "補印標籤" })).toBeNull();
+  });
+
   it("paginates: next disabled when page not full", async () => {
     stubInventory();
     renderPage();

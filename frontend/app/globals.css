@@ -886,6 +886,24 @@ body {
 .inv-empty {
   padding: 16px 12px;
 }
+.inv-reprint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.inv-reprint-btn {
+  padding: 2px 10px;
+  font-size: 13px;
+}
+.inv-reprint-ok {
+  color: var(--success);
+  font-size: 12px;
+}
+.inv-reprint-err {
+  font-size: 12px;
+  cursor: help;
+}
 .inv-badge {
   display: inline-block;
   padding: 2px 8px;

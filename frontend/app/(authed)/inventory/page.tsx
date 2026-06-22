@@ -2,9 +2,10 @@
 // /inventory 庫存瀏覽（docs/10 §/inventory）：序號品 / 數量品 / 散裝批 三分頁，唯讀清單＋篩選＋
 // 搜尋＋分頁，全部走 OpenAPI 生成型別 client（docs/11，禁手刻型別）。
 //
-// 待後端端點（F5b，需核准後補）：改價留痕、上下架、補印條碼（/serialized-items|bulk-lots/{id}/
-// print-label）、商品照片。本版不放假按鈕（沿 cash 頁「待後端」慣例）。
-import { useQuery } from "@tanstack/react-query";
+// 補印標籤：每列一顆「補印標籤」（IN_STOCK 序號品 / ON_SALE 散裝批），直接複用 hardware-agent
+// 的 /print/label——清單列本就帶齊 條碼/品名/售價，免再查 by-code、免改後端。
+// 待後端端點（F5b，需核准後補）：改價留痕、上下架、商品照片。本版不放假按鈕（沿 cash 頁慣例）。
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useState } from "react";
 
 import {
@@ -17,6 +18,7 @@ import {
   sellThroughPct,
   serializedStatusBadge,
 } from "@/features/inventory/inventory";
+import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -63,6 +65,37 @@ function MoneyText({ value }: { value: string | null | undefined }) {
 
 function BadgeChip({ badge }: { badge: Badge }) {
   return <span className={`inv-badge inv-tone-${badge.tone}`}>{badge.label}</span>;
+}
+
+// 單件補印：條碼/品名/整數元售價直接來自清單列；經 hardware-agent /print/label。
+function ReprintLabelButton({
+  code,
+  name,
+  price,
+}: {
+  code: string;
+  name: string;
+  price: number;
+}) {
+  const print = useMutation({ mutationFn: () => printLabel(code, name, price) });
+  return (
+    <span className="inv-reprint">
+      <button
+        type="button"
+        className="btn-ghost inv-reprint-btn"
+        onClick={() => print.mutate()}
+        disabled={print.isPending}
+      >
+        {print.isPending ? "列印中…" : "補印標籤"}
+      </button>
+      {print.isSuccess && <span className="inv-reprint-ok">✓ 已送出</span>}
+      {print.isError && (
+        <span className="form-error inv-reprint-err" title={print.error.message}>
+          ✗ 失敗
+        </span>
+      )}
+    </span>
+  );
 }
 
 function Pagination({
@@ -219,7 +252,7 @@ function SerializedPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["序號碼", "品名", "成色", "持有", "狀態", "標價"]}
+        headers={["序號碼", "品名", "成色", "持有", "狀態", "標價", "標籤"]}
       >
         {rows.map((item) => (
           <tr key={item.id}>
@@ -234,6 +267,15 @@ function SerializedPanel() {
             </td>
             <td>
               <MoneyText value={item.listed_price} />
+            </td>
+            <td>
+              {item.status === "IN_STOCK" && (
+                <ReprintLabelButton
+                  code={item.item_code}
+                  name={item.name}
+                  price={parseNtd(item.listed_price) ?? 0}
+                />
+              )}
             </td>
           </tr>
         ))}
@@ -350,7 +392,7 @@ function BulkPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["批號", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態"]}
+        headers={["批號", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態", "標籤"]}
       >
         {rows.map((lot) => (
           <tr key={lot.id}>
@@ -369,6 +411,15 @@ function BulkPanel() {
             <td>{sellThroughPct(lot.total_qty, lot.remaining_qty)}%</td>
             <td>
               <BadgeChip badge={bulkStatusBadge(lot.status)} />
+            </td>
+            <td>
+              {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
+                <ReprintLabelButton
+                  code={lot.lot_code}
+                  name={lot.name}
+                  price={parseNtd(lot.unit_price) ?? 0}
+                />
+              )}
             </td>
           </tr>
         ))}
