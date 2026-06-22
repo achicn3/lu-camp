@@ -153,6 +153,7 @@ class SaleLineType(StrEnum):
     SERIALIZED = "SERIALIZED"
     CATALOG = "CATALOG"
     BULK_LOT = "BULK_LOT"
+    MENU = "MENU"  # 餐飲/內用菜單品項（現做、不扣庫存、不折活動、不可購物金折抵）
 
 
 class PaymentMethod(StrEnum):

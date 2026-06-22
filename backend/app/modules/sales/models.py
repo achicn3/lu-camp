@@ -96,6 +96,7 @@ class SaleLine(Base, TimestampMixin):
     serialized_item_id: Mapped[int | None] = mapped_column(ForeignKey("serialized_items.id"))
     catalog_product_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_products.id"))
     bulk_lot_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_lots.id"))
+    menu_item_id: Mapped[int | None] = mapped_column(ForeignKey("menu_items.id"))
     description: Mapped[str] = mapped_column(String(150))
     qty: Mapped[int] = mapped_column()
     # unit_price/line_total 為**實際成交（折後）**值——退貨退實付、報表認實收皆以此為準。

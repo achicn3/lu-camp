@@ -14,13 +14,14 @@ class SaleLineInput:
     """一筆銷售明細輸入。依 line_type 擇一帶入參照：
 
     SERIALIZED → item_code（qty 固定 1）；CATALOG → catalog_product_id + qty；
-    BULK_LOT → bulk_lot_id + qty。
+    BULK_LOT → bulk_lot_id + qty；MENU → menu_item_id + qty（餐飲，不扣庫存）。
     """
 
     line_type: SaleLineType
     item_code: str | None = None
     catalog_product_id: int | None = None
     bulk_lot_id: int | None = None
+    menu_item_id: int | None = None
     qty: int = 1
 
 

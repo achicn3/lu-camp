@@ -657,6 +657,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/menu-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Items */
+        get: operations["listMenuItems"];
+        put?: never;
+        /** Create Menu Item */
+        post: operations["createMenuItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive Menu Item */
+        delete: operations["archiveMenuItem"];
+        options?: never;
+        head?: never;
+        /** Update Menu Item */
+        patch: operations["updateMenuItem"];
+        trace?: never;
+    };
     "/api/v1/product-models": {
         parameters: {
             query?: never;
@@ -2500,6 +2536,53 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** MenuItemCreateRequest */
+        MenuItemCreateRequest: {
+            /** Category */
+            category?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /** MenuItemRead */
+        MenuItemRead: {
+            /** Category */
+            category: string | null;
+            /** Id */
+            id: number;
+            /** Is Available */
+            is_available: boolean;
+            /** Name */
+            name: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Store Id */
+            store_id: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * MenuItemUpdateRequest
+         * @description 部分更新；未提供的欄位不變。category 可明確設為 null 以清空。
+         */
+        MenuItemUpdateRequest: {
+            /** Category */
+            category?: string | null;
+            /** Is Available */
+            is_available?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
+        };
         /**
          * OwnershipType
          * @description 序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。
@@ -2816,7 +2899,7 @@ export interface components {
         SaleInvoiceStatus: "NOT_ISSUED" | "ISSUED" | "VOID" | "ALLOWANCE";
         /**
          * SaleLineCreateRequest
-         * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT→id + qty。
+         * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。
          */
         SaleLineCreateRequest: {
             /** Bulk Lot Id */
@@ -2826,6 +2909,8 @@ export interface components {
             /** Item Code */
             item_code?: string | null;
             line_type: components["schemas"]["SaleLineType"];
+            /** Menu Item Id */
+            menu_item_id?: number | null;
             /**
              * Qty
              * @default 1
@@ -2853,6 +2938,8 @@ export interface components {
             /** Line Total */
             line_total: string;
             line_type: components["schemas"]["SaleLineType"];
+            /** Menu Item Id */
+            menu_item_id: number | null;
             /** Original Unit Price */
             original_unit_price?: string | null;
             /** Qty */
@@ -2867,7 +2954,7 @@ export interface components {
          * @description 銷售明細行的品項種類。
          * @enum {string}
          */
-        SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT";
+        SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT" | "MENU";
         /**
          * SaleQuoteLineRead
          * @description 試算單行輸出：折後實際成交＋折讓留痕。
@@ -2906,8 +2993,12 @@ export interface components {
             campaign_id: number | null;
             /** Campaign Name */
             campaign_name: string | null;
+            /** Food Subtotal */
+            food_subtotal: string;
             /** Lines */
             lines: components["schemas"]["SaleQuoteLineRead"][];
+            /** Store Credit Max */
+            store_credit_max: string;
             /** Total */
             total: string;
         };
@@ -4708,6 +4799,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    listMenuItems: {
+        parameters: {
+            query?: {
+                available_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createMenuItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuItemCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archiveMenuItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateMenuItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MenuItemUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MenuItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

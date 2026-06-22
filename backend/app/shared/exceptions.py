@@ -214,3 +214,15 @@ class ReturnLineInvalid(DomainError):
 
 class ReturnConflict(DomainError):
     """退貨與目前狀態衝突（已全退、已作廢、或付款型態暫不支援）。"""
+
+
+class MenuItemNotFound(DomainError):
+    """指定的餐飲菜單品項不存在（或不屬於本店、已封存）。"""
+
+
+class MenuItemUnavailable(DomainError):
+    """餐飲菜單品項目前停售（is_available=False），不可加入結帳。"""
+
+
+class DuplicateMenuItem(DomainError):
+    """同店餐飲菜單品項名稱重複。"""

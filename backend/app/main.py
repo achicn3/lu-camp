@@ -16,6 +16,7 @@ from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.consignment.router import router as consignment_router
 from app.modules.contacts.router import router as contacts_router
 from app.modules.inventory.router import router as inventory_router
+from app.modules.menu.router import router as menu_router
 from app.modules.purchasing.router import router as purchasing_router
 from app.modules.reports.finance_router import router as reports_finance_router
 from app.modules.reports.router import router as reports_router
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(consignment_router, prefix=API_PREFIX)
     app.include_router(acquisition_router, prefix=API_PREFIX)
     app.include_router(inventory_router, prefix=API_PREFIX)
+    app.include_router(menu_router, prefix=API_PREFIX)
     app.include_router(purchasing_router, prefix=API_PREFIX)
     app.include_router(stocktake_router, prefix=API_PREFIX)
     app.include_router(settings_router, prefix=API_PREFIX)

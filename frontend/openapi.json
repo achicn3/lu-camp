@@ -3202,6 +3202,172 @@
         "title": "MemberSourcedItemRead",
         "type": "object"
       },
+      "MenuItemCreateRequest": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "name": {
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "default": 0,
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "name",
+          "unit_price"
+        ],
+        "title": "MenuItemCreateRequest",
+        "type": "object"
+      },
+      "MenuItemRead": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_available": {
+            "title": "Is Available",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "name",
+          "unit_price",
+          "category",
+          "is_available",
+          "sort_order"
+        ],
+        "title": "MenuItemRead",
+        "type": "object"
+      },
+      "MenuItemUpdateRequest": {
+        "description": "部分更新；未提供的欄位不變。category 可明確設為 null 以清空。",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "is_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Available"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "title": "MenuItemUpdateRequest",
+        "type": "object"
+      },
       "OwnershipType": {
         "description": "序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。",
         "enum": [
@@ -3959,7 +4125,7 @@
         "type": "string"
       },
       "SaleLineCreateRequest": {
-        "description": "單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT→id + qty。",
+        "description": "單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。",
         "properties": {
           "bulk_lot_id": {
             "anyOf": [
@@ -3996,6 +4162,17 @@
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
+          },
+          "menu_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Item Id"
           },
           "qty": {
             "default": 1,
@@ -4055,6 +4232,17 @@
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
           },
+          "menu_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Item Id"
+          },
           "original_unit_price": {
             "anyOf": [
               {
@@ -4092,6 +4280,7 @@
           "serialized_item_id",
           "catalog_product_id",
           "bulk_lot_id",
+          "menu_item_id",
           "description",
           "qty",
           "unit_price",
@@ -4105,7 +4294,8 @@
         "enum": [
           "SERIALIZED",
           "CATALOG",
-          "BULK_LOT"
+          "BULK_LOT",
+          "MENU"
         ],
         "title": "SaleLineType",
         "type": "string"
@@ -4214,12 +4404,20 @@
             ],
             "title": "Campaign Name"
           },
+          "food_subtotal": {
+            "title": "Food Subtotal",
+            "type": "string"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SaleQuoteLineRead"
             },
             "title": "Lines",
             "type": "array"
+          },
+          "store_credit_max": {
+            "title": "Store Credit Max",
+            "type": "string"
           },
           "total": {
             "title": "Total",
@@ -4230,7 +4428,9 @@
           "total",
           "campaign_id",
           "campaign_name",
-          "lines"
+          "lines",
+          "food_subtotal",
+          "store_credit_max"
         ],
         "title": "SaleQuoteResponse",
         "type": "object"
@@ -7890,6 +8090,204 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/menu-items": {
+      "get": {
+        "operationId": "listMenuItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "available_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Available Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MenuItemRead"
+                  },
+                  "title": "Response Listmenuitems",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Menu Items",
+        "tags": [
+          "menu"
+        ]
+      },
+      "post": {
+        "operationId": "createMenuItem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuItemCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Menu Item",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/menu-items/{item_id}": {
+      "delete": {
+        "operationId": "archiveMenuItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Archive Menu Item",
+        "tags": [
+          "menu"
+        ]
+      },
+      "patch": {
+        "operationId": "updateMenuItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuItemUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Menu Item",
+        "tags": [
+          "menu"
         ]
       }
     },

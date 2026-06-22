@@ -34,6 +34,8 @@ from app.shared.exceptions import (
     InvalidSaleTender,
     InvalidStateTransition,
     MemberPointsAdjustFailed,
+    MenuItemNotFound,
+    MenuItemUnavailable,
     NoOpenCashSession,
     SaleAlreadyVoid,
     SaleItemNotFound,
@@ -58,6 +60,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     SaleAlreadyVoid: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
+    MenuItemNotFound: status.HTTP_404_NOT_FOUND,
+    MenuItemUnavailable: status.HTTP_409_CONFLICT,
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidSaleTender: status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -161,6 +165,8 @@ async def quote_sale(
             )
             for ql in quote.lines
         ],
+        food_subtotal=quote.food_subtotal,
+        store_credit_max=quote.store_credit_max,
     )
 
 

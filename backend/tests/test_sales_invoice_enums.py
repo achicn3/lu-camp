@@ -22,7 +22,7 @@ def test_sale_status_values() -> None:
 
 
 def test_sale_line_type_values() -> None:
-    assert {s.value for s in SaleLineType} == {"SERIALIZED", "CATALOG", "BULK_LOT"}
+    assert {s.value for s in SaleLineType} == {"SERIALIZED", "CATALOG", "BULK_LOT", "MENU"}
 
 
 def test_payment_method_values() -> None:

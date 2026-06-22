@@ -23,12 +23,13 @@ NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str
 
 
 class SaleLineCreateRequest(BaseModel):
-    """單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT→id + qty。"""
+    """單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。"""
 
     line_type: SaleLineType
     item_code: str | None = None
     catalog_product_id: int | None = None
     bulk_lot_id: int | None = None
+    menu_item_id: int | None = None
     qty: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
@@ -37,19 +38,32 @@ class SaleLineCreateRequest(BaseModel):
         if self.line_type == SaleLineType.SERIALIZED:
             if self.item_code is None:
                 raise ValueError("SERIALIZED 明細必須帶 item_code")
-            if self.catalog_product_id is not None or self.bulk_lot_id is not None:
+            if self.catalog_product_id is not None or self.bulk_lot_id is not None or (
+                self.menu_item_id is not None
+            ):
                 raise ValueError("SERIALIZED 明細只能帶 item_code")
             if self.qty != 1:
                 raise ValueError("SERIALIZED 明細數量必須為 1")
         elif self.line_type == SaleLineType.CATALOG:
             if self.catalog_product_id is None:
                 raise ValueError("CATALOG 明細必須帶 catalog_product_id")
-            if self.item_code is not None or self.bulk_lot_id is not None:
+            if self.item_code is not None or self.bulk_lot_id is not None or (
+                self.menu_item_id is not None
+            ):
                 raise ValueError("CATALOG 明細只能帶 catalog_product_id")
+        elif self.line_type == SaleLineType.MENU:
+            if self.menu_item_id is None:
+                raise ValueError("MENU 明細必須帶 menu_item_id")
+            if self.item_code is not None or self.catalog_product_id is not None or (
+                self.bulk_lot_id is not None
+            ):
+                raise ValueError("MENU 明細只能帶 menu_item_id")
         else:  # BULK_LOT
             if self.bulk_lot_id is None:
                 raise ValueError("BULK_LOT 明細必須帶 bulk_lot_id")
-            if self.item_code is not None or self.catalog_product_id is not None:
+            if self.item_code is not None or self.catalog_product_id is not None or (
+                self.menu_item_id is not None
+            ):
                 raise ValueError("BULK_LOT 明細只能帶 bulk_lot_id")
         return self
 
@@ -59,6 +73,7 @@ class SaleLineCreateRequest(BaseModel):
             item_code=self.item_code,
             catalog_product_id=self.catalog_product_id,
             bulk_lot_id=self.bulk_lot_id,
+            menu_item_id=self.menu_item_id,
             qty=self.qty,
         )
 
@@ -134,6 +149,9 @@ class SaleQuoteResponse(BaseModel):
     campaign_id: int | None
     campaign_name: str | None
     lines: list[SaleQuoteLineRead]
+    # 餐飲（內用）小計與購物金可折抵上限（=total−food_subtotal）；POS 據此卡住購物金輸入。
+    food_subtotal: NTDAmount
+    store_credit_max: NTDAmount
 
 
 class SaleLineRead(BaseModel):
@@ -146,6 +164,7 @@ class SaleLineRead(BaseModel):
     serialized_item_id: int | None
     catalog_product_id: int | None
     bulk_lot_id: int | None
+    menu_item_id: int | None
     description: str
     qty: int
     unit_price: NTDAmount

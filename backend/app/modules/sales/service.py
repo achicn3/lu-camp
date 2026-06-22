@@ -28,6 +28,8 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.service import InventoryService
+from app.modules.menu.models import MenuItem
+from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
@@ -50,6 +52,8 @@ from app.shared.exceptions import (
     EmptySale,
     IdempotencyKeyConflict,
     InvalidSaleTender,
+    MenuItemNotFound,
+    MenuItemUnavailable,
     NoOpenCashSession,
     SaleAlreadyVoid,
     SaleItemNotFound,
@@ -114,6 +118,8 @@ def _campaign_applies(
     """
     if campaign is None:
         return False
+    if line_type == SaleLineType.MENU:
+        return False  # 餐飲不參與門市活動折扣（裁示）
     if line_type == SaleLineType.SERIALIZED:
         return campaign.applies_consignment if is_consignment else campaign.applies_owned_serialized
     if line_type == SaleLineType.CATALOG:
@@ -139,12 +145,17 @@ class SaleQuote:
     """結帳前試算（docs/21 C2b）：套用生效活動後的折後總額與各行折讓；唯讀，不動庫存/不收款。
 
     供 POS 顯示折後價並送出對齊折後總額的收款（前端不自算金額）。
+
+    food_subtotal：餐飲（內用）折後小計；store_credit_max：購物金最多可折抵額
+    （＝total − food_subtotal，內用不得以購物金折抵）。POS 據此把購物金輸入卡在上限內。
     """
 
     total: Decimal
     campaign_id: int | None
     campaign_name: str | None
     lines: list[QuoteLine]
+    food_subtotal: Decimal
+    store_credit_max: Decimal
 
 
 def _member_points_for(total: Decimal) -> int:
@@ -169,6 +180,7 @@ def _cart_fingerprint(
                 "item_code": line.item_code,
                 "catalog_product_id": line.catalog_product_id,
                 "bulk_lot_id": line.bulk_lot_id,
+                "menu_item_id": line.menu_item_id,
                 "qty": line.qty,
             }
             for line in lines
@@ -199,6 +211,7 @@ class SalesService:
         self._contacts = ContactService(session)
         self._storecredit = StoreCreditService(session)
         self._campaigns = CampaignService(session)
+        self._menu = MenuService(session)
 
     @staticmethod
     def _normalize_tenders(tenders: list[TenderInput] | None) -> list[TenderInput] | None:
@@ -329,11 +342,14 @@ class SalesService:
         # 逐行依品項種類/擁有型態與活動開關套折後價（無活動→原價）。
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
 
+        food_subtotal = Decimal(0)  # 餐飲（內用）小計：購物金折抵上限與會員點數都要扣掉它
         for line in lines:
             line_total = await self._process_line(
                 store_id, sale.id, line, consignment_sales, campaign
             )
             total += line_total
+            if line.line_type == SaleLineType.MENU:
+                food_subtotal += line_total
 
         # 零/負總額拒（§6 金額為正整數元）：每筆 tender 金額須 >0（DB CHECK），零總額會
         # 落到「無收款腿或 amount=0」的不合法狀態；免費出貨應走獨立流程，不借道銷售。
@@ -342,6 +358,16 @@ class SalesService:
 
         # 收款計畫對齊 total（Σ tenders 必須 = total，否則 422）。
         plan = self._resolve_tenders(total, normalized_tenders)
+
+        # 內用不得以購物金折抵（裁示）：購物金 tender ≤ 應付總額 − 餐飲小計。
+        store_credit_amount = sum(
+            (t.amount for t in plan if t.tender_type == TenderType.STORE_CREDIT), Decimal(0)
+        )
+        redeemable_max = total - food_subtotal
+        if store_credit_amount > redeemable_max:
+            raise InvalidSaleTender(
+                f"購物金最多折抵 {redeemable_max} 元（內用 {food_subtotal} 元不得以購物金折抵）"
+            )
 
         # 稅於發票總額層級推算一次（§6）；不逐項算稅。
         tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
@@ -366,11 +392,11 @@ class SalesService:
                 commission_pct=commission_pct,
             )
 
-        # 會員點數累積（docs/16 §0）：floor(total/100)，同交易內、與銷售同生共死；
-        # 無買方不計；冪等重送走 find_idempotent_replay 回原單、不會重複累積。
+        # 會員點數累積（docs/16 §0）：floor(可累點金額/100)，同交易內、與銷售同生共死；
+        # 內用不累點（裁示）→ 以「總額 − 餐飲小計」為基數；無買方不計；冪等重送回原單不重複累積。
         # 實際累積數記在 sale.awarded_points：void 以此沖回、不重算（規則改版/歷史單不錯沖）。
         if buyer_contact_id is not None:
-            sale.awarded_points = _member_points_for(total)
+            sale.awarded_points = _member_points_for(total - food_subtotal)
             await self._contacts.add_member_points(store_id, buyer_contact_id, sale.awarded_points)
 
         await self._session.flush()
@@ -651,15 +677,20 @@ class SalesService:
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
         quoted: list[QuoteLine] = []
         total = Decimal(0)
+        food_subtotal = Decimal(0)
         for line in lines:
             ql = await self._quote_line(store_id, line, campaign)
             quoted.append(ql)
             total += ql.line_total
+            if ql.line_type == SaleLineType.MENU:
+                food_subtotal += ql.line_total
         return SaleQuote(
             total=total,
             campaign_id=campaign.id if campaign is not None else None,
             campaign_name=campaign.name if campaign is not None else None,
             lines=quoted,
+            food_subtotal=food_subtotal,
+            store_credit_max=total - food_subtotal,
         )
 
     async def _quote_line(
@@ -708,6 +739,17 @@ class SalesService:
                 original_unit_price=disc.original_unit_price,
                 discount_amount=disc.discount_per_unit * line.qty,
             )
+        if line.line_type == SaleLineType.MENU:
+            menu_item = await self._resolve_menu_item(store_id, line)
+            return QuoteLine(
+                line_type=SaleLineType.MENU,
+                description=menu_item.name,
+                qty=line.qty,
+                unit_price=menu_item.unit_price,  # 餐飲不折活動，原價即成交價
+                line_total=menu_item.unit_price * line.qty,
+                original_unit_price=None,
+                discount_amount=Decimal(0),
+            )
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
         if line.qty <= 0:
@@ -744,7 +786,39 @@ class SalesService:
             )
         if line.line_type == SaleLineType.CATALOG:
             return await self._process_catalog(store_id, sale_id, line, campaign)
+        if line.line_type == SaleLineType.MENU:
+            return await self._process_menu(store_id, sale_id, line)
         return await self._process_bulk(store_id, sale_id, line, campaign)
+
+    async def _resolve_menu_item(self, store_id: int, line: SaleLineInput) -> MenuItem:
+        """解析餐飲明細：驗 menu_item_id/qty、取本店未封存且可售的品項。"""
+        if line.menu_item_id is None:
+            raise SaleLineInvalid("MENU 明細必須帶 menu_item_id")
+        if line.qty <= 0:
+            raise SaleLineInvalid("MENU 明細數量必須 > 0")
+        item = await self._menu.get(store_id, line.menu_item_id)
+        if item is None or item.archived_at is not None:
+            raise MenuItemNotFound(f"找不到餐飲品項 {line.menu_item_id}")
+        if not item.is_available:
+            raise MenuItemUnavailable(f"餐飲品項 {item.name} 目前停售")
+        return item
+
+    async def _process_menu(self, store_id: int, sale_id: int, line: SaleLineInput) -> Decimal:
+        """餐飲明細：不扣庫存、不套活動折扣、原價成交；建 sale_line（line_type=MENU）。"""
+        item = await self._resolve_menu_item(store_id, line)
+        disc = _AppliedDiscount(item.unit_price, None, Decimal(0), None)
+        await self._repo.add_line(
+            SaleLine(
+                store_id=store_id,
+                sale_id=sale_id,
+                line_type=SaleLineType.MENU,
+                menu_item_id=item.id,
+                description=item.name,
+                qty=line.qty,
+                **self._line_amounts(disc, qty=line.qty),
+            )
+        )
+        return item.unit_price * line.qty
 
     async def _process_serialized(
         self,
