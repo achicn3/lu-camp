@@ -501,6 +501,54 @@ body {
   flex: 1;
 }
 
+/* 餐飲菜單磚（一格一格圓角方塊） */
+.pos-menu {
+  margin-top: var(--sp-5);
+}
+.pos-menu-title {
+  font-size: var(--text-md);
+  margin: 0 0 var(--sp-3);
+}
+.pos-menu-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--sp-3);
+}
+.pos-menu-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 84px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.1s, box-shadow 0.1s;
+}
+.pos-menu-tile:hover {
+  border-color: var(--accent);
+  box-shadow: 0 1px 4px rgba(35, 41, 31, 0.12);
+}
+.pos-menu-tile-name {
+  font-weight: 600;
+}
+.pos-menu-tile-price {
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.pos-qty-dialog {
+  max-width: 360px;
+  width: 100%;
+}
+.pos-qty-dialog-price,
+.pos-qty-dialog-subtotal {
+  color: var(--ink-soft);
+  margin: var(--sp-2) 0;
+}
+
 .balance-error {
   color: var(--danger);
 }

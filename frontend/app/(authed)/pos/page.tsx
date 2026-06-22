@@ -31,6 +31,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 type SaleRead = components["schemas"]["SaleRead"];
 type ContactRead = components["schemas"]["ContactRead"];
 type CampaignRead = components["schemas"]["CampaignRead"];
+type MenuItemRead = components["schemas"]["MenuItemRead"];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -466,6 +467,112 @@ function ActiveCampaignBanner() {
   );
 }
 
+// 餐飲數量彈窗：點磚後輸入數量（預設 1，可取消），確認後加入購物車。
+function QuantityDialog({
+  item,
+  onAdd,
+  onCancel,
+}: {
+  item: MenuItemRead;
+  onAdd: (qty: number) => void;
+  onCancel: () => void;
+}) {
+  const [qty, setQty] = useState("1");
+  const price = parseNtd(item.unit_price) ?? 0;
+  const n = Math.max(1, Math.trunc(parseNtd(qty) ?? 1));
+  return (
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`加入 ${item.name}`}
+    >
+      <div className="card pos-qty-dialog">
+        <h2>{item.name}</h2>
+        <p className="pos-qty-dialog-price">
+          單價 <Money value={price} />
+        </p>
+        <label className="field">
+          <span className="field-label">數量</span>
+          <input
+            className="pos-qty"
+            inputMode="numeric"
+            autoFocus
+            value={qty}
+            aria-label="數量"
+            onChange={(e) => setQty(e.target.value)}
+          />
+        </label>
+        <p className="pos-qty-dialog-subtotal">
+          小計 <Money value={price * n} />
+        </p>
+        <div className="pos-dialog-actions">
+          <button type="button" className="btn-ghost" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="btn-primary" onClick={() => onAdd(n)}>
+            加入購物車
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 餐飲菜單磚：可售品項一格一格圓角方塊；點磚開數量彈窗。
+function MenuPanel({ onAdd }: { onAdd: (line: CartLine) => void }) {
+  const [selected, setSelected] = useState<MenuItemRead | null>(null);
+  const query = useQuery({
+    queryKey: ["menu-items", "available"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/menu-items", {
+        params: { query: { available_only: true } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取菜單失敗");
+      return data;
+    },
+  });
+  const items = query.data ?? [];
+  if (items.length === 0) return null;
+
+  function add(qty: number) {
+    if (selected === null) return;
+    onAdd({
+      key: `MENU-${selected.id}`,
+      lineType: "MENU",
+      description: selected.name,
+      unitPrice: parseNtd(selected.unit_price) ?? 0,
+      qty,
+      menuItemId: selected.id,
+    });
+    setSelected(null);
+  }
+
+  return (
+    <div className="pos-menu">
+      <h2 className="pos-menu-title">餐飲菜單</h2>
+      <div className="pos-menu-tiles">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="pos-menu-tile"
+            onClick={() => setSelected(item)}
+          >
+            <span className="pos-menu-tile-name">{item.name}</span>
+            <span className="pos-menu-tile-price">
+              <Money value={parseNtd(item.unit_price) ?? 0} />
+            </span>
+          </button>
+        ))}
+      </div>
+      {selected !== null && (
+        <QuantityDialog item={selected} onAdd={add} onCancel={() => setSelected(null)} />
+      )}
+    </div>
+  );
+}
+
 export default function PosPage() {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [member, setMember] = useState<ContactRead | null>(null);
@@ -546,11 +653,16 @@ export default function PosPage() {
   // drawerOpen：讀取中/失敗 → null（未知，含現金收款先擋）；否則為是否有開帳中 session。
   const drawerOpen =
     cashSession.isSuccess === true ? cashSession.data !== null : null;
+  // 購物金可折抵上限（內用不得以購物金折抵）：試算回 store_credit_max；無餐飲時=total。
+  const storeCreditMax = quote.data
+    ? (parseNtd(quote.data.store_credit_max) ?? total)
+    : total;
   const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
   const validation = validatePlan(plan, total, {
     hasMember: member !== null,
     memberBalance,
     drawerOpen,
+    storeCreditMax,
   });
 
   const checkout = useMutation({
@@ -670,7 +782,9 @@ export default function PosPage() {
             </p>
           )}
           {lines.length === 0 ? (
-            <p className="pos-empty hint">掃描或輸入商品條碼開始結帳。</p>
+            <p className="pos-empty hint">
+              掃描或輸入商品條碼，或點下方餐飲菜單開始結帳。
+            </p>
           ) : (
             <table className="pos-cart">
               <thead>
@@ -755,6 +869,7 @@ export default function PosPage() {
               </tbody>
             </table>
           )}
+          <MenuPanel onAdd={addToCart} />
         </div>
 
         <aside className="pos-right card">

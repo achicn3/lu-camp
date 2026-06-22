@@ -97,6 +97,29 @@ describe("tender 純邏輯", () => {
     ).toMatch(/都必須大於 0/);
   });
 
+  it("storeCreditMax：內用餐飲不可用購物金折抵（購物金 > 上限 → 擋）", () => {
+    // total=380、餐飲=180 → store_credit_max=200。購物金 300 > 200 → 擋。
+    const over = resolvePlan("MIXED", 380, 80);
+    const v = validatePlan(over, 380, {
+      hasMember: true,
+      memberBalance: 1000,
+      storeCreditMax: 200,
+      ...OPEN,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.error).toMatch(/內用餐飲不可用購物金折抵/);
+    // 購物金 200（=上限）OK。
+    const okPlan = resolvePlan("MIXED", 380, 180);
+    expect(
+      validatePlan(okPlan, 380, {
+        hasMember: true,
+        memberBalance: 1000,
+        storeCreditMax: 200,
+        ...OPEN,
+      }).ok,
+    ).toBe(true);
+  });
+
   it("toTenders：現金/購物金分別產生列；純現金亦明列", () => {
     expect(toTenders(resolvePlan("CASH", 1850, 0))).toEqual([
       { tender_type: "CASH", amount: "1850" },

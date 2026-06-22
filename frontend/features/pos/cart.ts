@@ -12,10 +12,11 @@ export interface CartLine {
   description: string;
   unitPrice: number;
   qty: number;
-  /** 依 line_type 擇一：序號品帶 item_code、catalog 帶 id、bulk 帶 id。 */
+  /** 依 line_type 擇一：序號品帶 item_code、catalog 帶 id、bulk 帶 id、menu 帶 id。 */
   itemCode?: string;
   catalogProductId?: number;
   bulkLotId?: number;
+  menuItemId?: number;
   /** bulk 可售上限（remaining_qty），用於數量上限提示；serialized 為 1。 */
   maxQty?: number;
 }
@@ -77,6 +78,7 @@ export function toSaleLines(
     item_code: l.itemCode ?? null,
     catalog_product_id: l.catalogProductId ?? null,
     bulk_lot_id: l.bulkLotId ?? null,
+    menu_item_id: l.menuItemId ?? null,
     qty: l.qty,
   }));
 }

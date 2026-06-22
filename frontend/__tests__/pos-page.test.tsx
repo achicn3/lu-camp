@@ -103,14 +103,55 @@ describe("/pos 結帳頁", () => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
         return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
       return null;
     });
     renderPage();
     await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
-    expect(screen.getByText(/掃描或輸入商品條碼開始結帳/)).toBeTruthy();
+    expect(screen.getByText(/點下方餐飲菜單開始結帳/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
       "disabled",
       true,
+    );
+  });
+
+  it("點餐飲磚→數量彈窗（預設1、可加量）→加入同一購物車、總額更新", async () => {
+    const MENU = [{ id: 5, store_id: 1, name: "手沖-耶加", unit_price: "180", category: "咖啡", is_available: true, sort_order: 0 }];
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json(MENU);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "360",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "360",
+          store_credit_max: "0",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    // 點菜單磚 → 開數量彈窗
+    const tile = await screen.findByRole("button", { name: /手沖-耶加/ });
+    await user.click(tile);
+    const dialog = await screen.findByRole("dialog", { name: /加入 手沖-耶加/ });
+    // 預設數量 1 → 改成 2 → 加入購物車
+    const qtyInput = within(dialog).getByLabelText("數量");
+    expect(qtyInput).toHaveProperty("value", "1");
+    await user.clear(qtyInput);
+    await user.type(qtyInput, "2");
+    await user.click(within(dialog).getByRole("button", { name: "加入購物車" }));
+    // 購物車出現該行、應付總額 360（180×2，後端試算）
+    await waitFor(() =>
+      expect(screen.getAllByText("手沖-耶加").length).toBeGreaterThan(0),
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText(/360/).length).toBeGreaterThan(0),
     );
   });
 
@@ -122,7 +163,7 @@ describe("/pos 結帳頁", () => {
         return json({ id: 1, status: "OPEN" });
       if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
       if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
-        return json({ total: "1800", campaign_id: null, campaign_name: null, lines: [] });
+        return json({ total: "1800", campaign_id: null, campaign_name: null, lines: [], food_subtotal: "0", store_credit_max: "1800" });
       }
       if (url.endsWith("/api/v1/sales") && method === "POST") {
         saleBody = body;
@@ -189,6 +230,8 @@ describe("/pos 結帳頁", () => {
           campaign_id: 1,
           campaign_name: "開幕九折",
           lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1620",
         });
       }
       if (url.endsWith("/api/v1/sales") && method === "POST") {

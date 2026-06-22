@@ -42,6 +42,8 @@ export function validatePlan(
     memberBalance: number | null;
     /** 是否開帳中（含現金收款必須開帳，§7.8）；null = 讀取中/未知。 */
     drawerOpen: boolean | null;
+    /** 購物金可折抵上限（=total−餐飲小計，內用不得以購物金折抵；來自 /sales/quote）。 */
+    storeCreditMax?: number;
   },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
@@ -90,6 +92,19 @@ export function validatePlan(
     plan.storeCredit > opts.memberBalance
   ) {
     return { ok: false, error: "購物金餘額不足", needsMember, needsDrawer };
+  }
+  // 內用餐飲不得以購物金折抵（與後端 M1 不變量一致）：購物金 ≤ total−餐飲小計。
+  if (
+    needsMember &&
+    opts.storeCreditMax !== undefined &&
+    plan.storeCredit > opts.storeCreditMax
+  ) {
+    return {
+      ok: false,
+      error: `內用餐飲不可用購物金折抵（購物金最多 ${opts.storeCreditMax} 元）`,
+      needsMember,
+      needsDrawer,
+    };
   }
   // 含現金收款必須開帳中（§7.8）：未知（讀取中）或未開帳都不放行，避免送出才吃 409。
   if (needsDrawer && opts.drawerOpen !== true) {
