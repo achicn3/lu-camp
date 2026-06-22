@@ -549,6 +549,34 @@ body {
   margin: var(--sp-2) 0;
 }
 
+/* 餐飲菜單管理頁 */
+.menu-form {
+  margin-bottom: var(--sp-5);
+}
+.menu-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.menu-list-section {
+  margin-top: var(--sp-4);
+}
+.menu-row-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+.menu-edit-price,
+.menu-price-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.menu-row-error {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--text-sm);
+}
+
 .balance-error {
   color: var(--danger);
 }

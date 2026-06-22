@@ -20,6 +20,7 @@ const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
   { href: "/purchasing", label: "採購補貨", ready: true },
   { href: "/stocktake", label: "盤點", ready: true },
   { href: "/campaigns", label: "門市活動", ready: true },
+  { href: "/menu", label: "餐飲菜單", ready: true },
   { href: "/reports", label: "報表", ready: true },
   { href: "/settings", label: "設定", ready: true },
 ];
