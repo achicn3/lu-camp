@@ -20,6 +20,7 @@ from app.modules.settings.defaults import (
     DEFAULT_PREMIUM_RATE_MAX,
     DEFAULT_PREMIUM_RATE_MIN,
     DEFAULT_STORE_CREDIT_ENGINE_PARAMS,
+    DEFAULT_STORE_CREDIT_MIN_SPEND,
     DEFAULT_TAX_RATE,
 )
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
@@ -46,6 +47,7 @@ def _new_settings(store_id: int) -> StoreSettings:
         premium_rate_min=DEFAULT_PREMIUM_RATE_MIN,
         premium_rate_max=DEFAULT_PREMIUM_RATE_MAX,
         monthly_fixed_cash_outflow=Decimal(DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW),
+        store_credit_min_spend=Decimal(DEFAULT_STORE_CREDIT_MIN_SPEND),
         store_credit_engine_params=dict(DEFAULT_STORE_CREDIT_ENGINE_PARAMS),
     )
 

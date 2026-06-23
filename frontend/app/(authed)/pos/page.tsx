@@ -286,6 +286,7 @@ function TenderPanel({
   memberBalance,
   drawerOpen,
   storeCreditMax,
+  storeCreditMinSpend,
   mode,
   setMode,
   cashInput,
@@ -298,6 +299,7 @@ function TenderPanel({
   memberBalance: number | null;
   drawerOpen: boolean | null;
   storeCreditMax: number;
+  storeCreditMinSpend: number;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -311,6 +313,7 @@ function TenderPanel({
     memberBalance,
     drawerOpen,
     storeCreditMax,
+    storeCreditMinSpend,
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
@@ -660,12 +663,19 @@ export default function PosPage() {
   const storeCreditMax = quote.data
     ? (parseNtd(quote.data.store_credit_max) ?? total)
     : total;
+  // 購物金低消門檻（非餐飲消費未達則完全不可用購物金；0＝不限）：試算回 store_credit_min_spend。
+  // 欄位缺漏（舊回應）一律視為 0＝不限，避免誤擋。
+  const storeCreditMinSpend =
+    quote.data?.store_credit_min_spend != null
+      ? (parseNtd(quote.data.store_credit_min_spend) ?? 0)
+      : 0;
   const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
   const validation = validatePlan(plan, total, {
     hasMember: member !== null,
     memberBalance,
     drawerOpen,
     storeCreditMax,
+    storeCreditMinSpend,
   });
 
   const checkout = useMutation({
@@ -903,6 +913,7 @@ export default function PosPage() {
             memberBalance={memberBalance}
             drawerOpen={drawerOpen}
             storeCreditMax={storeCreditMax}
+            storeCreditMinSpend={storeCreditMinSpend}
             mode={mode}
             setMode={setMode}
             cashInput={cashInput}

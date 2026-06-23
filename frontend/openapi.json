@@ -1205,6 +1205,59 @@
         "title": "CashSessionStatus",
         "type": "string"
       },
+      "CatalogProductCreateRequest": {
+        "description": "新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。\n\n初始庫存固定 0（補庫存一律走採購收貨，留痕）；reorder_point 為低庫存提醒點。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "name": {
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "reorder_point": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Reorder Point",
+            "type": "integer"
+          },
+          "sku": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "sku",
+          "name",
+          "unit_price"
+        ],
+        "title": "CatalogProductCreateRequest",
+        "type": "object"
+      },
       "CatalogProductRead": {
         "description": "數量型商品輸出（POS 選件/庫存列表）。",
         "properties": {
@@ -4429,6 +4482,10 @@
             "title": "Store Credit Max",
             "type": "string"
           },
+          "store_credit_min_spend": {
+            "title": "Store Credit Min Spend",
+            "type": "string"
+          },
           "total": {
             "title": "Total",
             "type": "string"
@@ -4440,7 +4497,8 @@
           "campaign_name",
           "lines",
           "food_subtotal",
-          "store_credit_max"
+          "store_credit_max",
+          "store_credit_min_spend"
         ],
         "title": "SaleQuoteResponse",
         "type": "object"
@@ -4921,6 +4979,10 @@
             "title": "Store Credit Engine Params",
             "type": "object"
           },
+          "store_credit_min_spend": {
+            "title": "Store Credit Min Spend",
+            "type": "string"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -4941,6 +5003,7 @@
           "premium_rate_min",
           "premium_rate_max",
           "monthly_fixed_cash_outflow",
+          "store_credit_min_spend",
           "store_credit_engine_params"
         ],
         "title": "SettingsRead",
@@ -5088,6 +5151,23 @@
               }
             ],
             "title": "Store Credit Engine Params"
+          },
+          "store_credit_min_spend": {
+            "anyOf": [
+              {
+                "maximum": 999999999999.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Min Spend"
           },
           "tax_rate": {
             "anyOf": [
@@ -6794,6 +6874,51 @@
           }
         ],
         "summary": "List Catalog",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "post": {
+        "description": "新增數量型商品（上架，限 MANAGER）：廠商採購商品先建檔（初始庫存 0），\n之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。",
+        "operationId": "createCatalogProduct",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogProductCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Catalog Product",
         "tags": [
           "inventory"
         ]

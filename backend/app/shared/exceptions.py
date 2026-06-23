@@ -188,6 +188,10 @@ class DuplicateSupplier(DomainError):
     """同店供應商名稱重複。"""
 
 
+class DuplicateCatalogProduct(DomainError):
+    """同店 SKU 重複（數量型商品上架）。"""
+
+
 class StocktakeNotFound(DomainError):
     """指定的盤點單不存在（或不屬於本店）。"""
 

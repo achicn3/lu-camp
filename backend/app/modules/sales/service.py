@@ -152,6 +152,8 @@ class SaleQuote:
 
     food_subtotal：餐飲（內用）折後小計；store_credit_max：購物金最多可折抵額
     （＝total − food_subtotal，內用不得以購物金折抵）。POS 據此把購物金輸入卡在上限內。
+    store_credit_min_spend：購物金低消門檻（整數元，0＝不限）；非餐飲消費（store_credit_max）
+    未達此值則完全不可用購物金，POS 據此提示。
     """
 
     total: Decimal
@@ -160,6 +162,7 @@ class SaleQuote:
     lines: list[QuoteLine]
     food_subtotal: Decimal
     store_credit_max: Decimal
+    store_credit_min_spend: Decimal
 
 
 def _member_points_for(total: Decimal) -> int:
@@ -373,9 +376,16 @@ class SalesService:
                 f"購物金最多折抵 {redeemable_max} 元（內用 {food_subtotal} 元不得以購物金折抵）"
             )
 
+        settings = await self._settings.get_effective_settings(store_id)
+        # 購物金低消門檻（彈性設定，預設 0＝不限）：非餐飲消費未達門檻則完全不可用購物金。
+        if store_credit_amount > 0 and redeemable_max < settings.store_credit_min_spend:
+            raise InvalidSaleTender(
+                f"未達購物金低消門檻：非餐飲消費需滿 {settings.store_credit_min_spend} 元"
+                f"才能折抵購物金（目前 {redeemable_max} 元）"
+            )
+
         # 稅於發票總額層級推算一次（§6）；不逐項算稅。
-        tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
-        net, tax = split_tax_inclusive(total, tax_rate)
+        net, tax = split_tax_inclusive(total, settings.tax_rate)
         sale.subtotal = Decimal(net)
         sale.tax = Decimal(tax)
         sale.total = total
@@ -690,6 +700,7 @@ class SalesService:
             total += ql.line_total
             if ql.line_type == SaleLineType.MENU:
                 food_subtotal += ql.line_total
+        min_spend = (await self._settings.get_effective_settings(store_id)).store_credit_min_spend
         return SaleQuote(
             total=total,
             campaign_id=campaign.id if campaign is not None else None,
@@ -697,6 +708,7 @@ class SalesService:
             lines=quoted,
             food_subtotal=food_subtotal,
             store_credit_max=total - food_subtotal,
+            store_credit_min_spend=min_spend,
         )
 
     async def _quote_line(

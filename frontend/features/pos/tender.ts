@@ -44,6 +44,8 @@ export function validatePlan(
     drawerOpen: boolean | null;
     /** 購物金可折抵上限（=total−餐飲小計，內用不得以購物金折抵；來自 /sales/quote）。 */
     storeCreditMax?: number;
+    /** 購物金低消門檻（非餐飲消費未達則完全不可用購物金；0＝不限；來自 /sales/quote）。 */
+    storeCreditMinSpend?: number;
   },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
@@ -92,6 +94,21 @@ export function validatePlan(
     plan.storeCredit > opts.memberBalance
   ) {
     return { ok: false, error: "購物金餘額不足", needsMember, needsDrawer };
+  }
+  // 購物金低消門檻（彈性設定，0＝不限）：非餐飲消費（=storeCreditMax）未達門檻則完全不可用購物金。
+  if (
+    needsMember &&
+    opts.storeCreditMinSpend !== undefined &&
+    opts.storeCreditMinSpend > 0 &&
+    opts.storeCreditMax !== undefined &&
+    opts.storeCreditMax < opts.storeCreditMinSpend
+  ) {
+    return {
+      ok: false,
+      error: `未達購物金低消：非餐飲消費需滿 ${opts.storeCreditMinSpend} 元才能折抵購物金`,
+      needsMember,
+      needsDrawer,
+    };
   }
   // 內用餐飲不得以購物金折抵（與後端 M1 不變量一致）：購物金 ≤ total−餐飲小計。
   if (

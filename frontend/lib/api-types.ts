@@ -311,7 +311,12 @@ export interface paths {
         /** List Catalog */
         get: operations["listCatalogProducts"];
         put?: never;
-        post?: never;
+        /**
+         * Create Catalog Product
+         * @description 新增數量型商品（上架，限 MANAGER）：廠商採購商品先建檔（初始庫存 0），
+         *     之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。
+         */
+        post: operations["createCatalogProduct"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1764,6 +1769,27 @@ export interface components {
          */
         CashSessionStatus: "OPEN" | "CLOSED";
         /**
+         * CatalogProductCreateRequest
+         * @description 新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
+         *
+         *     初始庫存固定 0（補庫存一律走採購收貨，留痕）；reorder_point 為低庫存提醒點。
+         */
+        CatalogProductCreateRequest: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Reorder Point
+             * @default 0
+             */
+            reorder_point: number;
+            /** Sku */
+            sku: string;
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /**
          * CatalogProductRead
          * @description 數量型商品輸出（POS 選件/庫存列表）。
          */
@@ -3003,6 +3029,8 @@ export interface components {
             lines: components["schemas"]["SaleQuoteLineRead"][];
             /** Store Credit Max */
             store_credit_max: string;
+            /** Store Credit Min Spend */
+            store_credit_min_spend: string;
             /** Total */
             total: string;
         };
@@ -3214,6 +3242,8 @@ export interface components {
             store_credit_engine_params: {
                 [key: string]: unknown;
             };
+            /** Store Credit Min Spend */
+            store_credit_min_spend: string;
             /** Store Id */
             store_id: number;
             /** Tax Rate */
@@ -3249,6 +3279,8 @@ export interface components {
             store_credit_engine_params?: {
                 [key: string]: unknown;
             } | null;
+            /** Store Credit Min Spend */
+            store_credit_min_spend?: number | string | null;
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
@@ -4113,6 +4145,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProductRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogProductCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
                 };
             };
             /** @description Validation Error */

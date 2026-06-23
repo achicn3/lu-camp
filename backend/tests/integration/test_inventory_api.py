@@ -68,6 +68,20 @@ def _auth(store_id: int) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def _auth_manager(session: AsyncSession, store_id: int) -> dict[str, str]:
+    mgr = User(
+        store_id=store_id,
+        username=f"mgr-{store_id}",
+        password_hash="h",
+        role=UserRole.MANAGER,
+        is_active=True,
+    )
+    session.add(mgr)
+    await session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store_id)
+    return {"Authorization": f"Bearer {token}"}
+
+
 async def _seed_item(
     session: AsyncSession,
     store_id: int,
@@ -355,3 +369,48 @@ async def test_get_bulk_lot_by_code(client: httpx.AsyncClient, db_session: Async
 async def test_endpoints_require_auth(client: httpx.AsyncClient, path: str) -> None:
     resp = await client.get(path)
     assert resp.status_code == 401
+
+
+async def test_create_catalog_product_then_listed(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """上架數量型商品（MANAGER）：建檔後初始庫存 0，且出現在清單。"""
+    store_id = await _seed_store(db_session)
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.post(
+        "/api/v1/catalog-products",
+        json={"sku": "GAS-230", "name": "高山瓦斯罐 230g", "unit_price": "180", "reorder_point": 12},
+        headers=mgr,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["sku"] == "GAS-230"
+    assert body["quantity_on_hand"] == 0  # 補庫存一律走採購收貨
+    assert body["reorder_point"] == 12
+    # 出現在清單
+    listed = await client.get("/api/v1/catalog-products", headers=_auth(store_id))
+    assert any(p["sku"] == "GAS-230" for p in listed.json())
+
+
+async def test_create_catalog_product_duplicate_sku_409(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    mgr = await _auth_manager(db_session, store_id)
+    payload = {"sku": "DUP-1", "name": "重複品", "unit_price": "100"}
+    first = await client.post("/api/v1/catalog-products", json=payload, headers=mgr)
+    assert first.status_code == 201
+    dup = await client.post("/api/v1/catalog-products", json=payload, headers=mgr)
+    assert dup.status_code == 409
+
+
+async def test_create_catalog_product_clerk_forbidden(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    resp = await client.post(
+        "/api/v1/catalog-products",
+        json={"sku": "X-1", "name": "店員不可上架", "unit_price": "100"},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 403

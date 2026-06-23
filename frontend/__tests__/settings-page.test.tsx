@@ -33,6 +33,7 @@ const SETTINGS = {
   premium_rate_min: "0.0000",
   premium_rate_max: "0.2000",
   monthly_fixed_cash_outflow: "50000",
+  store_credit_min_spend: "0",
   store_credit_engine_params: {},
   allow_clerk_manage_categories: false,
 };

@@ -35,6 +35,7 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AcquisitionHasSoldItems,
     CrossStoreReference,
+    DuplicateCatalogProduct,
     InsufficientStock,
     InvalidStateTransition,
     OwnershipValidationError,
@@ -313,6 +314,33 @@ class InventoryService:
             limit=limit,
             offset=offset,
         )
+
+    async def create_catalog(
+        self,
+        store_id: int,
+        *,
+        sku: str,
+        name: str,
+        unit_price: Decimal,
+        reorder_point: int = 0,
+        brand_id: int | None = None,
+    ) -> CatalogProduct:
+        """新增數量型商品（上架）：廠商採購商品先建檔（初始庫存 0），之後採購收貨補庫存。
+
+        同店 SKU 唯一（重複 → DuplicateCatalogProduct）。
+        """
+        if await self._repo.get_catalog_by_sku(store_id, sku) is not None:
+            raise DuplicateCatalogProduct(f"SKU「{sku}」已存在")
+        product = CatalogProduct(
+            store_id=store_id,
+            sku=sku,
+            name=name,
+            unit_price=unit_price,
+            quantity_on_hand=0,
+            reorder_point=reorder_point,
+            brand_id=brand_id,
+        )
+        return await self._repo.add_catalog(product)
 
     async def list_catalog(
         self,

@@ -2,7 +2,7 @@
 // /acquisition 頁元件測試（非 combobox 深互動部分）：中文分頁、賣方建檔、驗證閘、散裝表單。
 // 完整買斷+定價輔助+送出流程由瀏覽器 E2E 覆蓋。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";

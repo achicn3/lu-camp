@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
 from app.shared.enums import (
     BulkAcquisitionBasis,
@@ -124,6 +124,36 @@ class SerializedItemRead(BaseModel):
     status: SerializedItemStatus
     intake_date: datetime
     sold_date: datetime | None
+
+
+class CatalogProductCreateRequest(BaseModel):
+    """新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
+
+    初始庫存固定 0（補庫存一律走採購收貨，留痕）；reorder_point 為低庫存提醒點。
+    """
+
+    sku: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=150)
+    unit_price: NTDAmount
+    reorder_point: int = Field(default=0, ge=0)
+    brand_id: int | None = None
+
+    @field_validator("sku", "name")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("不可為空白")
+        return cleaned
+
+    @field_validator("unit_price")
+    @classmethod
+    def _positive_whole(cls, value: Decimal) -> Decimal:
+        if value != value.to_integral_value():
+            raise ValueError("售價必須為整數元")
+        if value <= 0:
+            raise ValueError("售價必須為正")
+        return value
 
 
 class CatalogProductRead(BaseModel):

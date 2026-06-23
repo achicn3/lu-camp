@@ -167,6 +167,7 @@ async def quote_sale(
         ],
         food_subtotal=quote.food_subtotal,
         store_credit_max=quote.store_credit_max,
+        store_credit_min_spend=quote.store_credit_min_spend,
     )
 
 

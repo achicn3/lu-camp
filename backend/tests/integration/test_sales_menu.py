@@ -26,6 +26,8 @@ from app.modules.contacts.models import Contact
 from app.modules.inventory.models import CatalogProduct
 from app.modules.menu.models import MenuItem
 from app.modules.sales.models import SaleLine
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
@@ -114,6 +116,15 @@ async def _member_with_credit(
         created_by=clerk_id,
     )
     return member.id
+
+
+async def _set_min_spend(session: AsyncSession, store_id: int, amount: int) -> None:
+    await StoreSettingsService(session).update_settings(
+        store_id,
+        actor_user_id=None,
+        patch=SettingsUpdateRequest(store_credit_min_spend=Decimal(amount)),
+    )
+    await session.flush()
 
 
 def _auth(token: str, idem: str) -> dict[str, str]:
@@ -296,3 +307,70 @@ async def test_quote_returns_food_subtotal_and_credit_max(
     assert body["total"] == "380"
     assert body["food_subtotal"] == "180"
     assert body["store_credit_max"] == "200"
+    # 預設低消門檻 0（不限制）。
+    assert body["store_credit_min_spend"] == "0"
+
+
+async def test_store_credit_blocked_below_min_spend(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """購物金低消門檻：非餐飲消費未達門檻則完全不可用購物金（即使在折抵上限內）。"""
+    token, store_id, clerk_id = await _seed(db_session)
+    await _set_min_spend(db_session, store_id, 500)
+    member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
+    cat = await _catalog(db_session, store_id, price="200", qty=5)
+    # 非餐飲消費 200 < 門檻 500 → 用任何購物金都該被擋（422）。
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1}],
+            "buyer_contact_id": member,
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+        },
+        headers=_auth(token, "min-block"),
+    )
+    assert resp.status_code == 422
+    assert "低消" in resp.json()["detail"]
+
+
+async def test_store_credit_ok_at_min_spend(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """達門檻即可用購物金；門檻只看非餐飲消費（餐飲不計入）。"""
+    token, store_id, clerk_id = await _seed(db_session)
+    await _set_min_spend(db_session, store_id, 200)
+    member = await _member_with_credit(db_session, store_id, clerk_id, 1000)
+    coffee = await _menu_item(db_session, store_id, name="手沖", price="180")
+    cat = await _catalog(db_session, store_id, price="200", qty=5)
+    # 非餐飲 200 = 門檻 200 → 購物金 200 OK、餐飲 180 現金。
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [
+                {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
+                _menu_line(coffee, 1),
+            ],
+            "buyer_contact_id": member,
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "200"},
+                {"tender_type": "CASH", "amount": "180"},
+            ],
+        },
+        headers=_auth(token, "min-ok"),
+    )
+    assert resp.status_code == 201
+
+
+async def test_quote_echoes_min_spend(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, _ = await _seed(db_session)
+    await _set_min_spend(db_session, store_id, 500)
+    cat = await _catalog(db_session, store_id, price="200", qty=5)
+    resp = await client.post(
+        "/api/v1/sales/quote",
+        json={"lines": [{"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1}]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["store_credit_min_spend"] == "500"

@@ -534,6 +534,97 @@ function SupplierManager({ suppliers }: { suppliers: Supplier[] }) {
   );
 }
 
+// ── 上架數量型商品（廠商採購商品先建檔，之後才能建採購單→收貨）──────────────
+function CreateCatalogProductCard() {
+  const queryClient = useQueryClient();
+  const [sku, setSku] = useState("");
+  const [name, setName] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [reorderPoint, setReorderPoint] = useState("0");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const price = parseNtd(unitPrice);
+      if (sku.trim() === "" || name.trim() === "") throw new Error("SKU 與品名必填");
+      if (price === null || price <= 0) throw new Error("售價請輸入正整數");
+      const reorder = parseNtd(reorderPoint) ?? 0;
+      const { data, error } = await api.POST("/api/v1/catalog-products", {
+        body: {
+          sku: sku.trim(),
+          name: name.trim(),
+          unit_price: price,
+          reorder_point: reorder,
+        },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "上架失敗");
+      return data;
+    },
+    onSuccess: (data) => {
+      setOkMsg(`已上架「${data.name}」（SKU ${data.sku}），初始庫存 0，可於下方建採購單補貨。`);
+      setSku("");
+      setName("");
+      setUnitPrice("");
+      setReorderPoint("0");
+      setFormError(null);
+      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+    },
+    onError: (err: Error) => {
+      setFormError(err.message);
+      setOkMsg(null);
+    },
+  });
+
+  return (
+    <form
+      className="card pur-catalog-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        create.mutate();
+      }}
+    >
+      <h2>上架數量型商品</h2>
+      <p className="hint">廠商採購商品先在此建檔（初始庫存 0），之後即可建採購單→收貨補庫存。</p>
+      <label className="field">
+        <span>SKU *</span>
+        <input aria-label="SKU" value={sku} onChange={(e) => setSku(e.target.value)} />
+      </label>
+      <label className="field">
+        <span>品名 *</span>
+        <input aria-label="品名" value={name} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="field">
+        <span>售價（含稅整數元）*</span>
+        <input
+          aria-label="售價"
+          inputMode="numeric"
+          value={unitPrice}
+          onChange={(e) => setUnitPrice(e.target.value)}
+        />
+      </label>
+      <label className="field">
+        <span>低庫存提醒點</span>
+        <input
+          aria-label="低庫存提醒點"
+          inputMode="numeric"
+          value={reorderPoint}
+          onChange={(e) => setReorderPoint(e.target.value)}
+        />
+      </label>
+      {formError !== null && (
+        <p role="alert" className="form-error">
+          {formError}
+        </p>
+      )}
+      {okMsg !== null && <p className="form-success">{okMsg}</p>}
+      <button type="submit" className="btn-primary" disabled={create.isPending}>
+        {create.isPending ? "上架中…" : "上架商品"}
+      </button>
+    </form>
+  );
+}
+
 export default function PurchasingPage() {
   const [tab, setTab] = useState<Tab>("orders");
 
@@ -580,6 +671,7 @@ export default function PurchasingPage() {
       {tab === "orders" ? (
         <div className="pur-grid">
           <LowStockCard />
+          <CreateCatalogProductCard />
           <CreatePurchaseOrder suppliers={supplierList} />
           <PurchaseOrderList suppliers={supplierList} />
         </div>

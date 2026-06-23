@@ -65,6 +65,7 @@ function GeneralSettingsCard({
     const commissionRaw = String(form.get("default_commission_pct") ?? "");
     const marginRaw = String(form.get("default_margin_pct") ?? "");
     const outflowRaw = String(form.get("monthly_fixed_cash_outflow") ?? "");
+    const minSpendRaw = String(form.get("store_credit_min_spend") ?? "");
 
     const taxRate = parseRateInput(taxRateRaw);
     if (taxRate === null) {
@@ -88,6 +89,11 @@ function GeneralSettingsCard({
       setError("月固定現金支出請輸入非負整數");
       return;
     }
+    const minSpend = parseNtd(minSpendRaw);
+    if (minSpend === null || minSpend < 0) {
+      setError("購物金低消門檻請輸入非負整數（0＝不限制）");
+      return;
+    }
 
     // Only send changed fields
     const body: components["schemas"]["SettingsUpdateRequest"] = {};
@@ -101,6 +107,8 @@ function GeneralSettingsCard({
     if (margin !== settings.default_margin_pct) body.default_margin_pct = margin;
     if (outflow !== parseNtd(settings.monthly_fixed_cash_outflow))
       body.monthly_fixed_cash_outflow = outflow;
+    if (minSpend !== parseNtd(settings.store_credit_min_spend))
+      body.store_credit_min_spend = minSpend;
 
     if (Object.keys(body).length === 0) {
       setSuccess(true);
@@ -111,6 +119,7 @@ function GeneralSettingsCard({
 
   const taxPct = (parseFloat(settings.tax_rate) * 100).toString();
   const outflowNum = parseNtd(settings.monthly_fixed_cash_outflow);
+  const minSpendNum = parseNtd(settings.store_credit_min_spend);
 
   return (
     <form className="card" onSubmit={onSubmit}>
@@ -153,6 +162,16 @@ function GeneralSettingsCard({
           defaultValue={outflowNum !== null ? formatNtd(outflowNum) : "0"}
           required
         />
+      </label>
+      <label className="field">
+        <span className="field-label">購物金低消門檻（0＝不限）</span>
+        <input
+          name="store_credit_min_spend"
+          inputMode="numeric"
+          defaultValue={minSpendNum !== null ? formatNtd(minSpendNum) : "0"}
+          required
+        />
+        <span className="hint">非餐飲消費未達此金額則不可折抵購物金（內用餐飲一律不計入）。</span>
       </label>
       <label className="field field-toggle">
         <input

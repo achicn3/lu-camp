@@ -400,6 +400,18 @@ class InventoryRepository:
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
+    async def get_catalog_by_sku(self, store_id: int, sku: str) -> CatalogProduct | None:
+        stmt = select(CatalogProduct).where(
+            CatalogProduct.store_id == store_id, CatalogProduct.sku == sku
+        )
+        result: CatalogProduct | None = await self._session.scalar(stmt)
+        return result
+
+    async def add_catalog(self, product: CatalogProduct) -> CatalogProduct:
+        self._session.add(product)
+        await self._session.flush()
+        return product
+
     async def get_catalog_for_update(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         """取數量型商品並上行鎖（FOR UPDATE）+ 刷新；盤點確認時即時重讀現量、原子校正用。"""
         stmt = (

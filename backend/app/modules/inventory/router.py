@@ -16,6 +16,7 @@ from app.modules.inventory.schemas import (
     BrandCreate,
     BrandRead,
     BulkLotRead,
+    CatalogProductCreateRequest,
     CatalogProductRead,
     CategoryCreate,
     CategoryRead,
@@ -29,6 +30,7 @@ from app.modules.inventory.schemas import (
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus, UserRole
+from app.shared.exceptions import DuplicateCatalogProduct
 
 router = APIRouter(tags=["inventory"])
 
@@ -103,6 +105,32 @@ async def list_catalog(
         user.store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
     return [CatalogProductRead.model_validate(product) for product in products]
+
+
+@router.post(
+    "/catalog-products",
+    response_model=CatalogProductRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createCatalogProduct",
+)
+async def create_catalog_product(
+    payload: CatalogProductCreateRequest, session: SessionDep, user: ManagerDep
+) -> CatalogProductRead:
+    """新增數量型商品（上架，限 MANAGER）：廠商採購商品先建檔（初始庫存 0），
+    之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。"""
+    try:
+        product = await InventoryService(session).create_catalog(
+            user.store_id,
+            sku=payload.sku,
+            name=payload.name,
+            unit_price=payload.unit_price,
+            reorder_point=payload.reorder_point,
+            brand_id=payload.brand_id,
+        )
+    except DuplicateCatalogProduct as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    return CatalogProductRead.model_validate(product)
 
 
 @router.get(

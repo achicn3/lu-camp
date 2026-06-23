@@ -36,6 +36,7 @@ class SettingsRead(BaseModel):
     premium_rate_min: RateOut
     premium_rate_max: RateOut
     monthly_fixed_cash_outflow: NTDAmount
+    store_credit_min_spend: NTDAmount
     store_credit_engine_params: dict[str, Any]
 
     @classmethod
@@ -62,15 +63,19 @@ class SettingsUpdateRequest(BaseModel):
     monthly_fixed_cash_outflow: (
         Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
     ) = None
+    # 購物金低消門檻（整數元；0＝不限制）。上界對齊 DB Numeric(12,0)。
+    store_credit_min_spend: (
+        Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
+    ) = None
     store_credit_engine_params: dict[str, Any] | None = None
     # 溢價率變更事由（選填；寫入 premium_rate_history 留痕）。
     premium_change_reason: Annotated[str, Field(max_length=200)] | None = None
 
-    @field_validator("monthly_fixed_cash_outflow")
+    @field_validator("monthly_fixed_cash_outflow", "store_credit_min_spend")
     @classmethod
     def _whole_ntd(cls, value: Decimal | None) -> Decimal | None:
         if value is not None and value != value.to_integral_value():
-            raise ValueError("月固定現金支出必須為整數元")
+            raise ValueError("金額必須為整數元")
         return value
 
     @field_validator("premium_rate", "premium_rate_min", "premium_rate_max")

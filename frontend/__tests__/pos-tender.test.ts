@@ -120,6 +120,39 @@ describe("tender 純邏輯", () => {
     ).toBe(true);
   });
 
+  it("storeCreditMinSpend：非餐飲消費未達低消門檻 → 完全不可用購物金", () => {
+    // total=300（皆非餐飲）、store_credit_max=300，但低消門檻 500 → 不可用購物金。
+    const v = validatePlan(resolvePlan("STORE_CREDIT", 300, 0), 300, {
+      hasMember: true,
+      memberBalance: 1000,
+      storeCreditMax: 300,
+      storeCreditMinSpend: 500,
+      ...OPEN,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.error).toMatch(/未達購物金低消/);
+    // 門檻 0（預設）→ 不限制，可用。
+    expect(
+      validatePlan(resolvePlan("STORE_CREDIT", 300, 0), 300, {
+        hasMember: true,
+        memberBalance: 1000,
+        storeCreditMax: 300,
+        storeCreditMinSpend: 0,
+        ...OPEN,
+      }).ok,
+    ).toBe(true);
+    // 達門檻（非餐飲 500 = 門檻 500）→ 可用。
+    expect(
+      validatePlan(resolvePlan("STORE_CREDIT", 500, 0), 500, {
+        hasMember: true,
+        memberBalance: 1000,
+        storeCreditMax: 500,
+        storeCreditMinSpend: 500,
+        ...OPEN,
+      }).ok,
+    ).toBe(true);
+  });
+
   it("toTenders：現金/購物金分別產生列；純現金亦明列", () => {
     expect(toTenders(resolvePlan("CASH", 1850, 0))).toEqual([
       { tender_type: "CASH", amount: "1850" },
