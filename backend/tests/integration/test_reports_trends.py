@@ -21,6 +21,7 @@ from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import SerializedItem
+from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
@@ -122,6 +123,85 @@ async def _add_owned_sale(
         )
     )
     await session.flush()
+
+
+async def _add_menu_sale(
+    session: AsyncSession,
+    store_id: int,
+    clerk_id: int,
+    *,
+    when: datetime,
+    total: str,
+) -> None:
+    """直接建一筆「餐飲品項」已售銷售，created_at=when（控制落桶）。"""
+    global _SEQ
+    _SEQ += 1
+    menu_item = MenuItem(
+        store_id=store_id,
+        name=f"手沖咖啡-{_SEQ}",
+        unit_price=Decimal(total),
+        is_available=True,
+        sort_order=0,
+    )
+    session.add(menu_item)
+    await session.flush()
+    sale = Sale(
+        store_id=store_id,
+        clerk_user_id=clerk_id,
+        subtotal=Decimal(total),
+        tax=Decimal(0),
+        total=Decimal(total),
+        created_at=when,
+    )
+    session.add(sale)
+    await session.flush()
+    session.add(
+        SaleLine(
+            store_id=store_id,
+            sale_id=sale.id,
+            line_type=SaleLineType.MENU,
+            menu_item_id=menu_item.id,
+            description="手沖咖啡",
+            qty=1,
+            unit_price=Decimal(total),
+            line_total=Decimal(total),
+        )
+    )
+    await session.flush()
+
+
+async def test_food_secondhand_split_sums_to_period(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """餐飲/二手分列：日桶 food_revenue/secondhand_revenue 加總 = 全期 sales-margin，
+    且 food + secondhand == recognized_revenue（同源、不重複認列）。"""
+    mgr, _clerk, store_id, clerk_id, _m = await _seed(db_session)
+    await _add_owned_sale(
+        db_session, store_id, clerk_id, when=datetime(2026, 5, 2, tzinfo=UTC),
+        total="500", cost="300",
+    )
+    await _add_menu_sale(
+        db_session, store_id, clerk_id, when=datetime(2026, 5, 3, tzinfo=UTC), total="120",
+    )
+    await _add_menu_sale(
+        db_session, store_id, clerk_id, when=datetime(2026, 5, 4, tzinfo=UTC), total="80",
+    )
+    rows = await _trends(
+        client, mgr, dfrom="2026-05-01T00:00:00Z", dto="2026-05-31T00:00:00Z", gran="day"
+    )
+    total_food = sum(Decimal(str(r["food_revenue"])) for r in rows)
+    total_2nd = sum(Decimal(str(r["secondhand_revenue"])) for r in rows)
+    total_recognized = sum(Decimal(str(r["recognized_revenue"])) for r in rows)
+    margin = (
+        await client.get(
+            "/api/v1/reports/sales-margin",
+            params={"from": "2026-05-01T00:00:00Z", "to": "2026-05-31T00:00:00Z"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert total_food == Decimal(margin["food_revenue"]) == Decimal(200)  # 120 + 80
+    assert total_2nd == Decimal(margin["secondhand_revenue"]) == Decimal(500)
+    assert total_food + total_2nd == total_recognized == Decimal(700)
 
 
 async def _trends(

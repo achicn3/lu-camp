@@ -57,6 +57,8 @@ const TRENDS_DATA = {
       period: "2026-06-19",
       gross_turnover: "50000",
       recognized_revenue: "40000",
+      food_revenue: "9000",
+      secondhand_revenue: "31000",
       gross_margin: "18000",
       gross_margin_rate: "0.45",
       cogs: "22000",
@@ -69,6 +71,8 @@ const TRENDS_DATA = {
       period: "2026-06-20",
       gross_turnover: "70000",
       recognized_revenue: "55000",
+      food_revenue: "12000",
+      secondhand_revenue: "43000",
       gross_margin: "27000",
       gross_margin_rate: "0.49",
       cogs: "28000",
@@ -554,6 +558,12 @@ describe("ReportsPage", () => {
     // Recognized revenue values may appear in both chart ticks and table; just verify presence
     expect(screen.getAllByText("40,000").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("55,000").length).toBeGreaterThanOrEqual(1);
+
+    // Food/secondhand split columns (餐飲/二手) now present in trends (table header + chart legend)
+    expect(screen.getAllByText("餐飲營收").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("二手營收")).toBeTruthy();
+    expect(screen.getAllByText("9,000").length).toBeGreaterThanOrEqual(1); // food row 1
+    expect(screen.getAllByText("31,000").length).toBeGreaterThanOrEqual(1); // secondhand row 1
 
     // Granularity selector exists (look within select elements)
     const selects = screen.getAllByRole("combobox");

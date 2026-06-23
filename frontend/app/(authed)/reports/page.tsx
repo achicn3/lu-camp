@@ -130,7 +130,12 @@ function buildExportUrl(basePath: string, format: "csv" | "xlsx", params?: Recor
 // -- SVG Trend Chart Component (lightweight, zero-dependency) --
 
 interface TrendChartProps {
-  rows: { period: string; recognized_revenue: string; gross_margin: string }[];
+  rows: {
+    period: string;
+    recognized_revenue: string;
+    gross_margin: string;
+    food_revenue: string;
+  }[];
 }
 
 function TrendChart({ rows }: TrendChartProps) {
@@ -138,7 +143,8 @@ function TrendChart({ rows }: TrendChartProps) {
 
   const revenueValues = rows.map((r) => parseNtd(r.recognized_revenue) ?? 0);
   const marginValues = rows.map((r) => parseNtd(r.gross_margin) ?? 0);
-  const allValues = [...revenueValues, ...marginValues];
+  const foodValues = rows.map((r) => parseNtd(r.food_revenue) ?? 0);
+  const allValues = [...revenueValues, ...marginValues, ...foodValues];
 
   const { min: yMin, max: yMax, ticks } = computeChartScaling(allValues);
 
@@ -158,6 +164,9 @@ function TrendChart({ rows }: TrendChartProps) {
     .join(" ");
   const marginPath = rows
     .map((_, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(marginValues[i]).toFixed(1)}`)
+    .join(" ");
+  const foodPath = rows
+    .map((_, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(foodValues[i]).toFixed(1)}`)
     .join(" ");
 
   return (
@@ -207,14 +216,24 @@ function TrendChart({ rows }: TrendChartProps) {
           <circle key={`mar-${marginValues[i]}-${i}`} cx={toX(i)} cy={toY(marginValues[i])} r="3.5" fill="var(--info)" />
         ))}
 
+        {/* Food revenue line (餐飲營收) */}
+        <path d={foodPath} fill="none" stroke="var(--warn)" strokeWidth="2.5" strokeDasharray="6 3" />
+        {rows.map((_, i) => (
+          <circle key={`food-${foodValues[i]}-${i}`} cx={toX(i)} cy={toY(foodValues[i])} r="3.5" fill="var(--warn)" />
+        ))}
+
         {/* Legend */}
-        <rect x={chartWidth - padding.right - 150} y={padding.top} width="12" height="12" fill="var(--accent)" rx="2" />
-        <text x={chartWidth - padding.right - 134} y={padding.top + 11} fontSize="12" fill="var(--ink)">
+        <rect x={chartWidth - padding.right - 230} y={padding.top} width="12" height="12" fill="var(--accent)" rx="2" />
+        <text x={chartWidth - padding.right - 214} y={padding.top + 11} fontSize="12" fill="var(--ink)">
           認列營收
         </text>
-        <rect x={chartWidth - padding.right - 70} y={padding.top} width="12" height="12" fill="var(--info)" rx="2" />
-        <text x={chartWidth - padding.right - 54} y={padding.top + 11} fontSize="12" fill="var(--ink)">
+        <rect x={chartWidth - padding.right - 150} y={padding.top} width="12" height="12" fill="var(--info)" rx="2" />
+        <text x={chartWidth - padding.right - 134} y={padding.top + 11} fontSize="12" fill="var(--ink)">
           毛利
+        </text>
+        <rect x={chartWidth - padding.right - 70} y={padding.top} width="12" height="12" fill="var(--warn)" rx="2" />
+        <text x={chartWidth - padding.right - 54} y={padding.top + 11} fontSize="12" fill="var(--ink)">
+          餐飲營收
         </text>
       </svg>
     </div>
@@ -403,6 +422,8 @@ function TrendsPanel() {
                 <tr>
                   <th>期間</th>
                   <th>認列營收</th>
+                  <th>二手營收</th>
+                  <th>餐飲營收</th>
                   <th>毛利</th>
                   <th>毛利率</th>
                   <th>營業額</th>
@@ -414,6 +435,8 @@ function TrendsPanel() {
                   <tr key={row.period}>
                     <td>{row.period}</td>
                     <td><MoneyText value={row.recognized_revenue} /></td>
+                    <td><MoneyText value={row.secondhand_revenue} /></td>
+                    <td><MoneyText value={row.food_revenue} /></td>
                     <td><MoneyText value={row.gross_margin} /></td>
                     <td>{row.gross_margin_rate ?? "N/A"}</td>
                     <td><MoneyText value={row.gross_turnover} /></td>

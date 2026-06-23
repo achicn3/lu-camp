@@ -3439,6 +3439,8 @@ export interface components {
         TrendRow: {
             /** Cogs */
             cogs: string;
+            /** Food Revenue */
+            food_revenue: string;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
@@ -3452,6 +3454,8 @@ export interface components {
             period: string;
             /** Recognized Revenue */
             recognized_revenue: string;
+            /** Secondhand Revenue */
+            secondhand_revenue: string;
             /** Store Credit Issued */
             store_credit_issued: string;
             /** Store Credit Redeemed */

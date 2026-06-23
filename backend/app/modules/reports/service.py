@@ -438,6 +438,8 @@ class ReportsService:
                     period=cursor.date(),
                     gross_turnover=margin.gross_turnover,
                     recognized_revenue=margin.recognized_revenue,
+                    food_revenue=margin.food_revenue,
+                    secondhand_revenue=margin.secondhand_revenue,
                     gross_margin=margin.gross_margin,
                     gross_margin_rate=margin.gross_margin_rate,
                     cogs=margin.owned_cogs + margin.bulk_cogs,

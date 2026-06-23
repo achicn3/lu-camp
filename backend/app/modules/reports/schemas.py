@@ -183,6 +183,8 @@ class TrendRow(BaseModel):
     period: date
     gross_turnover: NTDAmount
     recognized_revenue: NTDAmount
+    food_revenue: NTDAmount
+    secondhand_revenue: NTDAmount
     gross_margin: NTDAmount
     gross_margin_rate: NTDAmountOpt
     cogs: NTDAmount

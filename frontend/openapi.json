@@ -5585,6 +5585,10 @@
             "title": "Cogs",
             "type": "string"
           },
+          "food_revenue": {
+            "title": "Food Revenue",
+            "type": "string"
+          },
           "gross_margin": {
             "title": "Gross Margin",
             "type": "string"
@@ -5613,6 +5617,10 @@
             "title": "Recognized Revenue",
             "type": "string"
           },
+          "secondhand_revenue": {
+            "title": "Secondhand Revenue",
+            "type": "string"
+          },
           "store_credit_issued": {
             "title": "Store Credit Issued",
             "type": "string"
@@ -5634,6 +5642,8 @@
           "period",
           "gross_turnover",
           "recognized_revenue",
+          "food_revenue",
+          "secondhand_revenue",
           "gross_margin",
           "gross_margin_rate",
           "cogs",
