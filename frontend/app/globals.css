@@ -469,6 +469,36 @@ body {
   font-family: var(--font-mono);
   color: var(--success);
 }
+.pos-credit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pos-credit-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+/* 餘額為店員結帳時最關心的數字 → 放大並以強調色凸顯。 */
+.pos-credit-balance {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--accent);
+}
+.pos-credit-input {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+}
+.pos-credit-input .field {
+  flex: 1;
+}
+.pos-credit-full {
+  min-height: var(--tap-min);
+  white-space: nowrap;
+}
 .pos-invoice-off {
   padding-top: var(--sp-4);
   border-top: 1px solid var(--border);

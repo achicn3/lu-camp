@@ -342,14 +342,77 @@ describe("/pos 結帳頁", () => {
     await user.click(screen.getByRole("button", { name: "查詢會員" }));
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await waitFor(() => expect(screen.getByText(/購物金餘額/)).toBeTruthy());
-    // 選購物金 → 出現上限訊息、結帳停用
-    await user.click(screen.getByText("購物金"));
+    // 選購物金折抵 → 顯示可折抵上限與餘額
+    await user.click(screen.getByText("購物金折抵"));
+    await waitFor(() =>
+      expect(screen.getByText(/購物金可折抵/)).toBeTruthy(),
+    );
+    // 輸入超過可折抵上限（1800）的金額 → 出現上限訊息、結帳停用
+    await user.type(screen.getByLabelText("購物金折抵金額"), "1900");
     await waitFor(() =>
       expect(screen.getByText(/內用餐飲不可用購物金折抵（購物金最多 1800 元）/)).toBeTruthy(),
     );
     expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
       "disabled",
       true,
+    );
+  });
+
+  it("二手＋會員選購物金折抵：全額折抵帶入餘額/上限較小者，結帳啟用（純購物金付款）", async () => {
+    const MEMBER = {
+      id: 7,
+      store_id: 1,
+      name: "林測試",
+      phone: "0900000000",
+      roles: ["MEMBER"],
+      member_points: 0,
+      national_id_masked: null,
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.includes("/contacts/7/store-credit"))
+        return json({ contact_id: 7, balance: "5000" });
+      if (url.includes("/api/v1/contacts") && method === "GET")
+        return json([MEMBER]);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        // total=1800（純二手）、無餐飲 → 購物金上限=1800。
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
+    await user.click(screen.getByRole("button", { name: "查詢會員" }));
+    await user.click(await screen.findByRole("button", { name: /林測試/ }));
+    await waitFor(() => expect(screen.getByText(/購物金餘額/)).toBeTruthy());
+    await user.click(screen.getByText("購物金折抵"));
+    // 全額折抵 → 帶入 min(餘額5000, 上限1800, 應付1800)=1800，現金腿 0 → 結帳啟用
+    await user.click(screen.getByRole("button", { name: "全額折抵" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("購物金折抵金額")).toHaveProperty(
+        "value",
+        "1800",
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
     );
   });
 

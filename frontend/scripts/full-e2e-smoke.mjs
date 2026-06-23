@@ -298,7 +298,8 @@ try {
   await page.click('button:has-text("查詢會員")');
   await page.locator(".pos-member-results button").filter({ hasText: MEMBER_NAME }).first().click();
   await page.waitForSelector(".pos-member-selected .money", { timeout: 8000 });
-  await page.locator(".pos-tender-mode", { hasText: "購物金" }).click();
+  await page.locator(".pos-tender-mode", { hasText: "購物金折抵" }).click();
+  await page.click('button:has-text("全額折抵")');
   const minErr = page.locator('[role="alert"].form-error').filter({ hasText: /未達購物金低消/ });
   await minErr.waitFor({ state: "visible", timeout: 8000 });
   ok("8b) ★低消未達門檻 → 購物金被擋", true, (await minErr.textContent()) ?? "");
@@ -330,17 +331,17 @@ try {
   await page.locator(".pos-member-results button").filter({ hasText: MEMBER_NAME }).first().click();
   await page.waitForSelector(".pos-member-selected .money", { timeout: 8000 });
   ok("9) POS 會員歸戶（購物金餘額載入）", true);
-  // 選「購物金」→ 應出現上限阻擋（內用不可折抵）
-  await page.locator(".pos-tender-mode", { hasText: "購物金" }).click();
+  // 選「購物金折抵」→ 輸入超過可折抵上限(1800) → 上限阻擋（內用不可折抵）
+  await page.locator(".pos-tender-mode", { hasText: "購物金折抵" }).click();
+  await page.getByLabel("購物金折抵金額").fill("1900");
   const capErr = page.locator('[role="alert"].form-error').filter({ hasText: /餐飲不可用購物金折抵/ });
   await capErr.waitFor({ state: "visible", timeout: 8000 });
   ok("9) ★內用不可折抵購物金（上限阻擋）", true, (await capErr.textContent()) ?? "");
   await shot(page, "pos-storecredit-cap");
-  // 改「混合」：現金部分 = 餐飲小計 120，其餘以購物金 → 可結帳
-  await page.locator(".pos-tender-mode", { hasText: "混合" }).click();
-  await page.locator('label:has-text("現金部分") input').fill("120");
+  // 全額折抵：自動帶入上限 1800（=應付−餐飲），現金腿補足餐飲 120 → 可結帳
+  await page.click('button:has-text("全額折抵")');
   await page.waitForTimeout(400);
-  ok("9) 改混合付款（現金 120 + 購物金抵二手）", await page.locator("text=購物金扣抵").isVisible());
+  ok("9) 全額折抵（購物金抵二手 + 現金補餐飲）", await page.locator("text=購物金扣抵").isVisible());
   await shot(page, "pos-mixed-tender");
   await page.locator(".pos-checkout").click();
   await page.waitForSelector("text=已完成", { timeout: 10000 });

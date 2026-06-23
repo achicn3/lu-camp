@@ -1,9 +1,16 @@
 "use client";
 // /pos 結帳（docs/10 §5、docs/16 §3.2）：掃碼加入購物車（序號品／散裝堆）→ 會員歸戶（選填）
-// → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
+// → 收款（現金／購物金折抵；折抵可部分可全額、現金自動補足）→ 結帳 POST /sales →
+// （完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
@@ -18,6 +25,7 @@ import {
 import {
   type TenderMode,
   changeDue,
+  maxRedeemable,
   resolvePlan,
   toTenders,
   validatePlan,
@@ -289,8 +297,8 @@ function TenderPanel({
   storeCreditMinSpend,
   mode,
   setMode,
-  cashInput,
-  setCashInput,
+  creditInput,
+  setCreditInput,
   receivedInput,
   setReceivedInput,
 }: {
@@ -302,12 +310,12 @@ function TenderPanel({
   storeCreditMinSpend: number;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
-  cashInput: string;
-  setCashInput: (v: string) => void;
+  creditInput: string;
+  setCreditInput: (v: string) => void;
   receivedInput: string;
   setReceivedInput: (v: string) => void;
 }) {
-  const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
+  const plan = resolvePlan(mode, total, parseNtd(creditInput) ?? 0);
   const validation = validatePlan(plan, total, {
     hasMember,
     memberBalance,
@@ -317,10 +325,12 @@ function TenderPanel({
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
+  // 全額折抵可帶入金額（受 餘額／可折抵上限／應付總額 夾擠）；無會員時為 0。
+  const fullCredit = maxRedeemable(total, memberBalance, storeCreditMax);
   return (
     <div className="pos-tender">
       <div className="pos-tender-modes" role="radiogroup" aria-label="收款方式">
-        {(["CASH", "STORE_CREDIT", "MIXED"] as const).map((m) => (
+        {(["CASH", "CREDIT"] as const).map((m) => (
           <label
             key={m}
             className={`pos-tender-mode ${mode === m ? "is-active" : ""}`}
@@ -331,31 +341,53 @@ function TenderPanel({
               checked={mode === m}
               onChange={() => setMode(m)}
             />
-            {m === "CASH" ? "現金" : m === "STORE_CREDIT" ? "購物金" : "混合"}
+            {m === "CASH" ? "現金" : "購物金折抵"}
           </label>
         ))}
       </div>
 
-      {mode === "MIXED" && (
-        <label className="field">
-          <span className="field-label">現金部分（其餘以購物金支付）</span>
-          <input
-            value={cashInput}
-            onChange={(e) => setCashInput(e.target.value)}
-            inputMode="numeric"
-          />
-        </label>
-      )}
-      {plan.storeCredit > 0 && (
-        <p className="hint">
-          購物金扣抵 <Money value={plan.storeCredit} />
-          {memberBalance !== null && (
-            <>
-              {" "}
-              · 餘額 <Money value={memberBalance} />
-            </>
+      {mode === "CREDIT" && (
+        <div className="pos-credit">
+          {/* 可折抵上限與會員餘額並列；餘額為店員最關心的數字 → 放大強調。 */}
+          <div className="pos-credit-summary">
+            <span className="hint">
+              購物金可折抵 <Money value={storeCreditMax} />
+            </span>
+            <span className="pos-credit-balance">
+              餘額{" "}
+              {memberBalance === null ? (
+                <span className="balance-error">未載入</span>
+              ) : (
+                <Money value={memberBalance} />
+              )}
+            </span>
+          </div>
+          <div className="pos-credit-input">
+            <label className="field">
+              <span className="field-label">購物金折抵金額（其餘以現金補足）</span>
+              <input
+                value={creditInput}
+                onChange={(e) => setCreditInput(e.target.value)}
+                inputMode="numeric"
+                aria-label="購物金折抵金額"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-ghost pos-credit-full"
+              disabled={fullCredit <= 0}
+              onClick={() => setCreditInput(String(fullCredit))}
+            >
+              全額折抵
+            </button>
+          </div>
+          {plan.storeCredit > 0 && (
+            <p className="hint">
+              購物金扣抵 <Money value={plan.storeCredit} /> · 現金{" "}
+              <Money value={plan.cash} />
+            </p>
           )}
-        </p>
+        </div>
       )}
       {plan.cash > 0 && (
         <label className="field">
@@ -583,7 +615,8 @@ export default function PosPage() {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [member, setMember] = useState<ContactRead | null>(null);
   const [mode, setMode] = useState<TenderMode>("CASH");
-  const [cashInput, setCashInput] = useState("");
+  // 購物金折抵金額（CREDIT 模式輸入）；現金腿 = 應付 − 此值，預設空＝折抵 0。
+  const [creditInput, setCreditInput] = useState("");
   const [receivedInput, setReceivedInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
@@ -669,7 +702,7 @@ export default function PosPage() {
     quote.data?.store_credit_min_spend != null
       ? (parseNtd(quote.data.store_credit_min_spend) ?? 0)
       : 0;
-  const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
+  const plan = resolvePlan(mode, total, parseNtd(creditInput) ?? 0);
   const validation = validatePlan(plan, total, {
     hasMember: member !== null,
     memberBalance,
@@ -677,6 +710,11 @@ export default function PosPage() {
     storeCreditMax,
     storeCreditMinSpend,
   });
+  // 切到購物金折抵時，折抵金額預設 0（現金腿先帶入應付總額），店員再輸入或按「全額折抵」。
+  const handleSetMode = useCallback((m: TenderMode) => {
+    setMode(m);
+    if (m === "CREDIT") setCreditInput("");
+  }, []);
 
   const checkout = useMutation({
     mutationFn: async (): Promise<SaleRead> => {
@@ -719,7 +757,7 @@ export default function PosPage() {
     setLines([]);
     setMember(null);
     setMode("CASH");
-    setCashInput("");
+    setCreditInput("");
     setReceivedInput("");
     setNotice(null);
     setCompleted(null);
@@ -915,9 +953,9 @@ export default function PosPage() {
             storeCreditMax={storeCreditMax}
             storeCreditMinSpend={storeCreditMinSpend}
             mode={mode}
-            setMode={setMode}
-            cashInput={cashInput}
-            setCashInput={setCashInput}
+            setMode={handleSetMode}
+            creditInput={creditInput}
+            setCreditInput={setCreditInput}
             receivedInput={receivedInput}
             setReceivedInput={setReceivedInput}
           />

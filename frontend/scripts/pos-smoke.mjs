@@ -1,5 +1,5 @@
 // POS 結帳瀏覽器煙霧測試：API 準備唯一測試資料 → 登入 → /pos →
-// 已售/售罄阻擋、序號品重複掃碼、現金/購物金/混合付款、散裝批數量調整、列印明細。
+// 已售/售罄阻擋、序號品重複掃碼、現金/購物金折抵（全額／部分）付款、散裝批數量調整、列印明細。
 // 另用既有 /sales API 驗證 catalog 數量型商品銷售，因目前 POS UI 尚無 catalog picker。
 // 執行：node scripts/pos-smoke.mjs
 // 需 backend:8000 + frontend:3000 已起、dev-manager 帳號可登入，且至少一筆可售 catalog SKU 已 seed。
@@ -350,6 +350,10 @@ async function chooseTender(page, text) {
   await page.locator(".pos-tender-mode", { hasText: text }).click();
 }
 
+async function fillCredit(page, amount) {
+  await page.getByLabel("購物金折抵金額").fill(amount);
+}
+
 async function closePrintDialog(page) {
   const dialog = page.locator('[role="dialog"]');
   if (await dialog.isVisible()) {
@@ -368,7 +372,7 @@ async function paymentMethodVisible(page, label) {
 async function startNextSale(page) {
   await closePrintDialog(page);
   await page.click('button:has-text("開始下一筆")');
-  await page.waitForSelector("text=掃描或輸入商品條碼開始結帳");
+  await page.waitForSelector("text=點下方餐飲菜單開始結帳");
 }
 
 let browser;
@@ -385,7 +389,7 @@ try {
   await page.waitForURL(`${BASE}/pos`);
   await page.waitForSelector("text=本期不開票");
   ok("POS 載入＋發票區隱藏（本期不開票）", true);
-  ok("空車提示", await page.locator("text=掃描或輸入商品條碼開始結帳").isVisible());
+  ok("空車提示", await page.locator("text=點下方餐飲菜單開始結帳").isVisible());
   ok("空車時結帳鍵停用", await page.locator('button:has-text("結帳")').isDisabled());
   await page.screenshot({ path: `${SHOTS}/01-pos-empty.png` });
 
@@ -410,7 +414,8 @@ try {
   await scanCode(page, fixtures.cashItem.code);
   const duplicateText = await expectAlert(page, /序號品不可重複/);
   ok("重複掃碼阻擋", duplicateText?.includes("已在購物車") ?? false, duplicateText ?? "");
-  await chooseTender(page, "購物金");
+  await chooseTender(page, "購物金折抵");
+  await fillCredit(page, "100");
   const noMemberText = await expectAlert(page, /必須先指定買方會員/);
   ok(
     "購物金無會員 → 阻擋並停用結帳",
@@ -438,27 +443,30 @@ try {
   await page.getByLabel(`${fixtures.storeCreditBulk.name} 數量`).fill("3");
   await expectTotal(page, fixtures.storeCreditBulk.unitPrice * 3, "散裝批數量調整後總額正確");
   await selectMember(page, fixtures.member);
-  await chooseTender(page, "購物金");
+  await chooseTender(page, "購物金折抵");
+  // 全額折抵：自動帶入 min(餘額, 可折抵上限, 應付總額)；散裝 120×3=360 全額折抵 → 純購物金。
+  await page.click('button:has-text("全額折抵")');
   ok("購物金扣抵提示", await page.locator("text=購物金扣抵").isVisible());
   await page.screenshot({ path: `${SHOTS}/05-pos-bulk-store-credit.png` });
   await page.click('button:has-text("結帳")');
   await page.waitForSelector("text=已完成");
-  ok("購物金結帳完成", await paymentMethodVisible(page, "購物金"));
+  ok("全額折抵結帳完成", await paymentMethodVisible(page, "購物金"));
   await page.screenshot({ path: `${SHOTS}/06-pos-store-credit-complete.png` });
   await startNextSale(page);
 
-  // 6) 混合付款：現金部分 + 購物金部分
+  // 6) 部分折抵（購物金 + 現金）：輸入折抵金額，現金腿自動補足
   await scanCode(page, fixtures.mixedItem.code);
   await page.waitForSelector(`text=${fixtures.mixedItem.name}`);
   await selectMember(page, fixtures.member);
-  await chooseTender(page, "混合");
-  await page.locator('label:has-text("現金部分") input').fill("300");
+  await chooseTender(page, "購物金折抵");
+  // mixedItem 500：折抵 200 → 現金腿 300。
+  await fillCredit(page, "200");
   await page.locator('label:has-text("實收現金") input').fill("500");
-  ok("混合付款扣抵提示", await page.locator("text=購物金扣抵").isVisible());
-  ok("混合付款找零提示", await page.locator(".pos-change", { hasText: "找零" }).isVisible());
+  ok("部分折抵扣抵提示", await page.locator("text=購物金扣抵").isVisible());
+  ok("部分折抵找零提示", await page.locator(".pos-change", { hasText: "找零" }).isVisible());
   await page.click('button:has-text("結帳")');
   await page.waitForSelector("text=已完成");
-  ok("混合付款結帳完成", await paymentMethodVisible(page, "混合"));
+  ok("部分折抵結帳完成", await paymentMethodVisible(page, "混合"));
   await page.screenshot({ path: `${SHOTS}/07-pos-mixed-complete.png` });
   await closePrintDialog(page);
 } catch (error) {

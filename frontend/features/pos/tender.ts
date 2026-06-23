@@ -1,14 +1,14 @@
-// POS 收款純邏輯（docs/16 §3.2）：現金 / 購物金 / 混合。金額整數元。
-// 後端規則：Σ tenders = total；購物金扣買方餘額（不足 409）；純購物金不需開帳。
+// POS 收款純邏輯（docs/16 §3.2）：現金 / 購物金折抵（可部分、可全額）。金額整數元。
+// 後端規則：Σ tenders = total；購物金扣買方餘額（不足 409）；無現金腿時不需開帳。
 import type { components } from "@/lib/api-types";
 
-export type TenderMode = "CASH" | "STORE_CREDIT" | "MIXED";
+export type TenderMode = "CASH" | "CREDIT";
 
 export interface TenderPlan {
   mode: TenderMode;
-  /** 現金部分（MIXED 時為使用者輸入；CASH 時 = total；STORE_CREDIT 時 0）。 */
+  /** 現金部分（CASH 時 = total；CREDIT 時 = total − 購物金，可為 0）。 */
   cash: number;
-  /** 購物金部分（MIXED 時 = total − cash；STORE_CREDIT 時 = total；CASH 時 0）。 */
+  /** 購物金部分（CASH 時 0；CREDIT 時 = 使用者輸入的折抵金額）。 */
   storeCredit: number;
 }
 
@@ -16,22 +16,38 @@ export interface TenderValidation {
   ok: boolean;
   /** 不可結帳時的中文原因（顯示於收款區）。 */
   error: string | null;
-  /** 是否需要買方會員（含購物金時為真）。 */
+  /** 是否需要買方會員（用到購物金時為真）。 */
   needsMember: boolean;
-  /** 是否需要開帳（含現金時為真）。 */
+  /** 是否需要開帳（有現金腿時為真）。 */
   needsDrawer: boolean;
 }
 
-/** 依模式把 total 拆成現金/購物金兩腿（MIXED 用使用者輸入的現金部分）。 */
+/**
+ * 依模式把 total 拆成現金/購物金兩腿。
+ * CREDIT 模式以「購物金折抵金額」為輸入，現金自動補足餘額（cash = total − 購物金）；
+ * 折抵滿額時現金腿為 0（等同純購物金付款）。
+ */
 export function resolvePlan(
   mode: TenderMode,
   total: number,
-  cashInput: number,
+  creditInput: number,
 ): TenderPlan {
   if (mode === "CASH") return { mode, cash: total, storeCredit: 0 };
-  if (mode === "STORE_CREDIT") return { mode, cash: 0, storeCredit: total };
-  const cash = clampInt(cashInput);
-  return { mode, cash, storeCredit: total - cash };
+  const storeCredit = clampInt(creditInput);
+  return { mode, cash: total - storeCredit, storeCredit };
+}
+
+/**
+ * 全額折抵可帶入的購物金金額：受 會員餘額、可折抵上限（內用排除）、應付總額 三者夾擠取最小。
+ * 無會員（餘額 null）→ 0。供「全額折抵」按鈕與前端防呆共用。
+ */
+export function maxRedeemable(
+  total: number,
+  memberBalance: number | null,
+  storeCreditMax: number,
+): number {
+  const balance = memberBalance ?? 0;
+  return Math.max(0, Math.min(clampInt(total), balance, clampInt(storeCreditMax)));
 }
 
 export function validatePlan(
@@ -53,20 +69,11 @@ export function validatePlan(
   if (total <= 0) {
     return { ok: false, error: "購物車是空的", needsMember, needsDrawer };
   }
-  if (plan.mode === "MIXED") {
-    if (plan.cash <= 0 || plan.storeCredit <= 0) {
-      return {
-        ok: false,
-        error: "混合付款的現金與購物金都必須大於 0",
-        needsMember,
-        needsDrawer,
-      };
-    }
-  }
-  if (plan.cash + plan.storeCredit !== total) {
+  // 購物金折抵模式卻未輸入折抵金額（預設 0）→ 提示輸入或改用現金。
+  if (plan.mode === "CREDIT" && plan.storeCredit <= 0) {
     return {
       ok: false,
-      error: "收款金額必須等於應付總額",
+      error: "請輸入購物金折抵金額（或改用現金付款）",
       needsMember,
       needsDrawer,
     };
@@ -88,6 +95,7 @@ export function validatePlan(
       needsDrawer,
     };
   }
+  // 防呆：折抵金額不得大於會員購物金餘額（前端先擋，後端 InsufficientStoreCredit 為最終把關）。
   if (
     needsMember &&
     opts.memberBalance !== null &&
@@ -116,14 +124,21 @@ export function validatePlan(
     opts.storeCreditMax !== undefined &&
     plan.storeCredit > opts.storeCreditMax
   ) {
+    const msg =
+      opts.storeCreditMax < total
+        ? `內用餐飲不可用購物金折抵（購物金最多 ${opts.storeCreditMax} 元）`
+        : `購物金折抵最多 ${opts.storeCreditMax} 元`;
+    return { ok: false, error: msg, needsMember, needsDrawer };
+  }
+  if (plan.cash + plan.storeCredit !== total) {
     return {
       ok: false,
-      error: `內用餐飲不可用購物金折抵（購物金最多 ${opts.storeCreditMax} 元）`,
+      error: "收款金額必須等於應付總額",
       needsMember,
       needsDrawer,
     };
   }
-  // 含現金收款必須開帳中（§7.8）：未知（讀取中）或未開帳都不放行，避免送出才吃 409。
+  // 有現金腿必須開帳中（§7.8）：未知（讀取中）或未開帳都不放行，避免送出才吃 409。
   if (needsDrawer && opts.drawerOpen !== true) {
     return {
       ok: false,
