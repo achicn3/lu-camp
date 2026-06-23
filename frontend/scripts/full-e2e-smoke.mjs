@@ -360,6 +360,13 @@ try {
   await page.press('input[name="code"]', "Enter");
   await page.waitForSelector(".pos-cart", { timeout: 8000 });
   await page.locator(".pos-tender-mode", { hasText: "現金" }).click();
+  // ★實收現金找零輔助：輸入大於應收的金額 → 顯示找零（寄售品 1000、實收 1500 → 找零 500）。
+  await page.locator('label:has-text("實收現金") input').fill("1500");
+  await page.waitForTimeout(400);
+  const changeEl = page.locator(".pos-change");
+  await changeEl.waitFor({ state: "visible", timeout: 8000 });
+  ok("10) ★實收現金找零輔助顯示找零", true, (await changeEl.textContent())?.trim() ?? "");
+  await shot(page, "pos-cash-change");
   await page.locator(".pos-checkout").click();
   await page.waitForSelector("text=已完成", { timeout: 10000 });
   ok("10) 賣出寄售品完成（產生待付款結算）", true);
