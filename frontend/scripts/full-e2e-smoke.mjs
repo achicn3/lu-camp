@@ -89,6 +89,26 @@ async function selectSeller(name) {
   await page.locator(".acq-results .combo-option").filter({ hasText: name }).first().click();
 }
 
+async function setMinSpend(value) {
+  await nav("設定", "/settings");
+  const inp = page.locator('input[name="store_credit_min_spend"]');
+  await inp.waitFor();
+  await inp.fill(String(value));
+  await page.click('button:has-text("儲存一般設定")');
+  await page.waitForTimeout(1200); // 等 PATCH 完成（成功訊息會隨重抓重繪而閃逝，不可靠）
+  // 重新載入設定頁，確認伺服器已持久化（輸入框顯示千分位格式化的已存值）。
+  await nav("設定", "/settings");
+  const expected = Number(value).toLocaleString("en-US");
+  await page.waitForFunction(
+    (exp) => {
+      const el = document.querySelector('input[name="store_credit_min_spend"]');
+      return !!el && el.value === exp;
+    },
+    expected,
+    { timeout: 8000 },
+  );
+}
+
 function codesFrom(text) {
   // 序號條碼形如 S1-26E77BAFE3；result 文字後面接「列印標籤」按鈕字樣，故以 token 正則精準擷取。
   return [...text.matchAll(/S\d+-[0-9A-F]+/g)].map((m) => m[0]);
@@ -224,6 +244,24 @@ try {
   ok("6) 寄售入庫完成（取得序號）", consignCode !== null, consignCode ?? r3.slice(0, 60));
   await shot(page, "consign-done");
 
+  // 6b) 收購「新增一列」呈現：買斷頁點「＋ 新增一列」→ 出現第 2 列鑑價卡（可獨立填/移除）。
+  await nav("收購", "/acquisition");
+  await page.click('[role="tab"]:has-text("買斷")');
+  await page.waitForSelector(".acq-row");
+  const rowsBefore = await page.locator(".acq-row").count();
+  await page.click('button:has-text("新增一列")');
+  await page.waitForFunction(
+    (n) => document.querySelectorAll(".acq-row").length > n,
+    rowsBefore,
+  );
+  const rowsAfter = await page.locator(".acq-row").count();
+  ok(
+    "6b) 收購「新增一列」→ 多出一張鑑價卡（可一次收多件）",
+    rowsAfter === rowsBefore + 1,
+    `${rowsBefore} → ${rowsAfter} 列（第 ${rowsAfter} 列出現）`,
+  );
+  await shot(page, "acq-add-row");
+
   // 7) 餐飲菜單管理：新增手沖咖啡（POS 餐飲磚用）
   await nav("餐飲菜單", "/menu");
   await page.waitForSelector(".inv-table");
@@ -246,6 +284,28 @@ try {
   await page.waitForSelector(".inv-reprint-ok, .inv-reprint-err", { timeout: 15000 });
   ok("8) 庫存逐列補印標籤（送代理）", (await page.locator(".inv-reprint-ok").count()) > 0);
   await shot(page, "inventory-reprint");
+
+  // 8b) 購物金低消門檻示範：設門檻 2000 → POS 二手(1800) 單品選購物金 → 「未達購物金低消」擋。
+  await setMinSpend(2000);
+  ok("8b) 設定購物金低消門檻 = 2000", true);
+  await shot(page, "settings-min-spend");
+  await nav("POS 結帳", "/pos");
+  await page.waitForSelector(".pos-menu-tiles");
+  await page.fill('input[name="code"]', buyoutCode);
+  await page.press('input[name="code"]', "Enter");
+  await page.waitForSelector(".pos-cart", { timeout: 8000 });
+  await page.locator(".pos-member-search input").fill(MEMBER_NAME);
+  await page.click('button:has-text("查詢會員")');
+  await page.locator(".pos-member-results button").filter({ hasText: MEMBER_NAME }).first().click();
+  await page.waitForSelector(".pos-member-selected .money", { timeout: 8000 });
+  await page.locator(".pos-tender-mode", { hasText: "購物金" }).click();
+  const minErr = page.locator('[role="alert"].form-error').filter({ hasText: /未達購物金低消/ });
+  await minErr.waitFor({ state: "visible", timeout: 8000 });
+  ok("8b) ★低消未達門檻 → 購物金被擋", true, (await minErr.textContent()) ?? "");
+  await shot(page, "pos-min-spend-block");
+  // 還原門檻 0（不影響後續結帳）
+  await setMinSpend(0);
+  ok("8b) 還原購物金低消門檻 = 0（不限）", true);
 
   // 9) POS：二手＋餐飲同車＋會員＋購物金（示範內用不可折抵購物金上限）
   await nav("POS 結帳", "/pos");
@@ -324,6 +384,96 @@ try {
   await page.waitForSelector('[role="dialog"]', { state: "detached", timeout: 8000 });
   ok("11) 寄售付款完成（現金出帳）", true);
   await shot(page, "consign-paid");
+
+  // 11b) 採購補貨：新增供應商 → ★上架數量型商品 → 建採購單 → 收貨入庫（廠商商品上架全流程）
+  await nav("採購補貨", "/purchasing");
+  await page.waitForSelector("h1:has-text('採購 / 補貨')");
+  // (a) 供應商
+  await page.click('.settle-tabs button:has-text("供應商")');
+  await page.waitForSelector(".pur-supplier-form");
+  const supplierName = `山林戶外-${RUN}`;
+  await page.fill('input[aria-label="供應商名稱"]', supplierName);
+  await page.click('.pur-supplier-form button:has-text("新增供應商")');
+  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`);
+  ok("11b) 新增供應商", true, supplierName);
+  // (b) 上架數量型商品（初始庫存 0）
+  await page.click('.settle-tabs button:has-text("採購單")');
+  await page.waitForSelector(".pur-catalog-form");
+  const gasName = `高山瓦斯罐-${RUN}`;
+  await page.locator('.pur-catalog-form input[aria-label="SKU"]').fill(`GAS-${RUN}`);
+  await page.locator('.pur-catalog-form input[aria-label="品名"]').fill(gasName);
+  await page.locator('.pur-catalog-form input[aria-label="售價"]').fill("180");
+  await page.locator('.pur-catalog-form input[aria-label="低庫存提醒點"]').fill("12");
+  await page.click('.pur-catalog-form button:has-text("上架商品")');
+  await page.waitForSelector(".pur-catalog-form .form-success", { timeout: 8000 });
+  ok("11b) ★上架數量型商品（廠商採購商品建檔，初始庫存 0）", true, gasName);
+  await shot(page, "purchasing-catalog-created");
+  // (c) 建採購單（選供應商、搜尋剛上架商品、設量與進貨價）
+  await page.selectOption('select[aria-label="供應商"]', { label: supplierName });
+  await page.fill('input[aria-label="搜尋數量品"]', gasName.slice(0, 5));
+  await page.waitForSelector(`.pur-search-results li button:has-text("${gasName}")`, { timeout: 8000 });
+  await page.click(`.pur-search-results li button:has-text("${gasName}")`);
+  await page.waitForSelector(".pur-lines tbody tr");
+  await page.locator('.pur-lines input[aria-label^="數量"]').fill("24");
+  await page.locator('.pur-lines input[aria-label^="進貨單價"]').fill("100");
+  await shot(page, "purchasing-po-draft");
+  await page.click('.pur-create button:has-text("建立採購單")');
+  await page.waitForSelector(
+    '.pur-order-table tbody tr button:has-text("收貨入庫")',
+    { timeout: 8000 },
+  );
+  ok("11b) 建立採購單（已下單）", true);
+  // (d) 收貨入庫 → 補庫存（上架完成）
+  await page.locator('.pur-order-table tbody tr button:has-text("收貨入庫")').first().click();
+  await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]', { timeout: 8000 });
+  await page.click('[role="dialog"] button:has-text("確認收貨")');
+  await page.waitForSelector('[role="dialog"]', { state: "detached", timeout: 8000 });
+  ok("11b) ★收貨入庫完成（廠商商品上架補庫存 24 件）", true);
+  await shot(page, "purchasing-received");
+
+  // 11c) 盤點：建立盤點單 → 輸入實點數（造一個差異）→ 確認調整
+  await nav("盤點", "/stocktake");
+  await page.waitForSelector("h1:has-text('盤點')");
+  await page.click('button:has-text("建立盤點單")');
+  await page.waitForSelector(".st-detail .st-lines tbody tr", { timeout: 8000 });
+  const stRow = page.locator(".st-lines tbody tr").first();
+  const sysQty = Number((await stRow.locator("td").nth(1).innerText()).trim());
+  await stRow.locator('input[aria-label^="實點數"]').fill(String(sysQty - 1));
+  await page.waitForTimeout(300);
+  ok("11c) 盤點輸入實點數（造差異 −1）", true, `系統 ${sysQty} → 實點 ${sysQty - 1}`);
+  await shot(page, "stocktake-counting");
+  await page.click('.st-detail button:has-text("確認盤點調整")');
+  await page.waitForSelector('[role="dialog"][aria-label="確認盤點"]', { timeout: 8000 });
+  await page.click('[role="dialog"] button:has-text("確認調整")');
+  await page.waitForSelector('[role="dialog"]', { state: "detached", timeout: 8000 });
+  ok("11c) 盤點確認調整完成", true);
+  await shot(page, "stocktake-confirmed");
+
+  // 11d) 門市活動：建立限時促銷 → 啟用 → 結束（建立/啟用/結束全流程）
+  await nav("門市活動", "/campaigns");
+  await page.waitForSelector("h1");
+  await page.fill('input[placeholder="例如：開幕九折"]', `週年慶九折-${RUN}`);
+  await page.fill('input[type="number"][min="1"]', "10");
+  const dt = page.locator('input[type="datetime-local"]');
+  await dt.nth(0).fill("2026-07-01T00:00");
+  await dt.nth(1).fill("2026-07-31T23:59");
+  await shot(page, "campaign-form");
+  await page.click('button:has-text("建立活動")');
+  await page.waitForSelector(`text=週年慶九折-${RUN}`, { timeout: 8000 });
+  ok("11d) 建立門市活動", true);
+  const activateBtn = page.locator('button:has-text("啟用")').first();
+  if (await activateBtn.count()) {
+    await activateBtn.click();
+    await page.waitForTimeout(600);
+    ok("11d) 啟用活動", true);
+  }
+  await shot(page, "campaign-created");
+  const endBtn = page.locator('button:has-text("結束")').first();
+  if (await endBtn.count()) {
+    await endBtn.click();
+    await page.waitForTimeout(600);
+    ok("11d) 結束活動（避免影響後續）", true);
+  }
 
   // 12) 報表巡覽
   await nav("報表", "/reports");
