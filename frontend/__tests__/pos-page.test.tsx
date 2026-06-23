@@ -298,6 +298,61 @@ describe("/pos 結帳頁", () => {
     expect(printed.lines[0].original_unit_price).toBe("1800");
   });
 
+  it("二手＋餐飲＋會員選購物金：顯示「內用餐飲不可用購物金折抵」上限訊息並停用結帳（回歸）", async () => {
+    // 回歸：TenderPanel 過去自算 validatePlan 卻漏傳 storeCreditMax，導致按鈕被停用卻不顯示原因。
+    const MEMBER = {
+      id: 7,
+      store_id: 1,
+      name: "林測試",
+      phone: "0900000000",
+      roles: ["MEMBER"],
+      member_points: 0,
+      national_id_masked: null,
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.includes("/contacts/7/store-credit"))
+        return json({ contact_id: 7, balance: "5000" });
+      if (url.includes("/api/v1/contacts") && method === "GET")
+        return json([MEMBER]);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        // total=1920（二手1800+餐飲120）、餐飲小計120 → 購物金上限=1800。
+        return json({
+          total: "1920",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "120",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    // 二手序號品入車
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    // 歸戶會員
+    await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
+    await user.click(screen.getByRole("button", { name: "查詢會員" }));
+    await user.click(await screen.findByRole("button", { name: /林測試/ }));
+    await waitFor(() => expect(screen.getByText(/購物金餘額/)).toBeTruthy());
+    // 選購物金 → 出現上限訊息、結帳停用
+    await user.click(screen.getByText("購物金"));
+    await waitFor(() =>
+      expect(screen.getByText(/內用餐飲不可用購物金折抵（購物金最多 1800 元）/)).toBeTruthy(),
+    );
+    expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
   it("生效活動橫幅顯示活動名稱與折扣", async () => {
     const ACTIVE_CAMPAIGN = {
       id: 1,

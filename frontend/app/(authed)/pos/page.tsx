@@ -285,6 +285,7 @@ function TenderPanel({
   hasMember,
   memberBalance,
   drawerOpen,
+  storeCreditMax,
   mode,
   setMode,
   cashInput,
@@ -296,6 +297,7 @@ function TenderPanel({
   hasMember: boolean;
   memberBalance: number | null;
   drawerOpen: boolean | null;
+  storeCreditMax: number;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -308,6 +310,7 @@ function TenderPanel({
     hasMember,
     memberBalance,
     drawerOpen,
+    storeCreditMax,
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
@@ -899,6 +902,7 @@ export default function PosPage() {
             hasMember={member !== null}
             memberBalance={memberBalance}
             drawerOpen={drawerOpen}
+            storeCreditMax={storeCreditMax}
             mode={mode}
             setMode={setMode}
             cashInput={cashInput}
