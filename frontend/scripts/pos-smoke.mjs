@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { validNationalId } from "./_national-id.mjs";
 
 const BASE = stripTrailingSlash(process.env.SMOKE_BASE ?? "http://localhost:3000");
 const API_BASE = stripTrailingSlash(process.env.SMOKE_API_BASE ?? "http://localhost:8000");
@@ -107,7 +108,7 @@ async function createContact(token, body) {
 async function createSeller(token, runId) {
   return await createContact(token, {
     name: `POS 煙霧賣方 ${runId}`,
-    national_id: `SMOKE-${runId}`,
+    national_id: validNationalId(),
     roles: ["SELLER"],
     member_points: 0,
     source_note: "POS smoke setup",

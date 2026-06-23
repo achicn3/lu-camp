@@ -84,6 +84,45 @@ async def test_create_stores_ciphertext_and_response_is_masked(
     assert get_pii_cipher().decrypt(contact.national_id_enc) == NATIONAL_ID
 
 
+async def test_create_rejects_invalid_national_id_without_leaking_value(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """格式/檢核碼錯誤的 national_id → 422，且回應不得含輸入值（PII，CLAUDE.md §5）。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    bad = "A123456788"  # 末碼錯一位
+    resp = await client.post(
+        "/api/v1/contacts",
+        json={"name": "格式錯", "national_id": bad, "roles": ["MEMBER"]},
+        headers=_auth(m_token),
+    )
+    assert resp.status_code == 422, resp.text
+    assert bad not in resp.text  # 不洩漏輸入值
+    # 不落地
+    contact = await db_session.scalar(select(Contact).where(Contact.name == "格式錯"))
+    assert contact is None
+
+
+async def test_update_rejects_invalid_national_id(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """PATCH 改 national_id 為非法值 → 422，且不洩漏輸入值。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    created = await client.post(
+        "/api/v1/contacts",
+        json={"name": "改身分證", "national_id": NATIONAL_ID, "roles": ["MEMBER"]},
+        headers=_auth(m_token),
+    )
+    cid = created.json()["id"]
+    bad = "Z999999999"
+    resp = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"national_id": bad},
+        headers=_auth(m_token),
+    )
+    assert resp.status_code == 422, resp.text
+    assert bad not in resp.text
+
+
 async def test_get_contact_masks_national_id(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

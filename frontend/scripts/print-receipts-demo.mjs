@@ -3,6 +3,7 @@
 // 需先啟動 backend(:8000, 已 seed dev-manager + seed_dev_purchasing) 與 agent(:8001, AGENT_DEVICES=real)。
 // 用法：API_BASE=http://localhost:8000 AGENT_BASE=http://localhost:8001 node scripts/print-receipts-demo.mjs
 import { randomUUID } from "node:crypto";
+import { validNationalId } from "./_national-id.mjs";
 
 const API = (process.env.API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const AGENT = (process.env.AGENT_BASE ?? "http://localhost:8001").replace(/\/+$/, "");
@@ -48,7 +49,7 @@ async function makeSerialized(listed) {
     method: "POST",
     token,
     expected: [201],
-    body: { name: `示範賣方 ${runId}`, national_id: `DEMO-${runId}`, roles: ["SELLER"] },
+    body: { name: `示範賣方 ${runId}`, national_id: validNationalId(), roles: ["SELLER"] },
   });
   const acq = await call(API, "/api/v1/acquisitions", {
     method: "POST",

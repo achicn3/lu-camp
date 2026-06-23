@@ -29,6 +29,7 @@ from app.shared.enums import ContactRole, UserRole
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     DuplicateContact,
+    InvalidNationalId,
     MemberRemovalBlocked,
 )
 
@@ -48,7 +49,14 @@ ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value)
 async def create_contact(
     payload: ContactCreate, session: SessionDep, user: CurrentUserDep
 ) -> ContactRead:
-    contact = await ContactService(session).create_contact(user.store_id, payload)
+    try:
+        contact = await ContactService(session).create_contact(user.store_id, payload)
+    except InvalidNationalId as exc:
+        # 訊息不含輸入值（PII）；於建檔當下回 422 擋下手動輸入錯誤。
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     # get_session 不自動 commit（各寫入端點自行 commit）；缺此行則建檔不落地（F6 E2E 抓到的
     # 既有 bug：POST /contacts 之前未 commit，正式環境建檔即遺失）。updateContact 已有 commit。
     await session.commit()
@@ -112,7 +120,7 @@ async def update_contact(
     except (DuplicateContact, MemberRemovalBlocked) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except AcquisitionRequiresNationalId as exc:
+    except (AcquisitionRequiresNationalId, InvalidNationalId) as exc:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)

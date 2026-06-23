@@ -65,6 +65,10 @@ class AcquisitionRequiresNationalId(DomainError):
     """收購/寄售對象必須有 national_id（接 T4：SELLER/CONSIGNOR 必填）。"""
 
 
+class InvalidNationalId(DomainError):
+    """national_id 格式/檢核碼不正確（避免手動輸入錯誤）。訊息不含輸入值（PII）。"""
+
+
 class InvalidAcquisitionCategory(DomainError):
     """收購品項的 category_id 不屬於本店（F6 additive 持久化的租戶守衛）。"""
 

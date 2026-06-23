@@ -18,6 +18,8 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { validNationalId } from "./_national-id.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "full-e2e");
 mkdirSync(SHOTS, { recursive: true });
@@ -25,7 +27,7 @@ mkdirSync(SHOTS, { recursive: true });
 const RUN = Date.now().toString().slice(-6);
 const MEMBER_NAME = `林大山-${RUN}`;
 const MEMBER_PHONE = `09${RUN}0000`.slice(0, 10);
-const MEMBER_NID = `E2E${RUN}X`;
+const MEMBER_NID = validNationalId(Number(RUN));
 
 const results = [];
 let shotN = 0;

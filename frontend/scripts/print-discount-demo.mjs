@@ -6,6 +6,7 @@
 //   AGENT_EPSON_HOST=<印表機IP>, AGENT_EINVOICE_AES_KEY=<32hex>)。
 // 用法：API_BASE=http://localhost:8000 AGENT_BASE=http://localhost:8001 node scripts/print-discount-demo.mjs
 import { randomUUID } from "node:crypto";
+import { validNationalId } from "./_national-id.mjs";
 
 const API = (process.env.API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const AGENT = (process.env.AGENT_BASE ?? "http://localhost:8001").replace(/\/+$/, "");
@@ -60,7 +61,7 @@ const seller = await call(API, "/api/v1/contacts", {
   method: "POST",
   token,
   expected: [201],
-  body: { name: `列印示範賣方 ${runId}`, national_id: `PRN-${runId}`, roles: ["SELLER"] },
+  body: { name: `列印示範賣方 ${runId}`, national_id: validNationalId(), roles: ["SELLER"] },
 });
 const acq = await call(API, "/api/v1/acquisitions", {
   method: "POST",

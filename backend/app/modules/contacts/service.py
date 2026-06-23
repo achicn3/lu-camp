@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
 from app.core.crypto import get_pii_cipher, national_id_blind_index
+from app.core.national_id import is_valid_national_id
 from app.modules.contacts.models import Contact
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate, ContactUpdate
@@ -11,6 +12,7 @@ from app.shared.enums import ContactRole
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     DuplicateContact,
+    InvalidNationalId,
     MemberPointsAdjustFailed,
     MemberRemovalBlocked,
 )
@@ -26,6 +28,8 @@ class ContactService:
         enc: str | None = None
         blind: str | None = None
         if data.national_id:
+            if not is_valid_national_id(data.national_id):
+                raise InvalidNationalId("身分證字號格式或檢核碼不正確，請確認後重新輸入")
             blind = national_id_blind_index(data.national_id)
             existing = await self._repo.get_by_blind_index(store_id, blind)
             if existing is not None:
@@ -172,6 +176,8 @@ class ContactService:
             contact.national_id_enc = None
             contact.national_id_blind_index = None
             return
+        if not is_valid_national_id(new_national_id):
+            raise InvalidNationalId("身分證字號格式或檢核碼不正確，請確認後重新輸入")
         blind = national_id_blind_index(new_national_id)
         existing = await self._repo.get_by_blind_index(store_id, blind)
         if existing is not None and existing.id != contact.id:
