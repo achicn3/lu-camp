@@ -379,7 +379,12 @@ async def test_create_catalog_product_then_listed(
     mgr = await _auth_manager(db_session, store_id)
     resp = await client.post(
         "/api/v1/catalog-products",
-        json={"sku": "GAS-230", "name": "高山瓦斯罐 230g", "unit_price": "180", "reorder_point": 12},
+        json={
+            "sku": "GAS-230",
+            "name": "高山瓦斯罐 230g",
+            "unit_price": "180",
+            "reorder_point": 12,
+        },
         headers=mgr,
     )
     assert resp.status_code == 201, resp.text

@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import suggested_price
@@ -340,7 +341,13 @@ class InventoryService:
             reorder_point=reorder_point,
             brand_id=brand_id,
         )
-        return await self._repo.add_catalog(product)
+        try:
+            return await self._repo.add_catalog(product)
+        except IntegrityError as exc:
+            # DB 唯一鍵後盾（uq_catalog_products_store_sku）：競態下兩請求同時通過上方檢查時兜底。
+            # flush 失敗會使交易進入 aborted 狀態，先 rollback 才能乾淨回 409。
+            await self._session.rollback()
+            raise DuplicateCatalogProduct(f"SKU「{sku}」已存在") from exc
 
     async def list_catalog(
         self,

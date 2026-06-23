@@ -96,6 +96,8 @@ class CategoryPricingRule(Base, TimestampMixin):
 
 class CatalogProduct(Base, TimestampMixin):
     __tablename__ = "catalog_products"
+    # 同店 SKU 唯一（與 brands/suppliers 同慣例）：DB 後盾，防 app 層 check-then-insert 競態。
+    __table_args__ = (UniqueConstraint("store_id", "sku", name="uq_catalog_products_store_sku"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
