@@ -156,26 +156,33 @@ function SellerSection({
   if (seller !== null) {
     return (
       <div className="card acq-seller">
-        <div>
-          <strong>{seller.name}</strong>
-          {seller.phone && <span className="hint"> · {seller.phone}</span>}
-          <span className="hint">
-            {" "}
-            {seller.has_national_id ? "（已建檔）" : "（尚未建檔身分證）"}
-          </span>
+        <div className="acq-seller-head">
+          <div>
+            <strong>{seller.name}</strong>
+            {seller.phone && <span className="hint"> · {seller.phone}</span>}
+            <span className="hint">
+              {" "}
+              {seller.has_national_id ? "（已建檔）" : "（尚未建檔身分證）"}
+            </span>
+          </div>
+          <button type="button" className="btn-ghost" onClick={() => onSelect(null)}>
+            更換
+          </button>
         </div>
         {!seller.has_national_id && (
           <form className="acq-backfill" onSubmit={onBackfill}>
-            <input
-              name="national_id"
-              placeholder="補登身分證字號"
-              aria-label="補登身分證字號"
-              autoComplete="off"
-              maxLength={10}
-            />
-            <button type="submit" className="btn-primary" disabled={backfillMut.isPending}>
-              補登並設為{roleLabel}
-            </button>
+            <div className="acq-backfill-row">
+              <input
+                name="national_id"
+                placeholder="補登身分證字號"
+                aria-label="補登身分證字號"
+                autoComplete="off"
+                maxLength={10}
+              />
+              <button type="submit" className="btn-primary" disabled={backfillMut.isPending}>
+                補登並設為{roleLabel}
+              </button>
+            </div>
             {error !== null && (
               <p role="alert" className="form-error">
                 {error}
@@ -183,9 +190,6 @@ function SellerSection({
             )}
           </form>
         )}
-        <button type="button" className="btn-ghost" onClick={() => onSelect(null)}>
-          更換
-        </button>
       </div>
     );
   }

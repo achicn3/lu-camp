@@ -1024,8 +1024,56 @@ body {
 }
 .acq-seller {
   display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.acq-seller-head {
+  display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-2);
+}
+/* 補登身分證：輸入框與按鈕同高、之間留間隔；輸入框填滿剩餘寬度。 */
+.acq-backfill {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.acq-backfill-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-3);
+}
+.acq-backfill-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-md);
+}
+.acq-backfill-row input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.acq-backfill-row .btn-primary {
+  white-space: nowrap;
+}
+/* 成色下拉與其他鑑價欄位輸入框同尺寸（同高、滿寬）。 */
+.acq-row-grid select {
+  min-height: var(--tap-min);
+  width: 100%;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: var(--text-md);
+}
+.acq-row-grid select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .acq-search,
 .acq-create-seller input {
