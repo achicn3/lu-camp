@@ -29,7 +29,7 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
   const mutation = useMutation({
     mutationFn: async (input: {
       name: string;
-      phone: string | null;
+      phone: string;
       national_id: string | null;
       roles: ContactRole[];
     }) => {

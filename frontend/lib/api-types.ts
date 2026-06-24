@@ -479,10 +479,12 @@ export interface paths {
         head?: never;
         /**
          * Update Contact
-         * @description 編輯會員（docs/17 §5.2、裁示 #3）。
+         * @description 編輯會員（docs/17 §5.2、裁示 #3，2026-06-24 放寬補登）。
          *
-         *     一般欄位 + 電話：CLERK 可改；變更 national_id / roles：限 MANAGER（否則 403）。
-         *     national_id 變更去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。
+         *     一般欄位 + 電話：CLERK 可改。national_id / roles 變更原則限 MANAGER；**例外（補登）**：
+         *     CLERK 可為「尚無 national_id」的聯絡人**設定**（非清空/非覆蓋）身分證字號，且角色**只增不減**，
+         *     以支援收購櫃檯一條龍把買斷會員升級為賣方。改既有/清空 national_id、移除角色仍限 MANAGER。
+         *     national_id/手機 去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。
          */
         patch: operations["updateContact"];
         trace?: never;
@@ -1958,7 +1960,8 @@ export interface components {
         ConsignmentSettlementStatus: "PENDING" | "PAID" | "CANCELLED";
         /**
          * ContactCreate
-         * @description 建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。
+         * @description 建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）；
+         *     收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。
          */
         ContactCreate: {
             /** Default Carrier Id */
@@ -1975,7 +1978,7 @@ export interface components {
             /** National Id */
             national_id?: string | null;
             /** Phone */
-            phone?: string | null;
+            phone: string;
             /** Roles */
             roles?: components["schemas"]["ContactRole"][];
             /** Source Note */
