@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
-import { validNationalId } from "./_national-id.mjs";
+import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = stripTrailingSlash(process.env.SMOKE_BASE ?? "http://localhost:3000");
 const API_BASE = stripTrailingSlash(process.env.SMOKE_API_BASE ?? "http://localhost:8000");
@@ -108,6 +108,7 @@ async function createContact(token, body) {
 async function createSeller(token, runId) {
   return await createContact(token, {
     name: `POS 煙霧賣方 ${runId}`,
+    phone: uniquePhone(),
     national_id: validNationalId(),
     roles: ["SELLER"],
     member_points: 0,
@@ -221,6 +222,16 @@ async function createSale(token, body, label) {
   });
 }
 
+// 以 quote 取折後總額再以現金收款（避免生效活動造成收款≠應付的 422）。供 setup 用。
+async function createSaleQuoted(token, lines, label) {
+  const quote = await apiJson("/api/v1/sales/quote", { method: "POST", token, body: { lines } });
+  return await createSale(
+    token,
+    { lines, tenders: [{ tender_type: "CASH", amount: String(quote.total) }] },
+    label,
+  );
+}
+
 async function exerciseCatalogQuantitySale(token) {
   const products = await apiJson("/api/v1/catalog-products?limit=200", { token });
   const product = products.find((p) => p.quantity_on_hand > 0 && parseNtd(p.unit_price) > 0);
@@ -230,13 +241,13 @@ async function exerciseCatalogQuantitySale(token) {
     );
   }
   const qty = product.quantity_on_hand >= 2 ? 2 : 1;
-  const total = parseNtd(product.unit_price) * qty;
+  const lines = [{ line_type: "CATALOG", catalog_product_id: product.id, qty }];
+  // 以 quote 取折後總額（可能有生效活動）→ 收款對齊折後，避免 422（折扣由後端套用）。
+  const quote = await apiJson("/api/v1/sales/quote", { method: "POST", token, body: { lines } });
+  const total = parseNtd(quote.total);
   const sale = await createSale(
     token,
-    {
-      lines: [{ line_type: "CATALOG", catalog_product_id: product.id, qty }],
-      tenders: [{ tender_type: "CASH", amount: String(total) }],
-    },
+    { lines, tenders: [{ tender_type: "CASH", amount: String(total) }] },
     "catalog",
   );
   const line = sale.lines?.find((l) => l.line_type === "CATALOG");
@@ -269,12 +280,9 @@ async function prepareFixtures() {
     price: 300,
     cost: 100,
   });
-  await createSale(
+  await createSaleQuoted(
     token,
-    {
-      lines: [{ line_type: "SERIALIZED", item_code: soldItem.code, qty: 1 }],
-      tenders: [{ tender_type: "CASH", amount: String(soldItem.price) }],
-    },
+    [{ line_type: "SERIALIZED", item_code: soldItem.code, qty: 1 }],
     "presold-serialized",
   );
 
@@ -288,12 +296,9 @@ async function prepareFixtures() {
     unitPrice: 80,
     totalQty: 1,
   });
-  await createSale(
+  await createSaleQuoted(
     token,
-    {
-      lines: [{ line_type: "BULK_LOT", bulk_lot_id: soldOutBulk.id, qty: 1 }],
-      tenders: [{ tender_type: "CASH", amount: String(soldOutBulk.unitPrice) }],
-    },
+    [{ line_type: "BULK_LOT", bulk_lot_id: soldOutBulk.id, qty: 1 }],
     "presold-bulk",
   );
 

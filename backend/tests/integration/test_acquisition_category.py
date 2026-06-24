@@ -52,7 +52,12 @@ def _auth(token: str) -> dict[str, str]:
 async def _seller(client: httpx.AsyncClient, token: str) -> int:
     resp = await client.post(
         "/api/v1/contacts",
-        json={"name": "賣家", "roles": ["SELLER"], "national_id": "A123456789"},
+        json={
+            "name": "賣家",
+            "phone": f"09{next(_idem):08d}",
+            "roles": ["SELLER"],
+            "national_id": "A123456789",
+        },
         headers=_auth(token),
     )
     assert resp.status_code == 201, resp.text

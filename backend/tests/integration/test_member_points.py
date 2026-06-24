@@ -230,7 +230,7 @@ async def test_contact_create_rejects_negative_points(
     token, _store_id = await _seed(db_session)
     resp = await client.post(
         "/api/v1/contacts",
-        json={"name": "負點數", "member_points": -1},
+        json={"name": "負點數", "phone": "0911999888", "member_points": -1},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422

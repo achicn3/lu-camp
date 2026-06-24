@@ -21,6 +21,10 @@ class Contact(Base, TimestampMixin):
         # 供購物金等表以複合 FK (contact_id, store_id) 指向——DB 層保證
         # 「contact 屬於該店」的租戶配對（adversarial review medium）。
         UniqueConstraint("id", "store_id", name="uq_contacts_id_store"),
+        # 手機號碼為店內聯絡人的唯一識別（必填於 API 層）：同店不可重複，供以
+        # 手機精確查找既有會員、避免重複建檔。phone 為 NULL 時多筆不衝突（內部
+        # 測試夾具可不帶 phone；app 建檔一律有值）。
+        UniqueConstraint("store_id", "phone", name="uq_contacts_store_phone"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -8,6 +8,12 @@ const LETTER_VALUES = {
 };
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+/** 產生唯一手機號碼（手機同店唯一、必填）；供煙霧/示範腳本建立聯絡人。 */
+export function uniquePhone(seed = Date.now() + Math.floor(Math.random() * 1e6)) {
+  const n = Math.abs(Math.trunc(seed)) % 100000000;
+  return `09${String(n).padStart(8, "0")}`;
+}
+
 /** 由種子（預設 now+亂數）產生合法身分證字號；不同種子幾乎必不同，供去重建檔。 */
 export function validNationalId(seed = Date.now() + Math.floor(Math.random() * 1e6)) {
   const n = Math.abs(Math.trunc(seed));

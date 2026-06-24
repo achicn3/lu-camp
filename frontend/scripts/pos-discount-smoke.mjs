@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 
 import { chromium } from "playwright";
-import { validNationalId } from "./_national-id.mjs";
+import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -77,7 +77,7 @@ try {
     method: "POST",
     token,
     expected: [201],
-    body: { name: `折扣煙測賣方 ${runId}`, national_id: validNationalId(), roles: ["SELLER"] },
+    body: { name: `折扣煙測賣方 ${runId}`, phone: uniquePhone(), national_id: validNationalId(), roles: ["SELLER"] },
   });
   const acq = await apiJson("/api/v1/acquisitions", {
     method: "POST",

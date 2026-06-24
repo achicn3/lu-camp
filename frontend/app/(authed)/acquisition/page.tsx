@@ -22,6 +22,7 @@ import {
   validateDraft,
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
+import { isValidNationalId } from "@/features/member/national-id";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { printLabel } from "@/lib/agent";
@@ -32,6 +33,7 @@ import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type Contact = components["schemas"]["ContactRead"];
+type ContactRole = components["schemas"]["ContactRole"];
 type Category = components["schemas"]["CategoryRead"];
 type PricingRule = components["schemas"]["PricingRuleRead"];
 type Grade = components["schemas"]["Grade"];
@@ -88,6 +90,8 @@ function SellerSection({
   const [q, setQ] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const role: ContactRole = isConsignment ? "CONSIGNOR" : "SELLER";
+  const roleLabel = isConsignment ? "寄售人" : "賣方";
 
   const results = useQuery({
     queryKey: ["contacts-search", q],
@@ -99,10 +103,15 @@ function SellerSection({
   });
 
   const createMut = useMutation({
-    mutationFn: async (input: { name: string; national_id: string }) => {
-      const role = isConsignment ? "CONSIGNOR" : "SELLER";
+    mutationFn: async (input: { name: string; phone: string; national_id: string }) => {
       const { data, error: apiErr } = await api.POST("/api/v1/contacts", {
-        body: { name: input.name, national_id: input.national_id, roles: [role], member_points: 0 },
+        body: {
+          name: input.name,
+          phone: input.phone,
+          national_id: input.national_id,
+          roles: [role],
+          member_points: 0,
+        },
       });
       if (!data) throw new Error(detail(apiErr) ?? "建立失敗");
       return data;
@@ -114,13 +123,66 @@ function SellerSection({
     onError: (e: Error) => setError(e.message),
   });
 
+  // 補登：為已選取、但尚無身分證字號的既有會員設定 national_id 並加上賣方/寄售人角色
+  // （收購櫃檯一條龍；後端放寬 CLERK 可補登，仍寫稽核）。
+  const backfillMut = useMutation({
+    mutationFn: async (input: { id: number; national_id: string }) => {
+      const roles = Array.from(
+        new Set<ContactRole>([...((seller?.roles ?? []) as ContactRole[]), role]),
+      );
+      const { data, error: apiErr } = await api.PATCH("/api/v1/contacts/{contact_id}", {
+        params: { path: { contact_id: input.id } },
+        body: { national_id: input.national_id, roles },
+      });
+      if (!data) throw new Error(detail(apiErr) ?? "補登失敗");
+      return data;
+    },
+    onSuccess: (c) => onSelect(c),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function onBackfill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    if (seller === null) return;
+    const nid = String(new FormData(event.currentTarget).get("national_id") ?? "").trim();
+    if (!isValidNationalId(nid)) {
+      setError("身分證字號格式或檢核碼不正確，請確認後重新輸入");
+      return;
+    }
+    backfillMut.mutate({ id: seller.id, national_id: nid });
+  }
+
   if (seller !== null) {
     return (
       <div className="card acq-seller">
         <div>
           <strong>{seller.name}</strong>
-          <span className="hint"> {seller.has_national_id ? "（已建檔）" : ""}</span>
+          {seller.phone && <span className="hint"> · {seller.phone}</span>}
+          <span className="hint">
+            {" "}
+            {seller.has_national_id ? "（已建檔）" : "（尚未建檔身分證）"}
+          </span>
         </div>
+        {!seller.has_national_id && (
+          <form className="acq-backfill" onSubmit={onBackfill}>
+            <input
+              name="national_id"
+              placeholder="補登身分證字號"
+              aria-label="補登身分證字號"
+              autoComplete="off"
+              maxLength={10}
+            />
+            <button type="submit" className="btn-primary" disabled={backfillMut.isPending}>
+              補登並設為{roleLabel}
+            </button>
+            {error !== null && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
+          </form>
+        )}
         <button type="button" className="btn-ghost" onClick={() => onSelect(null)}>
           更換
         </button>
@@ -133,20 +195,25 @@ function SellerSection({
     setError(null);
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
+    const phone = String(form.get("phone") ?? "").trim();
     const nid = String(form.get("national_id") ?? "").trim();
-    if (!name || !nid) {
-      setError("姓名與身分證字號皆必填");
+    if (!name || !phone || !nid) {
+      setError("姓名、電話、身分證字號皆必填");
       return;
     }
-    createMut.mutate({ name, national_id: nid });
+    if (!isValidNationalId(nid)) {
+      setError("身分證字號格式或檢核碼不正確，請確認後重新輸入");
+      return;
+    }
+    createMut.mutate({ name, phone, national_id: nid });
   }
 
   return (
     <div className="card">
-      <h2>{isConsignment ? "寄售人" : "賣方"}</h2>
+      <h2>{roleLabel}</h2>
       <input
         className="acq-search"
-        placeholder="以姓名搜尋"
+        placeholder="以手機或姓名搜尋"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         aria-label="賣方搜尋"
@@ -156,19 +223,22 @@ function SellerSection({
           {(results.data ?? []).map((c) => (
             <li key={c.id}>
               <button type="button" className="combo-option" onClick={() => onSelect(c)}>
-                {c.name} {c.national_id_masked ? `（${c.national_id_masked}）` : ""}
+                {c.name}
+                {c.phone ? ` · ${c.phone}` : ""}
+                {c.national_id_masked ? `（${c.national_id_masked}）` : "（無證號）"}
               </button>
             </li>
           ))}
         </ul>
       )}
       <button type="button" className="btn-ghost" onClick={() => setShowCreate((v) => !v)}>
-        找不到？建立新{isConsignment ? "寄售人" : "賣方"}
+        找不到？建立新{roleLabel}
       </button>
       {showCreate && (
         <form className="acq-create-seller" onSubmit={onCreate}>
           <input name="name" placeholder="姓名" aria-label="姓名" />
-          <input name="national_id" placeholder="身分證字號" aria-label="身分證字號" />
+          <input name="phone" placeholder="手機" aria-label="手機" inputMode="tel" />
+          <input name="national_id" placeholder="身分證字號" aria-label="身分證字號" maxLength={10} />
           <button type="submit" className="btn-primary" disabled={createMut.isPending}>
             建立並選取
           </button>

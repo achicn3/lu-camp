@@ -67,6 +67,12 @@ class ContactRepository:
         result: Contact | None = await self._session.scalar(stmt)
         return result
 
+    async def get_by_phone(self, store_id: int, phone: str) -> Contact | None:
+        """以手機號碼於本店精確查找（手機同店唯一）。"""
+        stmt = select(Contact).where(Contact.store_id == store_id, Contact.phone == phone)
+        result: Contact | None = await self._session.scalar(stmt)
+        return result
+
     async def search(
         self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
     ) -> list[Contact]:

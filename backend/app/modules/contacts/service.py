@@ -24,7 +24,13 @@ class ContactService:
         self._repo = ContactRepository(session)
 
     async def create_contact(self, store_id: int, data: ContactCreate) -> Contact:
-        """建檔；national_id 加密儲存，並以 blind index 精確去重（命中既有則回傳既有）。"""
+        """建檔；手機同店唯一（撞號 → DuplicateContact，請改以手機查找既有會員）；
+        national_id 加密儲存，並以 blind index 精確去重（命中既有則回傳既有）。"""
+        # 手機為店內唯一識別：撞號即擋，避免同一人重複建檔（DB 唯一約束為最終防線）。
+        if await self._repo.get_by_phone(store_id, data.phone) is not None:
+            raise DuplicateContact(
+                "此手機號碼已有聯絡人，請改以手機查找既有會員後補登/編輯"
+            )
         enc: str | None = None
         blind: str | None = None
         if data.national_id:
@@ -82,6 +88,12 @@ class ContactService:
                 raise ValueError("姓名不可為空")
             contact.name = data.name
         if "phone" in provided:
+            if not data.phone:
+                raise ValueError("電話不可為空")
+            if data.phone != contact.phone:
+                clash = await self._repo.get_by_phone(store_id, data.phone)
+                if clash is not None and clash.id != contact.id:
+                    raise DuplicateContact("此手機號碼已被同店其他聯絡人使用")
             contact.phone = data.phone
         if "default_carrier_type" in provided:
             contact.default_carrier_type = data.default_carrier_type

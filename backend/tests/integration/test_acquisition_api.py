@@ -65,8 +65,20 @@ async def _open_drawer(client: httpx.AsyncClient, token: str) -> None:
     assert resp.status_code == 201
 
 
+_phone_seq = itertools.count(1)
+
+
+def _uphone() -> str:
+    """測試用唯一手機（手機同店唯一，必填）。"""
+    return f"09{next(_phone_seq):08d}"
+
+
 async def _make_seller(client: httpx.AsyncClient, token: str, *, with_id: bool = True) -> int:
-    body: dict[str, object] = {"name": "賣家", "roles": ["SELLER" if with_id else "MEMBER"]}
+    body: dict[str, object] = {
+        "name": "賣家",
+        "phone": _uphone(),
+        "roles": ["SELLER" if with_id else "MEMBER"],
+    }
     if with_id:
         body["national_id"] = "A123456789"
     resp = await client.post("/api/v1/contacts", json=body, headers=_auth(token))

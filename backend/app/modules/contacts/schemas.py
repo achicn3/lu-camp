@@ -9,10 +9,11 @@ _MASK = "***"
 
 
 class ContactCreate(BaseModel):
-    """建立聯絡人輸入。收購/寄售對象（SELLER/CONSIGNOR）必填 national_id。"""
+    """建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）；
+    收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。"""
 
     name: str = Field(min_length=1)
-    phone: str | None = None
+    phone: str = Field(min_length=1)
     national_id: str | None = None
     roles: list[ContactRole] = Field(default_factory=list)
     member_points: int = Field(default=0, ge=0)  # 點數不可為負（docs/16 §0 僅累積）

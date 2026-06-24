@@ -57,6 +57,15 @@ async def create_contact(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    except DuplicateContact as exc:
+        # 手機撞號（同店唯一）→ 409，請改以手機查找既有會員。
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except IntegrityError as exc:  # 並發撞同一手機/blind index（唯一約束最終防線）
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="聯絡人重複（手機或身分證字號）"
+        ) from exc
     # get_session 不自動 commit（各寫入端點自行 commit）；缺此行則建檔不落地（F6 E2E 抓到的
     # 既有 bug：POST /contacts 之前未 commit，正式環境建檔即遺失）。updateContact 已有 commit。
     await session.commit()
@@ -101,18 +110,34 @@ async def get_contact(contact_id: int, session: SessionDep, user: CurrentUserDep
 async def update_contact(
     contact_id: int, payload: ContactUpdate, session: SessionDep, user: CurrentUserDep
 ) -> ContactRead:
-    """編輯會員（docs/17 §5.2、裁示 #3）。
+    """編輯會員（docs/17 §5.2、裁示 #3，2026-06-24 放寬補登）。
 
-    一般欄位 + 電話：CLERK 可改；變更 national_id / roles：限 MANAGER（否則 403）。
-    national_id 變更去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。
+    一般欄位 + 電話：CLERK 可改。national_id / roles 變更原則限 MANAGER；**例外（補登）**：
+    CLERK 可為「尚無 national_id」的聯絡人**設定**（非清空/非覆蓋）身分證字號，且角色**只增不減**，
+    以支援收購櫃檯一條龍把買斷會員升級為賣方。改既有/清空 national_id、移除角色仍限 MANAGER。
+    national_id/手機 去重的最終防線為 DB 唯一約束，並發撞重 → IntegrityError → 回滾 + 409。
     """
     provided = payload.model_fields_set
-    if ("national_id" in provided or "roles" in provided) and user.role != UserRole.MANAGER.value:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="變更身分證字號或角色需 MANAGER 權限",
-        )
     svc = ContactService(session)
+    touches_pii = "national_id" in provided
+    touches_roles = "roles" in provided
+    if (touches_pii or touches_roles) and user.role != UserRole.MANAGER.value:
+        # 補登例外：存在的聯絡人才談權限（不存在交由 service 回 404）。
+        current = await svc.get_contact(user.store_id, contact_id)
+        if current is not None:
+            allowed = True
+            if touches_pii:
+                # 僅允許「原本無 → 設定非空值」；覆蓋既有或清空一律需 MANAGER。
+                allowed = current.national_id_enc is None and bool(payload.national_id)
+            if touches_roles:
+                before = set(current.roles)
+                after = {r.value for r in (payload.roles or [])}
+                allowed = allowed and after.issuperset(before)  # 角色只增不減
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="變更身分證字號或角色需 MANAGER 權限（補登除外）",
+                )
     try:
         contact = await svc.update_contact(
             user.store_id, contact_id, payload, provided, actor_user_id=user.id
@@ -130,10 +155,10 @@ async def update_contact(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
-    except IntegrityError as exc:  # 並發撞同一 blind index（去重最終防線）
+    except IntegrityError as exc:  # 並發撞同一手機/blind index（去重最終防線）
         await session.rollback()
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="national_id 重複，無法更新"
+            status_code=status.HTTP_409_CONFLICT, detail="聯絡人重複（手機或身分證字號），無法更新"
         ) from exc
     if contact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到聯絡人")
