@@ -1,6 +1,8 @@
 """inventory 業務邏輯：狀態機、ownership 驗證、散裝扣減、主檔 get-or-create、定價輔助。"""
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +43,20 @@ from app.shared.exceptions import (
     InvalidStateTransition,
     OwnershipValidationError,
 )
+
+_MOVEMENT_LABELS: dict[tuple[StockDirection, StockReason], str] = {
+    (StockDirection.IN, StockReason.ACQUISITION): "入庫（收購）",
+    (StockDirection.IN, StockReason.PURCHASE): "入庫（進貨）",
+    (StockDirection.OUT, StockReason.SALE): "售出",
+    (StockDirection.IN, StockReason.RETURN): "退貨入庫",
+    (StockDirection.OUT, StockReason.CONSIGN_RETURN): "寄售退回",
+    (StockDirection.OUT, StockReason.WRITE_OFF): "作廢出庫",
+}
+
+
+def _movement_label(direction: StockDirection, reason: StockReason) -> str:
+    """庫存異動帳的白話事件標籤（庫存明細歷史用）。"""
+    return _MOVEMENT_LABELS.get((direction, reason), f"{direction.value}／{reason.value}")
 
 
 class InventoryService:
@@ -294,6 +310,96 @@ class InventoryService:
         """以 item_code 取序號品（供 POS 掃碼查件、讀取售價/ownership）。"""
         return await self._repo.get_serialized_by_code(store_id, item_code)
 
+    async def get_serialized_detail(
+        self, store_id: int, item_id: int
+    ) -> dict[str, Any] | None:
+        """序號品逐件明細：成本/售價/來源（賣方或寄售人）/收購/售出/完整異動歷史。
+
+        跨模組唯讀彙整，僅經對方 service（§2）；函式內 import 打破潛在循環相依（§9 例外）。
+        """
+        item = await self._repo.get_serialized_by_id(store_id, item_id)
+        if item is None:
+            return None
+
+        from app.modules.acquisition.service import AcquisitionService
+        from app.modules.contacts.service import ContactService
+        from app.modules.sales.service import SalesService
+
+        # 收購單（買斷賣方 contact_id 在此）。
+        acquisition = None
+        if item.acquisition_id is not None:
+            acquisition = await AcquisitionService(self._session).get_acquisition(
+                store_id, item.acquisition_id
+            )
+
+        # 來源：寄售→consignor_id；買斷→收購單的賣方。
+        if item.ownership_type == OwnershipType.CONSIGNMENT:
+            source_contact_id, source_kind = item.consignor_id, "CONSIGNOR"
+        else:
+            source_contact_id = acquisition.contact_id if acquisition is not None else None
+            source_kind = "SELLER"
+        source = None
+        if source_contact_id is not None:
+            contact = await ContactService(self._session).get_contact(store_id, source_contact_id)
+            if contact is not None:
+                source = {
+                    "contact_id": contact.id,
+                    "name": contact.name,
+                    "phone": contact.phone,
+                    "kind": source_kind,
+                }
+
+        # 售出明細（實際成交折後價、售出時間）。
+        sold_price: Decimal | None = None
+        sale_id: int | None = None
+        sale_line = await SalesService(self._session).get_serialized_sale_line(store_id, item_id)
+        if sale_line is not None:
+            line, sale = sale_line
+            sold_price = line.unit_price
+            sale_id = sale.id
+
+        margin: Decimal | None = None
+        if (
+            item.ownership_type == OwnershipType.OWNED
+            and sold_price is not None
+            and item.acquisition_cost is not None
+        ):
+            margin = sold_price - item.acquisition_cost
+
+        movements = await self._repo.movements_for_serialized(store_id, item_id)
+        history = [
+            {
+                "at": m.created_at,
+                "event": _movement_label(m.direction, m.reason),
+                "qty": m.qty,
+                "note": f"{m.ref_type}#{m.ref_id}" if m.ref_type is not None else None,
+            }
+            for m in movements
+        ]
+
+        return {
+            "id": item.id,
+            "item_code": item.item_code,
+            "name": item.name,
+            "brand_id": item.brand_id,
+            "category_id": item.category_id,
+            "grade": item.grade,
+            "ownership_type": item.ownership_type,
+            "status": item.status,
+            "commission_pct": item.commission_pct,
+            "listed_price": item.listed_price,
+            "acquisition_cost": item.acquisition_cost,
+            "intake_date": item.intake_date,
+            "sold_date": item.sold_date,
+            "sold_price": sold_price,
+            "margin": margin,
+            "source": source,
+            "acquisition_id": item.acquisition_id,
+            "acquisition_type": acquisition.type.value if acquisition is not None else None,
+            "sale_id": sale_id,
+            "history": history,
+        }
+
     async def list_serialized(
         self,
         store_id: int,
@@ -301,16 +407,28 @@ class InventoryService:
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
         consignor_id: int | None = None,
+        category_id: int | None = None,
+        brand_id: int | None = None,
+        min_age_days: int | None = None,
+        oldest_first: bool = False,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[SerializedItem]:
-        """列序號品（庫存頁/POS 查件；篩 status/ownership/consignor、q 搜品名碼；§4 店別範圍）。"""
+        """列序號品（庫存頁/POS 查件/久滯庫存；篩 status/ownership/consignor/類型/品牌、
+        min_age_days 撈已在庫≥N 天、q 搜品名碼；§4 店別範圍）。"""
+        stocked_before = (
+            datetime.now(UTC) - timedelta(days=min_age_days) if min_age_days is not None else None
+        )
         return await self._repo.list_serialized(
             store_id,
             status=status,
             ownership_type=ownership_type,
             consignor_id=consignor_id,
+            category_id=category_id,
+            brand_id=brand_id,
+            stocked_before=stocked_before,
+            oldest_first=oldest_first,
             q=q,
             limit=limit,
             offset=offset,

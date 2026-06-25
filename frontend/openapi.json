@@ -2769,6 +2769,92 @@
         "title": "InventoryValueReport",
         "type": "object"
       },
+      "ItemHistoryEvent": {
+        "description": "庫存明細歷史事件（一筆庫存異動帳對應一列）。",
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "event",
+          "qty"
+        ],
+        "title": "ItemHistoryEvent",
+        "type": "object"
+      },
+      "ItemSourceRead": {
+        "description": "庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。",
+        "properties": {
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "required": [
+          "contact_id",
+          "name",
+          "phone",
+          "kind"
+        ],
+        "title": "ItemSourceRead",
+        "type": "object"
+      },
       "LiabilityReport": {
         "description": "§5A 購物金負債報表。",
         "properties": {
@@ -4850,6 +4936,193 @@
           "transaction_count"
         ],
         "title": "SalesMarginReport",
+        "type": "object"
+      },
+      "SerializedItemDetailRead": {
+        "description": "序號品明細（庫存逐件「詳細」）：含成本/售價/來源/收購/售出/完整異動歷史。",
+        "properties": {
+          "acquisition_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Cost"
+          },
+          "acquisition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Id"
+          },
+          "acquisition_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Type"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "commission_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Pct"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ItemHistoryEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "intake_date": {
+            "format": "date-time",
+            "title": "Intake Date",
+            "type": "string"
+          },
+          "item_code": {
+            "title": "Item Code",
+            "type": "string"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "margin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Margin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ownership_type": {
+            "$ref": "#/components/schemas/OwnershipType"
+          },
+          "sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Id"
+          },
+          "sold_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Date"
+          },
+          "sold_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Price"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemSourceRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/SerializedItemStatus"
+          }
+        },
+        "required": [
+          "id",
+          "item_code",
+          "name",
+          "brand_id",
+          "category_id",
+          "grade",
+          "ownership_type",
+          "status",
+          "commission_pct",
+          "listed_price",
+          "acquisition_cost",
+          "intake_date",
+          "sold_date",
+          "sold_price",
+          "margin",
+          "source",
+          "acquisition_id",
+          "acquisition_type",
+          "sale_id",
+          "history"
+        ],
+        "title": "SerializedItemDetailRead",
         "type": "object"
       },
       "SerializedItemRead": {
@@ -10194,6 +10467,66 @@
           },
           {
             "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_age_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 3650,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Age Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "oldest_first",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Oldest First",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "q",
             "required": false,
             "schema": {
@@ -10313,6 +10646,54 @@
           }
         ],
         "summary": "Get Serialized By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/{item_id}/detail": {
+      "get": {
+        "description": "序號品逐件明細：來源（賣方/寄售人）、收購成本/時間、售價/成交價、入庫時間、完整異動歷史。",
+        "operationId": "getSerializedItemDetail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedItemDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Serialized Detail",
         "tags": [
           "inventory"
         ]

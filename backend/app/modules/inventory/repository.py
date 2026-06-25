@@ -4,6 +4,7 @@
 使併發下同一序號品只成功一筆、散裝批不會超賣。
 """
 
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, case, func, select, update
@@ -147,6 +148,13 @@ class InventoryRepository:
         result: SerializedItem | None = await self._session.scalar(stmt)
         return result
 
+    async def get_serialized_by_id(self, store_id: int, item_id: int) -> SerializedItem | None:
+        stmt = select(SerializedItem).where(
+            SerializedItem.store_id == store_id, SerializedItem.id == item_id
+        )
+        result: SerializedItem | None = await self._session.scalar(stmt)
+        return result
+
     async def list_serialized(
         self,
         store_id: int,
@@ -154,6 +162,10 @@ class InventoryRepository:
         status: SerializedItemStatus | None = None,
         ownership_type: OwnershipType | None = None,
         consignor_id: int | None = None,
+        category_id: int | None = None,
+        brand_id: int | None = None,
+        stocked_before: datetime | None = None,
+        oldest_first: bool = False,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
@@ -165,12 +177,21 @@ class InventoryRepository:
             stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
         if consignor_id is not None:
             stmt = stmt.where(SerializedItem.consignor_id == consignor_id)
+        if category_id is not None:
+            stmt = stmt.where(SerializedItem.category_id == category_id)
+        if brand_id is not None:
+            stmt = stmt.where(SerializedItem.brand_id == brand_id)
+        if stocked_before is not None:
+            # 久滯庫存：入庫早於 cutoff（已在庫天數 ≥ 指定天數）。
+            stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
         if q:
             pattern = f"%{q}%"
             stmt = stmt.where(
                 SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
             )
-        stmt = stmt.order_by(SerializedItem.id.desc()).limit(limit).offset(offset)
+        # 久滯庫存頁以「入庫最久」排序（intake_date 升冪）；一般列表維持新到舊。
+        order = SerializedItem.intake_date.asc() if oldest_first else SerializedItem.id.desc()
+        stmt = stmt.order_by(order).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def list_catalog(
@@ -482,6 +503,20 @@ class InventoryRepository:
         self._session.add(movement)
         await self._session.flush()
         return movement
+
+    async def movements_for_serialized(
+        self, store_id: int, serialized_item_id: int
+    ) -> list[StockMovement]:
+        """某序號品的庫存異動帳（時間升冪；明細頁歷史紀錄用，§4 店別範圍）。"""
+        stmt = (
+            select(StockMovement)
+            .where(
+                StockMovement.store_id == store_id,
+                StockMovement.serialized_item_id == serialized_item_id,
+            )
+            .order_by(StockMovement.created_at.asc(), StockMovement.id.asc())
+        )
+        return list((await self._session.scalars(stmt)).all())
 
     # ── 散裝批 ──
     async def add_bulk_lot(self, lot: BulkLot) -> BulkLot:

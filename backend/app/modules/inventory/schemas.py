@@ -126,6 +126,49 @@ class SerializedItemRead(BaseModel):
     sold_date: datetime | None
 
 
+class ItemSourceRead(BaseModel):
+    """庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。"""
+
+    contact_id: int | None
+    name: str | None
+    phone: str | None
+    kind: str  # "SELLER"（買斷賣方）/ "CONSIGNOR"（寄售人）
+
+
+class ItemHistoryEvent(BaseModel):
+    """庫存明細歷史事件（一筆庫存異動帳對應一列）。"""
+
+    at: datetime
+    event: str  # 入庫（收購）/ 售出 / 退貨入庫 / 寄售退回 / 作廢出庫…
+    qty: int
+    note: str | None = None
+
+
+class SerializedItemDetailRead(BaseModel):
+    """序號品明細（庫存逐件「詳細」）：含成本/售價/來源/收購/售出/完整異動歷史。"""
+
+    id: int
+    item_code: str
+    name: str
+    brand_id: int | None
+    category_id: int | None
+    grade: Grade
+    ownership_type: OwnershipType
+    status: SerializedItemStatus
+    commission_pct: int | None
+    listed_price: NTDAmount
+    acquisition_cost: NTDAmount | None
+    intake_date: datetime
+    sold_date: datetime | None
+    sold_price: NTDAmount | None  # 實際成交（折後）價
+    margin: NTDAmount | None  # 買斷已售：成交價 − 收購成本
+    source: ItemSourceRead | None
+    acquisition_id: int | None
+    acquisition_type: str | None
+    sale_id: int | None
+    history: list[ItemHistoryEvent]
+
+
 class CatalogProductCreateRequest(BaseModel):
     """新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
 

@@ -25,6 +25,7 @@ from app.modules.inventory.schemas import (
     PricingRulesUpdate,
     ProductModelCreate,
     ProductModelRead,
+    SerializedItemDetailRead,
     SerializedItemRead,
 )
 from app.modules.inventory.service import InventoryService
@@ -64,6 +65,21 @@ async def get_serialized_by_code(
 
 
 @router.get(
+    "/serialized-items/{item_id}/detail",
+    response_model=SerializedItemDetailRead,
+    operation_id="getSerializedItemDetail",
+)
+async def get_serialized_detail(
+    item_id: int, session: SessionDep, user: CurrentUserDep
+) -> SerializedItemDetailRead:
+    """序號品逐件明細：來源（賣方/寄售人）、收購成本/時間、售價/成交價、入庫時間、完整異動歷史。"""
+    detail = await InventoryService(session).get_serialized_detail(user.store_id, item_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此序號品")
+    return SerializedItemDetailRead.model_validate(detail)
+
+
+@router.get(
     "/serialized-items",
     response_model=list[SerializedItemRead],
     operation_id="listSerializedItems",
@@ -73,6 +89,10 @@ async def list_serialized(
     user: CurrentUserDep,
     status_filter: Annotated[SerializedItemStatus | None, Query(alias="status")] = None,
     ownership_type: Annotated[OwnershipType | None, Query(alias="ownership")] = None,
+    category_id: Annotated[int | None, Query(alias="category_id")] = None,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    min_age_days: Annotated[int | None, Query(alias="min_age_days", ge=1, le=3650)] = None,
+    oldest_first: Annotated[bool, Query(alias="oldest_first")] = False,
     q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -81,6 +101,10 @@ async def list_serialized(
         user.store_id,
         status=status_filter,
         ownership_type=ownership_type,
+        category_id=category_id,
+        brand_id=brand_id,
+        min_age_days=min_age_days,
+        oldest_first=oldest_first,
         q=q,
         limit=limit,
         offset=offset,

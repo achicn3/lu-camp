@@ -489,6 +489,12 @@ class SalesService:
     async def get_lines(self, sale_id: int) -> list[SaleLine]:
         return await self._repo.list_lines(sale_id)
 
+    async def get_serialized_sale_line(
+        self, store_id: int, serialized_item_id: int
+    ) -> tuple[SaleLine, Sale] | None:
+        """某序號品最近一筆銷售明細＋銷售單（庫存明細頁用；至多一筆，不變量 1）。"""
+        return await self._repo.get_serialized_sale_line(store_id, serialized_item_id)
+
     async def get_tenders(self, sale_id: int) -> list[SaleTender]:
         return await self._repo.list_tenders(sale_id)
 

@@ -60,6 +60,29 @@ const BULK = [
   },
 ];
 
+const DETAIL = {
+  id: 1,
+  item_code: "SER-001",
+  name: "登山帳篷",
+  brand_id: null,
+  category_id: null,
+  grade: "A",
+  ownership_type: "CONSIGNMENT",
+  status: "IN_STOCK",
+  commission_pct: 50,
+  listed_price: "3500",
+  acquisition_cost: null,
+  intake_date: "2026-06-01T00:00:00Z",
+  sold_date: null,
+  sold_price: null,
+  margin: null,
+  source: { contact_id: 7, name: "寄售人甲", phone: "0911222333", kind: "CONSIGNOR" },
+  acquisition_id: null,
+  acquisition_type: null,
+  sale_id: null,
+  history: [{ at: "2026-06-01T00:00:00Z", event: "入庫（收購）", qty: 1, note: "acquisition#1" }],
+};
+
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -67,14 +90,23 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function route(url: string): Response | null {
+  if (url.includes("/serialized-items/") && url.includes("/detail")) return json(DETAIL);
+  if (url.includes("/serialized-items")) return json(SERIALIZED);
+  if (url.includes("/catalog-products")) return json(CATALOG);
+  if (url.includes("/bulk-lots")) return json(BULK);
+  if (url.includes("/brands")) return json([]);
+  if (url.includes("/categories")) return json([]);
+  return null;
+}
+
 function stubInventory() {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
-      if (url.includes("/serialized-items")) return json(SERIALIZED);
-      if (url.includes("/catalog-products")) return json(CATALOG);
-      if (url.includes("/bulk-lots")) return json(BULK);
+      const resp = route(url);
+      if (resp) return resp;
       throw new Error(`unmatched fetch: ${url}`);
     }),
   );
@@ -131,9 +163,8 @@ describe("InventoryPage", () => {
           calls.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
           return json({ ok: true });
         }
-        if (url.includes("/serialized-items")) return json(SERIALIZED);
-        if (url.includes("/catalog-products")) return json(CATALOG);
-        if (url.includes("/bulk-lots")) return json(BULK);
+        const resp = route(url);
+        if (resp) return resp;
         throw new Error(`unmatched fetch: ${url}`);
       }),
     );
@@ -151,10 +182,10 @@ describe("InventoryPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : String(input);
-        if (url.includes("/serialized-items"))
+        if (url.includes("/serialized-items") && !url.includes("/detail"))
           return json([{ ...SERIALIZED[0], status: "SOLD", sold_date: "2026-06-10T00:00:00Z" }]);
-        if (url.includes("/catalog-products")) return json(CATALOG);
-        if (url.includes("/bulk-lots")) return json(BULK);
+        const resp = route(url);
+        if (resp) return resp;
         throw new Error(`unmatched fetch: ${url}`);
       }),
     );
@@ -169,5 +200,37 @@ describe("InventoryPage", () => {
     await screen.findByText("SER-001");
     const next = screen.getByRole("button", { name: "下一頁" });
     await waitFor(() => expect(next).toHaveProperty("disabled", true)); // 1 row < PAGE_SIZE
+  });
+
+  it("詳細 opens a modal showing source and history", async () => {
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "詳細" }));
+    expect(await screen.findByText("商品明細")).toBeTruthy();
+    expect(screen.getByText(/寄售人甲/)).toBeTruthy();
+    expect(screen.getByText("入庫（收購）")).toBeTruthy();
+  });
+
+  it("久滯庫存 tab queries by min_age_days and shows days-in-stock", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        urls.push(url);
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "久滯庫存" }));
+    await waitFor(() =>
+      expect(urls.some((u) => u.includes("min_age_days=90") && u.includes("oldest_first=true"))).toBe(
+        true,
+      ),
+    );
+    expect(await screen.findByText("SER-001")).toBeTruthy();
   });
 });

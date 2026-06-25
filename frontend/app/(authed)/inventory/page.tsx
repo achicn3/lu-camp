@@ -24,14 +24,39 @@ import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type SerializedItem = components["schemas"]["SerializedItemRead"];
+type SerializedDetail = components["schemas"]["SerializedItemDetailRead"];
 type BulkLot = components["schemas"]["BulkLotRead"];
 type CatalogProduct = components["schemas"]["CatalogProductRead"];
 type SerializedStatus = components["schemas"]["SerializedItemStatus"];
 type BulkStatus = components["schemas"]["BulkLotStatus"];
 type Ownership = components["schemas"]["OwnershipType"];
 
-type Tab = "serialized" | "catalog" | "bulk";
+type Tab = "serialized" | "aging" | "catalog" | "bulk";
 const PAGE_SIZE = 20;
+const AGE_PRESETS = [30, 60, 90, 180];
+
+function daysInStock(intakeDate: string): number {
+  const ms = Date.now() - new Date(intakeDate).getTime();
+  return Math.max(0, Math.floor(ms / 86_400_000));
+}
+
+function dt(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleString("zh-TW") : "—";
+}
+
+// 篩選用品牌/類型選項（單店量小，一次載入；供下拉與明細名稱對照共用）。
+function useFilterOptions() {
+  const brands = useQuery({
+    queryKey: ["brands", "all"],
+    queryFn: async () => (await api.GET("/api/v1/brands", { params: { query: { limit: 200 } } })).data ?? [],
+  });
+  const categories = useQuery({
+    queryKey: ["categories", "all"],
+    queryFn: async () =>
+      (await api.GET("/api/v1/categories", { params: { query: { limit: 200 } } })).data ?? [],
+  });
+  return { brands: brands.data ?? [], categories: categories.data ?? [] };
+}
 
 // 下拉選項（openapi-typescript 只生成型別、不生成 runtime 陣列；以生成型別標註保元素合法）。
 const SERIALIZED_STATUSES: SerializedStatus[] = [
@@ -45,6 +70,7 @@ const BULK_STATUSES: BulkStatus[] = ["ON_SALE", "SOLD_OUT", "WRITTEN_OFF"];
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "serialized", label: "序號品" },
+  { key: "aging", label: "久滯庫存" },
   { key: "catalog", label: "數量品" },
   { key: "bulk", label: "散裝批" },
 ];
@@ -194,20 +220,160 @@ function SearchBar({
   );
 }
 
+// 逐件「詳細」：來源（賣方/寄售人）、收購成本/時間、標價/成交價、入庫時間、完整異動歷史。
+function ItemDetailModal({
+  itemId,
+  brandName,
+  categoryName,
+  onClose,
+}: {
+  itemId: number;
+  brandName: (id: number | null) => string;
+  categoryName: (id: number | null) => string;
+  onClose: () => void;
+}) {
+  const detail = useQuery({
+    queryKey: ["serialized-detail", itemId],
+    queryFn: async (): Promise<SerializedDetail> => {
+      const { data, error } = await api.GET("/api/v1/serialized-items/{item_id}/detail", {
+        params: { path: { item_id: itemId } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取明細失敗");
+      return data;
+    },
+  });
+
+  const d = detail.data;
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="商品明細">
+      <div className="card pos-dialog inv-detail">
+        <div className="inv-detail-head">
+          <h2>商品明細</h2>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+        {detail.isPending ? (
+          <p>載入中…</p>
+        ) : detail.isError ? (
+          <p role="alert" className="form-error">
+            {detail.error.message}
+          </p>
+        ) : d ? (
+          <>
+            <h3 className="inv-detail-name">
+              {d.name} <span className="inv-code">{d.item_code}</span>
+            </h3>
+            <dl className="inv-detail-grid">
+              <div>
+                <dt>來源</dt>
+                <dd>
+                  {d.source
+                    ? `${d.source.kind === "CONSIGNOR" ? "寄售人" : "賣方"}：${d.source.name ?? "—"}${d.source.phone ? `（${d.source.phone}）` : ""}`
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>品牌 / 類型</dt>
+                <dd>
+                  {brandName(d.brand_id)} / {categoryName(d.category_id)}
+                </dd>
+              </div>
+              <div>
+                <dt>成色 / 持有</dt>
+                <dd>
+                  {gradeLabel(d.grade)}・{ownershipBadge(d.ownership_type).label}
+                </dd>
+              </div>
+              <div>
+                <dt>狀態</dt>
+                <dd>
+                  <BadgeChip badge={serializedStatusBadge(d.status)} />
+                </dd>
+              </div>
+              <div>
+                <dt>收購成本</dt>
+                <dd>
+                  <MoneyText value={d.acquisition_cost} />
+                  {d.commission_pct !== null && `（寄售抽成 ${d.commission_pct}%）`}
+                </dd>
+              </div>
+              <div>
+                <dt>標價</dt>
+                <dd>
+                  <MoneyText value={d.listed_price} />
+                </dd>
+              </div>
+              <div>
+                <dt>成交價</dt>
+                <dd>
+                  <MoneyText value={d.sold_price} />
+                  {d.sale_id !== null && <span className="row-sub">單號 #{d.sale_id}</span>}
+                </dd>
+              </div>
+              <div>
+                <dt>毛利</dt>
+                <dd>
+                  <MoneyText value={d.margin} />
+                </dd>
+              </div>
+              <div>
+                <dt>入庫時間</dt>
+                <dd>
+                  {dt(d.intake_date)}
+                  <span className="row-sub">已在庫 {daysInStock(d.intake_date)} 天</span>
+                </dd>
+              </div>
+              <div>
+                <dt>售出時間</dt>
+                <dd>{dt(d.sold_date)}</dd>
+              </div>
+            </dl>
+            <h4 className="inv-detail-subtitle">歷史紀錄</h4>
+            {d.history.length === 0 ? (
+              <p className="hint">尚無異動紀錄。</p>
+            ) : (
+              <ul className="inv-history">
+                {d.history.map((h, i) => (
+                  <li key={i}>
+                    <span className="inv-history-event">{h.event}</span>
+                    <span className="inv-history-at">{dt(h.at)}</span>
+                    {h.note && <span className="row-sub">{h.note}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SerializedPanel() {
   const [status, setStatus] = useState<SerializedStatus | "">("");
   const [ownership, setOwnership] = useState<Ownership | "">("");
+  const [brandId, setBrandId] = useState<number | "">("");
+  const [categoryId, setCategoryId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const { brands, categories } = useFilterOptions();
+  const brandName = (id: number | null) =>
+    id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
+  const categoryName = (id: number | null) =>
+    id === null ? "—" : (categories.find((c) => c.id === id)?.name ?? "—");
 
   const query = useQuery({
-    queryKey: ["inventory", "serialized", { status, ownership, q, page }],
+    queryKey: ["inventory", "serialized", { status, ownership, brandId, categoryId, q, page }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/serialized-items", {
         params: {
           query: {
             status: orUndefined(status),
             ownership: orUndefined(ownership),
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
             q: orUndefined(q),
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
@@ -247,12 +413,36 @@ function SerializedPanel() {
             </option>
           ))}
         </select>
+        <select
+          aria-label="品牌"
+          value={brandId}
+          onChange={(e) => { setBrandId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部品牌</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="類型"
+          value={categoryId}
+          onChange={(e) => { setCategoryId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部類型</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
       </SearchBar>
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["序號碼", "品名", "成色", "持有", "狀態", "標價", "標籤"]}
+        headers={["序號碼", "品名", "成色", "持有", "狀態", "標價", "操作"]}
       >
         {rows.map((item) => (
           <tr key={item.id}>
@@ -268,7 +458,10 @@ function SerializedPanel() {
             <td>
               <MoneyText value={item.listed_price} />
             </td>
-            <td>
+            <td className="inv-row-actions">
+              <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
+                詳細
+              </button>
               {item.status === "IN_STOCK" && (
                 <ReprintLabelButton
                   code={item.item_code}
@@ -281,6 +474,14 @@ function SerializedPanel() {
         ))}
       </TableShell>
       <Pagination page={page} count={rows.length} onPage={setPage} />
+      {detailId !== null && (
+        <ItemDetailModal
+          itemId={detailId}
+          brandName={brandName}
+          categoryName={categoryName}
+          onClose={() => setDetailId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -429,6 +630,150 @@ function BulkPanel() {
   );
 }
 
+// 久滯庫存（#4）：只看在庫（IN_STOCK），撈入庫 ≥ N 天、以入庫最久排序；快捷天數＋自訂天數。
+function AgingPanel() {
+  const [minDays, setMinDays] = useState(90);
+  const [customDays, setCustomDays] = useState("");
+  const [brandId, setBrandId] = useState<number | "">("");
+  const [categoryId, setCategoryId] = useState<number | "">("");
+  const [page, setPage] = useState(0);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const { brands, categories } = useFilterOptions();
+  const brandName = (id: number | null) =>
+    id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
+  const categoryName = (id: number | null) =>
+    id === null ? "—" : (categories.find((c) => c.id === id)?.name ?? "—");
+
+  const query = useQuery({
+    queryKey: ["inventory", "aging", { minDays, brandId, categoryId, page }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/serialized-items", {
+        params: {
+          query: {
+            status: "IN_STOCK",
+            min_age_days: minDays,
+            oldest_first: true,
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
+            limit: PAGE_SIZE,
+            offset: page * PAGE_SIZE,
+          },
+        },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取久滯庫存失敗");
+    },
+  });
+  const rows: SerializedItem[] = query.data ?? [];
+
+  function applyDays(days: number) {
+    setMinDays(days);
+    setPage(0);
+  }
+
+  return (
+    <div className="inv-panel">
+      <div className="inv-aging-controls">
+        <span className="field-label">入庫超過</span>
+        {AGE_PRESETS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            className={`chip ${minDays === d ? "chip-active" : ""}`}
+            onClick={() => applyDays(d)}
+          >
+            {d} 天
+          </button>
+        ))}
+        <form
+          className="inv-aging-custom"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const n = Number.parseInt(customDays, 10);
+            if (Number.isFinite(n) && n >= 1) applyDays(n);
+          }}
+        >
+          <input
+            inputMode="numeric"
+            placeholder="自訂天數"
+            aria-label="自訂天數"
+            value={customDays}
+            onChange={(e) => setCustomDays(e.target.value)}
+          />
+          <button type="submit" className="btn-secondary">
+            套用
+          </button>
+        </form>
+        <span className="hint">目前：入庫 ≥ {minDays} 天</span>
+      </div>
+      <div className="inv-filters">
+        <select
+          aria-label="品牌"
+          value={brandId}
+          onChange={(e) => { setBrandId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部品牌</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="類型"
+          value={categoryId}
+          onChange={(e) => { setCategoryId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部類型</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <TableShell
+        loading={query.isFetching}
+        error={query.isError ? query.error.message : null}
+        empty={rows.length === 0}
+        headers={["序號碼", "品名", "成色", "持有", "標價", "入庫時間", "已在庫天數", "操作"]}
+      >
+        {rows.map((item) => (
+          <tr key={item.id}>
+            <td className="inv-code">{item.item_code}</td>
+            <td>{item.name}</td>
+            <td>{gradeLabel(item.grade)}</td>
+            <td>
+              <BadgeChip badge={ownershipBadge(item.ownership_type)} />
+            </td>
+            <td>
+              <MoneyText value={item.listed_price} />
+            </td>
+            <td>{dt(item.intake_date)}</td>
+            <td>
+              <span className="inv-age-days">{daysInStock(item.intake_date)} 天</span>
+            </td>
+            <td className="inv-row-actions">
+              <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
+                詳細
+              </button>
+            </td>
+          </tr>
+        ))}
+      </TableShell>
+      <Pagination page={page} count={rows.length} onPage={setPage} />
+      {detailId !== null && (
+        <ItemDetailModal
+          itemId={detailId}
+          brandName={brandName}
+          categoryName={categoryName}
+          onClose={() => setDetailId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 export default function InventoryPage() {
   const [tab, setTab] = useState<Tab>("serialized");
   return (
@@ -449,6 +794,7 @@ export default function InventoryPage() {
         ))}
       </div>
       {tab === "serialized" && <SerializedPanel />}
+      {tab === "aging" && <AgingPanel />}
       {tab === "catalog" && <CatalogPanel />}
       {tab === "bulk" && <BulkPanel />}
     </section>

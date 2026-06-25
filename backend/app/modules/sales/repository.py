@@ -110,6 +110,26 @@ class SalesRepository:
         result = await self._session.scalars(stmt)
         return list(result)
 
+    async def get_serialized_sale_line(
+        self, store_id: int, serialized_item_id: int
+    ) -> tuple[SaleLine, Sale] | None:
+        """某序號品最近一筆銷售明細＋其銷售單（庫存明細頁顯示實際成交價/售出時間用）。
+
+        序號品至多賣出一次（不變量 1）；以 id 降冪取最近一筆，含退貨後的歷史亦可追。
+        """
+        stmt = (
+            select(SaleLine, Sale)
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                SaleLine.store_id == store_id,
+                SaleLine.serialized_item_id == serialized_item_id,
+            )
+            .order_by(SaleLine.id.desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(stmt)).first()
+        return (row[0], row[1]) if row is not None else None
+
     async def list_sales_by_buyer(
         self,
         store_id: int,

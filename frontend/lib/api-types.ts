@@ -1166,6 +1166,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/{item_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Serialized Detail
+         * @description 序號品逐件明細：來源（賣方/寄售人）、收購成本/時間、售價/成交價、入庫時間、完整異動歷史。
+         */
+        get: operations["getSerializedItemDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -2395,6 +2415,37 @@ export interface components {
             total_owned_retail_value: string;
         };
         /**
+         * ItemHistoryEvent
+         * @description 庫存明細歷史事件（一筆庫存異動帳對應一列）。
+         */
+        ItemHistoryEvent: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Event */
+            event: string;
+            /** Note */
+            note?: string | null;
+            /** Qty */
+            qty: number;
+        };
+        /**
+         * ItemSourceRead
+         * @description 庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。
+         */
+        ItemSourceRead: {
+            /** Contact Id */
+            contact_id: number | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string | null;
+            /** Phone */
+            phone: string | null;
+        };
+        /**
          * LiabilityReport
          * @description §5A 購物金負債報表。
          */
@@ -3217,6 +3268,51 @@ export interface components {
             transaction_count: number;
             /** Unknown Cost Sales */
             unknown_cost_sales: string;
+        };
+        /**
+         * SerializedItemDetailRead
+         * @description 序號品明細（庫存逐件「詳細」）：含成本/售價/來源/收購/售出/完整異動歷史。
+         */
+        SerializedItemDetailRead: {
+            /** Acquisition Cost */
+            acquisition_cost: string | null;
+            /** Acquisition Id */
+            acquisition_id: number | null;
+            /** Acquisition Type */
+            acquisition_type: string | null;
+            /** Brand Id */
+            brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
+            /** Commission Pct */
+            commission_pct: number | null;
+            grade: components["schemas"]["Grade"];
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
+            /**
+             * Intake Date
+             * Format: date-time
+             */
+            intake_date: string;
+            /** Item Code */
+            item_code: string;
+            /** Listed Price */
+            listed_price: string;
+            /** Margin */
+            margin: string | null;
+            /** Name */
+            name: string;
+            ownership_type: components["schemas"]["OwnershipType"];
+            /** Sale Id */
+            sale_id: number | null;
+            /** Sold Date */
+            sold_date: string | null;
+            /** Sold Price */
+            sold_price: string | null;
+            source: components["schemas"]["ItemSourceRead"] | null;
+            status: components["schemas"]["SerializedItemStatus"];
         };
         /**
          * SerializedItemRead
@@ -5903,6 +5999,10 @@ export interface operations {
             query?: {
                 status?: components["schemas"]["SerializedItemStatus"] | null;
                 ownership?: components["schemas"]["OwnershipType"] | null;
+                category_id?: number | null;
+                brand_id?: number | null;
+                min_age_days?: number | null;
+                oldest_first?: boolean;
                 q?: string | null;
                 limit?: number;
                 offset?: number;
@@ -5951,6 +6051,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSerializedItemDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemDetailRead"];
                 };
             };
             /** @description Validation Error */

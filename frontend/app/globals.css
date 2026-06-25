@@ -1067,6 +1067,110 @@ body {
   margin-top: 12px;
 }
 
+/* ── 庫存：逐件詳細 / 久滯庫存 / 列操作 ── */
+.inv-row-actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.inv-aging-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.inv-aging-custom {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.inv-aging-custom input {
+  width: 110px;
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-2);
+  background: var(--surface);
+}
+.inv-age-days {
+  font-weight: 600;
+  color: var(--gold, #b8893b);
+}
+.inv-detail {
+  max-width: 640px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.inv-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.inv-detail-name {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-lg);
+}
+.inv-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0 0 var(--sp-3);
+}
+.inv-detail-grid > div {
+  display: flex;
+  flex-direction: column;
+}
+.inv-detail-grid dt {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.inv-detail-grid dd {
+  margin: 0;
+  font-weight: 600;
+}
+.inv-detail-subtitle {
+  margin: var(--sp-2) 0 var(--sp-1);
+}
+.inv-history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-left: 2px solid var(--border);
+}
+.inv-history li {
+  position: relative;
+  padding: 6px 0 6px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.inv-history li::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.inv-history-event {
+  font-weight: 600;
+}
+.inv-history-at {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+@media (max-width: 640px) {
+  .inv-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── F6 收購（/acquisition）：分類定價輔助、combobox、鑑價列、撥款 ── */
 .acq {
   display: flex;
