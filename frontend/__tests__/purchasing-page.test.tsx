@@ -138,7 +138,8 @@ describe("/purchasing", () => {
     await user.click(await screen.findByRole("button", { name: "確認收貨" }));
 
     await waitFor(() => expect(receivePosted).toBe(true));
-    expect(await screen.findByText("已收貨")).toBeTruthy();
+    // 狀態篩選 chip 也有「已收貨」字樣，故鎖定採購單列的狀態徽章（span.inv-badge）。
+    expect(await screen.findByText("已收貨", { selector: "span.inv-badge" })).toBeTruthy();
   });
 
   it("builds a purchase order from a searched catalog product", async () => {
@@ -198,5 +199,27 @@ describe("/purchasing", () => {
     const parsed = JSON.parse(createdBody as unknown as string);
     expect(parsed.name).toBe("新供應商");
     expect(parsed.tax_id).toBe("87654321");
+  });
+
+  it("採購單狀態篩選會帶上 status 查詢參數", async () => {
+    loginAs("CLERK");
+    const poUrls: string[] = [];
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) {
+        poUrls.push(url);
+        return json([ORDERED_PO]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("已下單"); // 初次載入（全部，無 status 參數）
+    expect(poUrls.some((u) => !u.includes("status="))).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "待收貨" }));
+    await waitFor(() => expect(poUrls.some((u) => u.includes("status=ORDERED"))).toBe(true));
   });
 });

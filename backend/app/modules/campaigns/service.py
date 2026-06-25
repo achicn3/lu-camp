@@ -112,9 +112,14 @@ class CampaignService:
         return await self._repo.get(store_id, campaign_id)
 
     async def list_campaigns(
-        self, store_id: int, *, status: CampaignStatus | None = None
+        self,
+        store_id: int,
+        *,
+        status: CampaignStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[Campaign]:
-        return await self._repo.list(store_id, status=status)
+        return await self._repo.list(store_id, status=status, limit=limit, offset=offset)
 
     async def get_effective(self, store_id: int, now: datetime) -> Campaign | None:
         """目前生效中活動（C2 結帳套折扣用）；無則 None。"""

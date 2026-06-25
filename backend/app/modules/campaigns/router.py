@@ -67,8 +67,12 @@ async def list_campaigns(
     session: SessionDep,
     user: ManagerDep,
     campaign_status: Annotated[CampaignStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CampaignRead]:
-    campaigns = await CampaignService(session).list_campaigns(user.store_id, status=campaign_status)
+    campaigns = await CampaignService(session).list_campaigns(
+        user.store_id, status=campaign_status, limit=limit, offset=offset
+    )
     return [_to_read(c) for c in campaigns]
 
 

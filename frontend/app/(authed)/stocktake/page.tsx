@@ -14,8 +14,11 @@ import {
   summarize,
   variance,
 } from "@/features/stocktake/stocktake";
+import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+
+const PAGE_SIZE = 20;
 
 type Stocktake = components["schemas"]["StocktakeRead"];
 
@@ -255,6 +258,7 @@ export default function StocktakePage() {
   const queryClient = useQueryClient();
   const [openId, setOpenId] = useState<number | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
 
   const catalog = useQuery({
     queryKey: ["catalog-products", "all"],
@@ -273,10 +277,10 @@ export default function StocktakePage() {
   }, [catalog.data]);
 
   const stocktakes = useQuery({
-    queryKey: ["stocktakes"],
+    queryKey: ["stocktakes", page],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/stocktakes", {
-        params: { query: { limit: 100, offset: 0 } },
+        params: { query: { limit: PAGE_SIZE, offset: page * PAGE_SIZE } },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取盤點單失敗");
       return data;
@@ -377,6 +381,9 @@ export default function StocktakePage() {
                 })}
               </tbody>
             </table>
+          )}
+          {!stocktakes.isPending && !stocktakes.isError && (
+            <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
           )}
         </div>
       )}

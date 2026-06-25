@@ -10,6 +10,7 @@ from app.modules.purchasing.models import (
     PurchaseOrderLine,
     Supplier,
 )
+from app.shared.enums import PurchaseOrderStatus
 
 
 class PurchasingRepository:
@@ -58,16 +59,21 @@ class PurchasingRepository:
         return result
 
     async def list_purchase_orders(
-        self, store_id: int, *, limit: int, offset: int
+        self,
+        store_id: int,
+        *,
+        status: PurchaseOrderStatus | None = None,
+        limit: int,
+        offset: int,
     ) -> list[PurchaseOrder]:
         stmt = (
             select(PurchaseOrder)
             .options(selectinload(PurchaseOrder.lines))
             .where(PurchaseOrder.store_id == store_id)
-            .order_by(PurchaseOrder.id.desc())
-            .limit(limit)
-            .offset(offset)
         )
+        if status is not None:
+            stmt = stmt.where(PurchaseOrder.status == status)
+        stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def lock_purchase_order(

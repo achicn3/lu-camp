@@ -3860,6 +3860,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["CampaignStatus"] | null;
+                limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -5156,6 +5158,7 @@ export interface operations {
     listPurchaseOrders: {
         parameters: {
             query?: {
+                status?: components["schemas"]["PurchaseOrderStatus"] | null;
                 limit?: number;
                 offset?: number;
             };

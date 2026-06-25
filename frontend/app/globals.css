@@ -633,7 +633,8 @@ body {
 .member-table-link {
   font-weight: 600;
 }
-.member-pager {
+.member-pager,
+.pager {
   display: flex;
   align-items: center;
   justify-content: center;

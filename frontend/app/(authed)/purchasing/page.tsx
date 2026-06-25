@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
+import { Pagination } from "@/features/common/Pagination";
 import {
   type CatalogProduct,
   canReceive,
@@ -25,8 +26,18 @@ import { formatNtd, parseNtd } from "@/lib/money";
 
 type Supplier = components["schemas"]["SupplierRead"];
 type PurchaseOrder = components["schemas"]["PurchaseOrderRead"];
+type PoStatus = components["schemas"]["PurchaseOrderStatus"];
 
 type Tab = "orders" | "suppliers";
+
+const PAGE_SIZE = 20;
+
+const PO_STATUS_FILTERS: { value: PoStatus | "ALL"; label: string }[] = [
+  { value: "ALL", label: "全部" },
+  { value: "ORDERED", label: "待收貨" },
+  { value: "RECEIVED", label: "已收貨" },
+  { value: "CLOSED", label: "已結案" },
+];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -315,6 +326,8 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const queryClient = useQueryClient();
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
+  const [status, setStatus] = useState<PoStatus | "ALL">("ALL");
+  const [page, setPage] = useState(0);
 
   const supplierName = useMemo(() => {
     const map = new Map(suppliers.map((s) => [s.id, s.name] as const));
@@ -322,10 +335,15 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   }, [suppliers]);
 
   const orders = useQuery({
-    queryKey: ["purchase-orders"],
+    queryKey: ["purchase-orders", status, page],
     queryFn: async () => {
+      const query: { limit: number; offset: number; status?: PoStatus } = {
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      };
+      if (status !== "ALL") query.status = status;
       const { data, error } = await api.GET("/api/v1/purchase-orders", {
-        params: { query: { limit: 100, offset: 0 } },
+        params: { query },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取採購單失敗");
       return data;
@@ -354,6 +372,21 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   return (
     <div className="card pur-orders">
       <h2>採購單</h2>
+      <div className="settle-tabs" aria-label="採購單狀態篩選">
+        {PO_STATUS_FILTERS.map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            className={`chip ${status === f.value ? "chip-active" : ""}`}
+            onClick={() => {
+              setStatus(f.value);
+              setPage(0);
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
       {orders.isPending ? (
         <p>載入中…</p>
       ) : orders.isError ? (
@@ -361,7 +394,9 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           {orders.error.message}
         </p>
       ) : rows.length === 0 ? (
-        <p className="empty-state">尚無採購單。</p>
+        <p className="empty-state">
+          {page === 0 ? "尚無符合的採購單。" : "沒有更多採購單了。"}
+        </p>
       ) : (
         <table className="data-table pur-order-table">
           <thead>
@@ -412,6 +447,9 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           </tbody>
         </table>
       )}
+      {!orders.isPending && !orders.isError && (
+        <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+      )}
 
       {receiving !== null && (
         <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="確認收貨">
@@ -455,12 +493,33 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
 }
 
 // ── 供應商建檔 ───────────────────────────────────────────────
-function SupplierManager({ suppliers }: { suppliers: Supplier[] }) {
+function SupplierManager() {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [taxId, setTaxId] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [submittedSearch, setSubmittedSearch] = useState("");
+  const [page, setPage] = useState(0);
+
+  const list = useQuery({
+    queryKey: ["suppliers", "list", submittedSearch, page],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/suppliers", {
+        params: {
+          query: {
+            q: submittedSearch || undefined,
+            limit: PAGE_SIZE,
+            offset: page * PAGE_SIZE,
+          },
+        },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取供應商失敗");
+      return data;
+    },
+  });
+  const rows = list.data ?? [];
 
   const create = useMutation({
     mutationFn: async () => {
@@ -522,8 +581,47 @@ function SupplierManager({ suppliers }: { suppliers: Supplier[] }) {
 
       <div className="card pur-supplier-list">
         <h2>供應商清單</h2>
-        {suppliers.length === 0 ? (
-          <p className="empty-state">尚無供應商。</p>
+        <form
+          className="member-allsearch"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setPage(0);
+            setSubmittedSearch(search.trim());
+          }}
+        >
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="以名稱搜尋供應商"
+            aria-label="供應商搜尋"
+          />
+          <button type="submit" className="btn-secondary">
+            搜尋
+          </button>
+          {submittedSearch && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setSearch("");
+                setSubmittedSearch("");
+                setPage(0);
+              }}
+            >
+              清除（{submittedSearch}）
+            </button>
+          )}
+        </form>
+        {list.isPending ? (
+          <p>載入中…</p>
+        ) : list.isError ? (
+          <p role="alert" className="form-error">
+            {list.error.message}
+          </p>
+        ) : rows.length === 0 ? (
+          <p className="empty-state">
+            {submittedSearch ? "查無符合的供應商。" : "尚無供應商。"}
+          </p>
         ) : (
           <table className="data-table">
             <thead>
@@ -534,7 +632,7 @@ function SupplierManager({ suppliers }: { suppliers: Supplier[] }) {
               </tr>
             </thead>
             <tbody>
-              {suppliers.map((s) => (
+              {rows.map((s) => (
                 <tr key={s.id}>
                   <td>{s.name}</td>
                   <td>{s.contact ?? "—"}</td>
@@ -544,6 +642,7 @@ function SupplierManager({ suppliers }: { suppliers: Supplier[] }) {
             </tbody>
           </table>
         )}
+        <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
       </div>
     </div>
   );
@@ -691,7 +790,7 @@ export default function PurchasingPage() {
           <PurchaseOrderList suppliers={supplierList} />
         </div>
       ) : (
-        <SupplierManager suppliers={supplierList} />
+        <SupplierManager />
       )}
     </section>
   );

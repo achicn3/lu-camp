@@ -34,11 +34,20 @@ class CampaignRepository:
         result: Campaign | None = await self._session.scalar(stmt)
         return result
 
-    async def list(self, store_id: int, *, status: CampaignStatus | None = None) -> list[Campaign]:
+    async def list(
+        self,
+        store_id: int,
+        *,
+        status: CampaignStatus | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Campaign]:
         stmt = select(Campaign).where(Campaign.store_id == store_id)
         if status is not None:
             stmt = stmt.where(Campaign.status == status)
         stmt = stmt.order_by(Campaign.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
     async def get_effective(self, store_id: int, now: datetime) -> Campaign | None:

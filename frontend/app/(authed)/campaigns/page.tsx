@@ -10,11 +10,14 @@ import {
   scopeSummary,
   statusLabel,
 } from "@/features/campaigns/campaigns";
+import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 
 type CampaignRead = components["schemas"]["CampaignRead"];
 type CampaignStatus = components["schemas"]["CampaignStatus"];
+
+const PAGE_SIZE = 20;
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -250,13 +253,17 @@ const STATUS_FILTER_OPTIONS: { value: CampaignStatus | "ALL"; label: string }[] 
 export default function CampaignsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<CampaignStatus | "ALL">("ALL");
+  const [page, setPage] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Access probe: use the list endpoint itself to detect 403/401.
   const listQuery = useQuery({
-    queryKey: ["campaigns", statusFilter],
+    queryKey: ["campaigns", statusFilter, page],
     queryFn: async () => {
-      const params: { status?: CampaignStatus } = {};
+      const params: { status?: CampaignStatus; limit: number; offset: number } = {
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      };
       if (statusFilter !== "ALL") {
         params.status = statusFilter;
       }
@@ -344,7 +351,10 @@ export default function CampaignsPage() {
             狀態篩選
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as CampaignStatus | "ALL")}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as CampaignStatus | "ALL");
+                setPage(0);
+              }}
             >
               {STATUS_FILTER_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -395,6 +405,7 @@ export default function CampaignsPage() {
           </table>
           {campaigns.length === 0 && <p className="hint">尚無活動</p>}
         </div>
+        <Pagination page={page} count={campaigns.length} pageSize={PAGE_SIZE} onPage={setPage} />
       </div>
     </section>
   );

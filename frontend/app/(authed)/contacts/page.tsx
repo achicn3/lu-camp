@@ -10,6 +10,7 @@ import { type FormEvent, useState } from "react";
 
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { Pagination } from "@/features/common/Pagination";
 import { rolesLabel } from "@/features/member/labels";
 import { isValidNationalId } from "@/features/member/national-id";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -189,7 +190,6 @@ function AllMembersTab() {
   }
 
   const rows = members.data ?? [];
-  const hasNext = rows.length === PAGE_SIZE;
 
   return (
     <div className="card">
@@ -257,25 +257,7 @@ function AllMembersTab() {
               </tbody>
             </table>
           </div>
-          <div className="member-pager">
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={page === 0}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-            >
-              ← 上一頁
-            </button>
-            <span className="hint">第 {page + 1} 頁</span>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={!hasNext}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              下一頁 →
-            </button>
-          </div>
+          <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
         </>
       )}
     </div>

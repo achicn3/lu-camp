@@ -292,3 +292,42 @@ async def test_receive_unknown_purchase_order_returns_404(
     token, _store_id, _ = await _seed_store(db_session)
     resp = await client.post("/api/v1/purchase-orders/999999/receive", headers=_auth(token))
     assert resp.status_code == 404, resp.text
+
+
+async def test_list_purchase_orders_filters_by_status_and_paginates(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購單清單可依狀態篩選、並支援 limit/offset 分頁。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token)
+    po_open = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=1, unit_cost="10"
+    )
+    po_recv = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=2, unit_cost="20"
+    )
+    await client.post(f"/api/v1/purchase-orders/{po_recv}/receive", headers=_auth(token))
+
+    ordered = await client.get(
+        "/api/v1/purchase-orders", params={"status": "ORDERED"}, headers=_auth(token)
+    )
+    assert ordered.status_code == 200, ordered.text
+    ordered_ids = [po["id"] for po in ordered.json()]
+    assert po_open in ordered_ids and po_recv not in ordered_ids
+
+    received = await client.get(
+        "/api/v1/purchase-orders", params={"status": "RECEIVED"}, headers=_auth(token)
+    )
+    received_ids = [po["id"] for po in received.json()]
+    assert po_recv in received_ids and po_open not in received_ids
+
+    # 分頁：limit=1 各頁一筆、不重疊。
+    page0 = await client.get(
+        "/api/v1/purchase-orders", params={"limit": 1, "offset": 0}, headers=_auth(token)
+    )
+    page1 = await client.get(
+        "/api/v1/purchase-orders", params={"limit": 1, "offset": 1}, headers=_auth(token)
+    )
+    assert len(page0.json()) == 1 and len(page1.json()) == 1
+    assert page0.json()[0]["id"] != page1.json()[0]["id"]

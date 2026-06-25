@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
+import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -12,6 +13,8 @@ import { newIdempotencyKey } from "@/lib/uuid";
 
 type Settlement = components["schemas"]["ConsignmentSettlementRead"];
 type SettlementStatus = components["schemas"]["ConsignmentSettlementStatus"];
+
+const PAGE_SIZE = 50;
 
 const STATUS_TABS: { status: SettlementStatus; label: string }[] = [
   { status: "PENDING", label: "待付款" },
@@ -116,6 +119,7 @@ export default function ConsignmentPage() {
   const [status, setStatus] = useState<SettlementStatus>("PENDING");
   const [phoneInput, setPhoneInput] = useState("");
   const [phone, setPhone] = useState("");
+  const [page, setPage] = useState(0);
   const [paying, setPaying] = useState<Settlement | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
 
@@ -129,12 +133,12 @@ export default function ConsignmentPage() {
   });
 
   const settlements = useQuery({
-    queryKey: ["consignment", "settlements", status, phone],
+    queryKey: ["consignment", "settlements", status, phone, page],
     queryFn: async () => {
       const query: { status: SettlementStatus; limit: number; offset: number; phone?: string } = {
         status,
-        limit: 100,
-        offset: 0,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
       };
       if (phone) query.phone = phone;
       const { data, error } = await api.GET("/api/v1/consignment/settlements", {
@@ -195,7 +199,10 @@ export default function ConsignmentPage() {
             key={tab.status}
             type="button"
             className={`chip ${status === tab.status ? "chip-active" : ""}`}
-            onClick={() => setStatus(tab.status)}
+            onClick={() => {
+              setStatus(tab.status);
+              setPage(0);
+            }}
           >
             {tab.label}
           </button>
@@ -207,6 +214,7 @@ export default function ConsignmentPage() {
         onSubmit={(e) => {
           e.preventDefault();
           setPhone(phoneInput.trim());
+          setPage(0);
         }}
       >
         <input
@@ -227,6 +235,7 @@ export default function ConsignmentPage() {
             onClick={() => {
               setPhoneInput("");
               setPhone("");
+              setPage(0);
             }}
           >
             清除（手機：{phone}）
@@ -308,6 +317,9 @@ export default function ConsignmentPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {!settlements.isPending && !settlements.isError && (
+          <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
         )}
       </div>
 

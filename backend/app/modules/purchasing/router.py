@@ -16,6 +16,7 @@ from app.modules.purchasing.schemas import (
     SupplierRead,
 )
 from app.modules.purchasing.service import PurchasingService
+from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
@@ -109,11 +110,12 @@ async def create_purchase_order(
 async def list_purchase_orders(
     session: SessionDep,
     user: CurrentUserDep,
+    po_status: Annotated[PurchaseOrderStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PurchaseOrderRead]:
     purchase_orders = await PurchasingService(session).list_purchase_orders(
-        user.store_id, limit=limit, offset=offset
+        user.store_id, status=po_status, limit=limit, offset=offset
     )
     return [PurchaseOrderRead.from_model(po) for po in purchase_orders]
 

@@ -86,9 +86,16 @@ class PurchasingService:
         return purchase_order
 
     async def list_purchase_orders(
-        self, store_id: int, *, limit: int = 50, offset: int = 0
+        self,
+        store_id: int,
+        *,
+        status: PurchaseOrderStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[PurchaseOrder]:
-        return await self._repo.list_purchase_orders(store_id, limit=limit, offset=offset)
+        return await self._repo.list_purchase_orders(
+            store_id, status=status, limit=limit, offset=offset
+        )
 
     async def get_purchase_order(
         self, store_id: int, purchase_order_id: int
