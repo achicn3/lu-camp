@@ -76,6 +76,23 @@ class PurchasingRepository:
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    async def lines_for_catalog(
+        self, store_id: int, catalog_product_id: int
+    ) -> list[tuple[PurchaseOrderLine, PurchaseOrder, Supplier]]:
+        """某數量品的所有採購明細＋採購單＋供應商（庫存明細「進貨歷史」用，新到舊）。"""
+        stmt = (
+            select(PurchaseOrderLine, PurchaseOrder, Supplier)
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLine.purchase_order_id)
+            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+            .where(
+                PurchaseOrderLine.store_id == store_id,
+                PurchaseOrderLine.catalog_product_id == catalog_product_id,
+            )
+            .order_by(PurchaseOrder.id.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [(row[0], row[1], row[2]) for row in rows]
+
     async def lock_purchase_order(
         self, store_id: int, purchase_order_id: int
     ) -> PurchaseOrder | None:

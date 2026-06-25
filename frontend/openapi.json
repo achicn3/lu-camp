@@ -572,6 +572,127 @@
         "title": "BulkAcquisitionBasis",
         "type": "string"
       },
+      "BulkLotDetailRead": {
+        "description": "散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。",
+        "properties": {
+          "acquisition_cost": {
+            "title": "Acquisition Cost",
+            "type": "string"
+          },
+          "acquisition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Id"
+          },
+          "acquisition_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acquisition Type"
+          },
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ItemHistoryEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "intake_date": {
+            "format": "date-time",
+            "title": "Intake Date",
+            "type": "string"
+          },
+          "lot_code": {
+            "title": "Lot Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "remaining_qty": {
+            "title": "Remaining Qty",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemSourceRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_qty": {
+            "title": "Total Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "lot_code",
+          "name",
+          "brand_id",
+          "category_id",
+          "grade",
+          "acquisition_cost",
+          "unit_price",
+          "total_qty",
+          "remaining_qty",
+          "intake_date",
+          "source",
+          "acquisition_id",
+          "acquisition_type",
+          "history"
+        ],
+        "title": "BulkLotDetailRead",
+        "type": "object"
+      },
       "BulkLotRead": {
         "description": "散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。",
         "properties": {
@@ -1258,6 +1379,73 @@
         "title": "CatalogProductCreateRequest",
         "type": "object"
       },
+      "CatalogProductDetailRead": {
+        "description": "數量品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/ItemHistoryEvent"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purchases": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogPurchaseRead"
+            },
+            "title": "Purchases",
+            "type": "array"
+          },
+          "quantity_on_hand": {
+            "title": "Quantity On Hand",
+            "type": "integer"
+          },
+          "reorder_point": {
+            "title": "Reorder Point",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "name",
+          "brand_id",
+          "unit_price",
+          "quantity_on_hand",
+          "reorder_point",
+          "purchases",
+          "history"
+        ],
+        "title": "CatalogProductDetailRead",
+        "type": "object"
+      },
       "CatalogProductRead": {
         "description": "數量型商品輸出（POS 選件/庫存列表）。",
         "properties": {
@@ -1312,6 +1500,64 @@
           "reorder_point"
         ],
         "title": "CatalogProductRead",
+        "type": "object"
+      },
+      "CatalogPurchaseRead": {
+        "description": "數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。",
+        "properties": {
+          "ordered_at": {
+            "format": "date-time",
+            "title": "Ordered At",
+            "type": "string"
+          },
+          "po_id": {
+            "title": "Po Id",
+            "type": "integer"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "supplier_id": {
+            "title": "Supplier Id",
+            "type": "integer"
+          },
+          "supplier_name": {
+            "title": "Supplier Name",
+            "type": "string"
+          },
+          "unit_cost": {
+            "title": "Unit Cost",
+            "type": "string"
+          }
+        },
+        "required": [
+          "po_id",
+          "supplier_id",
+          "supplier_name",
+          "qty",
+          "unit_cost",
+          "status",
+          "ordered_at",
+          "received_at"
+        ],
+        "title": "CatalogPurchaseRead",
         "type": "object"
       },
       "CategoryCreate": {
@@ -6624,6 +6870,54 @@
         ]
       }
     },
+    "/api/v1/bulk-lots/{lot_id}/detail": {
+      "get": {
+        "description": "散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。",
+        "operationId": "getBulkLotDetail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bulk Detail",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/campaigns": {
       "get": {
         "operationId": "listCampaigns",
@@ -7264,6 +7558,54 @@
           }
         ],
         "summary": "Create Catalog Product",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/{product_id}/detail": {
+      "get": {
+        "description": "數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。",
+        "operationId": "getCatalogProductDetail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductDetailRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Catalog Detail",
         "tags": [
           "inventory"
         ]

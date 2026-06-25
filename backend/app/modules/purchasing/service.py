@@ -1,6 +1,7 @@
 """purchasing 業務邏輯：供應商、採購單與一次性收貨入庫。"""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,6 +97,25 @@ class PurchasingService:
         return await self._repo.list_purchase_orders(
             store_id, status=status, limit=limit, offset=offset
         )
+
+    async def purchase_history_for_catalog(
+        self, store_id: int, catalog_product_id: int
+    ) -> list[dict[str, Any]]:
+        """某數量品的進貨歷史（供應商/數量/進貨單價/狀態/時間）；庫存明細頁唯讀用。"""
+        rows = await self._repo.lines_for_catalog(store_id, catalog_product_id)
+        return [
+            {
+                "po_id": po.id,
+                "supplier_id": supplier.id,
+                "supplier_name": supplier.name,
+                "qty": line.qty,
+                "unit_cost": line.unit_cost,
+                "status": po.status.value,
+                "ordered_at": po.ordered_at,
+                "received_at": po.received_at,
+            }
+            for line, po, supplier in rows
+        ]
 
     async def get_purchase_order(
         self, store_id: int, purchase_order_id: int

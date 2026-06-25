@@ -518,6 +518,32 @@ class InventoryRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def movements_for_catalog(
+        self, store_id: int, catalog_product_id: int
+    ) -> list[StockMovement]:
+        """某數量品的庫存異動帳（時間升冪；明細頁歷史用，§4 店別範圍）。"""
+        stmt = (
+            select(StockMovement)
+            .where(
+                StockMovement.store_id == store_id,
+                StockMovement.catalog_product_id == catalog_product_id,
+            )
+            .order_by(StockMovement.created_at.asc(), StockMovement.id.asc())
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def movements_for_bulk(self, store_id: int, bulk_lot_id: int) -> list[StockMovement]:
+        """某散裝批的庫存異動帳（時間升冪；明細頁歷史用，§4 店別範圍）。"""
+        stmt = (
+            select(StockMovement)
+            .where(
+                StockMovement.store_id == store_id,
+                StockMovement.bulk_lot_id == bulk_lot_id,
+            )
+            .order_by(StockMovement.created_at.asc(), StockMovement.id.asc())
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     # ── 散裝批 ──
     async def add_bulk_lot(self, lot: BulkLot) -> BulkLot:
         self._session.add(lot)

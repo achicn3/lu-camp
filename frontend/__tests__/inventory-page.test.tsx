@@ -90,7 +90,50 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+const CATALOG_DETAIL = {
+  id: 2,
+  sku: "SKU-9",
+  name: "瓦斯罐",
+  brand_id: null,
+  unit_price: "120",
+  quantity_on_hand: 2,
+  reorder_point: 5,
+  purchases: [
+    {
+      po_id: 7,
+      supplier_id: 5,
+      supplier_name: "山野貿易",
+      qty: 10,
+      unit_cost: "60",
+      status: "RECEIVED",
+      ordered_at: "2026-06-20T00:00:00Z",
+      received_at: "2026-06-21T00:00:00Z",
+    },
+  ],
+  history: [{ at: "2026-06-21T00:00:00Z", event: "入庫（進貨）", qty: 10, note: "purchase_order#7" }],
+};
+
+const BULK_DETAIL = {
+  id: 3,
+  lot_code: "LOT-7",
+  name: "雜物堆",
+  brand_id: null,
+  category_id: null,
+  grade: "E",
+  acquisition_cost: "300",
+  unit_price: "50",
+  total_qty: 10,
+  remaining_qty: 4,
+  intake_date: "2026-06-01T00:00:00Z",
+  source: { contact_id: 9, name: "散裝寄售人", phone: "0922333444", kind: "CONSIGNOR" },
+  acquisition_id: null,
+  acquisition_type: null,
+  history: [{ at: "2026-06-01T00:00:00Z", event: "入庫（收購）", qty: 10, note: null }],
+};
+
 function route(url: string): Response | null {
+  if (url.includes("/catalog-products/") && url.includes("/detail")) return json(CATALOG_DETAIL);
+  if (url.includes("/bulk-lots/") && url.includes("/detail")) return json(BULK_DETAIL);
   if (url.includes("/serialized-items/") && url.includes("/detail")) return json(DETAIL);
   if (url.includes("/serialized-items")) return json(SERIALIZED);
   if (url.includes("/catalog-products")) return json(CATALOG);
@@ -210,6 +253,27 @@ describe("InventoryPage", () => {
     expect(await screen.findByText("商品明細")).toBeTruthy();
     expect(screen.getByText(/寄售人甲/)).toBeTruthy();
     expect(screen.getByText("入庫（收購）")).toBeTruthy();
+  });
+
+  it("數量品 詳細 modal shows supplier purchase history", async () => {
+    stubInventory();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "數量品" }));
+    await screen.findByText("SKU-9");
+    await userEvent.click(screen.getByRole("button", { name: "詳細" }));
+    expect(await screen.findByText("數量品明細")).toBeTruthy();
+    expect(screen.getByText("山野貿易")).toBeTruthy();
+    expect(screen.getByText("經銷商進貨歷史")).toBeTruthy();
+  });
+
+  it("散裝批 詳細 modal shows source and history", async () => {
+    stubInventory();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
+    await screen.findByText("LOT-7");
+    await userEvent.click(screen.getByRole("button", { name: "詳細" }));
+    expect(await screen.findByText("散裝批明細")).toBeTruthy();
+    expect(screen.getByText(/散裝寄售人/)).toBeTruthy();
   });
 
   it("久滯庫存 tab queries by min_age_days and shows days-in-stock", async () => {

@@ -140,6 +140,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/{lot_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Detail
+         * @description 散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。
+         */
+        get: operations["getBulkLotDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -317,6 +337,26 @@ export interface paths {
          *     之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。
          */
         post: operations["createCatalogProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Detail
+         * @description 數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。
+         */
+        get: operations["getCatalogProductDetail"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1531,6 +1571,43 @@ export interface components {
          */
         BulkAcquisitionBasis: "WEIGHT" | "BAG" | "UNSPECIFIED";
         /**
+         * BulkLotDetailRead
+         * @description 散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。
+         */
+        BulkLotDetailRead: {
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Acquisition Id */
+            acquisition_id: number | null;
+            /** Acquisition Type */
+            acquisition_type: string | null;
+            /** Brand Id */
+            brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
+            grade: components["schemas"]["Grade"];
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
+            /**
+             * Intake Date
+             * Format: date-time
+             */
+            intake_date: string;
+            /** Lot Code */
+            lot_code: string;
+            /** Name */
+            name: string;
+            /** Remaining Qty */
+            remaining_qty: number;
+            source: components["schemas"]["ItemSourceRead"] | null;
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
          * BulkLotRead
          * @description 散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。
          */
@@ -1832,6 +1909,30 @@ export interface components {
             unit_price: number | string;
         };
         /**
+         * CatalogProductDetailRead
+         * @description 數量品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。
+         */
+        CatalogProductDetailRead: {
+            /** Brand Id */
+            brand_id: number | null;
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Purchases */
+            purchases: components["schemas"]["CatalogPurchaseRead"][];
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Point */
+            reorder_point: number;
+            /** Sku */
+            sku: string;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
          * CatalogProductRead
          * @description 數量型商品輸出（POS 選件/庫存列表）。
          */
@@ -1852,6 +1953,31 @@ export interface components {
             store_id: number;
             /** Unit Price */
             unit_price: string;
+        };
+        /**
+         * CatalogPurchaseRead
+         * @description 數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。
+         */
+        CatalogPurchaseRead: {
+            /**
+             * Ordered At
+             * Format: date-time
+             */
+            ordered_at: string;
+            /** Po Id */
+            po_id: number;
+            /** Qty */
+            qty: number;
+            /** Received At */
+            received_at: string | null;
+            /** Status */
+            status: string;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Supplier Name */
+            supplier_name: string;
+            /** Unit Cost */
+            unit_cost: string;
         };
         /**
          * CategoryCreate
@@ -3952,6 +4078,37 @@ export interface operations {
             };
         };
     };
+    getBulkLotDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listCampaigns: {
         parameters: {
             query?: {
@@ -4319,6 +4476,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCatalogProductDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductDetailRead"];
                 };
             };
             /** @description Validation Error */

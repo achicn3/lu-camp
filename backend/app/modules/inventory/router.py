@@ -15,8 +15,10 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.inventory.schemas import (
     BrandCreate,
     BrandRead,
+    BulkLotDetailRead,
     BulkLotRead,
     CatalogProductCreateRequest,
+    CatalogProductDetailRead,
     CatalogProductRead,
     CategoryCreate,
     CategoryRead,
@@ -129,6 +131,21 @@ async def list_catalog(
         user.store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
     return [CatalogProductRead.model_validate(product) for product in products]
+
+
+@router.get(
+    "/catalog-products/{product_id}/detail",
+    response_model=CatalogProductDetailRead,
+    operation_id="getCatalogProductDetail",
+)
+async def get_catalog_detail(
+    product_id: int, session: SessionDep, user: CurrentUserDep
+) -> CatalogProductDetailRead:
+    """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
+    detail = await InventoryService(session).get_catalog_detail(user.store_id, product_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此數量品")
+    return CatalogProductDetailRead.model_validate(detail)
 
 
 @router.post(
@@ -337,3 +354,18 @@ async def list_bulk_lots(
         user.store_id, status=status_filter, q=q, limit=limit, offset=offset
     )
     return [BulkLotRead.model_validate(lot) for lot in lots]
+
+
+@router.get(
+    "/bulk-lots/{lot_id}/detail",
+    response_model=BulkLotDetailRead,
+    operation_id="getBulkLotDetail",
+)
+async def get_bulk_detail(
+    lot_id: int, session: SessionDep, user: CurrentUserDep
+) -> BulkLotDetailRead:
+    """散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。"""
+    detail = await InventoryService(session).get_bulk_detail(user.store_id, lot_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
+    return BulkLotDetailRead.model_validate(detail)

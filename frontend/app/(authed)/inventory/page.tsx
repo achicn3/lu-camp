@@ -350,6 +350,206 @@ function ItemDetailModal({
   );
 }
 
+type CatalogDetail = components["schemas"]["CatalogProductDetailRead"];
+type BulkDetail = components["schemas"]["BulkLotDetailRead"];
+
+const PO_STATUS_TEXT: Record<string, string> = {
+  DRAFT: "草稿",
+  ORDERED: "已下單",
+  RECEIVED: "已收貨",
+  CLOSED: "已結案",
+};
+
+function HistoryList({ history }: { history: { at: string; event: string; note?: string | null }[] }) {
+  if (history.length === 0) return <p className="hint">尚無異動紀錄。</p>;
+  return (
+    <ul className="inv-history">
+      {history.map((h, i) => (
+        <li key={i}>
+          <span className="inv-history-event">{h.event}</span>
+          <span className="inv-history-at">{dt(h.at)}</span>
+          {h.note && <span className="row-sub">{h.note}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// 數量品「詳細」（#2 經銷商）：售價/現量＋經銷商進貨歷史＋異動歷史。
+function CatalogDetailModal({ productId, onClose }: { productId: number; onClose: () => void }) {
+  const detail = useQuery({
+    queryKey: ["catalog-detail", productId],
+    queryFn: async (): Promise<CatalogDetail> => {
+      const { data, error } = await api.GET("/api/v1/catalog-products/{product_id}/detail", {
+        params: { path: { product_id: productId } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取明細失敗");
+      return data;
+    },
+  });
+  const d = detail.data;
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="數量品明細">
+      <div className="card pos-dialog inv-detail">
+        <div className="inv-detail-head">
+          <h2>數量品明細</h2>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+        {detail.isPending ? (
+          <p>載入中…</p>
+        ) : detail.isError ? (
+          <p role="alert" className="form-error">
+            {detail.error.message}
+          </p>
+        ) : d ? (
+          <>
+            <h3 className="inv-detail-name">
+              {d.name} <span className="inv-code">{d.sku}</span>
+            </h3>
+            <dl className="inv-detail-grid">
+              <div>
+                <dt>售價</dt>
+                <dd>
+                  <MoneyText value={d.unit_price} />
+                </dd>
+              </div>
+              <div>
+                <dt>現有量 / 補貨點</dt>
+                <dd>
+                  {d.quantity_on_hand} / {d.reorder_point}
+                </dd>
+              </div>
+            </dl>
+            <h4 className="inv-detail-subtitle">經銷商進貨歷史</h4>
+            {d.purchases.length === 0 ? (
+              <p className="hint">尚無進貨紀錄。</p>
+            ) : (
+              <table className="data-table inv-detail-table">
+                <thead>
+                  <tr>
+                    <th>供應商</th>
+                    <th>數量</th>
+                    <th>進貨單價</th>
+                    <th>狀態</th>
+                    <th>下單</th>
+                    <th>收貨</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.purchases.map((p) => (
+                    <tr key={p.po_id}>
+                      <td>{p.supplier_name}</td>
+                      <td>{p.qty}</td>
+                      <td>
+                        <MoneyText value={p.unit_cost} />
+                      </td>
+                      <td>{PO_STATUS_TEXT[p.status] ?? p.status}</td>
+                      <td>{dt(p.ordered_at)}</td>
+                      <td>{dt(p.received_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <h4 className="inv-detail-subtitle">庫存異動歷史</h4>
+            <HistoryList history={d.history} />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// 散裝批「詳細」（#2）：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。
+function BulkDetailModal({
+  lotId,
+  brandName,
+  onClose,
+}: {
+  lotId: number;
+  brandName: (id: number | null) => string;
+  onClose: () => void;
+}) {
+  const detail = useQuery({
+    queryKey: ["bulk-detail", lotId],
+    queryFn: async (): Promise<BulkDetail> => {
+      const { data, error } = await api.GET("/api/v1/bulk-lots/{lot_id}/detail", {
+        params: { path: { lot_id: lotId } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取明細失敗");
+      return data;
+    },
+  });
+  const d = detail.data;
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="散裝批明細">
+      <div className="card pos-dialog inv-detail">
+        <div className="inv-detail-head">
+          <h2>散裝批明細</h2>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+        {detail.isPending ? (
+          <p>載入中…</p>
+        ) : detail.isError ? (
+          <p role="alert" className="form-error">
+            {detail.error.message}
+          </p>
+        ) : d ? (
+          <>
+            <h3 className="inv-detail-name">
+              {d.name} <span className="inv-code">{d.lot_code}</span>
+            </h3>
+            <dl className="inv-detail-grid">
+              <div>
+                <dt>來源</dt>
+                <dd>
+                  {d.source
+                    ? `${d.source.kind === "CONSIGNOR" ? "寄售人" : "賣方"}：${d.source.name ?? "—"}${d.source.phone ? `（${d.source.phone}）` : ""}`
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>品牌 / 成色</dt>
+                <dd>
+                  {brandName(d.brand_id)}・{gradeLabel(d.grade)}
+                </dd>
+              </div>
+              <div>
+                <dt>收購成本</dt>
+                <dd>
+                  <MoneyText value={d.acquisition_cost} />
+                </dd>
+              </div>
+              <div>
+                <dt>每件均一價</dt>
+                <dd>
+                  <MoneyText value={d.unit_price} />
+                </dd>
+              </div>
+              <div>
+                <dt>剩餘 / 總數</dt>
+                <dd>
+                  {d.remaining_qty} / {d.total_qty}
+                </dd>
+              </div>
+              <div>
+                <dt>入庫時間</dt>
+                <dd>{dt(d.intake_date)}</dd>
+              </div>
+            </dl>
+            <h4 className="inv-detail-subtitle">庫存異動歷史</h4>
+            <HistoryList history={d.history} />
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SerializedPanel() {
   const [status, setStatus] = useState<SerializedStatus | "">("");
   const [ownership, setOwnership] = useState<Ownership | "">("");
@@ -490,6 +690,7 @@ function CatalogPanel() {
   const [lowStock, setLowStock] = useState(false);
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const query = useQuery({
     queryKey: ["inventory", "catalog", { lowStock, q, page }],
@@ -526,7 +727,7 @@ function CatalogPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["SKU", "品名", "單價", "現有量", "再訂購點", ""]}
+        headers={["SKU", "品名", "單價", "現有量", "再訂購點", "操作"]}
       >
         {rows.map((product) => {
           const low = isLowStock(product.quantity_on_hand, product.reorder_point);
@@ -539,12 +740,20 @@ function CatalogPanel() {
               </td>
               <td>{product.quantity_on_hand}</td>
               <td>{product.reorder_point}</td>
-              <td>{low && <BadgeChip badge={{ label: "低庫存", tone: "warn" }} />}</td>
+              <td className="inv-row-actions">
+                {low && <BadgeChip badge={{ label: "低庫存", tone: "warn" }} />}
+                <button type="button" className="btn-ghost" onClick={() => setDetailId(product.id)}>
+                  詳細
+                </button>
+              </td>
             </tr>
           );
         })}
       </TableShell>
       <Pagination page={page} count={rows.length} onPage={setPage} />
+      {detailId !== null && (
+        <CatalogDetailModal productId={detailId} onClose={() => setDetailId(null)} />
+      )}
     </div>
   );
 }
@@ -553,6 +762,10 @@ function BulkPanel() {
   const [status, setStatus] = useState<BulkStatus | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const { brands } = useFilterOptions();
+  const brandName = (id: number | null) =>
+    id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
 
   const query = useQuery({
     queryKey: ["inventory", "bulk", { status, q, page }],
@@ -593,7 +806,7 @@ function BulkPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["批號", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態", "標籤"]}
+        headers={["批號", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態", "操作"]}
       >
         {rows.map((lot) => (
           <tr key={lot.id}>
@@ -613,7 +826,10 @@ function BulkPanel() {
             <td>
               <BadgeChip badge={bulkStatusBadge(lot.status)} />
             </td>
-            <td>
+            <td className="inv-row-actions">
+              <button type="button" className="btn-ghost" onClick={() => setDetailId(lot.id)}>
+                詳細
+              </button>
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
                   code={lot.lot_code}
@@ -626,6 +842,9 @@ function BulkPanel() {
         ))}
       </TableShell>
       <Pagination page={page} count={rows.length} onPage={setPage} />
+      {detailId !== null && (
+        <BulkDetailModal lotId={detailId} brandName={brandName} onClose={() => setDetailId(null)} />
+      )}
     </div>
   );
 }

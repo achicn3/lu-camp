@@ -59,6 +59,19 @@ def _movement_label(direction: StockDirection, reason: StockReason) -> str:
     return _MOVEMENT_LABELS.get((direction, reason), f"{direction.value}／{reason.value}")
 
 
+def _build_history(movements: list[StockMovement]) -> list[dict[str, Any]]:
+    """把庫存異動帳列轉成明細頁的歷史事件（白話事件＋時間＋數量＋來源單據）。"""
+    return [
+        {
+            "at": m.created_at,
+            "event": _movement_label(m.direction, m.reason),
+            "qty": m.qty,
+            "note": f"{m.ref_type}#{m.ref_id}" if m.ref_type is not None else None,
+        }
+        for m in movements
+    ]
+
+
 class InventoryService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -366,16 +379,7 @@ class InventoryService:
         ):
             margin = sold_price - item.acquisition_cost
 
-        movements = await self._repo.movements_for_serialized(store_id, item_id)
-        history = [
-            {
-                "at": m.created_at,
-                "event": _movement_label(m.direction, m.reason),
-                "qty": m.qty,
-                "note": f"{m.ref_type}#{m.ref_id}" if m.ref_type is not None else None,
-            }
-            for m in movements
-        ]
+        history = _build_history(await self._repo.movements_for_serialized(store_id, item_id))
 
         return {
             "id": item.id,
@@ -397,6 +401,77 @@ class InventoryService:
             "acquisition_id": item.acquisition_id,
             "acquisition_type": acquisition.type.value if acquisition is not None else None,
             "sale_id": sale_id,
+            "history": history,
+        }
+
+    async def get_catalog_detail(self, store_id: int, product_id: int) -> dict[str, Any] | None:
+        """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
+        product = await self._repo.get_catalog(store_id, product_id)
+        if product is None:
+            return None
+        from app.modules.purchasing.service import PurchasingService
+
+        purchases = await PurchasingService(self._session).purchase_history_for_catalog(
+            store_id, product_id
+        )
+        history = _build_history(await self._repo.movements_for_catalog(store_id, product_id))
+        return {
+            "id": product.id,
+            "sku": product.sku,
+            "name": product.name,
+            "brand_id": product.brand_id,
+            "unit_price": product.unit_price,
+            "quantity_on_hand": product.quantity_on_hand,
+            "reorder_point": product.reorder_point,
+            "purchases": purchases,
+            "history": history,
+        }
+
+    async def get_bulk_detail(self, store_id: int, lot_id: int) -> dict[str, Any] | None:
+        """散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。"""
+        lot = await self._repo.get_bulk_lot(store_id, lot_id)
+        if lot is None:
+            return None
+        from app.modules.acquisition.service import AcquisitionService
+        from app.modules.contacts.service import ContactService
+
+        acquisition = None
+        if lot.acquisition_id is not None:
+            acquisition = await AcquisitionService(self._session).get_acquisition(
+                store_id, lot.acquisition_id
+            )
+        source_contact_id: int | None
+        if lot.consignor_id is not None:
+            source_contact_id, source_kind = lot.consignor_id, "CONSIGNOR"
+        else:
+            source_contact_id = acquisition.contact_id if acquisition is not None else None
+            source_kind = "SELLER"
+        source = None
+        if source_contact_id is not None:
+            contact = await ContactService(self._session).get_contact(store_id, source_contact_id)
+            if contact is not None:
+                source = {
+                    "contact_id": contact.id,
+                    "name": contact.name,
+                    "phone": contact.phone,
+                    "kind": source_kind,
+                }
+        history = _build_history(await self._repo.movements_for_bulk(store_id, lot_id))
+        return {
+            "id": lot.id,
+            "lot_code": lot.lot_code,
+            "name": lot.name,
+            "brand_id": lot.brand_id,
+            "category_id": lot.category_id,
+            "grade": lot.grade,
+            "acquisition_cost": lot.acquisition_cost,
+            "unit_price": lot.unit_price,
+            "total_qty": lot.total_qty,
+            "remaining_qty": lot.remaining_qty,
+            "intake_date": lot.intake_date,
+            "source": source,
+            "acquisition_id": lot.acquisition_id,
+            "acquisition_type": acquisition.type.value if acquisition is not None else None,
             "history": history,
         }
 

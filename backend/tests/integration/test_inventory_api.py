@@ -25,6 +25,7 @@ from app.modules.inventory.models import (
     SerializedItem,
     StockMovement,
 )
+from app.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Supplier
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -564,3 +565,81 @@ async def test_serialized_detail_unknown_returns_404(
     store_id = await _seed_store(db_session)
     resp = await client.get("/api/v1/serialized-items/999999/detail", headers=_auth(store_id))
     assert resp.status_code == 404
+
+
+async def test_catalog_detail_shows_supplier_purchase_history(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """數量品明細：經銷商進貨歷史（供應商/數量/單價）＋異動歷史。"""
+    store_id = await _seed_store(db_session)
+    clerk_id = _STORE_CLERKS[store_id]
+    supplier = Supplier(store_id=store_id, name="山野貿易")
+    product = CatalogProduct(
+        store_id=store_id, sku="GAS-230", name="高山瓦斯罐 230g",
+        unit_price=Decimal(120), quantity_on_hand=10,
+    )
+    db_session.add_all([supplier, product])
+    await db_session.flush()
+    po = PurchaseOrder(store_id=store_id, supplier_id=supplier.id, ordered_by=clerk_id)
+    db_session.add(po)
+    await db_session.flush()
+    db_session.add_all([
+        PurchaseOrderLine(
+            store_id=store_id, purchase_order_id=po.id, catalog_product_id=product.id,
+            qty=10, unit_cost=Decimal(60),
+        ),
+        StockMovement(
+            store_id=store_id, item_kind=ItemKind.CATALOG, catalog_product_id=product.id,
+            direction=StockDirection.IN, qty=10, reason=StockReason.PURCHASE,
+            ref_type="purchase_order", ref_id=po.id,
+        ),
+    ])
+    await db_session.flush()
+
+    resp = await client.get(
+        f"/api/v1/catalog-products/{product.id}/detail", headers=_auth(store_id)
+    )
+    assert resp.status_code == 200, resp.text
+    d = resp.json()
+    assert d["sku"] == "GAS-230"
+    assert len(d["purchases"]) == 1
+    assert d["purchases"][0]["supplier_name"] == "山野貿易"
+    assert d["purchases"][0]["unit_cost"] == "60"
+    assert [h["event"] for h in d["history"]] == ["入庫（進貨）"]
+
+
+async def test_bulk_detail_shows_source_and_cost(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """散裝批明細：來源（寄售人）、收購成本、均一價、剩餘、異動歷史。"""
+    store_id = await _seed_store(db_session)
+    consignor = Contact(
+        store_id=store_id, name="散裝寄售人", phone="0922333444", roles=["CONSIGNOR"]
+    )
+    db_session.add(consignor)
+    await db_session.flush()
+    lot = BulkLot(
+        store_id=store_id, lot_code="LOT-1", name="營釘雜項", grade=Grade.E,
+        consignor_id=consignor.id, acquisition_cost=Decimal(500),
+        acquisition_basis=BulkAcquisitionBasis.BAG, unit_price=Decimal(50),
+        total_qty=10, remaining_qty=7, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add(lot)
+    await db_session.flush()
+    db_session.add(
+        StockMovement(
+            store_id=store_id, item_kind=ItemKind.BULK_LOT, bulk_lot_id=lot.id,
+            direction=StockDirection.IN, qty=10, reason=StockReason.ACQUISITION,
+            ref_type="acquisition", ref_id=1,
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(f"/api/v1/bulk-lots/{lot.id}/detail", headers=_auth(store_id))
+    assert resp.status_code == 200, resp.text
+    d = resp.json()
+    assert d["source"]["name"] == "散裝寄售人"
+    assert d["source"]["kind"] == "CONSIGNOR"
+    assert d["acquisition_cost"] == "500"
+    assert d["remaining_qty"] == 7
+    assert [h["event"] for h in d["history"]] == ["入庫（收購）"]

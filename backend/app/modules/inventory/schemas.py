@@ -169,6 +169,53 @@ class SerializedItemDetailRead(BaseModel):
     history: list[ItemHistoryEvent]
 
 
+class CatalogPurchaseRead(BaseModel):
+    """數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。"""
+
+    po_id: int
+    supplier_id: int
+    supplier_name: str
+    qty: int
+    unit_cost: NTDAmount
+    status: str
+    ordered_at: datetime
+    received_at: datetime | None
+
+
+class CatalogProductDetailRead(BaseModel):
+    """數量品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。"""
+
+    id: int
+    sku: str
+    name: str
+    brand_id: int | None
+    unit_price: NTDAmount
+    quantity_on_hand: int
+    reorder_point: int
+    purchases: list[CatalogPurchaseRead]
+    history: list[ItemHistoryEvent]
+
+
+class BulkLotDetailRead(BaseModel):
+    """散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。"""
+
+    id: int
+    lot_code: str
+    name: str
+    brand_id: int | None
+    category_id: int | None
+    grade: Grade
+    acquisition_cost: NTDAmount
+    unit_price: NTDAmount
+    total_qty: int
+    remaining_qty: int
+    intake_date: datetime
+    source: ItemSourceRead | None
+    acquisition_id: int | None
+    acquisition_type: str | None
+    history: list[ItemHistoryEvent]
+
+
 class CatalogProductCreateRequest(BaseModel):
     """新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
 
