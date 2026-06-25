@@ -71,6 +71,27 @@ body {
   cursor: default;
 }
 
+/* 次要動作（查找/篩選/套用/列印等）：與主按鈕同高、淺色填底、綠字綠框 */
+.btn-secondary {
+  background: var(--green-soft, #e7efe6);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  min-height: var(--tap-min);
+  font-size: var(--text-md);
+  font-weight: 600;
+  padding: 0 var(--sp-5);
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .btn-ghost {
   background: transparent;
   color: var(--ink-soft);
