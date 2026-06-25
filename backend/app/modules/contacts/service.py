@@ -1,5 +1,7 @@
 """contacts 業務邏輯：加密 national_id、blind-index 去重、解密查看寫稽核。"""
 
+from decimal import Decimal
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -232,6 +234,24 @@ class ContactService:
         self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
     ) -> list[Contact]:
         return await self._repo.search(store_id, role, q, limit=limit, offset=offset)
+
+    async def list_members_with_credit(
+        self, store_id: int, q: str | None, *, limit: int, offset: int
+    ) -> list[tuple[Contact, Decimal]]:
+        """會員清單（role=MEMBER）併同購物金餘額；姓名/電話可模糊篩、分頁。
+
+        購物金餘額一次批次取回（避免逐人 N+1）；§4 店別範圍、§5 不以 national_id 搜尋。
+        """
+        members = await self._repo.search(
+            store_id, ContactRole.MEMBER.value, q, limit=limit, offset=offset
+        )
+        # 函式內 import 打破 contacts↔storecredit 循環相依（CLAUDE.md §9 允許之唯一例外）。
+        from app.modules.storecredit.service import StoreCreditService
+
+        balances = await StoreCreditService(self._session).balances_for(
+            store_id, [m.id for m in members]
+        )
+        return [(m, balances.get(m.id, Decimal(0))) for m in members]
 
     async def reveal_national_id(
         self, store_id: int, contact_id: int, actor_user_id: int

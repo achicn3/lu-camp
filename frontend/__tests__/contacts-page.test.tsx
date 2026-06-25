@@ -123,3 +123,69 @@ describe("contacts 建檔防呆", () => {
     });
   });
 });
+
+describe("contacts 查找 / 所有會員", () => {
+  it("預設不直接列出會員（查找前無清單）", () => {
+    stubFetch((url) => (url.includes("/api/v1/contacts") ? json([]) : null));
+    renderPage();
+    // 未搜尋前不應有「搜尋結果」清單；只有搜尋框與建檔卡。
+    expect(screen.queryByText("搜尋結果")).toBeNull();
+    expect(screen.getByRole("button", { name: "查找會員" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "所有會員" })).toBeTruthy();
+  });
+
+  it("身分證部分輸入 → 擋下並提示『精確查詢』，不打 lookup API", async () => {
+    const lookups: string[] = [];
+    stubFetch((url, method) => {
+      if (url.includes("/contacts/lookup") && method === "POST") {
+        lookups.push(url);
+        return json(null);
+      }
+      if (url.includes("/api/v1/contacts")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "身分證字號（精確）" }));
+    await user.type(screen.getByLabelText("身分證字號搜尋"), "A12345"); // 不完整
+    await user.click(screen.getByRole("button", { name: "搜尋" }));
+    await waitFor(() => expect(screen.getByText(/只能完整、精確查詢/)).toBeTruthy());
+    expect(lookups).toHaveLength(0);
+  });
+
+  it("身分證完整且合法 → 以 lookup 精確查詢並顯示結果", async () => {
+    let lookupBody: string | null = null;
+    stubFetch((url, method, body) => {
+      if (url.includes("/contacts/lookup") && method === "POST") {
+        lookupBody = body;
+        return json({ id: 7, name: "陳大寶", phone: "0922222222", roles: ["MEMBER"], member_points: 3 });
+      }
+      if (url.includes("/api/v1/contacts")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "身分證字號（精確）" }));
+    await user.type(screen.getByLabelText("身分證字號搜尋"), "A123456789");
+    await user.click(screen.getByRole("button", { name: "搜尋" }));
+    await waitFor(() => expect(screen.getByText("陳大寶")).toBeTruthy());
+    expect(JSON.parse(lookupBody as unknown as string)).toEqual({ national_id: "A123456789" });
+  });
+
+  it("所有會員分頁列出會員＋購物金餘額", async () => {
+    stubFetch((url) => {
+      if (url.includes("/contacts/members")) {
+        return json([
+          { id: 1, name: "林愛麗", phone: "0911111111", roles: ["MEMBER"], member_points: 5, has_national_id: false, store_credit_balance: "1100" },
+        ]);
+      }
+      if (url.includes("/api/v1/contacts")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "所有會員" }));
+    await waitFor(() => expect(screen.getByText("林愛麗")).toBeTruthy());
+    expect(screen.getByText("1,100")).toBeTruthy();
+  });
+});

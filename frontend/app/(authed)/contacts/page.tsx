@@ -1,6 +1,9 @@
 "use client";
-// /contacts 會員/賣方（F4 會員中心，docs/17）：搜尋（姓名/電話）＋清單＋建檔。
-// national_id 不可明文/部分搜尋（後端僅以 blind index 精確比對）；清單一律遮罩 PII。
+// /contacts 會員/賣方（F4 會員中心，docs/17）：兩個分頁——
+//   ① 查找會員：以姓名/電話模糊搜尋，或以身分證字號「精確」查詢（§5：證號不可明文/部分搜尋，
+//      僅以 blind index 精確比對，故只接受完整且檢核碼正確的證號）；不預設列出全部會員。
+//   ② 所有會員：分頁列出所有會員＋購物金餘額，可用姓名/電話篩。
+// national_id 一律遮罩、不回明文；金額以字串傳輸（§6）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
@@ -9,11 +12,14 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { rolesLabel } from "@/features/member/labels";
 import { isValidNationalId } from "@/features/member/national-id";
+import { formatNtd, parseNtd } from "@/lib/money";
 
 type Contact = components["schemas"]["ContactRead"];
 type ContactRole = components["schemas"]["ContactRole"];
+type Member = components["schemas"]["MemberWithCreditRead"];
 
 const ALL_ROLES: ContactRole[] = ["MEMBER", "SELLER", "CONSIGNOR"];
+const PAGE_SIZE = 50;
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -23,6 +29,260 @@ function extractDetail(error: unknown): string | null {
   return null;
 }
 
+function money(value: string): string {
+  const parsed = parseNtd(value);
+  return parsed === null ? value : formatNtd(parsed);
+}
+
+// ── ① 查找會員（姓名/電話模糊；或身分證字號精確）─────────────────────────
+type SearchMode = "name_phone" | "national_id";
+
+function SearchTab() {
+  const [mode, setMode] = useState<SearchMode>("name_phone");
+  const [q, setQ] = useState("");
+  const [submitted, setSubmitted] = useState<{ mode: SearchMode; value: string } | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
+
+  const results = useQuery({
+    queryKey: ["contacts", "search", submitted],
+    enabled: submitted !== null,
+    queryFn: async (): Promise<Contact[]> => {
+      if (submitted === null) return [];
+      if (submitted.mode === "national_id") {
+        const { data, error } = await api.POST("/api/v1/contacts/lookup", {
+          body: { national_id: submitted.value },
+        });
+        if (error) throw new Error(extractDetail(error) ?? "查詢失敗");
+        return data ? [data] : [];
+      }
+      const { data, error } = await api.GET("/api/v1/contacts", {
+        params: { query: { q: submitted.value, limit: PAGE_SIZE } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取會員清單失敗");
+      return data;
+    },
+  });
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setInputError(null);
+    const value = q.trim();
+    if (!value) {
+      setInputError(mode === "national_id" ? "請輸入完整身分證字號" : "請輸入姓名或電話");
+      return;
+    }
+    if (mode === "national_id" && !isValidNationalId(value)) {
+      setInputError(
+        "身分證字號格式或檢核碼不正確。為保護個資，身分證僅支援完整、精確查詢（不支援部分比對）。",
+      );
+      return;
+    }
+    setSubmitted({ mode, value });
+  }
+
+  return (
+    <>
+      <form className="card member-search" onSubmit={onSearch}>
+        <div className="member-search-modes" role="tablist" aria-label="搜尋方式">
+          <button
+            type="button"
+            className={`chip ${mode === "name_phone" ? "chip-active" : ""}`}
+            onClick={() => {
+              setMode("name_phone");
+              setInputError(null);
+            }}
+          >
+            姓名 / 電話
+          </button>
+          <button
+            type="button"
+            className={`chip ${mode === "national_id" ? "chip-active" : ""}`}
+            onClick={() => {
+              setMode("national_id");
+              setInputError(null);
+            }}
+          >
+            身分證字號（精確）
+          </button>
+        </div>
+        <label className="field">
+          <span className="field-label">
+            {mode === "national_id" ? "輸入完整身分證字號" : "輸入姓名或電話"}
+          </span>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={mode === "national_id" ? "例：A123456789" : "姓名或電話"}
+            inputMode={mode === "national_id" ? "text" : "tel"}
+            maxLength={mode === "national_id" ? 10 : undefined}
+            autoComplete="off"
+            aria-label={mode === "national_id" ? "身分證字號搜尋" : "姓名或電話搜尋"}
+          />
+        </label>
+        {mode === "national_id" && (
+          <p className="hint">
+            為保護個資，身分證字號<b>只能完整、精確查詢</b>（系統以加密索引比對，不做部分搜尋）。
+          </p>
+        )}
+        {inputError !== null && (
+          <p role="alert" className="form-error">
+            {inputError}
+          </p>
+        )}
+        <button type="submit" className="btn-primary">
+          搜尋
+        </button>
+      </form>
+
+      {submitted !== null && (
+        <div className="card">
+          <h2>搜尋結果</h2>
+          {results.isPending ? (
+            <p>載入中…</p>
+          ) : results.isError ? (
+            <p role="alert" className="form-error">
+              {results.error.message}
+            </p>
+          ) : results.data.length === 0 ? (
+            <p className="empty-state">查無符合的會員/賣方。可調整搜尋或於下方建檔。</p>
+          ) : (
+            <ul className="member-list">
+              {results.data.map((c) => (
+                <li key={c.id}>
+                  <Link href={`/contacts/${c.id}`} className="member-row">
+                    <span className="member-row-name">{c.name}</span>
+                    <span className="member-row-phone">{c.phone ?? "—"}</span>
+                    <span className="member-row-roles">{rolesLabel(c.roles)}</span>
+                    <span className="member-row-points">{c.member_points} 點</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── ② 所有會員（分頁清單 + 購物金；可篩姓名/電話）────────────────────────
+function AllMembersTab() {
+  const [q, setQ] = useState("");
+  const [submittedQ, setSubmittedQ] = useState("");
+  const [page, setPage] = useState(0);
+
+  const members = useQuery({
+    queryKey: ["contacts", "members", submittedQ, page],
+    queryFn: async (): Promise<Member[]> => {
+      const { data, error } = await api.GET("/api/v1/contacts/members", {
+        params: { query: { q: submittedQ || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取會員清單失敗");
+      return data;
+    },
+  });
+
+  function onSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPage(0);
+    setSubmittedQ(q.trim());
+  }
+
+  const rows = members.data ?? [];
+  const hasNext = rows.length === PAGE_SIZE;
+
+  return (
+    <div className="card">
+      <form className="member-allsearch" onSubmit={onSearch}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="以姓名或電話篩選"
+          aria-label="會員清單篩選"
+          inputMode="tel"
+        />
+        <button type="submit" className="btn-secondary">
+          篩選
+        </button>
+        {submittedQ && (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setQ("");
+              setSubmittedQ("");
+              setPage(0);
+            }}
+          >
+            清除（{submittedQ}）
+          </button>
+        )}
+      </form>
+
+      {members.isPending ? (
+        <p>載入中…</p>
+      ) : members.isError ? (
+        <p role="alert" className="form-error">
+          {members.error.message}
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="empty-state">{submittedQ ? "查無符合的會員。" : "目前沒有會員。"}</p>
+      ) : (
+        <>
+          <div className="member-table-wrap">
+            <table className="data-table member-table">
+              <thead>
+                <tr>
+                  <th>姓名</th>
+                  <th>電話</th>
+                  <th>角色</th>
+                  <th className="num">點數</th>
+                  <th className="num">購物金</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((m) => (
+                  <tr key={m.id}>
+                    <td>
+                      <Link href={`/contacts/${m.id}`} className="member-table-link">
+                        {m.name}
+                      </Link>
+                    </td>
+                    <td>{m.phone ?? "—"}</td>
+                    <td>{rolesLabel(m.roles)}</td>
+                    <td className="num">{m.member_points}</td>
+                    <td className="num money">{money(m.store_credit_balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="member-pager">
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ← 上一頁
+            </button>
+            <span className="hint">第 {page + 1} 頁</span>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={!hasNext}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              下一頁 →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── 建檔 ─────────────────────────────────────────────────────────────────
 function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<ContactRole[]>(["MEMBER"]);
@@ -126,74 +386,37 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+type Tab = "search" | "all";
+
 export default function ContactsPage() {
   const queryClient = useQueryClient();
-  const [q, setQ] = useState("");
-  const [submittedQ, setSubmittedQ] = useState("");
-
-  const list = useQuery({
-    queryKey: ["contacts", "list", submittedQ],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/contacts", {
-        params: { query: { q: submittedQ || undefined, limit: 50 } },
-      });
-      if (!data) throw new Error(extractDetail(error) ?? "讀取會員清單失敗");
-      return data;
-    },
-  });
-
-  function onSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmittedQ(q.trim());
-  }
+  const [tab, setTab] = useState<Tab>("search");
 
   return (
     <section>
       <h1 className="page-title">會員 / 賣方</h1>
+      <div className="settle-tabs" aria-label="會員功能">
+        <button
+          type="button"
+          className={`chip ${tab === "search" ? "chip-active" : ""}`}
+          onClick={() => setTab("search")}
+        >
+          查找會員
+        </button>
+        <button
+          type="button"
+          className={`chip ${tab === "all" ? "chip-active" : ""}`}
+          onClick={() => setTab("all")}
+        >
+          所有會員
+        </button>
+      </div>
+
       <div className="card-stack">
-        <form className="card member-search" onSubmit={onSearch}>
-          <label className="field">
-            <span className="field-label">搜尋（姓名 / 電話）</span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="輸入姓名或電話"
-            />
-          </label>
-          <button type="submit" className="btn-primary">
-            搜尋
-          </button>
-        </form>
-
-        <div className="card">
-          <h2>清單</h2>
-          {list.isPending ? (
-            <p>載入中…</p>
-          ) : list.isError ? (
-            <p role="alert" className="form-error">
-              {list.error.message}
-            </p>
-          ) : list.data.length === 0 ? (
-            <p className="empty-state">查無會員。可調整搜尋或於下方建檔。</p>
-          ) : (
-            <ul className="member-list">
-              {list.data.map((c: Contact) => (
-                <li key={c.id}>
-                  <Link href={`/contacts/${c.id}`} className="member-row">
-                    <span className="member-row-name">{c.name}</span>
-                    <span className="member-row-phone">{c.phone ?? "—"}</span>
-                    <span className="member-row-roles">{rolesLabel(c.roles)}</span>
-                    <span className="member-row-points">{c.member_points} 點</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
+        {tab === "search" ? <SearchTab /> : <AllMembersTab />}
         <CreateMemberCard
           onCreated={() => {
-            void queryClient.invalidateQueries({ queryKey: ["contacts", "list"] });
+            void queryClient.invalidateQueries({ queryKey: ["contacts"] });
           }}
         />
       </div>

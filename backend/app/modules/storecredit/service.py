@@ -554,6 +554,13 @@ class StoreCreditService:
         balances = await self._repo.balances_by_contact(store_id)
         return [(cid, bal) for cid, bal in sorted(balances.items()) if bal > 0]
 
+    async def balances_for(self, store_id: int, contact_ids: list[int]) -> dict[int, Decimal]:
+        """指定會員的購物金餘額（無帳戶者視為 0）；供 contacts 會員清單批次取餘額、避免 N+1。"""
+        if not contact_ids:
+            return {}
+        balances = await self._repo.balances_by_contact(store_id)
+        return {cid: balances.get(cid, Decimal(0)) for cid in contact_ids}
+
     async def aging_report(self, store_id: int, *, now: datetime) -> dict[str, object]:
         """未兌付負債帳齡分桶（FIFO 沖銷發出列；docs/16 §5A）。"""
         lots_rows = await self._repo.positive_lots(store_id)

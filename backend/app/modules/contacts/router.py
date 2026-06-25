@@ -23,6 +23,7 @@ from app.modules.contacts.schemas import (
     ContactNationalIdRead,
     ContactRead,
     ContactUpdate,
+    MemberWithCreditRead,
 )
 from app.modules.contacts.service import ContactService
 from app.shared.enums import ContactRole, UserRole
@@ -96,6 +97,24 @@ async def list_contacts(
         user.store_id, role.value if role is not None else None, q, limit=limit, offset=offset
     )
     return [ContactRead.from_model(c) for c in contacts]
+
+
+# /members 須宣告在 /{contact_id} 之前，否則 "members" 會被當成 contact_id 路徑參數。
+@router.get(
+    "/members", response_model=list[MemberWithCreditRead], operation_id="listMembersWithCredit"
+)
+async def list_members_with_credit(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[MemberWithCreditRead]:
+    """會員清單（role=MEMBER）併購物金餘額；姓名/電話可篩、分頁（§4 店別、§5 不以證號搜尋）。"""
+    rows = await ContactService(session).list_members_with_credit(
+        user.store_id, q, limit=limit, offset=offset
+    )
+    return [MemberWithCreditRead.from_model(c, bal) for c, bal in rows]
 
 
 @router.get("/{contact_id}", response_model=ContactRead, operation_id="getContact")

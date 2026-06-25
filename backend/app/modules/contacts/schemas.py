@@ -1,5 +1,7 @@
 """contacts 的 Pydantic schema：輸入驗證與遮罩輸出（預設不回 national_id 明文）。"""
 
+from decimal import Decimal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.contacts.models import Contact
@@ -78,6 +80,32 @@ class ContactRead(BaseModel):
             source_note=contact.source_note,
             national_id_masked=_MASK if has_id else None,
             has_national_id=has_id,
+        )
+
+
+class MemberWithCreditRead(BaseModel):
+    """會員清單列：基本資料 + 點數 + 購物金餘額（整數元字串）。national_id 一律遮罩。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    phone: str | None
+    roles: list[str]
+    member_points: int
+    has_national_id: bool
+    store_credit_balance: str
+
+    @classmethod
+    def from_model(cls, contact: Contact, balance: Decimal) -> "MemberWithCreditRead":
+        return cls(
+            id=contact.id,
+            name=contact.name,
+            phone=contact.phone,
+            roles=list(contact.roles),
+            member_points=contact.member_points,
+            has_national_id=contact.national_id_enc is not None,
+            store_credit_balance=str(balance),
         )
 
 

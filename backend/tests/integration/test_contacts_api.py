@@ -768,3 +768,49 @@ async def test_update_contact_cross_store_is_404(
         f"/api/v1/contacts/{cid}", json={"name": "竄改"}, headers=_auth(token_b)
     )
     assert resp.status_code == 404
+
+
+async def test_list_members_with_credit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """會員清單回傳會員＋購物金餘額；非會員不列入；姓名/電話可篩。"""
+    from app.modules.storecredit.service import StoreCreditService
+    from app.shared.enums import StoreCreditSourceType
+
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    manager = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    alice = Contact(store_id=store.id, name="林愛麗", phone="0911111111", roles=["MEMBER"])
+    bob = Contact(store_id=store.id, name="陳大寶", phone="0922222222", roles=["MEMBER"])
+    seller = Contact(store_id=store.id, name="只是賣方", phone="0933333333", roles=["SELLER"])
+    db_session.add_all([manager, alice, bob, seller])
+    await db_session.flush()
+    token = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store.id)
+
+    await StoreCreditService(db_session).credit(
+        store.id,
+        alice.id,
+        cash_equivalent=Decimal(1000),
+        premium_rate=Decimal("0.1000"),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=manager.id,
+    )
+
+    resp = await client.get("/api/v1/contacts/members", headers=_auth(token))
+    assert resp.status_code == 200, resp.text
+    rows = {row["name"]: row for row in resp.json()}
+    assert "只是賣方" not in rows  # 非會員不列入
+    assert rows["林愛麗"]["store_credit_balance"] == "1100"  # 含 10% 溢價
+    assert rows["陳大寶"]["store_credit_balance"] == "0"  # 無帳戶視為 0
+
+    by_name = await client.get(
+        "/api/v1/contacts/members", params={"q": "愛麗"}, headers=_auth(token)
+    )
+    assert [r["name"] for r in by_name.json()] == ["林愛麗"]
+
+    by_phone = await client.get(
+        "/api/v1/contacts/members", params={"q": "0922222222"}, headers=_auth(token)
+    )
+    assert [r["name"] for r in by_phone.json()] == ["陳大寶"]

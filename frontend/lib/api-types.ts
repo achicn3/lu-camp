@@ -463,6 +463,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/contacts/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Members With Credit
+         * @description 會員清單（role=MEMBER）併購物金餘額；姓名/電話可篩、分頁（§4 店別、§5 不以證號搜尋）。
+         */
+        get: operations["listMembersWithCredit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts/{contact_id}": {
         parameters: {
             query?: never;
@@ -2569,6 +2589,26 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * MemberWithCreditRead
+         * @description 會員清單列：基本資料 + 點數 + 購物金餘額（整數元字串）。national_id 一律遮罩。
+         */
+        MemberWithCreditRead: {
+            /** Has National Id */
+            has_national_id: boolean;
+            /** Id */
+            id: number;
+            /** Member Points */
+            member_points: number;
+            /** Name */
+            name: string;
+            /** Phone */
+            phone: string | null;
+            /** Roles */
+            roles: string[];
+            /** Store Credit Balance */
+            store_credit_balance: string;
+        };
         /** MenuItemCreateRequest */
         MenuItemCreateRequest: {
             /** Category */
@@ -4514,6 +4554,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContactRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listMembersWithCredit: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberWithCreditRead"][];
                 };
             };
             /** @description Validation Error */

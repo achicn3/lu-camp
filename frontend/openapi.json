@@ -3260,6 +3260,60 @@
         "title": "MemberSourcedItemRead",
         "type": "object"
       },
+      "MemberWithCreditRead": {
+        "description": "會員清單列：基本資料 + 點數 + 購物金餘額（整數元字串）。national_id 一律遮罩。",
+        "properties": {
+          "has_national_id": {
+            "title": "Has National Id",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "member_points": {
+            "title": "Member Points",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "store_credit_balance": {
+            "title": "Store Credit Balance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "phone",
+          "roles",
+          "member_points",
+          "has_national_id",
+          "store_credit_balance"
+        ],
+        "title": "MemberWithCreditRead",
+        "type": "object"
+      },
       "MenuItemCreateRequest": {
         "properties": {
           "category": {
@@ -7552,6 +7606,88 @@
           }
         ],
         "summary": "Lookup Contact",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/members": {
+      "get": {
+        "description": "會員清單（role=MEMBER）併購物金餘額；姓名/電話可篩、分頁（§4 店別、§5 不以證號搜尋）。",
+        "operationId": "listMembersWithCredit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberWithCreditRead"
+                  },
+                  "title": "Response Listmemberswithcredit",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Members With Credit",
         "tags": [
           "contacts"
         ]
