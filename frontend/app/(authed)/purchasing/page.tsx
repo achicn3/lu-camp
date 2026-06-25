@@ -321,6 +321,94 @@ function CreatePurchaseOrder({ suppliers }: { suppliers: Supplier[] }) {
   );
 }
 
+// ── 採購單詳情（點單號/詳細）：供應商、狀態、時間、完整明細＋總額 ──────────
+function PurchaseOrderDetailModal({
+  po,
+  supplierName,
+  productLabel,
+  onClose,
+  onReceive,
+}: {
+  po: PurchaseOrder;
+  supplierName: (id: number) => string;
+  productLabel: (id: number) => CatalogProduct | null;
+  onClose: () => void;
+  onReceive: () => void;
+}) {
+  const badge = poStatusBadge(po.status);
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="採購單詳情">
+      <div className="card pos-dialog pur-detail">
+        <div className="pur-detail-head">
+          <h2>採購單 #{po.id}</h2>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+        <dl className="pur-detail-grid">
+          <div>
+            <dt>供應商</dt>
+            <dd>{supplierName(po.supplier_id)}</dd>
+          </div>
+          <div>
+            <dt>狀態</dt>
+            <dd>
+              <span className={`inv-badge inv-tone-${badge.tone}`}>{badge.label}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>下單時間</dt>
+            <dd>{dt(po.ordered_at)}</dd>
+          </div>
+          <div>
+            <dt>收貨時間</dt>
+            <dd>{dt(po.received_at)}</dd>
+          </div>
+        </dl>
+        <table className="data-table pur-detail-table">
+          <thead>
+            <tr>
+              <th>商品</th>
+              <th>數量</th>
+              <th>進貨單價</th>
+              <th>小計</th>
+            </tr>
+          </thead>
+          <tbody>
+            {po.lines.map((line) => {
+              const prod = productLabel(line.catalog_product_id);
+              return (
+                <tr key={line.id}>
+                  <td>
+                    {prod ? prod.name : `#${line.catalog_product_id}`}
+                    {prod && <span className="row-sub">{prod.sku}</span>}
+                  </td>
+                  <td>{line.qty}</td>
+                  <td className="money">{money(line.unit_cost)}</td>
+                  <td className="money">{money(line.line_total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={3}>合計</td>
+              <td className="money">{money(po.total_cost)}</td>
+            </tr>
+          </tfoot>
+        </table>
+        {canReceive(po.status) && (
+          <div className="pos-dialog-actions">
+            <button type="button" className="btn-primary" onClick={onReceive}>
+              收貨入庫
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── 採購單清單 + 收貨 ────────────────────────────────────────
 function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const queryClient = useQueryClient();
@@ -328,11 +416,27 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [receiveError, setReceiveError] = useState<string | null>(null);
   const [status, setStatus] = useState<PoStatus | "ALL">("ALL");
   const [page, setPage] = useState(0);
+  const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
 
   const supplierName = useMemo(() => {
     const map = new Map(suppliers.map((s) => [s.id, s.name] as const));
     return (id: number) => map.get(id) ?? `#${id}`;
   }, [suppliers]);
+
+  // 數量品名稱對照（採購單明細以 catalog_product_id 記錄；詳情頁顯示品名/SKU）。
+  const catalog = useQuery({
+    queryKey: ["catalog-products", "name-map"],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/catalog-products", {
+        params: { query: { limit: 200, offset: 0 } },
+      });
+      return data ?? [];
+    },
+  });
+  const productLabel = useMemo(() => {
+    const map = new Map((catalog.data ?? []).map((p) => [p.id, p] as const));
+    return (id: number) => map.get(id) ?? null;
+  }, [catalog.data]);
 
   const orders = useQuery({
     queryKey: ["purchase-orders", status, page],
@@ -407,7 +511,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
               <th>項數</th>
               <th>總額</th>
               <th>狀態</th>
-              <th />
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -415,7 +519,11 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
               const badge = poStatusBadge(po.status);
               return (
                 <tr key={po.id}>
-                  <td>#{po.id}</td>
+                  <td>
+                    <button type="button" className="pur-po-link" onClick={() => setDetailPo(po)}>
+                      #{po.id}
+                    </button>
+                  </td>
                   <td>{supplierName(po.supplier_id)}</td>
                   <td>
                     {dt(po.ordered_at)}
@@ -426,7 +534,10 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                   <td>
                     <span className={`inv-badge inv-tone-${badge.tone}`}>{badge.label}</span>
                   </td>
-                  <td>
+                  <td className="pur-row-actions">
+                    <button type="button" className="btn-ghost" onClick={() => setDetailPo(po)}>
+                      詳細
+                    </button>
                     {canReceive(po.status) && (
                       <button
                         type="button"
@@ -449,6 +560,20 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       )}
       {!orders.isPending && !orders.isError && (
         <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+      )}
+
+      {detailPo !== null && (
+        <PurchaseOrderDetailModal
+          po={detailPo}
+          supplierName={supplierName}
+          productLabel={productLabel}
+          onClose={() => setDetailPo(null)}
+          onReceive={() => {
+            setReceiving(detailPo);
+            setReceiveError(null);
+            setDetailPo(null);
+          }}
+        />
       )}
 
       {receiving !== null && (
@@ -783,12 +908,18 @@ export default function PurchasingPage() {
       )}
 
       {tab === "orders" ? (
-        <div className="pur-grid">
-          <LowStockCard />
-          <CreateCatalogProductCard />
-          <CreatePurchaseOrder suppliers={supplierList} />
+        <>
+          {/* 採購單清單為主畫面（短頁面、可篩可翻可點詳情）；建立/上架/低庫存收進可展開區。 */}
           <PurchaseOrderList suppliers={supplierList} />
-        </div>
+          <details className="pur-tools">
+            <summary>建立採購單 ・ 上架商品 ・ 低庫存提醒</summary>
+            <div className="pur-grid pur-grid-tools">
+              <LowStockCard />
+              <CreateCatalogProductCard />
+              <CreatePurchaseOrder suppliers={supplierList} />
+            </div>
+          </details>
+        </>
       ) : (
         <SupplierManager />
       )}

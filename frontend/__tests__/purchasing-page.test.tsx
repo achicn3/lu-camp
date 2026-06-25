@@ -201,6 +201,24 @@ describe("/purchasing", () => {
     expect(parsed.tax_id).toBe("87654321");
   });
 
+  it("點採購單單號開啟詳情，顯示明細品名與合計", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "#7" }));
+    expect(await screen.findByText("採購單 #7")).toBeTruthy();
+    // 明細以品名顯示（非 #42）；鎖定詳情表格儲存格（低庫存卡也有同名，故指定 td）。
+    expect(screen.getByText("瓦斯罐", { selector: "td" })).toBeTruthy();
+    expect(screen.getByText("合計")).toBeTruthy();
+  });
+
   it("採購單狀態篩選會帶上 status 查詢參數", async () => {
     loginAs("CLERK");
     const poUrls: string[] = [];
