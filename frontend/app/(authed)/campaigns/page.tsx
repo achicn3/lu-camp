@@ -160,6 +160,7 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           />
           數量型商品
         </label>
+        <p className="hint">餐飲（內用）品項一律不參與活動折扣，結帳時自動以原價計算。</p>
       </fieldset>
 
       <fieldset className="campaign-scope-fieldset">

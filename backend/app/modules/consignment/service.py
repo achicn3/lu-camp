@@ -197,12 +197,13 @@ class ConsignmentService:
         store_id: int,
         *,
         status: ConsignmentSettlementStatus | None = None,
+        phone: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """店內寄售結算列（可篩 status；付款工作清單/應付查詢；§4 店別範圍）。"""
+        """店內寄售結算列（可篩 status／寄售人手機；付款工作清單/應付查詢；§4 店別範圍）。"""
         return await self._repo.list_settlements(
-            store_id, status=status, limit=limit, offset=offset
+            store_id, status=status, phone=phone, limit=limit, offset=offset
         )
 
     async def all_settlements_for_report(self, store_id: int) -> list[dict[str, Any]]:

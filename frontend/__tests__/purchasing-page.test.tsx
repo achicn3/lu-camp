@@ -110,7 +110,9 @@ describe("/purchasing", () => {
 
     expect(await screen.findByText("瓦斯罐")).toBeTruthy();
     expect(screen.getByText(/現量 1 \/ 補貨點 5/)).toBeTruthy();
-    expect(await screen.findByRole("option", { name: "山林供應商" })).toBeTruthy();
+    // 供應商欄改為「查無即建」combobox（與收購頁品牌一致），採購單清單仍以文字顯示供應商名。
+    expect(screen.getByLabelText("供應商")).toBeTruthy();
+    expect(await screen.findByText("山林供應商")).toBeTruthy();
     expect(screen.getByRole("button", { name: "收貨入庫" })).toBeTruthy();
     expect(screen.getByText("已下單")).toBeTruthy();
   });
@@ -156,8 +158,10 @@ describe("/purchasing", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByRole("option", { name: "山林供應商" });
-    await user.selectOptions(screen.getByLabelText("供應商"), "5");
+    const supplierInput = screen.getByLabelText("供應商");
+    await user.click(supplierInput);
+    await user.type(supplierInput, "山林");
+    await user.click(await screen.findByRole("option", { name: "山林供應商" }));
     await user.type(screen.getByLabelText("搜尋數量品"), "瓦斯");
     await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
     await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");

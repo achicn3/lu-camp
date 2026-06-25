@@ -7206,7 +7206,7 @@
     },
     "/api/v1/consignment/settlements": {
       "get": {
-        "description": "店內寄售結算列（可篩 status，新到舊、分頁；§4 店別範圍）。",
+        "description": "店內寄售結算列（可篩 status／寄售人手機，新到舊、分頁；§4 店別範圍）。",
         "operationId": "listConsignmentSettlements",
         "parameters": [
           {
@@ -7223,6 +7223,23 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "phone",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phone"
             }
           },
           {

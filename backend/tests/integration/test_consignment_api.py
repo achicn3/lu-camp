@@ -205,3 +205,28 @@ async def test_list_settlements_filters_by_status(
         "/api/v1/consignment/settlements", params={"status": "PENDING"}, headers=_auth(token)
     )
     assert all(row["id"] != sid for row in still_pending.json())
+
+
+async def test_list_settlements_filters_by_consignor_phone(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """以寄售人手機（部分）找出其結算；不符的手機回空清單。"""
+    token, sid, _ = await _seed(db_session)
+
+    hit = await client.get(
+        "/api/v1/consignment/settlements", params={"phone": "0912-000-001"}, headers=_auth(token)
+    )
+    assert hit.status_code == 200, hit.text
+    assert any(row["id"] == sid for row in hit.json())
+
+    partial = await client.get(
+        "/api/v1/consignment/settlements", params={"phone": "000-001"}, headers=_auth(token)
+    )
+    assert partial.status_code == 200, partial.text
+    assert any(row["id"] == sid for row in partial.json())
+
+    miss = await client.get(
+        "/api/v1/consignment/settlements", params={"phone": "0900-999-999"}, headers=_auth(token)
+    )
+    assert miss.status_code == 200, miss.text
+    assert all(row["id"] != sid for row in miss.json())

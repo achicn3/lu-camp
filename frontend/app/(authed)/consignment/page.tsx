@@ -114,6 +114,8 @@ function ConfirmDialog({
 export default function ConsignmentPage() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SettlementStatus>("PENDING");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [phone, setPhone] = useState("");
   const [paying, setPaying] = useState<Settlement | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
 
@@ -127,10 +129,16 @@ export default function ConsignmentPage() {
   });
 
   const settlements = useQuery({
-    queryKey: ["consignment", "settlements", status],
+    queryKey: ["consignment", "settlements", status, phone],
     queryFn: async () => {
+      const query: { status: SettlementStatus; limit: number; offset: number; phone?: string } = {
+        status,
+        limit: 100,
+        offset: 0,
+      };
+      if (phone) query.phone = phone;
       const { data, error } = await api.GET("/api/v1/consignment/settlements", {
-        params: { query: { status, limit: 100, offset: 0 } },
+        params: { query },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取寄售結算失敗");
       return data;
@@ -193,6 +201,38 @@ export default function ConsignmentPage() {
           </button>
         ))}
       </div>
+
+      <form
+        className="settle-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setPhone(phoneInput.trim());
+        }}
+      >
+        <input
+          className="acq-search"
+          inputMode="tel"
+          placeholder="以寄售人手機查找"
+          aria-label="以寄售人手機查找"
+          value={phoneInput}
+          onChange={(e) => setPhoneInput(e.target.value)}
+        />
+        <button type="submit" className="btn-secondary">
+          查找
+        </button>
+        {phone && (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setPhoneInput("");
+              setPhone("");
+            }}
+          >
+            清除（手機：{phone}）
+          </button>
+        )}
+      </form>
 
       {status === "PENDING" && (
         <div className="member-banner">

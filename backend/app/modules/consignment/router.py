@@ -45,12 +45,13 @@ async def list_settlements(
     session: SessionDep,
     user: CurrentUserDep,
     settlement_status: Annotated[ConsignmentSettlementStatus | None, Query(alias="status")] = None,
+    phone: Annotated[str | None, Query(max_length=20)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ConsignmentSettlementRead]:
-    """店內寄售結算列（可篩 status，新到舊、分頁；§4 店別範圍）。"""
+    """店內寄售結算列（可篩 status／寄售人手機，新到舊、分頁；§4 店別範圍）。"""
     rows = await ConsignmentService(session).list_settlements(
-        user.store_id, status=settlement_status, limit=limit, offset=offset
+        user.store_id, status=settlement_status, phone=phone, limit=limit, offset=offset
     )
     return [ConsignmentSettlementRead.model_validate(row) for row in rows]
 

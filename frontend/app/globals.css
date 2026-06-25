@@ -815,6 +815,17 @@ body {
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
+.settle-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+.settle-search .acq-search {
+  flex: 1 1 220px;
+  max-width: 320px;
+}
 .settle-card {
   max-width: none;
 }

@@ -394,7 +394,7 @@ export interface paths {
         };
         /**
          * List Settlements
-         * @description 店內寄售結算列（可篩 status，新到舊、分頁；§4 店別範圍）。
+         * @description 店內寄售結算列（可篩 status／寄售人手機，新到舊、分頁；§4 店別範圍）。
          */
         get: operations["listConsignmentSettlements"];
         put?: never;
@@ -4364,6 +4364,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["ConsignmentSettlementStatus"] | null;
+                phone?: string | null;
                 limit?: number;
                 offset?: number;
             };

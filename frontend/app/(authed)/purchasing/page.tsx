@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
 import {
   type CatalogProduct,
   canReceive,
@@ -150,6 +151,26 @@ function CreatePurchaseOrder({ suppliers }: { suppliers: Supplier[] }) {
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  // 送出成功後遞增 → 重掛供應商 combobox，連同內部文字一併清空（避免顯示舊值卻無 id）。
+  const [supplierKey, setSupplierKey] = useState(0);
+
+  function searchSuppliers(q: string): Promise<ComboOption[]> {
+    const needle = q.trim().toLowerCase();
+    return Promise.resolve(
+      suppliers
+        .filter((s) => needle === "" || s.name.toLowerCase().includes(needle))
+        .map((s) => ({ id: s.id, name: s.name })),
+    );
+  }
+  function createSupplier(name: string): Promise<ComboOption> {
+    return api.POST("/api/v1/suppliers", { body: { name, contact: null, tax_id: null } }).then(
+      ({ data, error }) => {
+        if (!data) throw new Error(extractDetail(error) ?? "建立供應商失敗");
+        void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+        return { id: data.id, name: data.name };
+      },
+    );
+  }
 
   const productSearch = useQuery({
     queryKey: ["catalog-products", "search", search],
@@ -176,6 +197,7 @@ function CreatePurchaseOrder({ suppliers }: { suppliers: Supplier[] }) {
       setLines([]);
       setSearch("");
       setSupplierId(null);
+      setSupplierKey((k) => k + 1);
       setFormError(null);
       void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
@@ -196,21 +218,14 @@ function CreatePurchaseOrder({ suppliers }: { suppliers: Supplier[] }) {
   return (
     <div className="card pur-create">
       <h2>建立採購單</h2>
-      <label className="field">
-        <span>供應商</span>
-        <select
-          aria-label="供應商"
-          value={supplierId ?? ""}
-          onChange={(e) => setSupplierId(e.target.value === "" ? null : Number(e.target.value))}
-        >
-          <option value="">請選擇供應商</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <CreatableCombobox
+        key={supplierKey}
+        label="供應商"
+        search={searchSuppliers}
+        create={createSupplier}
+        placeholder="選擇或新增供應商"
+        onChange={(o) => setSupplierId(o?.id ?? null)}
+      />
 
       <label className="field">
         <span>搜尋數量品（加入明細）</span>

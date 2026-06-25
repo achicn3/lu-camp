@@ -88,7 +88,11 @@ class ConsignmentRepository:
         return list((await self._session.scalars(stmt)).all())
 
     @staticmethod
-    def _settlements_select(store_id: int, status: ConsignmentSettlementStatus | None) -> Any:
+    def _settlements_select(
+        store_id: int,
+        status: ConsignmentSettlementStatus | None,
+        phone: str | None = None,
+    ) -> Any:
         """寄售結算明細 select（join 序號品/寄售人/銷售；只輸出姓名/電話，不含 national_id）。"""
         stmt = (
             select(
@@ -119,6 +123,8 @@ class ConsignmentRepository:
         )
         if status is not None:
             stmt = stmt.where(ConsignmentSettlement.status == status)
+        if phone:
+            stmt = stmt.where(Contact.phone.ilike(f"%{phone}%"))
         return stmt
 
     async def list_settlements(
@@ -126,12 +132,13 @@ class ConsignmentRepository:
         store_id: int,
         *,
         status: ConsignmentSettlementStatus | None = None,
+        phone: str | None = None,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
-        """店內寄售結算列（可篩 status、新到舊、分頁）；付款工作清單與應付查詢用。"""
+        """店內寄售結算列（可篩 status／寄售人手機、新到舊、分頁）；付款工作清單與應付查詢用。"""
         stmt = (
-            self._settlements_select(store_id, status)
+            self._settlements_select(store_id, status, phone)
             .order_by(ConsignmentSettlement.id.desc())
             .limit(limit)
             .offset(offset)
