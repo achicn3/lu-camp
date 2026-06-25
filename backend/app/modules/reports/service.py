@@ -417,6 +417,12 @@ class ReportsService:
         """
         if granularity not in ("day", "week", "month", "quarter"):
             raise DomainError("granularity 僅支援 day/week/month/quarter")
+        # 無時區（naive）的 from/to 視為 UTC，與其餘報表端點一致；否則與 _bucket_bounds
+        # 回傳的 tz-aware cursor 相比會拋 TypeError（offset-naive vs offset-aware）。
+        if date_from.tzinfo is None:
+            date_from = date_from.replace(tzinfo=UTC)
+        if date_to.tzinfo is None:
+            date_to = date_to.replace(tzinfo=UTC)
         now = _now()
         rows: list[TrendRow] = []
         cursor, _ = _bucket_bounds(granularity, date_from)

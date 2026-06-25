@@ -11,7 +11,7 @@ const MODULES: { title: string; description: string; href: string }[] = [
   { title: "採購補貨", description: "供應商、採購單、收貨入庫、上架數量型商品", href: "/purchasing" },
   { title: "盤點", description: "建立盤點單、輸入實點、確認校正", href: "/stocktake" },
   { title: "門市活動", description: "限時促銷折扣建立與成效", href: "/campaigns" },
-  { title: "餐飲菜單", description: "內用品項上下架、改價（MANAGER）", href: "/menu" },
+  { title: "餐飲菜單", description: "內用品項上下架、改價（限店長）", href: "/menu" },
   { title: "報表", description: "今日營運、趨勢、現金、毛利、庫存、寄售", href: "/reports" },
   { title: "設定", description: "稅率、抽成、購物金溢價與低消門檻", href: "/settings" },
 ];

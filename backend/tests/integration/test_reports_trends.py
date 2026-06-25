@@ -373,6 +373,25 @@ async def test_trends_rejects_bad_range_and_granularity(
     assert badg.status_code == 422
 
 
+async def test_trends_accepts_naive_datetime_params(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """無時區（naive）的 from/to 不得 500：service 內部正規化為 UTC，與其餘報表端點一致。
+
+    回歸守衛：先前 _bucket_bounds 的 tz-aware cursor 與 naive date_to 相比會拋
+    TypeError(offset-naive vs offset-aware) → 500。
+    """
+    mgr, _clerk, _store_id, _clerk_id, _m = await _seed(db_session)
+    for params in (
+        {"from": "2026-01-01", "to": "2026-02-01", "granularity": "day"},
+        {"from": "2026-01-01T00:00:00", "to": "2026-02-01T00:00:00", "granularity": "month"},
+    ):
+        resp = await client.get(
+            "/api/v1/reports/trends", params=params, headers=_auth(mgr)
+        )
+        assert resp.status_code == 200, resp.text
+
+
 async def test_trends_rejects_too_many_buckets(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

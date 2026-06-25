@@ -274,7 +274,7 @@ export default function CashPage() {
         <div className="card-stack">
           <div className="card">
             <h2>
-              開帳中 <span className="badge-open">OPEN</span>
+              <span className="badge-open">開帳中</span>
             </h2>
             <dl className="stat-list">
               <div className="stat">
