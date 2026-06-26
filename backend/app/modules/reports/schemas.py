@@ -347,3 +347,47 @@ class CampaignPerformanceReport(BaseModel):
     generated_at: datetime
     store_id: int
     rows: list[CampaignPerformanceRow]
+
+
+class InsightsBreakdownRow(BaseModel):
+    """經營洞察：單一品牌或類型的售出彙整列。"""
+
+    key: int | None
+    label: str
+    units_sold: int
+    revenue: NTDAmount
+    margin: NTDAmount
+    avg_unit_price: NTDAmount
+    avg_days_in_stock: float | None
+
+
+class InsightsTurnover(BaseModel):
+    """經營洞察：周轉 / 滯銷摘要。"""
+
+    in_stock_over_90d: int
+    avg_turnover_days: float | None
+    owned_serialized: int
+    consignment_serialized: int
+    bulk_on_sale: int
+    catalog_in_stock: int
+
+
+class InsightsRevenueMix(BaseModel):
+    """經營洞察：業態營收結構（認列口徑：寄售只認抽成）。"""
+
+    secondhand: NTDAmount
+    consignment_commission: NTDAmount
+    food: NTDAmount
+
+
+class InsightsReport(BaseModel):
+    """經營洞察報表（#8）：品牌/類型暢銷、周轉/滯銷、業態結構。趨勢另走 /reports/trends。"""
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    brand_breakdown: list[InsightsBreakdownRow]
+    category_breakdown: list[InsightsBreakdownRow]
+    turnover: InsightsTurnover
+    revenue_mix: InsightsRevenueMix

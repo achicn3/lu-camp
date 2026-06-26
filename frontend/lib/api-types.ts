@@ -913,6 +913,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Insights
+         * @description 經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
+         */
+        get: operations["businessInsightsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/inventory-value": {
         parameters: {
             query?: never;
@@ -2493,6 +2513,85 @@ export interface components {
         HealthResponse: {
             /** Status */
             status: string;
+        };
+        /**
+         * InsightsBreakdownRow
+         * @description 經營洞察：單一品牌或類型的售出彙整列。
+         */
+        InsightsBreakdownRow: {
+            /** Avg Days In Stock */
+            avg_days_in_stock: number | null;
+            /** Avg Unit Price */
+            avg_unit_price: string;
+            /** Key */
+            key: number | null;
+            /** Label */
+            label: string;
+            /** Margin */
+            margin: string;
+            /** Revenue */
+            revenue: string;
+            /** Units Sold */
+            units_sold: number;
+        };
+        /**
+         * InsightsReport
+         * @description 經營洞察報表（#8）：品牌/類型暢銷、周轉/滯銷、業態結構。趨勢另走 /reports/trends。
+         */
+        InsightsReport: {
+            /** Brand Breakdown */
+            brand_breakdown: components["schemas"]["InsightsBreakdownRow"][];
+            /** Category Breakdown */
+            category_breakdown: components["schemas"]["InsightsBreakdownRow"][];
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            revenue_mix: components["schemas"]["InsightsRevenueMix"];
+            /** Store Id */
+            store_id: number;
+            turnover: components["schemas"]["InsightsTurnover"];
+        };
+        /**
+         * InsightsRevenueMix
+         * @description 經營洞察：業態營收結構（認列口徑：寄售只認抽成）。
+         */
+        InsightsRevenueMix: {
+            /** Consignment Commission */
+            consignment_commission: string;
+            /** Food */
+            food: string;
+            /** Secondhand */
+            secondhand: string;
+        };
+        /**
+         * InsightsTurnover
+         * @description 經營洞察：周轉 / 滯銷摘要。
+         */
+        InsightsTurnover: {
+            /** Avg Turnover Days */
+            avg_turnover_days: number | null;
+            /** Bulk On Sale */
+            bulk_on_sale: number;
+            /** Catalog In Stock */
+            catalog_in_stock: number;
+            /** Consignment Serialized */
+            consignment_serialized: number;
+            /** In Stock Over 90D */
+            in_stock_over_90d: number;
+            /** Owned Serialized */
+            owned_serialized: number;
         };
         /**
          * InventoryValueReport
@@ -5681,6 +5780,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailySummaryReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    businessInsightsReport: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsReport"];
                 };
             };
             /** @description Validation Error */

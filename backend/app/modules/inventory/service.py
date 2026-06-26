@@ -404,6 +404,30 @@ class InventoryService:
             "history": history,
         }
 
+    async def count_aged_in_stock(self, store_id: int, days: int) -> int:
+        """在庫且入庫≥days 天的序號品件數（洞察摘要：久滯預警）。"""
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        return await self._repo.count_serialized(
+            store_id, status=SerializedItemStatus.IN_STOCK, stocked_before=cutoff
+        )
+
+    async def inventory_mix(self, store_id: int) -> dict[str, int]:
+        """在庫結構件數：自有序號品 / 寄售序號品 / 販售中散裝批 / 有量數量品（洞察摘要）。"""
+        owned = await self._repo.count_serialized(
+            store_id, status=SerializedItemStatus.IN_STOCK, ownership_type=OwnershipType.OWNED
+        )
+        consignment = await self._repo.count_serialized(
+            store_id, status=SerializedItemStatus.IN_STOCK, ownership_type=OwnershipType.CONSIGNMENT
+        )
+        bulk = await self._repo.count_bulk_on_sale(store_id)
+        catalog = await self._repo.count_catalog_in_stock(store_id)
+        return {
+            "owned_serialized": owned,
+            "consignment_serialized": consignment,
+            "bulk_on_sale": bulk,
+            "catalog_in_stock": catalog,
+        }
+
     async def get_catalog_detail(self, store_id: int, product_id: int) -> dict[str, Any] | None:
         """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
         product = await self._repo.get_catalog(store_id, product_id)

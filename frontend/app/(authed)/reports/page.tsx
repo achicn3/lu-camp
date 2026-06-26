@@ -30,6 +30,8 @@ type EffectivenessReport = components["schemas"]["EffectivenessReport"];
 type ReconciliationReport = components["schemas"]["ReconciliationReport"];
 type DailySummaryReport = components["schemas"]["DailySummaryReport"];
 type TrendsReport = components["schemas"]["TrendsReport"];
+type InsightsReport = components["schemas"]["InsightsReport"];
+type InsightsBreakdownRow = components["schemas"]["InsightsBreakdownRow"];
 type DailyCashReport = components["schemas"]["DailyCashReport"];
 type SalesMarginReport = components["schemas"]["SalesMarginReport"];
 type InventoryValueReport = components["schemas"]["InventoryValueReport"];
@@ -38,6 +40,7 @@ type CampaignPerformanceReport = components["schemas"]["CampaignPerformanceRepor
 
 type Tab =
   | "dashboard"
+  | "insights"
   | "trends"
   | "daily-cash"
   | "sales-margin"
@@ -51,6 +54,7 @@ type Tab =
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "dashboard", label: "今日營運" },
+  { key: "insights", label: "經營洞察" },
   { key: "trends", label: "趨勢" },
   { key: "daily-cash", label: "現金對帳" },
   { key: "sales-margin", label: "銷售毛利" },
@@ -351,6 +355,179 @@ function DashboardPanel() {
 }
 
 // -- Trends Panel --
+
+// -- 經營洞察（#8）：品牌/類型暢銷、趨勢圖、周轉/滯銷、業態結構 --
+
+function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
+  if (rows.length === 0) return <p className="hint">此期間查無售出資料。</p>;
+  return (
+    <div className="inv-table-wrap">
+      <table className="inv-table rpt-insight-table">
+        <thead>
+          <tr>
+            <th>名稱</th>
+            <th className="num">售出件數</th>
+            <th className="num">營收</th>
+            <th className="num">毛利</th>
+            <th className="num">平均單價</th>
+            <th className="num">平均在庫天數</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.key ?? "none"}-${r.label}`}>
+              <td>{r.label}</td>
+              <td className="num">{r.units_sold}</td>
+              <td className="num"><MoneyText value={r.revenue} /></td>
+              <td className="num"><MoneyText value={r.margin} /></td>
+              <td className="num"><MoneyText value={r.avg_unit_price} /></td>
+              <td className="num">{r.avg_days_in_stock === null ? "—" : `${r.avg_days_in_stock} 天`}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function InsightsPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+  const [granularity, setGranularity] = useState<"day" | "week" | "month" | "quarter">("month");
+  const [dimension, setDimension] = useState<"brand" | "category">("brand");
+
+  const insights = useQuery({
+    queryKey: ["reports", "insights", { from, to }],
+    queryFn: async (): Promise<InsightsReport> => {
+      const { data, error, response } = await api.GET("/api/v1/reports/insights", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to) } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取經營洞察失敗");
+    },
+  });
+
+  const trends = useQuery({
+    queryKey: ["reports", "trends", "insights-chart", { from, to, granularity }],
+    queryFn: async (): Promise<TrendsReport> => {
+      const { data, error, response } = await api.GET("/api/v1/reports/trends", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to), granularity } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取趨勢失敗");
+    },
+  });
+
+  const report = insights.data;
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <label>
+          趨勢粒度
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as "day" | "week" | "month" | "quarter")}
+          >
+            {FINANCIAL_GRANULARITY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {insights.isPending && <p className="hint">載入中...</p>}
+      {insights.isError && <ErrorBlock message={insights.error.message} />}
+      {report && (
+        <>
+          {/* 趨勢圖 TrendChart（沿用財務趨勢資料） */}
+          <h3 className="rpt-insight-h">營收 / 毛利趨勢</h3>
+          {trends.data ? <TrendChart rows={trends.data.rows} /> : <p className="hint">趨勢載入中…</p>}
+
+          {/* 周轉 / 滯銷摘要卡 */}
+          <h3 className="rpt-insight-h">周轉 / 滯銷</h3>
+          <div className="rpt-insight-cards">
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">{report.turnover.in_stock_over_90d}</span>
+              <span className="rpt-insight-cap">在庫 &gt; 90 天件數</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">
+                {report.turnover.avg_turnover_days === null ? "—" : `${report.turnover.avg_turnover_days} 天`}
+              </span>
+              <span className="rpt-insight-cap">平均周轉天數</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">{report.turnover.owned_serialized}</span>
+              <span className="rpt-insight-cap">在庫自有序號品</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">{report.turnover.consignment_serialized}</span>
+              <span className="rpt-insight-cap">在庫寄售序號品</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">{report.turnover.bulk_on_sale}</span>
+              <span className="rpt-insight-cap">販售中散裝批</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num">{report.turnover.catalog_in_stock}</span>
+              <span className="rpt-insight-cap">有量數量品</span>
+            </div>
+          </div>
+
+          {/* 業態營收結構 */}
+          <h3 className="rpt-insight-h">業態營收結構</h3>
+          <div className="rpt-insight-cards">
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.secondhand} /></span>
+              <span className="rpt-insight-cap">二手買斷/散裝</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.consignment_commission} /></span>
+              <span className="rpt-insight-cap">寄售抽成</span>
+            </div>
+            <div className="rpt-insight-card">
+              <span className="rpt-insight-num"><MoneyText value={report.revenue_mix.food} /></span>
+              <span className="rpt-insight-cap">餐飲</span>
+            </div>
+          </div>
+
+          {/* 品牌 / 類型 暢銷表 */}
+          <div className="rpt-insight-head">
+            <h3 className="rpt-insight-h">暢銷排行（依營收）</h3>
+            <div className="settle-tabs">
+              <button
+                type="button"
+                className={`chip ${dimension === "brand" ? "chip-active" : ""}`}
+                onClick={() => setDimension("brand")}
+              >
+                品牌
+              </button>
+              <button
+                type="button"
+                className={`chip ${dimension === "category" ? "chip-active" : ""}`}
+                onClick={() => setDimension("category")}
+              >
+                類型
+              </button>
+            </div>
+          </div>
+          <BreakdownTable
+            rows={dimension === "brand" ? report.brand_breakdown : report.category_breakdown}
+          />
+        </>
+      )}
+    </div>
+  );
+}
 
 function TrendsPanel() {
   const defaults = defaultDateRange();
@@ -1396,6 +1573,8 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
   switch (tab) {
     case "dashboard":
       return <DashboardPanel />;
+    case "insights":
+      return <InsightsPanel />;
     case "trends":
       return <TrendsPanel />;
     case "daily-cash":

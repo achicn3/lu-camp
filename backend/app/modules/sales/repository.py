@@ -17,6 +17,12 @@ from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.shared.enums import OwnershipType, SaleInvoiceStatus, SaleLineType, TenderType
 
+# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
+_SoldRowDB = tuple[
+    int | None, int | None, OwnershipType, Decimal | None, int | None,
+    datetime, datetime | None, Decimal,
+]
+
 
 @dataclass(frozen=True)
 class SalesMarginComponents:
@@ -162,6 +168,36 @@ class SalesRepository:
             .where(Sale.store_id == store_id, Sale.buyer_contact_id == contact_id)
         )
         return int(await self._session.scalar(stmt) or 0)
+
+    async def serialized_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[_SoldRowDB]:
+        """期間（未作廢）售出序號品的洞察原始列。
+
+        欄位：品牌/類型/持有/成本/抽成%/入庫/售出/成交額；供經營洞察逐品牌/類型彙整。
+        """
+        rows = await self._session.execute(
+            select(
+                SerializedItem.brand_id,
+                SerializedItem.category_id,
+                SerializedItem.ownership_type,
+                SerializedItem.acquisition_cost,
+                SerializedItem.commission_pct,
+                SerializedItem.intake_date,
+                SerializedItem.sold_date,
+                SaleLine.line_total,
+            )
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_type == SaleLineType.SERIALIZED,
+            )
+        )
+        return [tuple(r) for r in rows]
 
     async def count_lines_for_sales(self, sale_ids: list[int]) -> dict[int, int]:
         """各銷售單的明細行數（單一 grouped 查詢，避免 N+1；空 → {}）。"""

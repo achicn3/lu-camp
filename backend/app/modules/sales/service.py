@@ -610,6 +610,17 @@ class SalesService:
             secondhand_revenue=recognized_revenue - comp.menu_revenue,
         )
 
+    async def serialized_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[
+        tuple[
+            int | None, int | None, OwnershipType, Decimal | None, int | None,
+            datetime, datetime | None, Decimal,
+        ]
+    ]:
+        """期間售出序號品的洞察原始列（經營洞察報表逐品牌/類型彙整用）。"""
+        return await self._repo.serialized_sold_rows(store_id, date_from, date_to)
+
     async def excess_spend_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> dict[str, Decimal]:

@@ -194,6 +194,40 @@ class InventoryRepository:
         stmt = stmt.order_by(order).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    async def count_serialized(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None = None,
+        ownership_type: OwnershipType | None = None,
+        stocked_before: datetime | None = None,
+    ) -> int:
+        """序號品計數（洞察摘要：在庫結構、久滯件數）。"""
+        stmt = select(func.count()).select_from(SerializedItem).where(
+            SerializedItem.store_id == store_id
+        )
+        if status is not None:
+            stmt = stmt.where(SerializedItem.status == status)
+        if ownership_type is not None:
+            stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
+        if stocked_before is not None:
+            stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def count_bulk_on_sale(self, store_id: int) -> int:
+        """販售中散裝批計數（洞察摘要）。"""
+        stmt = select(func.count()).select_from(BulkLot).where(
+            BulkLot.store_id == store_id, BulkLot.status == BulkLotStatus.ON_SALE
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
+    async def count_catalog_in_stock(self, store_id: int) -> int:
+        """有現量（>0）的數量品種類數（洞察摘要）。"""
+        stmt = select(func.count()).select_from(CatalogProduct).where(
+            CatalogProduct.store_id == store_id, CatalogProduct.quantity_on_hand > 0
+        )
+        return int(await self._session.scalar(stmt) or 0)
+
     async def list_catalog(
         self,
         store_id: int,

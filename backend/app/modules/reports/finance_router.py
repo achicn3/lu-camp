@@ -19,6 +19,7 @@ from app.modules.reports.schemas import (
     ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
+    InsightsReport,
     InventoryValueReport,
     SalesMarginReport,
     TrendsReport,
@@ -230,6 +231,23 @@ async def trends(
         ],
     )
     return export_response(exp, fmt)
+
+
+@router.get("/insights", response_model=InsightsReport, operation_id="businessInsightsReport")
+async def insights(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[datetime, Query(alias="from")],
+    date_to: Annotated[datetime, Query(alias="to")],
+) -> InsightsReport:
+    """經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。"""
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    return await ReportsService(session).insights(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
 
 
 @router.get(

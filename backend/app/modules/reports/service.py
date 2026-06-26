@@ -6,6 +6,7 @@
 
 import calendar
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -33,6 +34,10 @@ from app.modules.reports.schemas import (
     EffectivenessReport,
     FlowRow,
     FlowsReport,
+    InsightsBreakdownRow,
+    InsightsReport,
+    InsightsRevenueMix,
+    InsightsTurnover,
     InventoryValueReport,
     LiabilityReport,
     MemberBalanceRow,
@@ -51,6 +56,23 @@ from app.shared.exceptions import DomainError
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
+_SoldRow = tuple[
+    int | None, int | None, OwnershipType, Decimal | None, int | None,
+    datetime, datetime | None, Decimal,
+]
+
+
+@dataclass
+class _InsightAcc:
+    """逐品牌/類型暢銷彙整的累加器。"""
+
+    units: int = 0
+    revenue: Decimal = field(default_factory=lambda: Decimal(0))
+    margin: Decimal = field(default_factory=lambda: Decimal(0))
+    days: list[int] = field(default_factory=list)
 
 
 MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
@@ -268,6 +290,90 @@ class ReportsService:
             cash_received=bd.cash_received,
             store_credit_redeemed=bd.store_credit_redeemed,
             transaction_count=bd.transaction_count,
+        )
+
+    @staticmethod
+    def _aggregate_insights(
+        rows: list[_SoldRow],
+        key_index: int,
+        name_map: dict[int, str],
+        default_label: str,
+    ) -> list[InsightsBreakdownRow]:
+        """逐品牌(key_index=0)/類型(key_index=1)彙整售出列：件數/營收/毛利/均價/平均在庫天數。
+
+        毛利口徑：買斷=成交價−收購成本（成本不明則不計毛利）；寄售=round_ntd(成交價×抽成%)。
+        """
+        groups: dict[int | None, _InsightAcc] = {}
+        for r in rows:
+            ownership, cost, pct, intake, sold, line_total = r[2], r[3], r[4], r[5], r[6], r[7]
+            key: int | None = r[0] if key_index == 0 else r[1]
+            acc = groups.setdefault(key, _InsightAcc())
+            acc.units += 1
+            acc.revenue += line_total
+            if ownership == OwnershipType.CONSIGNMENT and pct is not None:
+                acc.margin += round_ntd(line_total * Decimal(pct) / 100)
+            elif cost is not None:
+                acc.margin += line_total - cost
+            if sold is not None:
+                acc.days.append((sold - intake).days)
+        result = [
+            InsightsBreakdownRow(
+                key=key,
+                label=name_map.get(key, default_label) if key is not None else default_label,
+                units_sold=acc.units,
+                revenue=acc.revenue,
+                margin=acc.margin,
+                avg_unit_price=round_ntd(acc.revenue / acc.units) if acc.units else Decimal(0),
+                avg_days_in_stock=(
+                    round(sum(acc.days) / len(acc.days), 1) if acc.days else None
+                ),
+            )
+            for key, acc in groups.items()
+        ]
+        result.sort(key=lambda row: row.revenue, reverse=True)
+        return result
+
+    async def insights(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> InsightsReport:
+        """經營洞察報表（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。唯讀。"""
+        rows = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
+        brands = {
+            b.id: b.name for b in await self._inventory.list_brands(store_id, q=None, limit=200)
+        }
+        cats = {
+            c.id: c.name for c in await self._inventory.list_categories(store_id, q=None, limit=200)
+        }
+        brand_rows = self._aggregate_insights(rows, 0, brands, "未指定品牌")
+        category_rows = self._aggregate_insights(rows, 1, cats, "未分類")
+
+        spans = [(sold - intake).days for *_, intake, sold, _lt in rows if sold is not None]
+        avg_turnover = round(sum(spans) / len(spans), 1) if spans else None
+
+        mix = await self._inventory.inventory_mix(store_id)
+        aged = await self._inventory.count_aged_in_stock(store_id, 90)
+        bd = await self._sales.margin_breakdown(store_id, date_from, date_to)
+
+        return InsightsReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            brand_breakdown=brand_rows,
+            category_breakdown=category_rows,
+            turnover=InsightsTurnover(
+                in_stock_over_90d=aged,
+                avg_turnover_days=avg_turnover,
+                owned_serialized=mix["owned_serialized"],
+                consignment_serialized=mix["consignment_serialized"],
+                bulk_on_sale=mix["bulk_on_sale"],
+                catalog_in_stock=mix["catalog_in_stock"],
+            ),
+            revenue_mix=InsightsRevenueMix(
+                secondhand=bd.secondhand_revenue - bd.consignment_commission_income,
+                consignment_commission=bd.consignment_commission_income,
+                food=bd.food_revenue,
+            ),
         )
 
     async def campaign_performance(self, store_id: int) -> CampaignPerformanceReport:

@@ -293,6 +293,7 @@ function stubReportsFetch() {
       const url = input instanceof Request ? input.url : String(input);
       // Financial reports (Phase 6)
       if (url.includes("/reports/daily-summary")) return json(DAILY_SUMMARY_DATA);
+      if (url.includes("/reports/insights")) return json(INSIGHTS_DATA);
       if (url.includes("/reports/trends")) return json(TRENDS_DATA);
       if (url.includes("/reports/daily-cash")) return json(DAILY_CASH_DATA);
       if (url.includes("/reports/sales-margin")) return json(SALES_MARGIN_DATA);
@@ -307,6 +308,44 @@ function stubReportsFetch() {
     }),
   );
 }
+
+const INSIGHTS_DATA = {
+  generated_at: "2026-06-26T00:00:00Z",
+  store_id: 1,
+  date_from: "2026-06-01T00:00:00Z",
+  date_to: "2026-06-30T00:00:00Z",
+  brand_breakdown: [
+    {
+      key: 1,
+      label: "Snow Peak",
+      units_sold: 12,
+      revenue: "60000",
+      margin: "20000",
+      avg_unit_price: "5000",
+      avg_days_in_stock: 42.5,
+    },
+  ],
+  category_breakdown: [
+    {
+      key: 2,
+      label: "帳篷",
+      units_sold: 8,
+      revenue: "40000",
+      margin: "15000",
+      avg_unit_price: "5000",
+      avg_days_in_stock: 30,
+    },
+  ],
+  turnover: {
+    in_stock_over_90d: 3,
+    avg_turnover_days: 45.2,
+    owned_serialized: 10,
+    consignment_serialized: 5,
+    bulk_on_sale: 4,
+    catalog_in_stock: 7,
+  },
+  revenue_mix: { secondhand: "100000", consignment_commission: "8000", food: "20000" },
+};
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -352,6 +391,20 @@ describe("ReportsPage", () => {
     // gate 以後端授權為準，故即使 token=CLERK 也應渲染 dashboard 資料、不顯示權限提示。
     expect(await screen.findByText("120,000")).toBeTruthy();
     expect(screen.queryByText("需管理者權限")).toBeNull();
+  });
+
+  it("經營洞察 tab 顯示暢銷排行＋周轉摘要，並可切品牌/類型", async () => {
+    loginAs("MANAGER");
+    stubReportsFetch();
+    renderPage();
+    await screen.findByText("120,000"); // dashboard 先載入
+    await userEvent.click(screen.getByRole("tab", { name: "經營洞察" }));
+    expect(await screen.findByText("Snow Peak")).toBeTruthy();
+    expect(screen.getByText("在庫 > 90 天件數")).toBeTruthy();
+    expect(screen.getByText("寄售抽成")).toBeTruthy();
+    // 切到類型維度
+    await userEvent.click(screen.getByRole("button", { name: "類型" }));
+    expect(await screen.findByText("帳篷")).toBeTruthy();
   });
 
   it("manager sees liability tab with totals and per-member table", async () => {

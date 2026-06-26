@@ -2914,6 +2914,190 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InsightsBreakdownRow": {
+        "description": "經營洞察：單一品牌或類型的售出彙整列。",
+        "properties": {
+          "avg_days_in_stock": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Days In Stock"
+          },
+          "avg_unit_price": {
+            "title": "Avg Unit Price",
+            "type": "string"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "margin": {
+            "title": "Margin",
+            "type": "string"
+          },
+          "revenue": {
+            "title": "Revenue",
+            "type": "string"
+          },
+          "units_sold": {
+            "title": "Units Sold",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "units_sold",
+          "revenue",
+          "margin",
+          "avg_unit_price",
+          "avg_days_in_stock"
+        ],
+        "title": "InsightsBreakdownRow",
+        "type": "object"
+      },
+      "InsightsReport": {
+        "description": "經營洞察報表（#8）：品牌/類型暢銷、周轉/滯銷、業態結構。趨勢另走 /reports/trends。",
+        "properties": {
+          "brand_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/InsightsBreakdownRow"
+            },
+            "title": "Brand Breakdown",
+            "type": "array"
+          },
+          "category_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/InsightsBreakdownRow"
+            },
+            "title": "Category Breakdown",
+            "type": "array"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "revenue_mix": {
+            "$ref": "#/components/schemas/InsightsRevenueMix"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "turnover": {
+            "$ref": "#/components/schemas/InsightsTurnover"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "brand_breakdown",
+          "category_breakdown",
+          "turnover",
+          "revenue_mix"
+        ],
+        "title": "InsightsReport",
+        "type": "object"
+      },
+      "InsightsRevenueMix": {
+        "description": "經營洞察：業態營收結構（認列口徑：寄售只認抽成）。",
+        "properties": {
+          "consignment_commission": {
+            "title": "Consignment Commission",
+            "type": "string"
+          },
+          "food": {
+            "title": "Food",
+            "type": "string"
+          },
+          "secondhand": {
+            "title": "Secondhand",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secondhand",
+          "consignment_commission",
+          "food"
+        ],
+        "title": "InsightsRevenueMix",
+        "type": "object"
+      },
+      "InsightsTurnover": {
+        "description": "經營洞察：周轉 / 滯銷摘要。",
+        "properties": {
+          "avg_turnover_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Turnover Days"
+          },
+          "bulk_on_sale": {
+            "title": "Bulk On Sale",
+            "type": "integer"
+          },
+          "catalog_in_stock": {
+            "title": "Catalog In Stock",
+            "type": "integer"
+          },
+          "consignment_serialized": {
+            "title": "Consignment Serialized",
+            "type": "integer"
+          },
+          "in_stock_over_90d": {
+            "title": "In Stock Over 90D",
+            "type": "integer"
+          },
+          "owned_serialized": {
+            "title": "Owned Serialized",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "in_stock_over_90d",
+          "avg_turnover_days",
+          "owned_serialized",
+          "consignment_serialized",
+          "bulk_on_sale",
+          "catalog_in_stock"
+        ],
+        "title": "InsightsTurnover",
+        "type": "object"
+      },
       "InventoryValueReport": {
         "description": "庫存價值與庫齡（docs/19 §2.4）。\n\n自有（owned）才計成本價值；寄售在庫另列售價總額、不當自有資產；catalog 成本未建模 → cost=null。\naging 為「自有在庫成本價值」按入庫時間分桶（catalog 無入庫時間、寄售非自有，皆不入 aging）。\n已售/退場（SOLD/SOLD_OUT/RETURNED/WRITTEN_OFF、remaining=0）不入在庫。",
         "properties": {
@@ -9830,6 +10014,65 @@
           }
         ],
         "summary": "Daily Summary",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/insights": {
+      "get": {
+        "description": "經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。",
+        "operationId": "businessInsightsReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightsReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Insights",
         "tags": [
           "reports"
         ]

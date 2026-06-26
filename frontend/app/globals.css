@@ -1088,6 +1088,47 @@ body {
   margin-top: 12px;
 }
 
+/* ── 報表：經營洞察（#8） ── */
+.rpt-insight-h {
+  margin: var(--sp-5) 0 var(--sp-2);
+  font-size: var(--text-md);
+}
+.rpt-insight-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.rpt-insight-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-3);
+}
+.rpt-insight-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rpt-insight-num {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--accent);
+}
+.rpt-insight-cap {
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+.rpt-insight-table th.num,
+.rpt-insight-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
 /* ── 庫存：逐件詳細 / 久滯庫存 / 列操作 ── */
 .inv-row-actions {
   display: flex;
