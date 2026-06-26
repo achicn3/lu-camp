@@ -6,7 +6,7 @@
 // 的 /print/label——清單列本就帶齊 條碼/品名/售價，免再查 by-code、免改後端。
 // 待後端端點（F5b，需核准後補）：改價留痕、上下架、商品照片。本版不放假按鈕（沿 cash 頁慣例）。
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
 import {
   type Badge,
@@ -21,7 +21,13 @@ import {
 import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
+
+// 「詳細」含收購成本/毛利/進貨單價等敏感資訊（管理者限定，後端 detail 端點亦限 MANAGER）。
+function useIsManager(): boolean {
+  return useMemo(() => decodeSession()?.role === "MANAGER", []);
+}
 
 type SerializedItem = components["schemas"]["SerializedItemRead"];
 type SerializedDetail = components["schemas"]["SerializedItemDetailRead"];
@@ -558,6 +564,7 @@ function SerializedPanel() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const isManager = useIsManager();
   const { brands, categories } = useFilterOptions();
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
@@ -659,9 +666,11 @@ function SerializedPanel() {
               <MoneyText value={item.listed_price} />
             </td>
             <td className="inv-row-actions">
-              <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
-                詳細
-              </button>
+              {isManager && (
+                <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
+                  詳細
+                </button>
+              )}
               {item.status === "IN_STOCK" && (
                 <ReprintLabelButton
                   code={item.item_code}
@@ -691,6 +700,7 @@ function CatalogPanel() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const isManager = useIsManager();
 
   const query = useQuery({
     queryKey: ["inventory", "catalog", { lowStock, q, page }],
@@ -742,9 +752,11 @@ function CatalogPanel() {
               <td>{product.reorder_point}</td>
               <td className="inv-row-actions">
                 {low && <BadgeChip badge={{ label: "低庫存", tone: "warn" }} />}
-                <button type="button" className="btn-ghost" onClick={() => setDetailId(product.id)}>
-                  詳細
-                </button>
+                {isManager && (
+                  <button type="button" className="btn-ghost" onClick={() => setDetailId(product.id)}>
+                    詳細
+                  </button>
+                )}
               </td>
             </tr>
           );
@@ -763,6 +775,7 @@ function BulkPanel() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const isManager = useIsManager();
   const { brands } = useFilterOptions();
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
@@ -827,9 +840,11 @@ function BulkPanel() {
               <BadgeChip badge={bulkStatusBadge(lot.status)} />
             </td>
             <td className="inv-row-actions">
-              <button type="button" className="btn-ghost" onClick={() => setDetailId(lot.id)}>
-                詳細
-              </button>
+              {isManager && (
+                <button type="button" className="btn-ghost" onClick={() => setDetailId(lot.id)}>
+                  詳細
+                </button>
+              )}
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
                   code={lot.lot_code}
@@ -857,6 +872,7 @@ function AgingPanel() {
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
+  const isManager = useIsManager();
   const { brands, categories } = useFilterOptions();
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
@@ -973,9 +989,11 @@ function AgingPanel() {
               <span className="inv-age-days">{daysInStock(item.intake_date)} 天</span>
             </td>
             <td className="inv-row-actions">
-              <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
-                詳細
-              </button>
+              {isManager && (
+                <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
+                  詳細
+                </button>
+              )}
             </td>
           </tr>
         ))}

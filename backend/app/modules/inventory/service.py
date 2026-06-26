@@ -404,6 +404,14 @@ class InventoryService:
             "history": history,
         }
 
+    async def brand_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定品牌 id 的名稱對照（經營洞察依實際出現的 id 取名）。"""
+        return await self._repo.brand_names(store_id, ids)
+
+    async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定類型 id 的名稱對照（經營洞察用）。"""
+        return await self._repo.category_names(store_id, ids)
+
     async def count_aged_in_stock(self, store_id: int, days: int) -> int:
         """在庫且入庫≥days 天的序號品件數（洞察摘要：久滯預警）。"""
         cutoff = datetime.now(UTC) - timedelta(days=days)

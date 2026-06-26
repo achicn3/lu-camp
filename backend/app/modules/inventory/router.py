@@ -72,7 +72,7 @@ async def get_serialized_by_code(
     operation_id="getSerializedItemDetail",
 )
 async def get_serialized_detail(
-    item_id: int, session: SessionDep, user: CurrentUserDep
+    item_id: int, session: SessionDep, user: ManagerDep
 ) -> SerializedItemDetailRead:
     """序號品逐件明細：來源（賣方/寄售人）、收購成本/時間、售價/成交價、入庫時間、完整異動歷史。"""
     detail = await InventoryService(session).get_serialized_detail(user.store_id, item_id)
@@ -139,7 +139,7 @@ async def list_catalog(
     operation_id="getCatalogProductDetail",
 )
 async def get_catalog_detail(
-    product_id: int, session: SessionDep, user: CurrentUserDep
+    product_id: int, session: SessionDep, user: ManagerDep
 ) -> CatalogProductDetailRead:
     """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
     detail = await InventoryService(session).get_catalog_detail(user.store_id, product_id)
@@ -362,7 +362,7 @@ async def list_bulk_lots(
     operation_id="getBulkLotDetail",
 )
 async def get_bulk_detail(
-    lot_id: int, session: SessionDep, user: CurrentUserDep
+    lot_id: int, session: SessionDep, user: ManagerDep
 ) -> BulkLotDetailRead:
     """散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。"""
     detail = await InventoryService(session).get_bulk_detail(user.store_id, lot_id)

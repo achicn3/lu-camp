@@ -11,6 +11,13 @@ vi.mock("next/navigation", () => ({
 }));
 
 import InventoryPage from "@/app/(authed)/inventory/page";
+import { clearToken, setToken } from "@/lib/token";
+
+// 「詳細」鈕含敏感成本，限管理者；測詳細彈窗前需以 MANAGER token 登入。
+function loginManager() {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  setToken(`${b64({ alg: "HS256" })}.${b64({ sub: "1", role: "MANAGER", store_id: 1 })}.sig`);
+}
 
 const SERIALIZED = [
   {
@@ -166,6 +173,7 @@ function renderPage() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  clearToken();
 });
 
 describe("InventoryPage", () => {
@@ -247,6 +255,7 @@ describe("InventoryPage", () => {
 
   it("詳細 opens a modal showing source and history", async () => {
     stubInventory();
+    loginManager();
     renderPage();
     await screen.findByText("SER-001");
     await userEvent.click(screen.getByRole("button", { name: "詳細" }));
@@ -257,6 +266,7 @@ describe("InventoryPage", () => {
 
   it("數量品 詳細 modal shows supplier purchase history", async () => {
     stubInventory();
+    loginManager();
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "數量品" }));
     await screen.findByText("SKU-9");
@@ -268,6 +278,7 @@ describe("InventoryPage", () => {
 
   it("散裝批 詳細 modal shows source and history", async () => {
     stubInventory();
+    loginManager();
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
     await screen.findByText("LOT-7");

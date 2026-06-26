@@ -414,7 +414,8 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const queryClient = useQueryClient();
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
-  const [status, setStatus] = useState<PoStatus | "ALL">("ALL");
+  // 預設只看「待收貨」——最常用、且避免歷史採購單把頁面拉長；要看全部可切「全部」。
+  const [status, setStatus] = useState<PoStatus | "ALL">("ORDERED");
   const [page, setPage] = useState(0);
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
 
@@ -502,6 +503,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           {page === 0 ? "尚無符合的採購單。" : "沒有更多採購單了。"}
         </p>
       ) : (
+        <div className="pur-order-wrap">
         <table className="data-table pur-order-table">
           <thead>
             <tr>
@@ -557,6 +559,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
             })}
           </tbody>
         </table>
+        </div>
       )}
       {!orders.isPending && !orders.isError && (
         <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />

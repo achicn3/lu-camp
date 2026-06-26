@@ -214,6 +214,22 @@ class InventoryRepository:
             stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
         return int(await self._session.scalar(stmt) or 0)
 
+    async def brand_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定品牌 id 的名稱對照（經營洞察依售出列實際出現的 id 取名，不受清單上限限制）。"""
+        if not ids:
+            return {}
+        stmt = select(Brand.id, Brand.name).where(Brand.store_id == store_id, Brand.id.in_(ids))
+        return {int(i): n for i, n in (await self._session.execute(stmt)).all()}
+
+    async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
+        """指定類型 id 的名稱對照（經營洞察用，同上）。"""
+        if not ids:
+            return {}
+        stmt = select(Category.id, Category.name).where(
+            Category.store_id == store_id, Category.id.in_(ids)
+        )
+        return {int(i): n for i, n in (await self._session.execute(stmt)).all()}
+
     async def count_bulk_on_sale(self, store_id: int) -> int:
         """販售中散裝批計數（洞察摘要）。"""
         stmt = select(func.count()).select_from(BulkLot).where(

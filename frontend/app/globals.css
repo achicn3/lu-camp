@@ -888,9 +888,22 @@ body {
   gap: var(--sp-2);
   margin: var(--sp-3) 0;
 }
-.settle-search .acq-search {
+.settle-search-input {
   flex: 1 1 220px;
   max-width: 320px;
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-3);
+  font-size: var(--text-md);
+  background: var(--surface);
+}
+.settle-search-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settle-search .btn-primary {
+  padding: 0 var(--sp-5);
 }
 .settle-card {
   max-width: none;
@@ -1059,6 +1072,7 @@ body {
 }
 .inv-badge {
   display: inline-block;
+  white-space: nowrap;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
@@ -1086,6 +1100,33 @@ body {
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+}
+
+/* ── 報表：白話用途說明（讓一般人也能看懂專業術語） ── */
+.rpt-intro {
+  background: var(--green-soft, #e7efe6);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin: 0 0 var(--sp-3);
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+.rpt-intro b {
+  color: var(--accent);
+}
+.rpt-tip {
+  display: inline-block;
+  margin-left: 4px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  cursor: help;
 }
 
 /* ── 報表：經營洞察（#8） ── */
@@ -1510,7 +1551,22 @@ body {
   display: flex;
   gap: var(--sp-2);
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+.pur-row-actions .btn-primary {
+  padding: 0 var(--sp-4);
+}
+/* 採購單/供應商清單需整寬，否則 7 欄表格被 .card 的 520px 擠成直排字（很醜）。 */
+.pur-orders,
+.pur-supplier-list {
+  max-width: none;
+}
+.pur-order-wrap {
+  overflow-x: auto;
+}
+.pur-order-table th,
+.pur-order-table td {
+  white-space: nowrap;
 }
 .pur-po-link {
   background: none;

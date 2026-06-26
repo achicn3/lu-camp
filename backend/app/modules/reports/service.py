@@ -338,12 +338,11 @@ class ReportsService:
     ) -> InsightsReport:
         """經營洞察報表（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。唯讀。"""
         rows = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
-        brands = {
-            b.id: b.name for b in await self._inventory.list_brands(store_id, q=None, limit=200)
-        }
-        cats = {
-            c.id: c.name for c in await self._inventory.list_categories(store_id, q=None, limit=200)
-        }
+        # 依售出列實際出現的品牌/類型 id 取名（不受清單上限限制；Codex P2）。
+        brand_ids = list({r[0] for r in rows if r[0] is not None})
+        cat_ids = list({r[1] for r in rows if r[1] is not None})
+        brands = await self._inventory.brand_names(store_id, brand_ids)
+        cats = await self._inventory.category_names(store_id, cat_ids)
         brand_rows = self._aggregate_insights(rows, 0, brands, "未指定品牌")
         category_rows = self._aggregate_insights(rows, 1, cats, "未分類")
 

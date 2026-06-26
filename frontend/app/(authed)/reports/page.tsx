@@ -356,9 +356,34 @@ function DashboardPanel() {
 
 // -- Trends Panel --
 
+// 報表長表客戶端分頁（資料一次取回；只分頁「列」的顯示，總計仍為全期）。
+const REPORT_PAGE_SIZE = 20;
+function usePaged<T>(items: T[]): { rows: T[]; page: number; setPage: (p: number) => void; pages: number } {
+  const [page, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(items.length / REPORT_PAGE_SIZE));
+  const clamped = Math.min(page, pages - 1);
+  const start = clamped * REPORT_PAGE_SIZE;
+  return { rows: items.slice(start, start + REPORT_PAGE_SIZE), page: clamped, setPage, pages };
+}
+function ClientPager({ page, pages, onPage }: { page: number; pages: number; onPage: (p: number) => void }) {
+  if (pages <= 1) return null;
+  return (
+    <div className="pager">
+      <button type="button" className="btn-ghost" disabled={page === 0} onClick={() => onPage(page - 1)}>
+        ← 上一頁
+      </button>
+      <span className="hint">第 {page + 1} / {pages} 頁</span>
+      <button type="button" className="btn-ghost" disabled={page >= pages - 1} onClick={() => onPage(page + 1)}>
+        下一頁 →
+      </button>
+    </div>
+  );
+}
+
 // -- 經營洞察（#8）：品牌/類型暢銷、趨勢圖、周轉/滯銷、業態結構 --
 
 function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
+  const paged = usePaged(rows);
   if (rows.length === 0) return <p className="hint">此期間查無售出資料。</p>;
   return (
     <div className="inv-table-wrap">
@@ -374,7 +399,7 @@ function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {paged.rows.map((r) => (
             <tr key={`${r.key ?? "none"}-${r.label}`}>
               <td>{r.label}</td>
               <td className="num">{r.units_sold}</td>
@@ -386,6 +411,7 @@ function BreakdownTable({ rows }: { rows: InsightsBreakdownRow[] }) {
           ))}
         </tbody>
       </table>
+      <ClientPager page={paged.page} pages={paged.pages} onPage={paged.setPage} />
     </div>
   );
 }
@@ -1028,6 +1054,7 @@ function ConsignmentPayablesPanel() {
       throw new Error(extractDetail(error) ?? "讀取寄售應付報表失敗");
     },
   });
+  const paged = usePaged(query.data?.rows ?? []);
 
   if (query.isPending) return <p className="hint">載入中...</p>;
   if (query.isError) return <ErrorBlock message={query.error.message} />;
@@ -1041,14 +1068,17 @@ function ConsignmentPayablesPanel() {
 
   return (
     <div>
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　寄售品賣出後，<b>還沒付給寄售人</b>的款項彙整：待付/已付/取消/需追回各多少，逐筆可查。實際付款在「寄售付款」頁操作。
+      </p>
       <div className="rpt-filters">
         <label>
           狀態篩選
           <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}>
-            <option value="ALL">ALL</option>
-            <option value="PENDING">PENDING</option>
-            <option value="PAID">PAID</option>
-            <option value="CANCELLED">CANCELLED</option>
+            <option value="ALL">全部</option>
+            <option value="PENDING">待付款</option>
+            <option value="PAID">已付款</option>
+            <option value="CANCELLED">已取消</option>
           </select>
         </label>
       </div>
@@ -1089,7 +1119,7 @@ function ConsignmentPayablesPanel() {
             </tr>
           </thead>
           <tbody>
-            {report.rows.map((row) => (
+            {paged.rows.map((row) => (
               <tr key={row.settlement_id}>
                 <td className="money">{row.settlement_id}</td>
                 <td>{row.item_name}</td>
@@ -1106,6 +1136,7 @@ function ConsignmentPayablesPanel() {
           </tbody>
         </table>
         {report.rows.length === 0 && <p className="hint">查無資料</p>}
+        <ClientPager page={paged.page} pages={paged.pages} onPage={paged.setPage} />
       </div>
 
       <DownloadButtons onDownload={handleDownload} />
@@ -1212,6 +1243,7 @@ function LiabilityPanel() {
       throw new Error(extractDetail(error) ?? "讀取負債報表失敗");
     },
   });
+  const paged = usePaged(query.data?.per_member ?? []);
 
   if (query.isPending) return <p className="hint">載入中...</p>;
   if (query.isError) return <ErrorBlock message={query.error.message} />;
@@ -1226,16 +1258,21 @@ function LiabilityPanel() {
 
   return (
     <div>
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　會員手上還沒用掉的<b>購物金</b>就是店家的「負債」（未來要讓他們折抵）。
+        這裡看欠多少、放多久（帳齡）、以及每位會員各有多少。
+      </p>
       <dl className="rpt-summary">
         <div className="rpt-stat">
           <dt>未兌付總負債</dt>
           <dd><MoneyText value={report.total_outstanding} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>負債健康比</dt>
+          <dt>負債健康比<span className="rpt-tip" title="未兌付購物金 ÷ 月固定支出。數字越小，代表購物金負債相對每月開銷越輕、越健康；越大代表負債偏重。">ⓘ</span></dt>
           <dd>{report.liability_health_ratio ?? "N/A"}</dd>
         </div>
       </dl>
+      <p className="hint">「負債健康比」＝未兌付購物金 ÷ 月固定支出；數字<b>越小越健康</b>（負債相對開銷越輕）。</p>
 
       <h3>帳齡分桶</h3>
       <div className="inv-table-wrap">
@@ -1271,7 +1308,7 @@ function LiabilityPanel() {
             </tr>
           </thead>
           <tbody>
-            {report.per_member.map((m) => (
+            {paged.rows.map((m) => (
               <tr key={m.contact_id}>
                 <td>{m.name}</td>
                 <td><MoneyText value={m.balance} /></td>
@@ -1280,6 +1317,7 @@ function LiabilityPanel() {
           </tbody>
         </table>
         {report.per_member.length === 0 && <p className="hint">無會員持有購物金</p>}
+        <ClientPager page={paged.page} pages={paged.pages} onPage={paged.setPage} />
       </div>
 
       <DownloadButtons onDownload={handleDownload} />
@@ -1311,6 +1349,7 @@ function FlowsPanel() {
       throw new Error(extractDetail(error) ?? "讀取流量報表失敗");
     },
   });
+  const paged = usePaged(query.data?.rows ?? []);
 
   const report: FlowsReport | undefined = query.data;
 
@@ -1347,6 +1386,9 @@ function FlowsPanel() {
         </label>
       </div>
 
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　「流量」就是<b>購物金的進出流水</b>——每段期間<b>發出</b>多少（收購回饋/儲值）、被<b>兌付</b>多少（結帳折抵）、以及淨變化。看購物金是越發越多還是逐漸用掉。
+      </p>
       {query.isPending && <p className="hint">載入中...</p>}
       {query.isError && <ErrorBlock message={query.error.message} />}
       {report && (
@@ -1362,7 +1404,7 @@ function FlowsPanel() {
                 </tr>
               </thead>
               <tbody>
-                {report.rows.map((row) => (
+                {paged.rows.map((row) => (
                   <tr key={row.period}>
                     <td>{row.period}</td>
                     <td><MoneyText value={row.issued} /></td>
@@ -1373,6 +1415,7 @@ function FlowsPanel() {
               </tbody>
             </table>
             {report.rows.length === 0 && <p className="hint">查無資料</p>}
+            <ClientPager page={paged.page} pages={paged.pages} onPage={paged.setPage} />
           </div>
           <DownloadButtons onDownload={handleDownload} />
         </>
@@ -1434,6 +1477,9 @@ function EffectivenessPanel() {
 
   return (
     <div>
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　評估<b>購物金方案值不值得</b>的進階指標——例如顧客多花了多少、回購情形、平均溢價等（偏經營分析，店長參考）。每個指標都有說明文字。
+      </p>
       <div className="rpt-filters">
         <label>
           起始日期
@@ -1518,6 +1564,9 @@ function ReconciliationPanel() {
 
   return (
     <div>
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　系統自動<b>核對購物金帳目是否一致</b>（帳本記的負債 vs 各會員餘額加總）。兩邊相符代表帳沒問題；不符會標出來，請通知店長/工程。
+      </p>
       <dl className="rpt-summary">
         <div className="rpt-stat">
           <dt>帳本總負債</dt>

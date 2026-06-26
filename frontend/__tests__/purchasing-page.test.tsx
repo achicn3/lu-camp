@@ -234,10 +234,15 @@ describe("/purchasing", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText("已下單"); // 初次載入（全部，無 status 參數）
-    expect(poUrls.some((u) => !u.includes("status="))).toBe(true);
+    await screen.findByText("已下單"); // 預設只看「待收貨（ORDERED）」→ 帶 status=ORDERED
+    expect(poUrls.some((u) => u.includes("status=ORDERED"))).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "待收貨" }));
-    await waitFor(() => expect(poUrls.some((u) => u.includes("status=ORDERED"))).toBe(true));
+    // 切「全部」→ 不帶 status 參數（看所有採購單）。
+    await user.click(screen.getByRole("button", { name: "全部" }));
+    await waitFor(() =>
+      expect(poUrls.some((u) => u.includes("purchase-orders") && !u.includes("status="))).toBe(
+        true,
+      ),
+    );
   });
 });

@@ -547,7 +547,8 @@ async def test_serialized_detail_aggregates_source_sale_and_history(
     db_session.add_all([line, mv_in, mv_out])
     await db_session.flush()
 
-    resp = await client.get(f"/api/v1/serialized-items/{item.id}/detail", headers=_auth(store_id))
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.get(f"/api/v1/serialized-items/{item.id}/detail", headers=mgr)
     assert resp.status_code == 200, resp.text
     d = resp.json()
     assert d["source"]["name"] == "寄售人甲"
@@ -563,7 +564,8 @@ async def test_serialized_detail_unknown_returns_404(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     store_id = await _seed_store(db_session)
-    resp = await client.get("/api/v1/serialized-items/999999/detail", headers=_auth(store_id))
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.get("/api/v1/serialized-items/999999/detail", headers=mgr)
     assert resp.status_code == 404
 
 
@@ -596,8 +598,9 @@ async def test_catalog_detail_shows_supplier_purchase_history(
     ])
     await db_session.flush()
 
+    mgr = await _auth_manager(db_session, store_id)
     resp = await client.get(
-        f"/api/v1/catalog-products/{product.id}/detail", headers=_auth(store_id)
+        f"/api/v1/catalog-products/{product.id}/detail", headers=mgr
     )
     assert resp.status_code == 200, resp.text
     d = resp.json()
@@ -635,7 +638,8 @@ async def test_bulk_detail_shows_source_and_cost(
     )
     await db_session.flush()
 
-    resp = await client.get(f"/api/v1/bulk-lots/{lot.id}/detail", headers=_auth(store_id))
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.get(f"/api/v1/bulk-lots/{lot.id}/detail", headers=mgr)
     assert resp.status_code == 200, resp.text
     d = resp.json()
     assert d["source"]["name"] == "散裝寄售人"
@@ -643,3 +647,15 @@ async def test_bulk_detail_shows_source_and_cost(
     assert d["acquisition_cost"] == "500"
     assert d["remaining_qty"] == 7
     assert [h["event"] for h in d["history"]] == ["入庫（收購）"]
+
+
+async def test_serialized_detail_forbidden_for_clerk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """逐件明細含收購成本/毛利（敏感）→ 限管理者；CLERK 取得 403（Codex P1）。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="DET-CLERK")
+    resp = await client.get(
+        f"/api/v1/serialized-items/{item.id}/detail", headers=_auth(store_id)
+    )
+    assert resp.status_code == 403

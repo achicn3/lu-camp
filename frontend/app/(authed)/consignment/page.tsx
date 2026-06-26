@@ -218,14 +218,14 @@ export default function ConsignmentPage() {
         }}
       >
         <input
-          className="acq-search"
+          className="settle-search-input"
           inputMode="tel"
           placeholder="以寄售人手機查找"
           aria-label="以寄售人手機查找"
           value={phoneInput}
           onChange={(e) => setPhoneInput(e.target.value)}
         />
-        <button type="submit" className="btn-secondary">
+        <button type="submit" className="btn-primary">
           查找
         </button>
         {phone && (

@@ -694,8 +694,8 @@ describe("ReportsPage", () => {
     expect(screen.getByText("MSR 爐具")).toBeTruthy();
     expect(screen.getByText("王小明")).toBeTruthy();
     expect(screen.getByText("李大華")).toBeTruthy();
-    // status filter exists
-    const statusFilter = screen.getByDisplayValue("ALL");
+    // status filter exists（標籤改白話「全部」，value 仍為 ALL）
+    const statusFilter = screen.getByDisplayValue("全部");
     expect(statusFilter).toBeTruthy();
   });
 
