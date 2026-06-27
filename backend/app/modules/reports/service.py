@@ -63,6 +63,11 @@ _SoldRow = tuple[
     int | None, int | None, OwnershipType, Decimal | None, int | None,
     datetime, datetime | None, Decimal,
 ]
+# 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
+#            intake, sold, line_total)
+_BulkSold = tuple[
+    int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+]
 
 
 @dataclass
@@ -73,6 +78,18 @@ class _InsightAcc:
     revenue: Decimal = field(default_factory=lambda: Decimal(0))
     margin: Decimal = field(default_factory=lambda: Decimal(0))
     days: list[int] = field(default_factory=list)
+
+
+@dataclass
+class _NormRow:
+    """正規化售出列（序號品與散裝共用）：件數/營收/毛利/在庫天數，供統一彙整。"""
+
+    brand_id: int | None
+    category_id: int | None
+    units: int
+    revenue: Decimal
+    margin: Decimal
+    days: int | None
 
 
 MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
@@ -293,29 +310,54 @@ class ReportsService:
         )
 
     @staticmethod
+    def _normalize_serialized(rows: list[_SoldRow]) -> list[_NormRow]:
+        """序號品售出列 → 正規化列（每筆 1 件；買斷毛利=成交−成本，寄售=round(成交×抽成%)）。"""
+        out: list[_NormRow] = []
+        for brand_id, category_id, ownership, cost, pct, intake, sold, line_total in rows:
+            if ownership == OwnershipType.CONSIGNMENT and pct is not None:
+                margin = Decimal(round_ntd(line_total * Decimal(pct) / 100))
+            elif cost is not None:
+                margin = line_total - cost
+            else:
+                margin = Decimal(0)
+            days = (sold - intake).days if sold is not None else None
+            out.append(_NormRow(brand_id, category_id, 1, line_total, margin, days))
+        return out
+
+    @staticmethod
+    def _normalize_bulk(rows: list[_BulkSold]) -> list[_NormRow]:
+        """散裝售出列 → 正規化列（件數=本行件數；買斷毛利=成交−每件成本×件數，寄售散裝無抽成）。"""
+        out: list[_NormRow] = []
+        for (
+            brand_id, category_id, consignor_id, acq_cost, total_qty, qty, intake, sold, line_total
+        ) in rows:
+            if consignor_id is not None:
+                margin = Decimal(0)  # 寄售散裝無抽成模型（與報表他處一致）
+            else:
+                per_unit = Decimal(round_ntd(acq_cost / total_qty)) if total_qty else Decimal(0)
+                margin = line_total - per_unit * qty
+            out.append(
+                _NormRow(brand_id, category_id, qty, line_total, margin, (sold - intake).days)
+            )
+        return out
+
+    @staticmethod
     def _aggregate_insights(
-        rows: list[_SoldRow],
-        key_index: int,
+        rows: list[_NormRow],
+        by_brand: bool,
         name_map: dict[int, str],
         default_label: str,
     ) -> list[InsightsBreakdownRow]:
-        """逐品牌(key_index=0)/類型(key_index=1)彙整售出列：件數/營收/毛利/均價/平均在庫天數。
-
-        毛利口徑：買斷=成交價−收購成本（成本不明則不計毛利）；寄售=round_ntd(成交價×抽成%)。
-        """
+        """逐品牌/類型彙整正規化售出列：件數/營收/毛利/均價/平均在庫天數（序號品＋散裝統一口徑）。"""
         groups: dict[int | None, _InsightAcc] = {}
         for r in rows:
-            ownership, cost, pct, intake, sold, line_total = r[2], r[3], r[4], r[5], r[6], r[7]
-            key: int | None = r[0] if key_index == 0 else r[1]
+            key = r.brand_id if by_brand else r.category_id
             acc = groups.setdefault(key, _InsightAcc())
-            acc.units += 1
-            acc.revenue += line_total
-            if ownership == OwnershipType.CONSIGNMENT and pct is not None:
-                acc.margin += round_ntd(line_total * Decimal(pct) / 100)
-            elif cost is not None:
-                acc.margin += line_total - cost
-            if sold is not None:
-                acc.days.append((sold - intake).days)
+            acc.units += r.units
+            acc.revenue += r.revenue
+            acc.margin += r.margin
+            if r.days is not None:
+                acc.days.append(r.days)
         result = [
             InsightsBreakdownRow(
                 key=key,
@@ -336,17 +378,22 @@ class ReportsService:
     async def insights(
         self, store_id: int, *, date_from: datetime, date_to: datetime
     ) -> InsightsReport:
-        """經營洞察報表（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。唯讀。"""
-        rows = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
-        # 依售出列實際出現的品牌/類型 id 取名（不受清單上限限制；Codex P2）。
-        brand_ids = list({r[0] for r in rows if r[0] is not None})
-        cat_ids = list({r[1] for r in rows if r[1] is not None})
+        """經營洞察報表（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。唯讀。
+
+        序號品與散裝售出列一起納入排行（散裝也有品牌/類型/入庫/成本；Codex P2）。
+        """
+        ser = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
+        bulk = await self._sales.bulk_sold_rows(store_id, date_from, date_to)
+        norm = self._normalize_serialized(ser) + self._normalize_bulk(bulk)
+        # 依正規化列實際出現的品牌/類型 id 取名（不受清單上限限制；Codex P2）。
+        brand_ids = list({n.brand_id for n in norm if n.brand_id is not None})
+        cat_ids = list({n.category_id for n in norm if n.category_id is not None})
         brands = await self._inventory.brand_names(store_id, brand_ids)
         cats = await self._inventory.category_names(store_id, cat_ids)
-        brand_rows = self._aggregate_insights(rows, 0, brands, "未指定品牌")
-        category_rows = self._aggregate_insights(rows, 1, cats, "未分類")
+        brand_rows = self._aggregate_insights(norm, True, brands, "未指定品牌")
+        category_rows = self._aggregate_insights(norm, False, cats, "未分類")
 
-        spans = [(sold - intake).days for *_, intake, sold, _lt in rows if sold is not None]
+        spans = [n.days for n in norm if n.days is not None]
         avg_turnover = round(sum(spans) / len(spans), 1) if spans else None
 
         mix = await self._inventory.inventory_mix(store_id)

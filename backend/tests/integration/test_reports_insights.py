@@ -12,11 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.inventory.models import Brand, Category, SerializedItem
+from app.modules.inventory.models import Brand, BulkLot, Category, SerializedItem
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
+    BulkAcquisitionBasis,
+    BulkLotStatus,
     Grade,
     OwnershipType,
     SaleLineType,
@@ -119,6 +121,60 @@ async def test_insights_brand_breakdown_units_revenue_margin(
     # 周轉摘要存在（實際數值依當下在庫，僅驗結構）。
     assert "in_stock_over_90d" in body["turnover"]
     assert body["turnover"]["consignment_serialized"] >= 0
+
+
+async def test_insights_includes_bulk_sales(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """散裝售出也納入品牌/類型排行（Codex P2）：件數=售出件數、毛利=成交−每件成本×件數。"""
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    brand = Brand(store_id=store.id, name="Coleman")
+    cat = Category(store_id=store.id, name="營釘", target_margin_pct=40)
+    db_session.add_all([mgr, clerk, brand, cat])
+    await db_session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+
+    lot = BulkLot(
+        store_id=store.id, lot_code="LOT-1", name="鋁合金營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=7, status=BulkLotStatus.ON_SALE,
+        brand_id=brand.id, category_id=cat.id, intake_date=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add(lot)
+    await db_session.flush()
+    sale = Sale(
+        store_id=store.id, clerk_user_id=clerk.id,
+        subtotal=Decimal(150), tax=Decimal(0), total=Decimal(150),
+        created_at=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    db_session.add(sale)
+    await db_session.flush()
+    db_session.add(
+        SaleLine(
+            store_id=store.id, sale_id=sale.id, line_type=SaleLineType.BULK_LOT,
+            bulk_lot_id=lot.id, description=lot.name, qty=3,
+            unit_price=Decimal(50), line_total=Decimal(150),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/reports/insights",
+        params={"from": "2026-01-01T00:00:00Z", "to": "2026-12-31T00:00:00Z"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    rows = {r["label"]: r for r in resp.json()["brand_breakdown"]}
+    assert "Coleman" in rows  # 散裝品牌有進排行
+    coleman = rows["Coleman"]
+    assert coleman["units_sold"] == 3  # 售出 3 件（非 1 列）
+    assert coleman["revenue"] == "150"
+    # 每件成本 round(300/10)=30 → 毛利 150 - 30*3 = 60。
+    assert coleman["margin"] == "60"
 
 
 async def test_insights_requires_manager(

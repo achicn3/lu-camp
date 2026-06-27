@@ -22,6 +22,11 @@ _SoldRowDB = tuple[
     int | None, int | None, OwnershipType, Decimal | None, int | None,
     datetime, datetime | None, Decimal,
 ]
+# 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
+#            intake, sold, line_total)
+_BulkSoldRowDB = tuple[
+    int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+]
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,9 @@ class SalesRepository:
             .where(
                 SaleLine.store_id == store_id,
                 SaleLine.serialized_item_id == serialized_item_id,
+                # 排除已作廢銷售（Codex P2）：作廢已把品項回補為 IN_STOCK，
+                # 不應再對在庫品顯示來自作廢交易的成交價/單號。
+                Sale.invoice_status != SaleInvoiceStatus.VOID,
             )
             .order_by(SaleLine.id.desc())
             .limit(1)
@@ -197,6 +205,38 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
+            )
+        )
+        return [tuple(r) for r in rows]
+
+    async def bulk_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[_BulkSoldRowDB]:
+        """期間（未作廢）售出散裝的洞察原始列。
+
+        欄位：品牌/類型/寄售人/整堆成本/整堆件數/本行件數/入庫/該銷售時間/成交額；
+        供經營洞察把散裝也納入品牌/類型排行（Codex P2）。每件成本＝整堆成本÷整堆件數。
+        """
+        rows = await self._session.execute(
+            select(
+                BulkLot.brand_id,
+                BulkLot.category_id,
+                BulkLot.consignor_id,
+                BulkLot.acquisition_cost,
+                BulkLot.total_qty,
+                SaleLine.qty,
+                BulkLot.intake_date,
+                Sale.created_at,
+                SaleLine.line_total,
+            )
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_type == SaleLineType.BULK_LOT,
             )
         )
         return [tuple(r) for r in rows]

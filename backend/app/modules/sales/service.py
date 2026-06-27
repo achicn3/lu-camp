@@ -623,6 +623,16 @@ class SalesService:
         """期間售出序號品的洞察原始列（經營洞察報表逐品牌/類型彙整用）。"""
         return await self._repo.serialized_sold_rows(store_id, date_from, date_to)
 
+    async def bulk_sold_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[
+        tuple[
+            int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+        ]
+    ]:
+        """期間售出散裝的洞察原始列（經營洞察把散裝納入品牌/類型排行；Codex P2）。"""
+        return await self._repo.bulk_sold_rows(store_id, date_from, date_to)
+
     async def excess_spend_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> dict[str, Decimal]:

@@ -36,6 +36,7 @@ from app.shared.enums import (
     Grade,
     ItemKind,
     OwnershipType,
+    SaleInvoiceStatus,
     SaleLineType,
     SerializedItemStatus,
     StockDirection,
@@ -559,6 +560,37 @@ async def test_serialized_detail_aggregates_source_sale_and_history(
     assert d["sale_id"] == sale.id
     events = [e["event"] for e in d["history"]]
     assert events == ["入庫（收購）", "售出"]
+
+
+async def test_serialized_detail_ignores_voided_sale(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已作廢銷售不得成為在庫品的成交資料（Codex P2）：sale_id/sold_price 為空。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="DET-VOID")  # IN_STOCK（作廢已回補）
+    clerk_id = _STORE_CLERKS[store_id]
+    sale = Sale(
+        store_id=store_id, clerk_user_id=clerk_id,
+        subtotal=Decimal(1900), tax=Decimal(100), total=Decimal(2000),
+        invoice_status=SaleInvoiceStatus.VOID,
+    )
+    db_session.add(sale)
+    await db_session.flush()
+    db_session.add(
+        SaleLine(
+            store_id=store_id, sale_id=sale.id, line_type=SaleLineType.SERIALIZED,
+            serialized_item_id=item.id, description="雙人帳篷", qty=1,
+            unit_price=Decimal(2000), line_total=Decimal(2000),
+        )
+    )
+    await db_session.flush()
+
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.get(f"/api/v1/serialized-items/{item.id}/detail", headers=mgr)
+    assert resp.status_code == 200, resp.text
+    d = resp.json()
+    assert d["sale_id"] is None
+    assert d["sold_price"] is None
 
 
 async def test_serialized_detail_unknown_returns_404(
