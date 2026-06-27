@@ -43,6 +43,7 @@ from app.shared.enums import (
     PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
+    SaleStatus,
     StockReason,
     StoreCreditSourceType,
     TenderType,
@@ -679,6 +680,31 @@ class SalesService:
         await self._consignment.cancel_settlements_for_sale(
             sale.store_id, sale.id, actor_user_id=actor_user_id
         )
+        # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
+        # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、數量品現量加回（與退貨同口徑，
+        # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、
+        # 散裝守恆破（B6）。只對「未退貨（COMPLETED）」的單回補，避免與退貨流程重複回補。
+        if sale.status == SaleStatus.COMPLETED:
+            for line in await self._repo.list_lines(sale.id):
+                if line.line_type == SaleLineType.CATALOG and line.catalog_product_id is not None:
+                    await self._inventory.return_catalog_items(
+                        sale.store_id, line.catalog_product_id, line.qty,
+                        ref_type="sale_void", ref_id=sale.id,
+                    )
+                elif (
+                    line.line_type == SaleLineType.SERIALIZED
+                    and line.serialized_item_id is not None
+                ):
+                    await self._inventory.return_serialized_sale_item(
+                        sale.store_id, line.serialized_item_id,
+                        ref_type="sale_void", ref_id=sale.id,
+                    )
+                elif line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id is not None:
+                    await self._inventory.return_bulk_lot_items(
+                        sale.store_id, line.bulk_lot_id, line.qty,
+                        ref_type="sale_void", ref_id=sale.id,
+                    )
+                # MENU：無庫存，略過。
         return sale
 
     async def record_print_detail(self, sale: Sale, actor_user_id: int) -> None:

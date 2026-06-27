@@ -244,6 +244,30 @@ async def test_void_requires_manager_and_marks_void(
     assert again.status_code == 409
 
 
+async def test_void_restores_inventory(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢＝此筆銷售視為未發生 → 庫存回補（數量品現量加回）；否則庫存被永久消耗。"""
+    token, store_id, _ = await _seed(db_session)
+    mgr_token = await _seed_manager(db_session, store_id)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    created = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 3)]},
+        headers=_auth(token, idem="void-restock"),
+    )
+    sale_id = created.json()["id"]
+    db_session.expire_all()
+    after_sale = await db_session.get(CatalogProduct, cat)
+    assert after_sale is not None and after_sale.quantity_on_hand == 7  # 10 - 3
+
+    voided = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_auth(mgr_token))
+    assert voided.status_code == 200
+    db_session.expire_all()
+    restored = await db_session.get(CatalogProduct, cat)
+    assert restored is not None and restored.quantity_on_hand == 10  # 回補後復原
+
+
 async def test_void_404(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _, store_id, _ = await _seed(db_session)
     mgr_token = await _seed_manager(db_session, store_id)
