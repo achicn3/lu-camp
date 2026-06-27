@@ -138,17 +138,18 @@ async def test_insights_includes_bulk_sales(
     await db_session.flush()
     token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
 
+    # 成本 100／總 3、賣 2：整行四捨五入 COGS=round(100*2/3)=67（每件先捨會錯成 66）。
     lot = BulkLot(
         store_id=store.id, lot_code="LOT-1", name="鋁合金營釘", grade=Grade.E,
-        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
-        unit_price=Decimal(50), total_qty=10, remaining_qty=7, status=BulkLotStatus.ON_SALE,
+        acquisition_cost=Decimal(100), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=3, remaining_qty=1, status=BulkLotStatus.ON_SALE,
         brand_id=brand.id, category_id=cat.id, intake_date=datetime(2026, 1, 1, tzinfo=UTC),
     )
     db_session.add(lot)
     await db_session.flush()
     sale = Sale(
         store_id=store.id, clerk_user_id=clerk.id,
-        subtotal=Decimal(150), tax=Decimal(0), total=Decimal(150),
+        subtotal=Decimal(100), tax=Decimal(0), total=Decimal(100),
         created_at=datetime(2026, 6, 20, tzinfo=UTC),
     )
     db_session.add(sale)
@@ -156,8 +157,8 @@ async def test_insights_includes_bulk_sales(
     db_session.add(
         SaleLine(
             store_id=store.id, sale_id=sale.id, line_type=SaleLineType.BULK_LOT,
-            bulk_lot_id=lot.id, description=lot.name, qty=3,
-            unit_price=Decimal(50), line_total=Decimal(150),
+            bulk_lot_id=lot.id, description=lot.name, qty=2,
+            unit_price=Decimal(50), line_total=Decimal(100),
         )
     )
     await db_session.flush()
@@ -171,10 +172,66 @@ async def test_insights_includes_bulk_sales(
     rows = {r["label"]: r for r in resp.json()["brand_breakdown"]}
     assert "Coleman" in rows  # 散裝品牌有進排行
     coleman = rows["Coleman"]
-    assert coleman["units_sold"] == 3  # 售出 3 件（非 1 列）
-    assert coleman["revenue"] == "150"
-    # 每件成本 round(300/10)=30 → 毛利 150 - 30*3 = 60。
-    assert coleman["margin"] == "60"
+    assert coleman["units_sold"] == 2  # 售出 2 件（非 1 列）
+    assert coleman["revenue"] == "100"
+    # 整行四捨五入 COGS=round(100*2/3)=67 → 毛利 100 - 67 = 33（Codex P3）。
+    assert coleman["margin"] == "33"
+
+
+async def test_insights_turnover_days_weighted_by_units(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """平均在庫天數以售出件數加權（Codex P2）：1 件序號品(10天)＋5 件散裝(100天)→(10+500)/6=85。"""
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    brand = Brand(store_id=store.id, name="MSR")
+    db_session.add_all([mgr, clerk, brand])
+    await db_session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+
+    item = SerializedItem(
+        store_id=store.id, item_code="OWN-W", name="爐具", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(1000),
+        acquisition_cost=Decimal(500), brand_id=brand.id, status=SerializedItemStatus.SOLD,
+        intake_date=datetime(2026, 6, 10, tzinfo=UTC), sold_date=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    lot = BulkLot(
+        store_id=store.id, lot_code="LOT-W", name="瓦斯", grade=Grade.E,
+        acquisition_cost=Decimal(50), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(40), total_qty=10, remaining_qty=5, status=BulkLotStatus.ON_SALE,
+        brand_id=brand.id, intake_date=datetime(2026, 3, 12, tzinfo=UTC),  # → 6/20 約 100 天
+    )
+    db_session.add_all([item, lot])
+    await db_session.flush()
+    await _sell(db_session, store.id, clerk.id, item, Decimal(1000))  # 序號品：10 天、1 件
+    sale = Sale(
+        store_id=store.id, clerk_user_id=clerk.id,
+        subtotal=Decimal(200), tax=Decimal(0), total=Decimal(200),
+        created_at=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    db_session.add(sale)
+    await db_session.flush()
+    db_session.add(
+        SaleLine(
+            store_id=store.id, sale_id=sale.id, line_type=SaleLineType.BULK_LOT,
+            bulk_lot_id=lot.id, description=lot.name, qty=5,
+            unit_price=Decimal(40), line_total=Decimal(200),
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/reports/insights",
+        params={"from": "2026-01-01T00:00:00Z", "to": "2026-12-31T00:00:00Z"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    msr = {r["label"]: r for r in resp.json()["brand_breakdown"]}["MSR"]
+    # 加權：(10×1 + 100×5) / (1+5) = 510/6 = 85.0（未加權會是 (10+100)/2=55）。
+    assert msr["avg_days_in_stock"] == 85.0
 
 
 async def test_insights_requires_manager(

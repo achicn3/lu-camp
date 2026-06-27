@@ -72,12 +72,13 @@ _BulkSold = tuple[
 
 @dataclass
 class _InsightAcc:
-    """逐品牌/類型暢銷彙整的累加器。"""
+    """逐品牌/類型暢銷彙整的累加器。在庫天數以售出件數加權（Codex P2）。"""
 
     units: int = 0
     revenue: Decimal = field(default_factory=lambda: Decimal(0))
     margin: Decimal = field(default_factory=lambda: Decimal(0))
-    days: list[int] = field(default_factory=list)
+    day_weight: int = 0  # Σ(在庫天數 × 該列件數)
+    day_units: int = 0  # Σ(有在庫天數的列之件數)
 
 
 @dataclass
@@ -334,8 +335,10 @@ class ReportsService:
             if consignor_id is not None:
                 margin = Decimal(0)  # 寄售散裝無抽成模型（與報表他處一致）
             else:
-                per_unit = Decimal(round_ntd(acq_cost / total_qty)) if total_qty else Decimal(0)
-                margin = line_total - per_unit * qty
+                # 整行四捨五入 COGS（Codex P3）：與銷售毛利/庫存報表同口徑
+                # （round(整堆成本×件數÷整堆件數)），否則洞察毛利與財報對不起來。
+                cogs = Decimal(round_ntd(acq_cost * qty / total_qty)) if total_qty else Decimal(0)
+                margin = line_total - cogs
             out.append(
                 _NormRow(brand_id, category_id, qty, line_total, margin, (sold - intake).days)
             )
@@ -357,7 +360,8 @@ class ReportsService:
             acc.revenue += r.revenue
             acc.margin += r.margin
             if r.days is not None:
-                acc.days.append(r.days)
+                acc.day_weight += r.days * r.units
+                acc.day_units += r.units
         result = [
             InsightsBreakdownRow(
                 key=key,
@@ -367,7 +371,7 @@ class ReportsService:
                 margin=acc.margin,
                 avg_unit_price=round_ntd(acc.revenue / acc.units) if acc.units else Decimal(0),
                 avg_days_in_stock=(
-                    round(sum(acc.days) / len(acc.days), 1) if acc.days else None
+                    round(acc.day_weight / acc.day_units, 1) if acc.day_units else None
                 ),
             )
             for key, acc in groups.items()
@@ -393,8 +397,10 @@ class ReportsService:
         brand_rows = self._aggregate_insights(norm, True, brands, "未指定品牌")
         category_rows = self._aggregate_insights(norm, False, cats, "未分類")
 
-        spans = [n.days for n in norm if n.days is not None]
-        avg_turnover = round(sum(spans) / len(spans), 1) if spans else None
+        # 平均周轉天數以售出件數加權（散裝 qty>1 不應與單件序號品同權；Codex P2）。
+        day_weight = sum(n.days * n.units for n in norm if n.days is not None)
+        day_units = sum(n.units for n in norm if n.days is not None)
+        avg_turnover = round(day_weight / day_units, 1) if day_units else None
 
         mix = await self._inventory.inventory_mix(store_id)
         aged = await self._inventory.count_aged_in_stock(store_id, 90)

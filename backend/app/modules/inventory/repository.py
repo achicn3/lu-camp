@@ -155,6 +155,18 @@ class InventoryRepository:
         result: SerializedItem | None = await self._session.scalar(stmt)
         return result
 
+    async def get_serialized_for_update(
+        self, store_id: int, item_id: int
+    ) -> SerializedItem | None:
+        """取序號品並上行鎖（FOR UPDATE）；改價時與銷售/作廢序列化，狀態檢查具原子性。"""
+        stmt = (
+            select(SerializedItem)
+            .where(SerializedItem.store_id == store_id, SerializedItem.id == item_id)
+            .with_for_update()
+        )
+        result: SerializedItem | None = await self._session.scalar(stmt)
+        return result
+
     async def list_serialized(
         self,
         store_id: int,
@@ -602,6 +614,16 @@ class InventoryRepository:
 
     async def get_bulk_lot(self, store_id: int, lot_id: int) -> BulkLot | None:
         stmt = select(BulkLot).where(BulkLot.id == lot_id, BulkLot.store_id == store_id)
+        result: BulkLot | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_bulk_lot_for_update(self, store_id: int, lot_id: int) -> BulkLot | None:
+        """取散裝批並上行鎖（FOR UPDATE）；改價時與銷售序列化，ON_SALE 檢查具原子性。"""
+        stmt = (
+            select(BulkLot)
+            .where(BulkLot.id == lot_id, BulkLot.store_id == store_id)
+            .with_for_update()
+        )
         result: BulkLot | None = await self._session.scalar(stmt)
         return result
 

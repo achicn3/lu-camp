@@ -417,8 +417,12 @@ class InventoryService:
     async def update_serialized_price(
         self, store_id: int, item_id: int, *, unit_price: Decimal, actor_user_id: int
     ) -> SerializedItem | None:
-        """改序號品標價（僅在庫；寫稽核）。找不到→None；非在庫→InvalidStateTransition。"""
-        item = await self._repo.get_serialized_by_id(store_id, item_id)
+        """改序號品標價（僅在庫；寫稽核）。找不到→None；非在庫→InvalidStateTransition。
+
+        以 FOR UPDATE 鎖列後再檢查狀態（Codex P2）：與並發銷售/作廢序列化，
+        避免「讀到 IN_STOCK→對方賣掉→仍寫入新價」的競態改到已售品。
+        """
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
         if item is None:
             return None
         if item.status != SerializedItemStatus.IN_STOCK:
@@ -445,8 +449,11 @@ class InventoryService:
     async def update_bulk_price(
         self, store_id: int, lot_id: int, *, unit_price: Decimal, actor_user_id: int
     ) -> BulkLot | None:
-        """改散裝批每件均一價（僅販售中；寫稽核）。找不到→None；非販售中→InvalidStateTransition。"""
-        lot = await self._repo.get_bulk_lot(store_id, lot_id)
+        """改散裝批每件均一價（僅販售中；寫稽核）。找不到→None；非販售中→InvalidStateTransition。
+
+        以 FOR UPDATE 鎖列後再檢查狀態（Codex P2）：與並發銷售序列化，避免售罄品被陳舊檢查改價。
+        """
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
         if lot is None:
             return None
         if lot.status != BulkLotStatus.ON_SALE:
