@@ -57,6 +57,7 @@ from app.shared.exceptions import (
     MenuItemUnavailable,
     NoOpenCashSession,
     SaleAlreadyVoid,
+    SaleHasReturns,
     SaleItemNotFound,
     SaleLineInvalid,
 )
@@ -651,6 +652,15 @@ class SalesService:
         if locked is None or locked.invoice_status == SaleInvoiceStatus.VOID:
             raise SaleAlreadyVoid(f"sale {sale.id} 已作廢，不可重複作廢")
         sale = locked
+        # 已退貨的銷售不可作廢（Codex P1）：退貨已回補庫存/退款，且退回的序號品可能已被
+        # 後續銷售再賣出——若再作廢回補會重複放回庫存、或把別單賣掉的品翻回 IN_STOCK。
+        # 函式內 import 打破 sales↔returns 潛在循環相依（§9 例外）。
+        from app.modules.returns.service import ReturnsService
+
+        if await ReturnsService(self._session).has_returns_for_sale(sale.store_id, sale.id):
+            raise SaleHasReturns(
+                f"sale {sale.id} 已有退貨，不可作廢；請以退貨流程處理剩餘部分"
+            )
         before = sale.invoice_status.value
         sale.invoice_status = SaleInvoiceStatus.VOID
         await self._session.flush()

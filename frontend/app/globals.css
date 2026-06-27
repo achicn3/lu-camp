@@ -1244,6 +1244,10 @@ body {
   overflow-x: auto;
   white-space: nowrap;
 }
+.inv-price-dialog {
+  max-width: 360px;
+  width: 100%;
+}
 .inv-history {
   list-style: none;
   padding: 0;

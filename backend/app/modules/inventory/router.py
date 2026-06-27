@@ -23,6 +23,7 @@ from app.modules.inventory.schemas import (
     CategoryCreate,
     CategoryRead,
     CategoryTargetUpdate,
+    PriceUpdateRequest,
     PricingRuleRead,
     PricingRulesUpdate,
     ProductModelCreate,
@@ -33,7 +34,7 @@ from app.modules.inventory.schemas import (
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus, UserRole
-from app.shared.exceptions import DuplicateCatalogProduct
+from app.shared.exceptions import DuplicateCatalogProduct, InvalidStateTransition
 
 router = APIRouter(tags=["inventory"])
 
@@ -79,6 +80,68 @@ async def get_serialized_detail(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此序號品")
     return SerializedItemDetailRead.model_validate(detail)
+
+
+@router.patch(
+    "/serialized-items/{item_id}/price",
+    response_model=SerializedItemRead,
+    operation_id="updateSerializedPrice",
+)
+async def update_serialized_price(
+    item_id: int, payload: PriceUpdateRequest, session: SessionDep, user: ManagerDep
+) -> SerializedItemRead:
+    """改序號品標價（限管理者；僅在庫；寫稽核）。找不到→404、非在庫→409。"""
+    try:
+        item = await InventoryService(session).update_serialized_price(
+            user.store_id, item_id, unit_price=payload.unit_price, actor_user_id=user.id
+        )
+    except InvalidStateTransition as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此序號品")
+    await session.commit()
+    return SerializedItemRead.model_validate(item)
+
+
+@router.patch(
+    "/catalog-products/{product_id}/price",
+    response_model=CatalogProductRead,
+    operation_id="updateCatalogPrice",
+)
+async def update_catalog_price(
+    product_id: int, payload: PriceUpdateRequest, session: SessionDep, user: ManagerDep
+) -> CatalogProductRead:
+    """改數量品售價（限管理者；寫稽核）。找不到→404。"""
+    product = await InventoryService(session).update_catalog_price(
+        user.store_id, product_id, unit_price=payload.unit_price, actor_user_id=user.id
+    )
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此數量品")
+    await session.commit()
+    return CatalogProductRead.model_validate(product)
+
+
+@router.patch(
+    "/bulk-lots/{lot_id}/price",
+    response_model=BulkLotRead,
+    operation_id="updateBulkPrice",
+)
+async def update_bulk_price(
+    lot_id: int, payload: PriceUpdateRequest, session: SessionDep, user: ManagerDep
+) -> BulkLotRead:
+    """改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。"""
+    try:
+        lot = await InventoryService(session).update_bulk_price(
+            user.store_id, lot_id, unit_price=payload.unit_price, actor_user_id=user.id
+        )
+    except InvalidStateTransition as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if lot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
+    await session.commit()
+    return BulkLotRead.model_validate(lot)
 
 
 @router.get(

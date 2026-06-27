@@ -4131,6 +4131,28 @@
         "title": "PremiumSuggestionResponse",
         "type": "object"
       },
+      "PriceUpdateRequest": {
+        "description": "改售價（manager；含稅整數元 > 0；序號品=標價、數量品/散裝=單價）。",
+        "properties": {
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "unit_price"
+        ],
+        "title": "PriceUpdateRequest",
+        "type": "object"
+      },
       "PricingRuleRead": {
         "description": "分類×成色帶 定價規則輸出（收購定價輔助讀取）。",
         "properties": {
@@ -7102,6 +7124,64 @@
         ]
       }
     },
+    "/api/v1/bulk-lots/{lot_id}/price": {
+      "patch": {
+        "description": "改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。",
+        "operationId": "updateBulkPrice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Bulk Price",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/campaigns": {
       "get": {
         "operationId": "listCampaigns",
@@ -7790,6 +7870,64 @@
           }
         ],
         "summary": "Get Catalog Detail",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/{product_id}/price": {
+      "patch": {
+        "description": "改數量品售價（限管理者；寫稽核）。找不到→404。",
+        "operationId": "updateCatalogPrice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Catalog Price",
         "tags": [
           "inventory"
         ]
@@ -11279,6 +11417,64 @@
           }
         ],
         "summary": "Get Serialized Detail",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/{item_id}/price": {
+      "patch": {
+        "description": "改序號品標價（限管理者；僅在庫；寫稽核）。找不到→404、非在庫→409。",
+        "operationId": "updateSerializedPrice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Serialized Price",
         "tags": [
           "inventory"
         ]

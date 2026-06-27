@@ -160,6 +160,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/{lot_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Bulk Price
+         * @description 改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。
+         */
+        patch: operations["updateBulkPrice"];
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -361,6 +381,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Catalog Price
+         * @description 改數量品售價（限管理者；寫稽核）。找不到→404。
+         */
+        patch: operations["updateCatalogPrice"];
         trace?: never;
     };
     "/api/v1/categories": {
@@ -1244,6 +1284,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/serialized-items/{item_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Serialized Price
+         * @description 改序號品標價（限管理者；僅在庫；寫稽核）。找不到→404、非在庫→409。
+         */
+        patch: operations["updateSerializedPrice"];
         trace?: never;
     };
     "/api/v1/settings": {
@@ -3006,6 +3066,14 @@ export interface components {
             };
         };
         /**
+         * PriceUpdateRequest
+         * @description 改售價（manager；含稅整數元 > 0；序號品=標價、數量品/散裝=單價）。
+         */
+        PriceUpdateRequest: {
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /**
          * PricingRuleRead
          * @description 分類×成色帶 定價規則輸出（收購定價輔助讀取）。
          */
@@ -4208,6 +4276,41 @@ export interface operations {
             };
         };
     };
+    updateBulkPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listCampaigns: {
         parameters: {
             query?: {
@@ -4606,6 +4709,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProductDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCatalogPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
                 };
             };
             /** @description Validation Error */
@@ -6401,6 +6539,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateSerializedPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */

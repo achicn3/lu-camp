@@ -11,6 +11,7 @@ from decimal import Decimal
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -659,3 +660,100 @@ async def test_serialized_detail_forbidden_for_clerk(
         f"/api/v1/serialized-items/{item.id}/detail", headers=_auth(store_id)
     )
     assert resp.status_code == 403
+
+
+async def test_update_serialized_price_manager_audits(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """改序號品標價（限管理者；在庫）：價更新並寫稽核 UPDATE_PRICE（before/after）。"""
+    from app.core.audit import AuditLog
+
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="PRICE-1", listed_price="1280")
+    mgr = await _auth_manager(db_session, store_id)
+    await db_session.commit()  # 釋出 savepoint，端點 commit/rollback 不影響種子
+
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/price",
+        json={"unit_price": "1680"},
+        headers=mgr,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["listed_price"] == "1680"  # 回應即更新後標價
+    audits = (
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "UPDATE_PRICE", AuditLog.store_id == store_id
+            )
+        )
+    ).all()
+    assert len(audits) == 1
+
+
+async def test_update_serialized_price_forbidden_for_clerk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="PRICE-2")
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/price",
+        json={"unit_price": "999"},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_serialized_price_rejects_sold(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已售出不可改價 → 409。"""
+    store_id = await _seed_store(db_session)
+    sold = await _seed_item(
+        db_session, store_id, item_code="PRICE-3", status=SerializedItemStatus.SOLD
+    )
+    mgr = await _auth_manager(db_session, store_id)
+    await db_session.commit()
+    r = await client.patch(
+        f"/api/v1/serialized-items/{sold.id}/price", json={"unit_price": "100"}, headers=mgr
+    )
+    assert r.status_code == 409
+
+
+async def test_update_serialized_price_rejects_zero(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """非正整數售價 → 422（schema 驗證，端點前擋下）。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="PRICE-4")
+    mgr = await _auth_manager(db_session, store_id)
+    await db_session.commit()
+    r = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/price", json={"unit_price": "0"}, headers=mgr
+    )
+    assert r.status_code == 422
+
+
+async def test_update_catalog_and_bulk_price(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    mgr = await _auth_manager(db_session, store_id)
+    product = CatalogProduct(
+        store_id=store_id, sku="CP-1", name="瓦斯罐", unit_price=Decimal(120), quantity_on_hand=5
+    )
+    lot = BulkLot(
+        store_id=store_id, lot_code="LOT-P", name="營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([product, lot])
+    await db_session.flush()
+
+    rc = await client.patch(
+        f"/api/v1/catalog-products/{product.id}/price", json={"unit_price": "150"}, headers=mgr
+    )
+    assert rc.status_code == 200 and rc.json()["unit_price"] == "150"
+    rb = await client.patch(
+        f"/api/v1/bulk-lots/{lot.id}/price", json={"unit_price": "65"}, headers=mgr
+    )
+    assert rb.status_code == 200 and rb.json()["unit_price"] == "65"

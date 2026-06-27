@@ -7,7 +7,8 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import suggested_price
+from app.core.audit import write_audit_log
+from app.core.money import round_ntd, suggested_price
 from app.modules.inventory.models import (
     Brand,
     BulkLot,
@@ -411,6 +412,65 @@ class InventoryService:
     async def category_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
         """指定類型 id 的名稱對照（經營洞察用）。"""
         return await self._repo.category_names(store_id, ids)
+
+    # ── 改售價（manager；含稅整數元；每次寫稽核 before/after，§5/§9）──
+    async def update_serialized_price(
+        self, store_id: int, item_id: int, *, unit_price: Decimal, actor_user_id: int
+    ) -> SerializedItem | None:
+        """改序號品標價（僅在庫；寫稽核）。找不到→None；非在庫→InvalidStateTransition。"""
+        item = await self._repo.get_serialized_by_id(store_id, item_id)
+        if item is None:
+            return None
+        if item.status != SerializedItemStatus.IN_STOCK:
+            raise InvalidStateTransition("僅在庫序號品可改售價")
+        old, new = item.listed_price, Decimal(round_ntd(unit_price))
+        item.listed_price = new
+        await self._session.flush()
+        await self._audit_price(store_id, actor_user_id, "serialized_item", item_id, old, new)
+        return item
+
+    async def update_catalog_price(
+        self, store_id: int, product_id: int, *, unit_price: Decimal, actor_user_id: int
+    ) -> CatalogProduct | None:
+        """改數量品售價（寫稽核）。找不到→None。"""
+        product = await self._repo.get_catalog(store_id, product_id)
+        if product is None:
+            return None
+        old, new = product.unit_price, Decimal(round_ntd(unit_price))
+        product.unit_price = new
+        await self._session.flush()
+        await self._audit_price(store_id, actor_user_id, "catalog_product", product_id, old, new)
+        return product
+
+    async def update_bulk_price(
+        self, store_id: int, lot_id: int, *, unit_price: Decimal, actor_user_id: int
+    ) -> BulkLot | None:
+        """改散裝批每件均一價（僅販售中；寫稽核）。找不到→None；非販售中→InvalidStateTransition。"""
+        lot = await self._repo.get_bulk_lot(store_id, lot_id)
+        if lot is None:
+            return None
+        if lot.status != BulkLotStatus.ON_SALE:
+            raise InvalidStateTransition("僅販售中散裝批可改售價")
+        old, new = lot.unit_price, Decimal(round_ntd(unit_price))
+        lot.unit_price = new
+        await self._session.flush()
+        await self._audit_price(store_id, actor_user_id, "bulk_lot", lot_id, old, new)
+        return lot
+
+    async def _audit_price(
+        self, store_id: int, actor_user_id: int, entity_type: str, entity_id: int,
+        old: Decimal, new: Decimal,
+    ) -> None:
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_PRICE",
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            before={"price": str(old)},
+            after={"price": str(new)},
+        )
 
     async def count_aged_in_stock(self, store_id: int, days: int) -> int:
         """在庫且入庫≥days 天的序號品件數（洞察摘要：久滯預警）。"""

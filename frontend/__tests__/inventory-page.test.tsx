@@ -287,6 +287,37 @@ describe("InventoryPage", () => {
     expect(screen.getByText(/散裝寄售人/)).toBeTruthy();
   });
 
+  it("管理者可改序號品售價（PATCH /price，含稅整數元）", async () => {
+    loginManager();
+    let patched: { url: string; body: unknown } | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (url.includes("/serialized-items/") && url.includes("/price") && method === "PATCH") {
+          const raw =
+            input instanceof Request ? await input.clone().text() : String(init?.body ?? "{}");
+          patched = { url, body: JSON.parse(raw) };
+          return json({ ...SERIALIZED[0], listed_price: "4200" });
+        }
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "改價" }));
+    const input = await screen.findByLabelText("新售價");
+    await userEvent.clear(input);
+    await userEvent.type(input, "4200");
+    await userEvent.click(screen.getByRole("button", { name: "送出" }));
+    await waitFor(() => expect(patched).not.toBeNull());
+    expect(patched!.url).toContain("/serialized-items/1/price");
+    expect(patched!.body).toEqual({ unit_price: "4200" });
+  });
+
   it("久滯庫存 tab queries by min_age_days and shows days-in-stock", async () => {
     const urls: string[] = [];
     vi.stubGlobal(

@@ -80,6 +80,19 @@ class CategoryTargetUpdate(BaseModel):
     target_margin_pct: int = Field(ge=0, le=99)
 
 
+class PriceUpdateRequest(BaseModel):
+    """改售價（manager；含稅整數元 > 0；序號品=標價、數量品/散裝=單價）。"""
+
+    unit_price: NTDAmount
+
+    @field_validator("unit_price")
+    @classmethod
+    def _positive_integer(cls, v: Decimal) -> Decimal:
+        if v <= 0 or v != v.to_integral_value():
+            raise ValueError("售價須為正整數元")
+        return v
+
+
 class PricingRuleRead(BaseModel):
     """分類×成色帶 定價規則輸出（收購定價輔助讀取）。"""
 

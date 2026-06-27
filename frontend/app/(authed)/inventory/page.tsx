@@ -5,7 +5,7 @@
 // 補印標籤：每列一顆「補印標籤」（IN_STOCK 序號品 / ON_SALE 散裝批），直接複用 hardware-agent
 // 的 /print/label——清單列本就帶齊 條碼/品名/售價，免再查 by-code、免改後端。
 // 待後端端點（F5b，需核准後補）：改價留痕、上下架、商品照片。本版不放假按鈕（沿 cash 頁慣例）。
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 
 import {
@@ -223,6 +223,101 @@ function SearchBar({
         查詢
       </button>
     </form>
+  );
+}
+
+// 改售價（管理者限定；後端寫稽核）。序號品改標價、數量品/散裝改單價。
+function ChangePriceButton({
+  kind,
+  id,
+  currentPrice,
+}: {
+  kind: "serialized" | "catalog" | "bulk";
+  id: number;
+  currentPrice: string;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState(currentPrice);
+  const [error, setError] = useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: async (price: string) => {
+      const body = { unit_price: price };
+      if (kind === "serialized") {
+        const { data, error: e } = await api.PATCH("/api/v1/serialized-items/{item_id}/price", {
+          params: { path: { item_id: id } },
+          body,
+        });
+        if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
+        return data;
+      }
+      if (kind === "catalog") {
+        const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}/price", {
+          params: { path: { product_id: id } },
+          body,
+        });
+        if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
+        return data;
+      }
+      const { data, error: e } = await api.PATCH("/api/v1/bulk-lots/{lot_id}/price", {
+        params: { path: { lot_id: id } },
+        body,
+      });
+      if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setOpen(false);
+      void qc.invalidateQueries({ queryKey: ["inventory"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    const n = parseNtd(value);
+    if (n === null || n <= 0 || !Number.isInteger(n)) {
+      setError("售價須為正整數元");
+      return;
+    }
+    mut.mutate(String(n));
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn-ghost" onClick={() => { setValue(currentPrice); setOpen(true); }}>
+        改價
+      </button>
+    );
+  }
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="改售價">
+      <form className="card pos-dialog inv-price-dialog" onSubmit={submit}>
+        <h2>改售價</h2>
+        <p className="hint">改價為敏感操作，系統會記錄誰、何時、改前改後（稽核）。</p>
+        <label className="field">
+          <span className="field-label">新售價（含稅整數元）</span>
+          <input
+            inputMode="numeric"
+            autoFocus
+            aria-label="新售價"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </label>
+        {error !== null && <p role="alert" className="form-error">{error}</p>}
+        <div className="pos-dialog-actions">
+          <button type="submit" className="btn-primary" disabled={mut.isPending}>
+            {mut.isPending ? "更新中…" : "送出"}
+          </button>
+          <button type="button" className="btn-ghost" onClick={() => setOpen(false)} disabled={mut.isPending}>
+            取消
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -671,6 +766,9 @@ function SerializedPanel() {
                   詳細
                 </button>
               )}
+              {isManager && item.status === "IN_STOCK" && (
+                <ChangePriceButton kind="serialized" id={item.id} currentPrice={item.listed_price} />
+              )}
               {item.status === "IN_STOCK" && (
                 <ReprintLabelButton
                   code={item.item_code}
@@ -756,6 +854,9 @@ function CatalogPanel() {
                   <button type="button" className="btn-ghost" onClick={() => setDetailId(product.id)}>
                     詳細
                   </button>
+                )}
+                {isManager && (
+                  <ChangePriceButton kind="catalog" id={product.id} currentPrice={product.unit_price} />
                 )}
               </td>
             </tr>
@@ -844,6 +945,9 @@ function BulkPanel() {
                 <button type="button" className="btn-ghost" onClick={() => setDetailId(lot.id)}>
                   詳細
                 </button>
+              )}
+              {isManager && lot.status === "ON_SALE" && (
+                <ChangePriceButton kind="bulk" id={lot.id} currentPrice={lot.unit_price} />
               )}
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
@@ -993,6 +1097,9 @@ function AgingPanel() {
                 <button type="button" className="btn-ghost" onClick={() => setDetailId(item.id)}>
                   詳細
                 </button>
+              )}
+              {isManager && (
+                <ChangePriceButton kind="serialized" id={item.id} currentPrice={item.listed_price} />
               )}
             </td>
           </tr>

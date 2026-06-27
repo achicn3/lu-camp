@@ -38,6 +38,7 @@ from app.shared.exceptions import (
     MenuItemUnavailable,
     NoOpenCashSession,
     SaleAlreadyVoid,
+    SaleHasReturns,
     SaleItemNotFound,
     SaleLineInvalid,
     StoreCreditConflict,
@@ -205,7 +206,7 @@ async def void_sale(sale_id: int, session: SessionDep, user: ManagerDep) -> Sale
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到銷售單")
     try:
         voided = await svc.void_sale(sale, user.id)
-    except SaleAlreadyVoid as exc:
+    except (SaleAlreadyVoid, SaleHasReturns) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except MemberPointsAdjustFailed as exc:

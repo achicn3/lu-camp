@@ -65,6 +65,10 @@ class ReturnsService:
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
 
+    async def has_returns_for_sale(self, store_id: int, sale_id: int) -> bool:
+        """該銷售是否已有退貨（供 sales.void_sale 前置檢查：已退貨者不可作廢）。"""
+        return await self._repo.has_returns_for_sale(store_id, sale_id)
+
     async def find_idempotent_replay(
         self,
         store_id: int,

@@ -184,7 +184,9 @@ class SalesRepository:
                 SerializedItem.acquisition_cost,
                 SerializedItem.commission_pct,
                 SerializedItem.intake_date,
-                SerializedItem.sold_date,
+                # 售出時間取「該銷售」的時間（Sale.created_at），而非 item.sold_date——
+                # 後者是可變狀態（退貨清空、再售覆寫），會讓歷史期間的在庫天數算錯（Codex P2）。
+                Sale.created_at,
                 SaleLine.line_total,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)

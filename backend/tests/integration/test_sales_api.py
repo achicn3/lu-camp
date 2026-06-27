@@ -268,6 +268,36 @@ async def test_void_restores_inventory(
     assert restored is not None and restored.quantity_on_hand == 10  # 回補後復原
 
 
+async def test_void_rejected_when_sale_has_returns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已退貨的銷售不可作廢（Codex P1）：避免退貨已回補的庫存被作廢重複放回 → 409。"""
+    from app.modules.returns.models import CustomerReturn
+
+    token, store_id, clerk_id = await _seed(db_session)
+    mgr_token = await _seed_manager(db_session, store_id)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    created = await client.post(
+        "/api/v1/sales", json={"lines": [_catalog_line(cat, 2)]}, headers=_auth(token, idem="r")
+    )
+    sale_id = created.json()["id"]
+    # 模擬已存在一筆退貨單。
+    db_session.add(
+        CustomerReturn(
+            store_id=store_id, sale_id=sale_id, refund_amount=Decimal("100"),
+            reason="客戶退貨", clerk_user_id=clerk_id,
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_auth(mgr_token))
+    assert resp.status_code == 409, resp.text
+    # 未作廢、庫存未被重複回補（仍為 8）。
+    db_session.expire_all()
+    product = await db_session.get(CatalogProduct, cat)
+    assert product is not None and product.quantity_on_hand == 8
+
+
 async def test_void_404(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _, store_id, _ = await _seed(db_session)
     mgr_token = await _seed_manager(db_session, store_id)

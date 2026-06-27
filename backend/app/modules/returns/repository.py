@@ -20,6 +20,15 @@ class ReturnsRepository:
         await self._session.flush()
         return line
 
+    async def has_returns_for_sale(self, store_id: int, sale_id: int) -> bool:
+        """該銷售是否已有任何退貨單（供作廢前置檢查：已退貨者不可作廢）。"""
+        stmt = select(
+            select(CustomerReturn.id)
+            .where(CustomerReturn.store_id == store_id, CustomerReturn.sale_id == sale_id)
+            .exists()
+        )
+        return bool(await self._session.scalar(stmt))
+
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         stmt = select(CustomerReturn).where(
             CustomerReturn.id == return_id,

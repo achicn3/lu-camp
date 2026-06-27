@@ -109,6 +109,10 @@ class SaleAlreadyVoid(DomainError):
     """銷售已作廢，不可重複作廢。"""
 
 
+class SaleHasReturns(DomainError):
+    """已（部分/全部）退貨的銷售不可作廢——退貨已處理庫存/退款，作廢會重複回補造成庫存失真。"""
+
+
 class MemberPointsAdjustFailed(DomainError):
     """會員點數調整失敗（對象不存在或會使點數為負）——資料不一致，整筆交易應回滾。"""
 
