@@ -178,6 +178,41 @@ async def test_insights_includes_bulk_sales(
     assert coleman["margin"] == "33"
 
 
+async def test_insights_csv_export(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """經營洞察支援 CSV 匯出（Codex P2）：輸出品牌/類型暢銷排行＋周轉/業態 meta。"""
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    brand = Brand(store_id=store.id, name="Snow Peak")
+    db_session.add_all([mgr, clerk, brand])
+    await db_session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+    item = SerializedItem(
+        store_id=store.id, item_code="OWN-CSV", name="帳篷", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(5000),
+        acquisition_cost=Decimal(3000), brand_id=brand.id, status=SerializedItemStatus.SOLD,
+        intake_date=datetime(2026, 6, 1, tzinfo=UTC), sold_date=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    db_session.add(item)
+    await db_session.flush()
+    await _sell(db_session, store.id, clerk.id, item, Decimal(5000))
+
+    resp = await client.get(
+        "/api/v1/reports/insights",
+        params={"from": "2026-01-01T00:00:00Z", "to": "2026-12-31T00:00:00Z", "format": "csv"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    text = resp.content.decode("utf-8-sig")
+    assert "維度" in text and "售出件數" in text and "平均在庫天數" in text
+    assert "Snow Peak" in text
+    assert "平均周轉天數" in text  # 周轉摘要置於 meta
+
+
 async def test_insights_turnover_days_weighted_by_units(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -239,15 +239,58 @@ async def insights(
     user: ManagerDep,
     date_from: Annotated[datetime, Query(alias="from")],
     date_to: Annotated[datetime, Query(alias="to")],
-) -> InsightsReport:
-    """經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。"""
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> InsightsReport | Response:
+    """經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
+
+    匯出（?format=csv|xlsx）輸出品牌＋類型暢銷排行；周轉/業態結構置於 meta。
+    """
     if date_to <= date_from:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
         )
-    return await ReportsService(session).insights(
+    report = await ReportsService(session).insights(
         user.store_id, date_from=date_from, date_to=date_to
     )
+    if fmt == "json":
+        return report
+
+    def _days(value: float | None) -> str:
+        return "N/A" if value is None else str(value)
+
+    t, mix = report.turnover, report.revenue_mix
+    meta = [
+        ("產生時間", report.generated_at.isoformat()),
+        ("店別", str(report.store_id)),
+        ("起", report.date_from.isoformat()),
+        ("迄", report.date_to.isoformat()),
+        ("在庫>90天件數", str(t.in_stock_over_90d)),
+        ("平均周轉天數", _days(t.avg_turnover_days)),
+        ("二手營收", str(mix.secondhand)),
+        ("寄售抽成", str(mix.consignment_commission)),
+        ("餐飲營收", str(mix.food)),
+    ]
+    rows = [
+        [
+            dim,
+            r.label,
+            str(r.units_sold),
+            str(r.revenue),
+            str(r.margin),
+            str(r.avg_unit_price),
+            _days(r.avg_days_in_stock),
+        ]
+        for dim, group in (("品牌", report.brand_breakdown), ("類型", report.category_breakdown))
+        for r in group
+    ]
+    exp = TabularExport(
+        sheet="經營洞察",
+        filename_stem=f"insights-{report.store_id}",
+        meta=meta,
+        headers=["維度", "名稱", "售出件數", "營收", "毛利", "平均單價", "平均在庫天數"],
+        rows=rows,
+    )
+    return export_response(exp, fmt)
 
 
 @router.get(

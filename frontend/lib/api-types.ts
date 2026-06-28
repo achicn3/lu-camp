@@ -963,6 +963,8 @@ export interface paths {
         /**
          * Insights
          * @description 經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
+         *
+         *     匯出（?format=csv|xlsx）輸出品牌＋類型暢銷排行；周轉/業態結構置於 meta。
          */
         get: operations["businessInsightsReport"];
         put?: never;
@@ -5936,6 +5938,7 @@ export interface operations {
             query: {
                 from: string;
                 to: string;
+                format?: "json" | "csv" | "xlsx";
             };
             header?: never;
             path?: never;

@@ -10159,7 +10159,7 @@
     },
     "/api/v1/reports/insights": {
       "get": {
-        "description": "經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。",
+        "description": "經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。\n\n匯出（?format=csv|xlsx）輸出品牌＋類型暢銷排行；周轉/業態結構置於 meta。",
         "operationId": "businessInsightsReport",
         "parameters": [
           {
@@ -10179,6 +10179,21 @@
             "schema": {
               "format": "date-time",
               "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
               "type": "string"
             }
           }
