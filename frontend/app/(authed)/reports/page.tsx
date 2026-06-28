@@ -476,7 +476,13 @@ function InsightsPanel() {
         <>
           {/* 趨勢圖 TrendChart（沿用財務趨勢資料） */}
           <h3 className="rpt-insight-h">營收 / 毛利趨勢</h3>
-          {trends.data ? <TrendChart rows={trends.data.rows} /> : <p className="hint">趨勢載入中…</p>}
+          {trends.isError ? (
+            <ErrorBlock message={trends.error.message} />
+          ) : trends.data ? (
+            <TrendChart rows={trends.data.rows} />
+          ) : (
+            <p className="hint">趨勢載入中…</p>
+          )}
 
           {/* 周轉 / 滯銷摘要卡 */}
           <h3 className="rpt-insight-h">周轉 / 滯銷</h3>

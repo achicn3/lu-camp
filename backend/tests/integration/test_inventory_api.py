@@ -593,6 +593,44 @@ async def test_serialized_detail_ignores_voided_sale(
     assert d["sold_price"] is None
 
 
+async def test_serialized_detail_ignores_returned_sale(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已退貨（非作廢、已回補 IN_STOCK）的在庫品，不得顯示已退款的成交/獲利（Codex P2）。"""
+    store_id = await _seed_store(db_session)
+    # 退貨後品項回補為 IN_STOCK，但原（非作廢）sale_line 仍在。
+    item = SerializedItem(
+        store_id=store_id, item_code="DET-RET", name="退貨帳篷", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(2000),
+        acquisition_cost=Decimal(1200), status=SerializedItemStatus.IN_STOCK,
+    )
+    db_session.add(item)
+    await db_session.flush()
+    clerk_id = _STORE_CLERKS[store_id]
+    sale = Sale(
+        store_id=store_id, clerk_user_id=clerk_id,
+        subtotal=Decimal(1900), tax=Decimal(100), total=Decimal(2000),
+    )
+    db_session.add(sale)
+    await db_session.flush()
+    db_session.add(
+        SaleLine(
+            store_id=store_id, sale_id=sale.id, line_type=SaleLineType.SERIALIZED,
+            serialized_item_id=item.id, description="退貨帳篷", qty=1,
+            unit_price=Decimal(2000), line_total=Decimal(2000),
+        )
+    )
+    await db_session.flush()
+
+    mgr = await _auth_manager(db_session, store_id)
+    resp = await client.get(f"/api/v1/serialized-items/{item.id}/detail", headers=mgr)
+    assert resp.status_code == 200, resp.text
+    d = resp.json()
+    assert d["sale_id"] is None
+    assert d["sold_price"] is None
+    assert d["margin"] is None  # 不得顯示已退款的獲利
+
+
 async def test_serialized_detail_unknown_returns_404(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

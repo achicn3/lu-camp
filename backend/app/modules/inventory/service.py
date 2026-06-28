@@ -363,14 +363,18 @@ class InventoryService:
                     "kind": source_kind,
                 }
 
-        # 售出明細（實際成交折後價、售出時間）。
+        # 售出明細（實際成交折後價、售出時間）：僅在「目前確為已售」時才顯示（Codex P2）。
+        # 已退貨/作廢會回補為 IN_STOCK 但留下非作廢 sale_line——不可再顯示那筆已退款的成交/獲利。
         sold_price: Decimal | None = None
         sale_id: int | None = None
-        sale_line = await SalesService(self._session).get_serialized_sale_line(store_id, item_id)
-        if sale_line is not None:
-            line, sale = sale_line
-            sold_price = line.unit_price
-            sale_id = sale.id
+        if item.status == SerializedItemStatus.SOLD:
+            sale_line = await SalesService(self._session).get_serialized_sale_line(
+                store_id, item_id
+            )
+            if sale_line is not None:
+                line, sale = sale_line
+                sold_price = line.unit_price
+                sale_id = sale.id
 
         margin: Decimal | None = None
         if (

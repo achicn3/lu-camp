@@ -286,11 +286,13 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-function stubReportsFetch() {
+function stubReportsFetch(override?: (url: string) => Response | null) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
+      const overridden = override?.(url);
+      if (overridden) return overridden;
       // Financial reports (Phase 6)
       if (url.includes("/reports/daily-summary")) return json(DAILY_SUMMARY_DATA);
       if (url.includes("/reports/insights")) return json(INSIGHTS_DATA);
@@ -405,6 +407,20 @@ describe("ReportsPage", () => {
     // 切到類型維度
     await userEvent.click(screen.getByRole("button", { name: "類型" }));
     expect(await screen.findByText("帳篷")).toBeTruthy();
+  });
+
+  it("經營洞察：趨勢查詢失敗時顯示錯誤而非永遠載入中（Codex P3）", async () => {
+    loginAs("MANAGER");
+    // trends 回 422（模擬日粒度跨大區間觸發桶上限），其餘端點正常。
+    stubReportsFetch((url) =>
+      url.includes("/reports/trends") ? json({ detail: "趨勢粒度桶數過多" }, 422) : null,
+    );
+    renderPage();
+    await screen.findByText("120,000");
+    await userEvent.click(screen.getByRole("tab", { name: "經營洞察" }));
+    expect(await screen.findByText("Snow Peak")).toBeTruthy(); // insights 成功
+    expect(await screen.findByText("趨勢粒度桶數過多")).toBeTruthy(); // 趨勢錯誤有顯示
+    expect(screen.queryByText("趨勢載入中…")).toBeNull(); // 不再卡在載入中
   });
 
   it("manager sees liability tab with totals and per-member table", async () => {
