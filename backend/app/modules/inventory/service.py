@@ -598,6 +598,10 @@ class InventoryService:
         stocked_before = (
             datetime.now(UTC) - timedelta(days=min_age_days) if min_age_days is not None else None
         )
+        # 久滯庫存語意僅涵蓋仍在庫品；若查詢給了 min_age_days 卻未指定 status，
+        # 預設限定 IN_STOCK，避免已售/已沖銷品被當成久滯庫存回傳。
+        if stocked_before is not None and status is None:
+            status = SerializedItemStatus.IN_STOCK
         return await self._repo.list_serialized(
             store_id,
             status=status,

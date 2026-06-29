@@ -506,6 +506,50 @@ async def test_list_serialized_aging_min_age_and_oldest_first(
     assert [r["item_code"] for r in both.json()] == ["AGE-OLD", "AGE-NEW"]
 
 
+async def test_aging_query_excludes_non_in_stock_items(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """久滯庫存語意僅含在庫品：min_age_days 未帶 status 時，已售/已沖銷的老件不得回傳；
+    明確帶 status 仍可查（不破壞既有篩選）。"""
+    store_id = await _seed_store(db_session)
+    now = datetime.now(UTC)
+    sold_old = SerializedItem(
+        store_id=store_id, item_code="AGE-SOLD", name="已售老帳篷", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(1000),
+        intake_date=now - timedelta(days=200),
+        status=SerializedItemStatus.SOLD, sold_date=now - timedelta(days=10),
+    )
+    written_off_old = SerializedItem(
+        store_id=store_id, item_code="AGE-WO", name="已沖銷老帳篷", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(1000),
+        intake_date=now - timedelta(days=200),
+        status=SerializedItemStatus.WRITTEN_OFF,
+    )
+    stocked_old = SerializedItem(
+        store_id=store_id, item_code="AGE-IN", name="在庫老帳篷", grade=Grade.A,
+        ownership_type=OwnershipType.OWNED, listed_price=Decimal(1000),
+        intake_date=now - timedelta(days=200),
+    )
+    db_session.add_all([sold_old, written_off_old, stocked_old])
+    await db_session.flush()
+
+    # 未帶 status：只回在庫老件，排除 SOLD / WRITTEN_OFF。
+    aged = await client.get(
+        "/api/v1/serialized-items",
+        params={"min_age_days": 90, "oldest_first": "true"},
+        headers=_auth(store_id),
+    )
+    assert [r["item_code"] for r in aged.json()] == ["AGE-IN"]
+
+    # 明確帶 status 仍尊重該篩選（可查老的已售件）。
+    sold = await client.get(
+        "/api/v1/serialized-items",
+        params={"min_age_days": 90, "oldest_first": "true", "status": "SOLD"},
+        headers=_auth(store_id),
+    )
+    assert [r["item_code"] for r in sold.json()] == ["AGE-SOLD"]
+
+
 async def test_serialized_detail_aggregates_source_sale_and_history(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
