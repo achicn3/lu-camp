@@ -208,11 +208,17 @@ class ConsignmentRepository:
         return Decimal(total if total is not None else 0)
 
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
-        """指定銷售集合的寄售抽成合計（SC-5b 毛利推導；唯讀，店家收入只認抽成）。"""
+        """指定銷售集合的「有效」寄售抽成合計（SC-5b/毛利推導；唯讀，店家收入只認抽成）。
+
+        退貨反轉後抽成經濟上不成立（客人已退款，不變量 #7）：未付結算 CANCELLED、
+        已付結算 reclaim_needed（款待向寄售人追回）皆排除，否則報表高估店家收入。
+        """
         if not sale_ids:
             return Decimal(0)
         stmt = select(func.coalesce(func.sum(ConsignmentSettlement.commission_amount), 0)).where(
             ConsignmentSettlement.store_id == store_id,
             ConsignmentSettlement.sale_id.in_(sale_ids),
+            ConsignmentSettlement.status != ConsignmentSettlementStatus.CANCELLED,
+            ConsignmentSettlement.reclaim_needed.is_(False),
         )
         return Decimal((await self._session.scalar(stmt)) or 0)
