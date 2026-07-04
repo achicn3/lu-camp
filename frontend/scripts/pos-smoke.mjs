@@ -1,6 +1,6 @@
 // POS 結帳瀏覽器煙霧測試：API 準備唯一測試資料 → 登入 → /pos →
 // 已售/售罄阻擋、序號品重複掃碼、現金/購物金/混合付款、散裝批數量調整、列印明細。
-// 另用既有 /sales API 驗證 catalog 數量型商品銷售，因目前 POS UI 尚無 catalog picker。
+// 另用既有 /sales API 驗證 catalog 數量型商品銷售；POS UI 掃 SKU 售數量品另見 pos-catalog-smoke.mjs。
 // 執行：node scripts/pos-smoke.mjs
 // 需 backend:8000 + frontend:3000 已起、dev-manager 帳號可登入，且至少一筆可售 catalog SKU 已 seed。
 import { randomUUID } from "node:crypto";

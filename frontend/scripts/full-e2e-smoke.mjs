@@ -407,6 +407,8 @@ try {
   ok("11b) 新增供應商", true, supplierName);
   // (b) 上架數量型商品（初始庫存 0）
   await page.click('.settle-tabs button:has-text("採購單")');
+  // 建立/上架/低庫存收進 <details class="pur-tools"> 摺疊區（0b67e1a 改版）：先展開。
+  await page.locator(".pur-tools > summary").click();
   await page.waitForSelector(".pur-catalog-form");
   const gasName = `高山瓦斯罐-${RUN}`;
   await page.locator('.pur-catalog-form input[aria-label="SKU"]').fill(`GAS-${RUN}`);
@@ -418,7 +420,12 @@ try {
   ok("11b) ★上架數量型商品（廠商採購商品建檔，初始庫存 0）", true, gasName);
   await shot(page, "purchasing-catalog-created");
   // (c) 建採購單（選供應商、搜尋剛上架商品、設量與進貨價）
-  await page.selectOption('select[aria-label="供應商"]', { label: supplierName });
+  // 供應商改為查無即建 combobox（1a2d0c1）：填名 → 點既有選項。
+  await page.locator(".pur-create .combo-input").fill(supplierName);
+  await page
+    .locator(".pur-create .combo-option", { hasText: supplierName })
+    .first()
+    .click();
   await page.fill('input[aria-label="搜尋數量品"]', gasName.slice(0, 5));
   await page.waitForSelector(`.pur-search-results li button:has-text("${gasName}")`, { timeout: 8000 });
   await page.click(`.pur-search-results li button:has-text("${gasName}")`);
