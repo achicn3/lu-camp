@@ -3,6 +3,26 @@
 > 從審查（含 Codex adversarial-review）或實作中發現、經決議延後處理的真實問題。
 > 每項註明來源、原因、預定處理時機，確保不被遺忘。完成後移除並於該 PR 註記。
 
+## D-7（T13 收尾必辦）— 電子發票「開立」語意重對齊 + 證明聯接線 + G3 稅務定案
+
+- **來源**：2026-07-02 端到端流程檢視（feat/einvoice-infra）。
+- **(a) 開立語意重對齊（設計層）**：目前狀態機唯有平台 ProcessResult 成功才把發票轉
+  ISSUED——在「字軌配號未實作」階段這是誠實且正確的（任何發票都不該是 ISSUED）。但台灣
+  B2C 實務相反：**開立是結帳當下的本地行為**（自已配字軌區間取號、產隨機碼、當場交付證明聯
+  或存載具），F0401 上傳是「存證」（48 小時內），上傳失敗不會取消開立。**T13 落地配號時必須
+  把 ISSUED 移回結帳當下**（本地配號成功即開立），佇列 UPLOADED 降格為「存證完成」；
+  VOID_PENDING→VOID（等 F0501 核可）語意亦須同步重審。不重對齊就上線會拿錯誤的模型運作。
+- **(b) 證明聯列印接線**：硬體代理 `/print/einvoice`（InvoicePayload：字軌+隨機碼+QR AES）
+  已就緒；缺後端 Invoice→InvoicePayload 橋接與 POS 開立當下的呼叫點。與 (a) 綁定實作。
+  同時開放 `/sales` API 的載具/捐贈/統編欄位與 POS UI（現為停用佔位）。
+- **(c) G3 稅務定案（找會計師，開票上線前必須）**：購物金付款目前把購物金當「支付工具」、
+  發票開**全額**。若會計師把儲值金歸類為「售出時即開立」或「折抵屬折讓」，開票金額與時點
+  都會變（docs/16 G3）。
+- **(d) ✅ 已解（2026-07-02，確認非刻意）**：POS 掃碼補數量品第三段 fallback（序號→散裝→SKU），
+  後端新增 `GET /catalog-products/by-sku/{sku}`；瀏覽器煙霧 `pos-catalog-smoke.mjs` 10/10。
+- **狀態**：擋於 `EInvoiceActivationNotReady`（序列化器就緒前 einvoice_enabled 不可開啟），
+  故不影響現行營運；T13 動工時以本項為 checklist。
+
 ## D-4（橫切任務，待排）— 敏感操作的當前授權重驗（auth-hardening）
 
 - **來源**：T12 Codex adversarial-review（2026-06-06）對 void 授權的觀察。
@@ -20,6 +40,19 @@
   D-4 實作時一併涵蓋：敏感操作重查 DB（既定修法）、必要時 token 版本/撤銷機制、登入節流
   改共享儲存（多 worker 時）、`seed_dev_store.py` 補與 `seed_dev_user.py` 相同的環境防護。
 - **狀態**：待排獨立橫切任務。Codex 之後每跑會再報此點（app-wide 設計），視為已處置已知項、非 blocker。
+
+## D-8（報表退貨口徑，待排）— 營收/毛利不扣退貨 + 退貨不沖點數
+
+- **來源**：2026-07-02 金流/報表全面檢視（同批發現的「寄售抽成計入已取消結算」已修：
+  `commission_total_for_sales` 排除 CANCELLED 與 reclaim_needed）。
+- **(1) 營收/毛利報表不扣退貨（High，潛伏）**：`margin_components` 只排 VOID，退貨行仍以全額
+  計營收與成本——全退的單照樣貢獻毛利（與現金側 `sale_refund_out` 對不上）；退回序號品再售出
+  會**重複計營收**。影響 R2/R6/C4/經營洞察/SC-5b（同源 margin_breakdown）。docs/19:105 原裁示
+  「returns 上線後分欄顯示」未實作。修法：各段以 `return_lines` 已退數量/金額沖回＋報表分欄。
+- **(2) 退貨不沖回會員點數（Medium）**：`void_sale` 以 awarded_points 沖回、`create_return`
+  沒碰點數——全退後客人白拿點數。**口徑待裁示：按退款金額比例沖 vs 全退才沖**。
+- **緩解**：4B 退貨 UI 已擱置（店內不會用），退貨僅能走 API → 兩項現為潛伏問題；
+  退貨線因電子發票 G0401 折讓已接上，啟用前必須修。
 
 ## D-3（設計筆記，待 Phase 4 退貨一起評估）— 銷售作廢 vs 發票作廢狀態建模
 
