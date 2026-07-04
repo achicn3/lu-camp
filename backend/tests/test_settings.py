@@ -20,6 +20,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
+from app.shared.exceptions import EInvoiceActivationNotReady
 
 
 async def _seed_store(session: AsyncSession) -> int:
@@ -57,12 +58,10 @@ async def test_update_creates_row_and_applies_patch(db_session: AsyncSession) ->
         store_id,
         actor_user_id=user_id,
         patch=SettingsUpdateRequest(
-            einvoice_enabled=True,
             default_commission_pct=40,
             allow_clerk_manage_categories=True,
         ),
     )
-    assert updated.einvoice_enabled is True
     assert updated.default_commission_pct == 40
     assert updated.allow_clerk_manage_categories is True
     # 未提供的欄位維持預設。
@@ -71,7 +70,7 @@ async def test_update_creates_row_and_applies_patch(db_session: AsyncSession) ->
     # 已持久化。
     persisted = await svc.get_persisted(store_id)
     assert persisted is not None
-    assert persisted.einvoice_enabled is True
+    assert persisted.default_commission_pct == 40
 
 
 async def test_update_is_idempotent_on_existing_row(db_session: AsyncSession) -> None:
@@ -96,7 +95,9 @@ async def test_update_writes_audit(db_session: AsyncSession) -> None:
     store_id, user_id = await _seed_store_and_user(db_session)
     svc = StoreSettingsService(db_session)
     await svc.update_settings(
-        store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
+        store_id,
+        actor_user_id=user_id,
+        patch=SettingsUpdateRequest(allow_clerk_manage_categories=True),
     )
     audits = (await db_session.scalars(select(AuditLog))).all()
     settings_audits = [a for a in audits if a.action == "UPDATE_SETTINGS"]
@@ -106,7 +107,25 @@ async def test_update_writes_audit(db_session: AsyncSession) -> None:
     assert a.actor_user_id == user_id
     assert a.entity_type == "settings"
     # after 反映變更後的值。
-    assert a.after is not None and a.after.get("einvoice_enabled") is True
+    assert a.after is not None and a.after.get("allow_clerk_manage_categories") is True
+
+
+async def test_enable_einvoice_blocked_until_serializer_ready(db_session: AsyncSession) -> None:
+    """XSD 序列化器/字軌配號未落地（T13）前不得開啟 einvoice_enabled；關閉不受限。"""
+    store_id, user_id = await _seed_store_and_user(db_session)
+    svc = StoreSettingsService(db_session)
+    with pytest.raises(EInvoiceActivationNotReady):
+        await svc.update_settings(
+            store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
+        )
+    # 未寫入任何變更。
+    persisted = await svc.get_persisted(store_id)
+    assert persisted is None or persisted.einvoice_enabled is False
+    # 明確關閉（False）不受限。
+    updated = await svc.update_settings(
+        store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=False)
+    )
+    assert updated.einvoice_enabled is False
 
 
 @pytest.mark.parametrize(

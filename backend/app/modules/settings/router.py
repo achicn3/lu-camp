@@ -18,7 +18,7 @@ from app.modules.settings.schemas import (
 )
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import UserRole
-from app.shared.exceptions import InvalidPremiumRate
+from app.shared.exceptions import EInvoiceActivationNotReady, InvalidPremiumRate
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -46,6 +46,9 @@ async def update_settings(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    except EInvoiceActivationNotReady as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return SettingsRead.from_model(settings)
 

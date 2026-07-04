@@ -61,23 +61,38 @@ async def test_manager_patch_updates_and_persists(
     patch = await client.patch(
         "/api/v1/settings",
         json={
-            "einvoice_enabled": True,
             "default_margin_pct": 30,
             "allow_clerk_manage_categories": True,
         },
         headers=_auth(token),
     )
     assert patch.status_code == 200
-    assert patch.json()["einvoice_enabled"] is True
     assert patch.json()["default_margin_pct"] == 30
     assert patch.json()["allow_clerk_manage_categories"] is True
     # 再 GET 應反映已持久化的變更。
     got = await client.get("/api/v1/settings", headers=_auth(token))
-    assert got.json()["einvoice_enabled"] is True
     assert got.json()["default_margin_pct"] == 30
     assert got.json()["allow_clerk_manage_categories"] is True
     # 未動到的維持預設。
     assert got.json()["default_commission_pct"] == 50
+    assert got.json()["einvoice_enabled"] is False
+
+
+async def test_enable_einvoice_returns_409_until_ready(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """XSD 序列化器/字軌配號未落地（T13）前，開啟 einvoice_enabled → 409、不持久化。"""
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    # 先固定種子（savepoint 釋放；外層交易仍會整批回滾）：409 路徑的 router rollback
+    # 只回滾該請求的變更，不吃掉種子 user，後續 GET 才能以同 token 驗證未持久化。
+    await db_session.commit()
+    resp = await client.patch(
+        "/api/v1/settings", json={"einvoice_enabled": True}, headers=_auth(token)
+    )
+    assert resp.status_code == 409
+    got = await client.get("/api/v1/settings", headers=_auth(token))
+    assert got.status_code == 200
+    assert got.json()["einvoice_enabled"] is False
 
 
 async def test_clerk_patch_forbidden(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

@@ -64,9 +64,9 @@ class SettingsUpdateRequest(BaseModel):
         Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
     ) = None
     # 購物金低消門檻（整數元；0＝不限制）。上界對齊 DB Numeric(12,0)。
-    store_credit_min_spend: (
-        Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
-    ) = None
+    store_credit_min_spend: Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None = (
+        None
+    )
     store_credit_engine_params: dict[str, Any] | None = None
     # 溢價率變更事由（選填；寫入 premium_rate_history 留痕）。
     premium_change_reason: Annotated[str, Field(max_length=200)] | None = None

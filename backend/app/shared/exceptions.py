@@ -238,3 +238,62 @@ class MenuItemUnavailable(DomainError):
 
 class DuplicateMenuItem(DomainError):
     """同店餐飲菜單品項名稱重複。"""
+
+
+class InvoiceNotFound(DomainError):
+    """指定的發票不存在（或不屬於本店）。"""
+
+
+class EInvoiceQueueItemNotFound(DomainError):
+    """指定的電子發票上傳佇列項目不存在（或不屬於本店）。"""
+
+
+class EInvoiceQueueNotRetryable(DomainError):
+    """佇列項目目前不可重送（僅 FAILED 可重送；PENDING/UPLOADED 不可）。"""
+
+
+class EInvoiceSerializerNotReady(DomainError):
+    """MIG XML 序列化尚未依官方 XSD 實作（T13 收尾階段；憑證/主機到位後才做）。
+
+    禁止憑 docs/14 對照骨架或記憶硬寫欄位（CLAUDE.md §6、docs/14 §4、docs/18）。
+    """
+
+
+class EInvoiceDropError(DomainError):
+    """拋檔到 Turnkey SRC 目錄失敗（非法檔名/路徑逃逸等）。訊息不含檔案內容。"""
+
+
+class EInvoiceQueueNotDroppable(DomainError):
+    """佇列項目目前不可拋檔（非 PENDING，或對應發票已作廢）。避免重複/無效上傳。"""
+
+
+class EInvoiceResultNotApplicable(DomainError):
+    """平台回執不適用於此佇列項目（尚未拋檔、或已達終態不可覆寫）。"""
+
+
+class InvoiceNotIssued(DomainError):
+    """折讓的原發票尚未正式開立（PENDING/不存在）——未開立不可折讓（§7 不變量 5）。"""
+
+
+class AllowanceExceedsInvoice(DomainError):
+    """折讓累計金額超過原發票總額——折讓不可超過原發票。"""
+
+
+class DuplicateAllowanceForReturn(DomainError):
+    """同一退貨單已有折讓，不可重複開立（以 return_id 唯一保護）。"""
+
+
+class InvoiceIncompleteForIssue(DomainError):
+    """發票缺少開立必要欄位（字軌號碼/開立日/開立時間/隨機碼），狀態機不得標成 ISSUED。
+
+    MIG 4.1 F0401 明列 InvoiceNumber/InvoiceDate/InvoiceTime 為必填；配號/序列化待 T13 收尾，
+    在這些欄位齊備前不允許把發票視為已正式開立。
+    """
+
+
+class EInvoiceActivationNotReady(DomainError):
+    """電子發票尚未可正式啟用（XSD 序列化器/字軌配號未實作，T13 收尾）。
+
+    現在打開 einvoice_enabled 只會讓每筆銷售建永遠無法核可的 PENDING 發票、佇列無限堆積，
+    故在就緒前於 settings 層擋下開啟（關閉不受限）。
+    """

@@ -27,6 +27,7 @@ from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
+from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
@@ -221,6 +222,7 @@ class SalesService:
         self._storecredit = StoreCreditService(session)
         self._campaigns = CampaignService(session)
         self._menu = MenuService(session)
+        self._einvoice = EInvoiceService(session)
 
     @staticmethod
     def _normalize_tenders(tenders: list[TenderInput] | None) -> list[TenderInput] | None:
@@ -414,6 +416,17 @@ class SalesService:
         if buyer_contact_id is not None:
             sale.awarded_points = _member_points_for(total - food_subtotal)
             await self._contacts.add_member_points(store_id, buyer_contact_id, sale.awarded_points)
+
+        # 電子發票（§6）：einvoice_enabled 時於同一原子交易內建立**待開立（PENDING）**發票 +
+        # F0401 上傳佇列，並標 sale.invoice_status=PENDING_ISSUE——尚未取得平台核可字軌號碼，
+        # **非「已開立」**（配號/序列化/上傳待 T13 收尾，平台 ProcessResult 核可後才轉 ISSUED）。
+        # 關閉時維持 NOT_ISSUED（銷售仍完整記錄、可日後補開）。買方統編未於 POS 收集 → 一律 B2C。
+        # create_pending_invoice 以 sale_id 冪等；冪等重送於上方已回原單、不會重複開立。
+        if settings.einvoice_enabled:
+            await self._einvoice.create_pending_invoice(
+                store_id, sale_id=sale.id, total=total, tax_rate=settings.tax_rate
+            )
+            sale.invoice_status = SaleInvoiceStatus.PENDING_ISSUE
 
         await self._session.flush()
         return sale
@@ -616,8 +629,14 @@ class SalesService:
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[
         tuple[
-            int | None, int | None, OwnershipType, Decimal | None, int | None,
-            datetime, datetime | None, Decimal,
+            int | None,
+            int | None,
+            OwnershipType,
+            Decimal | None,
+            int | None,
+            datetime,
+            datetime | None,
+            Decimal,
         ]
     ]:
         """期間售出序號品的洞察原始列（經營洞察報表逐品牌/類型彙整用）。"""
@@ -627,7 +646,15 @@ class SalesService:
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[
         tuple[
-            int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+            int | None,
+            int | None,
+            int | None,
+            Decimal,
+            int,
+            int,
+            datetime,
+            datetime,
+            Decimal,
         ]
     ]:
         """期間售出散裝的洞察原始列（經營洞察把散裝納入品牌/類型排行；Codex P2）。"""
@@ -668,9 +695,7 @@ class SalesService:
         from app.modules.returns.service import ReturnsService
 
         if await ReturnsService(self._session).has_returns_for_sale(sale.store_id, sale.id):
-            raise SaleHasReturns(
-                f"sale {sale.id} 已有退貨，不可作廢；請以退貨流程處理剩餘部分"
-            )
+            raise SaleHasReturns(f"sale {sale.id} 已有退貨，不可作廢；請以退貨流程處理剩餘部分")
         before = sale.invoice_status.value
         sale.invoice_status = SaleInvoiceStatus.VOID
         await self._session.flush()
@@ -695,6 +720,10 @@ class SalesService:
         await self._storecredit.reverse_for_sale_void(
             sale.store_id, sale.id, created_by=actor_user_id
         )
+        # 電子發票中止（§6）：把該銷售的待開立發票標 VOID，使其待送佇列列被 drop_pending 拒絕，
+        # 不會把已作廢銷售的發票拋上平台。已核可（ISSUED）發票的作廢須另送 F0501/F0701 平台訊息
+        # ——該路徑待收尾階段依 作廢 vs 註銷 規則接線。無發票（einvoice 關閉時建的單）→ no-op。
+        await self._einvoice.void_invoice_for_sale(sale.store_id, sale.id)
         # 寄售結算反轉（invariant #7，Phase 4）：未付→CANCELLED、已付→reclaim_needed，
         # 否則作廢後仍可付款給寄售人造成現金漏出（Codex adversarial）。非寄售單 → no-op。
         await self._consignment.cancel_settlements_for_sale(
@@ -708,24 +737,63 @@ class SalesService:
             for line in await self._repo.list_lines(sale.id):
                 if line.line_type == SaleLineType.CATALOG and line.catalog_product_id is not None:
                     await self._inventory.return_catalog_items(
-                        sale.store_id, line.catalog_product_id, line.qty,
-                        ref_type="sale_void", ref_id=sale.id,
+                        sale.store_id,
+                        line.catalog_product_id,
+                        line.qty,
+                        ref_type="sale_void",
+                        ref_id=sale.id,
                     )
                 elif (
                     line.line_type == SaleLineType.SERIALIZED
                     and line.serialized_item_id is not None
                 ):
                     await self._inventory.return_serialized_sale_item(
-                        sale.store_id, line.serialized_item_id,
-                        ref_type="sale_void", ref_id=sale.id,
+                        sale.store_id,
+                        line.serialized_item_id,
+                        ref_type="sale_void",
+                        ref_id=sale.id,
                     )
                 elif line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id is not None:
                     await self._inventory.return_bulk_lot_items(
-                        sale.store_id, line.bulk_lot_id, line.qty,
-                        ref_type="sale_void", ref_id=sale.id,
+                        sale.store_id,
+                        line.bulk_lot_id,
+                        line.qty,
+                        ref_type="sale_void",
+                        ref_id=sale.id,
                     )
                 # MENU：無庫存，略過。
         return sale
+
+    async def mark_invoice_issued(self, store_id: int, sale_id: int) -> None:
+        """電子發票平台核可（F0401 ProcessResult 成功）後，把對應銷售的 invoice_status
+        由 PENDING_ISSUE 轉 ISSUED（由 einvoice service 於回執處理時回呼；跨模組經 service，§2）。
+
+        僅在仍為 PENDING_ISSUE 時轉移（冪等、且不覆寫已 VOID/ALLOWANCE 等後續狀態）。
+        """
+        sale = await self._repo.lock_sale(store_id, sale_id)
+        if sale is not None and sale.invoice_status == SaleInvoiceStatus.PENDING_ISSUE:
+            sale.invoice_status = SaleInvoiceStatus.ISSUED
+            await self._session.flush()
+
+    async def mark_invoice_allowance(self, store_id: int, sale_id: int) -> None:
+        """G0401 折讓平台核可後，把對應銷售 invoice_status 由 PENDING_ALLOWANCE 轉 ALLOWANCE
+        （einvoice service 回執處理時回呼；跨模組經 service，§2）。僅 PENDING_ALLOWANCE 時轉。"""
+        sale = await self._repo.lock_sale(store_id, sale_id)
+        if sale is not None and sale.invoice_status == SaleInvoiceStatus.PENDING_ALLOWANCE:
+            sale.invoice_status = SaleInvoiceStatus.ALLOWANCE
+            await self._session.flush()
+
+    async def mark_invoice_not_issued(self, store_id: int, sale_id: int) -> None:
+        """待開立發票被中止（退貨觸發的作廢收斂：F0401 失敗或 F0501 核可）後，把對應銷售的
+        invoice_status 由 PENDING_ISSUE 收斂回 NOT_ISSUED——該銷售最終無有效發票。
+
+        僅在仍為 PENDING_ISSUE 時轉：sale-void 路徑的 invoice_status 已是 VOID（銷售作廢語意，
+        報表據此排除，D-3），不得覆寫。einvoice service 回執處理時回呼（跨模組經 service，§2）。
+        """
+        sale = await self._repo.lock_sale(store_id, sale_id)
+        if sale is not None and sale.invoice_status == SaleInvoiceStatus.PENDING_ISSUE:
+            sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED
+            await self._session.flush()
 
     async def record_print_detail(self, sale: Sale, actor_user_id: int) -> None:
         """補印商品明細聯：寫稽核（實際列印由前端送硬體代理，見 docs/04、Phase 3 硬體）。"""

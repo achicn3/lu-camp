@@ -31,12 +31,15 @@ def test_payment_method_values() -> None:
 
 
 def test_sale_invoice_status_values() -> None:
-    # sales.invoice_status：含 NOT_ISSUED（開關關閉/未開票），不含 UPLOADED。
+    # sales.invoice_status：NOT_ISSUED（未開票）、PENDING_ISSUE（已排開立、待平台核可）、ISSUED、
+    # PENDING_ALLOWANCE（已排 G0401 折讓、待平台核可）、ALLOWANCE、VOID。
     assert {s.value for s in SaleInvoiceStatus} == {
-        "ISSUED",
         "NOT_ISSUED",
-        "VOID",
+        "PENDING_ISSUE",
+        "ISSUED",
+        "PENDING_ALLOWANCE",
         "ALLOWANCE",
+        "VOID",
     }
 
 
@@ -45,17 +48,20 @@ def test_invoice_type_b2c_b2b() -> None:
 
 
 def test_invoice_status_values() -> None:
-    # invoices.status：含 UPLOADED（已上傳平台），不含 NOT_ISSUED。
+    # invoices.status：PENDING（待平台核可，無字軌號碼）→ ISSUED（ProcessResult 核可）；
+    # 已核可發票作廢：ISSUED → VOID_PENDING（F0501 已排、平台未確認）→ VOID；ALLOWANCE 折讓。
     assert {s.value for s in InvoiceStatus} == {
+        "PENDING",
         "ISSUED",
-        "UPLOADED",
+        "VOID_PENDING",
         "VOID",
         "ALLOWANCE",
     }
 
 
 def test_upload_status_values() -> None:
-    assert {s.value for s in UploadStatus} == {"PENDING", "UPLOADED", "FAILED"}
+    # CANCELLED：發票在平台核可前即被作廢，其待送 F0401 的明確終態（非殭屍 PENDING）。
+    assert {s.value for s in UploadStatus} == {"PENDING", "UPLOADED", "FAILED", "CANCELLED"}
 
 
 def test_einvoice_action_values() -> None:

@@ -11,13 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
+from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.models import CustomerReturn, ReturnLine
 from app.modules.returns.repository import ReturnsRepository
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import (
     CashMovementType,
+    InvoiceStatus,
     PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
@@ -61,6 +64,8 @@ class ReturnsService:
         self._inventory = InventoryService(session)
         self._cash = CashDrawerService(session)
         self._consignment = ConsignmentService(session)
+        self._einvoice = EInvoiceService(session)
+        self._settings = StoreSettingsService(session)
 
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
@@ -205,6 +210,36 @@ class ReturnsService:
         if all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines):
             sale.status = SaleStatus.RETURNED
 
+        # 折讓（§7.5、不變量 5）：原銷售已「正式開票」（發票 ISSUED）→ 產 G0401 折讓單並標
+        # sale.invoice_status=PENDING_ALLOWANCE；而非直接刪除發票。**比照 ISSUE/VOID：等 G0401
+        # 平台 ProcessResult 成功後才由 einvoice 回呼轉正式 ALLOWANCE**（避免 G0401 上傳失敗卻已顯示
+        # 已折讓）。折讓金額＝本次退款額；同退貨 return_id 唯一、累計不超過原發票（einvoice 守衛）。
+        invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
+        if invoice is not None and invoice.status == InvoiceStatus.ISSUED:
+            tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
+            await self._einvoice.record_allowance(
+                store_id,
+                invoice_id=invoice.id,
+                total=refund_amount,
+                tax_rate=tax_rate,
+                return_id=customer_return.id,
+            )
+            sale.invoice_status = SaleInvoiceStatus.PENDING_ALLOWANCE
+        elif (
+            invoice is not None
+            and invoice.status == InvoiceStatus.PENDING
+            and sale.status == SaleStatus.RETURNED
+        ):
+            # 發票尚未平台核可期間即「全數退貨」：比照作廢收斂，不可放任 F0401 之後以全額核可
+            # 卻無折讓（買了馬上退是門市真實場景）。void_invoice_for_sale 分流：F0401 未拋檔 →
+            # 發票 VOID＋佇列 CANCELLED（平台從未收過）；已拋檔 → VOID_PENDING，由 F0401 回執
+            # 決定（成功→續 F0501 作廢、失敗→VOID），最終由 einvoice 回呼收斂 sale 狀態。
+            voided = await self._einvoice.void_invoice_for_sale(store_id, sale.id)
+            if voided is not None and voided.status == InvoiceStatus.VOID:
+                sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED  # 未拋檔即取消：無有效發票
+        # 部分退貨且發票仍 PENDING：不動——F0401 核可（發票成立）時由 einvoice 回呼
+        # backfill_allowances_for_issued_sale 補開 G0401。
+
         await write_audit_log(
             self._session,
             store_id=store_id,
@@ -223,6 +258,40 @@ class ReturnsService:
         if refreshed is None:
             raise ReturnNotFound(f"找不到退貨單 {customer_return.id}")
         return refreshed
+
+    async def backfill_allowances_for_issued_sale(self, store_id: int, sale_id: int) -> None:
+        """發票（F0401）平台核可後，為「核可前已發生的退貨」補開 G0401 折讓（§7.5）。
+
+        由 einvoice service 於 ISSUE 回執成功時回呼（跨模組經 service，§2）。退貨當下發票尚未
+        成立（PENDING）無法開折讓；發票此刻成立 → 逐張退貨單補建折讓＋G0401 佇列，並把 sale
+        轉 PENDING_ALLOWANCE（等 G0401 核可才轉正式 ALLOWANCE）。以 return_id 冪等（已有折讓
+        者跳過）；無退貨 → no-op。全退場景不會走到這裡（退貨時已把發票導入作廢收斂）。
+        """
+        returns = await self._repo.list_returns_for_sale(store_id, sale_id)
+        if not returns:
+            return
+        invoice = await self._einvoice.get_invoice_for_sale(store_id, sale_id)
+        if invoice is None or invoice.status != InvoiceStatus.ISSUED:
+            return
+        tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
+        created = False
+        for customer_return in returns:
+            existing = await self._einvoice.get_allowance_for_return(store_id, customer_return.id)
+            if existing is not None:
+                continue
+            await self._einvoice.record_allowance(
+                store_id,
+                invoice_id=invoice.id,
+                total=customer_return.refund_amount,
+                tax_rate=tax_rate,
+                return_id=customer_return.id,
+            )
+            created = True
+        if created:
+            sale = await self._sales.lock_sale(store_id, sale_id)
+            if sale is not None and sale.invoice_status == SaleInvoiceStatus.ISSUED:
+                sale.invoice_status = SaleInvoiceStatus.PENDING_ALLOWANCE
+                await self._session.flush()
 
     @staticmethod
     def _normalize_lines(lines: Sequence[ReturnLineInput]) -> dict[int, int]:

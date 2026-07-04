@@ -30,9 +30,11 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
 
 export const INVOICE_STATUS_LABELS: Record<string, string> = {
   NOT_ISSUED: "未開立",
+  PENDING_ISSUE: "發票開立中",
   ISSUED: "已開立",
-  VOID: "已作廢",
+  PENDING_ALLOWANCE: "折讓開立中",
   ALLOWANCE: "已折讓",
+  VOID: "已作廢",
 };
 
 /** 以對照表翻譯；查無則原樣回傳（避免吞掉未知後端值）。 */

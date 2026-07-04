@@ -37,6 +37,15 @@ class ReturnsRepository:
         result: CustomerReturn | None = await self._session.scalar(stmt)
         return result
 
+    async def list_returns_for_sale(self, store_id: int, sale_id: int) -> list[CustomerReturn]:
+        """某銷售的所有退貨單（發票核可後補開折讓用）。"""
+        stmt = (
+            select(CustomerReturn)
+            .where(CustomerReturn.store_id == store_id, CustomerReturn.sale_id == sale_id)
+            .order_by(CustomerReturn.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def get_by_idempotency_key(self, store_id: int, key: str) -> CustomerReturn | None:
         """同 (store_id, idempotency_key) 的退貨單；idempotent 重播用（防重複退現）。"""
         stmt = select(CustomerReturn).where(

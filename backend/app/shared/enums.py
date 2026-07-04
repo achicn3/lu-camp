@@ -181,13 +181,19 @@ class SaleInvoiceStatus(StrEnum):
     """銷售單的開票狀態（sales.invoice_status）。
 
     NOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；
-    ISSUED：已開立發票；VOID：已作廢；ALLOWANCE：已折讓。
+    PENDING_ISSUE：已排入電子發票開立佇列、尚未取得平台核可字軌號碼（本地 outbox pending，
+      非「已開立」——尚無 invoice_no/開立日/隨機碼）；
+    ISSUED：平台已核可、發票正式開立；
+    PENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；
+    ALLOWANCE：G0401 平台核可、折讓成立；VOID：已作廢。
     """
 
     NOT_ISSUED = "NOT_ISSUED"
+    PENDING_ISSUE = "PENDING_ISSUE"
     ISSUED = "ISSUED"
-    VOID = "VOID"
+    PENDING_ALLOWANCE = "PENDING_ALLOWANCE"
     ALLOWANCE = "ALLOWANCE"
+    VOID = "VOID"
 
 
 class InvoiceType(StrEnum):
@@ -198,20 +204,33 @@ class InvoiceType(StrEnum):
 
 
 class InvoiceStatus(StrEnum):
-    """發票（invoices）狀態。UPLOADED 表已上傳整合平台並取得回執。"""
+    """發票（invoices）本地紀錄狀態。
 
+    PENDING：本地已建、排入上傳佇列，尚未取得平台核可（無字軌號碼——序列化/配號待 T13 收尾）；
+    ISSUED：平台 ProcessResult 核可、正式開立；
+    VOID_PENDING：已核可發票申請作廢、F0501 已排隊但平台尚未確認（本地不可先當正式作廢，
+      否則 F0501 失敗時本地顯示作廢、平台仍有效）；VOID：F0501 平台核可後的正式作廢；
+    ALLOWANCE：已折讓。佇列本身的上傳狀態另見 UploadStatus。
+    """
+
+    PENDING = "PENDING"
     ISSUED = "ISSUED"
-    UPLOADED = "UPLOADED"
+    VOID_PENDING = "VOID_PENDING"
     VOID = "VOID"
     ALLOWANCE = "ALLOWANCE"
 
 
 class UploadStatus(StrEnum):
-    """上傳佇列/發票上傳狀態（einvoice_upload_queue.status、invoice.upload_status）。"""
+    """電子發票上傳佇列狀態（einvoice_upload_queue.status）。
+
+    PENDING 待拋檔/待平台核可；UPLOADED 平台 ProcessResult 核可；FAILED 平台退回（可 retry）；
+    CANCELLED 中止（如發票在核可前即被作廢，其待送 F0401 明確終止、不再拋檔）。
+    """
 
     PENDING = "PENDING"
     UPLOADED = "UPLOADED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class EInvoiceAction(StrEnum):
@@ -220,6 +239,20 @@ class EInvoiceAction(StrEnum):
     ISSUE = "ISSUE"
     VOID = "VOID"
     ALLOWANCE = "ALLOWANCE"
+
+
+class EInvoiceMessageType(StrEnum):
+    """MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。
+
+    本店為自建 Turnkey 存證營業人（docs/14 §0）：F0401 開立、F0501 作廢、F0701 註銷、
+    G0401 開立折讓、G0501 作廢折讓。實際 XML 欄位/長度/Enum 待 T13 依官方 XSD 落地。
+    """
+
+    F0401 = "F0401"
+    F0501 = "F0501"
+    F0701 = "F0701"
+    G0401 = "G0401"
+    G0501 = "G0501"
 
 
 class ConsignmentSettlementStatus(StrEnum):
