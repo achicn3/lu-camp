@@ -1,18 +1,20 @@
 """einvoice API 整合測試（T14 殼）：發票查詢、佇列檢視/重送、回執記錄 + RBAC。"""
 
 from collections.abc import AsyncGenerator
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import httpx
 import pytest_asyncio
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.einvoice.dropper import EInvoiceDropper
-from app.modules.einvoice.models import Invoice
+from app.modules.einvoice.models import EInvoiceResultEvent, Invoice
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.sales.models import Sale
 from app.modules.store.models import Store
@@ -189,6 +191,45 @@ async def test_result_incomplete_issue_returns_422(
         headers=_auth(mgr_token),
     )
     assert resp.status_code == 422
+
+
+async def test_conflicting_late_receipt_409_keeps_event(
+    client: httpx.AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """終態列收到矛盾回執 → 409，且回執事件被 commit 保留（稽核證據不因 409 消失）。"""
+    store_id, sale_id, mgr_token, _ = await _seed(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    invoice.invoice_no = "AB12345678"
+    invoice.invoice_date = date(2026, 7, 1)
+    invoice.invoice_time = "12:34:56"
+    invoice.random_number = "1234"
+    await db_session.flush()
+    queue_id = (await svc.list_queue(store_id))[0].id
+    await svc.drop_pending(
+        store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    accept = await client.post(
+        f"/api/v1/einvoice/queue/{queue_id}/result",
+        json={"success": True},
+        headers=_auth(mgr_token),
+    )
+    assert accept.status_code == 200  # 已 UPLOADED（終態）
+
+    late = await client.post(
+        f"/api/v1/einvoice/queue/{queue_id}/result",
+        json={"success": False, "message": "遲到的矛盾失敗"},
+        headers=_auth(mgr_token),
+    )
+    assert late.status_code == 409
+    event_count = await db_session.scalar(
+        select(func.count())
+        .select_from(EInvoiceResultEvent)
+        .where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event_count == 2  # 首次核可＋矛盾遲到回執皆留稽核
 
 
 async def test_retry_pending_conflicts(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

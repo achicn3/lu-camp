@@ -22,7 +22,12 @@ XSD_SERIALIZER_READY = False
 
 @runtime_checkable
 class InvoiceXmlSerializer(Protocol):
-    """把本地發票/折讓紀錄序列化為某訊息類型的 MIG XML bytes（UTF-8）。"""
+    """把本地發票/折讓紀錄序列化為某訊息類型的 MIG XML bytes（UTF-8）。
+
+    **必須確定性**（同一發票列 → 位元組完全相同）：兩階段拋檔的 crash 恢復以認領時的
+    sha256 驗證重算內容（einvoice/service.drop_pending），非確定性輸出（如內嵌當下時間戳）
+    會使恢復被拒。時間類欄位一律取自發票列（invoice_date/invoice_time），不得取 now()。
+    """
 
     def serialize_invoice(self, invoice: Invoice, message_type: EInvoiceMessageType) -> bytes:
         """開立/作廢/註銷（F0401/F0501/F0701）的 XML bytes。"""

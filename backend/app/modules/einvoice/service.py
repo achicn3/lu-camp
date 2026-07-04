@@ -13,6 +13,7 @@
 4. 折讓只對已開立（ISSUED）發票、累計不超過原發票、同退貨至多一張（§7 不變量 5）。
 """
 
+import hashlib
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -38,9 +39,11 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AllowanceExceedsInvoice,
     DuplicateAllowanceForReturn,
+    EInvoiceDropError,
     EInvoiceQueueItemNotFound,
     EInvoiceQueueNotDroppable,
     EInvoiceQueueNotRetryable,
+    EInvoiceResultConflict,
     EInvoiceResultNotApplicable,
     InvoiceIncompleteForIssue,
     InvoiceNotFound,
@@ -153,7 +156,9 @@ class EInvoiceService:
                 for i in await self._repo.list_queue_items_for_invoice(store_id, invoice.id)
                 if i.action is EInvoiceAction.ISSUE and i.status is UploadStatus.PENDING
             ]
-            in_flight = any(i.dropped_at is not None for i in issue_items)
+            # 「已認領」（xml_path 設）即視為在途：認領後檔案就可能已曝光給 Turnkey
+            # （兩階段拋檔的 crash 窗口），不可當平台沒收過而 CANCELLED。
+            in_flight = any(i.xml_path is not None for i in issue_items)
             if in_flight:
                 # 已交付 Turnkey、平台結果未回：不可視為沒收過，改請求作廢、留 F0401 待回執決定。
                 invoice.status = InvoiceStatus.VOID_PENDING
@@ -226,12 +231,24 @@ class EInvoiceService:
         serializer: InvoiceXmlSerializer,
         dropper: EInvoiceDropper,
     ) -> EInvoiceUploadQueue:
-        """把待送佇列列的 MIG XML 原子落入 Turnkey SRC 目錄；記 path/sha256/dropped_at。
+        """把待送佇列列的 MIG XML 原子落入 Turnkey SRC 目錄（**兩階段、rollback-safe**）。
 
-        僅對 **PENDING 且尚未拋檔** 的列拋檔；已拋檔（dropped_at 已設）→ 冪等 no-op（排程重跑
-        不重複寫同一筆）。非 PENDING（UPLOADED/FAILED）或對應發票已作廢 → EInvoiceQueueNotDroppable
-        （不上傳無效/已作廢發票）。序列化未就緒時明確拋 EInvoiceSerializerNotReady（不產出可能
-        錯誤的 XML）。拋檔不改上傳狀態（Turnkey 非同步上傳，唯 ProcessResult 成功才 UPLOADED）。
+        檔案一落入 SRC 就可能被 Turnkey 撿走上傳——外部副作用**不可**發生在未 commit 的 DB
+        交易內（Codex adversarial：crash 後 DB 說「沒拋過」、平台卻收到檔）。故本方法自管
+        交易邊界（outbox 交付入口，偏離「呼叫端 commit」慣例、僅此一處）：
+
+        1. **認領（先持久化）**：序列化（純函式）→ 寫入 xml_path/xml_sha256 → `commit`。
+           此後即使 crash，DB 都記得「這筆已認領、內容 sha 已定」。
+        2. 寫檔（原子、確定性檔名——重跑為覆寫同名檔，永不產生第二份）。
+        3. **確認**：寫入 dropped_at → `commit`。
+
+        Crash 恢復：重呼本方法——已認領未確認（xml_path 設、dropped_at NULL）→ 重新序列化並
+        驗 sha 與認領一致（序列化必須確定性；不符即拒，防止內容漂移下重拋不同檔），覆寫檔案、
+        補 dropped_at。已確認（dropped_at 設）→ 冪等 no-op。回執側以「已認領」即接受
+        （見 record_result）——認領後檔案就可能已曝光。
+
+        非 PENDING 或對應發票已作廢 → EInvoiceQueueNotDroppable；序列化未就緒 →
+        EInvoiceSerializerNotReady（發生在認領前，無任何持久/檔案副作用）。
         """
         item = await self._repo.lock_queue_item(store_id, queue_id)
         if item is None:
@@ -241,17 +258,38 @@ class EInvoiceService:
                 f"佇列項目非 PENDING（目前 {item.status.value}），不可拋檔"
             )
         if item.dropped_at is not None:
-            return item  # 已拋檔、待 Turnkey 上傳：冪等 no-op，不重複寫檔
+            return item  # 已拋檔確認、待 Turnkey 上傳：冪等 no-op，不重複寫檔
 
         payload = await self._serialize(store_id, item, serializer)
         filename = f"{item.message_type.value}-{store_id}-{queue_id}.xml"
+        expected_path = str(dropper.src_dir(item.message_type) / filename)
+
+        if item.xml_path is None:
+            # 階段 1：認領先於檔案曝光——commit 後才允許任何檔案副作用。
+            item.xml_path = expected_path
+            item.xml_sha256 = hashlib.sha256(payload).hexdigest()
+            await self._session.commit()
+        else:
+            # 恢復路徑：驗證重算內容與認領一致（確定性序列化守衛）。
+            recomputed = hashlib.sha256(payload).hexdigest()
+            if item.xml_path != expected_path or item.xml_sha256 != recomputed:
+                raise EInvoiceDropError(
+                    f"佇列 {queue_id} 重拋內容與認領不符（序列化非確定性或目錄變更），"
+                    "拒絕覆寫已可能曝光的檔案"
+                )
+
+        # 階段 2：原子寫檔（crash 於此 → 恢復路徑覆寫同名檔，無第二份）。
         result = dropper.drop(item.message_type, filename, payload)
-        item.xml_path = str(result.path)
-        item.xml_sha256 = result.sha256
-        item.dropped_at = datetime.now(UTC)
-        await self._session.flush()
-        await self._session.refresh(item)  # onupdate updated_at 由 DB 設，刷回避免 lazy IO
-        return item
+        if result.sha256 != item.xml_sha256:
+            raise EInvoiceDropError(f"佇列 {queue_id} 落檔 sha 與認領不符")
+
+        # 階段 3：確認交付。
+        locked = await self._repo.lock_queue_item(store_id, queue_id)
+        assert locked is not None  # 認領已 commit，列必存在
+        locked.dropped_at = datetime.now(UTC)
+        await self._session.commit()
+        await self._session.refresh(locked)
+        return locked
 
     async def retry(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue:
         """把 FAILED 佇列列轉回 PENDING（attempts+1），供重新拋檔/上傳。
@@ -296,7 +334,14 @@ class EInvoiceService:
             狀態機拒絕把不完整發票標成 ISSUED（M1；配號/序列化齊備後才會成立）。
           - VOID（F0501）核可 → 發票 VOID_PENDING→VOID（此時平台才真正作廢，H3）。
           - ALLOWANCE（G0401）核可 → 不改發票狀態（折讓為獨立單）。
-        - 未拋檔、或已達終態（UPLOADED/FAILED/CANCELLED）→ EInvoiceResultNotApplicable（不覆寫）。
+        - 終態列（UPLOADED/FAILED/CANCELLED）的回執**冪等處理**（Codex adversarial：importer
+          重試/重複掃回執是常態，不可在 409 上打轉、更不可回滾掉稽核事件）：
+          - 與終態一致的重複回執（UPLOADED×success / FAILED×failure）→ 接受：事件留檔、
+            回現狀、不改狀態、不拋例外。
+          - 矛盾的遲到回執 → 事件留檔（flush）後拋 EInvoiceResultConflict；呼叫端應 commit
+            保留事件再回報衝突（router 已如此），終態不變更。
+        - 未認領（xml_path NULL——檔案不可能曝光過）→ EInvoiceResultNotApplicable。
+          已認領未確認（crash 於拋檔中途）的回執照常受理——檔案可能已被 Turnkey 撿走。
 
         自動解析 Turnkey 回執檔的 importer 待收尾階段依 3.9 手冊實作；此為結果落庫共用出口。
         """
@@ -320,13 +365,21 @@ class EInvoiceService:
             await self._session.refresh(item)
             return item
 
-        # ProcessResult：只對已拋檔且仍 PENDING 的列生效，不覆寫終態。
+        # ProcessResult：終態列冪等/留證，不覆寫（見 docstring）。
         if item.status is not UploadStatus.PENDING:
-            raise EInvoiceResultNotApplicable(
-                f"佇列項目已達終態（{item.status.value}），不接受回執覆寫"
+            duplicate_same_outcome = (item.status is UploadStatus.UPLOADED and success) or (
+                item.status is UploadStatus.FAILED and not success
             )
-        if item.dropped_at is None:
-            raise EInvoiceResultNotApplicable("佇列項目尚未拋檔，不應有平台回執")
+            await self._session.flush()  # 事件先落庫（append-only 稽核，不因例外遺失）
+            if duplicate_same_outcome:
+                await self._session.refresh(item)
+                return item  # 冪等接受重複回執
+            raise EInvoiceResultConflict(
+                f"佇列項目已達終態（{item.status.value}），與回執"
+                f"（success={success}）矛盾；事件已留稽核、終態不變更"
+            )
+        if item.xml_path is None:
+            raise EInvoiceResultNotApplicable("佇列項目尚未認領拋檔，不應有平台回執")
 
         if success:
             # 發票狀態轉移（守衛先行；失敗則整筆不變）。

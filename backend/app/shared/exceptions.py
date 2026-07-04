@@ -268,7 +268,15 @@ class EInvoiceQueueNotDroppable(DomainError):
 
 
 class EInvoiceResultNotApplicable(DomainError):
-    """平台回執不適用於此佇列項目（尚未拋檔、或已達終態不可覆寫）。"""
+    """平台回執不適用於此佇列項目（尚未認領拋檔，不應有平台回執）。"""
+
+
+class EInvoiceResultConflict(DomainError):
+    """遲到且矛盾的平台回執（與既有終態不一致）：事件已留稽核、終態不變更。
+
+    呼叫端（router/importer）應保留已寫入的回執事件（commit）再回報衝突，
+    供對帳時區分「重複的成功回執」與「矛盾的遲到失敗」。
+    """
 
 
 class InvoiceNotIssued(DomainError):

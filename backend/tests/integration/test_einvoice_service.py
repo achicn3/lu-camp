@@ -8,6 +8,7 @@ import hashlib
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 from sqlalchemy import func, select
@@ -36,9 +37,11 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AllowanceExceedsInvoice,
     DuplicateAllowanceForReturn,
+    EInvoiceDropError,
     EInvoiceQueueItemNotFound,
     EInvoiceQueueNotDroppable,
     EInvoiceQueueNotRetryable,
+    EInvoiceResultConflict,
     EInvoiceResultNotApplicable,
     EInvoiceSerializerNotReady,
     InvoiceIncompleteForIssue,
@@ -49,13 +52,28 @@ TAX_RATE = Decimal("0.05")
 
 
 class _FakeSerializer:
-    """測試用序列化器：回傳固定 bytes，驗證拋檔機制不被 NotReady 阻擋。"""
+    """測試用序列化器：回傳固定 bytes（確定性），驗證拋檔機制不被 NotReady 阻擋。"""
 
     def serialize_invoice(self, invoice: Invoice, message_type: EInvoiceMessageType) -> bytes:
         return b"<Invoice/>"
 
     def serialize_allowance(self, allowance: object, message_type: EInvoiceMessageType) -> bytes:
         return b"<Allowance/>"
+
+
+class _AltSerializer(_FakeSerializer):
+    """輸出不同內容的序列化器：模擬非確定性/內容漂移（恢復時應被 sha 守衛拒絕）。"""
+
+    def serialize_invoice(self, invoice: Invoice, message_type: EInvoiceMessageType) -> bytes:
+        return b"<Invoice mutated/>"
+
+
+class _CrashAfterWriteDropper(EInvoiceDropper):
+    """寫檔成功後立刻 crash：模擬「檔案已曝光、確認（dropped_at）未落庫」的中斷窗口。"""
+
+    def drop(self, message_type: EInvoiceMessageType, filename: str, payload: bytes) -> NoReturn:
+        super().drop(message_type, filename, payload)
+        raise RuntimeError("simulated crash after file write")
 
 
 async def _seed_sale(session: AsyncSession, *, total: Decimal = Decimal(1050)) -> tuple[int, int]:
@@ -274,6 +292,99 @@ async def test_drop_pending_unknown_queue_raises(db_session: AsyncSession, tmp_p
         )
 
 
+# ── 兩階段拋檔 crash 韌性（Codex adversarial：檔案曝光不可先於持久狀態）──
+
+
+async def _claim_then_crash(
+    db_session: AsyncSession, svc: EInvoiceService, store_id: int, tmp_path: Path
+) -> int:
+    """把首個佇列列推進到「已認領＋檔案已寫＋確認未落庫」的中斷態；回 queue_id。"""
+    queue_id = await _first_queue_id(svc, store_id)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        await svc.drop_pending(
+            store_id,
+            queue_id,
+            serializer=_FakeSerializer(),
+            dropper=_CrashAfterWriteDropper(tmp_path),
+        )
+    item = (await svc.list_queue(store_id))[0]
+    assert item.xml_path is not None  # 認領已持久（先於檔案曝光 commit）
+    assert item.dropped_at is None  # 確認遺失（crash 窗口）
+    return queue_id
+
+
+async def test_crash_after_file_receipt_still_accepted(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """crash 後 DB 說「未確認」但檔案已可能被 Turnkey 撿走 → 回執以「已認領」受理、可收斂。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    await _fill_issue_fields(db_session, invoice)
+    queue_id = await _claim_then_crash(db_session, svc, store_id, tmp_path)
+
+    item = await svc.record_result(store_id, queue_id, success=True, status_code="0000")
+
+    assert item.status is UploadStatus.UPLOADED
+    assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.ISSUED
+
+
+async def test_crash_recovery_redrops_same_file_idempotently(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """crash 後重跑 drop_pending：驗 sha 一致 → 覆寫同名檔（不產生第二份）→ 補確認。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = await _claim_then_crash(db_session, svc, store_id, tmp_path)
+
+    dropper = EInvoiceDropper(tmp_path)
+    item = await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+
+    assert item.dropped_at is not None  # 確認補齊
+    src_dir = dropper.src_dir(EInvoiceMessageType.F0401)
+    assert len(list(src_dir.iterdir())) == 1  # 檔名確定性 → 覆寫、無第二份
+
+
+async def test_crash_recovery_rejects_content_drift(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """恢復時重算內容與認領 sha 不符（序列化漂移）→ 拒絕覆寫已可能曝光的檔案。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = await _claim_then_crash(db_session, svc, store_id, tmp_path)
+
+    with pytest.raises(EInvoiceDropError, match="不符"):
+        await svc.drop_pending(
+            store_id, queue_id, serializer=_AltSerializer(), dropper=EInvoiceDropper(tmp_path)
+        )
+
+
+async def test_void_with_claimed_f0401_goes_void_pending(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """已認領（檔案可能曝光）但未確認的 F0401，作廢時視為在途 → VOID_PENDING、不 CANCELLED。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    await _claim_then_crash(db_session, svc, store_id, tmp_path)
+
+    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+
+    assert voided is not None
+    assert voided.status is InvoiceStatus.VOID_PENDING  # 不可當平台沒收過
+    assert (await svc.list_queue(store_id))[0].status is UploadStatus.PENDING  # F0401 保留
+
+
 # ── 回執（F5 守衛）──
 
 
@@ -361,16 +472,47 @@ async def test_summary_result_does_not_change_status(
     assert event_count == 1
 
 
-async def test_record_result_does_not_overwrite_terminal(
+async def test_duplicate_same_outcome_receipt_is_idempotent(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:
+    """終態列收到同結果的重複回執（importer 重試常態）→ 冪等接受、事件留檔、狀態不變。"""
     store_id, sale_id = await _seed_sale(db_session)
     svc = EInvoiceService(db_session)
     await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)  # 已 UPLOADED
     queue_id = await _first_queue_id(svc, store_id)
 
-    with pytest.raises(EInvoiceResultNotApplicable):
+    item = await svc.record_result(store_id, queue_id, success=True, source_ref="dup-scan")
+
+    assert item.status is UploadStatus.UPLOADED  # 不變
+    event_count = await db_session.scalar(
+        select(func.count())
+        .select_from(EInvoiceResultEvent)
+        .where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event_count == 2  # 首次核可 + 重複回執都留稽核
+
+
+async def test_conflicting_late_receipt_keeps_event_and_state(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """終態列收到矛盾回執 → EInvoiceResultConflict；事件留稽核、終態與發票皆不變。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)  # UPLOADED
+    queue_id = await _first_queue_id(svc, store_id)
+
+    with pytest.raises(EInvoiceResultConflict):
         await svc.record_result(store_id, queue_id, success=False, message="遲到的失敗回執")
+
+    # 事件已 flush（service 不回滾稽核）；狀態/發票不變。
+    event_count = await db_session.scalar(
+        select(func.count())
+        .select_from(EInvoiceResultEvent)
+        .where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event_count == 2
+    assert (await svc.list_queue(store_id))[0].status is UploadStatus.UPLOADED
+    assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.ISSUED
 
 
 async def test_record_result_process_failure_marks_failed(

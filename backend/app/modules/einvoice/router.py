@@ -23,6 +23,7 @@ from app.shared.enums import UploadStatus
 from app.shared.exceptions import (
     EInvoiceQueueItemNotFound,
     EInvoiceQueueNotRetryable,
+    EInvoiceResultConflict,
     EInvoiceResultNotApplicable,
     InvoiceIncompleteForIssue,
     InvoiceNotFound,
@@ -125,6 +126,11 @@ async def record_result(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except EInvoiceResultNotApplicable as exc:
         await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except EInvoiceResultConflict as exc:
+        # 矛盾的遲到回執：**commit 保留稽核事件**（append-only 證據不可因 409 而消失），
+        # 終態未被 service 變更，再回報衝突。
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InvoiceIncompleteForIssue as exc:
         await session.rollback()
