@@ -363,6 +363,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog-products/by-sku/{sku}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog By Sku
+         * @description POS 掃碼查數量品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
+         *
+         *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
+         */
+        get: operations["getCatalogProductBySku"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog-products/{product_id}/detail": {
         parameters: {
             query?: never;
@@ -747,6 +769,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/einvoice/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Queue
+         * @description 上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。
+         */
+        get: operations["listEInvoiceQueue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/queue/{queue_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Result
+         * @description 記錄平台回執並更新佇列/發票狀態（限 MANAGER）。
+         *
+         *     成功→UPLOADED、失敗→FAILED（可再 retry）。自動解析 Turnkey 回執檔的 importer
+         *     待收尾階段實作；此端點為手動/importer 共用的結果落庫出口。
+         */
+        post: operations["recordEInvoiceResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/queue/{queue_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Queue Item
+         * @description 重送失敗的佇列項目（限 MANAGER；FAILED→PENDING、attempts+1，不新配發票號碼）。
+         */
+        post: operations["retryEInvoiceQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -756,6 +841,26 @@ export interface paths {
         };
         /** Health */
         get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Invoice
+         * @description 單張發票（店別範圍）。
+         */
+        get: operations["getInvoice"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2462,6 +2567,94 @@ export interface components {
             unknown_cost_sales: string;
         };
         /**
+         * EInvoiceAction
+         * @description 電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。
+         * @enum {string}
+         */
+        EInvoiceAction: "ISSUE" | "VOID" | "ALLOWANCE";
+        /**
+         * EInvoiceMessageType
+         * @description MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。
+         *
+         *     本店為自建 Turnkey 存證營業人（docs/14 §0）：F0401 開立、F0501 作廢、F0701 註銷、
+         *     G0401 開立折讓、G0501 作廢折讓。實際 XML 欄位/長度/Enum 待 T13 依官方 XSD 落地。
+         * @enum {string}
+         */
+        EInvoiceMessageType: "F0401" | "F0501" | "F0701" | "G0401" | "G0501";
+        /**
+         * EInvoiceQueueItemRead
+         * @description 上傳佇列項目輸出（GET /einvoice/queue）。
+         */
+        EInvoiceQueueItemRead: {
+            action: components["schemas"]["EInvoiceAction"];
+            /** Allowance Id */
+            allowance_id: number | null;
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dropped At */
+            dropped_at: string | null;
+            /** Id */
+            id: number;
+            /** Invoice Id */
+            invoice_id: number | null;
+            /** Last Error */
+            last_error: string | null;
+            message_type: components["schemas"]["EInvoiceMessageType"];
+            status: components["schemas"]["UploadStatus"];
+            /** Store Id */
+            store_id: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Uploaded At */
+            uploaded_at: string | null;
+            /** Xml Path */
+            xml_path: string | null;
+            /** Xml Sha256 */
+            xml_sha256: string | null;
+        };
+        /**
+         * EInvoiceQueueListRead
+         * @description 佇列清單（分頁）。
+         */
+        EInvoiceQueueListRead: {
+            /** Items */
+            items: components["schemas"]["EInvoiceQueueItemRead"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /**
+         * EInvoiceResultRequest
+         * @description 記錄一筆平台回執（手動或 importer）。
+         *
+         *     自動解析 Turnkey ProcessResult/SummaryResult 檔的 importer 待收尾階段依 3.9 手冊實作；
+         *     此輸入讓平台結果可先被記錄並驅動佇列/發票狀態。
+         */
+        EInvoiceResultRequest: {
+            /**
+             * Kind
+             * @default PROCESS
+             */
+            kind: string;
+            /** Message */
+            message?: string | null;
+            /** Source Ref */
+            source_ref?: string | null;
+            /** Status Code */
+            status_code?: string | null;
+            /** Success */
+            success: boolean;
+        };
+        /**
          * EffectivenessReport
          * @description §5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。
          */
@@ -2701,6 +2894,69 @@ export interface components {
             /** Total Owned Retail Value */
             total_owned_retail_value: string;
         };
+        /**
+         * InvoiceRead
+         * @description 發票輸出（GET /invoices/{id}）。
+         */
+        InvoiceRead: {
+            /** Buyer Name */
+            buyer_name: string | null;
+            /** Buyer Tax Id */
+            buyer_tax_id: string | null;
+            /** Carrier Id */
+            carrier_id: string | null;
+            /** Carrier Type */
+            carrier_type: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Donate Mark */
+            donate_mark: boolean;
+            /** Id */
+            id: number;
+            /** Invoice Date */
+            invoice_date: string | null;
+            /** Invoice No */
+            invoice_no: string | null;
+            /** Invoice Time */
+            invoice_time: string | null;
+            invoice_type: components["schemas"]["InvoiceType"];
+            /** Net */
+            net: string;
+            /** Npoban */
+            npoban: string | null;
+            /** Print Mark */
+            print_mark: boolean;
+            /** Sale Id */
+            sale_id: number;
+            status: components["schemas"]["InvoiceStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
+        };
+        /**
+         * InvoiceStatus
+         * @description 發票（invoices）本地紀錄狀態。
+         *
+         *     PENDING：本地已建、排入上傳佇列，尚未取得平台核可（無字軌號碼——序列化/配號待 T13 收尾）；
+         *     ISSUED：平台 ProcessResult 核可、正式開立；
+         *     VOID_PENDING：已核可發票申請作廢、F0501 已排隊但平台尚未確認（本地不可先當正式作廢，
+         *       否則 F0501 失敗時本地顯示作廢、平台仍有效）；VOID：F0501 平台核可後的正式作廢；
+         *     ALLOWANCE：已折讓。佇列本身的上傳狀態另見 UploadStatus。
+         * @enum {string}
+         */
+        InvoiceStatus: "PENDING" | "ISSUED" | "VOID_PENDING" | "VOID" | "ALLOWANCE";
+        /**
+         * InvoiceType
+         * @description 發票交易類型（本系統領域層；與 MIG InvoiceTypeEnum 07/08 為不同概念）。
+         * @enum {string}
+         */
+        InvoiceType: "B2C" | "B2B";
         /**
          * ItemHistoryEvent
          * @description 庫存明細歷史事件（一筆庫存異動帳對應一列）。
@@ -3312,10 +3568,14 @@ export interface components {
          * @description 銷售單的開票狀態（sales.invoice_status）。
          *
          *     NOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；
-         *     ISSUED：已開立發票；VOID：已作廢；ALLOWANCE：已折讓。
+         *     PENDING_ISSUE：已排入電子發票開立佇列、尚未取得平台核可字軌號碼（本地 outbox pending，
+         *       非「已開立」——尚無 invoice_no/開立日/隨機碼）；
+         *     ISSUED：平台已核可、發票正式開立；
+         *     PENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；
+         *     ALLOWANCE：G0401 平台核可、折讓成立；VOID：已作廢。
          * @enum {string}
          */
-        SaleInvoiceStatus: "NOT_ISSUED" | "ISSUED" | "VOID" | "ALLOWANCE";
+        SaleInvoiceStatus: "NOT_ISSUED" | "PENDING_ISSUE" | "ISSUED" | "PENDING_ALLOWANCE" | "ALLOWANCE" | "VOID";
         /**
          * SaleLineCreateRequest
          * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。
@@ -3961,6 +4221,15 @@ export interface components {
             /** Store Id */
             store_id: number;
         };
+        /**
+         * UploadStatus
+         * @description 電子發票上傳佇列狀態（einvoice_upload_queue.status）。
+         *
+         *     PENDING 待拋檔/待平台核可；UPLOADED 平台 ProcessResult 核可；FAILED 平台退回（可 retry）；
+         *     CANCELLED 中止（如發票在核可前即被作廢，其待送 F0401 明確終止、不再拋檔）。
+         * @enum {string}
+         */
+        UploadStatus: "PENDING" | "UPLOADED" | "FAILED" | "CANCELLED";
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -4675,6 +4944,37 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCatalogProductBySku: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5462,6 +5762,105 @@ export interface operations {
             };
         };
     };
+    listEInvoiceQueue: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["UploadStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceQueueListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordEInvoiceResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EInvoiceResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retryEInvoiceQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getHealth: {
         parameters: {
             query?: never;
@@ -5478,6 +5877,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    getInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invoice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

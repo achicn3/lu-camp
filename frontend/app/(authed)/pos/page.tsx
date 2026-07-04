@@ -22,7 +22,7 @@ import {
   toTenders,
   validatePlan,
 } from "@/features/pos/tender";
-import { printSaleDetail } from "@/lib/agent";
+import { openCashDrawer, printSaleDetail } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -46,7 +46,8 @@ function Money({ value }: { value: number }) {
 }
 
 // ── 掃碼加入購物車 ──
-// 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）；掃描到完整碼即自動加入購物車。
+// 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）；掃描到完整碼即自動加入。
+// 數量型商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 數量品 一格通吃。
 const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
 
 function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
@@ -54,7 +55,7 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: async (code: string): Promise<CartLine> => {
-      // 先試序號品，再試散裝堆（一格掃碼通吃，docs/10 §3）。
+      // 先試序號品，再試散裝堆，最後試數量品 SKU（一格掃碼通吃，docs/10 §3）。
       const serialized = await api.GET(
         "/api/v1/serialized-items/by-code/{item_code}",
         {
@@ -104,6 +105,30 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
         throw new Error(
           extractDetail(bulk.error) ??
             `查詢失敗（HTTP ${bulk.response.status}）`,
+        );
+      }
+      // 最後試數量型商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
+      const catalog = await api.GET("/api/v1/catalog-products/by-sku/{sku}", {
+        params: { path: { sku: code } },
+      });
+      if (catalog.response.status === 200 && catalog.data) {
+        const product = catalog.data;
+        if (product.quantity_on_hand <= 0)
+          throw new Error(`${product.sku} 已無庫存`);
+        return {
+          key: `C:${product.id}`,
+          lineType: "CATALOG",
+          description: product.name,
+          unitPrice: parseNtd(product.unit_price) ?? 0,
+          qty: 1,
+          catalogProductId: product.id,
+          maxQty: product.quantity_on_hand,
+        };
+      }
+      if (catalog.response.status !== 404) {
+        throw new Error(
+          extractDetail(catalog.error) ??
+            `查詢失敗（HTTP ${catalog.response.status}）`,
         );
       }
       throw new Error(`找不到此條碼：${code}`);
@@ -587,6 +612,8 @@ export default function PosPage() {
   const [receivedInput, setReceivedInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
+  // 開錢櫃失敗提示（docs/10 §5：交易已成立，代理離線只提示、不可擋流程）。
+  const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -702,6 +729,12 @@ export default function PosPage() {
       setCompleted(sale);
       setCompletedCampaign(campaignNote);
       setShowDialog(true);
+      // 收現才開錢櫃（docs/10 §5）；純購物金不碰現金、不開櫃。
+      // fire-and-forget：交易已寫後端，開櫃失敗只在完成畫面提示、不擋流程。
+      if (plan.cash > 0) {
+        setDrawerNotice(null);
+        openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
+      }
     },
   });
 
@@ -725,6 +758,7 @@ export default function PosPage() {
     setCompleted(null);
     setCompletedCampaign(null);
     setShowDialog(false);
+    setDrawerNotice(null);
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
@@ -756,6 +790,11 @@ export default function PosPage() {
               </dd>
             </div>
           </dl>
+          {drawerNotice !== null && (
+            <p role="alert" className="form-error">
+              錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
+            </p>
+          )}
           <div className="pos-dialog-actions">
             <button
               type="button"

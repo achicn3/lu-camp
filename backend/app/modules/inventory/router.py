@@ -104,6 +104,24 @@ async def update_serialized_price(
     return SerializedItemRead.model_validate(item)
 
 
+@router.get(
+    "/catalog-products/by-sku/{sku}",
+    response_model=CatalogProductRead,
+    operation_id="getCatalogProductBySku",
+)
+async def get_catalog_by_sku(
+    sku: str, session: SessionDep, user: CurrentUserDep
+) -> CatalogProductRead:
+    """POS 掃碼查數量品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
+
+    須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
+    """
+    product = await InventoryService(session).get_catalog_by_sku(user.store_id, sku)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此 SKU 的商品")
+    return CatalogProductRead.model_validate(product)
+
+
 @router.patch(
     "/catalog-products/{product_id}/price",
     response_model=CatalogProductRead,

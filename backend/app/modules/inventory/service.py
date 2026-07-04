@@ -913,6 +913,10 @@ class InventoryService:
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         return await self._repo.get_catalog(store_id, catalog_id)
 
+    async def get_catalog_by_sku(self, store_id: int, sku: str) -> CatalogProduct | None:
+        """以 SKU 取數量品（POS 掃碼售出；店範圍）。"""
+        return await self._repo.get_catalog_by_sku(store_id, sku)
+
     async def sell_catalog_items(self, catalog_id: int, qty: int) -> None:
         """原子扣減數量型商品庫存；不足則拒絕（不先查再改，併發安全）。"""
         if qty <= 0:

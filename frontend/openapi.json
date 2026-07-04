@@ -2636,6 +2636,245 @@
         "title": "DailySummaryReport",
         "type": "object"
       },
+      "EInvoiceAction": {
+        "description": "電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。",
+        "enum": [
+          "ISSUE",
+          "VOID",
+          "ALLOWANCE"
+        ],
+        "title": "EInvoiceAction",
+        "type": "string"
+      },
+      "EInvoiceMessageType": {
+        "description": "MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。\n\n本店為自建 Turnkey 存證營業人（docs/14 §0）：F0401 開立、F0501 作廢、F0701 註銷、\nG0401 開立折讓、G0501 作廢折讓。實際 XML 欄位/長度/Enum 待 T13 依官方 XSD 落地。",
+        "enum": [
+          "F0401",
+          "F0501",
+          "F0701",
+          "G0401",
+          "G0501"
+        ],
+        "title": "EInvoiceMessageType",
+        "type": "string"
+      },
+      "EInvoiceQueueItemRead": {
+        "description": "上傳佇列項目輸出（GET /einvoice/queue）。",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EInvoiceAction"
+          },
+          "allowance_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowance Id"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dropped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invoice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Id"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "message_type": {
+            "$ref": "#/components/schemas/EInvoiceMessageType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UploadStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded At"
+          },
+          "xml_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xml Path"
+          },
+          "xml_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Xml Sha256"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "action",
+          "message_type",
+          "invoice_id",
+          "allowance_id",
+          "status",
+          "attempts",
+          "xml_path",
+          "xml_sha256",
+          "dropped_at",
+          "uploaded_at",
+          "last_error",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "EInvoiceQueueItemRead",
+        "type": "object"
+      },
+      "EInvoiceQueueListRead": {
+        "description": "佇列清單（分頁）。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EInvoiceQueueItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset"
+        ],
+        "title": "EInvoiceQueueListRead",
+        "type": "object"
+      },
+      "EInvoiceResultRequest": {
+        "description": "記錄一筆平台回執（手動或 importer）。\n\n自動解析 Turnkey ProcessResult/SummaryResult 檔的 importer 待收尾階段依 3.9 手冊實作；\n此輸入讓平台結果可先被記錄並驅動佇列/發票狀態。",
+        "properties": {
+          "kind": {
+            "default": "PROCESS",
+            "pattern": "^(PROCESS|SUMMARY)$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "EInvoiceResultRequest",
+        "type": "object"
+      },
       "EffectivenessReport": {
         "description": "§5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。",
         "properties": {
@@ -3198,6 +3437,187 @@
         ],
         "title": "InventoryValueReport",
         "type": "object"
+      },
+      "InvoiceRead": {
+        "description": "發票輸出（GET /invoices/{id}）。",
+        "properties": {
+          "buyer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Name"
+          },
+          "buyer_tax_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Tax Id"
+          },
+          "carrier_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Id"
+          },
+          "carrier_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carrier Type"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "donate_mark": {
+            "title": "Donate Mark",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invoice_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Date"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
+          "invoice_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Time"
+          },
+          "invoice_type": {
+            "$ref": "#/components/schemas/InvoiceType"
+          },
+          "net": {
+            "title": "Net",
+            "type": "string"
+          },
+          "npoban": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Npoban"
+          },
+          "print_mark": {
+            "title": "Print Mark",
+            "type": "boolean"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InvoiceStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "sale_id",
+          "invoice_type",
+          "invoice_no",
+          "invoice_date",
+          "invoice_time",
+          "buyer_tax_id",
+          "buyer_name",
+          "carrier_type",
+          "carrier_id",
+          "donate_mark",
+          "npoban",
+          "print_mark",
+          "net",
+          "tax",
+          "total",
+          "status",
+          "created_at"
+        ],
+        "title": "InvoiceRead",
+        "type": "object"
+      },
+      "InvoiceStatus": {
+        "description": "發票（invoices）本地紀錄狀態。\n\nPENDING：本地已建、排入上傳佇列，尚未取得平台核可（無字軌號碼——序列化/配號待 T13 收尾）；\nISSUED：平台 ProcessResult 核可、正式開立；\nVOID_PENDING：已核可發票申請作廢、F0501 已排隊但平台尚未確認（本地不可先當正式作廢，\n  否則 F0501 失敗時本地顯示作廢、平台仍有效）；VOID：F0501 平台核可後的正式作廢；\nALLOWANCE：已折讓。佇列本身的上傳狀態另見 UploadStatus。",
+        "enum": [
+          "PENDING",
+          "ISSUED",
+          "VOID_PENDING",
+          "VOID",
+          "ALLOWANCE"
+        ],
+        "title": "InvoiceStatus",
+        "type": "string"
+      },
+      "InvoiceType": {
+        "description": "發票交易類型（本系統領域層；與 MIG InvoiceTypeEnum 07/08 為不同概念）。",
+        "enum": [
+          "B2C",
+          "B2B"
+        ],
+        "title": "InvoiceType",
+        "type": "string"
       },
       "ItemHistoryEvent": {
         "description": "庫存明細歷史事件（一筆庫存異動帳對應一列）。",
@@ -4764,12 +5184,14 @@
         "type": "object"
       },
       "SaleInvoiceStatus": {
-        "description": "銷售單的開票狀態（sales.invoice_status）。\n\nNOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；\nISSUED：已開立發票；VOID：已作廢；ALLOWANCE：已折讓。",
+        "description": "銷售單的開票狀態（sales.invoice_status）。\n\nNOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；\nPENDING_ISSUE：已排入電子發票開立佇列、尚未取得平台核可字軌號碼（本地 outbox pending，\n  非「已開立」——尚無 invoice_no/開立日/隨機碼）；\nISSUED：平台已核可、發票正式開立；\nPENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；\nALLOWANCE：G0401 平台核可、折讓成立；VOID：已作廢。",
         "enum": [
           "NOT_ISSUED",
+          "PENDING_ISSUE",
           "ISSUED",
-          "VOID",
-          "ALLOWANCE"
+          "PENDING_ALLOWANCE",
+          "ALLOWANCE",
+          "VOID"
         ],
         "title": "SaleInvoiceStatus",
         "type": "string"
@@ -6554,6 +6976,17 @@
         "title": "TrendsReport",
         "type": "object"
       },
+      "UploadStatus": {
+        "description": "電子發票上傳佇列狀態（einvoice_upload_queue.status）。\n\nPENDING 待拋檔/待平台核可；UPLOADED 平台 ProcessResult 核可；FAILED 平台退回（可 retry）；\nCANCELLED 中止（如發票在核可前即被作廢，其待送 F0401 明確終止、不再拋檔）。",
+        "enum": [
+          "PENDING",
+          "UPLOADED",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "UploadStatus",
+        "type": "string"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -7822,6 +8255,54 @@
           }
         ],
         "summary": "Create Catalog Product",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/by-sku/{sku}": {
+      "get": {
+        "description": "POS 掃碼查數量品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。\n\n須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。",
+        "operationId": "getCatalogProductBySku",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sku",
+            "required": true,
+            "schema": {
+              "title": "Sku",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Catalog By Sku",
         "tags": [
           "inventory"
         ]
@@ -9335,6 +9816,190 @@
         ]
       }
     },
+    "/api/v1/einvoice/queue": {
+      "get": {
+        "description": "上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。",
+        "operationId": "listEInvoiceQueue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/UploadStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EInvoiceQueueListRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Queue",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/queue/{queue_id}/result": {
+      "post": {
+        "description": "記錄平台回執並更新佇列/發票狀態（限 MANAGER）。\n\n成功→UPLOADED、失敗→FAILED（可再 retry）。自動解析 Turnkey 回執檔的 importer\n待收尾階段實作；此端點為手動/importer 共用的結果落庫出口。",
+        "operationId": "recordEInvoiceResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "title": "Queue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EInvoiceResultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EInvoiceQueueItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Result",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/queue/{queue_id}/retry": {
+      "post": {
+        "description": "重送失敗的佇列項目（限 MANAGER；FAILED→PENDING、attempts+1，不新配發票號碼）。",
+        "operationId": "retryEInvoiceQueue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "title": "Queue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EInvoiceQueueItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retry Queue Item",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "getHealth",
@@ -9353,6 +10018,54 @@
         "summary": "Health",
         "tags": [
           "system"
+        ]
+      }
+    },
+    "/api/v1/invoices/{invoice_id}": {
+      "get": {
+        "description": "單張發票（店別範圍）。",
+        "operationId": "getInvoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Invoice",
+        "tags": [
+          "einvoice"
         ]
       }
     },

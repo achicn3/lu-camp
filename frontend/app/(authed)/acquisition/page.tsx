@@ -25,7 +25,7 @@ import { canVoid } from "@/features/acquisition/void";
 import { isValidNationalId } from "@/features/member/national-id";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
-import { printLabel } from "@/lib/agent";
+import { openCashDrawer, printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -536,6 +536,8 @@ export default function AcquisitionPage() {
   // 作廢剛建立的這筆（限管理者）：開啟確認對話框／顯示作廢結果。
   const [voidTarget, setVoidTarget] = useState<number | null>(null);
   const [voidedNote, setVoidedNote] = useState<string | null>(null);
+  // 開錢櫃失敗提示（docs/10 §5：收購已成立，代理離線只提示、不可擋流程）。
+  const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
   // 送出成功後遞增 → 重掛鑑價列/散裝表單，連同 combobox 內部文字一併清空（避免顯示舊值卻無 id）。
   const [formKey, setFormKey] = useState(0);
   // 管理者才顯示作廢入口（後端 ManagerDep 為最終權威；前端隱藏僅為 UX）。token 在頁面生命週期內不變。
@@ -625,6 +627,19 @@ export default function AcquisitionPage() {
       return data;
     },
     onSuccess: (data) => {
+      // 付現才開錢櫃（docs/10 §5：後端成功後才開櫃付款；寄售/純購物金不碰現金）。
+      // fire-and-forget：收購已寫後端，開櫃失敗只提示、不擋流程。
+      const cashPaid = isConsignment
+        ? 0
+        : payoutMethod === "CASH"
+          ? payable
+          : payoutMethod === "SPLIT"
+            ? (parseNtd(splitCash) ?? 0)
+            : 0;
+      setDrawerNotice(null);
+      if (cashPaid > 0) {
+        openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
+      }
       setResult({
         acquisitionId: data.acquisition_id,
         type: data.type,
@@ -771,6 +786,11 @@ export default function AcquisitionPage() {
       {result !== null && (
         <div className="card form-success acq-result">
           <p>收購完成（單號 #{result.acquisitionId}）。</p>
+          {drawerNotice !== null && (
+            <p role="alert" className="form-error">
+              錢櫃未開啟：{drawerNotice}（收購已完成，請以鑰匙開櫃付款）
+            </p>
+          )}
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
           {result.lot !== null && <p>散裝批號：{result.lot}</p>}
           <PrintLabelsAction codes={result.codes} lot={result.lot} />

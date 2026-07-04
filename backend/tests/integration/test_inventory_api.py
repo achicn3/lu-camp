@@ -188,6 +188,35 @@ async def test_list_serialized_pagination(
     assert len(page.json()) == 2
 
 
+async def test_get_catalog_by_sku(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """POS 掃碼查數量品：以 SKU 取件（店範圍；他店/不存在一律 404）。"""
+    store_id = await _seed_store(db_session)
+    other = await _seed_store(db_session, "他店")
+    db_session.add(
+        CatalogProduct(
+            store_id=store_id,
+            sku="GAS-230",
+            name="高山瓦斯罐 230g",
+            unit_price=Decimal("120"),
+            quantity_on_hand=5,
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get("/api/v1/catalog-products/by-sku/GAS-230", headers=_auth(store_id))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sku"] == "GAS-230"
+    assert body["unit_price"] == "120"
+    assert body["quantity_on_hand"] == 5
+
+    # 他店同 SKU 不可見（§4）；不存在 → 404。
+    cross = await client.get("/api/v1/catalog-products/by-sku/GAS-230", headers=_auth(other))
+    assert cross.status_code == 404
+    missing = await client.get("/api/v1/catalog-products/by-sku/NOPE", headers=_auth(store_id))
+    assert missing.status_code == 404
+
+
 async def test_list_catalog_products(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     store_id = await _seed_store(db_session)
     other = await _seed_store(db_session, "他店")

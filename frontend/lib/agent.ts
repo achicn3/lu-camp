@@ -17,10 +17,10 @@ async function postAgent(path: string, body: unknown): Promise<void> {
       body: JSON.stringify(body),
     });
   } catch {
-    throw new Error("無法連線硬體代理（請確認明細機服務）");
+    throw new Error("無法連線硬體代理（請確認櫃檯設備服務）");
   }
   if (!res.ok) {
-    let detail = `列印失敗（${res.status}）`;
+    let detail = `硬體操作失敗（${res.status}）`;
     try {
       const j = (await res.json()) as { detail?: unknown };
       if (typeof j.detail === "string") detail = j.detail;
@@ -51,4 +51,12 @@ export async function printLabel(
   price: number,
 ): Promise<void> {
   await postAgent("/print/label", { code, name, price });
+}
+
+/**
+ * 開錢櫃（EPSON 踢櫃，docs/10 §5）：現金收付時觸發。
+ * 呼叫端須把失敗當「非阻擋」處理——交易已寫後端，代理離線只提示、不可擋流程。
+ */
+export async function openCashDrawer(): Promise<void> {
+  await postAgent("/drawer/open", {});
 }

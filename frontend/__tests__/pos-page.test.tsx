@@ -157,6 +157,7 @@ describe("/pos 結帳頁", () => {
 
   it("掃描序號品加入購物車、總額更新、現金結帳→完成＋列印對話框", async () => {
     let saleBody = "";
+    let drawerCalls = 0;
     stubFetch((url, method, body) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
@@ -181,6 +182,10 @@ describe("/pos 結帳頁", () => {
       }
       if (url.includes("/print/detail")) return json({ status: "ok" }); // 硬體代理列印
       if (url.includes("/print-detail")) return json({ id: 7 }); // 後端稽核
+      if (url.includes("/drawer/open")) {
+        drawerCalls += 1; // 現金結帳 → 踢開錢櫃（docs/10 §5）
+        return json({ status: "ok" });
+      }
       return null;
     });
     const user = userEvent.setup();
@@ -213,6 +218,8 @@ describe("/pos 結帳頁", () => {
     await waitFor(() =>
       expect(within(dialog).getByText(/已送出列印/)).toBeTruthy(),
     );
+    // 現金結帳 → 已踢開錢櫃一次
+    await waitFor(() => expect(drawerCalls).toBe(1));
   });
 
   it("活動生效：總額顯示折後、結帳送折後收款、明細送印帶折扣與活動（docs/21 C2b）", async () => {
@@ -264,6 +271,7 @@ describe("/pos 結帳頁", () => {
         agentBody = body; // 硬體代理收到的明細 payload
         return json({ status: "ok" });
       }
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
       if (url.includes("/print-detail")) return json({ id: 8 }); // 後端稽核
       return null;
     });
@@ -413,6 +421,8 @@ describe("/pos 結帳頁", () => {
         return json({ detail: "not found" }, 404);
       if (url.includes("/bulk-lots/by-code/"))
         return json({ detail: "not found" }, 404);
+      if (url.includes("/catalog-products/by-sku/"))
+        return json({ detail: "not found" }, 404);
       return null;
     });
     const user = userEvent.setup();
@@ -421,6 +431,105 @@ describe("/pos 結帳頁", () => {
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "NOPE{Enter}");
     await waitFor(() =>
       expect(screen.getByText(/找不到此條碼：NOPE/)).toBeTruthy(),
+    );
+  });
+
+  it("掃數量品 SKU 加入購物車（序號/散裝 404 後 fallback）", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/bulk-lots/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/catalog-products/by-sku/GAS-230"))
+        return json({
+          id: 77,
+          store_id: 1,
+          sku: "GAS-230",
+          name: "高山瓦斯罐 230g",
+          brand_id: null,
+          unit_price: "120",
+          quantity_on_hand: 5,
+          reorder_point: 0,
+        });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "GAS-230{Enter}");
+    await waitFor(() =>
+      expect(screen.getByText("高山瓦斯罐 230g")).toBeTruthy(),
+    );
+    // 數量品可調量（非序號品才有 qty 輸入框）。
+    expect(screen.getByLabelText("高山瓦斯罐 230g 數量")).toBeTruthy();
+  });
+
+  it("掃無庫存的數量品 SKU 顯示阻擋", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/bulk-lots/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/catalog-products/by-sku/EMPTY-1"))
+        return json({
+          id: 78,
+          store_id: 1,
+          sku: "EMPTY-1",
+          name: "缺貨商品",
+          brand_id: null,
+          unit_price: "50",
+          quantity_on_hand: 0,
+          reorder_point: 0,
+        });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "EMPTY-1{Enter}");
+    await waitFor(() =>
+      expect(screen.getByText(/EMPTY-1 已無庫存/)).toBeTruthy(),
+    );
+  });
+
+  it("開錢櫃失敗不擋交易：完成畫面顯示鑰匙開櫃提示", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({ total: "1800", campaign_id: null, campaign_name: null, lines: [], food_subtotal: "0", store_credit_max: "1800" });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        return json(
+          { id: 9, store_id: 1, total: "1800", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/drawer/open"))
+        return json({ detail: "錢櫃離線" }, 503); // 代理回失敗 → 只提示、不擋交易
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+
+    // 交易照樣完成，且顯示錢櫃未開啟提示（docs/10：不可阻擋交易已成立的資料）。
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /已完成/ })).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/錢櫃未開啟：錢櫃離線/)).toBeTruthy(),
     );
   });
 });
