@@ -349,12 +349,28 @@ class EInvoiceService:
 
         不觸碰發票與字軌號碼——重送絕不為同一筆銷售產生第二個發票號碼（不變量 2）。
         清掉上次拋檔痕跡（xml_path/sha256/dropped_at），使可重新拋檔。
+
+        **終態目標不可復活**（Codex 第六輪）：F0401 失敗時若發票已在 VOID_PENDING
+        （失敗轉移已把發票收斂為 VOID），retry 會造出「PENDING 但拋檔被拒、回執無法歸屬」
+        的永久掛列——目標發票已 VOID／折讓已作廢者一律拒絕重送，列維持 FAILED 供稽核。
         """
         item = await self._repo.lock_queue_item(store_id, queue_id)
         if item is None:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
         if item.status is not UploadStatus.FAILED:
             raise EInvoiceQueueNotRetryable(f"僅 FAILED 可重送，目前狀態：{item.status.value}")
+        if item.action is EInvoiceAction.ISSUE and item.invoice_id is not None:
+            invoice = await self._repo.get_invoice(store_id, item.invoice_id)
+            if invoice is not None and invoice.status is InvoiceStatus.VOID:
+                raise EInvoiceQueueNotRetryable(
+                    f"發票 {invoice.id} 已作廢，開立訊息不可重送（此列維持 FAILED 供稽核）"
+                )
+        if item.allowance_id is not None:
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id)
+            if allowance is not None and allowance.voided:
+                raise EInvoiceQueueNotRetryable(
+                    f"折讓 {allowance.id} 已作廢，折讓訊息不可重送（此列維持 FAILED 供稽核）"
+                )
         item.status = UploadStatus.PENDING
         item.attempts += 1
         item.last_error = None
@@ -406,6 +422,19 @@ class EInvoiceService:
 
         自動解析 Turnkey 回執檔的 importer 待收尾階段依 3.9 手冊實作；此為結果落庫共用出口。
         """
+        # 全域鎖序 sale → queue（Codex 第六輪）：狀態性回執可能觸及 sale（mark_invoice_*），
+        # 而作廢/退貨路徑先鎖 sale 再鎖佇列——此處先以無鎖讀解析關聯 sale（queue→invoice→
+        # sale_id 皆不可變欄位）、鎖 sale，再鎖佇列列，否則兩路徑 AB-BA 死鎖。
+        if kind == RESULT_KIND_PROCESS:
+            preview = await self._repo.get_queue_item(store_id, queue_id)
+            if preview is None:
+                raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
+            sale_id = await self._resolve_sale_id(store_id, preview)
+            if sale_id is not None:
+                from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+                await SalesService(self._session).lock_sale_row(store_id, sale_id)
+
         item = await self._repo.lock_queue_item(store_id, queue_id)
         if item is None:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
@@ -556,6 +585,18 @@ class EInvoiceService:
         from app.modules.sales.service import SalesService  # 函式內 import 破 sales↔einvoice 循環
 
         await SalesService(self._session).mark_invoice_allowance(store_id, invoice.sale_id)
+
+    async def _resolve_sale_id(self, store_id: int, item: EInvoiceUploadQueue) -> int | None:
+        """佇列列 → 關聯 sale_id（invoice 直連或經 allowance→invoice；欄位皆不可變）。"""
+        invoice_id = item.invoice_id
+        if invoice_id is None and item.allowance_id is not None:
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id)
+            if allowance is not None and allowance.store_id == store_id:
+                invoice_id = allowance.invoice_id
+        if invoice_id is None:
+            return None
+        invoice = await self._repo.get_invoice(store_id, invoice_id)
+        return invoice.sale_id if invoice is not None else None
 
     async def get_invoice(self, store_id: int, invoice_id: int) -> Invoice:
         invoice = await self._repo.get_invoice(store_id, invoice_id)

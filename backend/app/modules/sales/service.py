@@ -783,6 +783,15 @@ class SalesService:
             sale.invoice_status = SaleInvoiceStatus.ALLOWANCE
             await self._session.flush()
 
+    async def lock_sale_row(self, store_id: int, sale_id: int) -> Sale | None:
+        """鎖定銷售列（FOR UPDATE；跨模組經 service，§2）。
+
+        **全域鎖序 sale → queue**（Codex 第六輪）：作廢/退貨路徑天然先鎖 sale 再動 einvoice
+        佇列；回執路徑（einvoice.record_result）在鎖佇列列**之前**必須先經此方法鎖關聯 sale，
+        否則兩路徑 AB-BA 死鎖。同交易內重複鎖同列免費（mark_invoice_* 之後重鎖無害）。
+        """
+        return await self._repo.lock_sale(store_id, sale_id)
+
     async def mark_invoice_not_issued(self, store_id: int, sale_id: int) -> None:
         """待開立發票被中止（退貨觸發的作廢收斂：F0401 失敗或 F0501 核可）後，把對應銷售的
         invoice_status 由 PENDING_ISSUE 收斂回 NOT_ISSUED——該銷售最終無有效發票。

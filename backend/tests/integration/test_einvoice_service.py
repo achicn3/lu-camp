@@ -762,6 +762,51 @@ async def test_retry_rejects_non_failed(db_session: AsyncSession) -> None:
         await svc.retry(store_id, queue_id)
 
 
+async def test_retry_rejected_when_invoice_void(db_session: AsyncSession, tmp_path: Path) -> None:
+    """Codex 第六輪回歸：發票已 VOID 的 F0401 失敗列不可 retry（避免造出永久掛列）。
+
+    路徑：拋檔 → 作廢（VOID_PENDING）→ F0401 失敗（失敗轉移把發票收斂 VOID）→ retry 必拒，
+    列維持 FAILED 供稽核。
+    """
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = await _first_queue_id(svc, store_id)
+    await svc.drop_pending(
+        store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await svc.void_invoice_for_sale(store_id, sale_id)  # 在途 → VOID_PENDING
+    await svc.record_result(store_id, queue_id, success=False, message="E0001")  # → 發票 VOID
+
+    with pytest.raises(EInvoiceQueueNotRetryable, match="已作廢"):
+        await svc.retry(store_id, queue_id)
+    assert (await svc.list_queue(store_id))[0].status is UploadStatus.FAILED  # 維持終態
+
+
+async def test_retry_rejected_when_allowance_voided(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """折讓已作廢的 G0401 失敗列同樣不可 retry（對稱守衛）。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
+    allowance = await svc.record_allowance(
+        store_id, invoice_id=invoice.id, total=Decimal(210), tax_rate=TAX_RATE, return_id=1
+    )
+    g_item = next(i for i in await svc.list_queue(store_id) if i.allowance_id == allowance.id)
+    await svc.drop_pending(
+        store_id, g_item.id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await svc.record_result(store_id, g_item.id, success=False, message="E0002")
+    allowance.voided = True  # 模擬折讓作廢（G0501 流程屬 T13）
+    await db_session.flush()
+
+    with pytest.raises(EInvoiceQueueNotRetryable, match="折讓"):
+        await svc.retry(store_id, g_item.id)
+
+
 async def test_retry_unknown_item_raises(db_session: AsyncSession) -> None:
     store_id, _sale_id = await _seed_sale(db_session)
     with pytest.raises(EInvoiceQueueItemNotFound):

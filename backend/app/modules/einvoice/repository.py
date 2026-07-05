@@ -124,6 +124,15 @@ class EInvoiceRepository:
         value = await self._session.scalar(stmt)
         return int(value if value is not None else 0)
 
+    async def get_queue_item(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue | None:
+        """無鎖讀佇列列（回執路徑先解析關聯 sale 用——全域鎖序 sale→queue 的前置）。"""
+        stmt = select(EInvoiceUploadQueue).where(
+            EInvoiceUploadQueue.id == queue_id,
+            EInvoiceUploadQueue.store_id == store_id,
+        )
+        result: EInvoiceUploadQueue | None = await self._session.scalar(stmt)
+        return result
+
     async def lock_queue_item(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue | None:
         """取得佇列列並上 row lock（拋檔/標記/重送前重載持久列，不信任呼叫端物件）。"""
         stmt = (
