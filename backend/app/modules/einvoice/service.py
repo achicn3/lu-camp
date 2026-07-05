@@ -282,36 +282,37 @@ class EInvoiceService:
                 "拒絕覆寫已可能曝光的檔案"
             )
 
-        # 階段 2：原子寫檔（crash 於此 → 恢復路徑覆寫同名檔，無第二份）。
-        result = dropper.drop(item.message_type, filename, payload)
-        if result.sha256 != claim_sha:
-            raise EInvoiceDropError(f"佇列 {queue_id} 落檔 sha 與認領不符")
-
-        # 階段 3：確認交付（CAS）。
-        return await self._confirm_drop(
+        # 階段 2：持列鎖「驗認領 → 寫檔 → 確認」單一交易（Codex 第四輪）。
+        return await self._expose_and_confirm(
             store_id,
             queue_id,
+            filename=filename,
+            payload=payload,
+            dropper=dropper,
             expected_path=expected_path,
             expected_sha=claim_sha,
             expected_attempts=claim_attempts,
         )
 
-    async def _confirm_drop(
+    async def _expose_and_confirm(
         self,
         store_id: int,
         queue_id: int,
         *,
+        filename: str,
+        payload: bytes,
+        dropper: EInvoiceDropper,
         expected_path: str,
         expected_sha: str,
         expected_attempts: int,
     ) -> EInvoiceUploadQueue:
-        """拋檔確認（compare-and-set）：認領未被他人動過才寫 dropped_at。
+        """持列鎖完成「CAS 驗認領 → 寫檔曝光 → 確認 dropped_at」（單一交易）。
 
-        認領 commit 後鎖已釋放；此窗口內可能發生「失敗回執 → retry（清認領、attempts+1）」。
-        恢復的確認若無條件寫 dropped_at，會把已重試的列污染成「PENDING＋已確認＋無認領」的
-        死狀態（Codex 第二輪 high）。故僅在 status/xml_path/sha/attempts 全部仍等於認領值且
-        dropped_at 仍 NULL 時確認；否則放棄——狀態已由回執/retry 收斂，本次交付作廢
-        （新世代會以新檔名重拋）。
+        認領 commit 後鎖已釋放，「失敗回執 → retry（清認領、世代+1）」可插隊（Codex 第二/
+        四輪 high）。故檔案曝光**前**先重取列鎖並驗認領未被動過：過期 → 放棄且**不寫檔**
+        （否則過期世代的檔案仍會曝光給 Turnkey，CAS 只保住 DB、保不住外部副作用）；完好 →
+        持鎖寫檔＋確認——retry/record_result 需要同一列鎖，被序列化在本交易之後。
+        寫檔為短本地 FS 操作，持鎖成本可接受（單店 outbox）。
         """
         locked = await self._repo.lock_queue_item(store_id, queue_id)
         assert locked is not None  # 認領已 commit，列必存在
@@ -322,8 +323,19 @@ class EInvoiceService:
             and locked.attempts == expected_attempts
             and locked.dropped_at is None
         )
-        if claim_intact:
-            locked.dropped_at = datetime.now(UTC)
+        if not claim_intact:
+            # 狀態已由回執/retry 收斂：本次交付作廢、過期世代檔案不曝光。
+            # 本分支無任何變更 → commit 純釋放列鎖（不可 rollback：會誤回同 session 內
+            # 其他未 commit 的工作）。
+            await self._session.commit()
+            await self._session.refresh(locked)
+            return locked
+
+        result = dropper.drop(locked.message_type, filename, payload)
+        if result.sha256 != expected_sha:
+            await self._session.commit()  # 無列變更；釋放列鎖後回報
+            raise EInvoiceDropError(f"佇列 {queue_id} 落檔 sha 與認領不符")
+        locked.dropped_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(locked)
         return locked

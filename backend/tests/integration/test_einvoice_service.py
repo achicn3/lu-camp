@@ -76,6 +76,13 @@ class _CrashAfterWriteDropper(EInvoiceDropper):
         raise RuntimeError("simulated crash after file write")
 
 
+class _CrashBeforeWriteDropper(EInvoiceDropper):
+    """寫檔前就 crash：模擬「已認領、檔案尚未曝光」的中斷窗口（第四輪競態用）。"""
+
+    def drop(self, message_type: EInvoiceMessageType, filename: str, payload: bytes) -> NoReturn:
+        raise RuntimeError("simulated crash before file write")
+
+
 async def _seed_sale(session: AsyncSession, *, total: Decimal = Decimal(1050)) -> tuple[int, int]:
     """建 store + clerk + 一筆 sale；回 (store_id, sale_id)。"""
     store = Store(name="門市")
@@ -367,33 +374,45 @@ async def test_crash_recovery_rejects_content_drift(
         )
 
 
-async def test_confirm_drop_cas_refuses_after_retry(
+async def test_stale_generation_file_not_exposed_after_retry(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    """CAS 確認（Codex 第二輪 high）：認領→失敗回執→retry 清認領後，恢復的確認不可污染新世代。
+    """CAS＋曝光守衛（Codex 第二/四輪 high）：認領→失敗回執→retry 後，恢復的交付
+    必須整段放棄——不寫 dropped_at、**也不把過期世代（a0）的檔案寫進 SRC**。
 
-    直接呼叫 _confirm_drop 模擬「原拋檔恢復後帶舊認領值回來確認」——公開 API 無法確定性
-    重現此競態窗口（認領 commit 後鎖已釋放）。
+    競態窗口（認領 commit 後、重取列鎖前）僅能直呼私有交付段重現。
     """
     store_id, sale_id = await _seed_sale(db_session)
     svc = EInvoiceService(db_session)
     await svc.create_pending_invoice(
         store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
     )
-    queue_id = await _claim_then_crash(db_session, svc, store_id, tmp_path)
+    queue_id = await _first_queue_id(svc, store_id)
+    # 認領成功、檔案尚未曝光（寫檔前 crash）。
+    with pytest.raises(RuntimeError, match="before file write"):
+        await svc.drop_pending(
+            store_id,
+            queue_id,
+            serializer=_FakeSerializer(),
+            dropper=_CrashBeforeWriteDropper(tmp_path),
+        )
     stale = (await svc.list_queue(store_id))[0]
     stale_path, stale_sha = stale.xml_path, stale.xml_sha256
     assert stale_path is not None and stale_sha is not None
+    assert stale.dropped_at is None
 
     # 窗口內：失敗回執（已認領可受理）→ FAILED → retry 清認領、世代 +1。
     await svc.record_result(store_id, queue_id, success=False, message="E0001")
     await svc.retry(store_id, queue_id)
 
-    # 原拋檔「恢復」帶舊認領值確認 → CAS 放棄，不寫 dropped_at、不造出死狀態。
-    # 競態窗口（認領 commit 後鎖已釋放）僅能直呼私有確認重現。
-    item = await svc._confirm_drop(
+    # 原交付「恢復」帶舊認領值回來 → 放棄：不寫檔、不確認、不污染新世代。
+    dropper = EInvoiceDropper(tmp_path)
+    item = await svc._expose_and_confirm(
         store_id,
         queue_id,
+        filename=f"F0401-{store_id}-{queue_id}-a0.xml",
+        payload=b"<Invoice/>",
+        dropper=dropper,
         expected_path=stale_path,
         expected_sha=stale_sha,
         expected_attempts=0,
@@ -401,6 +420,8 @@ async def test_confirm_drop_cas_refuses_after_retry(
     assert item.status is UploadStatus.PENDING
     assert item.dropped_at is None  # 未被污染
     assert item.xml_path is None  # retry 後的乾淨認領位維持
+    src_dir = dropper.src_dir(EInvoiceMessageType.F0401)
+    assert not src_dir.exists() or list(src_dir.iterdir()) == []  # a0 檔案未曝光
 
 
 async def test_old_generation_receipt_conflicts_after_retry(
