@@ -380,10 +380,13 @@ class EInvoiceService:
             保留事件再回報衝突（router 已如此），終態不變更。
         - 未認領（xml_path NULL——檔案不可能曝光過）→ EInvoiceResultNotApplicable。
           已認領未確認（crash 於拋檔中途）的回執照常受理——檔案可能已被 Turnkey 撿走。
-        - **交付世代歸屬**（Codex 第二輪）：`delivery_attempt` 有帶且 ≠ 當前 attempts →
+        - **交付世代歸屬**（Codex 第二/三輪）：`delivery_attempt` 有帶且 ≠ 當前 attempts →
           舊世代回執（retry 前的交付）——事件留稽核後拋 EInvoiceResultConflict，絕不套用到
-          新世代（舊失敗不可誤殺新嘗試、舊成功不可把已改內容的新發票標 ISSUED）。未帶視為
-          當前世代（手動操作情境）；T13 importer 必須自檔名（…-a{n}.xml）解出世代帶入。
+          新世代（舊失敗不可誤殺新嘗試、舊成功不可把已改內容的新發票標 ISSUED）。
+          **retry 過的列（attempts > 0）狀態性回執必帶世代**：省略即無法歸屬（可能是任一舊
+          世代的遲到回執）→ 同樣留稽核＋衝突、不改狀態——歸屬不得依賴呼叫端自律。從未 retry
+          （attempts == 0）只有一個世代、省略無歧義，維持手動方便。T13 importer 必自檔名
+          （…-a{n}.xml）解出世代帶入。稽核事件照實記錄呼叫端所帶世代（未帶存 NULL，不竄補）。
 
         自動解析 Turnkey 回執檔的 importer 待收尾階段依 3.9 手冊實作；此為結果落庫共用出口。
         """
@@ -399,9 +402,7 @@ class EInvoiceService:
                 status_code=status_code,
                 message=message,
                 source_ref=source_ref,
-                delivery_attempt=(
-                    delivery_attempt if delivery_attempt is not None else item.attempts
-                ),
+                delivery_attempt=delivery_attempt,  # 照實記錄（未帶存 NULL，稽核不說謊）
             )
         )
         # SummaryResult：僅對帳、不改單筆狀態。
@@ -410,12 +411,20 @@ class EInvoiceService:
             await self._session.refresh(item)
             return item
 
-        # 舊世代回執：留稽核、不套用（呼叫端 commit 保留事件再回報衝突，router 已如此）。
+        # 世代歸屬（留稽核、不套用；呼叫端 commit 保留事件再回報衝突，router 已如此）：
+        # (a) 帶了但不符 → 舊世代回執；(b) retry 過卻沒帶 → 無法歸屬，不得預設為當前世代
+        #     （Codex 第三輪：a0 遲到成功省略世代會被誤套到 a1）。
         if delivery_attempt is not None and delivery_attempt != item.attempts:
             await self._session.flush()
             raise EInvoiceResultConflict(
                 f"回執屬於交付世代 a{delivery_attempt}，佇列目前為 a{item.attempts}"
                 "（已 retry）；事件已留稽核、不套用"
+            )
+        if delivery_attempt is None and item.attempts > 0:
+            await self._session.flush()
+            raise EInvoiceResultConflict(
+                f"佇列已 retry（目前世代 a{item.attempts}），狀態性回執必須帶 "
+                "delivery_attempt 以歸屬世代；事件已留稽核、不套用"
             )
 
         # ProcessResult：終態列冪等/留證，不覆寫（見 docstring）。

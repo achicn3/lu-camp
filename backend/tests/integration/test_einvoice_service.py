@@ -442,7 +442,44 @@ async def test_old_generation_receipt_conflicts_after_retry(
             .order_by(EInvoiceResultEvent.id)
         )
     ).all()
-    assert list(attempts_logged) == [0, 0, 1]
+    assert list(attempts_logged) == [None, 0, 1]  # 未帶世代照實存 NULL（稽核不竄補）
+
+
+async def test_stale_receipt_without_attempt_rejected_after_retry(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Codex 第三輪回歸：retry 過的列，省略 delivery_attempt 的狀態性回執不得預設為當前世代。
+
+    a0 失敗 → retry → 拋 a1 → 「a0 的遲到成功」**不帶世代**送入 → 必須 409＋留稽核、
+    佇列/發票皆不動；帶 a1 世代才核可。
+    """
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    await _fill_issue_fields(db_session, invoice)
+    queue_id = await _first_queue_id(svc, store_id)
+    dropper = EInvoiceDropper(tmp_path)
+    await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+    await svc.record_result(store_id, queue_id, success=False, message="E0001")
+    await svc.retry(store_id, queue_id)
+    await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+
+    with pytest.raises(EInvoiceResultConflict, match="必須帶"):
+        await svc.record_result(store_id, queue_id, success=True)  # 省略世代 → 拒
+
+    assert (await svc.list_queue(store_id))[0].status is UploadStatus.PENDING  # 不動
+    assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.PENDING
+    event_count = await db_session.scalar(
+        select(func.count())
+        .select_from(EInvoiceResultEvent)
+        .where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event_count == 2  # 失敗回執＋被拒的無世代回執都留稽核
+
+    accepted = await svc.record_result(store_id, queue_id, success=True, delivery_attempt=1)
+    assert accepted.status is UploadStatus.UPLOADED
 
 
 async def test_void_with_claimed_f0401_goes_void_pending(
