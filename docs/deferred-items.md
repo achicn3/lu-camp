@@ -12,6 +12,9 @@
   或存載具），F0401 上傳是「存證」（48 小時內），上傳失敗不會取消開立。**T13 落地配號時必須
   把 ISSUED 移回結帳當下**（本地配號成功即開立），佇列 UPLOADED 降格為「存證完成」；
   VOID_PENDING→VOID（等 F0501 核可）語意亦須同步重審。不重對齊就上線會拿錯誤的模型運作。
+- **(a2) importer 協議約定（Codex 第九輪收斂備註）**：T13 回執 importer 若不經 router 直呼
+  `record_result`，必須沿用「衝突/不適用/欄位不齊也 commit 回執事件」的協議（事件永不回滾）、
+  並自檔名（…-a{n}.xml）解出交付世代帶入 `delivery_attempt`。
 - **(b) 證明聯列印接線**：硬體代理 `/print/einvoice`（InvoicePayload：字軌+隨機碼+QR AES）
   已就緒；缺後端 Invoice→InvoicePayload 橋接與 POS 開立當下的呼叫點。與 (a) 綁定實作。
   同時開放 `/sales` API 的載具/捐贈/統編欄位與 POS UI（現為停用佔位）。
