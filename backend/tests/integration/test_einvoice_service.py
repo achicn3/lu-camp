@@ -503,6 +503,51 @@ async def test_stale_receipt_without_attempt_rejected_after_retry(
     assert accepted.status is UploadStatus.UPLOADED
 
 
+async def test_claimed_unexposed_f0401_recovers_after_void(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Codex 第五輪回歸：認領後（檔案未曝光）crash → 作廢 → VOID_PENDING 不卡死。
+
+    已認領的 F0401 允許在 VOID_PENDING 下恢復完成交付 → 回執必然到來 →
+    F0401 成功→自動排 F0501 → F0501 核可 → 發票 VOID、sale 收斂——不會永遠 PENDING 無回執。
+    """
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    await _fill_issue_fields(db_session, invoice)
+    queue_id = await _first_queue_id(svc, store_id)
+    # 認領成功、檔案「未」曝光（寫檔前 crash）。
+    with pytest.raises(RuntimeError, match="before file write"):
+        await svc.drop_pending(
+            store_id,
+            queue_id,
+            serializer=_FakeSerializer(),
+            dropper=_CrashBeforeWriteDropper(tmp_path),
+        )
+
+    # 作廢：已認領 → 在途 → VOID_PENDING、F0401 保留（不可當平台沒收過）。
+    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    assert voided is not None
+    assert voided.status is InvoiceStatus.VOID_PENDING
+
+    # 恢復完成交付（VOID_PENDING 下已認領的 F0401 放行）→ 檔案落地、回執可到。
+    dropper = EInvoiceDropper(tmp_path)
+    item = await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+    assert item.dropped_at is not None
+
+    # F0401 平台核可 → 自動續排 F0501 → 核可 → 正式 VOID（收斂、不卡死）。
+    await svc.record_result(store_id, queue_id, success=True)
+    void_items = [i for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.VOID]
+    assert len(void_items) == 1
+    await svc.drop_pending(
+        store_id, void_items[0].id, serializer=_FakeSerializer(), dropper=dropper
+    )
+    await svc.record_result(store_id, void_items[0].id, success=True)
+    assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.VOID
+
+
 async def test_void_with_claimed_f0401_goes_void_pending(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:

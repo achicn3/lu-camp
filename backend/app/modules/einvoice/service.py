@@ -151,13 +151,17 @@ class EInvoiceService:
             invoice.status = InvoiceStatus.VOID_PENDING
             await self._enqueue_f0501(store_id, invoice.id)
         else:  # PENDING（尚未平台核可）
+            # FOR UPDATE：與交付協議同鎖（Codex 第五輪）——避免讀到過期未認領列、
+            # 在另一 worker 曝光檔案後才取消（交付持列鎖期間，本查詢會等待其 commit）。
             issue_items = [
                 i
-                for i in await self._repo.list_queue_items_for_invoice(store_id, invoice.id)
+                for i in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id)
                 if i.action is EInvoiceAction.ISSUE and i.status is UploadStatus.PENDING
             ]
             # 「已認領」（xml_path 設）即視為在途：認領後檔案就可能已曝光給 Turnkey
-            # （兩階段拋檔的 crash 窗口），不可當平台沒收過而 CANCELLED。
+            # （兩階段拋檔的 crash 窗口），不可當平台沒收過而 CANCELLED。已認領未確認的列
+            # 允許在 VOID_PENDING 下恢復完成交付（見 _serialize），回執到來後由
+            # 「F0401 成功→續 F0501／失敗→VOID」收斂，不會卡死。
             in_flight = any(i.xml_path is not None for i in issue_items)
             if in_flight:
                 # 已交付 Turnkey、平台結果未回：不可視為沒收過，改請求作廢、留 F0401 待回執決定。
@@ -596,10 +600,18 @@ class EInvoiceService:
         invoice = await self._repo.get_invoice(store_id, item.invoice_id or 0)
         if invoice is None:
             raise InvoiceNotFound(f"發票不存在或不屬於本店：id={item.invoice_id}")
-        # 開立（F0401）只在發票仍待開立（PENDING）時可拋；已 ISSUED/VOID_PENDING/VOID 皆不再拋開立。
-        # 作廢（F0501）訊息本就針對 VOID_PENDING 發票，放行。
+        # 開立（F0401）只在發票仍待開立（PENDING）時可拋。例外（Codex 第五輪）：**已認領**的
+        # F0401 在 VOID_PENDING 下允許恢復完成交付——認領後檔案可能已曝光、無從得知（crash 於
+        # 寫檔前後皆有可能），唯有補完交付讓平台回執必然到來，才能由「F0401 成功→續 F0501／
+        # 失敗→VOID」收斂；否則該列永遠 PENDING 而無回執、發票卡死 VOID_PENDING。
+        # 其餘（ISSUED/VOID、或未認領的 VOID_PENDING）不得拋開立。作廢（F0501）本就針對
+        # VOID_PENDING 發票，放行。
         if item.action is EInvoiceAction.ISSUE and invoice.status is not InvoiceStatus.PENDING:
-            raise EInvoiceQueueNotDroppable(
-                f"發票 {invoice.id} 非待開立（{invoice.status.value}），不可拋開立訊息"
+            claimed_recovery = (
+                invoice.status is InvoiceStatus.VOID_PENDING and item.xml_path is not None
             )
+            if not claimed_recovery:
+                raise EInvoiceQueueNotDroppable(
+                    f"發票 {invoice.id} 非待開立（{invoice.status.value}），不可拋開立訊息"
+                )
         return serializer.serialize_invoice(invoice, item.message_type)

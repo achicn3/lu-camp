@@ -84,6 +84,25 @@ class EInvoiceRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def lock_queue_items_for_invoice(
+        self, store_id: int, invoice_id: int
+    ) -> list[EInvoiceUploadQueue]:
+        """某發票的所有佇列列（FOR UPDATE、刷新到已提交狀態）。
+
+        作廢判斷「取消 vs 在途」必須與交付協議（_expose_and_confirm 持列鎖寫檔）同鎖序列化，
+        否則可能讀到過期的未認領列、在另一 worker 曝光檔案後才取消（Codex 第五輪）。
+        """
+        stmt = (
+            select(EInvoiceUploadQueue)
+            .where(
+                EInvoiceUploadQueue.store_id == store_id,
+                EInvoiceUploadQueue.invoice_id == invoice_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def count_other_pending_allowance_items(
         self, store_id: int, invoice_id: int, *, exclude_queue_id: int
     ) -> int:
