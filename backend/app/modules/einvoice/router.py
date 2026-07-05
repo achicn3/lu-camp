@@ -126,15 +126,20 @@ async def record_result(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except EInvoiceResultNotApplicable as exc:
-        await session.rollback()
+        # 規則：**回執事件一旦落庫、永不回滾**（Codex 第八輪）——未認領的回執本身就是
+        # 值得稽核的異常證據；commit 保留事件後回 409（佇列/發票未被 service 變更）。
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except EInvoiceResultConflict as exc:
-        # 矛盾的遲到回執：**commit 保留稽核事件**（append-only 證據不可因 409 而消失），
+        # 矛盾的遲到回執：commit 保留稽核事件（append-only 證據不可因 409 而消失），
         # 終態未被 service 變更，再回報衝突。
         await session.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except InvoiceIncompleteForIssue as exc:
-        await session.rollback()
+        # 平台「成功」回執不可因本地欄位不齊而消失（Codex 第八輪 high）：commit 保留事件
+        # （佇列維持 PENDING、發票未動），操作員補齊字軌/日期/時間/隨機碼後重送回執即收斂；
+        # 稽核軌跡完整證明平台已核可。
+        await session.commit()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc

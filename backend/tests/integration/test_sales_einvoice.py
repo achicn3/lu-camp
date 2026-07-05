@@ -415,6 +415,58 @@ async def test_partial_return_before_accept_backfills_allowance(
     assert len(g0401) == 1
 
 
+async def test_failed_allowance_blocks_sale_allowance_until_resolved(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Codex 第八輪回歸：一張折讓 FAILED、另一張成功 → sale 不得標 ALLOWANCE；
+    失敗折讓 retry→重拋→核可後才轉正式 ALLOWANCE。"""
+    store_id, clerk_id, code1 = await _seed(db_session, einvoice_enabled=True)
+    code2 = await _seed_second_item(db_session, store_id)
+    sales = SalesService(db_session)
+    einvoice = EInvoiceService(db_session)
+    sale = await sales.create_sale(
+        store_id,
+        clerk_id,
+        lines=[
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code1),
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code2),
+        ],
+    )
+    invoice = await einvoice.get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    await _accept_invoice(db_session, einvoice, store_id, invoice, tmp_path)  # ISSUED
+
+    sale_lines = await sales.get_lines(sale.id)
+    await _return_lines(db_session, store_id, clerk_id, sale.id, [sale_lines[0].id], idem="r1")
+    await _return_lines(db_session, store_id, clerk_id, sale.id, [sale_lines[1].id], idem="r2")
+    g0401 = [i for i in await einvoice.list_queue(store_id) if i.action is EInvoiceAction.ALLOWANCE]
+    assert len(g0401) == 2
+    dropper = EInvoiceDropper(tmp_path)
+
+    # 第一張失敗、第二張成功 → sale 仍不得標 ALLOWANCE（失敗折讓未解決）。
+    await einvoice.drop_pending(
+        store_id, g0401[0].id, serializer=_FakeSerializer(), dropper=dropper
+    )
+    await einvoice.record_result(store_id, g0401[0].id, success=False, message="E0001")
+    await einvoice.drop_pending(
+        store_id, g0401[1].id, serializer=_FakeSerializer(), dropper=dropper
+    )
+    await einvoice.record_result(store_id, g0401[1].id, success=True)
+    mid = await sales.get_sale(store_id, sale.id)
+    assert mid is not None
+    assert mid.invoice_status is SaleInvoiceStatus.PENDING_ALLOWANCE  # FAILED 也算未解決
+
+    # 失敗折讓 retry → 重拋（新世代）→ 核可 → 全數成功終結 → 轉正式 ALLOWANCE。
+    await einvoice.retry(store_id, g0401[0].id)
+    await einvoice.drop_pending(
+        store_id, g0401[0].id, serializer=_FakeSerializer(), dropper=dropper
+    )
+    await einvoice.record_result(store_id, g0401[0].id, success=True, delivery_attempt=1)
+    done = await sales.get_sale(store_id, sale.id)
+    assert done is not None
+    assert done.invoice_status is SaleInvoiceStatus.ALLOWANCE
+
+
 async def test_multiple_inflight_allowances_transition_only_when_all_accepted(
     db_session: AsyncSession, tmp_path: Path
 ) -> None:

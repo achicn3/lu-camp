@@ -169,6 +169,13 @@ async def test_result_on_undropped_conflicts(
         headers=_auth(mgr_token),
     )
     assert resp.status_code == 409  # EInvoiceResultNotApplicable
+    # 回執事件一旦落庫、永不回滾（Codex 第八輪）：異常回執本身是稽核證據。
+    event_count = await db_session.scalar(
+        select(func.count())
+        .select_from(EInvoiceResultEvent)
+        .where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event_count == 1
 
 
 async def test_result_incomplete_issue_returns_422(
@@ -230,6 +237,38 @@ async def test_conflicting_late_receipt_409_keeps_event(
         .where(EInvoiceResultEvent.queue_id == queue_id)
     )
     assert event_count == 2  # 首次核可＋矛盾遲到回執皆留稽核
+
+
+async def test_incomplete_issue_422_keeps_success_receipt(
+    client: httpx.AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Codex 第八輪：發票缺開立欄位時的平台「成功」回執 → 422 但事件保留（success=True）。
+
+    佇列維持 PENDING、發票未動；補齊欄位後重送回執即收斂，稽核可證明平台早已核可。
+    """
+    store_id, sale_id, mgr_token, _ = await _seed(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = (await svc.list_queue(store_id))[0].id
+    await svc.drop_pending(
+        store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )  # 未填字軌等欄位
+
+    resp = await client.post(
+        f"/api/v1/einvoice/queue/{queue_id}/result",
+        json={"success": True, "status_code": "0000"},
+        headers=_auth(mgr_token),
+    )
+    assert resp.status_code == 422
+
+    event = await db_session.scalar(
+        select(EInvoiceResultEvent).where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event is not None
+    assert event.success is True  # 平台成功回執未被回滾
+    assert (await svc.list_queue(store_id))[0].status == "PENDING"  # 可補欄位後重送收斂
 
 
 async def test_result_with_stale_delivery_attempt_409(

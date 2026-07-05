@@ -103,10 +103,14 @@ class EInvoiceRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
-    async def count_other_pending_allowance_items(
+    async def count_other_unresolved_allowance_items(
         self, store_id: int, invoice_id: int, *, exclude_queue_id: int
     ) -> int:
-        """同一發票「其他」仍待送/待回執的折讓佇列列數（多折讓 in-flight 時 sale 級狀態的精度）。"""
+        """同一發票「其他」尚未成功終結的折讓佇列列數（sale 級 ALLOWANCE 轉移守門）。
+
+        未解決＝非 UPLOADED 亦非 CANCELLED——**FAILED 也算未解決**（Codex 第八輪：一張折讓
+        失敗、另一張成功時，sale 不得被標成已折讓完成；失敗列須 retry 收斂後才轉）。
+        """
         stmt = (
             select(func.count())
             .select_from(EInvoiceUploadQueue)
@@ -116,7 +120,7 @@ class EInvoiceRepository:
             )
             .where(
                 EInvoiceUploadQueue.store_id == store_id,
-                EInvoiceUploadQueue.status == UploadStatus.PENDING,
+                EInvoiceUploadQueue.status.notin_([UploadStatus.UPLOADED, UploadStatus.CANCELLED]),
                 EInvoiceUploadQueue.id != exclude_queue_id,
                 InvoiceAllowance.invoice_id == invoice_id,
             )

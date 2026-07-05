@@ -578,11 +578,11 @@ class EInvoiceService:
         invoice = await self._repo.get_invoice(store_id, allowance.invoice_id)
         if invoice is None:
             return
-        others = await self._repo.count_other_pending_allowance_items(
+        others = await self._repo.count_other_unresolved_allowance_items(
             store_id, invoice.id, exclude_queue_id=item.id
         )
         if others > 0:
-            return  # 其他折讓仍在途，sale 級狀態維持 PENDING_ALLOWANCE
+            return  # 其他折讓未成功終結（含 FAILED），sale 級狀態維持 PENDING_ALLOWANCE
         from app.modules.sales.service import SalesService  # 函式內 import 破 sales↔einvoice 循環
 
         await SalesService(self._session).mark_invoice_allowance(store_id, invoice.sale_id)
