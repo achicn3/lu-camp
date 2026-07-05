@@ -210,6 +210,7 @@ def upgrade() -> None:
         sa.Column("store_id", sa.Integer(), sa.ForeignKey("stores.id"), nullable=False),
         sa.Column("queue_id", sa.Integer(), nullable=False),
         sa.Column("result_kind", sa.String(length=20), nullable=False),
+        sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("status_code", sa.String(length=20), nullable=True),
         sa.Column("message", sa.String(length=500), nullable=True),
         sa.Column("source_ref", sa.String(length=200), nullable=True),

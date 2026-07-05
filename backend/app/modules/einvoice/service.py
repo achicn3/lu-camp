@@ -444,6 +444,7 @@ class EInvoiceService:
                 store_id=store_id,
                 queue_id=queue_id,
                 result_kind=kind,
+                success=success,  # 權威成敗（status_code/message 選填，稽核須可獨立證明結果）
                 status_code=status_code,
                 message=message,
                 source_ref=source_ref,

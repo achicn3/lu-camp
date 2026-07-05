@@ -236,6 +236,9 @@ class EInvoiceResultEvent(Base):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     queue_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     result_kind: Mapped[str] = mapped_column(String(20))  # 'PROCESS' / 'SUMMARY'
+    # 回執成敗（權威結果，non-null）：status_code/message 皆選填，稽核軌跡必須能獨立
+    # 證明平台回了成功或失敗（含重複/矛盾回執），不得只靠佇列狀態推論。
+    success: Mapped[bool] = mapped_column(Boolean)
     status_code: Mapped[str | None] = mapped_column(String(20))  # 平台結果/錯誤碼
     message: Mapped[str | None] = mapped_column(String(500))
     source_ref: Mapped[str | None] = mapped_column(String(200))  # 回執檔名/log 參照

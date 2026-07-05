@@ -456,14 +456,15 @@ async def test_old_generation_receipt_conflicts_after_retry(
     assert accepted.status is UploadStatus.UPLOADED
     assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.ISSUED
     # 稽核事件含世代標記（含被拒的 a0 回執）。
-    attempts_logged = (
-        await db_session.scalars(
-            select(EInvoiceResultEvent.delivery_attempt)
+    rows = (
+        await db_session.execute(
+            select(EInvoiceResultEvent.delivery_attempt, EInvoiceResultEvent.success)
             .where(EInvoiceResultEvent.queue_id == queue_id)
             .order_by(EInvoiceResultEvent.id)
         )
     ).all()
-    assert list(attempts_logged) == [None, 0, 1]  # 未帶世代照實存 NULL（稽核不竄補）
+    # 未帶世代照實存 NULL（稽核不竄補）；每筆事件都留權威成敗。
+    assert [(a, ok) for a, ok in rows] == [(None, False), (0, True), (1, True)]
 
 
 async def test_stale_receipt_without_attempt_rejected_after_retry(
@@ -665,12 +666,14 @@ async def test_duplicate_same_outcome_receipt_is_idempotent(
     item = await svc.record_result(store_id, queue_id, success=True, source_ref="dup-scan")
 
     assert item.status is UploadStatus.UPLOADED  # 不變
-    event_count = await db_session.scalar(
-        select(func.count())
-        .select_from(EInvoiceResultEvent)
-        .where(EInvoiceResultEvent.queue_id == queue_id)
-    )
-    assert event_count == 2  # 首次核可 + 重複回執都留稽核
+    outcomes = (
+        await db_session.scalars(
+            select(EInvoiceResultEvent.success)
+            .where(EInvoiceResultEvent.queue_id == queue_id)
+            .order_by(EInvoiceResultEvent.id)
+        )
+    ).all()
+    assert list(outcomes) == [True, True]  # 首次核可 + 重複回執都留稽核（含權威成敗）
 
 
 async def test_conflicting_late_receipt_keeps_event_and_state(
@@ -685,13 +688,15 @@ async def test_conflicting_late_receipt_keeps_event_and_state(
     with pytest.raises(EInvoiceResultConflict):
         await svc.record_result(store_id, queue_id, success=False, message="遲到的失敗回執")
 
-    # 事件已 flush（service 不回滾稽核）；狀態/發票不變。
-    event_count = await db_session.scalar(
-        select(func.count())
-        .select_from(EInvoiceResultEvent)
-        .where(EInvoiceResultEvent.queue_id == queue_id)
-    )
-    assert event_count == 2
+    # 事件已 flush（service 不回滾稽核）；狀態/發票不變。稽核可獨立證明「先成功、後矛盾失敗」。
+    outcomes = (
+        await db_session.scalars(
+            select(EInvoiceResultEvent.success)
+            .where(EInvoiceResultEvent.queue_id == queue_id)
+            .order_by(EInvoiceResultEvent.id)
+        )
+    ).all()
+    assert list(outcomes) == [True, False]
     assert (await svc.list_queue(store_id))[0].status is UploadStatus.UPLOADED
     assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.ISSUED
 
@@ -713,6 +718,31 @@ async def test_record_result_process_failure_marks_failed(
 
     assert item.status is UploadStatus.FAILED
     assert item.last_error == "E0001 欄位錯誤"
+
+
+async def test_bare_failure_receipt_outcome_persisted(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """Codex 第七輪回歸：不帶 status_code/message 的失敗回執，事件仍留權威成敗（success=False）。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = await _first_queue_id(svc, store_id)
+    await svc.drop_pending(
+        store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+
+    item = await svc.record_result(store_id, queue_id, success=False)  # 無碼、無訊息
+
+    assert item.status is UploadStatus.FAILED
+    event = await db_session.scalar(
+        select(EInvoiceResultEvent).where(EInvoiceResultEvent.queue_id == queue_id)
+    )
+    assert event is not None
+    assert event.success is False  # 稽核可獨立證明失敗，不靠佇列狀態推論
+    assert event.status_code is None and event.message is None
 
 
 async def test_record_result_unknown_queue_raises(db_session: AsyncSession) -> None:
