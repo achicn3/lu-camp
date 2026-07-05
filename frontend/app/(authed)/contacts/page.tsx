@@ -273,6 +273,7 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
       name: string;
       phone: string;
       national_id: string | null;
+      address: string | null;
       roles: ContactRole[];
     }) => {
       const { data, error: apiError } = await api.POST("/api/v1/contacts", {
@@ -313,8 +314,9 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
       setError("身分證字號格式或檢核碼不正確，請確認後重新輸入");
       return;
     }
+    const address = String(form.get("address")).trim() || null;
     mutation.mutate(
-      { name, phone, national_id: nationalId, roles },
+      { name, phone, national_id: nationalId, address, roles },
       { onSuccess: () => formEl.reset() },
     );
   }
@@ -330,6 +332,10 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
         <label className="field">
           <span className="field-label">電話 *</span>
           <input name="phone" inputMode="tel" required />
+        </label>
+        <label className="field">
+          <span className="field-label">住址（切結書顯示用）</span>
+          <input name="address" maxLength={200} placeholder="選填" />
         </label>
         <label className="field">
           <span className="field-label">身分證字號（收購/寄售必填）</span>

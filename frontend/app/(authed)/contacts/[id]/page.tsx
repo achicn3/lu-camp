@@ -530,6 +530,7 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
     patch.mutate({
       name: String(form.get("name")).trim(),
       phone: String(form.get("phone")).trim() || null,
+      address: String(form.get("address")).trim() || null,
       source_note: String(form.get("source_note")).trim() || null,
     });
   }
@@ -563,6 +564,10 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
           <label className="field">
             <span className="field-label">電話</span>
             <input name="phone" defaultValue={contact.phone ?? ""} inputMode="tel" />
+          </label>
+          <label className="field">
+            <span className="field-label">住址（切結書顯示用）</span>
+            <input name="address" defaultValue={contact.address ?? ""} maxLength={200} />
           </label>
           <label className="field">
             <span className="field-label">備註</span>
@@ -677,6 +682,9 @@ export default function MemberDetailPage() {
             <span className="member-head-roles">{rolesLabel(header.data.contact.roles)}</span>
           )}
         </h1>
+        {header.data?.contact.address && (
+          <p className="hint">住址：{header.data.contact.address}</p>
+        )}
       </div>
 
       {header.isError ? (

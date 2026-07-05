@@ -2317,6 +2317,8 @@ export interface components {
          *     收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。
          */
         ContactCreate: {
+            /** Address */
+            address?: string | null;
             /** Default Carrier Id */
             default_carrier_id?: string | null;
             /** Default Carrier Type */
@@ -2358,6 +2360,8 @@ export interface components {
          * @description 聯絡人輸出：national_id 一律遮罩，不回明文。
          */
         ContactRead: {
+            /** Address */
+            address: string | null;
             /** Default Carrier Id */
             default_carrier_id: string | null;
             /** Default Carrier Type */
@@ -2396,6 +2400,8 @@ export interface components {
          *     member_points 不在此編輯（走點數累積/校正路徑）。
          */
         ContactUpdate: {
+            /** Address */
+            address?: string | null;
             /** Default Carrier Id */
             default_carrier_id?: string | null;
             /** Default Carrier Type */

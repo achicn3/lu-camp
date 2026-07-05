@@ -17,6 +17,7 @@ class ContactCreate(BaseModel):
     name: str = Field(min_length=1)
     phone: str = Field(min_length=1)
     national_id: str | None = None
+    address: str | None = Field(default=None, max_length=200)  # K1：住址（明文，D5）
     roles: list[ContactRole] = Field(default_factory=list)
     member_points: int = Field(default=0, ge=0)  # 點數不可為負（docs/16 §0 僅累積）
     default_carrier_type: str | None = None
@@ -42,6 +43,7 @@ class ContactUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     phone: str | None = None
     national_id: str | None = None
+    address: str | None = Field(default=None, max_length=200)  # 可改可清（PATCH 語意）
     roles: list[ContactRole] | None = None
     default_carrier_type: str | None = None
     default_carrier_id: str | None = None
@@ -57,6 +59,7 @@ class ContactRead(BaseModel):
     store_id: int
     name: str
     phone: str | None
+    address: str | None
     roles: list[str]
     member_points: int
     default_carrier_type: str | None
@@ -73,6 +76,7 @@ class ContactRead(BaseModel):
             store_id=contact.store_id,
             name=contact.name,
             phone=contact.phone,
+            address=contact.address,
             roles=list(contact.roles),
             member_points=contact.member_points,
             default_carrier_type=contact.default_carrier_type,

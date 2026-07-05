@@ -141,6 +141,46 @@ async def test_update_rejects_invalid_national_id(
     assert bad not in resp.text
 
 
+async def test_address_create_update_and_clear(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """K1（docs/23 D5）：住址欄——建檔可帶、讀取回傳、PATCH 可改可清（明文、與電話同級）。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+
+    created = await client.post(
+        "/api/v1/contacts",
+        json={
+            "phone": _uphone(),
+            "name": "住址測試",
+            "roles": ["MEMBER"],
+            "address": "台中市西屯區逢甲路 100 號",
+        },
+        headers=_auth(m_token),
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["address"] == "台中市西屯區逢甲路 100 號"
+    cid = body["id"]
+
+    # PATCH 改住址
+    patched = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"address": "台中市北區三民路 50 號"},
+        headers=_auth(m_token),
+    )
+    assert patched.status_code == 200
+    assert patched.json()["address"] == "台中市北區三民路 50 號"
+
+    # PATCH 明確清空
+    cleared = await client.patch(
+        f"/api/v1/contacts/{cid}",
+        json={"address": None},
+        headers=_auth(m_token),
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["address"] is None
+
+
 async def test_create_requires_phone(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     """手機必填：建檔未帶手機 → 422。"""
     _, m_token, _ = await _setup_store_and_tokens(db_session)

@@ -48,6 +48,7 @@ class ContactService:
             store_id=store_id,
             name=data.name,
             phone=data.phone,
+            address=data.address,
             national_id_enc=enc,
             national_id_blind_index=blind,
             roles=[role.value for role in data.roles],
@@ -97,6 +98,8 @@ class ContactService:
                 if clash is not None and clash.id != contact.id:
                     raise DuplicateContact("此手機號碼已被同店其他聯絡人使用")
             contact.phone = data.phone
+        if "address" in provided:
+            contact.address = data.address
         if "default_carrier_type" in provided:
             contact.default_carrier_type = data.default_carrier_type
         if "default_carrier_id" in provided:

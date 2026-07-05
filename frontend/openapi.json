@@ -1947,6 +1947,18 @@
       "ContactCreate": {
         "description": "建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）；\n收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。",
         "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
           "default_carrier_id": {
             "anyOf": [
               {
@@ -2054,6 +2066,17 @@
       "ContactRead": {
         "description": "聯絡人輸出：national_id 一律遮罩，不回明文。",
         "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
           "default_carrier_id": {
             "anyOf": [
               {
@@ -2142,6 +2165,7 @@
           "store_id",
           "name",
           "phone",
+          "address",
           "roles",
           "member_points",
           "default_carrier_type",
@@ -2166,6 +2190,18 @@
       "ContactUpdate": {
         "description": "編輯聯絡人（PATCH 語意；docs/17 §5.2、裁示 #3）。\n\n所有欄位皆為選配；以 `model_fields_set` 區分「未提供」與「明確設為 null」。\n角色/national_id 變更的 RBAC（限 MANAGER）由 router 依提供欄位判定。\nmember_points 不在此編輯（走點數累積/校正路徑）。",
         "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
           "default_carrier_id": {
             "anyOf": [
               {

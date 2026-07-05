@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { validNationalId } from "./_national-id.mjs";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
+const API_BASE = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "codex-test", "contacts-smoke");
 const USERNAME = process.env.SMOKE_USERNAME ?? "dev-manager";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
@@ -36,9 +37,12 @@ try {
   await page.goto(`${BASE}/contacts`);
   await page.waitForSelector('button:has-text("建檔")');
 
-  const name = `煙霧會員 ${Date.now().toString().slice(-6)}`;
+  const run = Date.now().toString().slice(-8);
+  const name = `煙霧會員 ${run.slice(-6)}`;
+  const phone = `09${run}`; // 每次唯一（同店手機唯一約束）
   await page.getByLabel("姓名 *").fill(name);
-  await page.getByLabel("電話 *").fill("0912345678");
+  await page.getByLabel("電話 *").fill(phone);
+  await page.getByLabel("住址（切結書顯示用）").fill("台中市西屯區煙霧路 1 號");
 
   // 1) 不合法身分證字號 → 前端擋下、不建檔
   await page.getByLabel("身分證字號（收購/寄售必填）").fill("A123456788"); // 末碼錯
@@ -58,6 +62,37 @@ try {
   );
   ok("合法身分證字號 → 建檔成功", true);
   await page.screenshot({ path: `${SHOTS}/02-created.png` });
+
+  // 3) K1 住址：以 API 找回 id → 會員中心顯示住址 → 編輯分頁改住址 → 重載驗證
+  const loginRes = await fetch(`${API_BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+  });
+  const token = (await loginRes.json()).access_token;
+  const found = await fetch(
+    `${API_BASE}/api/v1/contacts?q=${encodeURIComponent(phone)}&limit=5`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const rows = await found.json();
+  const cid = rows[0]?.id;
+  ok("API 取回新會員（住址已存）", rows[0]?.address === "台中市西屯區煙霧路 1 號", `id=${cid}`);
+
+  await page.goto(`${BASE}/contacts/${cid}`);
+  await page.waitForSelector("text=住址：台中市西屯區煙霧路 1 號");
+  ok("會員中心頁首顯示住址", true);
+  await page.screenshot({ path: `${SHOTS}/03-address-shown.png` });
+
+  await page.click('button:has-text("編輯")');
+  const addrInput = page.getByLabel("住址（切結書顯示用）");
+  await addrInput.waitFor({ state: "visible" });
+  await addrInput.fill("台中市北區改址路 2 號");
+  await page.click('button:has-text("儲存")');
+  await page.waitForSelector("text=已儲存", { timeout: 8000 }).catch(() => {});
+  await page.goto(`${BASE}/contacts/${cid}`);
+  await page.waitForSelector("text=住址：台中市北區改址路 2 號");
+  ok("編輯住址後重載顯示新值", true);
+  await page.screenshot({ path: `${SHOTS}/04-address-edited.png` });
 } finally {
   await browser.close();
 }

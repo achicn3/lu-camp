@@ -31,6 +31,8 @@ class Contact(Base, TimestampMixin):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     phone: Mapped[str | None] = mapped_column(String(30), index=True)
+    # 住址（K1，docs/23 D5）：明文儲存（與電話同級聯絡資料；不入 log）。切結書顯示用。
+    address: Mapped[str | None] = mapped_column(String(200))
     national_id_enc: Mapped[str | None] = mapped_column(String(255))
     national_id_blind_index: Mapped[str | None] = mapped_column(String(64), index=True)
     roles: Mapped[list[str]] = mapped_column(
