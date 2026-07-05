@@ -2822,6 +2822,18 @@
       "EInvoiceResultRequest": {
         "description": "記錄一筆平台回執（手動或 importer）。\n\n自動解析 Turnkey ProcessResult/SummaryResult 檔的 importer 待收尾階段依 3.9 手冊實作；\n此輸入讓平台結果可先被記錄並驅動佇列/發票狀態。",
         "properties": {
+          "delivery_attempt": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivery Attempt"
+          },
           "kind": {
             "default": "PROCESS",
             "pattern": "^(PROCESS|SUMMARY)$",

@@ -85,3 +85,6 @@ class EInvoiceResultRequest(BaseModel):
     status_code: str | None = Field(default=None, max_length=20)
     message: str | None = Field(default=None, max_length=500)
     source_ref: str | None = Field(default=None, max_length=200)
+    # 回執所屬交付世代（拋檔檔名 …-a{n}.xml 的 n）：有帶且與當前不符 → 409、事件留稽核。
+    # 未帶視為當前世代（手動操作）；importer 必帶。
+    delivery_attempt: int | None = Field(default=None, ge=0)

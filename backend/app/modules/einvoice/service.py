@@ -244,8 +244,12 @@ class EInvoiceService:
 
         Crash 恢復：重呼本方法——已認領未確認（xml_path 設、dropped_at NULL）→ 重新序列化並
         驗 sha 與認領一致（序列化必須確定性；不符即拒，防止內容漂移下重拋不同檔），覆寫檔案、
-        補 dropped_at。已確認（dropped_at 設）→ 冪等 no-op。回執側以「已認領」即接受
+        補確認。已確認（dropped_at 設）→ 冪等 no-op。回執側以「已認領」即接受
         （見 record_result）——認領後檔案就可能已曝光。
+
+        **交付世代**（Codex 第二輪）：檔名嵌入 `attempts` 世代（`…-a{n}.xml`）——每次 retry
+        是新檔名新訊息，回執可歸屬世代；確認階段為 **compare-and-set**（認領 commit 後鎖已
+        釋放，中間可能發生「失敗回執→retry 清認領」，恢復的確認絕不可污染已重試的列）。
 
         非 PENDING 或對應發票已作廢 → EInvoiceQueueNotDroppable；序列化未就緒 →
         EInvoiceSerializerNotReady（發生在認領前，無任何持久/檔案副作用）。
@@ -261,32 +265,65 @@ class EInvoiceService:
             return item  # 已拋檔確認、待 Turnkey 上傳：冪等 no-op，不重複寫檔
 
         payload = await self._serialize(store_id, item, serializer)
-        filename = f"{item.message_type.value}-{store_id}-{queue_id}.xml"
+        claim_attempts = item.attempts  # 交付世代快照（CAS 用）
+        filename = f"{item.message_type.value}-{store_id}-{queue_id}-a{claim_attempts}.xml"
         expected_path = str(dropper.src_dir(item.message_type) / filename)
+        claim_sha = hashlib.sha256(payload).hexdigest()
 
         if item.xml_path is None:
             # 階段 1：認領先於檔案曝光——commit 後才允許任何檔案副作用。
             item.xml_path = expected_path
-            item.xml_sha256 = hashlib.sha256(payload).hexdigest()
+            item.xml_sha256 = claim_sha
             await self._session.commit()
-        else:
-            # 恢復路徑：驗證重算內容與認領一致（確定性序列化守衛）。
-            recomputed = hashlib.sha256(payload).hexdigest()
-            if item.xml_path != expected_path or item.xml_sha256 != recomputed:
-                raise EInvoiceDropError(
-                    f"佇列 {queue_id} 重拋內容與認領不符（序列化非確定性或目錄變更），"
-                    "拒絕覆寫已可能曝光的檔案"
-                )
+        elif item.xml_path != expected_path or item.xml_sha256 != claim_sha:
+            # 恢復路徑：重算內容/世代路徑必須與認領一致（確定性序列化守衛）。
+            raise EInvoiceDropError(
+                f"佇列 {queue_id} 重拋內容與認領不符（序列化非確定性或目錄變更），"
+                "拒絕覆寫已可能曝光的檔案"
+            )
 
         # 階段 2：原子寫檔（crash 於此 → 恢復路徑覆寫同名檔，無第二份）。
         result = dropper.drop(item.message_type, filename, payload)
-        if result.sha256 != item.xml_sha256:
+        if result.sha256 != claim_sha:
             raise EInvoiceDropError(f"佇列 {queue_id} 落檔 sha 與認領不符")
 
-        # 階段 3：確認交付。
+        # 階段 3：確認交付（CAS）。
+        return await self._confirm_drop(
+            store_id,
+            queue_id,
+            expected_path=expected_path,
+            expected_sha=claim_sha,
+            expected_attempts=claim_attempts,
+        )
+
+    async def _confirm_drop(
+        self,
+        store_id: int,
+        queue_id: int,
+        *,
+        expected_path: str,
+        expected_sha: str,
+        expected_attempts: int,
+    ) -> EInvoiceUploadQueue:
+        """拋檔確認（compare-and-set）：認領未被他人動過才寫 dropped_at。
+
+        認領 commit 後鎖已釋放；此窗口內可能發生「失敗回執 → retry（清認領、attempts+1）」。
+        恢復的確認若無條件寫 dropped_at，會把已重試的列污染成「PENDING＋已確認＋無認領」的
+        死狀態（Codex 第二輪 high）。故僅在 status/xml_path/sha/attempts 全部仍等於認領值且
+        dropped_at 仍 NULL 時確認；否則放棄——狀態已由回執/retry 收斂，本次交付作廢
+        （新世代會以新檔名重拋）。
+        """
         locked = await self._repo.lock_queue_item(store_id, queue_id)
         assert locked is not None  # 認領已 commit，列必存在
-        locked.dropped_at = datetime.now(UTC)
+        claim_intact = (
+            locked.status is UploadStatus.PENDING
+            and locked.xml_path == expected_path
+            and locked.xml_sha256 == expected_sha
+            and locked.attempts == expected_attempts
+            and locked.dropped_at is None
+        )
+        if claim_intact:
+            locked.dropped_at = datetime.now(UTC)
         await self._session.commit()
         await self._session.refresh(locked)
         return locked
@@ -322,6 +359,7 @@ class EInvoiceService:
         status_code: str | None = None,
         message: str | None = None,
         source_ref: str | None = None,
+        delivery_attempt: int | None = None,
     ) -> EInvoiceUploadQueue:
         """記錄一筆 Turnkey 回執並（依 ProcessResult）更新佇列/發票狀態。
 
@@ -342,6 +380,10 @@ class EInvoiceService:
             保留事件再回報衝突（router 已如此），終態不變更。
         - 未認領（xml_path NULL——檔案不可能曝光過）→ EInvoiceResultNotApplicable。
           已認領未確認（crash 於拋檔中途）的回執照常受理——檔案可能已被 Turnkey 撿走。
+        - **交付世代歸屬**（Codex 第二輪）：`delivery_attempt` 有帶且 ≠ 當前 attempts →
+          舊世代回執（retry 前的交付）——事件留稽核後拋 EInvoiceResultConflict，絕不套用到
+          新世代（舊失敗不可誤殺新嘗試、舊成功不可把已改內容的新發票標 ISSUED）。未帶視為
+          當前世代（手動操作情境）；T13 importer 必須自檔名（…-a{n}.xml）解出世代帶入。
 
         自動解析 Turnkey 回執檔的 importer 待收尾階段依 3.9 手冊實作；此為結果落庫共用出口。
         """
@@ -357,6 +399,9 @@ class EInvoiceService:
                 status_code=status_code,
                 message=message,
                 source_ref=source_ref,
+                delivery_attempt=(
+                    delivery_attempt if delivery_attempt is not None else item.attempts
+                ),
             )
         )
         # SummaryResult：僅對帳、不改單筆狀態。
@@ -364,6 +409,14 @@ class EInvoiceService:
             await self._session.flush()
             await self._session.refresh(item)
             return item
+
+        # 舊世代回執：留稽核、不套用（呼叫端 commit 保留事件再回報衝突，router 已如此）。
+        if delivery_attempt is not None and delivery_attempt != item.attempts:
+            await self._session.flush()
+            raise EInvoiceResultConflict(
+                f"回執屬於交付世代 a{delivery_attempt}，佇列目前為 a{item.attempts}"
+                "（已 retry）；事件已留稽核、不套用"
+            )
 
         # ProcessResult：終態列冪等/留證，不覆寫（見 docstring）。
         if item.status is not UploadStatus.PENDING:

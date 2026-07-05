@@ -239,6 +239,8 @@ class EInvoiceResultEvent(Base):
     status_code: Mapped[str | None] = mapped_column(String(20))  # 平台結果/錯誤碼
     message: Mapped[str | None] = mapped_column(String(500))
     source_ref: Mapped[str | None] = mapped_column(String(200))  # 回執檔名/log 參照
+    # 回執所屬交付世代（＝拋檔檔名的 a{n}；retry 會遞增）。稽核可區分舊/新世代回執。
+    delivery_attempt: Mapped[int | None] = mapped_column(Integer)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

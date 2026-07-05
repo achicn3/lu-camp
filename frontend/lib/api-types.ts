@@ -2640,6 +2640,8 @@ export interface components {
          *     此輸入讓平台結果可先被記錄並驅動佇列/發票狀態。
          */
         EInvoiceResultRequest: {
+            /** Delivery Attempt */
+            delivery_attempt?: number | null;
             /**
              * Kind
              * @default PROCESS

@@ -207,7 +207,7 @@ async def test_drop_pending_writes_file_keeps_pending(
 
     assert item.status is UploadStatus.PENDING  # 拋檔不改上傳狀態
     assert item.xml_path is not None
-    assert item.xml_path.endswith(f"F0401-{store_id}-{queue_id}.xml")
+    assert item.xml_path.endswith(f"F0401-{store_id}-{queue_id}-a0.xml")  # 檔名嵌交付世代
     assert item.xml_sha256 == hashlib.sha256(b"<Invoice/>").hexdigest()
     assert item.dropped_at is not None
 
@@ -365,6 +365,84 @@ async def test_crash_recovery_rejects_content_drift(
         await svc.drop_pending(
             store_id, queue_id, serializer=_AltSerializer(), dropper=EInvoiceDropper(tmp_path)
         )
+
+
+async def test_confirm_drop_cas_refuses_after_retry(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """CAS 確認（Codex 第二輪 high）：認領→失敗回執→retry 清認領後，恢復的確認不可污染新世代。
+
+    直接呼叫 _confirm_drop 模擬「原拋檔恢復後帶舊認領值回來確認」——公開 API 無法確定性
+    重現此競態窗口（認領 commit 後鎖已釋放）。
+    """
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = await _claim_then_crash(db_session, svc, store_id, tmp_path)
+    stale = (await svc.list_queue(store_id))[0]
+    stale_path, stale_sha = stale.xml_path, stale.xml_sha256
+    assert stale_path is not None and stale_sha is not None
+
+    # 窗口內：失敗回執（已認領可受理）→ FAILED → retry 清認領、世代 +1。
+    await svc.record_result(store_id, queue_id, success=False, message="E0001")
+    await svc.retry(store_id, queue_id)
+
+    # 原拋檔「恢復」帶舊認領值確認 → CAS 放棄，不寫 dropped_at、不造出死狀態。
+    # 競態窗口（認領 commit 後鎖已釋放）僅能直呼私有確認重現。
+    item = await svc._confirm_drop(
+        store_id,
+        queue_id,
+        expected_path=stale_path,
+        expected_sha=stale_sha,
+        expected_attempts=0,
+    )
+    assert item.status is UploadStatus.PENDING
+    assert item.dropped_at is None  # 未被污染
+    assert item.xml_path is None  # retry 後的乾淨認領位維持
+
+
+async def test_old_generation_receipt_conflicts_after_retry(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """跨世代回執歸屬（Codex 第二輪 high）：retry 後舊世代回執 → 409 留稽核；新世代照常。"""
+    store_id, sale_id = await _seed_sale(db_session)
+    svc = EInvoiceService(db_session)
+    invoice = await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    await _fill_issue_fields(db_session, invoice)
+    queue_id = await _first_queue_id(svc, store_id)
+    dropper = EInvoiceDropper(tmp_path)
+
+    # 世代 a0：拋檔 → 平台退回 → retry → 世代 a1 重拋（兩個世代各自檔名，不互相覆寫）。
+    await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+    await svc.record_result(store_id, queue_id, success=False, message="E0001")
+    await svc.retry(store_id, queue_id)
+    item = await svc.drop_pending(store_id, queue_id, serializer=_FakeSerializer(), dropper=dropper)
+    assert item.xml_path is not None and item.xml_path.endswith("-a1.xml")
+    names = sorted(p.name for p in dropper.src_dir(EInvoiceMessageType.F0401).iterdir())
+    assert [n[-7:] for n in names] == ["-a0.xml", "-a1.xml"]  # 世代檔名並存
+
+    # 舊世代（a0）的遲到成功回執 → 衝突留稽核，絕不把新世代標 ISSUED。
+    with pytest.raises(EInvoiceResultConflict, match="a0"):
+        await svc.record_result(store_id, queue_id, success=True, delivery_attempt=0)
+    assert (await svc.list_queue(store_id))[0].status is UploadStatus.PENDING
+
+    # 新世代（a1）回執照常核可。
+    accepted = await svc.record_result(store_id, queue_id, success=True, delivery_attempt=1)
+    assert accepted.status is UploadStatus.UPLOADED
+    assert (await svc.get_invoice(store_id, invoice.id)).status is InvoiceStatus.ISSUED
+    # 稽核事件含世代標記（含被拒的 a0 回執）。
+    attempts_logged = (
+        await db_session.scalars(
+            select(EInvoiceResultEvent.delivery_attempt)
+            .where(EInvoiceResultEvent.queue_id == queue_id)
+            .order_by(EInvoiceResultEvent.id)
+        )
+    ).all()
+    assert list(attempts_logged) == [0, 0, 1]
 
 
 async def test_void_with_claimed_f0401_goes_void_pending(

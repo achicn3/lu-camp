@@ -120,6 +120,7 @@ async def record_result(
             status_code=payload.status_code,
             message=payload.message,
             source_ref=payload.source_ref,
+            delivery_attempt=payload.delivery_attempt,
         )
     except EInvoiceQueueItemNotFound as exc:
         await session.rollback()

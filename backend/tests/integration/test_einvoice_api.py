@@ -232,6 +232,29 @@ async def test_conflicting_late_receipt_409_keeps_event(
     assert event_count == 2  # 首次核可＋矛盾遲到回執皆留稽核
 
 
+async def test_result_with_stale_delivery_attempt_409(
+    client: httpx.AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """回執帶舊交付世代（≠ 當前 attempts）→ 409、狀態不變（importer 重掃舊回執防護）。"""
+    store_id, sale_id, mgr_token, _ = await _seed(db_session)
+    svc = EInvoiceService(db_session)
+    await svc.create_pending_invoice(
+        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+    )
+    queue_id = (await svc.list_queue(store_id))[0].id
+    await svc.drop_pending(
+        store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+
+    resp = await client.post(
+        f"/api/v1/einvoice/queue/{queue_id}/result",
+        json={"success": True, "delivery_attempt": 7},
+        headers=_auth(mgr_token),
+    )
+    assert resp.status_code == 409
+    assert (await svc.list_queue(store_id))[0].status == "PENDING"
+
+
 async def test_retry_pending_conflicts(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     store_id, sale_id, mgr_token, _ = await _seed(db_session)
     svc = EInvoiceService(db_session)

@@ -213,6 +213,7 @@ def upgrade() -> None:
         sa.Column("status_code", sa.String(length=20), nullable=True),
         sa.Column("message", sa.String(length=500), nullable=True),
         sa.Column("source_ref", sa.String(length=200), nullable=True),
+        sa.Column("delivery_attempt", sa.Integer(), nullable=True),
         sa.Column(
             "received_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
