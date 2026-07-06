@@ -401,6 +401,15 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         + chunk(b"IDAT", half[4:])
         + chunk(b"IEND", b"")
     ).decode()
+    # 零長度首 IDAT ＋ ancillary ＋ 後續 IDAT：不得繞過連續性檢查（Codex 第六輪）
+    zero_len_split_idat = base64.b64encode(
+        magic
+        + ihdr(1, 1)
+        + chunk(b"IDAT", b"")
+        + chunk(b"tEXt", b"k\x00v")
+        + chunk(b"IDAT", zlib.compress(b"\x00" * 5))
+        + chunk(b"IEND", b"")
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
@@ -416,6 +425,7 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         unknown_critical,
         dup_ihdr,
         split_idat,
+        zero_len_split_idat,
     ]
     for payload in bad_payloads:
         resp = await client.post(

@@ -222,6 +222,7 @@ class SigningService:
         pos = 8  # magic 之後
         first = True
         idat = bytearray()
+        seen_idat = False  # 與收集的 bytes 分開追蹤：零長度 IDAT 也算開始（Codex 第六輪）
         idat_ended = False
         while True:
             if pos + 12 > len(image):  # 至少要放得下 length+type+CRC
@@ -245,13 +246,14 @@ class SigningService:
             elif chunk_type == b"IDAT":
                 if idat_ended:  # IDAT 中斷後再現＝不連續
                     raise malformed
+                seen_idat = True
                 idat += image[pos + 8 : data_end]
             elif chunk_type == b"IEND":
                 if length != 0 or data_end + 4 != len(image) or not idat:
                     raise malformed
                 return bytes(idat)
             else:
-                if idat:
+                if seen_idat:
                     idat_ended = True
                 if not chunk_type[0] & 0x20:  # 大寫開頭＝critical；白名單外一律拒收
                     raise malformed
