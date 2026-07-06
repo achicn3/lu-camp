@@ -128,9 +128,17 @@ try {
   const disabledInitially = await page.locator("button.kiosk-submit").isDisabled();
   ok("未完成前送出鈕停用", disabledInitially);
 
-  // 勾同意 + 選現金 + 簽名
+  // 勾同意 + 選現金
   await page.check('.kiosk-agree-check input[type="checkbox"]');
   await page.click('button.kiosk-payout-btn:has-text("現金")');
+
+  // 單擊畫布（無筆劃）不足以構成簽名：送出鈕仍停用（對齊後端非空白門檻）。
+  const canvasBox = await page.locator("canvas.kiosk-sign-canvas").boundingBox();
+  await page.mouse.click(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+  await page.waitForTimeout(150);
+  ok("單擊不算簽名、送出仍停用", await page.locator("button.kiosk-submit").isDisabled());
+
+  // 完整簽名
   await drawSignature(page);
   await page.waitForTimeout(200);
   await page.screenshot({ path: join(SHOTS, "02-signed.png"), fullPage: true });

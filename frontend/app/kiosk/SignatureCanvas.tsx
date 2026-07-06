@@ -8,6 +8,11 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 const CANVAS_W = 1000;
 const CANVAS_H = 360;
 const STROKE = "#23291f"; // var(--ink) 的實色（canvas 不吃 CSS 變數）
+// 客端墨跡門檻：與後端「可見墨跡」判定（alpha≥64 且亮度<200）同語意，門檻取
+// 略高於後端的 100（用 200）以確保客端放行者後端必收，不會送出才被 422 打回。
+const INK_ALPHA_MIN = 64;
+const INK_DARKNESS_MAX = 200;
+const MIN_INK_PIXELS = 200;
 
 export interface SignatureCanvasHandle {
   /** 匯出簽名 PNG 的 base64（不含 data: 前綴）；空白時回 null。 */
@@ -39,32 +44,38 @@ export const SignatureCanvas = forwardRef<
     };
   }
 
-  function markInk() {
-    if (!hasInk.current) {
-      hasInk.current = true;
-      onInkChange(true);
+  // 以實際墨跡像素數（而非「有畫任何一筆」）判定簽名是否足夠，與後端非空白門檻對齊：
+  // 避免「單點/極短一劃」通過客端卻被後端 422（Codex K3 medium）。
+  function countInkPixels(): number {
+    const c = ctx();
+    if (!c) return 0;
+    const data = c.getImageData(0, 0, CANVAS_W, CANVAS_H).data;
+    let ink = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3];
+      const luma = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (alpha >= INK_ALPHA_MIN && luma < INK_DARKNESS_MAX) ink += 1;
+    }
+    return ink;
+  }
+
+  function refreshInk() {
+    const enough = countInkPixels() >= MIN_INK_PIXELS;
+    if (enough !== hasInk.current) {
+      hasInk.current = enough;
+      onInkChange(enough);
     }
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.preventDefault();
     drawing.current = true;
-    const at = toCanvasCoords(e);
-    last.current = at;
+    last.current = toCanvasCoords(e);
     try {
       canvasRef.current?.setPointerCapture(e.pointerId);
     } catch {
       // 某些環境（含合成滑鼠→pointer 事件）不支援 capture；不影響作畫。
     }
-    // 落點即點一個小點：即使只是輕點也留下墨跡（作畫由 move 續接）。
-    const c = ctx();
-    if (c) {
-      c.fillStyle = STROKE;
-      c.beginPath();
-      c.arc(at.x, at.y, 2, 0, Math.PI * 2);
-      c.fill();
-    }
-    markInk();
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -82,19 +93,22 @@ export const SignatureCanvas = forwardRef<
     c.lineTo(to.x, to.y);
     c.stroke();
     last.current = to;
-    markInk();
   }
 
   function endStroke() {
+    if (!drawing.current) return;
     drawing.current = false;
     last.current = null;
+    refreshInk(); // 每筆結束才數一次墨跡（避免逐點 getImageData 拖慢作畫）
   }
 
   function clear() {
     const c = ctx();
     if (c) c.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    hasInk.current = false;
-    onInkChange(false);
+    if (hasInk.current) {
+      hasInk.current = false;
+      onInkChange(false);
+    }
   }
 
   useImperativeHandle(ref, () => ({

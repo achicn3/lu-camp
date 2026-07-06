@@ -1953,3 +1953,9 @@ body {
   min-height: 64px;
   font-size: var(--text-lg);
 }
+.kiosk-item-extra {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  margin-top: var(--sp-1);
+}

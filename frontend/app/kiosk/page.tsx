@@ -2,7 +2,7 @@
 // 手持簽署裝置主頁（docs/23 K3）：KIOSK 帳號登入 → 每 2 秒輪詢待簽任務 → 顯示切結書/
 // 品項金額/會員資料 → 客人選撥款（AFFIDAVIT 二選一，D7）→ 手寫簽名 → 送出。簽名綁內容快照：
 // 顯示的就是客人簽的那份（content 由店員端凍結）。送出後回待機，等下一張任務。
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useRef, useState, useSyncExternalStore } from "react";
 
 import { api } from "@/lib/api";
@@ -41,6 +41,7 @@ export default function KioskPage() {
 
 // ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
 function KioskLogin() {
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -49,6 +50,9 @@ function KioskLogin() {
     const form = new FormData(event.currentTarget);
     setSubmitting(true);
     setError(null);
+    // 換帳號即清掉舊 kiosk 查詢快取：客人面向裝置不得閃現前一位客人的任務快照
+    // （Codex K3 medium；比照 (authed) 登入清快取）。
+    queryClient.removeQueries({ queryKey: ["kiosk"] });
     const result = await login(String(form.get("username")), String(form.get("password")));
     setSubmitting(false);
     if (!result.ok) setError(result.message);
@@ -82,6 +86,7 @@ function KioskLogin() {
 
 // ── 已登入主控：輪詢 → 待機/任務 ────────────────────────────────────────
 function KioskConsole() {
+  const queryClient = useQueryClient();
   const { data, error } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
@@ -95,7 +100,15 @@ function KioskConsole() {
         <div className="kiosk-standby-inner">
           <h1 className="kiosk-standby-title">此裝置非簽署帳號</h1>
           <p className="kiosk-standby-sub">請以 KIOSK 簽署帳號重新登入。</p>
-          <button type="button" className="btn-secondary" onClick={() => clearToken()}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              // 先移除 kiosk 快取再清 token：避免重登期間閃現舊快照（Codex K3 medium）。
+              queryClient.removeQueries({ queryKey: ["kiosk"] });
+              clearToken();
+            }}
+          >
             重新登入
           </button>
         </div>
@@ -125,6 +138,7 @@ function Standby() {
 const PAYOUT_KINDS = new Set(["ACQUISITION_AFFIDAVIT"]);
 
 function TaskScreen({ task }: { task: KioskTask }) {
+  const queryClient = useQueryClient();
   const canvasRef = useRef<SignatureCanvasHandle>(null);
   const [hasInk, setHasInk] = useState(false);
   const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
@@ -132,6 +146,8 @@ function TaskScreen({ task }: { task: KioskTask }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  // 任務已被店員作廢/取代（409）：終態，鎖住送出，靠輪詢帶回待機/新任務。
+  const [superseded, setSuperseded] = useState(false);
 
   const needsPayout = PAYOUT_KINDS.has(task.kind);
   const needsAgreement = task.agreement_body !== null;
@@ -139,13 +155,14 @@ function TaskScreen({ task }: { task: KioskTask }) {
   const canSubmit =
     hasInk &&
     !submitting &&
+    !superseded &&
     (!needsPayout || payout !== null) &&
     (!needsAgreement || agreed);
 
   async function submit() {
     const image = canvasRef.current?.toBase64();
     if (!image) {
-      setError("請先簽名");
+      setError("簽名太少，請簽得更完整（或清除重簽）。");
       return;
     }
     setSubmitting(true);
@@ -156,12 +173,17 @@ function TaskScreen({ task }: { task: KioskTask }) {
     });
     setSubmitting(false);
     if (!response.ok) {
-      // 409：任務已被店員作廢/取代（反悔或改內容重推）→ 回待機等新任務。
-      setError(
-        response.status === 409
-          ? "此項目已由店員更新，請依店員指示重新確認。"
-          : "送出失敗，請再試一次或請店員協助。",
-      );
+      if (response.status === 409) {
+        // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
+        // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。
+        setSuperseded(true);
+        setError("此項目已由店員更新，請依店員指示，稍候將顯示最新內容。");
+        void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+      } else if (response.status === 422) {
+        setError("簽名無法辨識，請清除後簽得更完整。");
+      } else {
+        setError("送出失敗，請再試一次或請店員協助。");
+      }
       return;
     }
     setDone(true);
@@ -282,11 +304,12 @@ const CONTENT_LABELS: Record<string, string> = {
   balance_after: "扣抵後餘額",
 };
 
+// 客人簽的是完整 JSON 快照，故此處**窮舉渲染**所有欄位、不靜默丟棄任何鍵
+// （Codex K3 high：簽到沒看到的內容＝證據風險）。已知鍵給中文標籤與金額格式，
+// 未知鍵照原樣列出；巢狀物件/陣列（items 以外）以可讀字串呈現。
 function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
   const items = Array.isArray(content.items) ? (content.items as unknown[]) : [];
-  const scalars = Object.entries(content).filter(
-    ([key, value]) => key !== "items" && (typeof value === "string" || typeof value === "number"),
-  );
+  const rest = Object.entries(content).filter(([key]) => key !== "items");
 
   return (
     <div className="kiosk-snapshot">
@@ -301,9 +324,18 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
           <tbody>
             {items.map((raw, i) => {
               const item = (raw ?? {}) as Record<string, unknown>;
+              // name/amount 以外的品項欄位一併呈現，避免遺漏客人所簽內容。
+              const extra = Object.entries(item).filter(([k]) => k !== "name" && k !== "amount");
               return (
                 <tr key={i}>
-                  <td>{String(item.name ?? "—")}</td>
+                  <td>
+                    {String(item.name ?? "—")}
+                    {extra.length > 0 && (
+                      <span className="kiosk-item-extra">
+                        {extra.map(([k, v]) => `${CONTENT_LABELS[k] ?? k}：${renderValue(v)}`).join("；")}
+                      </span>
+                    )}
+                  </td>
                   <td className="kiosk-items-amount">{formatAmount(item.amount)}</td>
                 </tr>
               );
@@ -311,12 +343,12 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
           </tbody>
         </table>
       )}
-      {scalars.length > 0 && (
+      {rest.length > 0 && (
         <dl className="kiosk-fields">
-          {scalars.map(([key, value]) => (
+          {rest.map(([key, value]) => (
             <div className="kiosk-field-row" key={key}>
               <dt>{CONTENT_LABELS[key] ?? key}</dt>
-              <dd>{isAmountKey(key) ? formatAmount(value) : String(value)}</dd>
+              <dd>{isAmountKey(key) ? formatAmount(value) : renderValue(value)}</dd>
             </div>
           ))}
         </dl>
@@ -327,6 +359,18 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
 
 function isAmountKey(key: string): boolean {
   return ["total", "deduct", "balance", "balance_after"].includes(key);
+}
+
+function renderValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  // 巢狀物件/陣列：以 JSON 呈現，確保不遺漏客人所簽內容（寧可醜、不可漏）。
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function formatAmount(value: unknown): string {
