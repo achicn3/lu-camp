@@ -1,0 +1,337 @@
+"use client";
+// 手持簽署裝置主頁（docs/23 K3）：KIOSK 帳號登入 → 每 2 秒輪詢待簽任務 → 顯示切結書/
+// 品項金額/會員資料 → 客人選撥款（AFFIDAVIT 二選一，D7）→ 手寫簽名 → 送出。簽名綁內容快照：
+// 顯示的就是客人簽的那份（content 由店員端凍結）。送出後回待機，等下一張任務。
+import { useQuery } from "@tanstack/react-query";
+import { type FormEvent, useRef, useState, useSyncExternalStore } from "react";
+
+import { api } from "@/lib/api";
+import { login } from "@/lib/auth";
+import { clearToken, getToken, subscribeToken } from "@/lib/token";
+
+import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
+
+type KioskTask = NonNullable<
+  Awaited<ReturnType<typeof fetchCurrentTask>>
+>;
+
+async function fetchCurrentTask() {
+  const { data, response } = await api.GET("/api/v1/kiosk/tasks/current");
+  if (!response.ok) {
+    // 403：此裝置非 KIOSK 帳號（後端 D4 圍堵）；往上拋讓 UI 提示重登。
+    throw new Error(response.status === 403 ? "FORBIDDEN" : "FETCH_FAILED");
+  }
+  return data ?? null;
+}
+
+const emptySubscribe = () => () => {};
+
+export default function KioskPage() {
+  const token = useSyncExternalStore(subscribeToken, getToken, () => null);
+  const hydrated = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+
+  if (!hydrated) return null;
+  if (token === null) return <KioskLogin />;
+  return <KioskConsole />;
+}
+
+// ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
+function KioskLogin() {
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSubmitting(true);
+    setError(null);
+    const result = await login(String(form.get("username")), String(form.get("password")));
+    setSubmitting(false);
+    if (!result.ok) setError(result.message);
+  }
+
+  return (
+    <main className="kiosk-login">
+      <form className="kiosk-login-card" onSubmit={onSubmit}>
+        <h1 className="kiosk-login-title">簽署裝置設定</h1>
+        <p className="kiosk-login-sub">請以本店簽署裝置帳號登入（一次登入、長期使用）</p>
+        <label className="field">
+          <span className="field-label">帳號</span>
+          <input name="username" autoComplete="username" required autoFocus />
+        </label>
+        <label className="field">
+          <span className="field-label">密碼</span>
+          <input name="password" type="password" autoComplete="current-password" required />
+        </label>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? "登入中…" : "啟用裝置"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+// ── 已登入主控：輪詢 → 待機/任務 ────────────────────────────────────────
+function KioskConsole() {
+  const { data, error } = useQuery({
+    queryKey: ["kiosk", "current"],
+    queryFn: fetchCurrentTask,
+    refetchInterval: 2000,
+    refetchOnWindowFocus: true,
+  });
+
+  if (error instanceof Error && error.message === "FORBIDDEN") {
+    return (
+      <main className="kiosk-standby">
+        <div className="kiosk-standby-inner">
+          <h1 className="kiosk-standby-title">此裝置非簽署帳號</h1>
+          <p className="kiosk-standby-sub">請以 KIOSK 簽署帳號重新登入。</p>
+          <button type="button" className="btn-secondary" onClick={() => clearToken()}>
+            重新登入
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (!data) return <Standby />;
+  // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
+  // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
+  return <TaskScreen key={data.id} task={data} />;
+}
+
+function Standby() {
+  return (
+    <main className="kiosk-standby">
+      <div className="kiosk-standby-inner">
+        <h1 className="kiosk-standby-title">露營二手</h1>
+        <p className="kiosk-standby-sub">請稍候，店員將為您送出待確認的項目。</p>
+        <div className="kiosk-standby-dot" aria-hidden />
+      </div>
+    </main>
+  );
+}
+
+// ── 任務畫面：切結書 + 明細 + 撥款 + 簽名 ────────────────────────────────
+const PAYOUT_KINDS = new Set(["ACQUISITION_AFFIDAVIT"]);
+
+function TaskScreen({ task }: { task: KioskTask }) {
+  const canvasRef = useRef<SignatureCanvasHandle>(null);
+  const [hasInk, setHasInk] = useState(false);
+  const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+
+  const needsPayout = PAYOUT_KINDS.has(task.kind);
+  const needsAgreement = task.agreement_body !== null;
+
+  const canSubmit =
+    hasInk &&
+    !submitting &&
+    (!needsPayout || payout !== null) &&
+    (!needsAgreement || agreed);
+
+  async function submit() {
+    const image = canvasRef.current?.toBase64();
+    if (!image) {
+      setError("請先簽名");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
+      params: { path: { task_id: task.id } },
+      body: { signature_image_base64: image, chosen_payout: needsPayout ? payout : null },
+    });
+    setSubmitting(false);
+    if (!response.ok) {
+      // 409：任務已被店員作廢/取代（反悔或改內容重推）→ 回待機等新任務。
+      setError(
+        response.status === 409
+          ? "此項目已由店員更新，請依店員指示重新確認。"
+          : "送出失敗，請再試一次或請店員協助。",
+      );
+      return;
+    }
+    setDone(true);
+  }
+
+  if (done) {
+    return (
+      <main className="kiosk-thanks">
+        <div className="kiosk-thanks-inner">
+          <div className="kiosk-thanks-check" aria-hidden>
+            ✓
+          </div>
+          <h1 className="kiosk-thanks-title">已完成簽署</h1>
+          <p className="kiosk-standby-sub">感謝您，請將裝置交回給店員。</p>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="kiosk-task">
+      <header className="kiosk-task-header">
+        <h1 className="kiosk-task-title">{taskHeading(task.kind)}</h1>
+      </header>
+
+      <section className="kiosk-task-body">
+        <ContentSnapshot content={task.content} />
+
+        {needsAgreement && (
+          <div className="kiosk-agreement">
+            <h2 className="kiosk-agreement-title">{task.agreement_title}</h2>
+            <div className="kiosk-agreement-body">{task.agreement_body}</div>
+            <label className="kiosk-agree-check">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+              />
+              <span>本人已閱讀並同意上述切結書及條款內容</span>
+            </label>
+          </div>
+        )}
+
+        {needsPayout && (
+          <div className="kiosk-payout">
+            <h2 className="kiosk-section-title">請選擇收款方式</h2>
+            <div className="kiosk-payout-options">
+              <button
+                type="button"
+                className={payoutClass(payout === "CASH")}
+                onClick={() => setPayout("CASH")}
+              >
+                現金
+              </button>
+              <button
+                type="button"
+                className={payoutClass(payout === "STORE_CREDIT")}
+                onClick={() => setPayout("STORE_CREDIT")}
+              >
+                購物金
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="kiosk-signature">
+          <h2 className="kiosk-section-title">簽名確認</h2>
+          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} />
+        </div>
+      </section>
+
+      <footer className="kiosk-task-footer">
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <button
+          type="button"
+          className="btn-primary kiosk-submit"
+          disabled={!canSubmit}
+          onClick={submit}
+        >
+          {submitting ? "送出中…" : "確認並送出"}
+        </button>
+      </footer>
+    </main>
+  );
+}
+
+function taskHeading(kind: string): string {
+  switch (kind) {
+    case "ACQUISITION_AFFIDAVIT":
+      return "收購確認與切結";
+    case "STORE_CREDIT_USE":
+      return "購物金使用確認";
+    case "TRANSACTION_ACK":
+      return "交易紀錄簽收";
+    default:
+      return "簽署確認";
+  }
+}
+
+function payoutClass(active: boolean): string {
+  return active ? "kiosk-payout-btn kiosk-payout-btn--active" : "kiosk-payout-btn";
+}
+
+// content 為店員端凍結的顯示快照（自由 dict）：優雅呈現已知欄位（品項清單＋常見純量）。
+const CONTENT_LABELS: Record<string, string> = {
+  seller_name: "姓名",
+  member_name: "會員",
+  national_id_masked: "身分證字號",
+  phone: "電話",
+  address: "住址",
+  total: "合計金額",
+  deduct: "扣抵購物金",
+  balance: "購物金餘額",
+  balance_after: "扣抵後餘額",
+};
+
+function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
+  const items = Array.isArray(content.items) ? (content.items as unknown[]) : [];
+  const scalars = Object.entries(content).filter(
+    ([key, value]) => key !== "items" && (typeof value === "string" || typeof value === "number"),
+  );
+
+  return (
+    <div className="kiosk-snapshot">
+      {items.length > 0 && (
+        <table className="kiosk-items">
+          <thead>
+            <tr>
+              <th>品項</th>
+              <th className="kiosk-items-amount">金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((raw, i) => {
+              const item = (raw ?? {}) as Record<string, unknown>;
+              return (
+                <tr key={i}>
+                  <td>{String(item.name ?? "—")}</td>
+                  <td className="kiosk-items-amount">{formatAmount(item.amount)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {scalars.length > 0 && (
+        <dl className="kiosk-fields">
+          {scalars.map(([key, value]) => (
+            <div className="kiosk-field-row" key={key}>
+              <dt>{CONTENT_LABELS[key] ?? key}</dt>
+              <dd>{isAmountKey(key) ? formatAmount(value) : String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function isAmountKey(key: string): boolean {
+  return ["total", "deduct", "balance", "balance_after"].includes(key);
+}
+
+function formatAmount(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  const num = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(num)) return String(value);
+  return `$${num.toLocaleString("zh-TW")}`;
+}

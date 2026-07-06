@@ -1698,3 +1698,258 @@ body {
 .st-var-zero {
   color: var(--ink-soft);
 }
+
+/* ── 手持簽署裝置（docs/23 K3）：客人面向全螢幕，字大、觸控友善 ────────── */
+.kiosk-root {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+}
+.kiosk-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+}
+.kiosk-login-card {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.kiosk-login-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0;
+}
+.kiosk-login-sub {
+  color: var(--ink-soft);
+  margin: 0;
+}
+.kiosk-standby,
+.kiosk-thanks {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  text-align: center;
+}
+.kiosk-standby-inner,
+.kiosk-thanks-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.kiosk-standby-title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 6vw, 56px);
+  margin: 0;
+}
+.kiosk-standby-sub {
+  font-size: var(--text-lg);
+  color: var(--ink-soft);
+  margin: 0;
+}
+.kiosk-standby-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: kiosk-pulse 1.4s ease-in-out infinite;
+}
+@keyframes kiosk-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+.kiosk-thanks-check {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #fff;
+  font-size: 56px;
+  display: grid;
+  place-items: center;
+}
+.kiosk-thanks-title {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 5vw, 44px);
+  margin: 0;
+}
+
+/* 任務畫面：三段（標題 / 可捲內容 / 固定底部送出） */
+.kiosk-task {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.kiosk-task-header {
+  padding: var(--sp-6) var(--sp-6) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.kiosk-task-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0;
+}
+.kiosk-task-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+.kiosk-section-title,
+.kiosk-agreement-title {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--sp-3);
+}
+.kiosk-snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.kiosk-items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+.kiosk-items th,
+.kiosk-items td {
+  padding: var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.kiosk-items-amount {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.kiosk-fields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.kiosk-field-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px dashed var(--border);
+}
+.kiosk-field-row dt {
+  color: var(--ink-soft);
+}
+.kiosk-field-row dd {
+  margin: 0;
+  font-weight: 600;
+}
+.kiosk-agreement {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  background: var(--surface);
+}
+.kiosk-agreement-body {
+  max-height: 260px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  font-size: var(--text-md);
+  padding: var(--sp-3);
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+.kiosk-agree-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  font-size: var(--text-md);
+}
+.kiosk-agree-check input {
+  width: 24px;
+  height: 24px;
+}
+.kiosk-payout-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+.kiosk-payout-btn {
+  min-height: 72px;
+  font-size: var(--text-lg);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.kiosk-payout-btn--active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.kiosk-sign-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.kiosk-sign-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.kiosk-sign-hint {
+  color: var(--ink-soft);
+}
+.kiosk-sign-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+.kiosk-sign-canvas {
+  width: 100%;
+  aspect-ratio: 1000 / 360;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  touch-action: none;
+}
+.kiosk-sign-wrap--enlarged {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--bg);
+  padding: var(--sp-6);
+  justify-content: center;
+}
+.kiosk-sign-wrap--enlarged .kiosk-sign-canvas {
+  height: 70vh;
+  aspect-ratio: auto;
+}
+.kiosk-task-footer {
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.kiosk-submit {
+  width: 100%;
+  min-height: 64px;
+  font-size: var(--text-lg);
+}
