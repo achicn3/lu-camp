@@ -33,6 +33,17 @@ from app.shared.exceptions import (
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _MAX_SIGNATURE_DIMENSION = 4096  # 簽名 canvas 尺寸上限（像素）
+# 解壓後原始掃描線資料上限：綁住 zlib 解壓的記憶體（512KB 壓縮檔在正常簽名圖遠達不到此值）
+_MAX_RAW_IMAGE_BYTES = 8_000_000
+# color_type → 通道數；bit_depth 合法組合依 PNG 規格 §11.2.2
+_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+_PNG_VALID_BIT_DEPTHS = {
+    0: {1, 2, 4, 8, 16},
+    2: {8, 16},
+    3: {1, 2, 4, 8},
+    4: {8, 16},
+    6: {8, 16},
+}
 
 
 class SigningService:
@@ -190,16 +201,13 @@ class SigningService:
             raise InvalidSignatureImage(f"簽名影像過大（上限 {MAX_SIGNATURE_BYTES // 1000} KB）")
         if not image.startswith(_PNG_MAGIC):
             raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
-        SigningService._validate_png_chunks(image)
-        width = int.from_bytes(image[16:20], "big")
-        height = int.from_bytes(image[20:24], "big")
-        if not (1 <= width <= _MAX_SIGNATURE_DIMENSION and 1 <= height <= _MAX_SIGNATURE_DIMENSION):
-            raise InvalidSignatureImage("簽名影像尺寸不合理")
+        idat = SigningService._validate_png_chunks(image)
+        SigningService._validate_png_renderable(image, idat)
         return image
 
     @staticmethod
-    def _validate_png_chunks(image: bytes) -> None:
-        """逐 chunk 掃描 PNG 結構；任何缺陷一律 InvalidSignatureImage。
+    def _validate_png_chunks(image: bytes) -> bytes:
+        """逐 chunk 掃描 PNG 結構並回傳串接的 IDAT 資料；任何缺陷一律 InvalidSignatureImage。
 
         驗證：每個 chunk 的長度落在檔內、CRC 正確；IHDR 為首個 chunk（長度 13）；
         至少一個 IDAT；IEND 為零長度且為檔案最後一個 chunk（無尾隨資料）。
@@ -207,7 +215,7 @@ class SigningService:
         malformed = InvalidSignatureImage("簽名影像 PNG 結構不完整或損毀")
         pos = 8  # magic 之後
         first = True
-        seen_idat = False
+        idat = bytearray()
         while True:
             if pos + 12 > len(image):  # 至少要放得下 length+type+CRC
                 raise malformed
@@ -224,9 +232,52 @@ class SigningService:
                     raise malformed
                 first = False
             if chunk_type == b"IDAT":
-                seen_idat = True
+                idat += image[pos + 8 : data_end]
             if chunk_type == b"IEND":
-                if length != 0 or data_end + 4 != len(image) or not seen_idat:
+                if length != 0 or data_end + 4 != len(image) or not idat:
                     raise malformed
-                return
+                return bytes(idat)
             pos = data_end + 4
+
+    @staticmethod
+    def _validate_png_renderable(image: bytes, idat: bytes) -> None:
+        """證明影像資料真的可渲染，而非只有 chunk 形狀正確（Codex 第三輪 high）。
+
+        IHDR 語意驗證（尺寸、bit_depth/color_type 合法組合、compression/filter 必為 0、
+        不收 interlaced——簽名 canvas 不會輸出），再以 zlib **有界**解壓串接的 IDAT
+        （上限＝預期掃描線總量＋1，防解壓炸彈），要求流完整（eof）、無殘餘、
+        解壓後長度恰等於 `height × (1 + ceil(width×bpp/8))`。
+        """
+        width = int.from_bytes(image[16:20], "big")
+        height = int.from_bytes(image[20:24], "big")
+        bit_depth = image[24]
+        color_type = image[25]
+        compression = image[26]
+        filter_method = image[27]
+        interlace = image[28]
+        if not (1 <= width <= _MAX_SIGNATURE_DIMENSION and 1 <= height <= _MAX_SIGNATURE_DIMENSION):
+            raise InvalidSignatureImage("簽名影像尺寸不合理")
+        if (
+            color_type not in _PNG_CHANNELS
+            or bit_depth not in _PNG_VALID_BIT_DEPTHS[color_type]
+            or compression != 0
+            or filter_method != 0
+            or interlace != 0
+        ):
+            raise InvalidSignatureImage("簽名影像 PNG 標頭參數不支援")
+        bits_per_pixel = bit_depth * _PNG_CHANNELS[color_type]
+        expected = height * (1 + (width * bits_per_pixel + 7) // 8)
+        if expected > _MAX_RAW_IMAGE_BYTES:
+            raise InvalidSignatureImage("簽名影像尺寸不合理")
+        try:
+            decompressor = zlib.decompressobj()
+            raw = decompressor.decompress(idat, expected + 1)
+        except zlib.error as exc:
+            raise InvalidSignatureImage("簽名影像的影像資料無法解壓（非有效 PNG）") from exc
+        if (
+            not decompressor.eof
+            or decompressor.unused_data
+            or decompressor.unconsumed_tail
+            or len(raw) != expected
+        ):
+            raise InvalidSignatureImage("簽名影像的影像資料不完整（無法渲染）")

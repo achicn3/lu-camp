@@ -66,18 +66,29 @@ def create_app() -> FastAPI:
     async def limit_kiosk_body(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        if request.url.path.startswith(f"{API_PREFIX}/kiosk"):
+        # 嚴格政策（Codex 第三輪 medium）：帶 body 的 /kiosk 請求必須有合法 Content-Length
+        # ——缺（chunked/串流）一律 411，超上限/非法 413，皆於 JSON 解析「前」擋下。
+        # 自家 kiosk 前端必帶 Content-Length，正常流量零影響；schema/服務層為內層防線。
+        if request.url.path.startswith(f"{API_PREFIX}/kiosk") and request.method in (
+            "POST",
+            "PUT",
+            "PATCH",
+        ):
             content_length = request.headers.get("content-length")
-            if content_length is not None:
-                try:
-                    too_large = int(content_length) > KIOSK_MAX_BODY_BYTES
-                except ValueError:
-                    too_large = True
-                if too_large:
-                    return JSONResponse(
-                        status_code=413,
-                        content={"detail": "請求體過大（簽署裝置上限 1MB）"},
-                    )
+            if content_length is None:
+                return JSONResponse(
+                    status_code=411,
+                    content={"detail": "簽署裝置請求必須帶 Content-Length"},
+                )
+            try:
+                too_large = int(content_length) > KIOSK_MAX_BODY_BYTES
+            except ValueError:
+                too_large = True
+            if too_large:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "請求體過大（簽署裝置上限 1MB）"},
+                )
         return await call_next(request)
 
     @app.get(

@@ -367,6 +367,14 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
     trailing = base64.b64encode(
         magic + ihdr(1, 1) + chunk(b"IDAT", b"x") + chunk(b"IEND", b"") + b"junk"
     ).decode()
+    # CRC 全對但 IDAT 非 zlib 流 → 印不出來的假證據（Codex 第三輪 high）
+    non_zlib_idat = base64.b64encode(
+        magic + ihdr(1, 1) + chunk(b"IDAT", b"x") + chunk(b"IEND", b"")
+    ).decode()
+    # zlib 流有效但解壓長度與 IHDR 尺寸不符（1x1 RGBA 應為 5 bytes）
+    wrong_size = base64.b64encode(
+        magic + ihdr(1, 1) + chunk(b"IDAT", zlib.compress(b"\x00")) + chunk(b"IEND", b"")
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
@@ -376,6 +384,8 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         no_idat,
         bad_crc,
         trailing,
+        non_zlib_idat,
+        wrong_size,
     ]
     for payload in bad_payloads:
         resp = await client.post(
@@ -398,6 +408,26 @@ async def test_kiosk_oversized_body_rejected_before_parsing(
         headers=_auth(s.kiosk),
     )
     assert resp.status_code == 413
+
+
+async def test_kiosk_chunked_body_requires_content_length(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """無 Content-Length（chunked/串流）的 /kiosk 寫入 → 411，不得繞過上限（Codex 第三輪）。"""
+    s = await _seed(db_session)
+    task = await _create_task(client, s.clerk, s.contact_id)
+
+    async def body_stream() -> AsyncGenerator[bytes]:
+        yield b'{"signature_image_base64": "'
+        yield b"A" * 1024
+        yield b'", "chosen_payout": "CASH"}'
+
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        content=body_stream(),
+        headers={**_auth(s.kiosk), "content-type": "application/json"},
+    )
+    assert resp.status_code == 411
 
 
 # ── 作廢（反悔機制）與狀態機 ───────────────────────────────────────────
