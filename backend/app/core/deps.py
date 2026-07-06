@@ -51,6 +51,40 @@ async def get_current_user(
     )
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="使用者已停用或不存在")
+    # KIOSK 中央預設拒絕（docs/23 D4）：手持簽署裝置僅能使用 /kiosk 端點（get_kiosk_user），
+    # 一律不得通過一般店務依賴——一處圍堵，免逐端點防漏。
+    if user.role.value == "KIOSK":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="簽署裝置帳號僅能使用簽署端點"
+        )
+    return CurrentUser(id=user.id, role=user.role.value, store_id=user.store_id)
+
+
+async def get_kiosk_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CurrentUser:
+    """手持簽署裝置身分（KIOSK 專用，docs/23 D4）：同樣逐請求回 DB 覆核（D-4）。
+
+    僅 /kiosk 端點使用；非 KIOSK 角色一律 403（店務帳號不該掛在客人面向的裝置上）。
+    """
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未提供認證憑證")
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="無效或過期的憑證"
+        ) from exc
+    user = await UserService(session).get_user_in_store(
+        store_id=int(payload["store_id"]), user_id=int(payload["sub"])
+    )
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="使用者已停用或不存在")
+    if user.role.value != "KIOSK":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="此端點僅供簽署裝置使用"
+        )
     return CurrentUser(id=user.id, role=user.role.value, store_id=user.store_id)
 
 

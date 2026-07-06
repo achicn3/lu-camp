@@ -4,10 +4,15 @@ from enum import StrEnum
 
 
 class UserRole(StrEnum):
-    """使用者角色。MANAGER 為管理者（可跨店/解密 PII），CLERK 為門市店員。"""
+    """使用者角色。MANAGER 為管理者（可跨店/解密 PII），CLERK 為門市店員。
+
+    KIOSK 為手持簽署裝置的專用身分（docs/23 D4）：登入一次長駐，**僅能**使用簽署端點
+    （中央預設拒絕：get_current_user 直接擋 KIOSK，見 core/deps.py），碰不到任何店務資料。
+    """
 
     MANAGER = "MANAGER"
     CLERK = "CLERK"
+    KIOSK = "KIOSK"
 
 
 class ContactRole(StrEnum):
@@ -300,4 +305,23 @@ class CampaignStatus(StrEnum):
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
     ENDED = "ENDED"
+    CANCELLED = "CANCELLED"
+
+
+class SignatureTaskKind(StrEnum):
+    """手持簽署任務類型（docs/23）。"""
+
+    ACQUISITION_AFFIDAVIT = "ACQUISITION_AFFIDAVIT"  # 收購切結書＋條款＋品項＋撥款選擇
+    STORE_CREDIT_USE = "STORE_CREDIT_USE"  # 購物金扣抵確認
+    TRANSACTION_ACK = "TRANSACTION_ACK"  # 交易紀錄簽收
+
+
+class SignatureTaskStatus(StrEnum):
+    """簽署任務狀態機：PENDING → SIGNED / CANCELLED。
+
+    無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。
+    """
+
+    PENDING = "PENDING"
+    SIGNED = "SIGNED"
     CANCELLED = "CANCELLED"

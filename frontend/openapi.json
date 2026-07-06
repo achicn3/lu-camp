@@ -3753,6 +3753,176 @@
         "title": "ItemSourceRead",
         "type": "object"
       },
+      "KioskSignRequest": {
+        "properties": {
+          "chosen_payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signature_image_base64": {
+            "minLength": 1,
+            "title": "Signature Image Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signature_image_base64"
+        ],
+        "title": "KioskSignRequest",
+        "type": "object"
+      },
+      "KioskTaskRead": {
+        "description": "手持端任務視圖：AFFIDAVIT 任務附上切結書全文（客人簽的就是這份）。",
+        "properties": {
+          "agreement_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Body"
+          },
+          "agreement_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Title"
+          },
+          "agreement_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Version"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "chosen_payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "has_signature": {
+            "title": "Has Signature",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SignatureTaskKind"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Type"
+          },
+          "signed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SignatureTaskStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "kind",
+          "status",
+          "contact_id",
+          "content",
+          "agreement_version",
+          "chosen_payout",
+          "has_signature",
+          "signed_at",
+          "cancelled_at",
+          "ref_type",
+          "ref_id",
+          "created_at",
+          "agreement_title",
+          "agreement_body"
+        ],
+        "title": "KioskTaskRead",
+        "type": "object"
+      },
       "LiabilityReport": {
         "description": "§5A 購物金負債報表。",
         "properties": {
@@ -6433,6 +6603,193 @@
         },
         "title": "SettingsUpdateRequest",
         "type": "object"
+      },
+      "SignatureTaskCreate": {
+        "properties": {
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SignatureTaskKind"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "ref_type": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Type"
+          }
+        },
+        "required": [
+          "kind",
+          "contact_id",
+          "content"
+        ],
+        "title": "SignatureTaskCreate",
+        "type": "object"
+      },
+      "SignatureTaskKind": {
+        "description": "手持簽署任務類型（docs/23）。",
+        "enum": [
+          "ACQUISITION_AFFIDAVIT",
+          "STORE_CREDIT_USE",
+          "TRANSACTION_ACK"
+        ],
+        "title": "SignatureTaskKind",
+        "type": "string"
+      },
+      "SignatureTaskRead": {
+        "properties": {
+          "agreement_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Version"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "chosen_payout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PayoutMethod"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "content": {
+            "additionalProperties": true,
+            "title": "Content",
+            "type": "object"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "has_signature": {
+            "title": "Has Signature",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SignatureTaskKind"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Type"
+          },
+          "signed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signed At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SignatureTaskStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "kind",
+          "status",
+          "contact_id",
+          "content",
+          "agreement_version",
+          "chosen_payout",
+          "has_signature",
+          "signed_at",
+          "cancelled_at",
+          "ref_type",
+          "ref_id",
+          "created_at"
+        ],
+        "title": "SignatureTaskRead",
+        "type": "object"
+      },
+      "SignatureTaskStatus": {
+        "description": "簽署任務狀態機：PENDING → SIGNED / CANCELLED。\n\n無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。",
+        "enum": [
+          "PENDING",
+          "SIGNED",
+          "CANCELLED"
+        ],
+        "title": "SignatureTaskStatus",
+        "type": "string"
       },
       "StocktakeConfirmRequest": {
         "description": "確認盤點輸入：各商品實點數（未列入者不調整）。",
@@ -10117,6 +10474,146 @@
         ]
       }
     },
+    "/api/v1/kiosk/tasks/current": {
+      "get": {
+        "description": "手持端輪詢：最新待簽任務；無任務回 null（前端顯示待機畫面）。",
+        "operationId": "getCurrentKioskTask",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/KioskTaskRead"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Getcurrentkiosktask"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Current Kiosk Task",
+        "tags": [
+          "kiosk"
+        ]
+      }
+    },
+    "/api/v1/kiosk/tasks/{task_id}": {
+      "get": {
+        "description": "手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。",
+        "operationId": "getKioskTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Kiosk Task",
+        "tags": [
+          "kiosk"
+        ]
+      }
+    },
+    "/api/v1/kiosk/tasks/{task_id}/sign": {
+      "post": {
+        "operationId": "signKioskTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KioskSignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sign Kiosk Task",
+        "tags": [
+          "kiosk"
+        ]
+      }
+    },
     "/api/v1/menu-items": {
       "get": {
         "operationId": "listMenuItems",
@@ -12388,6 +12885,269 @@
         "summary": "Premium Rate History",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/signing/tasks": {
+      "get": {
+        "operationId": "listSignatureTasks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SignatureTaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SignatureTaskRead"
+                  },
+                  "title": "Response Listsignaturetasks",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Signature Tasks",
+        "tags": [
+          "signing"
+        ]
+      },
+      "post": {
+        "operationId": "createSignatureTask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignatureTaskCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Signature Task",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
+    "/api/v1/signing/tasks/{task_id}": {
+      "get": {
+        "operationId": "getSignatureTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Signature Task",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
+    "/api/v1/signing/tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "cancelSignatureTask",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignatureTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Signature Task",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
+    "/api/v1/signing/tasks/{task_id}/signature": {
+      "get": {
+        "description": "取簽名 PNG 原圖（K6 憑證聯列印用）。未簽名 → 404。",
+        "operationId": "getSignatureImage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/png": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Signature Image",
+        "tags": [
+          "signing"
         ]
       }
     },

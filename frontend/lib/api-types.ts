@@ -869,6 +869,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/kiosk/tasks/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current Kiosk Task
+         * @description 手持端輪詢：最新待簽任務；無任務回 null（前端顯示待機畫面）。
+         */
+        get: operations["getCurrentKioskTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Kiosk Task
+         * @description 手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
+         */
+        get: operations["getKioskTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Kiosk Task */
+        post: operations["signKioskTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/menu-items": {
         parameters: {
             query?: never;
@@ -1440,6 +1497,78 @@ export interface paths {
         };
         /** Premium Rate History */
         get: operations["getPremiumRateHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signing/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Signature Tasks */
+        get: operations["listSignatureTasks"];
+        put?: never;
+        /** Create Signature Task */
+        post: operations["createSignatureTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signing/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signature Task */
+        get: operations["getSignatureTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signing/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Signature Task */
+        post: operations["cancelSignatureTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signing/tasks/{task_id}/signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Signature Image
+         * @description 取簽名 PNG 原圖（K6 憑證聯列印用）。未簽名 → 404。
+         */
+        get: operations["getSignatureImage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2996,6 +3125,52 @@ export interface components {
             /** Phone */
             phone: string | null;
         };
+        /** KioskSignRequest */
+        KioskSignRequest: {
+            chosen_payout?: components["schemas"]["PayoutMethod"] | null;
+            /** Signature Image Base64 */
+            signature_image_base64: string;
+        };
+        /**
+         * KioskTaskRead
+         * @description 手持端任務視圖：AFFIDAVIT 任務附上切結書全文（客人簽的就是這份）。
+         */
+        KioskTaskRead: {
+            /** Agreement Body */
+            agreement_body: string | null;
+            /** Agreement Title */
+            agreement_title: string | null;
+            /** Agreement Version */
+            agreement_version: number | null;
+            /** Cancelled At */
+            cancelled_at: string | null;
+            chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** Contact Id */
+            contact_id: number;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Has Signature */
+            has_signature: boolean;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["SignatureTaskKind"];
+            /** Ref Id */
+            ref_id: number | null;
+            /** Ref Type */
+            ref_type: string | null;
+            /** Signed At */
+            signed_at: string | null;
+            status: components["schemas"]["SignatureTaskStatus"];
+            /** Store Id */
+            store_id: number;
+        };
         /**
          * LiabilityReport
          * @description §5A 購物金負債報表。
@@ -3986,6 +4161,67 @@ export interface components {
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
+        /** SignatureTaskCreate */
+        SignatureTaskCreate: {
+            /** Contact Id */
+            contact_id: number;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            kind: components["schemas"]["SignatureTaskKind"];
+            /** Ref Id */
+            ref_id?: number | null;
+            /** Ref Type */
+            ref_type?: string | null;
+        };
+        /**
+         * SignatureTaskKind
+         * @description 手持簽署任務類型（docs/23）。
+         * @enum {string}
+         */
+        SignatureTaskKind: "ACQUISITION_AFFIDAVIT" | "STORE_CREDIT_USE" | "TRANSACTION_ACK";
+        /** SignatureTaskRead */
+        SignatureTaskRead: {
+            /** Agreement Version */
+            agreement_version: number | null;
+            /** Cancelled At */
+            cancelled_at: string | null;
+            chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** Contact Id */
+            contact_id: number;
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Has Signature */
+            has_signature: boolean;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["SignatureTaskKind"];
+            /** Ref Id */
+            ref_id: number | null;
+            /** Ref Type */
+            ref_type: string | null;
+            /** Signed At */
+            signed_at: string | null;
+            status: components["schemas"]["SignatureTaskStatus"];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * SignatureTaskStatus
+         * @description 簽署任務狀態機：PENDING → SIGNED / CANCELLED。
+         *
+         *     無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。
+         * @enum {string}
+         */
+        SignatureTaskStatus: "PENDING" | "SIGNED" | "CANCELLED";
         /**
          * StocktakeConfirmRequest
          * @description 確認盤點輸入：各商品實點數（未列入者不調整）。
@@ -5920,6 +6156,92 @@ export interface operations {
             };
         };
     };
+    getCurrentKioskTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"] | null;
+                };
+            };
+        };
+    };
+    getKioskTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    signKioskTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KioskSignRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listMenuItems: {
         parameters: {
             query?: {
@@ -7100,6 +7422,165 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PremiumRateHistoryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listSignatureTasks: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SignatureTaskStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignatureTaskRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createSignatureTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignatureTaskCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignatureTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSignatureTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignatureTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelSignatureTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignatureTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSignatureImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
                 };
             };
             /** @description Validation Error */

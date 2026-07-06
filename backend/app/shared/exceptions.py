@@ -305,3 +305,19 @@ class EInvoiceActivationNotReady(DomainError):
     現在打開 einvoice_enabled 只會讓每筆銷售建永遠無法核可的 PENDING 發票、佇列無限堆積，
     故在就緒前於 settings 層擋下開啟（關閉不受限）。
     """
+
+
+class SignatureTaskNotFound(DomainError):
+    """指定的簽署任務不存在（或不屬於本店）。"""
+
+
+class SignatureTaskNotPending(DomainError):
+    """簽署任務非 PENDING（已簽署/已作廢），不可再簽名或作廢。"""
+
+
+class InvalidSignatureImage(DomainError):
+    """簽名影像不合法（非 base64 PNG、或大小超出限制）。"""
+
+
+class InvalidKioskPayout(DomainError):
+    """手持端撥款選擇不合法（僅限 現金/購物金 二選一，docs/23 D7；或該任務類型不收撥款選擇）。"""
