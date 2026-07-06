@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { api } from "@/lib/api";
-import { login, readTokenRole } from "@/lib/auth";
+import { login, readTokenRole, verifyStaffCredentials } from "@/lib/auth";
 import { clearToken, getToken, subscribeToken } from "@/lib/token";
 
 import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
@@ -36,13 +36,27 @@ export default function KioskPage() {
 
   if (!hydrated) return null;
   if (token === null) return <KioskLogin />;
+  // 同步（本地解碼、不需連線）攔非 KIOSK token：客人裝置上若殘留有效店務 token，
+  // 絕不掛載 console（否則該 token 仍可被導去店務殼）——直接清除並回裝置登入
+  // （Codex K3 high；後端 403 清除為次要防線）。
+  if (readTokenRole(token) !== "KIOSK") return <NonKioskGate />;
   return <KioskConsole />;
 }
 
-// ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
-function KioskLogin() {
+// 客人裝置上出現非 KIOSK token：清 token+快取後回裝置登入（清除觸發 token 變更 → 重繪）。
+function NonKioskGate() {
   const queryClient = useQueryClient();
-  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    queryClient.clear();
+    clearToken();
+  }, [queryClient]);
+  return <KioskLogin initialError="此裝置僅限 KIOSK 簽署帳號登入。" />;
+}
+
+// ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
+function KioskLogin({ initialError = null }: { initialError?: string | null }) {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(initialError);
   const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -102,12 +116,16 @@ function KioskConsole() {
   // 簽署完成後暫停輪詢並停在「交回店員」畫面（Codex K3 high）：否則店員在客人尚未
   // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
   const [completed, setCompleted] = useState(false);
+  // 簽名送出進行中亦暫停輪詢（Codex K3 high）：否則 POST 尚未回應期間，輪詢可能因
+  // 店員重推而換掉 data、使 key=id 重掛出下一張任務，讓前一位客人看到他人內容。
+  const [signing, setSigning] = useState(false);
+  const paused = completed || signing;
   const { data, error } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
-    refetchInterval: completed ? false : 2000,
-    refetchOnWindowFocus: !completed,
-    enabled: !completed,
+    refetchInterval: paused ? false : 2000,
+    refetchOnWindowFocus: !paused,
+    enabled: !paused,
   });
 
   const forbidden = error instanceof Error && error.message === "FORBIDDEN";
@@ -134,11 +152,41 @@ function KioskConsole() {
   if (forbidden || !data) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
   // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
   // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
-  return <TaskScreen key={data.id} task={data} onComplete={() => setCompleted(true)} />;
+  return (
+    <TaskScreen
+      key={data.id}
+      task={data}
+      onSigningChange={setSigning}
+      onComplete={() => {
+        setSigning(false);
+        setCompleted(true);
+      }}
+    />
+  );
 }
 
-// 交回畫面：簽署完成後停於此，等店員點「完成」才恢復輪詢接下一位客人。
+// 交回畫面：簽署完成後停於此。恢復輪詢需**現場店務員帳密**授權（Codex K3 high）——
+// 避免客人自行點按解鎖、進而看到下一位客人的內容/個資。驗證不持久化 token（裝置身分
+// 仍為 KIOSK）。
 function Handoff({ onReset }: { onReset: () => void }) {
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+
+  async function unlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setVerifying(true);
+    setError(null);
+    const ok = await verifyStaffCredentials(
+      String(form.get("username")),
+      String(form.get("password")),
+    );
+    setVerifying(false);
+    if (ok) onReset();
+    else setError("店務員帳密不正確，無法解鎖。");
+  }
+
   return (
     <main className="kiosk-thanks">
       <div className="kiosk-thanks-inner">
@@ -147,9 +195,30 @@ function Handoff({ onReset }: { onReset: () => void }) {
         </div>
         <h1 className="kiosk-thanks-title">已完成簽署</h1>
         <p className="kiosk-standby-sub">感謝您，請將裝置交回給店員。</p>
-        <button type="button" className="btn-secondary" onClick={onReset}>
-          完成（店員操作）
-        </button>
+        {!showForm ? (
+          <button type="button" className="btn-secondary" onClick={() => setShowForm(true)}>
+            店員解鎖，接續下一位
+          </button>
+        ) : (
+          <form className="kiosk-unlock-form" onSubmit={unlock}>
+            <label className="field">
+              <span className="field-label">店員帳號</span>
+              <input name="username" autoComplete="off" required autoFocus />
+            </label>
+            <label className="field">
+              <span className="field-label">密碼</span>
+              <input name="password" type="password" autoComplete="off" required />
+            </label>
+            {error !== null && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
+            <button type="submit" className="btn-primary" disabled={verifying}>
+              {verifying ? "驗證中…" : "解鎖"}
+            </button>
+          </form>
+        )}
       </div>
     </main>
   );
@@ -170,7 +239,15 @@ function Standby() {
 // ── 任務畫面：切結書 + 明細 + 撥款 + 簽名 ────────────────────────────────
 const PAYOUT_KINDS = new Set(["ACQUISITION_AFFIDAVIT"]);
 
-function TaskScreen({ task, onComplete }: { task: KioskTask; onComplete: () => void }) {
+function TaskScreen({
+  task,
+  onComplete,
+  onSigningChange,
+}: {
+  task: KioskTask;
+  onComplete: () => void;
+  onSigningChange: (signing: boolean) => void;
+}) {
   const queryClient = useQueryClient();
   const canvasRef = useRef<SignatureCanvasHandle>(null);
   const [hasInk, setHasInk] = useState(false);
@@ -199,12 +276,14 @@ function TaskScreen({ task, onComplete }: { task: KioskTask; onComplete: () => v
     }
     setSubmitting(true);
     setError(null);
+    onSigningChange(true); // 送出期間暫停父層輪詢，避免任務在 POST 途中被換掉
     const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
       params: { path: { task_id: task.id } },
       body: { signature_image_base64: image, chosen_payout: needsPayout ? payout : null },
     });
     setSubmitting(false);
     if (!response.ok) {
+      onSigningChange(false); // 失敗才恢復輪詢（成功走 onComplete，由父層維持暫停）
       if (response.status === 409) {
         // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
         // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。

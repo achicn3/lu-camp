@@ -36,9 +36,8 @@ export function logout(): void {
   clearToken();
 }
 
-/** 讀 JWT 內的 role 原字串（含 KIOSK；供路由閘門判斷），無 token/壞格式 → null。 */
-export function readTokenRole(): string | null {
-  const token = getToken();
+/** 讀某個 JWT（預設當前 token）內的 role 原字串（含 KIOSK；供路由閘門判斷），壞格式→null。 */
+export function readTokenRole(token: string | null = getToken()): string | null {
   if (!token) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -50,6 +49,19 @@ export function readTokenRole(): string | null {
     return typeof role === "string" ? role : null;
   } catch {
     return null;
+  }
+}
+
+/** 驗證店務員（MANAGER/CLERK）帳密但**不持久化** token：供 KIOSK 交回解鎖等
+ *  「需要現場店員授權、又不改變裝置身分」的場景。帳密錯/非店務角色/連線失敗 → false。 */
+export async function verifyStaffCredentials(username: string, password: string): Promise<boolean> {
+  try {
+    const { data } = await api.POST("/api/v1/auth/login", { body: { username, password } });
+    if (!data) return false;
+    const role = readTokenRole(data.access_token);
+    return role === "MANAGER" || role === "CLERK";
+  } catch {
+    return false;
   }
 }
 

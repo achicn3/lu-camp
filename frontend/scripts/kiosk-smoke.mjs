@@ -173,10 +173,19 @@ try {
   const nextLeaked = await page.locator('h1:has-text("交易紀錄簽收")').isVisible();
   ok("交回前不自動帶出下一位任務", stillHandoff && !nextLeaked);
 
-  // 店員點「完成」→ 恢復輪詢，下一張任務才出現
-  await page.click('button:has-text("完成（店員操作）")');
+  // 解鎖需現場店務員帳密：錯帳密不得解鎖
+  await page.click('button:has-text("店員解鎖，接續下一位")');
+  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
+  await page.fill('.kiosk-unlock-form input[name="password"]', "wrong-pass");
+  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
+  await page.waitForSelector('.kiosk-unlock-form .form-error', { timeout: 6000 });
+  ok("錯誤店務帳密不得解鎖", await page.locator('h1:has-text("已完成簽署")').isVisible());
+
+  // 正確店務帳密 → 恢復輪詢，下一張任務才出現
+  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
+  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
   await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
-  ok("店員完成後帶出下一張任務", true);
+  ok("店務帳密解鎖後帶出下一張任務", true);
 
   // ── 回歸：content.items 非陣列時仍完整顯示、不靜默丟棄（Codex K3 high）─────
   const ackBody = await page.textContent(".kiosk-task-body");
@@ -189,6 +198,15 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
   ok("KIOSK token 不得進店務殼", page.url().replace(/\/+$/, "").endsWith("/kiosk"), page.url());
+
+  // ── 回歸：客人裝置上殘留店務 token → /kiosk 不掛載 console、清除並回裝置登入
+  //    （Codex K3 high：非 KIOSK token 絕不留在客人裝置）───────────────────────
+  await page.evaluate((t) => window.localStorage.setItem("lu-camp.access-token", t), mgrToken);
+  await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  const loginShown = await page.locator('button:has-text("啟用裝置")').isVisible();
+  const cleared = await page.evaluate(() => window.localStorage.getItem("lu-camp.access-token"));
+  ok("殘留店務 token 被清除且回裝置登入", loginShown && cleared === null);
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
 } finally {
