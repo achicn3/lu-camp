@@ -382,6 +382,25 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         + chunk(b"IDAT", zlib.compress(b"\xff" + b"\x00" * 4))
         + chunk(b"IEND", b"")
     ).decode()
+    good_idat = chunk(b"IDAT", zlib.compress(b"\x00" * 5))
+    # 白名單外的 critical chunk（大寫開頭）：合規解碼器會拒繪（Codex 第五輪 high）
+    unknown_critical = base64.b64encode(
+        magic + ihdr(1, 1) + chunk(b"CRIT", b"x") + good_idat + chunk(b"IEND", b"")
+    ).decode()
+    # 重複 IHDR
+    dup_ihdr = base64.b64encode(
+        magic + ihdr(1, 1) + ihdr(1, 1) + good_idat + chunk(b"IEND", b"")
+    ).decode()
+    # 不連續 IDAT（IDAT → tEXt → IDAT）
+    half = zlib.compress(b"\x00" * 5)
+    split_idat = base64.b64encode(
+        magic
+        + ihdr(1, 1)
+        + chunk(b"IDAT", half[:4])
+        + chunk(b"tEXt", b"k\x00v")
+        + chunk(b"IDAT", half[4:])
+        + chunk(b"IEND", b"")
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
@@ -394,6 +413,9 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         non_zlib_idat,
         wrong_size,
         bad_filter,
+        unknown_critical,
+        dup_ihdr,
+        split_idat,
     ]
     for payload in bad_payloads:
         resp = await client.post(
@@ -402,6 +424,39 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
             headers=_auth(s.kiosk),
         )
         assert resp.status_code == 422, resp.text
+
+
+async def test_sign_accepts_png_with_ancillary_chunks(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """ancillary chunk（如 tEXt/pHYs）依規格可安全忽略，不得過度阻擋。"""
+    import zlib as _zlib
+
+    s = await _seed(db_session)
+    task = await _create_task(client, s.clerk, s.contact_id)
+    magic = b"\x89PNG\r\n\x1a\n"
+
+    def chunk(ctype: bytes, data: bytes) -> bytes:
+        return (
+            len(data).to_bytes(4, "big")
+            + ctype
+            + data
+            + _zlib.crc32(ctype + data).to_bytes(4, "big")
+        )
+
+    png = (
+        magic
+        + chunk(b"IHDR", (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00")
+        + chunk(b"tEXt", b"Software\x00lu-camp")
+        + chunk(b"IDAT", _zlib.compress(b"\x00" * 5))
+        + chunk(b"IEND", b"")
+    )
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={"signature_image_base64": base64.b64encode(png).decode(), "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert resp.status_code == 200, resp.text
 
 
 async def test_kiosk_oversized_body_rejected_before_parsing(

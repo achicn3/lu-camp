@@ -211,13 +211,18 @@ class SigningService:
     def _validate_png_chunks(image: bytes) -> bytes:
         """逐 chunk 掃描 PNG 結構並回傳串接的 IDAT 資料；任何缺陷一律 InvalidSignatureImage。
 
-        驗證：每個 chunk 的長度落在檔內、CRC 正確；IHDR 為首個 chunk（長度 13）；
-        至少一個 IDAT；IEND 為零長度且為檔案最後一個 chunk（無尾隨資料）。
+        只收「簽名 canvas 會輸出的 PNG 子集」（Codex 第五輪 high）：
+        - 每個 chunk 長度落在檔內、CRC 正確、type 為 ASCII 字母；
+        - IHDR 恰一次且居首（長度 13）；IDAT ≥1 且必須連續；IEND 零長度、居末、無尾隨；
+        - critical chunk 僅允許 IHDR/IDAT/IEND（PLTE/未知 critical 一律拒收——合規解碼器
+          會拒繪未知 critical，收了就是存下印不出來的證據）；ancillary（小寫開頭，如
+          tEXt/pHYs）依規格可安全忽略，放行。
         """
         malformed = InvalidSignatureImage("簽名影像 PNG 結構不完整或損毀")
         pos = 8  # magic 之後
         first = True
         idat = bytearray()
+        idat_ended = False
         while True:
             if pos + 12 > len(image):  # 至少要放得下 length+type+CRC
                 raise malformed
@@ -229,16 +234,27 @@ class SigningService:
             crc = int.from_bytes(image[data_end : data_end + 4], "big")
             if zlib.crc32(image[pos + 4 : data_end]) != crc:
                 raise malformed
+            if not all(65 <= b <= 90 or 97 <= b <= 122 for b in chunk_type):
+                raise malformed
             if first:
                 if chunk_type != b"IHDR" or length != 13:
                     raise malformed
                 first = False
-            if chunk_type == b"IDAT":
+            elif chunk_type == b"IHDR":  # 重複 IHDR
+                raise malformed
+            elif chunk_type == b"IDAT":
+                if idat_ended:  # IDAT 中斷後再現＝不連續
+                    raise malformed
                 idat += image[pos + 8 : data_end]
-            if chunk_type == b"IEND":
+            elif chunk_type == b"IEND":
                 if length != 0 or data_end + 4 != len(image) or not idat:
                     raise malformed
                 return bytes(idat)
+            else:
+                if idat:
+                    idat_ended = True
+                if not chunk_type[0] & 0x20:  # 大寫開頭＝critical；白名單外一律拒收
+                    raise malformed
             pos = data_end + 4
 
     @staticmethod
