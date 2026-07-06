@@ -7,9 +7,11 @@
 
 import base64
 import binascii
+import hashlib
 import zlib
 from datetime import UTC, datetime
 
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,10 +58,26 @@ class SigningService:
         self._session = session
         self._repo = SigningRepository(session)
 
+    async def _lock_store_signing(self, store_id: int) -> None:
+        """取本店簽署互斥鎖（pg_advisory_xact_lock，交易結束自動釋放）。
+
+        序列化同店的 create/cancel/sign（Codex 第八輪 medium）：否則店員重推
+        （create_task 於 cancel_pending_tasks 前先做 contact/agreement 前置作業）
+        與客人在舊頁面送簽可交錯，使舊任務先被簽 SIGNED、cancel 的 bulk UPDATE
+        再也匹配不到它，留下「對已被取代內容的有效簽名」＋一張新待簽任務。
+        於三個變更入口最前面取鎖，讓重推與舊頁簽名只有序列化後的勝者生效。
+        """
+        seed = f"signing:{store_id}".encode()
+        lock_key = int.from_bytes(hashlib.sha256(seed).digest()[:8], byteorder="big", signed=True)
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key}
+        )
+
     async def create_task(
         self, store_id: int, data: SignatureTaskCreate, *, created_by: int
     ) -> SignatureTask:
         """建立簽署任務（店員發起）。AFFIDAVIT 自動綁定當前切結書版本（lazy 落庫）。"""
+        await self._lock_store_signing(store_id)
         # 跨模組只經對方 service：確認任務對象存在且屬同店。
         from app.modules.contacts.service import ContactService
 
@@ -92,6 +110,7 @@ class SigningService:
 
     async def cancel_task(self, store_id: int, task_id: int) -> SignatureTask:
         """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。僅 PENDING 可作廢。"""
+        await self._lock_store_signing(store_id)
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
@@ -115,6 +134,7 @@ class SigningService:
     ) -> SignatureTask:
         """手持端送出簽名：驗 PNG、驗撥款選擇（D7）、PENDING→SIGNED（FOR UPDATE 序列化）。"""
         image = self._decode_signature(signature_image_base64)
+        await self._lock_store_signing(store_id)
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
