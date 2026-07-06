@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// (authed) 守衛測試：有 token 渲染內容；無 token 導回 /login；401 廣播導回；登出/401 清空 query 快取。
+// (authed) 守衛測試：有效店務 token 渲染內容；無 token 導回 /login；KIOSK/無效 token 不渲染
+// 店務殼（導回 /kiosk 或 /login）；401 廣播導回；登出/401 清空 query 快取。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -13,6 +14,13 @@ vi.mock("next/navigation", () => ({
 
 import AuthedLayout from "@/app/(authed)/layout";
 import { UNAUTHORIZED_EVENT, clearToken, setToken } from "@/lib/token";
+
+// 產生 decodeSession 可解析的 JWT 形狀 token（header.payload.sig，payload 為 base64url）。
+function makeToken(role: string, storeId = 1, sub = "1"): string {
+  const b64url = (obj: unknown) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${b64url({ alg: "HS256", typ: "JWT" })}.${b64url({ sub, role, store_id: storeId })}.sig`;
+}
 
 function renderLayout(children: ReactNode, queryClient = new QueryClient()) {
   render(
@@ -30,15 +38,15 @@ afterEach(() => {
 });
 
 describe("(authed) layout", () => {
-  it("有 token：渲染內容、不導向", async () => {
-    setToken("tok");
+  it("有效店務 token：渲染內容、不導向", async () => {
+    setToken(makeToken("MANAGER"));
     renderLayout(<p>受保護內容</p>);
     expect(await screen.findByText("受保護內容")).toBeDefined();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
   it("token 只在 localStorage（重新整理情境）：仍渲染內容、不誤導去登入", async () => {
-    window.localStorage.setItem("lu-camp.access-token", "persisted");
+    window.localStorage.setItem("lu-camp.access-token", makeToken("CLERK"));
     renderLayout(<p>受保護內容</p>);
     expect(await screen.findByText("受保護內容")).toBeDefined();
     expect(replaceMock).not.toHaveBeenCalled();
@@ -50,8 +58,22 @@ describe("(authed) layout", () => {
     expect(screen.queryByText("受保護內容")).toBeNull();
   });
 
+  it("KIOSK token：不渲染店務殼、導回 /kiosk", async () => {
+    setToken(makeToken("KIOSK"));
+    renderLayout(<p>受保護內容</p>);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/kiosk"));
+    expect(screen.queryByText("受保護內容")).toBeNull();
+  });
+
+  it("無效（非 JWT）token：不渲染店務殼、導回 /login", async () => {
+    setToken("garbage");
+    renderLayout(<p>受保護內容</p>);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));
+    expect(screen.queryByText("受保護內容")).toBeNull();
+  });
+
   it("收到 401 廣播：導回 /login 並清空 query 快取", async () => {
-    setToken("tok");
+    setToken(makeToken("MANAGER"));
     const qc = new QueryClient();
     qc.setQueryData(["reports", "access"], "granted");
     renderLayout(<p>受保護內容</p>, qc);
@@ -62,7 +84,7 @@ describe("(authed) layout", () => {
   });
 
   it("登出：清空 query 快取，避免下一位登入者看到前一身分的資料/授權", async () => {
-    setToken("tok");
+    setToken(makeToken("MANAGER"));
     const qc = new QueryClient();
     qc.setQueryData(["premium-rate-history"], [{ id: 1 }]);
     qc.setQueryData(["reports", "access"], "granted");

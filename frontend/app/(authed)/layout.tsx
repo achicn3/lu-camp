@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 
-import { decodeSession, logout } from "@/lib/auth";
+import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
 
 const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
@@ -42,7 +42,13 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (hydrated && token === null) router.replace("/login");
+    if (!hydrated) return;
+    // 無 token，或 token 非有效店務身分（KIOSK 簽署裝置 token 使 decodeSession()→null，
+    // 或格式損毀）→ 不得渲染店務殼（否則客人面向的 KIOSK 裝置導到店務頁時，會在後端
+    // 403 前短暫看到快取的店務資料）。KIOSK 一律導回其專用 /kiosk（Codex K3 medium）。
+    if (token === null || decodeSession() === null) {
+      router.replace(readTokenRole() === "KIOSK" ? "/kiosk" : "/login");
+    }
   }, [hydrated, token, router]);
 
   useEffect(() => {
@@ -55,8 +61,9 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [router, queryClient]);
 
-  if (!hydrated || token === null) return null;
+  // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
+  if (!hydrated || token === null || session === null) return null;
 
   return (
     <div className="app-shell">

@@ -50,9 +50,10 @@ function KioskLogin() {
     const form = new FormData(event.currentTarget);
     setSubmitting(true);
     setError(null);
-    // 換帳號即清掉舊 kiosk 查詢快取：客人面向裝置不得閃現前一位客人的任務快照
-    // （Codex K3 medium；比照 (authed) 登入清快取）。
-    queryClient.removeQueries({ queryKey: ["kiosk"] });
+    // 進入/切換 KIOSK 是一次認證邊界轉換：清整個 QueryClient，避免此 SPA 內殘留的
+    // 店務頁快取（非 kiosk 鍵）在客人面向裝置上被看到，也不閃現前一位客人的任務
+    // 快照（Codex K3 medium；比照 (authed) 登入/登出清快取）。
+    queryClient.clear();
     const result = await login(String(form.get("username")), String(form.get("password")));
     setSubmitting(false);
     if (!result.ok) setError(result.message);
@@ -104,8 +105,8 @@ function KioskConsole() {
             type="button"
             className="btn-secondary"
             onClick={() => {
-              // 先移除 kiosk 快取再清 token：避免重登期間閃現舊快照（Codex K3 medium）。
-              queryClient.removeQueries({ queryKey: ["kiosk"] });
+              // 認證邊界：清整個快取再清 token，避免重登期間閃現舊快照/店務殘留（Codex K3）。
+              queryClient.clear();
               clearToken();
             }}
           >
@@ -308,8 +309,11 @@ const CONTENT_LABELS: Record<string, string> = {
 // （Codex K3 high：簽到沒看到的內容＝證據風險）。已知鍵給中文標籤與金額格式，
 // 未知鍵照原樣列出；巢狀物件/陣列（items 以外）以可讀字串呈現。
 function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
-  const items = Array.isArray(content.items) ? (content.items as unknown[]) : [];
-  const rest = Object.entries(content).filter(([key]) => key !== "items");
+  const itemsIsArray = Array.isArray(content.items);
+  const items = itemsIsArray ? (content.items as unknown[]) : [];
+  // 僅在 items 真的以陣列渲染時，才將它排除於一般欄位；若 items 非陣列（schema 漂移/
+  // 錯誤生產者），仍以一般欄位 renderValue 列出，絕不靜默丟棄客人所簽內容（Codex K3 高）。
+  const rest = Object.entries(content).filter(([key]) => key !== "items" || !itemsIsArray);
 
   return (
     <div className="kiosk-snapshot">

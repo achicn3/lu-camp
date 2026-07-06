@@ -161,6 +161,24 @@ try {
     headers: { authorization: `Bearer ${mgrToken}` },
   });
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
+
+  // ── 回歸：content.items 非陣列時仍完整顯示、不靜默丟棄（Codex K3 high）─────
+  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+    kind: "TRANSACTION_ACK",
+    contact_id: contactId,
+    content: { items: "單一字串品項", note: "非陣列 items 也要顯示" },
+  });
+  await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  const ackBody = await page.textContent(".kiosk-task-body");
+  ok(
+    "非陣列 items 不被丟棄",
+    ackBody.includes("單一字串品項") && ackBody.includes("非陣列 items 也要顯示"),
+  );
+
+  // ── 回歸：KIOSK token 導到店務頁 → 不渲染店務殼、導回 /kiosk（Codex K3 medium）──
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  ok("KIOSK token 不得進店務殼", page.url().replace(/\/+$/, "").endsWith("/kiosk"), page.url());
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
 } finally {
