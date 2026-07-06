@@ -899,6 +899,8 @@ export interface paths {
         /**
          * Get Kiosk Task
          * @description 手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
+         *
+         *     僅限 PENDING：已簽/已作廢/不存在一律 404——手持裝置不得憑 ID 枚舉歷史內容快照。
          */
         get: operations["getKioskTask"];
         put?: never;

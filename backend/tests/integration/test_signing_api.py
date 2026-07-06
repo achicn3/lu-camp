@@ -197,6 +197,65 @@ async def test_kiosk_current_returns_latest_pending_with_agreement_text(
     assert "個人資料" in body["agreement_body"]
 
 
+async def test_repush_cancels_previous_pending(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """重推＝舊單作廢：停在舊頁面的平板不可簽下舊快照（Codex 對抗式審查 high）。"""
+    s = await _seed(db_session)
+    first = await _create_task(client, s.clerk, s.contact_id)
+    second = await _create_task(client, s.clerk, s.contact_id)
+
+    resp = await client.get(f"/api/v1/signing/tasks/{first['id']}", headers=_auth(s.clerk))
+    assert resp.json()["status"] == "CANCELLED"
+    assert resp.json()["cancelled_at"] is not None
+
+    # 舊任務不可再簽；新任務可簽
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{first['id']}/sign",
+        json={"signature_image_base64": _PNG_B64, "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert resp.status_code == 409
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{second['id']}/sign",
+        json={"signature_image_base64": _PNG_B64, "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert resp.status_code == 200
+
+
+async def test_kiosk_cannot_read_finished_tasks(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """手持端不得憑 ID 枚舉歷史內容快照：已簽/已作廢一律 404（Codex 對抗式審查 high）。"""
+    s = await _seed(db_session)
+    signed = await _create_task(client, s.clerk, s.contact_id)
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{signed['id']}/sign",
+        json={"signature_image_base64": _PNG_B64, "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert resp.status_code == 200
+    resp = await client.get(f"/api/v1/kiosk/tasks/{signed['id']}", headers=_auth(s.kiosk))
+    assert resp.status_code == 404
+
+    cancelled = await _create_task(client, s.clerk, s.contact_id)
+    resp = await client.post(
+        f"/api/v1/signing/tasks/{cancelled['id']}/cancel", headers=_auth(s.clerk)
+    )
+    assert resp.status_code == 200
+    resp = await client.get(f"/api/v1/kiosk/tasks/{cancelled['id']}", headers=_auth(s.kiosk))
+    assert resp.status_code == 404
+
+    # PENDING 中仍可重讀（簽名頁確認未被作廢）
+    pending = await _create_task(client, s.clerk, s.contact_id)
+    resp = await client.get(f"/api/v1/kiosk/tasks/{pending['id']}", headers=_auth(s.kiosk))
+    assert resp.status_code == 200
+    # 店員端不受此限：歷史任務仍可查（對帳/列印）
+    resp = await client.get(f"/api/v1/signing/tasks/{signed['id']}", headers=_auth(s.clerk))
+    assert resp.status_code == 200
+
+
 # ── 簽名流程與守衛 ─────────────────────────────────────────────────────
 
 
@@ -276,10 +335,26 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
     s = await _seed(db_session)
     task = await _create_task(client, s.clerk, s.contact_id)
     oversized = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 600_000).decode()
+    magic = b"\x89PNG\r\n\x1a\n"
+    iend = b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"
+    # 只有 magic、無 IHDR/IEND 的偽 PNG
+    fake_structure = base64.b64encode(magic + b"0" * 64).decode()
+    # 結構完整但寬度為 0（不合理尺寸）
+    zero_width = base64.b64encode(
+        magic
+        + b"\x00\x00\x00\x0dIHDR"
+        + (0).to_bytes(4, "big")
+        + (1).to_bytes(4, "big")
+        + b"\x08\x06\x00\x00\x00"
+        + b"\x00" * 4
+        + iend
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
-        oversized,  # 超過大小上限
+        oversized,  # 超過大小上限（解碼前即以 base64 長度擋下）
+        fake_structure,  # PNG magic 但無 IHDR/IEND
+        zero_width,  # IHDR 尺寸不合理
     ]
     for payload in bad_payloads:
         resp = await client.post(

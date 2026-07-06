@@ -120,14 +120,28 @@ def upgrade() -> None:
     op.create_index("ix_signature_tasks_store_id", "signature_tasks", ["store_id"])
     op.create_index("ix_signature_tasks_contact_id", "signature_tasks", ["contact_id"])
     op.create_index("ix_signature_tasks_store_status", "signature_tasks", ["store_id", "status"])
+    # 同店同時最多一件待簽（重推＝舊單作廢的最終防線）。
+    op.create_index(
+        "uq_signature_tasks_store_pending",
+        "signature_tasks",
+        ["store_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'PENDING'"),
+    )
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """Downgrade schema。
+
+    注意：KIOSK 帳號屬本 migration 引入的角色，降級前必須先移除，否則恢復舊
+    CHECK（僅 MANAGER/CLERK）會失敗。signing 兩表先 drop，無 created_by FK 殘留。
+    """
+    op.drop_index("uq_signature_tasks_store_pending", table_name="signature_tasks")
     op.drop_index("ix_signature_tasks_store_status", table_name="signature_tasks")
     op.drop_index("ix_signature_tasks_contact_id", table_name="signature_tasks")
     op.drop_index("ix_signature_tasks_store_id", table_name="signature_tasks")
     op.drop_table("signature_tasks")
     op.drop_table("agreement_versions")
+    op.execute("DELETE FROM users WHERE role = 'KIOSK'")
     op.drop_constraint("userrole", "users", type_="check")
     op.create_check_constraint("userrole", "users", f"role IN ({_USER_ROLE_OLD})")

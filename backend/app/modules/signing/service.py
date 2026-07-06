@@ -25,7 +25,11 @@ from app.shared.exceptions import (
 )
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_PNG_IEND = b"IEND\xae\x42\x60\x82"
 _MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
+# base64 膨脹 4/3；解碼「前」先以字串長度擋上限，不先吃記憶體（Codex 對抗式審查 high）
+_MAX_SIGNATURE_B64_CHARS = _MAX_SIGNATURE_BYTES * 4 // 3 + 8
+_MAX_SIGNATURE_DIMENSION = 4096  # 簽名 canvas 尺寸上限（像素）
 
 
 class SigningService:
@@ -47,6 +51,10 @@ class SigningService:
         agreement_version_id: int | None = None
         if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             agreement_version_id = (await self._get_or_seed_current_agreement()).id
+
+        # 重推＝舊單作廢：同店同時最多一件待簽（DB 部分唯一索引為最終防線）。
+        # 否則店員改內容重推後，停在舊頁面的平板仍可簽下舊快照，留下錯誤證據。
+        await self._repo.cancel_pending_tasks(store_id)
 
         task = SignatureTask(
             store_id=store_id,
@@ -109,6 +117,17 @@ class SigningService:
     async def get_task(self, store_id: int, task_id: int) -> SignatureTask | None:
         return await self._repo.get(store_id, task_id)
 
+    async def get_pending_task_for_kiosk(self, store_id: int, task_id: int) -> SignatureTask | None:
+        """手持端重讀：僅回 PENDING 中的任務，其餘一律 None（→404）。
+
+        手持裝置在客人手上，不得憑 ID 枚舉歷史簽署單的內容快照；簽名送出的
+        回應已帶最終狀態，事後不需要（也不允許）再讀。
+        """
+        task = await self._repo.get(store_id, task_id)
+        if task is None or task.status is not SignatureTaskStatus.PENDING:
+            return None
+        return task
+
     async def latest_pending_task(self, store_id: int) -> SignatureTask | None:
         """手持端輪詢：最新一筆待簽任務（單店單裝置，同時最多一件在簽）。"""
         return await self._repo.latest_pending(store_id)
@@ -146,13 +165,26 @@ class SigningService:
 
     @staticmethod
     def _decode_signature(signature_image_base64: str) -> bytes:
-        """base64 → bytes，驗 PNG magic 與大小上限；不合格一律 InvalidSignatureImage。"""
+        """base64 → bytes；長度上限於解碼前先擋，再驗 PNG 結構（magic/IHDR 尺寸/IEND 結尾）。
+
+        威脅模型是「以裝置 token 塞垃圾/超大 payload 當簽名證據」，不是圖像解析漏洞，
+        故做結構驗證而不引入完整解碼器；不合格一律 InvalidSignatureImage。
+        """
+        if len(signature_image_base64) > _MAX_SIGNATURE_B64_CHARS:
+            raise InvalidSignatureImage(f"簽名影像過大（上限 {_MAX_SIGNATURE_BYTES // 1000} KB）")
         try:
             image = base64.b64decode(signature_image_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise InvalidSignatureImage("簽名影像非有效 base64") from exc
-        if not image.startswith(_PNG_MAGIC):
-            raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
         if len(image) > _MAX_SIGNATURE_BYTES:
             raise InvalidSignatureImage(f"簽名影像過大（上限 {_MAX_SIGNATURE_BYTES // 1000} KB）")
+        # PNG 結構驗證：magic ＋ 首 chunk 為 IHDR（尺寸合理）＋ 以 IEND chunk 結尾。
+        if len(image) < 33 or not image.startswith(_PNG_MAGIC) or image[12:16] != b"IHDR":
+            raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
+        width = int.from_bytes(image[16:20], "big")
+        height = int.from_bytes(image[20:24], "big")
+        if not (1 <= width <= _MAX_SIGNATURE_DIMENSION and 1 <= height <= _MAX_SIGNATURE_DIMENSION):
+            raise InvalidSignatureImage("簽名影像尺寸不合理")
+        if not image.endswith(_PNG_IEND):
+            raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
         return image

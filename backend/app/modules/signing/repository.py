@@ -1,6 +1,8 @@
 """signing 資料存取：簽署任務與切結書版本（唯一可碰 signing 資料表的層）。"""
 
-from sqlalchemy import select
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.signing.models import AgreementVersion, SignatureTask
@@ -32,6 +34,21 @@ class SigningRepository:
             .with_for_update()
         )
         return result
+
+    async def cancel_pending_tasks(self, store_id: int) -> int:
+        """作廢同店所有 PENDING 任務（重推＝舊單作廢；守護「同時最多一件待簽」）。"""
+        result = cast(
+            "CursorResult[Any]",
+            await self._session.execute(
+                update(SignatureTask)
+                .where(
+                    SignatureTask.store_id == store_id,
+                    SignatureTask.status == SignatureTaskStatus.PENDING,
+                )
+                .values(status=SignatureTaskStatus.CANCELLED, cancelled_at=func.now())
+            ),
+        )
+        return result.rowcount or 0
 
     async def latest_pending(self, store_id: int) -> SignatureTask | None:
         """最新一筆 PENDING（手持端輪詢用；單店單裝置，同時最多一件在簽）。"""

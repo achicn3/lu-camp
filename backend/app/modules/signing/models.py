@@ -20,6 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -80,6 +81,13 @@ class SignatureTask(Base, TimestampMixin):
             name="ck_signature_tasks_payout_binary",
         ),
         Index("ix_signature_tasks_store_status", "store_id", "status"),
+        # 同店同時最多一件待簽（重推＝舊單作廢的最終防線；併發建立時第二筆撞索引）。
+        Index(
+            "uq_signature_tasks_store_pending",
+            "store_id",
+            unique=True,
+            postgresql_where=text("status = 'PENDING'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

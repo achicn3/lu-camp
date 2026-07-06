@@ -173,11 +173,14 @@ async def get_current_kiosk_task(session: SessionDep, user: KioskDep) -> KioskTa
 
 @kiosk_router.get("/tasks/{task_id}", response_model=KioskTaskRead, operation_id="getKioskTask")
 async def get_kiosk_task(task_id: int, session: SessionDep, user: KioskDep) -> KioskTaskRead:
-    """手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。"""
+    """手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
+
+    僅限 PENDING：已簽/已作廢/不存在一律 404——手持裝置不得憑 ID 枚舉歷史內容快照。
+    """
     service = SigningService(session)
-    task = await service.get_task(user.store_id, task_id)
+    task = await service.get_pending_task_for_kiosk(user.store_id, task_id)
     if task is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="簽署任務不存在")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="簽署任務不存在或已結束")
     return _to_kiosk_read(task, await service.get_agreement_for_task(task))
 
 
