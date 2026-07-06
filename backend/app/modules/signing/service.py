@@ -44,12 +44,14 @@ _MIN_SIGNATURE_HEIGHT = 50
 _MIN_INK_PIXELS = 100  # 一筆最短的簽名劃線也有數百個深色像素
 _INK_ALPHA_MIN = 64  # 墨跡定義：不透明度 ≥ 此值
 _INK_DARKNESS_MAX = 200  # 且亮度 < 此值（白底黑字/透明底黑字皆適用）
-# color_type → 通道數；bit_depth 合法組合依 PNG 規格 §11.2.2。
-# 不收 palette 型（3）：簽名 canvas 只會輸出灰階/truecolor（±alpha），
-# 一併免除 PLTE chunk 語意驗證的整個攻擊面（Codex 第四輪建議）。
-_PNG_CHANNELS = {0: 1, 2: 3, 4: 2, 6: 4}
-# 只收 8-bit（canvas 一律輸出 8-bit；亦使解濾波為位元組對齊、實作單純）
-_PNG_VALID_BIT_DEPTHS = {0: {8}, 2: {8}, 4: {8}, 6: {8}}
+# 只收 8-bit RGBA（color type 6）：HTML canvas 的 toDataURL('image/png') 一律輸出此型。
+# 收斂到「客人手持端實際會產生的唯一子集」——每像素有真 alpha，透明度全由 alpha 表達，
+# 免除 palette（3）的 PLTE、以及 type 0/2 搭 tRNS 把墨跡宣告成透明的整個攻擊面
+# （Codex 第四/九輪）。tRNS 對 type 6 本就非法，另於 chunk 掃描明確拒收。
+_PNG_CHANNELS = {6: 4}
+_PNG_VALID_BIT_DEPTHS = {6: {8}}
+# 會改變透明度/合成語意的 ancillary chunk：一律拒收（避免「渲染空白卻算有墨跡」）。
+_PNG_FORBIDDEN_CHUNKS = frozenset({b"tRNS", b"bKGD"})
 _PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法值（規格 §9.2）
 
 
@@ -280,6 +282,10 @@ class SigningService:
                     idat_ended = True
                 if not chunk_type[0] & 0x20:  # 大寫開頭＝critical；白名單外一律拒收
                     raise malformed
+                if (
+                    chunk_type in _PNG_FORBIDDEN_CHUNKS
+                ):  # 改變透明度/合成的 ancillary（Codex 第九輪）
+                    raise malformed
             pos = data_end + 4
 
     @staticmethod
@@ -338,11 +344,12 @@ class SigningService:
     def _require_visible_ink(raw: bytes, width: int, height: int, color_type: int) -> None:
         """解濾波（PNG 規格 §9：None/Sub/Up/Average/Paeth）並驗可見墨跡像素數。
 
-        空白/全透明影像不得成為已簽署的法律證據（Codex 第七輪 high）。墨跡定義：
-        不透明度 ≥ _INK_ALPHA_MIN 且亮度 < _INK_DARKNESS_MAX（涵蓋白底黑字與
-        透明底黑字兩種 canvas 輸出）。8-bit 限定（上游已擋），bpp＝通道數。
+        空白/全透明影像不得成為已簽署的法律證據（Codex 第七輪 high）。上游已收斂為
+        8-bit RGBA（type 6，每像素含真 alpha；tRNS 已拒收），故透明度以逐像素 alpha
+        判定，無標頭層級透明的假設漏洞。墨跡定義：alpha ≥ _INK_ALPHA_MIN 且
+        亮度 < _INK_DARKNESS_MAX（白底黑字與透明底黑字皆適用）。
         """
-        bpp = _PNG_CHANNELS[color_type]
+        bpp = _PNG_CHANNELS[color_type]  # RGBA → 4
         stride = width * bpp
         prev = bytes(stride)
         ink = 0
@@ -372,18 +379,8 @@ class SigningService:
                     predictor = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
                     row[i] = (row[i] + predictor) & 0xFF
             for x in range(0, stride, bpp):
-                if color_type == 6:
-                    alpha = row[x + 3]
-                    luma = (row[x] + row[x + 1] + row[x + 2]) // 3
-                elif color_type == 4:
-                    alpha = row[x + 1]
-                    luma = row[x]
-                elif color_type == 2:
-                    alpha = 255
-                    luma = (row[x] + row[x + 1] + row[x + 2]) // 3
-                else:  # 0：灰階
-                    alpha = 255
-                    luma = row[x]
+                alpha = row[x + 3]
+                luma = (row[x] + row[x + 1] + row[x + 2]) // 3
                 if alpha >= _INK_ALPHA_MIN and luma < _INK_DARKNESS_MAX:
                     ink += 1
             if ink >= _MIN_INK_PIXELS:

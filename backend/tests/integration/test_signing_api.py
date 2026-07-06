@@ -441,6 +441,39 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         + chunk(b"IDAT", zlib.compress(b"\x00" * 5))
         + chunk(b"IEND", b"")
     ).decode()
+    # 8-bit truecolor（type 2）＋ tRNS 把黑色宣告為透明：渲染空白卻含深色樣本，
+    # 不得被算成有墨跡（Codex 第九輪 high）。type 2 於標頭即被拒（只收 RGBA）。
+    tc_width, tc_height = 200, 80
+    tc_raw = bytearray()
+    for _y in range(tc_height):
+        tc_raw.append(0)
+        tc_raw += b"\x00\x00\x00" * tc_width  # 全黑
+    truecolor_ihdr = chunk(
+        b"IHDR",
+        tc_width.to_bytes(4, "big") + tc_height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00",
+    )
+    truecolor_trns = base64.b64encode(
+        magic
+        + truecolor_ihdr
+        + chunk(b"tRNS", b"\x00\x00\x00\x00\x00\x00")  # 黑色透明
+        + chunk(b"IDAT", zlib.compress(bytes(tc_raw)))
+        + chunk(b"IEND", b"")
+    ).decode()
+    # 合法 RGBA（有墨跡）但夾帶 tRNS ancillary → 改變透明度語意，拒收（Codex 第九輪）
+    rgba_raw = bytearray()
+    for y in range(80):
+        rgba_raw.append(0)
+        for _x in range(200):
+            rgba_raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
+    rgba_with_trns = base64.b64encode(
+        magic
+        + chunk(
+            b"IHDR", (200).to_bytes(4, "big") + (80).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
+        )
+        + chunk(b"tRNS", b"\x00")
+        + chunk(b"IDAT", zlib.compress(bytes(rgba_raw)))
+        + chunk(b"IEND", b"")
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
@@ -457,6 +490,8 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         dup_ihdr,
         split_idat,
         zero_len_split_idat,
+        truecolor_trns,
+        rgba_with_trns,
     ]
     for payload in bad_payloads:
         resp = await client.post(
