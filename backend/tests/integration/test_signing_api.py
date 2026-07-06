@@ -375,6 +375,13 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
     wrong_size = base64.b64encode(
         magic + ihdr(1, 1) + chunk(b"IDAT", zlib.compress(b"\x00")) + chunk(b"IEND", b"")
     ).decode()
+    # 結構/CRC/zlib 全對、長度也對，但掃描線 filter byte 非法（0xFF ∉ 0..4）
+    bad_filter = base64.b64encode(
+        magic
+        + ihdr(1, 1)
+        + chunk(b"IDAT", zlib.compress(b"\xff" + b"\x00" * 4))
+        + chunk(b"IEND", b"")
+    ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
@@ -386,6 +393,7 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         trailing,
         non_zlib_idat,
         wrong_size,
+        bad_filter,
     ]
     for payload in bad_payloads:
         resp = await client.post(

@@ -35,15 +35,17 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _MAX_SIGNATURE_DIMENSION = 4096  # 簽名 canvas 尺寸上限（像素）
 # 解壓後原始掃描線資料上限：綁住 zlib 解壓的記憶體（512KB 壓縮檔在正常簽名圖遠達不到此值）
 _MAX_RAW_IMAGE_BYTES = 8_000_000
-# color_type → 通道數；bit_depth 合法組合依 PNG 規格 §11.2.2
-_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+# color_type → 通道數；bit_depth 合法組合依 PNG 規格 §11.2.2。
+# 不收 palette 型（3）：簽名 canvas 只會輸出灰階/truecolor（±alpha），
+# 一併免除 PLTE chunk 語意驗證的整個攻擊面（Codex 第四輪建議）。
+_PNG_CHANNELS = {0: 1, 2: 3, 4: 2, 6: 4}
 _PNG_VALID_BIT_DEPTHS = {
     0: {1, 2, 4, 8, 16},
     2: {8, 16},
-    3: {1, 2, 4, 8},
     4: {8, 16},
     6: {8, 16},
 }
+_PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法值（規格 §9.2）
 
 
 class SigningService:
@@ -281,3 +283,8 @@ class SigningService:
             or len(raw) != expected
         ):
             raise InvalidSignatureImage("簽名影像的影像資料不完整（無法渲染）")
+        # 每條掃描線首位元組必為合法 filter type 0..4（Codex 第四輪 high）：
+        # zlib 流完整不代表內容合法，filter byte 非法的 PNG 多數渲染器會拒繪。
+        stride = 1 + (width * bits_per_pixel + 7) // 8
+        if any(raw[row * stride] not in _PNG_FILTER_TYPES for row in range(height)):
+            raise InvalidSignatureImage("簽名影像的掃描線資料非法（無法渲染）")
