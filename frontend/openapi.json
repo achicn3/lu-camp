@@ -3766,6 +3766,7 @@
             ]
           },
           "signature_image_base64": {
+            "maxLength": 682674,
             "minLength": 1,
             "title": "Signature Image Base64",
             "type": "string"

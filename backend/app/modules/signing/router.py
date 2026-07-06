@@ -25,6 +25,7 @@ from app.shared.exceptions import (
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
+    SignatureTaskConflict,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
@@ -83,6 +84,9 @@ async def create_signature_task(
     except ContactNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SignatureTaskConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     agreement = await service.get_agreement_for_task(task)
     result = _to_read(task, agreement)
     await session.commit()

@@ -7,28 +7,31 @@
 
 import base64
 import binascii
+import zlib
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.signing import agreements
 from app.modules.signing.models import AgreementVersion, SignatureTask
 from app.modules.signing.repository import SigningRepository
-from app.modules.signing.schemas import SignatureTaskCreate
+from app.modules.signing.schemas import (
+    MAX_SIGNATURE_B64_CHARS,
+    MAX_SIGNATURE_BYTES,
+    SignatureTaskCreate,
+)
 from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
 from app.shared.exceptions import (
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
+    SignatureTaskConflict,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-_PNG_IEND = b"IEND\xae\x42\x60\x82"
-_MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
-# base64 膨脹 4/3；解碼「前」先以字串長度擋上限，不先吃記憶體（Codex 對抗式審查 high）
-_MAX_SIGNATURE_B64_CHARS = _MAX_SIGNATURE_BYTES * 4 // 3 + 8
 _MAX_SIGNATURE_DIMENSION = 4096  # 簽名 canvas 尺寸上限（像素）
 
 
@@ -66,7 +69,10 @@ class SigningService:
             ref_id=data.ref_id,
             created_by=created_by,
         )
-        return await self._repo.add(task)
+        try:
+            return await self._repo.add(task)
+        except IntegrityError as exc:  # 併發重推：另一筆先建成功（單一待簽唯一索引）
+            raise SignatureTaskConflict("簽署任務建立衝突（另一筆同時建立），請重試") from exc
 
     async def cancel_task(self, store_id: int, task_id: int) -> SignatureTask:
         """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。僅 PENDING 可作廢。"""
@@ -159,32 +165,68 @@ class SigningService:
         if existing is not None:
             return existing
         title, body = agreements.AGREEMENT_TEXTS[version]
-        return await self._repo.add_agreement(
-            AgreementVersion(version=version, title=title, body=body)
-        )
+        try:
+            return await self._repo.add_agreement(
+                AgreementVersion(version=version, title=title, body=body)
+            )
+        except IntegrityError as exc:  # 首次落庫競態：另一筆先種成功
+            raise SignatureTaskConflict("切結書版本初始化衝突，請重試") from exc
 
     @staticmethod
     def _decode_signature(signature_image_base64: str) -> bytes:
-        """base64 → bytes；長度上限於解碼前先擋，再驗 PNG 結構（magic/IHDR 尺寸/IEND 結尾）。
+        """base64 → bytes；長度上限於解碼前先擋，再做完整 PNG 結構驗證。
 
-        威脅模型是「以裝置 token 塞垃圾/超大 payload 當簽名證據」，不是圖像解析漏洞，
-        故做結構驗證而不引入完整解碼器；不合格一律 InvalidSignatureImage。
+        簽名是法律證據，存進去就必須能渲染/列印：逐 chunk 驗長度與 CRC、IHDR 居首
+        且尺寸合理、至少一個 IDAT、IEND 為零長度終結且無尾隨資料。schema 已有
+        max_length，此處為最後防線；不合格一律 InvalidSignatureImage。
         """
-        if len(signature_image_base64) > _MAX_SIGNATURE_B64_CHARS:
-            raise InvalidSignatureImage(f"簽名影像過大（上限 {_MAX_SIGNATURE_BYTES // 1000} KB）")
+        if len(signature_image_base64) > MAX_SIGNATURE_B64_CHARS:
+            raise InvalidSignatureImage(f"簽名影像過大（上限 {MAX_SIGNATURE_BYTES // 1000} KB）")
         try:
             image = base64.b64decode(signature_image_base64, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise InvalidSignatureImage("簽名影像非有效 base64") from exc
-        if len(image) > _MAX_SIGNATURE_BYTES:
-            raise InvalidSignatureImage(f"簽名影像過大（上限 {_MAX_SIGNATURE_BYTES // 1000} KB）")
-        # PNG 結構驗證：magic ＋ 首 chunk 為 IHDR（尺寸合理）＋ 以 IEND chunk 結尾。
-        if len(image) < 33 or not image.startswith(_PNG_MAGIC) or image[12:16] != b"IHDR":
+        if len(image) > MAX_SIGNATURE_BYTES:
+            raise InvalidSignatureImage(f"簽名影像過大（上限 {MAX_SIGNATURE_BYTES // 1000} KB）")
+        if not image.startswith(_PNG_MAGIC):
             raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
+        SigningService._validate_png_chunks(image)
         width = int.from_bytes(image[16:20], "big")
         height = int.from_bytes(image[20:24], "big")
         if not (1 <= width <= _MAX_SIGNATURE_DIMENSION and 1 <= height <= _MAX_SIGNATURE_DIMENSION):
             raise InvalidSignatureImage("簽名影像尺寸不合理")
-        if not image.endswith(_PNG_IEND):
-            raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
         return image
+
+    @staticmethod
+    def _validate_png_chunks(image: bytes) -> None:
+        """逐 chunk 掃描 PNG 結構；任何缺陷一律 InvalidSignatureImage。
+
+        驗證：每個 chunk 的長度落在檔內、CRC 正確；IHDR 為首個 chunk（長度 13）；
+        至少一個 IDAT；IEND 為零長度且為檔案最後一個 chunk（無尾隨資料）。
+        """
+        malformed = InvalidSignatureImage("簽名影像 PNG 結構不完整或損毀")
+        pos = 8  # magic 之後
+        first = True
+        seen_idat = False
+        while True:
+            if pos + 12 > len(image):  # 至少要放得下 length+type+CRC
+                raise malformed
+            length = int.from_bytes(image[pos : pos + 4], "big")
+            chunk_type = image[pos + 4 : pos + 8]
+            data_end = pos + 8 + length
+            if length > len(image) - pos - 12:
+                raise malformed
+            crc = int.from_bytes(image[data_end : data_end + 4], "big")
+            if zlib.crc32(image[pos + 4 : data_end]) != crc:
+                raise malformed
+            if first:
+                if chunk_type != b"IHDR" or length != 13:
+                    raise malformed
+                first = False
+            if chunk_type == b"IDAT":
+                seen_idat = True
+            if chunk_type == b"IEND":
+                if length != 0 or data_end + 4 != len(image) or not seen_idat:
+                    raise malformed
+                return
+            pos = data_end + 4

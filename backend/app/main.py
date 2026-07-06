@@ -5,8 +5,11 @@ OpenAPI 合約管線（docs/11）有實際內容可匯出。後續模組依
 docs/05-project-structure.md 掛載於此。
 """
 
-from fastapi import FastAPI
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.config import get_settings
@@ -34,6 +37,9 @@ from app.modules.storecredit.router import store_router as storecredit_store_rou
 from app.modules.user.router import router as auth_router
 
 API_PREFIX = "/api/v1"
+# 手持端請求體上限：簽名 base64（≈683KB）＋ JSON 外殼的寬裕值。手持裝置在客人手上，
+# 超大 payload 於 JSON 解析「前」即以 Content-Length 擋下（服務層另有解碼前防線）。
+KIOSK_MAX_BODY_BYTES = 1_000_000
 
 
 class HealthResponse(BaseModel):
@@ -55,6 +61,24 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def limit_kiosk_body(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.url.path.startswith(f"{API_PREFIX}/kiosk"):
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    too_large = int(content_length) > KIOSK_MAX_BODY_BYTES
+                except ValueError:
+                    too_large = True
+                if too_large:
+                    return JSONResponse(
+                        status_code=413,
+                        content={"detail": "請求體過大（簽署裝置上限 1MB）"},
+                    )
+        return await call_next(request)
 
     @app.get(
         f"{API_PREFIX}/health",

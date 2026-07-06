@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
 
+MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
+# base64 膨脹 4/3；schema 先擋（422），服務層解碼前再驗一次（最後防線）
+MAX_SIGNATURE_B64_CHARS = MAX_SIGNATURE_BYTES * 4 // 3 + 8
+
 
 class SignatureTaskCreate(BaseModel):
     kind: SignatureTaskKind
@@ -47,6 +51,6 @@ class KioskTaskRead(SignatureTaskRead):
 
 
 class KioskSignRequest(BaseModel):
-    signature_image_base64: str = Field(min_length=1)
+    signature_image_base64: str = Field(min_length=1, max_length=MAX_SIGNATURE_B64_CHARS)
     # AFFIDAVIT 必填且限 CASH/STORE_CREDIT（D7 二選一）；其他任務種類必須不帶。
     chosen_payout: PayoutMethod | None = None

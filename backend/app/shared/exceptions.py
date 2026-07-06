@@ -319,5 +319,9 @@ class InvalidSignatureImage(DomainError):
     """簽名影像不合法（非 base64 PNG、或大小超出限制）。"""
 
 
+class SignatureTaskConflict(DomainError):
+    """簽署任務建立衝突（併發重推撞「同店單一待簽」唯一索引/條款版本種子競態），請重試。"""
+
+
 class InvalidKioskPayout(DomainError):
     """手持端撥款選擇不合法（僅限 現金/購物金 二選一，docs/23 D7；或該任務類型不收撥款選擇）。"""

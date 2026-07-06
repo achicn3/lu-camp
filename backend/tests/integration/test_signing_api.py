@@ -8,6 +8,7 @@
 """
 
 import base64
+import zlib
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -334,27 +335,47 @@ async def test_non_affidavit_rejects_payout_choice(
 async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     s = await _seed(db_session)
     task = await _create_task(client, s.clerk, s.contact_id)
-    oversized = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 600_000).decode()
     magic = b"\x89PNG\r\n\x1a\n"
-    iend = b"\x00\x00\x00\x00IEND\xae\x42\x60\x82"
-    # 只有 magic、無 IHDR/IEND 的偽 PNG
+
+    def chunk(ctype: bytes, data: bytes) -> bytes:
+        return (
+            len(data).to_bytes(4, "big")
+            + ctype
+            + data
+            + zlib.crc32(ctype + data).to_bytes(4, "big")
+        )
+
+    def ihdr(width: int, height: int) -> bytes:
+        return chunk(
+            b"IHDR",
+            width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00",
+        )
+
+    oversized = base64.b64encode(magic + b"0" * 600_000).decode()
+    # 只有 magic、無合法 chunk 的偽 PNG
     fake_structure = base64.b64encode(magic + b"0" * 64).decode()
-    # 結構完整但寬度為 0（不合理尺寸）
+    # chunk/CRC 全對但寬度為 0（不合理尺寸）
     zero_width = base64.b64encode(
-        magic
-        + b"\x00\x00\x00\x0dIHDR"
-        + (0).to_bytes(4, "big")
-        + (1).to_bytes(4, "big")
-        + b"\x08\x06\x00\x00\x00"
-        + b"\x00" * 4
-        + iend
+        magic + ihdr(0, 1) + chunk(b"IDAT", b"x") + chunk(b"IEND", b"")
+    ).decode()
+    # 無 IDAT：IHDR+IEND 形狀正確但無影像資料，存了也印不出來（Codex 第二輪 high）
+    no_idat = base64.b64encode(magic + ihdr(1, 1) + chunk(b"IEND", b"")).decode()
+    # CRC 損毀
+    corrupt = magic + ihdr(1, 1) + chunk(b"IDAT", b"x") + chunk(b"IEND", b"")
+    bad_crc = base64.b64encode(corrupt[:-1] + bytes([corrupt[-1] ^ 0xFF])).decode()
+    # IEND 之後有尾隨資料
+    trailing = base64.b64encode(
+        magic + ihdr(1, 1) + chunk(b"IDAT", b"x") + chunk(b"IEND", b"") + b"junk"
     ).decode()
     bad_payloads = [
         "not-base64!!!",  # 非法 base64
         base64.b64encode(b"GIF89a....").decode(),  # 非 PNG magic
-        oversized,  # 超過大小上限（解碼前即以 base64 長度擋下）
-        fake_structure,  # PNG magic 但無 IHDR/IEND
-        zero_width,  # IHDR 尺寸不合理
+        oversized,  # 超過大小上限（schema max_length 於解析後即擋）
+        fake_structure,
+        zero_width,
+        no_idat,
+        bad_crc,
+        trailing,
     ]
     for payload in bad_payloads:
         resp = await client.post(
@@ -363,6 +384,20 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
             headers=_auth(s.kiosk),
         )
         assert resp.status_code == 422, resp.text
+
+
+async def test_kiosk_oversized_body_rejected_before_parsing(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """>1MB 的請求體在 JSON 解析前即以 Content-Length 413 擋下（Codex 第二輪 medium）。"""
+    s = await _seed(db_session)
+    task = await _create_task(client, s.clerk, s.contact_id)
+    resp = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={"signature_image_base64": "A" * 1_100_000, "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert resp.status_code == 413
 
 
 # ── 作廢（反悔機制）與狀態機 ───────────────────────────────────────────
