@@ -33,18 +33,21 @@ from app.shared.exceptions import (
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _MAX_SIGNATURE_DIMENSION = 4096  # 簽名 canvas 尺寸上限（像素）
-# 解壓後原始掃描線資料上限：綁住 zlib 解壓的記憶體（512KB 壓縮檔在正常簽名圖遠達不到此值）
-_MAX_RAW_IMAGE_BYTES = 8_000_000
+# 解壓後原始掃描線資料上限：綁住 zlib 解壓的記憶體與解濾波 CPU
+# （K3 canvas 約 1200×400 RGBA ≈ 1.9MB，遠低於此值）
+_MAX_RAW_IMAGE_BYTES = 4_000_000
+# 簽名不可為空白證據（Codex 第七輪 high）：最小畫布尺寸＋可見墨跡像素門檻
+_MIN_SIGNATURE_WIDTH = 150
+_MIN_SIGNATURE_HEIGHT = 50
+_MIN_INK_PIXELS = 100  # 一筆最短的簽名劃線也有數百個深色像素
+_INK_ALPHA_MIN = 64  # 墨跡定義：不透明度 ≥ 此值
+_INK_DARKNESS_MAX = 200  # 且亮度 < 此值（白底黑字/透明底黑字皆適用）
 # color_type → 通道數；bit_depth 合法組合依 PNG 規格 §11.2.2。
 # 不收 palette 型（3）：簽名 canvas 只會輸出灰階/truecolor（±alpha），
 # 一併免除 PLTE chunk 語意驗證的整個攻擊面（Codex 第四輪建議）。
 _PNG_CHANNELS = {0: 1, 2: 3, 4: 2, 6: 4}
-_PNG_VALID_BIT_DEPTHS = {
-    0: {1, 2, 4, 8, 16},
-    2: {8, 16},
-    4: {8, 16},
-    6: {8, 16},
-}
+# 只收 8-bit（canvas 一律輸出 8-bit；亦使解濾波為位元組對齊、實作單純）
+_PNG_VALID_BIT_DEPTHS = {0: {8}, 2: {8}, 4: {8}, 6: {8}}
 _PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法值（規格 §9.2）
 
 
@@ -275,7 +278,10 @@ class SigningService:
         compression = image[26]
         filter_method = image[27]
         interlace = image[28]
-        if not (1 <= width <= _MAX_SIGNATURE_DIMENSION and 1 <= height <= _MAX_SIGNATURE_DIMENSION):
+        if not (
+            _MIN_SIGNATURE_WIDTH <= width <= _MAX_SIGNATURE_DIMENSION
+            and _MIN_SIGNATURE_HEIGHT <= height <= _MAX_SIGNATURE_DIMENSION
+        ):
             raise InvalidSignatureImage("簽名影像尺寸不合理")
         if (
             color_type not in _PNG_CHANNELS
@@ -306,3 +312,61 @@ class SigningService:
         stride = 1 + (width * bits_per_pixel + 7) // 8
         if any(raw[row * stride] not in _PNG_FILTER_TYPES for row in range(height)):
             raise InvalidSignatureImage("簽名影像的掃描線資料非法（無法渲染）")
+        SigningService._require_visible_ink(raw, width, height, color_type)
+
+    @staticmethod
+    def _require_visible_ink(raw: bytes, width: int, height: int, color_type: int) -> None:
+        """解濾波（PNG 規格 §9：None/Sub/Up/Average/Paeth）並驗可見墨跡像素數。
+
+        空白/全透明影像不得成為已簽署的法律證據（Codex 第七輪 high）。墨跡定義：
+        不透明度 ≥ _INK_ALPHA_MIN 且亮度 < _INK_DARKNESS_MAX（涵蓋白底黑字與
+        透明底黑字兩種 canvas 輸出）。8-bit 限定（上游已擋），bpp＝通道數。
+        """
+        bpp = _PNG_CHANNELS[color_type]
+        stride = width * bpp
+        prev = bytes(stride)
+        ink = 0
+        pos = 0
+        for _row in range(height):
+            filter_type = raw[pos]
+            row = bytearray(raw[pos + 1 : pos + 1 + stride])
+            pos += 1 + stride
+            if filter_type == 1:  # Sub
+                for i in range(bpp, stride):
+                    row[i] = (row[i] + row[i - bpp]) & 0xFF
+            elif filter_type == 2:  # Up
+                for i in range(stride):
+                    row[i] = (row[i] + prev[i]) & 0xFF
+            elif filter_type == 3:  # Average
+                for i in range(stride):
+                    left = row[i - bpp] if i >= bpp else 0
+                    row[i] = (row[i] + (left + prev[i]) // 2) & 0xFF
+            elif filter_type == 4:  # Paeth
+                for i in range(stride):
+                    a = row[i - bpp] if i >= bpp else 0
+                    b = prev[i]
+                    c = prev[i - bpp] if i >= bpp else 0
+                    pa = abs(b - c)
+                    pb = abs(a - c)
+                    pc = abs(a + b - 2 * c)
+                    predictor = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+                    row[i] = (row[i] + predictor) & 0xFF
+            for x in range(0, stride, bpp):
+                if color_type == 6:
+                    alpha = row[x + 3]
+                    luma = (row[x] + row[x + 1] + row[x + 2]) // 3
+                elif color_type == 4:
+                    alpha = row[x + 1]
+                    luma = row[x]
+                elif color_type == 2:
+                    alpha = 255
+                    luma = (row[x] + row[x + 1] + row[x + 2]) // 3
+                else:  # 0：灰階
+                    alpha = 255
+                    luma = row[x]
+                if alpha >= _INK_ALPHA_MIN and luma < _INK_DARKNESS_MAX:
+                    ink += 1
+            if ink >= _MIN_INK_PIXELS:
+                return
+            prev = bytes(row)
+        raise InvalidSignatureImage("簽名影像為空白（未偵測到可見簽名筆跡）")

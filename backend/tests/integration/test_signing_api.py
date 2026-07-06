@@ -25,11 +25,42 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
 
-# 1x1 透明 PNG（有效 magic + 完整結構）
-_PNG_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
-    "AAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-)
+
+def _signature_png(width: int = 200, height: int = 80) -> str:
+    """產生一張非空白的簽名 PNG（8-bit RGBA、filter 0），含足量深色墨跡像素。
+
+    伺服端會拒收空白/全透明證據（Codex 第七輪），故 happy-path 一律用此夾具。
+    """
+    magic = b"\x89PNG\r\n\x1a\n"
+
+    def chunk(ctype: bytes, data: bytes) -> bytes:
+        return (
+            len(data).to_bytes(4, "big")
+            + ctype
+            + data
+            + zlib.crc32(ctype + data).to_bytes(4, "big")
+        )
+
+    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # filter type None
+        for x in range(width):
+            # 中段畫一條黑色橫向筆跡（足以超過墨跡像素門檻）
+            if 20 <= y <= 40:
+                raw += b"\x00\x00\x00\xff"
+            else:
+                raw += b"\xff\xff\xff\xff"
+    png = (
+        magic
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw)))
+        + chunk(b"IEND", b"")
+    )
+    return base64.b64encode(png).decode()
+
+
+_PNG_B64 = _signature_png()
 
 
 @pytest_asyncio.fixture
@@ -436,6 +467,56 @@ async def test_sign_rejects_bad_images(client: httpx.AsyncClient, db_session: As
         assert resp.status_code == 422, resp.text
 
 
+async def test_sign_rejects_blank_signature(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """空白/全透明影像不得成為已簽署證據（Codex 第七輪 high）。"""
+    import zlib as _zlib
+
+    s = await _seed(db_session)
+    magic = b"\x89PNG\r\n\x1a\n"
+
+    def chunk(ctype: bytes, data: bytes) -> bytes:
+        return (
+            len(data).to_bytes(4, "big")
+            + ctype
+            + data
+            + _zlib.crc32(ctype + data).to_bytes(4, "big")
+        )
+
+    def blank_png(width: int, height: int, pixel: bytes) -> str:
+        ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
+        raw = bytearray()
+        for _y in range(height):
+            raw.append(0)
+            raw += pixel * width
+        png = (
+            magic
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", _zlib.compress(bytes(raw)))
+            + chunk(b"IEND", b"")
+        )
+        return base64.b64encode(png).decode()
+
+    # 太小（1x1 透明，舊 happy-path 夾具）＋ 足尺寸但全透明 ＋ 足尺寸但全白
+    cases = [
+        blank_png(1, 1, b"\x00\x00\x00\x00"),
+        blank_png(200, 80, b"\x00\x00\x00\x00"),
+        blank_png(200, 80, b"\xff\xff\xff\xff"),
+    ]
+    task = await _create_task(client, s.clerk, s.contact_id)
+    for payload in cases:
+        resp = await client.post(
+            f"/api/v1/kiosk/tasks/{task['id']}/sign",
+            json={"signature_image_base64": payload, "chosen_payout": "CASH"},
+            headers=_auth(s.kiosk),
+        )
+        assert resp.status_code == 422, resp.text
+    # 守衛失敗不改狀態
+    resp = await client.get(f"/api/v1/signing/tasks/{task['id']}", headers=_auth(s.clerk))
+    assert resp.json()["status"] == "PENDING"
+
+
 async def test_sign_accepts_png_with_ancillary_chunks(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -454,11 +535,18 @@ async def test_sign_accepts_png_with_ancillary_chunks(
             + _zlib.crc32(ctype + data).to_bytes(4, "big")
         )
 
+    width, height = 200, 80
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        for _x in range(width):
+            raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
+    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
     png = (
         magic
-        + chunk(b"IHDR", (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00")
+        + chunk(b"IHDR", ihdr)
         + chunk(b"tEXt", b"Software\x00lu-camp")
-        + chunk(b"IDAT", _zlib.compress(b"\x00" * 5))
+        + chunk(b"IDAT", _zlib.compress(bytes(raw)))
         + chunk(b"IEND", b"")
     )
     resp = await client.post(
