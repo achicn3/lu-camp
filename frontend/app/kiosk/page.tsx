@@ -3,10 +3,10 @@
 // 品項金額/會員資料 → 客人選撥款（AFFIDAVIT 二選一，D7）→ 手寫簽名 → 送出。簽名綁內容快照：
 // 顯示的就是客人簽的那份（content 由店員端凍結）。送出後回待機，等下一張任務。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { api } from "@/lib/api";
-import { login } from "@/lib/auth";
+import { login, readTokenRole } from "@/lib/auth";
 import { clearToken, getToken, subscribeToken } from "@/lib/token";
 
 import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
@@ -56,7 +56,18 @@ function KioskLogin() {
     queryClient.clear();
     const result = await login(String(form.get("username")), String(form.get("password")));
     setSubmitting(false);
-    if (!result.ok) setError(result.message);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    // 只有 KIOSK 帳號可留在此裝置：誤用店務帳號（MANAGER/CLERK）登入會把有效店務
+    // token 留在客人面向裝置上、可被導去店務殼——故非 KIOSK 一律立刻清除並提示
+    // （Codex K3 high）。
+    if (readTokenRole() !== "KIOSK") {
+      clearToken();
+      queryClient.clear();
+      setError("此帳號非簽署裝置帳號，請以本店 KIOSK 簽署帳號登入。");
+    }
   }
 
   return (
@@ -85,42 +96,63 @@ function KioskLogin() {
   );
 }
 
-// ── 已登入主控：輪詢 → 待機/任務 ────────────────────────────────────────
+// ── 已登入主控：輪詢 → 待機/任務/交回 ────────────────────────────────────
 function KioskConsole() {
   const queryClient = useQueryClient();
+  // 簽署完成後暫停輪詢並停在「交回店員」畫面（Codex K3 high）：否則店員在客人尚未
+  // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
+  const [completed, setCompleted] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
-    refetchInterval: 2000,
-    refetchOnWindowFocus: true,
+    refetchInterval: completed ? false : 2000,
+    refetchOnWindowFocus: !completed,
+    enabled: !completed,
   });
 
-  if (error instanceof Error && error.message === "FORBIDDEN") {
+  const forbidden = error instanceof Error && error.message === "FORBIDDEN";
+  // 非 KIOSK token 落在客人裝置上：立刻清 token+快取（不等點按），避免店務殼外洩
+  // （Codex K3 high）。清除後 token→null，KioskPage 會切回裝置登入畫面。
+  useEffect(() => {
+    if (forbidden) {
+      queryClient.clear();
+      clearToken();
+    }
+  }, [forbidden, queryClient]);
+
+  if (completed) {
     return (
-      <main className="kiosk-standby">
-        <div className="kiosk-standby-inner">
-          <h1 className="kiosk-standby-title">此裝置非簽署帳號</h1>
-          <p className="kiosk-standby-sub">請以 KIOSK 簽署帳號重新登入。</p>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              // 認證邊界：清整個快取再清 token，避免重登期間閃現舊快照/店務殘留（Codex K3）。
-              queryClient.clear();
-              clearToken();
-            }}
-          >
-            重新登入
-          </button>
-        </div>
-      </main>
+      <Handoff
+        onReset={() => {
+          // 交回店員：清掉暫存的當前任務再恢復輪詢，避免恢復瞬間閃現剛簽的舊任務。
+          queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+          setCompleted(false);
+        }}
+      />
     );
   }
-
-  if (!data) return <Standby />;
+  if (forbidden || !data) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
   // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
   // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
-  return <TaskScreen key={data.id} task={data} />;
+  return <TaskScreen key={data.id} task={data} onComplete={() => setCompleted(true)} />;
+}
+
+// 交回畫面：簽署完成後停於此，等店員點「完成」才恢復輪詢接下一位客人。
+function Handoff({ onReset }: { onReset: () => void }) {
+  return (
+    <main className="kiosk-thanks">
+      <div className="kiosk-thanks-inner">
+        <div className="kiosk-thanks-check" aria-hidden>
+          ✓
+        </div>
+        <h1 className="kiosk-thanks-title">已完成簽署</h1>
+        <p className="kiosk-standby-sub">感謝您，請將裝置交回給店員。</p>
+        <button type="button" className="btn-secondary" onClick={onReset}>
+          完成（店員操作）
+        </button>
+      </div>
+    </main>
+  );
 }
 
 function Standby() {
@@ -138,14 +170,13 @@ function Standby() {
 // ── 任務畫面：切結書 + 明細 + 撥款 + 簽名 ────────────────────────────────
 const PAYOUT_KINDS = new Set(["ACQUISITION_AFFIDAVIT"]);
 
-function TaskScreen({ task }: { task: KioskTask }) {
+function TaskScreen({ task, onComplete }: { task: KioskTask; onComplete: () => void }) {
   const queryClient = useQueryClient();
   const canvasRef = useRef<SignatureCanvasHandle>(null);
   const [hasInk, setHasInk] = useState(false);
   const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const [agreed, setAgreed] = useState(false);
   // 任務已被店員作廢/取代（409）：終態，鎖住送出，靠輪詢帶回待機/新任務。
   const [superseded, setSuperseded] = useState(false);
@@ -187,21 +218,9 @@ function TaskScreen({ task }: { task: KioskTask }) {
       }
       return;
     }
-    setDone(true);
-  }
-
-  if (done) {
-    return (
-      <main className="kiosk-thanks">
-        <div className="kiosk-thanks-inner">
-          <div className="kiosk-thanks-check" aria-hidden>
-            ✓
-          </div>
-          <h1 className="kiosk-thanks-title">已完成簽署</h1>
-          <p className="kiosk-standby-sub">感謝您，請將裝置交回給店員。</p>
-        </div>
-      </main>
-    );
+    // 成功：交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成畫面，
+    // 避免輪詢在客人交回前帶出下一位客人的任務）。
+    onComplete();
   }
 
   return (

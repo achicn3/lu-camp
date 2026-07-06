@@ -162,13 +162,23 @@ try {
   });
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
 
-  // ── 回歸：content.items 非陣列時仍完整顯示、不靜默丟棄（Codex K3 high）─────
+  // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
   await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "TRANSACTION_ACK",
     contact_id: contactId,
     content: { items: "單一字串品項", note: "非陣列 items 也要顯示" },
   });
+  await page.waitForTimeout(3000); // 跨過一個輪詢週期（2s）
+  const stillHandoff = await page.locator('h1:has-text("已完成簽署")').isVisible();
+  const nextLeaked = await page.locator('h1:has-text("交易紀錄簽收")').isVisible();
+  ok("交回前不自動帶出下一位任務", stillHandoff && !nextLeaked);
+
+  // 店員點「完成」→ 恢復輪詢，下一張任務才出現
+  await page.click('button:has-text("完成（店員操作）")');
   await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  ok("店員完成後帶出下一張任務", true);
+
+  // ── 回歸：content.items 非陣列時仍完整顯示、不靜默丟棄（Codex K3 high）─────
   const ackBody = await page.textContent(".kiosk-task-body");
   ok(
     "非陣列 items 不被丟棄",
