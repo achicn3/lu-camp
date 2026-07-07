@@ -158,6 +158,12 @@ function KioskConsole() {
   // 僅暫停 enabled 不夠——POST 前已在途的 refetch 仍可能回填快取；故簽名期間另以
   // frozenTask 凍結畫面上的任務、並 cancelQueries 中止在途請求（Codex K3 第五輪 high）。
   const [frozenTask, setFrozenTask] = useState<KioskTask | null>(null);
+  // 顯示中的任務一經呈現即「釘住」其 id（Codex K3 第十輪 high）：店員於客人尚未簽/交回前
+  // 取消並改推另一張任務時，不得自動把新任務換到客人面前（可能是下一位客人的內容/個資）——
+  // 需店員確認解鎖後才採用。以 React 官方「prop 變更時調整 state」模式於 render 中同步（非
+  // effect、非 ref-in-render），待機清除、首張認領、不同任務不採用（交由 render 顯示閘門）。
+  const [engagedTaskId, setEngagedTaskId] = useState<number | null>(null);
+  const [syncedData, setSyncedData] = useState<KioskTask | null | undefined>(undefined);
   const signing = frozenTask !== null;
   const paused = completed || signing || recovering;
   const { data, error } = useQuery({
@@ -167,6 +173,18 @@ function KioskConsole() {
     refetchOnWindowFocus: !paused,
     enabled: !paused,
   });
+
+  // 於 render 中同步釘選（React 官方模式；React Query 結構共享使 data 參考在內容不變時穩定）。
+  if (!paused && data !== syncedData) {
+    setSyncedData(data);
+    const id = data?.id ?? null;
+    if (id === null) {
+      setEngagedTaskId(null); // 待機：清釘選
+    } else if (engagedTaskId === null) {
+      setEngagedTaskId(id); // 認領首張任務
+    }
+    // 不同任務：不改 engagedTaskId → render 顯示店員確認閘門
+  }
 
   function onSigningChange(active: boolean, task?: KioskTask) {
     if (active && task) {
@@ -195,8 +213,9 @@ function KioskConsole() {
         message="請店員確認此筆是否已簽署後解鎖，再接續作業。"
         unlockLabel="店員確認並解鎖"
         onReset={() => {
-          // 店員已確認：清簽署鎖＋當前任務快取再恢復輪詢。
+          // 店員已確認：清簽署鎖＋當前任務快取＋釘選再恢復輪詢。
           setSigningLock(false);
+          setEngagedTaskId(null);
           queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
           setRecovering(false);
         }}
@@ -211,8 +230,9 @@ function KioskConsole() {
         message="感謝您，請將裝置交回給店員。"
         unlockLabel="店員解鎖，接續下一位"
         onReset={() => {
-          // 店員解鎖：清持久化交回鎖＋暫存的當前任務再恢復輪詢，避免恢復瞬間閃現舊任務。
+          // 店員解鎖：清持久化交回鎖＋當前任務快取＋釘選再恢復輪詢，避免恢復瞬間閃現舊任務。
           setHandoffLock(false);
+          setEngagedTaskId(null);
           queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
           setCompleted(false);
         }}
@@ -222,6 +242,19 @@ function KioskConsole() {
   // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
   const shown = frozenTask ?? data;
   if (forbidden || !shown) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
+  // 顯示任務與已認領不符（店員取消並改推了不同任務）→ 需店員確認才採用新任務，保護前一位客人
+  // 不被自動換上他人內容（Codex K3 第十輪 high）。簽名進行中（frozenTask）不受此限。
+  if (!frozenTask && engagedTaskId !== null && shown.id !== engagedTaskId) {
+    return (
+      <StaffGate
+        variant="recover"
+        title="任務已更新"
+        message="內容已由店員更新，請店員確認後解鎖再交予客人。"
+        unlockLabel="店員確認並解鎖"
+        onReset={() => setEngagedTaskId(shown.id)}
+      />
+    );
+  }
   // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
   // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
   return (
