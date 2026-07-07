@@ -388,7 +388,11 @@ function TaskScreen({
     // 送出「前」即持久化簽署鎖：即使 POST 已寫入但回應遺失、客人又重整，重掛也會進恢復畫面
     // 而非恢復輪詢（Codex K3 第七輪 high）。明確結果才清除。
     setSigningLock(true);
-    let outcome: "ok" | "http" | "thrown" = "thrown";
+    // outcome 三分類（Codex K3 第九輪 high）：
+    //  - definitive：後端**確定**未寫入或已終態（409/4xx）→ 清鎖、恢復輪詢。
+    //  - ambiguous：**可能已寫入**（5xx / thrown）→ 保持凍結、不恢復輪詢，同鍵重送或店員解鎖收斂。
+    //  - ok：成功。
+    let outcome: "ok" | "definitive" | "ambiguous" = "ambiguous";
     try {
       const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
         params: { path: { task_id: task.id } },
@@ -400,8 +404,13 @@ function TaskScreen({
       });
       if (response.ok) {
         outcome = "ok";
+      } else if (response.status >= 500) {
+        // 5xx（500/502/503/504）不是「未寫入」的證明——可能 commit 後才失敗/序列化失敗/
+        // 閘道逾時。當作曖昧，同 thrown 處理（保持凍結、不恢復輪詢）（Codex K3 第九輪 high）。
+        outcome = "ambiguous";
+        setError("伺服器忙線，請再按一次「確認並送出」（系統會避免重複簽名）。");
       } else {
-        outcome = "http";
+        outcome = "definitive";
         if (response.status === 409) {
           // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
           // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。
@@ -414,6 +423,7 @@ function TaskScreen({
           submittedPayload.current = null;
           setError("簽名無法辨識，請清除後簽得更完整。");
         } else {
+          // 其他 4xx（客端錯誤，確定未寫入）：解鎖允許重簽。
           setPayloadLocked(false);
           submittedPayload.current = null;
           setError("送出失敗，請再試一次或請店員協助。");
@@ -423,13 +433,13 @@ function TaskScreen({
       // 網路/LAN 失敗（fetch reject）：後端**可能已寫入但回應遺失**。不恢復輪詢（保持
       // 凍結、鎖住 POST 途中的隱私邊界），提示以同一冪等鍵再送一次——若已寫入則回放成功、
       // 否則正常簽（Codex K3 第六輪 high）。payload 已於送出時鎖定並凍結，重送必為同內容。
-      outcome = "thrown";
+      outcome = "ambiguous";
       setError("連線不穩，請再按一次「確認並送出」（系統會避免重複簽名）。");
     } finally {
       setSubmitting(false);
-      // 明確 HTTP 回應（非 thrown）代表後端確定未寫入或已終態：清簽署鎖並恢復輪詢。
-      // thrown 保留簽署鎖（可能已寫入）：保持凍結，由客人以同鍵重送 或 重整後店員解鎖收斂。
-      if (outcome === "http") {
+      // definitive 才清鎖恢復輪詢；ambiguous（5xx/thrown）保留簽署鎖與凍結，避免恢復輪詢
+      // 把下一位任務顯示給前一位客人——由同鍵重送 或 重整後店員解鎖收斂。
+      if (outcome === "definitive") {
         setSigningLock(false);
         onSigningChange(false);
       }

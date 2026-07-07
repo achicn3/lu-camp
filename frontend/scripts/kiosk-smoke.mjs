@@ -203,11 +203,11 @@ try {
     ackBody.includes("單一字串品項") && ackBody.includes("非陣列 items 也要顯示"),
   );
 
-  // ── 回歸：送出遇網路失敗不得卡死＋在途鎖定 payload（Codex K3 第五/八輪）──────
-  // 延遲後中止簽名 POST：模擬 LAN 失敗，並讓「在途期間」有時間檢查控制項已鎖定。
+  // ── 回歸：5xx 為曖昧（可能已寫入）不得清鎖恢復輪詢＋在途鎖定 payload（Codex K3 第八/九輪）
+  // 延遲後回 500：模擬「已受理但伺服器失敗」，在途期間檢查控制項鎖定；500 後須保持凍結。
   await page.route("**/api/v1/kiosk/tasks/*/sign", async (route) => {
     await new Promise((r) => setTimeout(r, 800));
-    await route.abort();
+    await route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' });
   });
   await drawSignature(page);
   const submitClick = page.click("button.kiosk-submit");
@@ -219,10 +219,14 @@ try {
   const recoverable =
     (await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
     (await page.locator("button.kiosk-submit").isEnabled());
-  ok("送出失敗後可重試、不卡死", recoverable);
+  ok("5xx 後可重試、不卡死", recoverable);
 
-  // 曖昧失敗後 payload 仍鎖定：清除簽名鈕停用（重送須為同 payload；Codex K3 第七輪）
-  ok("曖昧失敗後鎖定清除簽名", await page.locator('button:has-text("清除重簽")').isDisabled());
+  // 5xx 為曖昧：payload 仍鎖定，且持久簽署鎖未被清（localStorage 仍為 '1'）——不恢復輪詢
+  ok("5xx 後鎖定清除簽名", await page.locator('button:has-text("清除重簽")').isDisabled());
+  const lockKept = await page.evaluate(() =>
+    window.localStorage.getItem("lu-camp.kiosk-signing"),
+  );
+  ok("5xx 為曖昧、持久簽署鎖未清", lockKept === "1", `lock=${lockKept}`);
 
   // 曖昧失敗後重整 → 進店員恢復畫面、不輪詢、不顯示待簽任務（Codex K3 第七輪 high）
   await page.reload({ waitUntil: "networkidle" });
