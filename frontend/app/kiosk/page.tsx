@@ -52,6 +52,23 @@ function setSigningLock(on: boolean): void {
   else window.localStorage.removeItem(SIGNING_LOCK_KEY);
 }
 
+// 已認領任務釘選持久化（Codex K3 第十二輪 high）：釘選只存記憶體時，重整/重掛會清掉、
+// 使空窗或閘門期間的下一張任務被當首張直接顯示、繞過店員確認。改存 localStorage，
+// 僅由店員解鎖路徑更新/清除。
+const ENGAGED_KEY = "lu-camp.kiosk-engaged";
+function readEngagedTask(): number | null {
+  if (typeof window === "undefined") return null;
+  const v = window.localStorage.getItem(ENGAGED_KEY);
+  if (v === null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function writeEngagedTask(id: number | null): void {
+  if (typeof window === "undefined") return;
+  if (id === null) window.localStorage.removeItem(ENGAGED_KEY);
+  else window.localStorage.setItem(ENGAGED_KEY, String(id));
+}
+
 // LAN（http，非安全來源）下 crypto.randomUUID 可能不存在——提供退回實作，供簽名冪等鍵用。
 function newIdempotencyKey(): string {
   const c = typeof crypto !== "undefined" ? crypto : undefined;
@@ -162,7 +179,7 @@ function KioskConsole() {
   // 取消並改推另一張任務時，不得自動把新任務換到客人面前（可能是下一位客人的內容/個資）——
   // 需店員確認解鎖後才採用。以 React 官方「prop 變更時調整 state」模式於 render 中同步（非
   // effect、非 ref-in-render），待機清除、首張認領、不同任務不採用（交由 render 顯示閘門）。
-  const [engagedTaskId, setEngagedTaskId] = useState<number | null>(null);
+  const [engagedTaskId, setEngagedTaskId] = useState<number | null>(readEngagedTask);
   const [syncedData, setSyncedData] = useState<KioskTask | null | undefined>(undefined);
   const signing = frozenTask !== null;
   const paused = completed || signing || recovering;
@@ -186,6 +203,12 @@ function KioskConsole() {
     }
     // id===null（暫無待簽）或不同任務：不動 engagedTaskId → render 顯示待機或店員確認閘門
   }
+
+  // 釘選持久化到 localStorage（純副作用、無 setState）：重整/重掛後由初值還原、跨掛載守住
+  // 閘門（Codex K3 第十二輪 high）。
+  useEffect(() => {
+    writeEngagedTask(engagedTaskId);
+  }, [engagedTaskId]);
 
   function onSigningChange(active: boolean, task?: KioskTask) {
     if (active && task) {

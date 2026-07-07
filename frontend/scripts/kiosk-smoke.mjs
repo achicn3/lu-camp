@@ -275,6 +275,10 @@ try {
     !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
       !(await page.locator("text=下一位客人 B 的內容").isVisible()),
   );
+  // 閘門顯示時重整 → 釘選持久，仍停在閘門、不放行 B（Codex K3 第十二輪 high）
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
+  ok("閘門顯示時重整仍被擋", !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()));
   // 店員確認解鎖 → 採用新任務 B
   await page.click('button:has-text("店員確認並解鎖")');
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
@@ -287,6 +291,9 @@ try {
   //    被當成首張任務直接顯示（Codex K3 第十一輪 high）─────────────────────────
   await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskB.json.id}/cancel`);
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 }); // current=null → 待機
+  // 空窗（current=null）期間重整 → 釘選持久，仍非「首張」狀態（Codex K3 第十二輪）
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
   await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
