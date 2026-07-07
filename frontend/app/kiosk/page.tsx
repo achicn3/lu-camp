@@ -118,7 +118,10 @@ function KioskConsole() {
   const [completed, setCompleted] = useState(false);
   // 簽名送出進行中亦暫停輪詢（Codex K3 high）：否則 POST 尚未回應期間，輪詢可能因
   // 店員重推而換掉 data、使 key=id 重掛出下一張任務，讓前一位客人看到他人內容。
-  const [signing, setSigning] = useState(false);
+  // 僅暫停 enabled 不夠——POST 前已在途的 refetch 仍可能回填快取；故簽名期間另以
+  // frozenTask 凍結畫面上的任務、並 cancelQueries 中止在途請求（Codex K3 第五輪 high）。
+  const [frozenTask, setFrozenTask] = useState<KioskTask | null>(null);
+  const signing = frozenTask !== null;
   const paused = completed || signing;
   const { data, error } = useQuery({
     queryKey: ["kiosk", "current"],
@@ -127,6 +130,15 @@ function KioskConsole() {
     refetchOnWindowFocus: !paused,
     enabled: !paused,
   });
+
+  function onSigningChange(active: boolean, task?: KioskTask) {
+    if (active && task) {
+      setFrozenTask(task); // 凍結顯示的任務
+      void queryClient.cancelQueries({ queryKey: ["kiosk", "current"] }); // 中止在途 refetch
+    } else {
+      setFrozenTask(null);
+    }
+  }
 
   const forbidden = error instanceof Error && error.message === "FORBIDDEN";
   // 非 KIOSK token 落在客人裝置上：立刻清 token+快取（不等點按），避免店務殼外洩
@@ -149,16 +161,18 @@ function KioskConsole() {
       />
     );
   }
-  if (forbidden || !data) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
+  // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
+  const shown = frozenTask ?? data;
+  if (forbidden || !shown) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
   // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
   // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
   return (
     <TaskScreen
-      key={data.id}
-      task={data}
-      onSigningChange={setSigning}
+      key={shown.id}
+      task={shown}
+      onSigningChange={onSigningChange}
       onComplete={() => {
-        setSigning(false);
+        setFrozenTask(null);
         setCompleted(true);
       }}
     />
@@ -246,7 +260,7 @@ function TaskScreen({
 }: {
   task: KioskTask;
   onComplete: () => void;
-  onSigningChange: (signing: boolean) => void;
+  onSigningChange: (signing: boolean, task?: KioskTask) => void;
 }) {
   const queryClient = useQueryClient();
   const canvasRef = useRef<SignatureCanvasHandle>(null);
@@ -276,15 +290,17 @@ function TaskScreen({
     }
     setSubmitting(true);
     setError(null);
-    onSigningChange(true); // 送出期間暫停父層輪詢，避免任務在 POST 途中被換掉
-    const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
-      params: { path: { task_id: task.id } },
-      body: { signature_image_base64: image, chosen_payout: needsPayout ? payout : null },
-    });
-    setSubmitting(false);
-    if (!response.ok) {
-      onSigningChange(false); // 失敗才恢復輪詢（成功走 onComplete，由父層維持暫停）
-      if (response.status === 409) {
+    // 送出期間凍結父層任務並中止在途輪詢，避免任務在 POST 途中被換掉（Codex K3 第五輪）。
+    onSigningChange(true, task);
+    let ok = false;
+    try {
+      const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
+        params: { path: { task_id: task.id } },
+        body: { signature_image_base64: image, chosen_payout: needsPayout ? payout : null },
+      });
+      if (response.ok) {
+        ok = true;
+      } else if (response.status === 409) {
         // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
         // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。
         setSuperseded(true);
@@ -295,11 +311,21 @@ function TaskScreen({
       } else {
         setError("送出失敗，請再試一次或請店員協助。");
       }
-      return;
+    } catch {
+      // 網路/LAN 失敗（fetch reject）：明確回可重試錯誤，不讓畫面卡在鎖定狀態
+      // （Codex K3 第五輪 medium）。若後端其實已寫入，恢復輪詢後任務會呈 SIGNED、
+      // 再送出得 409 交由既有終態處理，不會重複簽。
+      setError("連線失敗，請確認店內網路後再送出一次。");
+    } finally {
+      setSubmitting(false);
+      // 未成功一律恢復輪詢（成功則走 onComplete，由父層維持暫停至交回）。
+      if (!ok) onSigningChange(false);
     }
-    // 成功：交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成畫面，
-    // 避免輪詢在客人交回前帶出下一位客人的任務）。
-    onComplete();
+    if (ok) {
+      // 成功：交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成畫面，
+      // 避免輪詢在客人交回前帶出下一位客人的任務）。
+      onComplete();
+    }
   }
 
   return (

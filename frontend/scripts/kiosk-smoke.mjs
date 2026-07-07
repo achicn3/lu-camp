@@ -194,6 +194,19 @@ try {
     ackBody.includes("單一字串品項") && ackBody.includes("非陣列 items 也要顯示"),
   );
 
+  // ── 回歸：送出遇網路失敗不得卡死（Codex K3 第五輪 medium）──────────────────
+  // 攔截並中止簽名 POST，模擬 LAN 失敗；畫面須顯示可重試錯誤、送出鈕恢復可按、不卡死。
+  await page.route("**/api/v1/kiosk/tasks/*/sign", (route) => route.abort());
+  await drawSignature(page);
+  await page.click("button.kiosk-submit");
+  await page.waitForSelector(".kiosk-task-footer .form-error", { timeout: 6000 });
+  await page.waitForTimeout(300);
+  const recoverable =
+    (await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
+    (await page.locator("button.kiosk-submit").isEnabled());
+  ok("送出失敗後可重試、不卡死", recoverable);
+  await page.unroute("**/api/v1/kiosk/tasks/*/sign");
+
   // ── 回歸：KIOSK token 導到店務頁 → 不渲染店務殼、導回 /kiosk（Codex K3 medium）──
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
