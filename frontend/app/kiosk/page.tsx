@@ -175,15 +175,16 @@ function KioskConsole() {
   });
 
   // 於 render 中同步釘選（React 官方模式；React Query 結構共享使 data 參考在內容不變時穩定）。
+  // **釘選只由店員解鎖清除、絕不因輪詢回 null 而清**（Codex K3 第十一輪 high）：否則
+  // 「顯示 A → 店員取消 A（current=null）→ 建立 B」的空窗會讓 B 被當成首張任務直接顯示、
+  // 繞過閘門。認領一次後即長駐，之後任何不同任務都會撞閘門。
   if (!paused && data !== syncedData) {
     setSyncedData(data);
     const id = data?.id ?? null;
-    if (id === null) {
-      setEngagedTaskId(null); // 待機：清釘選
-    } else if (engagedTaskId === null) {
-      setEngagedTaskId(id); // 認領首張任務
+    if (id !== null && engagedTaskId === null) {
+      setEngagedTaskId(id); // 認領首張任務（僅在尚未認領時）
     }
-    // 不同任務：不改 engagedTaskId → render 顯示店員確認閘門
+    // id===null（暫無待簽）或不同任務：不動 engagedTaskId → render 顯示待機或店員確認閘門
   }
 
   function onSigningChange(active: boolean, task?: KioskTask) {

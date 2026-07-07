@@ -264,7 +264,7 @@ try {
   });
   await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 }); // 顯示 A、釘選
   // 店員改推不同任務 B（建立即取消 A）
-  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+  const taskB = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "TRANSACTION_ACK",
     contact_id: contactId,
     content: { note: "下一位客人 B 的內容" },
@@ -282,6 +282,27 @@ try {
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
   await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
   ok("店員解鎖後採用新任務", true);
+
+  // ── 釘選閘門（空窗）：取消 B → current=null 待機 → 建 C，C 仍須被閘門擋，不得因空窗
+  //    被當成首張任務直接顯示（Codex K3 第十一輪 high）─────────────────────────
+  await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskB.json.id}/cancel`);
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 }); // current=null → 待機
+  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+    kind: "ACQUISITION_AFFIDAVIT",
+    contact_id: contactId,
+    content: { seller_name: "空窗後客C", total: "700", items: [{ name: "C物", amount: "700" }] },
+  });
+  await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
+  ok(
+    "取消到空窗再建新任務仍被閘門擋",
+    !(await page.locator('h1:has-text("收購確認與切結")').isVisible()),
+  );
+  await page.click('button:has-text("店員確認並解鎖")');
+  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
+  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
+  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  ok("空窗後解鎖採用新任務", true);
 
   // ── 回歸：KIOSK token 導到店務頁 → 不渲染店務殼、導回 /kiosk（Codex K3 medium）──
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
