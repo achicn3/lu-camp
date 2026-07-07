@@ -3130,6 +3130,8 @@ export interface components {
         /** KioskSignRequest */
         KioskSignRequest: {
             chosen_payout?: components["schemas"]["PayoutMethod"] | null;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
             /** Signature Image Base64 */
             signature_image_base64: string;
         };

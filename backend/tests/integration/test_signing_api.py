@@ -323,6 +323,43 @@ async def test_sign_affidavit_happy_path(
     assert resp.content == base64.b64decode(_PNG_B64)
 
 
+async def test_sign_idempotent_replay(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """回應遺失後以同 idempotency_key 重送 → 回放成功（200 SIGNED），非 409；
+    不同/無鍵重送仍 409（Codex K3 第六輪）。"""
+    s = await _seed(db_session)
+    task = await _create_task(client, s.clerk, s.contact_id)
+    body = {
+        "signature_image_base64": _PNG_B64,
+        "chosen_payout": "CASH",
+        "idempotency_key": "attempt-abc-123",
+    }
+    first = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign", json=body, headers=_auth(s.kiosk)
+    )
+    assert first.status_code == 200 and first.json()["status"] == "SIGNED"
+
+    # 同鍵重送（模擬回應遺失後重試）→ 回放同結果，不是 409
+    replay = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign", json=body, headers=_auth(s.kiosk)
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["status"] == "SIGNED"
+
+    # 不同鍵 / 無鍵重送 → 仍是 409（不同來源不得覆蓋既簽）
+    other = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={**body, "idempotency_key": "different-key"},
+        headers=_auth(s.kiosk),
+    )
+    assert other.status_code == 409
+    nokey = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={"signature_image_base64": _PNG_B64, "chosen_payout": "CASH"},
+        headers=_auth(s.kiosk),
+    )
+    assert nokey.status_code == 409
+
+
 async def test_affidavit_payout_must_be_binary(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

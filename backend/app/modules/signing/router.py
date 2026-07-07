@@ -201,6 +201,7 @@ async def sign_kiosk_task(
             task_id,
             signature_image_base64=body.signature_image_base64,
             chosen_payout=body.chosen_payout,
+            idempotency_key=body.idempotency_key,
         )
     except SignatureTaskNotFound as exc:
         await session.rollback()

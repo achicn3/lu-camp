@@ -133,13 +133,24 @@ class SigningService:
         *,
         signature_image_base64: str,
         chosen_payout: PayoutMethod | None,
+        idempotency_key: str | None = None,
     ) -> SignatureTask:
-        """手持端送出簽名：驗 PNG、驗撥款選擇（D7）、PENDING→SIGNED（FOR UPDATE 序列化）。"""
+        """手持端送出簽名：驗 PNG、驗撥款選擇（D7）、PENDING→SIGNED（FOR UPDATE 序列化）。
+
+        idempotency_key（客端每張任務一鍵）：若任務已由**同一鍵**簽成，回放同一結果
+        而非 409——手持端「已提交但回應遺失」以同鍵重送即可安全收斂到完成，避免曖昧
+        失敗使裝置卡住或恢復輪詢洩漏下一位客人任務（Codex K3 第六輪 high）。
+        """
         image = self._decode_signature(signature_image_base64)
         await self._lock_store_signing(store_id)
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
+        if task.status is SignatureTaskStatus.SIGNED:
+            # 冪等回放：同鍵已簽成 → 回原任務（視為成功）；不同鍵/無鍵 → 仍是 409。
+            if idempotency_key is not None and task.sign_idempotency_key == idempotency_key:
+                return task
+            raise SignatureTaskNotPending(f"簽署任務 {task_id} 已簽署，請店員重新推送")
         if task.status is not SignatureTaskStatus.PENDING:
             raise SignatureTaskNotPending(
                 f"簽署任務 {task_id} 非待簽狀態（{task.status}），請店員重新推送"
@@ -153,6 +164,7 @@ class SigningService:
         task.signature_image = image
         task.signed_at = datetime.now(UTC)
         task.chosen_payout = chosen_payout
+        task.sign_idempotency_key = idempotency_key
         task.status = SignatureTaskStatus.SIGNED
         await self._session.flush()
         await self._session.refresh(task)

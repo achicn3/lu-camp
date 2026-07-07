@@ -3765,6 +3765,18 @@
               }
             ]
           },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
           "signature_image_base64": {
             "maxLength": 682674,
             "minLength": 1,

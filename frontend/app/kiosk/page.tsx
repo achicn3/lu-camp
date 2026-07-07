@@ -26,6 +26,26 @@ async function fetchCurrentTask() {
 
 const emptySubscribe = () => () => {};
 
+// 交回鎖持久化（Codex K3 第六輪 high）：簽署完成的隱私鎖不可只存記憶體——瀏覽器重整/
+// 重掛會以 completed=false 重啟輪詢、把下一位任務顯示給前一位客人。改存 localStorage，
+// 僅由店員解鎖清除。單店單裝置故用單一鍵。
+const HANDOFF_KEY = "lu-camp.kiosk-handoff";
+function readHandoffLock(): boolean {
+  return typeof window !== "undefined" && window.localStorage.getItem(HANDOFF_KEY) === "1";
+}
+function setHandoffLock(on: boolean): void {
+  if (typeof window === "undefined") return;
+  if (on) window.localStorage.setItem(HANDOFF_KEY, "1");
+  else window.localStorage.removeItem(HANDOFF_KEY);
+}
+
+// LAN（http，非安全來源）下 crypto.randomUUID 可能不存在——提供退回實作，供簽名冪等鍵用。
+function newIdempotencyKey(): string {
+  const c = typeof crypto !== "undefined" ? crypto : undefined;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export default function KioskPage() {
   const token = useSyncExternalStore(subscribeToken, getToken, () => null);
   const hydrated = useSyncExternalStore(
@@ -115,7 +135,8 @@ function KioskConsole() {
   const queryClient = useQueryClient();
   // 簽署完成後暫停輪詢並停在「交回店員」畫面（Codex K3 high）：否則店員在客人尚未
   // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
-  const [completed, setCompleted] = useState(false);
+  // 初值讀持久化交回鎖：重整/重掛後若上一位尚未由店員解鎖，仍停在交回畫面。
+  const [completed, setCompleted] = useState(readHandoffLock);
   // 簽名送出進行中亦暫停輪詢（Codex K3 high）：否則 POST 尚未回應期間，輪詢可能因
   // 店員重推而換掉 data、使 key=id 重掛出下一張任務，讓前一位客人看到他人內容。
   // 僅暫停 enabled 不夠——POST 前已在途的 refetch 仍可能回填快取；故簽名期間另以
@@ -154,7 +175,8 @@ function KioskConsole() {
     return (
       <Handoff
         onReset={() => {
-          // 交回店員：清掉暫存的當前任務再恢復輪詢，避免恢復瞬間閃現剛簽的舊任務。
+          // 店員解鎖：清持久化交回鎖＋暫存的當前任務再恢復輪詢，避免恢復瞬間閃現舊任務。
+          setHandoffLock(false);
           queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
           setCompleted(false);
         }}
@@ -172,6 +194,7 @@ function KioskConsole() {
       task={shown}
       onSigningChange={onSigningChange}
       onComplete={() => {
+        setHandoffLock(true); // 持久化交回鎖：重整也停在交回畫面，須店員解鎖
         setFrozenTask(null);
         setCompleted(true);
       }}
@@ -264,6 +287,9 @@ function TaskScreen({
 }) {
   const queryClient = useQueryClient();
   const canvasRef = useRef<SignatureCanvasHandle>(null);
+  // 每張任務一把冪等鍵（隨此 TaskScreen 掛載生成、跨重試不變）：回應遺失後以同鍵重送，
+  // 後端回放同結果而非 409（Codex K3 第六輪）。key=task.id 換任務即重掛→自然換新鍵。
+  const idempotencyKey = useRef<string>(newIdempotencyKey());
   const [hasInk, setHasInk] = useState(false);
   const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -292,36 +318,45 @@ function TaskScreen({
     setError(null);
     // 送出期間凍結父層任務並中止在途輪詢，避免任務在 POST 途中被換掉（Codex K3 第五輪）。
     onSigningChange(true, task);
-    let ok = false;
+    let outcome: "ok" | "http" | "thrown" = "thrown";
     try {
       const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
         params: { path: { task_id: task.id } },
-        body: { signature_image_base64: image, chosen_payout: needsPayout ? payout : null },
+        body: {
+          signature_image_base64: image,
+          chosen_payout: needsPayout ? payout : null,
+          idempotency_key: idempotencyKey.current,
+        },
       });
       if (response.ok) {
-        ok = true;
-      } else if (response.status === 409) {
-        // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
-        // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。
-        setSuperseded(true);
-        setError("此項目已由店員更新，請依店員指示，稍候將顯示最新內容。");
-        void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
-      } else if (response.status === 422) {
-        setError("簽名無法辨識，請清除後簽得更完整。");
+        outcome = "ok";
       } else {
-        setError("送出失敗，請再試一次或請店員協助。");
+        outcome = "http";
+        if (response.status === 409) {
+          // 任務已被店員作廢/取代（反悔或改內容重推）：標記終態、鎖住送出，
+          // 並立即失效輪詢查詢 → 下一輪回待機或帶出新任務（Codex K3 medium）。
+          setSuperseded(true);
+          setError("此項目已由店員更新，請依店員指示，稍候將顯示最新內容。");
+          void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+        } else if (response.status === 422) {
+          setError("簽名無法辨識，請清除後簽得更完整。");
+        } else {
+          setError("送出失敗，請再試一次或請店員協助。");
+        }
       }
     } catch {
-      // 網路/LAN 失敗（fetch reject）：明確回可重試錯誤，不讓畫面卡在鎖定狀態
-      // （Codex K3 第五輪 medium）。若後端其實已寫入，恢復輪詢後任務會呈 SIGNED、
-      // 再送出得 409 交由既有終態處理，不會重複簽。
-      setError("連線失敗，請確認店內網路後再送出一次。");
+      // 網路/LAN 失敗（fetch reject）：後端**可能已寫入但回應遺失**。不恢復輪詢（保持
+      // 凍結、鎖住 POST 途中的隱私邊界），提示以同一冪等鍵再送一次——若已寫入則回放成功、
+      // 否則正常簽（Codex K3 第六輪 high）。
+      outcome = "thrown";
+      setError("連線不穩，請再按一次「確認並送出」（系統會避免重複簽名）。");
     } finally {
       setSubmitting(false);
-      // 未成功一律恢復輪詢（成功則走 onComplete，由父層維持暫停至交回）。
-      if (!ok) onSigningChange(false);
+      // 僅 HTTP 明確回應（非 thrown）才恢復輪詢：thrown 的任務可能已簽成，保持凍結由
+      // 客人以同鍵重送收斂，避免恢復輪詢把下一位任務顯示給前一位客人。
+      if (outcome === "http") onSigningChange(false);
     }
-    if (ok) {
+    if (outcome === "ok") {
       // 成功：交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成畫面，
       // 避免輪詢在客人交回前帶出下一位客人的任務）。
       onComplete();

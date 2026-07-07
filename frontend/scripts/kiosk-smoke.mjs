@@ -162,12 +162,21 @@ try {
   });
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
 
-  // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
+  // ── 交回鎖持久化：完成畫面重整後仍停在交回、不解鎖（Codex K3 第六輪 high）──
   await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "TRANSACTION_ACK",
     contact_id: contactId,
     content: { items: "單一字串品項", note: "非陣列 items 也要顯示" },
   });
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(600);
+  ok(
+    "重整後仍停在交回畫面（持久鎖）",
+    (await page.locator('h1:has-text("已完成簽署")').isVisible()) &&
+      !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()),
+  );
+
+  // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
   await page.waitForTimeout(3000); // 跨過一個輪詢週期（2s）
   const stillHandoff = await page.locator('h1:has-text("已完成簽署")').isVisible();
   const nextLeaked = await page.locator('h1:has-text("交易紀錄簽收")').isVisible();
@@ -205,7 +214,18 @@ try {
     (await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
     (await page.locator("button.kiosk-submit").isEnabled());
   ok("送出失敗後可重試、不卡死", recoverable);
+
+  // 網路恢復後以同一冪等鍵重送 → 成功進交回畫面（thrown→retry 收斂；Codex K3 第六輪）
   await page.unroute("**/api/v1/kiosk/tasks/*/sign");
+  await page.click("button.kiosk-submit");
+  await page.waitForSelector('h1:has-text("已完成簽署")', { timeout: 8000 });
+  ok("網路恢復後重送成功進交回", true);
+  // 解鎖回到待機（此任務已簽、無其他待簽）
+  await page.click('button:has-text("店員解鎖，接續下一位")');
+  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
+  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
+  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
 
   // ── 回歸：KIOSK token 導到店務頁 → 不渲染店務殼、導回 /kiosk（Codex K3 medium）──
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });

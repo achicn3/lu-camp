@@ -54,3 +54,5 @@ class KioskSignRequest(BaseModel):
     signature_image_base64: str = Field(min_length=1, max_length=MAX_SIGNATURE_B64_CHARS)
     # AFFIDAVIT 必填且限 CASH/STORE_CREDIT（D7 二選一）；其他任務種類必須不帶。
     chosen_payout: PayoutMethod | None = None
+    # 客端每張任務一鍵：回應遺失時以同鍵重送安全回放（idempotent；Codex K3 第六輪）。
+    idempotency_key: str | None = Field(default=None, max_length=80)
