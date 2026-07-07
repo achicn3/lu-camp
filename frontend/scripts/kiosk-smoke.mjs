@@ -203,19 +203,25 @@ try {
     ackBody.includes("單一字串品項") && ackBody.includes("非陣列 items 也要顯示"),
   );
 
-  // ── 回歸：送出遇網路失敗不得卡死（Codex K3 第五輪 medium）──────────────────
-  // 攔截並中止簽名 POST，模擬 LAN 失敗；畫面須顯示可重試錯誤、送出鈕恢復可按、不卡死。
-  await page.route("**/api/v1/kiosk/tasks/*/sign", (route) => route.abort());
+  // ── 回歸：送出遇網路失敗不得卡死＋在途鎖定 payload（Codex K3 第五/八輪）──────
+  // 延遲後中止簽名 POST：模擬 LAN 失敗，並讓「在途期間」有時間檢查控制項已鎖定。
+  await page.route("**/api/v1/kiosk/tasks/*/sign", async (route) => {
+    await new Promise((r) => setTimeout(r, 800));
+    await route.abort();
+  });
   await drawSignature(page);
-  await page.click("button.kiosk-submit");
+  const submitClick = page.click("button.kiosk-submit");
+  await page.waitForTimeout(300); // POST 在途
+  ok("送出在途即鎖定清除簽名", await page.locator('button:has-text("清除重簽")').isDisabled());
+  await submitClick;
   await page.waitForSelector(".kiosk-task-footer .form-error", { timeout: 6000 });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(200);
   const recoverable =
     (await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
     (await page.locator("button.kiosk-submit").isEnabled());
   ok("送出失敗後可重試、不卡死", recoverable);
 
-  // 曖昧失敗後 payload 鎖定：撥款/清除簽名鈕停用（重送須為同 payload；Codex K3 第七輪）
+  // 曖昧失敗後 payload 仍鎖定：清除簽名鈕停用（重送須為同 payload；Codex K3 第七輪）
   ok("曖昧失敗後鎖定清除簽名", await page.locator('button:has-text("清除重簽")').isDisabled());
 
   // 曖昧失敗後重整 → 進店員恢復畫面、不輪詢、不顯示待簽任務（Codex K3 第七輪 high）

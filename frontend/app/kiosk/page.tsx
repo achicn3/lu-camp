@@ -340,6 +340,10 @@ function TaskScreen({
   // 每張任務一把冪等鍵（隨此 TaskScreen 掛載生成、跨重試不變）：回應遺失後以同鍵重送，
   // 後端回放同結果而非 409（Codex K3 第六輪）。key=task.id 換任務即重掛→自然換新鍵。
   const idempotencyKey = useRef<string>(newIdempotencyKey());
+  // 首次送出凍結的 payload（重試沿用同一份，避免在途變更造成同鍵不同指紋 409）。
+  const submittedPayload = useRef<{ image: string; payout: "CASH" | "STORE_CREDIT" | null } | null>(
+    null,
+  );
   const [hasInk, setHasInk] = useState(false);
   const [payout, setPayout] = useState<"CASH" | "STORE_CREDIT" | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -353,6 +357,8 @@ function TaskScreen({
 
   const needsPayout = PAYOUT_KINDS.has(task.kind);
   const needsAgreement = task.agreement_body !== null;
+  // 送出在途或曖昧鎖定時，撥款/同意/簽名一律不可改（重試須與已送出的 payload 一致）。
+  const controlsLocked = submitting || payloadLocked;
 
   const canSubmit =
     hasInk &&
@@ -362,12 +368,20 @@ function TaskScreen({
     (!needsAgreement || agreed);
 
   async function submit() {
-    const image = canvasRef.current?.toBase64();
-    if (!image) {
-      setError("簽名太少，請簽得更完整（或清除重簽）。");
-      return;
+    // 凍結「首次送出」的 payload 並於重試沿用同一份（Codex K3 第八輪 high）：否則在 POST
+    // 在途期間客人改撥款/重畫，重試會以同鍵送出不同內容 → 撞不同指紋 409 → 誤判 superseded
+    // 清鎖恢復輪詢。捕捉於 ref、送出即鎖控制項（submitting||payloadLocked），杜絕在途變更。
+    if (submittedPayload.current === null) {
+      const image = canvasRef.current?.toBase64();
+      if (!image) {
+        setError("簽名太少，請簽得更完整（或清除重簽）。");
+        return;
+      }
+      submittedPayload.current = { image, payout: needsPayout ? payout : null };
     }
+    const frozen = submittedPayload.current;
     setSubmitting(true);
+    setPayloadLocked(true); // 送出即鎖：POST 在途期間不得改動撥款/同意/簽名
     setError(null);
     // 送出期間凍結父層任務並中止在途輪詢，避免任務在 POST 途中被換掉（Codex K3 第五輪）。
     onSigningChange(true, task);
@@ -379,8 +393,8 @@ function TaskScreen({
       const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
         params: { path: { task_id: task.id } },
         body: {
-          signature_image_base64: image,
-          chosen_payout: needsPayout ? payout : null,
+          signature_image_base64: frozen.image,
+          chosen_payout: frozen.payout,
           idempotency_key: idempotencyKey.current,
         },
       });
@@ -395,17 +409,21 @@ function TaskScreen({
           setError("此項目已由店員更新，請依店員指示，稍候將顯示最新內容。");
           void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
         } else if (response.status === 422) {
+          // 後端明確拒收此影像：解鎖並清凍結 payload，讓客人重新簽（回應已達，無曖昧）。
+          setPayloadLocked(false);
+          submittedPayload.current = null;
           setError("簽名無法辨識，請清除後簽得更完整。");
         } else {
+          setPayloadLocked(false);
+          submittedPayload.current = null;
           setError("送出失敗，請再試一次或請店員協助。");
         }
       }
     } catch {
       // 網路/LAN 失敗（fetch reject）：後端**可能已寫入但回應遺失**。不恢復輪詢（保持
       // 凍結、鎖住 POST 途中的隱私邊界），提示以同一冪等鍵再送一次——若已寫入則回放成功、
-      // 否則正常簽（Codex K3 第六輪 high）。並鎖住 payload，令重送必為同內容（第七輪）。
+      // 否則正常簽（Codex K3 第六輪 high）。payload 已於送出時鎖定並凍結，重送必為同內容。
       outcome = "thrown";
-      setPayloadLocked(true);
       setError("連線不穩，請再按一次「確認並送出」（系統會避免重複簽名）。");
     } finally {
       setSubmitting(false);
@@ -441,7 +459,7 @@ function TaskScreen({
               <input
                 type="checkbox"
                 checked={agreed}
-                disabled={payloadLocked}
+                disabled={controlsLocked}
                 onChange={(e) => setAgreed(e.target.checked)}
               />
               <span>本人已閱讀並同意上述切結書及條款內容</span>
@@ -456,7 +474,7 @@ function TaskScreen({
               <button
                 type="button"
                 className={payoutClass(payout === "CASH")}
-                disabled={payloadLocked}
+                disabled={controlsLocked}
                 onClick={() => setPayout("CASH")}
               >
                 現金
@@ -464,7 +482,7 @@ function TaskScreen({
               <button
                 type="button"
                 className={payoutClass(payout === "STORE_CREDIT")}
-                disabled={payloadLocked}
+                disabled={controlsLocked}
                 onClick={() => setPayout("STORE_CREDIT")}
               >
                 購物金
@@ -475,7 +493,7 @@ function TaskScreen({
 
         <div className="kiosk-signature">
           <h2 className="kiosk-section-title">簽名確認</h2>
-          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} locked={payloadLocked} />
+          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} locked={controlsLocked} />
         </div>
       </section>
 
