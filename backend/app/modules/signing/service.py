@@ -142,13 +142,20 @@ class SigningService:
         失敗使裝置卡住或恢復輪詢洩漏下一位客人任務（Codex K3 第六輪 high）。
         """
         image = self._decode_signature(signature_image_base64)
+        # 冪等指紋綁定「鍵＋簽名影像＋撥款選擇」：同鍵但改了影像/撥款的重送不得回放舊結果
+        # （否則遺失 CASH 回應後改送 STORE_CREDIT 會拿到舊 CASH 的 200；Codex K3 第七輪 high）。
+        fingerprint = (
+            self._sign_fingerprint(idempotency_key, image, chosen_payout)
+            if idempotency_key is not None
+            else None
+        )
         await self._lock_store_signing(store_id)
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
         if task.status is SignatureTaskStatus.SIGNED:
-            # 冪等回放：同鍵已簽成 → 回原任務（視為成功）；不同鍵/無鍵 → 仍是 409。
-            if idempotency_key is not None and task.sign_idempotency_key == idempotency_key:
+            # 冪等回放：同鍵＋同內容已簽成 → 回原任務（視為成功）；同鍵但內容不同/無鍵 → 409。
+            if fingerprint is not None and task.sign_idempotency_key == fingerprint:
                 return task
             raise SignatureTaskNotPending(f"簽署任務 {task_id} 已簽署，請店員重新推送")
         if task.status is not SignatureTaskStatus.PENDING:
@@ -164,11 +171,27 @@ class SigningService:
         task.signature_image = image
         task.signed_at = datetime.now(UTC)
         task.chosen_payout = chosen_payout
-        task.sign_idempotency_key = idempotency_key
+        task.sign_idempotency_key = fingerprint
         task.status = SignatureTaskStatus.SIGNED
         await self._session.flush()
         await self._session.refresh(task)
         return task
+
+    @staticmethod
+    def _sign_fingerprint(
+        idempotency_key: str, image: bytes, chosen_payout: PayoutMethod | None
+    ) -> str:
+        """簽名冪等指紋 = sha256(鍵 ∥ 影像 ∥ 撥款)；存於 sign_idempotency_key 欄供回放比對。
+
+        綁內容而非只綁鍵：同鍵但影像/撥款不同的重送必得不同指紋 → 不回放、回 409。
+        """
+        digest = hashlib.sha256()
+        digest.update(idempotency_key.encode())
+        digest.update(b"\x00")
+        digest.update(image)
+        digest.update(b"\x00")
+        digest.update((chosen_payout.value if chosen_payout is not None else "").encode())
+        return digest.hexdigest()
 
     async def get_task(self, store_id: int, task_id: int) -> SignatureTask | None:
         return await self._repo.get(store_id, task_id)

@@ -215,12 +215,30 @@ try {
     (await page.locator("button.kiosk-submit").isEnabled());
   ok("送出失敗後可重試、不卡死", recoverable);
 
-  // 網路恢復後以同一冪等鍵重送 → 成功進交回畫面（thrown→retry 收斂；Codex K3 第六輪）
+  // 曖昧失敗後 payload 鎖定：撥款/清除簽名鈕停用（重送須為同 payload；Codex K3 第七輪）
+  ok("曖昧失敗後鎖定清除簽名", await page.locator('button:has-text("清除重簽")').isDisabled());
+
+  // 曖昧失敗後重整 → 進店員恢復畫面、不輪詢、不顯示待簽任務（Codex K3 第七輪 high）
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector('h1:has-text("上一筆簽署尚未確認")', { timeout: 8000 });
+  ok(
+    "曖昧失敗重整後進恢復畫面、不洩漏任務",
+    !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()),
+  );
+  // 店員確認並解鎖 → 恢復輪詢，待簽任務重新出現（可重新簽署）
   await page.unroute("**/api/v1/kiosk/tasks/*/sign");
+  await page.click('button:has-text("店員確認並解鎖")');
+  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
+  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
+  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
+  await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  ok("店員解鎖恢復後任務重現", true);
+
+  // 重新簽署 → 成功進交回；再解鎖回待機
+  await drawSignature(page);
   await page.click("button.kiosk-submit");
   await page.waitForSelector('h1:has-text("已完成簽署")', { timeout: 8000 });
-  ok("網路恢復後重送成功進交回", true);
-  // 解鎖回到待機（此任務已簽、無其他待簽）
+  ok("恢復後重新簽署成功", true);
   await page.click('button:has-text("店員解鎖，接續下一位")');
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);

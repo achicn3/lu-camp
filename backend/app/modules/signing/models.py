@@ -105,9 +105,9 @@ class SignatureTask(Base, TimestampMixin):
     signature_image: Mapped[bytes | None] = mapped_column(LargeBinary)  # PNG
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # 簽名送出的客端嘗試鍵（idempotency）：手持端「已提交但回應遺失」時以同鍵重送，
-    # 若後端其實已簽成，回放同一結果而非 409——避免曖昧失敗使裝置卡住或洩漏下一位任務
-    # （docs/23；Codex K3 第六輪）。
+    # 簽名冪等指紋 = sha256(客端鍵 ∥ 簽名影像 ∥ 撥款)：手持端「已提交但回應遺失」時以同鍵＋
+    # 同內容重送 → 後端回放同結果而非 409；同鍵但改了內容 → 指紋不同 → 409（不覆蓋既簽）。
+    # 綁內容避免「遺失 CASH 回應後改送 STORE_CREDIT 拿到舊 CASH 200」（docs/23；Codex K3 第六/七輪）。
     sign_idempotency_key: Mapped[str | None] = mapped_column(String(80))
     # 關聯單據（K4/K5 回填）：acquisition/sale 等；不設 FK（跨模組鬆耦合、單據於簽後才建）。
     ref_type: Mapped[str | None] = mapped_column(String(30))

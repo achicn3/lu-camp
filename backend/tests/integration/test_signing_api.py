@@ -359,6 +359,21 @@ async def test_sign_idempotent_replay(client: httpx.AsyncClient, db_session: Asy
     )
     assert nokey.status_code == 409
 
+    # 同鍵但改了撥款 → 指紋不同 → 409（不得回放舊 CASH 結果；Codex K3 第七輪）
+    changed_payout = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={**body, "chosen_payout": "STORE_CREDIT"},
+        headers=_auth(s.kiosk),
+    )
+    assert changed_payout.status_code == 409
+    # 同鍵但改了簽名影像 → 指紋不同 → 409
+    changed_image = await client.post(
+        f"/api/v1/kiosk/tasks/{task['id']}/sign",
+        json={**body, "signature_image_base64": _signature_png(220, 90)},
+        headers=_auth(s.kiosk),
+    )
+    assert changed_image.status_code == 409
+
 
 async def test_affidavit_payout_must_be_binary(
     client: httpx.AsyncClient, db_session: AsyncSession

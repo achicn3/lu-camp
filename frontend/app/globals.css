@@ -1966,3 +1966,6 @@ body {
   width: min(320px, 100%);
   text-align: left;
 }
+.kiosk-thanks-check--warn {
+  background: var(--warn);
+}

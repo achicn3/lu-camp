@@ -22,8 +22,8 @@ export interface SignatureCanvasHandle {
 
 export const SignatureCanvas = forwardRef<
   SignatureCanvasHandle,
-  { onInkChange: (hasInk: boolean) => void }
->(function SignatureCanvas({ onInkChange }, ref) {
+  { onInkChange: (hasInk: boolean) => void; locked?: boolean }
+>(function SignatureCanvas({ onInkChange, locked = false }, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
   const hasInk = useRef(false);
@@ -68,6 +68,7 @@ export const SignatureCanvas = forwardRef<
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (locked) return; // 曖昧提交後鎖定：不得改動簽名（重送須為同一影像）
     e.preventDefault();
     drawing.current = true;
     last.current = toCanvasCoords(e);
@@ -129,7 +130,7 @@ export const SignatureCanvas = forwardRef<
           <button type="button" className="btn-ghost" onClick={() => setEnlarged((v) => !v)}>
             {enlarged ? "縮小" : "放大簽名"}
           </button>
-          <button type="button" className="btn-ghost" onClick={clear}>
+          <button type="button" className="btn-ghost" onClick={clear} disabled={locked}>
             清除重簽
           </button>
         </div>

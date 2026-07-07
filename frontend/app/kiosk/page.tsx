@@ -39,6 +39,19 @@ function setHandoffLock(on: boolean): void {
   else window.localStorage.removeItem(HANDOFF_KEY);
 }
 
+// 曖昧簽署鎖（Codex K3 第七輪 high）：POST **送出前**即持久化——若後端已寫入但回應遺失、
+// 客人又在重送前重整，重掛後據此進入店員解鎖的恢復畫面、絕不恢復輪詢顯示下一位任務。
+// 明確結果（成功/HTTP 錯誤）才清除；thrown（連線失敗）保留。
+const SIGNING_LOCK_KEY = "lu-camp.kiosk-signing";
+function readSigningLock(): boolean {
+  return typeof window !== "undefined" && window.localStorage.getItem(SIGNING_LOCK_KEY) === "1";
+}
+function setSigningLock(on: boolean): void {
+  if (typeof window === "undefined") return;
+  if (on) window.localStorage.setItem(SIGNING_LOCK_KEY, "1");
+  else window.localStorage.removeItem(SIGNING_LOCK_KEY);
+}
+
 // LAN（http，非安全來源）下 crypto.randomUUID 可能不存在——提供退回實作，供簽名冪等鍵用。
 function newIdempotencyKey(): string {
   const c = typeof crypto !== "undefined" ? crypto : undefined;
@@ -137,13 +150,16 @@ function KioskConsole() {
   // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
   // 初值讀持久化交回鎖：重整/重掛後若上一位尚未由店員解鎖，仍停在交回畫面。
   const [completed, setCompleted] = useState(readHandoffLock);
+  // 曖昧簽署恢復（Codex K3 第七輪 high）：重掛時若持久化簽署鎖仍在（thrown 後未收斂又重整），
+  // 進入店員解鎖恢復畫面、不輪詢——避免把下一位任務顯示給前一位客人。
+  const [recovering, setRecovering] = useState(() => readSigningLock() && !readHandoffLock());
   // 簽名送出進行中亦暫停輪詢（Codex K3 high）：否則 POST 尚未回應期間，輪詢可能因
   // 店員重推而換掉 data、使 key=id 重掛出下一張任務，讓前一位客人看到他人內容。
   // 僅暫停 enabled 不夠——POST 前已在途的 refetch 仍可能回填快取；故簽名期間另以
   // frozenTask 凍結畫面上的任務、並 cancelQueries 中止在途請求（Codex K3 第五輪 high）。
   const [frozenTask, setFrozenTask] = useState<KioskTask | null>(null);
   const signing = frozenTask !== null;
-  const paused = completed || signing;
+  const paused = completed || signing || recovering;
   const { data, error } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
@@ -171,9 +187,29 @@ function KioskConsole() {
     }
   }, [forbidden, queryClient]);
 
+  if (recovering) {
+    return (
+      <StaffGate
+        variant="recover"
+        title="上一筆簽署尚未確認"
+        message="請店員確認此筆是否已簽署後解鎖，再接續作業。"
+        unlockLabel="店員確認並解鎖"
+        onReset={() => {
+          // 店員已確認：清簽署鎖＋當前任務快取再恢復輪詢。
+          setSigningLock(false);
+          queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+          setRecovering(false);
+        }}
+      />
+    );
+  }
   if (completed) {
     return (
-      <Handoff
+      <StaffGate
+        variant="done"
+        title="已完成簽署"
+        message="感謝您，請將裝置交回給店員。"
+        unlockLabel="店員解鎖，接續下一位"
         onReset={() => {
           // 店員解鎖：清持久化交回鎖＋暫存的當前任務再恢復輪詢，避免恢復瞬間閃現舊任務。
           setHandoffLock(false);
@@ -202,10 +238,21 @@ function KioskConsole() {
   );
 }
 
-// 交回畫面：簽署完成後停於此。恢復輪詢需**現場店務員帳密**授權（Codex K3 high）——
-// 避免客人自行點按解鎖、進而看到下一位客人的內容/個資。驗證不持久化 token（裝置身分
-// 仍為 KIOSK）。
-function Handoff({ onReset }: { onReset: () => void }) {
+// 店員帳密解鎖畫面（Codex K3 high）：交回鎖／曖昧簽署恢復皆須現場店務員帳密授權，避免
+// 客人自行點按解鎖看到下一位客人內容。驗證不持久化 token（裝置身分仍為 KIOSK）。
+function StaffGate({
+  variant,
+  title,
+  message,
+  unlockLabel,
+  onReset,
+}: {
+  variant: "done" | "recover";
+  title: string;
+  message: string;
+  unlockLabel: string;
+  onReset: () => void;
+}) {
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -227,14 +274,17 @@ function Handoff({ onReset }: { onReset: () => void }) {
   return (
     <main className="kiosk-thanks">
       <div className="kiosk-thanks-inner">
-        <div className="kiosk-thanks-check" aria-hidden>
-          ✓
+        <div
+          className={variant === "done" ? "kiosk-thanks-check" : "kiosk-thanks-check kiosk-thanks-check--warn"}
+          aria-hidden
+        >
+          {variant === "done" ? "✓" : "!"}
         </div>
-        <h1 className="kiosk-thanks-title">已完成簽署</h1>
-        <p className="kiosk-standby-sub">感謝您，請將裝置交回給店員。</p>
+        <h1 className="kiosk-thanks-title">{title}</h1>
+        <p className="kiosk-standby-sub">{message}</p>
         {!showForm ? (
           <button type="button" className="btn-secondary" onClick={() => setShowForm(true)}>
-            店員解鎖，接續下一位
+            {unlockLabel}
           </button>
         ) : (
           <form className="kiosk-unlock-form" onSubmit={unlock}>
@@ -297,6 +347,9 @@ function TaskScreen({
   const [agreed, setAgreed] = useState(false);
   // 任務已被店員作廢/取代（409）：終態，鎖住送出，靠輪詢帶回待機/新任務。
   const [superseded, setSuperseded] = useState(false);
+  // 曾遇 thrown（曖昧提交）：鎖住撥款/同意/清除，令重送必為同一 payload → 後端同鍵同指紋
+  // 回放成功（改了 payload 會撞不同指紋 409）（Codex K3 第七輪）。
+  const [payloadLocked, setPayloadLocked] = useState(false);
 
   const needsPayout = PAYOUT_KINDS.has(task.kind);
   const needsAgreement = task.agreement_body !== null;
@@ -318,6 +371,9 @@ function TaskScreen({
     setError(null);
     // 送出期間凍結父層任務並中止在途輪詢，避免任務在 POST 途中被換掉（Codex K3 第五輪）。
     onSigningChange(true, task);
+    // 送出「前」即持久化簽署鎖：即使 POST 已寫入但回應遺失、客人又重整，重掛也會進恢復畫面
+    // 而非恢復輪詢（Codex K3 第七輪 high）。明確結果才清除。
+    setSigningLock(true);
     let outcome: "ok" | "http" | "thrown" = "thrown";
     try {
       const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
@@ -347,18 +403,23 @@ function TaskScreen({
     } catch {
       // 網路/LAN 失敗（fetch reject）：後端**可能已寫入但回應遺失**。不恢復輪詢（保持
       // 凍結、鎖住 POST 途中的隱私邊界），提示以同一冪等鍵再送一次——若已寫入則回放成功、
-      // 否則正常簽（Codex K3 第六輪 high）。
+      // 否則正常簽（Codex K3 第六輪 high）。並鎖住 payload，令重送必為同內容（第七輪）。
       outcome = "thrown";
+      setPayloadLocked(true);
       setError("連線不穩，請再按一次「確認並送出」（系統會避免重複簽名）。");
     } finally {
       setSubmitting(false);
-      // 僅 HTTP 明確回應（非 thrown）才恢復輪詢：thrown 的任務可能已簽成，保持凍結由
-      // 客人以同鍵重送收斂，避免恢復輪詢把下一位任務顯示給前一位客人。
-      if (outcome === "http") onSigningChange(false);
+      // 明確 HTTP 回應（非 thrown）代表後端確定未寫入或已終態：清簽署鎖並恢復輪詢。
+      // thrown 保留簽署鎖（可能已寫入）：保持凍結，由客人以同鍵重送 或 重整後店員解鎖收斂。
+      if (outcome === "http") {
+        setSigningLock(false);
+        onSigningChange(false);
+      }
     }
     if (outcome === "ok") {
-      // 成功：交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成畫面，
-      // 避免輪詢在客人交回前帶出下一位客人的任務）。
+      // 成功：清簽署鎖，交由 KioskConsole 顯示「交回店員」並暫停輪詢（不在此本地顯示完成
+      // 畫面，避免輪詢在客人交回前帶出下一位客人的任務）。
+      setSigningLock(false);
       onComplete();
     }
   }
@@ -380,6 +441,7 @@ function TaskScreen({
               <input
                 type="checkbox"
                 checked={agreed}
+                disabled={payloadLocked}
                 onChange={(e) => setAgreed(e.target.checked)}
               />
               <span>本人已閱讀並同意上述切結書及條款內容</span>
@@ -394,6 +456,7 @@ function TaskScreen({
               <button
                 type="button"
                 className={payoutClass(payout === "CASH")}
+                disabled={payloadLocked}
                 onClick={() => setPayout("CASH")}
               >
                 現金
@@ -401,6 +464,7 @@ function TaskScreen({
               <button
                 type="button"
                 className={payoutClass(payout === "STORE_CREDIT")}
+                disabled={payloadLocked}
                 onClick={() => setPayout("STORE_CREDIT")}
               >
                 購物金
@@ -411,7 +475,7 @@ function TaskScreen({
 
         <div className="kiosk-signature">
           <h2 className="kiosk-section-title">簽名確認</h2>
-          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} />
+          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} locked={payloadLocked} />
         </div>
       </section>
 
