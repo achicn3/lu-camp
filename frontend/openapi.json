@@ -62,6 +62,17 @@
             ],
             "title": "Payout Split Cash"
           },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          },
           "type": {
             "$ref": "#/components/schemas/AcquisitionType"
           }
@@ -6401,6 +6412,10 @@
             "title": "Premium Rate Min",
             "type": "string"
           },
+          "require_acquisition_affidavit": {
+            "title": "Require Acquisition Affidavit",
+            "type": "boolean"
+          },
           "store_credit_engine_params": {
             "additionalProperties": true,
             "title": "Store Credit Engine Params",
@@ -6426,6 +6441,7 @@
           "default_commission_pct",
           "default_margin_pct",
           "allow_clerk_manage_categories",
+          "require_acquisition_affidavit",
           "premium_rate",
           "premium_rate_min",
           "premium_rate_max",
@@ -6566,6 +6582,17 @@
               }
             ],
             "title": "Premium Rate Min"
+          },
+          "require_acquisition_affidavit": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Acquisition Affidavit"
           },
           "store_credit_engine_params": {
             "anyOf": [

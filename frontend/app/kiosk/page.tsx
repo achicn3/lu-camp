@@ -544,7 +544,8 @@ function TaskScreen({
                 disabled={controlsLocked}
                 onClick={() => setPayout("CASH")}
               >
-                現金
+                <span className="kiosk-payout-label">現金</span>
+                <span className="kiosk-payout-amount">{formatAmount(task.content.total)}</span>
               </button>
               <button
                 type="button"
@@ -552,7 +553,17 @@ function TaskScreen({
                 disabled={controlsLocked}
                 onClick={() => setPayout("STORE_CREDIT")}
               >
-                購物金
+                <span className="kiosk-payout-label">購物金</span>
+                {storeCreditPremium(task.content) ? (
+                  <span className="kiosk-payout-amount">
+                    {formatAmount(storeCreditPremium(task.content)?.amount)}
+                    <span className="kiosk-payout-bonus">
+                      多得 {formatAmount(storeCreditPremium(task.content)?.extra)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="kiosk-payout-amount">{formatAmount(task.content.total)}</span>
+                )}
               </button>
             </div>
           </div>
@@ -621,7 +632,12 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
   const items = itemsIsArray ? (content.items as unknown[]) : [];
   // 僅在 items 真的以陣列渲染時，才將它排除於一般欄位；若 items 非陣列（schema 漂移/
   // 錯誤生產者），仍以一般欄位 renderValue 列出，絕不靜默丟棄客人所簽內容（Codex K3 高）。
-  const rest = Object.entries(content).filter(([key]) => key !== "items" || !itemsIsArray);
+  // store_credit_premium 於撥款按鈕另外呈現，不列入通用明細。
+  // （綁定用身分指紋已移至後端內部欄，不在 content，故此處不再需要遮蔽。）
+  const hidden = new Set(["store_credit_premium"]);
+  const rest = Object.entries(content).filter(
+    ([key]) => !hidden.has(key) && (key !== "items" || !itemsIsArray),
+  );
 
   return (
     <div className="kiosk-snapshot">
@@ -690,4 +706,15 @@ function formatAmount(value: unknown): string {
   const num = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(num)) return String(value);
   return `$${num.toLocaleString("zh-TW")}`;
+}
+
+// 後端於 AFFIDAVIT 內容補的購物金溢價預覽（客人選購物金可多得幾%；使用者裁示）。
+function storeCreditPremium(
+  content: Record<string, unknown>,
+): { amount: unknown; extra: unknown } | null {
+  const p = content.store_credit_premium;
+  if (p === null || typeof p !== "object") return null;
+  const rec = p as Record<string, unknown>;
+  if (rec.amount === undefined) return null;
+  return { amount: rec.amount, extra: rec.extra };
 }

@@ -325,3 +325,8 @@ class SignatureTaskConflict(DomainError):
 
 class InvalidKioskPayout(DomainError):
     """手持端撥款選擇不合法（僅限 現金/購物金 二選一，docs/23 D7；或該任務類型不收撥款選擇）。"""
+
+
+class SignatureContentMismatch(DomainError):
+    """收購內容（品項/金額/總額）與已簽切結的內容快照不符（docs/23 K4）：客人簽的必須就是
+    這張收購——改了金額/品項就不可沿用舊簽署，須重新推送簽署。"""

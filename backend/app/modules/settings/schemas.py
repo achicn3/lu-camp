@@ -32,6 +32,7 @@ class SettingsRead(BaseModel):
     default_commission_pct: int
     default_margin_pct: int
     allow_clerk_manage_categories: bool
+    require_acquisition_affidavit: bool
     premium_rate: RateOut
     premium_rate_min: RateOut
     premium_rate_max: RateOut
@@ -56,6 +57,7 @@ class SettingsUpdateRequest(BaseModel):
     default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
     default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
     allow_clerk_manage_categories: bool | None = None
+    require_acquisition_affidavit: bool | None = None
     premium_rate: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_min: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_max: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None

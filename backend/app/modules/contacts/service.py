@@ -256,6 +256,24 @@ class ContactService:
         )
         return [(m, balances.get(m.id, Decimal(0))) for m in members]
 
+    async def masked_national_id(self, store_id: int, contact_id: int) -> str | None:
+        """回部分遮罩的 national_id（如 A12****789；證號遮罩，D1），無則 None。
+
+        供手持切結顯示——客人可辨識是自己的證號但不外露完整值；輸出為遮罩、非完整
+        揭露，故不寫稽核（reveal_national_id 才是完整揭露＋稽核）。
+        """
+        contact = await self._repo.get(store_id, contact_id)
+        if contact is None or contact.national_id_enc is None:
+            return None
+        try:
+            plain = get_pii_cipher().decrypt(contact.national_id_enc)
+        except Exception:
+            # 損毀/非本金鑰密文不得讓簽署任務建立整筆失敗——遮罩不可得即回 None（顯示層降級）。
+            return None
+        if len(plain) <= 6:
+            return "*" * len(plain)
+        return f"{plain[:3]}****{plain[-3:]}"
+
     async def reveal_national_id(
         self, store_id: int, contact_id: int, actor_user_id: int
     ) -> str | None:

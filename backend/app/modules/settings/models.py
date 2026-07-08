@@ -50,6 +50,11 @@ class StoreSettings(Base, TimestampMixin):
     allow_clerk_manage_categories: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
+    # 收購須手持切結（docs/23 K4，D2）：開啟後付現/購物金收購（BUYOUT/BULK_LOT）必須綁定
+    # 已簽手持切結才可完成——保護店家取得非贓物切結的法律證據。預設關（店家就緒後開啟）。
+    require_acquisition_affidavit: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     # 購物金溢價率與政策界線（docs/16 §1.5/§6.1）：premium_rate 夾在 [min, max]。
     premium_rate: Mapped[Decimal] = mapped_column(
         Numeric(5, 4), server_default=text("0.10"), nullable=False

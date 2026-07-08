@@ -20,12 +20,29 @@ class AcquisitionRepository:
         return acquisition
 
     async def get_by_idempotency_key(
-        self, store_id: int, idempotency_key: str
+        self, store_id: int, idempotency_key: str, *, for_update: bool = False
     ) -> Acquisition | None:
         stmt = select(Acquisition).where(
             Acquisition.store_id == store_id,
             Acquisition.idempotency_key == idempotency_key,
         )
+        if for_update:
+            # 回放決策前鎖列（Codex K4 第十五輪）：與 void_acquisition 的 FOR UPDATE 序列化，
+            # 杜絕「回放讀到 void 前舊版（voided_at=NULL）而回 201」的競態。
+            stmt = stmt.with_for_update()
+        result: Acquisition | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_by_signature_task_id(
+        self, store_id: int, signature_task_id: int, *, for_update: bool = False
+    ) -> Acquisition | None:
+        """已綁定某手持切結的收購單（單次使用唯一約束 → 至多一張）。"""
+        stmt = select(Acquisition).where(
+            Acquisition.store_id == store_id,
+            Acquisition.signature_task_id == signature_task_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
         result: Acquisition | None = await self._session.scalar(stmt)
         return result
 

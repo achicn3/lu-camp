@@ -34,6 +34,8 @@ class Acquisition(Base, TimestampMixin):
     __tablename__ = "acquisitions"
     __table_args__ = (
         UniqueConstraint("store_id", "idempotency_key", name="uq_acquisitions_store_idem_key"),
+        # 一份手持切結至多綁一張收購（docs/23 K4，D2）；名稱與 migration 一致供 service 辨識。
+        UniqueConstraint("signature_task_id", name="uq_acquisitions_signature_task"),
         # NULL 僅限 legacy 回填列；新寫入一律非空（service 守衛＋本 CHECK 防空字串）。
         CheckConstraint(
             "idempotency_key IS NULL OR length(idempotency_key) > 0",
@@ -98,6 +100,9 @@ class Acquisition(Base, TimestampMixin):
     # 操作層冪等（D-2 模式；Codex SC-2 high）：重試不得重複入庫/付現/入購物金。
     idempotency_key: Mapped[str | None] = mapped_column(String(80))
     idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # 綁定的手持簽署切結任務（docs/23 K4，D2）：一份已簽切結書至多綁一張收購單（UNIQUE
+    # 為單次使用的最終防線）。撥款方式須與該切結任務客人所選（chosen_payout）一致。
+    signature_task_id: Mapped[int | None] = mapped_column(ForeignKey("signature_tasks.id"))
     note: Mapped[str | None] = mapped_column(String(500))
     # 作廢（F6.5）：voided_at IS NOT NULL 即「已作廢」（不另立 status 列舉）。作廢時對稱反轉
     # 庫存/現金/購物金；只加這三欄、不動 credit 腿/成本/ownership，故既有背書守衛仍成立。

@@ -1717,6 +1717,8 @@ export interface components {
             payout_method: components["schemas"]["PayoutMethod"];
             /** Payout Split Cash */
             payout_split_cash?: number | string | null;
+            /** Signature Task Id */
+            signature_task_id?: number | null;
             type: components["schemas"]["AcquisitionType"];
         };
         /**
@@ -4119,6 +4121,8 @@ export interface components {
             premium_rate_max: string;
             /** Premium Rate Min */
             premium_rate_min: string;
+            /** Require Acquisition Affidavit */
+            require_acquisition_affidavit: boolean;
             /** Store Credit Engine Params */
             store_credit_engine_params: {
                 [key: string]: unknown;
@@ -4156,6 +4160,8 @@ export interface components {
             premium_rate_max?: number | string | null;
             /** Premium Rate Min */
             premium_rate_min?: number | string | null;
+            /** Require Acquisition Affidavit */
+            require_acquisition_affidavit?: boolean | null;
             /** Store Credit Engine Params */
             store_credit_engine_params?: {
                 [key: string]: unknown;

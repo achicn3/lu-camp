@@ -80,6 +80,13 @@ class SignatureTask(Base, TimestampMixin):
             "chosen_payout IS NULL OR chosen_payout <> 'SPLIT'",
             name="ck_signature_tasks_payout_binary",
         ),
+        # 已簽的收購切結必有撥款選擇（docs/23 K4，Codex 第三輪）：杜絕 NULL 撥款的已簽
+        # 買斷切結成為可綁定的證據。
+        CheckConstraint(
+            "NOT (status = 'SIGNED' AND kind = 'ACQUISITION_AFFIDAVIT') "
+            "OR chosen_payout IS NOT NULL",
+            name="ck_signature_tasks_signed_affidavit_payout",
+        ),
         Index("ix_signature_tasks_store_status", "store_id", "status"),
         # 同店同時最多一件待簽（重推＝舊單作廢的最終防線；併發建立時第二筆撞索引）。
         Index(
@@ -107,8 +114,12 @@ class SignatureTask(Base, TimestampMixin):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 簽名冪等指紋 = sha256(客端鍵 ∥ 簽名影像 ∥ 撥款)：手持端「已提交但回應遺失」時以同鍵＋
     # 同內容重送 → 後端回放同結果而非 409；同鍵但改了內容 → 指紋不同 → 409（不覆蓋既簽）。
-    # 綁內容避免「遺失 CASH 回應後改送 STORE_CREDIT 拿到舊 CASH 200」（docs/23；Codex K3 第六/七輪）。
+    # 綁內容避免「遺失 CASH 回應後改送 STORE_CREDIT 拿到舊 200」（docs/23 Codex K3 第六/七輪）。
     sign_idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    # 綁定用穩定身分指紋 = national_id_blind_index（HMAC，非明文、非可逆），建立時凍結。
+    # **伺服器內部欄、絕不列入任何讀取序列化/API 回應**（含手持端）——遮罩有損，此指紋供 K4
+    # 收購綁定精確比對身分；放 content JSON 會被手持端讀到、跨越 D1/D4 PII 邊界（K4 第十一輪）。
+    identity_fingerprint: Mapped[str | None] = mapped_column(String(64))
     # 關聯單據（K4/K5 回填）：acquisition/sale 等；不設 FK（跨模組鬆耦合、單據於簽後才建）。
     ref_type: Mapped[str | None] = mapped_column(String(30))
     ref_id: Mapped[int | None] = mapped_column()

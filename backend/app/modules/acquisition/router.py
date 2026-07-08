@@ -35,6 +35,10 @@ from app.shared.exceptions import (
     InvalidAcquisitionCategory,
     InvalidPayoutSplit,
     NoOpenCashSession,
+    SignatureContentMismatch,
+    SignatureTaskConflict,
+    SignatureTaskNotFound,
+    SignatureTaskNotPending,
     StoreCreditConflict,
     StoreCreditMemberRequired,
 )
@@ -58,6 +62,11 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditConflict: status.HTTP_409_CONFLICT,
+    # 手持切結綁定（docs/23 K4）：查無/非本會員已簽切結 → 404/422；已被綁定 → 409
+    SignatureContentMismatch: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SignatureTaskNotFound: status.HTTP_404_NOT_FOUND,
+    SignatureTaskNotPending: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SignatureTaskConflict: status.HTTP_409_CONFLICT,
     # F6.5 作廢：已作廢/含已售/購物金已花 → 409（衝突狀態，不可作廢）
     AcquisitionAlreadyVoid: status.HTTP_409_CONFLICT,
     AcquisitionHasSoldItems: status.HTTP_409_CONFLICT,

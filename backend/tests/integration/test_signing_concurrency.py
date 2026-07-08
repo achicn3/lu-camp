@@ -11,6 +11,7 @@ import asyncio
 from sqlalchemy import delete, select
 
 import app.core.db as app_db
+from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.modules.contacts.models import Contact
 from app.modules.signing.models import SignatureTask
 from app.modules.signing.schemas import SignatureTaskCreate
@@ -34,7 +35,14 @@ async def test_concurrent_create_keeps_single_pending() -> None:
         clerk = User(
             store_id=store.id, username="conc-sign", password_hash="h", role=UserRole.CLERK
         )
-        contact = Contact(store_id=store.id, name="併發客", phone="0955555555", roles=["SELLER"])
+        contact = Contact(
+            store_id=store.id,
+            name="併發客",
+            phone="0955555555",
+            national_id_enc=get_pii_cipher().encrypt("A123456789"),
+            national_id_blind_index=national_id_blind_index("A123456789"),
+            roles=["SELLER"],
+        )
         s.add_all([clerk, contact])
         await s.flush()
         store_id, clerk_id, contact_id = store.id, clerk.id, contact.id
@@ -103,7 +111,14 @@ async def test_repush_and_old_sign_serialized() -> None:
         clerk = User(
             store_id=store.id, username="repush-clerk", password_hash="h", role=UserRole.CLERK
         )
-        contact = Contact(store_id=store.id, name="重推客", phone="0955000111", roles=["SELLER"])
+        contact = Contact(
+            store_id=store.id,
+            name="重推客",
+            phone="0955000111",
+            national_id_enc=get_pii_cipher().encrypt("B123456780"),
+            national_id_blind_index=national_id_blind_index("B123456780"),
+            roles=["SELLER"],
+        )
         s.add_all([clerk, contact])
         await s.flush()
         store_id, clerk_id, contact_id = store.id, clerk.id, contact.id

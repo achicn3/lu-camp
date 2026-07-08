@@ -122,6 +122,12 @@ try {
   const bodyText = await page.textContent(".kiosk-task-body");
   ok("顯示品項與金額", bodyText.includes("登山背包") && bodyText.includes("1,800"));
   ok("顯示切結書全文", bodyText.includes("非贓物") && bodyText.includes("個人資料"));
+  // 購物金溢價（使用者裁示）：預設 10% → 1800 現金 → 購物金多得 $180
+  ok(
+    "購物金按鈕顯示溢價（多得）",
+    bodyText.includes("多得") && bodyText.includes("180"),
+    bodyText.match(/多得[^，。]*/)?.[0] ?? "",
+  );
   await page.screenshot({ path: join(SHOTS, "01-task.png"), fullPage: true });
 
   // 送出鈕在未同意/未選撥款/未簽名時應 disabled

@@ -1424,6 +1424,23 @@ body {
 .acq-submit {
   align-self: flex-start;
 }
+.acq-pending-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid #f0a020;
+  background: #fff7e6;
+  border-radius: 8px;
+  color: #7a4a00;
+}
+.acq-pending-recovery p {
+  margin: 0;
+}
+.acq-idem-warn {
+  margin: 0;
+}
 .acq-print-labels {
   display: flex;
   flex-direction: column;
@@ -1968,4 +1985,24 @@ body {
 }
 .kiosk-thanks-check--warn {
   background: var(--warn);
+}
+.kiosk-payout-btn {
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+}
+.kiosk-payout-label {
+  font-weight: 600;
+}
+.kiosk-payout-amount {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+.kiosk-payout-bonus {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--success);
+}
+.kiosk-payout-btn--active .kiosk-payout-bonus {
+  color: var(--accent-ink);
 }

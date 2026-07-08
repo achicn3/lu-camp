@@ -25,6 +25,7 @@ from app.modules.signing.schemas import (
 )
 from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
 from app.shared.exceptions import (
+    AcquisitionRequiresNationalId,
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
@@ -78,29 +79,42 @@ class SigningService:
     async def create_task(
         self, store_id: int, data: SignatureTaskCreate, *, created_by: int
     ) -> SignatureTask:
-        """建立簽署任務（店員發起）。AFFIDAVIT 自動綁定當前切結書版本（lazy 落庫）。"""
+        """建立簽署任務（店員發起）。AFFIDAVIT 自動綁定切結書版本，並以後端為準補齊
+        身分欄（姓名/電話/證號遮罩/住址，D1）與購物金溢價預覽（客人選購物金可多得幾%）。"""
         await self._lock_store_signing(store_id)
         # 跨模組只經對方 service：確認任務對象存在且屬同店。
         from app.modules.contacts.service import ContactService
 
-        contact = await ContactService(self._session).get_contact(store_id, data.contact_id)
+        contacts = ContactService(self._session)
+        contact = await contacts.get_contact(store_id, data.contact_id)
         if contact is None:
             raise ContactNotFound(f"contact {data.contact_id} 不存在或不屬本店")
 
+        content = dict(data.content)
+        # 保留鍵防注入/回顯（Codex K4 第十二輪）：綁定用身分指紋只存後端內部欄，絕不容客端
+        # 於 content 夾帶同名鍵而被儲存並經 API 回傳（跨 D1/D4 PII 邊界）。一律先剝除。
+        content.pop("national_id_fingerprint", None)
         agreement_version_id: int | None = None
         if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             agreement_version_id = (await self._get_or_seed_current_agreement()).id
+            content = await self._enrich_affidavit_content(store_id, contact, contacts, content)
 
         # 重推＝舊單作廢：同店同時最多一件待簽（DB 部分唯一索引為最終防線）。
         # 否則店員改內容重推後，停在舊頁面的平板仍可簽下舊快照，留下錯誤證據。
         await self._repo.cancel_pending_tasks(store_id)
 
+        # 身分指紋於建立（＝內容凍結）時擷取入內部欄；收購綁定時比對此值與當前會員檔。
+        identity_fingerprint: str | None = None
+        if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
+            identity_fingerprint = getattr(contact, "national_id_blind_index", None)
+
         task = SignatureTask(
             store_id=store_id,
             kind=data.kind,
             contact_id=data.contact_id,
-            content=data.content,
+            content=content,
             agreement_version_id=agreement_version_id,
+            identity_fingerprint=identity_fingerprint,
             ref_type=data.ref_type,
             ref_id=data.ref_id,
             created_by=created_by,
@@ -109,6 +123,62 @@ class SigningService:
             return await self._repo.add(task)
         except IntegrityError as exc:  # 併發重推：另一筆先建成功（單一待簽唯一索引）
             raise SignatureTaskConflict("簽署任務建立衝突（另一筆同時建立），請重試") from exc
+
+    async def _enrich_affidavit_content(
+        self,
+        store_id: int,
+        contact: object,
+        contacts: object,
+        content: dict[str, object],
+    ) -> dict[str, object]:
+        """以後端為準補齊切結內容的身分欄（D1）與購物金溢價預覽。
+
+        身分（姓名/電話/證號遮罩/住址）一律以會員檔覆寫——客人簽的身分必為系統認定的本人，
+        不受前端傳入影響。若 content 帶總額，另附「選購物金可多得幾%」的預覽（金額型收購用），
+        讓客人在手持端看到現金 vs 購物金的差額後再選（撥款仍由客人於手持端決定）。
+        """
+        from decimal import Decimal
+
+        from app.core.money import round_ntd
+        from app.modules.settings.service import StoreSettingsService
+
+        enriched = dict(content)
+        enriched["seller_name"] = getattr(contact, "name", None)
+        enriched["phone"] = getattr(contact, "phone", None)
+        enriched["address"] = getattr(contact, "address", None)
+        contact_id = getattr(contact, "id", None)
+        # 收購切結必須在對象有「可用（可解密）身分證字號」時才產生（Codex K4 第六輪 high）：
+        # 否則客人簽的切結沒帶證號、事後補證號再綁定＝證據不足。無可用證號即擋下、不建任務。
+        masked = (
+            await contacts.masked_national_id(store_id, contact_id)  # type: ignore[attr-defined]
+            if contact_id is not None
+            else None
+        )
+        if masked is None:
+            raise AcquisitionRequiresNationalId(
+                "收購切結對象必須有可用的身分證字號（請先建檔/補登）才能推送簽署"
+            )
+        enriched["national_id_masked"] = masked  # 顯示用（遮罩）
+        # 綁定用穩定身分指紋改存**伺服器內部欄** identity_fingerprint（見 create_task），不入
+        # content——放 content 會被手持端 API 讀到、洩漏可跨任務關聯的 HMAC 身分（K4 第十一輪）。
+
+        raw_total = enriched.get("total")
+        if raw_total is not None:
+            try:
+                total = Decimal(str(raw_total))
+            except (ValueError, ArithmeticError):
+                total = Decimal(-1)
+            if total >= 0:
+                svc = StoreSettingsService(self._session)
+                settings = await svc.get_effective_settings(store_id)
+                rate = Decimal(settings.premium_rate)
+                with_premium = round_ntd(total * (Decimal(1) + rate))
+                enriched["store_credit_premium"] = {
+                    "rate": str(rate),
+                    "amount": str(with_premium),
+                    "extra": str(with_premium - total),
+                }
+        return enriched
 
     async def cancel_task(self, store_id: int, task_id: int) -> SignatureTask:
         """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。僅 PENDING 可作廢。"""
@@ -195,6 +265,27 @@ class SigningService:
 
     async def get_task(self, store_id: int, task_id: int) -> SignatureTask | None:
         return await self._repo.get(store_id, task_id)
+
+    async def get_signed_affidavit(
+        self, store_id: int, task_id: int, *, contact_id: int
+    ) -> SignatureTask:
+        """取一份供收購綁定的已簽切結（docs/23 K4）：須存在、屬本店、為 ACQUISITION_AFFIDAVIT
+        種類、狀態 SIGNED、且對象為指定會員。任一不符即 SignatureTaskNotPending/NotFound。
+
+        供 acquisition service 在建立收購時驗證＋讀 chosen_payout（跨模組只經對方 service）。
+        """
+        task = await self._repo.get(store_id, task_id)
+        if task is None:
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬本店")
+        if (
+            task.kind is not SignatureTaskKind.ACQUISITION_AFFIDAVIT
+            or task.status is not SignatureTaskStatus.SIGNED
+            or task.contact_id != contact_id
+        ):
+            raise SignatureTaskNotPending(
+                f"簽署任務 {task_id} 非本會員之已簽收購切結，不可用於此收購"
+            )
+        return task
 
     async def get_pending_task_for_kiosk(self, store_id: int, task_id: int) -> SignatureTask | None:
         """手持端重讀：僅回 PENDING 中的任務，其餘一律 None（→404）。

@@ -92,6 +92,9 @@ class AcquisitionCreate(BaseModel):
     # ＝應付總額−現金部分，由後端推導，避免兩數加總不一致）。
     payout_method: PayoutMethod = PayoutMethod.CASH
     payout_split_cash: NTDAmount | None = None
+    # 手持切結任務（docs/23 K4，D2）：帶入時後端驗證其為同店同會員之已簽切結（AFFIDAVIT），
+    # 且 payout_method 須與客人於手持端所選（chosen_payout）一致；一份切結至多綁一張收購單。
+    signature_task_id: int | None = None
 
     @field_validator("payout_split_cash")
     @classmethod

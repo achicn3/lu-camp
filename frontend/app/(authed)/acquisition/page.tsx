@@ -3,7 +3,7 @@
 // （品牌/型號/分類 combobox + 雙重約束定價輔助）→ 撥款（現金/購物金/混合）→ 送出。
 // 全中文（labels 單一真實來源）；金額整數元、走 OpenAPI 生成型別 client；標籤列印待後端（不放假按鈕）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState, useSyncExternalStore } from "react";
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
 import { ACQ_TYPE_LABEL, GRADE_LABEL, PAYOUT_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
@@ -30,6 +30,15 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
+import {
+  canDiscardIdempotencyKey,
+  clearPendingAcqIdemKey,
+  loadPendingAcqIdemKey,
+  pendingAcqIdemKeyServerSnapshot,
+  pendingAcqIdemKeySnapshot,
+  savePendingAcqIdemKey,
+  subscribePendingAcqIdemKey,
+} from "@/lib/idempotency";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type Contact = components["schemas"]["ContactRead"];
@@ -540,6 +549,9 @@ export default function AcquisitionPage() {
   const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
   // 送出成功後遞增 → 重掛鑑價列/散裝表單，連同 combobox 內部文字一併清空（避免顯示舊值卻無 id）。
   const [formKey, setFormKey] = useState(0);
+  // 手持切結（docs/23 K4）：推送至手持裝置後的任務 id；輪詢其狀態，SIGNED 後才可完成收購，
+  // 撥款方式以客人於手持端所選為準（D7）。
+  const [signTaskId, setSignTaskId] = useState<number | null>(null);
   // 管理者才顯示作廢入口（後端 ManagerDep 為最終權威；前端隱藏僅為 UX）。token 在頁面生命週期內不變。
   const isManager = useMemo(() => decodeSession()?.role === "MANAGER", []);
 
@@ -559,6 +571,21 @@ export default function AcquisitionPage() {
       return response.status === 200 ? (data ?? null) : null;
     },
   });
+  // 手持切結任務狀態輪詢（PENDING 時每 2 秒；SIGNED/CANCELLED 停）。
+  const signTask = useQuery({
+    queryKey: ["signing-task", signTaskId],
+    enabled: signTaskId != null,
+    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 2000 : false),
+    queryFn: async () => {
+      if (signTaskId == null) return null;
+      const { data } = await api.GET("/api/v1/signing/tasks/{task_id}", {
+        params: { path: { task_id: signTaskId } },
+      });
+      return data ?? null;
+    },
+  });
+  const signed = signTask.data?.status === "SIGNED";
+  const signedPayout = signTask.data?.chosen_payout ?? null;
 
   const isConsignment = type === "CONSIGNMENT";
   const isBulk = type === "BULK_LOT";
@@ -569,10 +596,13 @@ export default function AcquisitionPage() {
   const payable = isBulk
     ? parseNtd(lot.acquisitionCost) ?? 0
     : payableTotal(rows.map((r) => parseNtd(r.acquisitionCost) ?? 0));
+  // 已簽切結 → 撥款以客人所選為準（D7），否則用店員選的（非手持流程）。
+  const effectivePayout: PayoutMethod =
+    signed && signedPayout ? signedPayout : payoutMethod;
   const creditEquiv =
-    payoutMethod === "STORE_CREDIT"
+    effectivePayout === "STORE_CREDIT"
       ? payable
-      : payoutMethod === "SPLIT"
+      : effectivePayout === "SPLIT"
         ? Math.max(0, payable - (parseNtd(splitCash) ?? 0))
         : 0;
   const premiumGain = creditEquiv > 0 ? creditPremiumPreview(creditEquiv, premiumRate) : 0;
@@ -587,6 +617,20 @@ export default function AcquisitionPage() {
     sellerIsMember,
   };
 
+  // 收購冪等鍵凍結（Codex K4 第九/十八/十九輪）：同一次送出的重試須沿用同一把鍵，回應在 LAN
+  // 途中遺失後（甚至重新整理/重掛）重送才能被後端冪等重放（而非以新鍵重複撥款）。鍵存
+  // localStorage 為唯一事實來源、以 useSyncExternalStore 反映（hydration 安全，掛載即可得）。
+  const pendingKey = useSyncExternalStore(
+    subscribePendingAcqIdemKey,
+    pendingAcqIdemKeySnapshot,
+    pendingAcqIdemKeyServerSnapshot,
+  );
+  // 區分「本次掛載擁有的鍵」（送出失敗/曖昧後就地重試合法、不擋）與「先前掛載殘留的鍵」
+  // （重掛後表單已空，殘留鍵須擋下送出、先核對，避免以相同內容靜默重放舊收購）。
+  const [sessionOwnsKey, setSessionOwnsKey] = useState(false);
+  // localStorage 寫入失敗（配額/隱私）：本 session 仍以記憶體後備防重複，但無法跨重整保護。
+  const [idemNotDurable, setIdemNotDurable] = useState(false);
+  const recoveryNeeded = pendingKey != null && !sessionOwnsKey;
   const submit = useMutation({
     mutationFn: async () => {
       const ntd = (s: string) => String(parseNtd(s));
@@ -616,24 +660,42 @@ export default function AcquisitionPage() {
         }));
       }
       if (!isConsignment) {
-        body.payout_method = payoutMethod;
-        if (payoutMethod === "SPLIT") body.payout_split_cash = ntd(splitCash);
+        body.payout_method = effectivePayout;
+        if (effectivePayout === "SPLIT") body.payout_split_cash = ntd(splitCash);
       }
-      const { data, error } = await api.POST("/api/v1/acquisitions", {
+      if (signed && signTaskId != null) body.signature_task_id = signTaskId;
+      // 本次掛載已有鍵（就地重試，含記憶體後備）就沿用，否則新鑄並標記本掛載擁有。
+      const key = loadPendingAcqIdemKey() ?? newIdempotencyKey();
+      const durable = savePendingAcqIdemKey(key);
+      setSessionOwnsKey(true);
+      setIdemNotDurable(!durable); // 未持久化：提示跨重整保護不保證（本 session 仍防重複）。
+      const { data, error, response } = await api.POST("/api/v1/acquisitions", {
         body: body as never,
-        params: { header: { "Idempotency-Key": newIdempotencyKey() } },
+        params: { header: { "Idempotency-Key": key } },
       });
-      if (!data) throw new Error(detail(error) ?? "收購送出失敗");
+      if (!data) {
+        // 只有**非衝突的 4xx**（驗證/認證，確定未提交）才清鍵。409＝該鍵已屬先前已提交的
+        // 收購（改了內容才會撞）→ 保留鍵，否則改表單再送會以新鍵重複建單/撥款；5xx/逾時/網路
+        // 中斷屬曖昧亦保留鍵（Codex K4 第十六/十七輪）。網路中斷會在上面 throw、不走到這。
+        if (canDiscardIdempotencyKey(response.status)) {
+          clearPendingAcqIdemKey();
+          setSessionOwnsKey(false);
+        }
+        throw new Error(detail(error) ?? "收購送出失敗");
+      }
       return data;
     },
     onSuccess: (data) => {
+      clearPendingAcqIdemKey(); // 本單完成，下一單換新冪等鍵
+      setSessionOwnsKey(false);
+      setIdemNotDurable(false);
       // 付現才開錢櫃（docs/10 §5：後端成功後才開櫃付款；寄售/純購物金不碰現金）。
       // fire-and-forget：收購已寫後端，開櫃失敗只提示、不擋流程。
       const cashPaid = isConsignment
         ? 0
-        : payoutMethod === "CASH"
+        : effectivePayout === "CASH"
           ? payable
-          : payoutMethod === "SPLIT"
+          : effectivePayout === "SPLIT"
             ? (parseNtd(splitCash) ?? 0)
             : 0;
       setDrawerNotice(null);
@@ -650,13 +712,87 @@ export default function AcquisitionPage() {
       setRows([emptyItem()]);
       setLot(emptyLot());
       setSeller(null);
+      setSignTaskId(null); // 完成即解除手持切結綁定，下一單重新推送
       setFormKey((k) => k + 1);
       void queryClient.invalidateQueries({ queryKey: ["cash-session"] });
     },
     onError: (e: Error) => setErrors([e.message]),
   });
 
+  // 明確放棄未確認的收購鍵（店員已於收購紀錄核對確定「未建立」）：清鍵、解除掛載擁有並清空表單。
+  const startFreshAcquisition = (): void => {
+    clearPendingAcqIdemKey();
+    setSessionOwnsKey(false);
+    setIdemNotDurable(false);
+    setErrors([]);
+    setRows([emptyItem()]);
+    setLot(emptyLot());
+    setSeller(null);
+    setSignTaskId(null);
+    setFormKey((k) => k + 1);
+  };
+
+  // 推送手持切結任務（docs/23 K4）：以當前鑑價內容建立 AFFIDAVIT 任務給手持裝置簽署。
+  const pushSign = useMutation({
+    mutationFn: async () => {
+      if (!seller) throw new Error("請先選擇賣方");
+      const items = isBulk
+        ? [{ name: lot.name || "散裝批", amount: String(payable) }]
+        : rows.map((r) => ({ name: r.name || "品項", amount: String(parseNtd(r.acquisitionCost) ?? 0) }));
+      const content: Record<string, unknown> = {
+        seller_name: seller.name,
+        phone: seller.phone,
+        items,
+        total: String(payable),
+      };
+      // 散裝批：把數量與計價基準納入簽署快照，綁定時精確比對——否則客人簽後仍可改 total_qty，
+      // 建出客人未確認的數量存貨（Codex K4 第十一輪）。
+      if (isBulk) {
+        content.lot = {
+          total_qty: parseNtd(lot.totalQty),
+          acquisition_basis: lot.acquisitionBasis,
+        };
+      }
+      const { data, error } = await api.POST("/api/v1/signing/tasks", {
+        body: {
+          kind: "ACQUISITION_AFFIDAVIT",
+          contact_id: seller.id,
+          content,
+          ref_type: "acquisition",
+        },
+      });
+      if (!data) throw new Error(detail(error) ?? "推送手持簽署失敗");
+      return data;
+    },
+    onSuccess: (d) => {
+      setErrors([]);
+      setSignTaskId(d.id);
+    },
+    onError: (e: Error) => setErrors([e.message]),
+  });
+  const cancelSign = useMutation({
+    mutationFn: async () => {
+      if (signTaskId == null) return;
+      const { response } = await api.POST("/api/v1/signing/tasks/{task_id}/cancel", {
+        params: { path: { task_id: signTaskId } },
+      });
+      // 非 2xx（如客人剛好已簽 → 409）不可視為取消成功而清除綁定（Codex K4 high）：
+      // 重新輪詢取回最新狀態（可能已 SIGNED），保留 signTaskId，令送出仍須帶已簽切結。
+      if (!response.ok) {
+        await signTask.refetch();
+        throw new Error("此簽署已完成或無法取消，請確認手持裝置狀態");
+      }
+    },
+    onSuccess: () => setSignTaskId(null), // 僅確認 CANCELLED（2xx）才解除綁定
+    onError: (e: Error) => setErrors([e.message]),
+  });
+
   function onSubmit() {
+    // 有先前掛載殘留、未確認的收購鍵時，先擋下送出、要求核對（Codex K4 第十九輪）。
+    if (recoveryNeeded) {
+      setErrors(["有一筆未確認的收購，請先至收購紀錄核對；確定未建立再按「開新單」"]);
+      return;
+    }
     setErrors([]);
     setResult(null);
     const found = validateDraft(draft);
@@ -737,31 +873,68 @@ export default function AcquisitionPage() {
                 <input
                   type="radio"
                   name="payout"
-                  checked={payoutMethod === m}
+                  checked={effectivePayout === m}
+                  disabled={signed}
                   onChange={() => setPayoutMethod(m)}
                 />
                 {PAYOUT_LABEL[m]}
               </label>
             ))}
           </div>
+          {signed && (
+            <p className="form-success">
+              客人已於手持裝置選擇撥款：{signedPayout ? PAYOUT_LABEL[signedPayout] : "—"}
+            </p>
+          )}
           <p>
             應付現金總額：<strong className="money">{formatNtd(payable)}</strong>
           </p>
-          {payoutMethod === "SPLIT" && (
+          {effectivePayout === "SPLIT" && (
             <label className="field">
               <span className="field-label">現金部分</span>
               <input inputMode="numeric" value={splitCash} onChange={(e) => setSplitCash(e.target.value)} />
             </label>
           )}
-          {(payoutMethod === "STORE_CREDIT" || payoutMethod === "SPLIT") && (
+          {(effectivePayout === "STORE_CREDIT" || effectivePayout === "SPLIT") && (
             <p className="acq-premium">
               {sellerIsMember
                 ? `購物金入帳 ${formatNtd(creditEquiv + premiumGain)}（含溢價可多得 ${formatNtd(premiumGain)}，依當前溢價率試算）`
                 : "提醒：購物金/混合撥款的對象必須是會員"}
             </p>
           )}
-          {(payoutMethod === "CASH" || payoutMethod === "SPLIT") && !drawerOpen && (
+          {(effectivePayout === "CASH" || effectivePayout === "SPLIT") && !drawerOpen && (
             <p className="form-error">尚未開帳：現金/混合撥款需先至「現金對帳」開帳</p>
+          )}
+        </div>
+      )}
+
+      {/* 手持切結（docs/23 K4）：BUYOUT/BULK_LOT 可送至手持裝置請客人確認切結＋撥款＋簽名 */}
+      {!isConsignment && (
+        <div className="card acq-sign">
+          <h2>手持簽署</h2>
+          {signTaskId == null ? (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={seller == null || payable <= 0 || pushSign.isPending}
+              onClick={() => pushSign.mutate()}
+            >
+              送至手持裝置簽署
+            </button>
+          ) : signed ? (
+            <p className="form-success">✓ 客人已完成簽署，可送出收購。</p>
+          ) : (
+            <div className="acq-sign-wait">
+              <p>已送至手持裝置，等待客人確認並簽署…</p>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={cancelSign.isPending}
+                onClick={() => cancelSign.mutate()}
+              >
+                取消／重新推送
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -774,11 +947,32 @@ export default function AcquisitionPage() {
         </ul>
       )}
 
+      {idemNotDurable && !recoveryNeeded && (
+        <p className="form-error acq-idem-warn" role="alert">
+          注意：本機瀏覽器儲存異常，未完成收購僅在本頁面有效、無法跨重新整理保護；送出後請勿
+          重整頁面，若疑似未成功請於收購紀錄確認後再處理。
+        </p>
+      )}
+
+      {recoveryNeeded && (
+        <div className="acq-pending-recovery" role="alert">
+          <p>
+            偵測到一筆先前<strong>未確認的收購（可能已完成）</strong>——本機在送出後未收到成功
+            回應（斷線／逾時／頁面重整）。請先至<strong>收購紀錄</strong>確認是否已建立：
+            若已建立，請勿重送以免重複；若<strong>確定未建立</strong>，再按「開新單」重新收購。
+            （在此之前已停用送出，避免以相同內容靜默重放舊收購。）
+          </p>
+          <button type="button" className="btn-secondary" onClick={startFreshAcquisition}>
+            確定未建立，開新單
+          </button>
+        </div>
+      )}
+
       <button
         type="button"
         className="btn-primary acq-submit"
         onClick={onSubmit}
-        disabled={submit.isPending}
+        disabled={submit.isPending || recoveryNeeded || (signTaskId != null && !signed)}
       >
         送出收購
       </button>

@@ -16,6 +16,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
@@ -45,7 +46,7 @@ def _signature_png(width: int = 200, height: int = 80) -> str:
     raw = bytearray()
     for y in range(height):
         raw.append(0)  # filter type None
-        for x in range(width):
+        for _x in range(width):
             # 中段畫一條黑色橫向筆跡（足以超過墨跡像素門檻）
             if 20 <= y <= 40:
                 raw += b"\x00\x00\x00\xff"
@@ -93,7 +94,14 @@ async def _seed(session: AsyncSession) -> Seeded:
     mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
     clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
     kiosk = User(store_id=store.id, username="pad", password_hash="h", role=UserRole.KIOSK)
-    contact = Contact(store_id=store.id, name="王小明", phone="0912345678", roles=["SELLER"])
+    contact = Contact(
+        store_id=store.id,
+        name="王小明",
+        phone="0912345678",
+        national_id_enc=get_pii_cipher().encrypt("A123456789"),
+        national_id_blind_index=national_id_blind_index("A123456789"),
+        roles=["SELLER"],
+    )
     session.add_all([mgr, clerk, kiosk, contact])
     await session.flush()
     # 先落地：router 的錯誤路徑會 rollback，未 commit 的種子會被吃掉（savepoint 模式）。

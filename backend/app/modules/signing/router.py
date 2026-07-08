@@ -22,6 +22,7 @@ from app.modules.signing.schemas import (
 from app.modules.signing.service import SigningService
 from app.shared.enums import SignatureTaskStatus
 from app.shared.exceptions import (
+    AcquisitionRequiresNationalId,
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
@@ -84,6 +85,11 @@ async def create_signature_task(
     except ContactNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AcquisitionRequiresNationalId as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except SignatureTaskConflict as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
