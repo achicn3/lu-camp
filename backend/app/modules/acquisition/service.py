@@ -257,6 +257,10 @@ class AcquisitionService:
             if signed_basis != str(data.lot.acquisition_basis.value):
                 return False
         else:
+            # 非散裝收購不得綁「含 lot 敘述」的切結（Codex K5 第九輪 high）：客人簽了散裝
+            # 件數/基準，綁到 BUYOUT 時這些簽名事實不會被驗證——fail closed、要求重推重簽。
+            if content.get("lot") is not None:
+                return False
             expected_items = [
                 ((it.name or "品項"), Decimal(str(it.acquisition_cost or 0)))
                 for it in (data.items or [])

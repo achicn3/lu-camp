@@ -5404,6 +5404,17 @@
             "title": "Lines",
             "type": "array"
           },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          },
           "tenders": {
             "anyOf": [
               {
@@ -5856,6 +5867,17 @@
       "SaleSummaryRead": {
         "description": "銷售單摘要輸出（列表用，不含明細）。",
         "properties": {
+          "buyer_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Contact Id"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -5896,7 +5918,8 @@
           "total",
           "invoice_status",
           "status",
-          "created_at"
+          "created_at",
+          "buyer_contact_id"
         ],
         "title": "SaleSummaryRead",
         "type": "object"
@@ -6416,6 +6439,10 @@
             "title": "Require Acquisition Affidavit",
             "type": "boolean"
           },
+          "require_store_credit_signing": {
+            "title": "Require Store Credit Signing",
+            "type": "boolean"
+          },
           "store_credit_engine_params": {
             "additionalProperties": true,
             "title": "Store Credit Engine Params",
@@ -6442,6 +6469,7 @@
           "default_margin_pct",
           "allow_clerk_manage_categories",
           "require_acquisition_affidavit",
+          "require_store_credit_signing",
           "premium_rate",
           "premium_rate_min",
           "premium_rate_max",
@@ -6593,6 +6621,17 @@
               }
             ],
             "title": "Require Acquisition Affidavit"
+          },
+          "require_store_credit_signing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Store Credit Signing"
           },
           "store_credit_engine_params": {
             "anyOf": [

@@ -1441,6 +1441,24 @@ body {
 .acq-idem-warn {
   margin: 0;
 }
+.pos-sign-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+}
+.pos-sign-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.pos-sign-done {
+  margin: 0;
+  color: #1a7f37;
+  font-weight: 600;
+}
 .acq-print-labels {
   display: flex;
   flex-direction: column;

@@ -23,7 +23,7 @@ from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import PayoutMethod, SignatureTaskKind, UserRole
-from app.shared.exceptions import AcquisitionRequiresNationalId
+from app.shared.exceptions import AcquisitionRequiresNationalId, SignatureContentMismatch
 
 
 def _signature_png(width: int = 200, height: int = 80) -> str:
@@ -348,26 +348,18 @@ async def test_fractional_signed_amount_rejected(
     )
     clerk_id = await _clerk_id(db_session, store_id)
     svc = SigningService(db_session)
-    # 切結金額 1800.9（小數）；收購送整數 1800 → 不得相符
-    task = await svc.create_task(
-        store_id,
-        SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content={"items": [{"name": "相機", "amount": "1800.9"}], "total": "1800.9"},
-        ),
-        created_by=clerk_id,
-    )
-    await svc.sign_task(
-        store_id, task.id, signature_image_base64=_PNG, chosen_payout=PayoutMethod.CASH
-    )
-    await db_session.commit()
-    resp = await client.post(
-        "/api/v1/acquisitions",
-        json=_buyout_body(contact_id, task.id, "CASH", cost="1800"),
-        headers=_auth(token),
-    )
-    assert resp.status_code == 422, resp.text
+    # 切結金額 1800.9（小數）：K5 第八輪起於**建立時**即被深度 canonical 擋下（422），
+    # 不再等到綁定——小數金額根本簽不出來（比原「綁定時 422」更強的守衛）。
+    with pytest.raises(SignatureContentMismatch):
+        await svc.create_task(
+            store_id,
+            SignatureTaskCreate(
+                kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+                contact_id=contact_id,
+                content={"items": [{"name": "相機", "amount": "1800.9"}], "total": "1800.9"},
+            ),
+            created_by=clerk_id,
+        )
 
 
 async def test_affidavit_content_enriched_with_premium(
@@ -803,7 +795,7 @@ async def test_unsigned_changed_payload_same_key_conflicts(
 ) -> None:
     """未簽收購已提交後、以**原冪等鍵**送不同內容 → 409（第十七輪）：前端據此不可丟棄鍵改新鍵
     重送（否則重複建單/撥款）。"""
-    store_id, token, contact_id = await _seed(db_session)
+    _store_id, token, contact_id = await _seed(db_session)
     await client.post(
         "/api/v1/cash-sessions/open", json={"opening_float": "5000"}, headers=_auth(token)
     )
@@ -823,3 +815,38 @@ async def test_unsigned_changed_payload_same_key_conflicts(
     changed = {**base, "items": [{**base["items"][0], "acquisition_cost": "2500"}]}
     conflict = await client.post("/api/v1/acquisitions", json=changed, headers=hdr)
     assert conflict.status_code == 409, conflict.text
+
+
+async def test_lot_bearing_affidavit_cannot_bind_buyout(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """含 lot 敘述（散裝件數/基準）的切結不得綁到 BUYOUT → 422（Codex K5 第九輪：
+    客人簽的每個欄位都必須被綁定驗證，BUYOUT 不驗 lot → fail closed）。"""
+    store_id, token, contact_id = await _seed(db_session)
+    await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "5000"}, headers=_auth(token)
+    )
+    clerk_id = await _clerk_id(db_session, store_id)
+    svc = SigningService(db_session)
+    task = await svc.create_task(
+        store_id,
+        SignatureTaskCreate(
+            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+            contact_id=contact_id,
+            content={
+                "items": [{"name": "相機", "amount": "1800"}],
+                "total": "1800",
+                "lot": {"total_qty": 10, "acquisition_basis": "BAG"},
+            },
+        ),
+        created_by=clerk_id,
+    )
+    await svc.sign_task(
+        store_id, task.id, signature_image_base64=_PNG, chosen_payout=PayoutMethod.CASH
+    )
+    await db_session.commit()
+    # 品名/金額/總額都相符的 BUYOUT，但切結含 lot → 422
+    resp = await client.post(
+        "/api/v1/acquisitions", json=_buyout_body(contact_id, task.id, "CASH"), headers=_auth(token)
+    )
+    assert resp.status_code == 422, resp.text

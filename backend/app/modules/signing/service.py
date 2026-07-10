@@ -9,7 +9,12 @@ import base64
 import binascii
 import hashlib
 import zlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.modules.sales.models import Sale
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -23,13 +28,21 @@ from app.modules.signing.schemas import (
     MAX_SIGNATURE_BYTES,
     SignatureTaskCreate,
 )
-from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
+from app.shared.enums import (
+    PayoutMethod,
+    SaleInvoiceStatus,
+    SaleStatus,
+    SignatureTaskKind,
+    SignatureTaskStatus,
+)
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
+    SignatureContentMismatch,
     SignatureTaskConflict,
+    SignatureTaskInvalidated,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
@@ -54,6 +67,9 @@ _PNG_VALID_BIT_DEPTHS = {6: {8}}
 # 會改變透明度/合成語意的 ancillary chunk：一律拒收（避免「渲染空白卻算有墨跡」）。
 _PNG_FORBIDDEN_CHUNKS = frozenset({b"tRNS", b"bKGD"})
 _PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法值（規格 §9.2）
+# 已簽 STORE_CREDIT_USE 的結帳綁定時效（Codex K5 第十一輪）：簽名→放行結帳為連續現場動作，
+# 15 分鐘遠大於正常流程；逾時未用＝結帳已被放棄，該授權不可再綁新銷售（防不記名重用）。
+_STORE_CREDIT_USE_BINDING_TTL = timedelta(minutes=15)
 
 
 class SigningService:
@@ -98,6 +114,10 @@ class SigningService:
         if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             agreement_version_id = (await self._get_or_seed_current_agreement()).id
             content = await self._enrich_affidavit_content(store_id, contact, contacts, content)
+        elif data.kind is SignatureTaskKind.STORE_CREDIT_USE:
+            content = await self._enrich_store_credit_content(store_id, contact, content)
+        elif data.kind is SignatureTaskKind.TRANSACTION_ACK:
+            content = await self._canonical_transaction_ack_content(store_id, data)
 
         # 重推＝舊單作廢：同店同時最多一件待簽（DB 部分唯一索引為最終防線）。
         # 否則店員改內容重推後，停在舊頁面的平板仍可簽下舊快照，留下錯誤證據。
@@ -142,7 +162,11 @@ class SigningService:
         from app.core.money import round_ntd
         from app.modules.settings.service import StoreSettingsService
 
-        enriched = dict(content)
+        # 客端內容**深度 canonical**（Codex K5 第七/八輪）：items/total/lot 為收購綁定精確比對
+        # 的欄位，但巢狀多餘鍵（序號/成色/來源敘述…）綁定不驗——一律重建為「綁定會驗的最小
+        # 形狀」，其他鍵（含巢狀）不進快照；形狀/金額不合法即拒（422），不讓客人簽下綁定
+        # 永不驗證的敘述。
+        enriched: dict[str, object] = self._canonical_affidavit_client_fields(content)
         enriched["seller_name"] = getattr(contact, "name", None)
         enriched["phone"] = getattr(contact, "phone", None)
         enriched["address"] = getattr(contact, "address", None)
@@ -180,13 +204,196 @@ class SigningService:
                 }
         return enriched
 
+    async def _enrich_store_credit_content(
+        self, store_id: int, contact: object, content: dict[str, object]
+    ) -> dict[str, object]:
+        """購物金扣抵確認內容**整份 canonical**（docs/23 K5，D3；Codex K5 第七輪）。
+
+        客人簽的每個欄位都必須是「結帳會綁定驗證」或「後端權威補齊」的——客端夾帶的任何
+        其他鍵一律不進快照（否則手持端會渲染出結帳從不比對的內容，簽名證據描述超過實際綁定）。
+        快照＝{debit, sale_total, seller_name, phone, balance_before, balance_after}：
+        debit/sale_total 須為有效非負整數元（結帳精確比對），身分以會員檔覆寫，餘額以當前
+        帳本補齊（結帳時再以 FOR UPDATE 精確重驗）。
+        """
+        from app.modules.storecredit.service import StoreCreditService
+
+        debit = self._whole_ntd(content.get("debit"))
+        sale_total = self._whole_ntd(content.get("sale_total"))
+        if debit is None or sale_total is None:
+            raise SignatureContentMismatch(
+                "購物金扣抵確認必須帶有效的本次折抵（debit）與消費合計（sale_total）整數元"
+            )
+        contact_id = getattr(contact, "id", None)
+        balance = (
+            await StoreCreditService(self._session).get_balance(store_id, int(contact_id))
+            if contact_id is not None
+            else Decimal(0)
+        )
+        return {
+            "seller_name": getattr(contact, "name", None),
+            "phone": getattr(contact, "phone", None),
+            "debit": str(debit),
+            "sale_total": str(sale_total),
+            "balance_before": str(balance),
+            "balance_after": str(balance - debit),
+        }
+
+    async def _ensure_sale_ackable(
+        self, store_id: int, ref_type: str | None, ref_id: int | None, contact_id: int
+    ) -> "Sale":
+        """驗證交易紀錄簽收的 ref 銷售**當下**可簽收：本店銷售、買方＝任務對象、非作廢、
+        且**無任何退貨列**（部分退貨後原總額已非交易實態，不可再讓客人簽原額——Codex K5
+        第四輪 high）。建立與簽名兩個時點都要過此檢查。回 Sale。
+
+        以 **FOR UPDATE 鎖銷售列**（第五輪）：void/return 皆序列化於銷售行鎖，鎖列讀後持鎖至
+        本交易 commit——並行作廢/退貨只能整體先於或後於本次檢查＋簽名落地，不會夾在中間。"""
+        from app.modules.returns.service import ReturnsService
+        from app.modules.sales.service import SalesService
+
+        if ref_type != "sale" or ref_id is None:
+            raise SignatureContentMismatch(
+                "交易紀錄簽收必須指向一筆銷售（ref_type='sale'＋ref_id）"
+            )
+        sale = await SalesService(self._session).get_sale_for_update(store_id, ref_id)
+        if sale is None:
+            raise SignatureContentMismatch(f"找不到銷售 {ref_id}，無法推送簽收")
+        if sale.buyer_contact_id != contact_id:
+            raise SignatureContentMismatch("簽收對象與該銷售的買方不符")
+        if sale.invoice_status is SaleInvoiceStatus.VOID:
+            raise SignatureContentMismatch("已作廢的銷售不可簽收")
+        if sale.status is SaleStatus.RETURNED or (
+            await ReturnsService(self._session).has_returns_for_sale(store_id, ref_id)
+        ):
+            raise SignatureContentMismatch(
+                "已有退貨（含部分退貨）的銷售不可簽收原額；請以退貨後實態另行處理"
+            )
+        return sale
+
+    async def _canonical_transaction_ack_content(
+        self, store_id: int, data: SignatureTaskCreate
+    ) -> dict[str, object]:
+        """交易紀錄簽收（docs/23 K5b，Codex K5 第三輪）：內容一律以**後端銷售單**為準重建，
+        不信任客端 content——否則過期/被竄改的店務端可讓客人簽下描述錯誤交易的「權威」證據。
+        內容整份覆寫（單號/總額/時間），客端傳什麼都不進快照。
+        """
+        sale = await self._ensure_sale_ackable(
+            store_id, data.ref_type, data.ref_id, data.contact_id
+        )
+        return {
+            "sale_ref": f"#{sale.id}",
+            "total": str(sale.total),
+            "purchased_at": sale.created_at.isoformat(timespec="minutes"),
+        }
+
+    def _canonical_affidavit_client_fields(self, content: dict[str, object]) -> dict[str, object]:
+        """把切結的客端欄位重建為收購綁定會精確比對的**最小形狀**（Codex K5 第八輪）：
+
+        items＝[{name, amount}]（name 非空字串、amount 非負整數元）、total＝非負整數元、
+        lot（選）＝{total_qty: 正整數, acquisition_basis: 字串}。巢狀多餘鍵全數剝除；
+        形狀不合法即拒——客人簽的每個欄位都必須是綁定驗證或後端權威補齊的。
+        """
+        items_raw = content.get("items")
+        if not isinstance(items_raw, list) or not items_raw:
+            raise SignatureContentMismatch("收購切結必須帶品項清單（items）")
+        items: list[dict[str, str]] = []
+        for it in items_raw:
+            if not isinstance(it, dict):
+                raise SignatureContentMismatch("收購切結品項必須為物件（name＋amount）")
+            name = str(it.get("name") or "").strip()
+            amount = self._whole_ntd(it.get("amount"))
+            if not name or amount is None:
+                raise SignatureContentMismatch(
+                    "收購切結品項必須帶名稱與有效金額（非負整數元）"
+                )
+            items.append({"name": name, "amount": str(amount)})
+        total = self._whole_ntd(content.get("total"))
+        if total is None:
+            raise SignatureContentMismatch("收購切結必須帶有效總額（total，非負整數元）")
+        canonical: dict[str, object] = {"items": items, "total": str(total)}
+        lot_raw = content.get("lot")
+        if lot_raw is not None:
+            if not isinstance(lot_raw, dict):
+                raise SignatureContentMismatch("散裝批切結的 lot 必須為物件")
+            qty = lot_raw.get("total_qty")
+            basis = lot_raw.get("acquisition_basis")
+            if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+                raise SignatureContentMismatch("散裝批切結必須帶正整數件數（total_qty）")
+            if not isinstance(basis, str) or not basis:
+                raise SignatureContentMismatch("散裝批切結必須帶計價基準（acquisition_basis）")
+            canonical["lot"] = {"total_qty": qty, "acquisition_basis": basis}
+        return canonical
+
+    @staticmethod
+    def _whole_ntd(value: object) -> Decimal | None:
+        """把金額欄嚴格解析為非負整數元 Decimal；缺值/小數/負值/非數 → None（同 acquisition）。"""
+        if value is None:
+            return None
+        try:
+            d = Decimal(str(value))
+        except (ValueError, ArithmeticError):
+            return None
+        if d < 0 or d != d.to_integral_value():
+            return None
+        return d
+
+    async def get_signed_store_credit_task(
+        self, store_id: int, task_id: int, *, contact_id: int
+    ) -> SignatureTask:
+        """取一份供結帳綁定的已簽購物金扣抵任務（docs/23 K5）：須存在、屬本店、為 STORE_CREDIT_USE
+        種類、狀態 SIGNED、且對象為指定買方會員。任一不符即 NotFound/NotPending。
+
+        **FOR UPDATE 鎖任務列、持鎖至結帳 commit**（Codex K5 第十二輪 high）：與 cancel_task
+        （同以任務行鎖）序列化——作廢先 commit 則此處看到 CANCELLED 而拒；結帳先 commit 則
+        作廢看到已綁定銷售而 409。杜絕「銷售已扣款、任務證據卻寫作廢」的不一致。
+        """
+        task = await self._repo.get_for_update(store_id, task_id)
+        if task is None:
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬本店")
+        if (
+            task.kind is not SignatureTaskKind.STORE_CREDIT_USE
+            or task.status is not SignatureTaskStatus.SIGNED
+            or task.contact_id != contact_id
+        ):
+            raise SignatureTaskNotPending(
+                f"簽署任務 {task_id} 非本會員之已簽購物金扣抵確認，不可用於此結帳"
+            )
+        # 綁定時效（Codex K5 第十一輪 high）：簽名→放行結帳是連續現場動作（docs/23 §3），
+        # 逾時未用的已簽授權不可再綁新銷售（結帳被放棄後它是「不記名扣抵憑證」）。
+        # 已綁定銷售的回應遺失重放走 find_signature_replay、不經此處，不受時效影響。
+        if task.signed_at is None or (
+            datetime.now(UTC) - task.signed_at > _STORE_CREDIT_USE_BINDING_TTL
+        ):
+            raise SignatureTaskNotPending(
+                f"簽署任務 {task_id} 已逾綁定時效（{_STORE_CREDIT_USE_BINDING_TTL}），"
+                "請重新推送簽署"
+            )
+        return task
+
     async def cancel_task(self, store_id: int, task_id: int) -> SignatureTask:
-        """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。僅 PENDING 可作廢。"""
+        """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。
+
+        PENDING 一律可作廢。**已簽的 STORE_CREDIT_USE 於「尚未綁定任何銷售」時也可作廢**
+        （Codex K5 第十一輪 high）：客人簽完、結帳被放棄/內容變更時，若不能收回，這張已簽
+        授權會一直是可再用的「不記名扣抵憑證」。已綁定銷售＝交易證據，不可作廢。
+        其他已簽/已作廢狀態維持拒絕。
+        """
         await self._lock_store_signing(store_id)
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
-        if task.status is not SignatureTaskStatus.PENDING:
+        if task.status is SignatureTaskStatus.SIGNED and (
+            task.kind is SignatureTaskKind.STORE_CREDIT_USE
+        ):
+            from app.modules.sales.service import SalesService
+
+            bound = await SalesService(self._session).find_sale_by_signature_task(
+                store_id, task_id
+            )
+            if bound is not None:
+                raise SignatureTaskNotPending(
+                    f"簽署任務 {task_id} 已綁定銷售 #{bound.id}（交易證據），不可作廢"
+                )
+        elif task.status is not SignatureTaskStatus.PENDING:
             raise SignatureTaskNotPending(
                 f"簽署任務 {task_id} 非待簽狀態（{task.status}），不可作廢"
             )
@@ -237,6 +444,24 @@ class SigningService:
                 raise InvalidKioskPayout("收購撥款須於現金/購物金中二選一（docs/23 D7）")
         elif chosen_payout is not None:
             raise InvalidKioskPayout("此簽署任務不涉及撥款選擇，不可帶 chosen_payout")
+
+        # 交易紀錄簽收於**簽名當下**重驗 ref 銷售仍可簽收（Codex K5 第四/五輪 high）：推送後、
+        # 客人簽名前該單可能已作廢/退貨——簽下去會留下對已失效交易的簽收證據。檢查以 FOR UPDATE
+        # 鎖銷售列並持鎖至 commit（與 void/return 序列化）。失效即把任務作廢並拋
+        # SignatureTaskInvalidated——router 須**提交**此作廢（非 rollback），任務才不會繼續
+        # 被手持端輪詢到。
+        if task.kind is SignatureTaskKind.TRANSACTION_ACK:
+            try:
+                await self._ensure_sale_ackable(
+                    store_id, task.ref_type, task.ref_id, task.contact_id
+                )
+            except SignatureContentMismatch as exc:
+                task.status = SignatureTaskStatus.CANCELLED
+                task.cancelled_at = datetime.now(UTC)
+                await self._session.flush()
+                raise SignatureTaskInvalidated(
+                    f"該銷售已作廢/退貨，簽收已失效：{exc}"
+                ) from exc
 
         task.signature_image = image
         task.signed_at = datetime.now(UTC)

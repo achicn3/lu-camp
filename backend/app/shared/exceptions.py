@@ -315,6 +315,14 @@ class SignatureTaskNotPending(DomainError):
     """簽署任務非 PENDING（已簽署/已作廢），不可再簽名或作廢。"""
 
 
+class SignatureTaskInvalidated(DomainError):
+    """簽署任務於簽名當下發現 ref 實態已失效（銷售作廢/退貨），任務已被作廢。
+
+    與 SignatureTaskNotPending 區分：本例外代表「任務狀態已改為 CANCELLED、**須提交**」，
+    router 不可 rollback（否則作廢遺失、任務繼續被手持端輪詢到；docs/23 K5 第五輪）。
+    """
+
+
 class InvalidSignatureImage(DomainError):
     """簽名影像不合法（非 base64 PNG、或大小超出限制）。"""
 

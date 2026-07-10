@@ -3749,6 +3749,8 @@ export interface components {
             buyer_contact_id?: number | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
+            /** Signature Task Id */
+            signature_task_id?: number | null;
             /** Tenders */
             tenders?: components["schemas"]["SaleTenderRequest"][] | null;
         };
@@ -3926,6 +3928,8 @@ export interface components {
          * @description 銷售單摘要輸出（列表用，不含明細）。
          */
         SaleSummaryRead: {
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
             /**
              * Created At
              * Format: date-time
@@ -4123,6 +4127,8 @@ export interface components {
             premium_rate_min: string;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit: boolean;
+            /** Require Store Credit Signing */
+            require_store_credit_signing: boolean;
             /** Store Credit Engine Params */
             store_credit_engine_params: {
                 [key: string]: unknown;
@@ -4162,6 +4168,8 @@ export interface components {
             premium_rate_min?: number | string | null;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit?: boolean | null;
+            /** Require Store Credit Signing */
+            require_store_credit_signing?: boolean | null;
             /** Store Credit Engine Params */
             store_credit_engine_params?: {
                 [key: string]: unknown;

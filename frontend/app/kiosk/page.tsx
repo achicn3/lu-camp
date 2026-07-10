@@ -620,8 +620,11 @@ const CONTENT_LABELS: Record<string, string> = {
   address: "住址",
   total: "合計金額",
   deduct: "扣抵購物金",
+  debit: "本次折抵",
   balance: "購物金餘額",
-  balance_after: "扣抵後餘額",
+  balance_before: "目前購物金餘額",
+  balance_after: "折抵後剩餘",
+  sale_total: "本次消費合計",
 };
 
 // 客人簽的是完整 JSON 快照，故此處**窮舉渲染**所有欄位、不靜默丟棄任何鍵
@@ -686,7 +689,7 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
 }
 
 function isAmountKey(key: string): boolean {
-  return ["total", "deduct", "balance", "balance_after"].includes(key);
+  return ["total", "deduct", "debit", "balance", "balance_before", "balance_after", "sale_total"].includes(key);
 }
 
 function renderValue(value: unknown): string {

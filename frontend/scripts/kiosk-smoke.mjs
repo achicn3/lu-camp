@@ -169,23 +169,25 @@ try {
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
 
   // ── 交回鎖持久化：完成畫面重整後仍停在交回、不解鎖（Codex K3 第六輪 high）──
+  // （通用第二任務改用 STORE_CREDIT_USE：K5 起 TRANSACTION_ACK 內容由後端以銷售單為準重建，
+  //  不再接受自由內容；渲染穩健性回歸靠 STORE_CREDIT_USE 的客端鍵合併路徑。）
   await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
-    kind: "TRANSACTION_ACK",
+    kind: "STORE_CREDIT_USE",
     contact_id: contactId,
-    content: { items: "單一字串品項", note: "非陣列 items 也要顯示" },
+    content: { debit: "100", sale_total: "100" },
   });
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(600);
   ok(
     "重整後仍停在交回畫面（持久鎖）",
     (await page.locator('h1:has-text("已完成簽署")').isVisible()) &&
-      !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()),
+      !(await page.locator('h1:has-text("購物金使用確認")').isVisible()),
   );
 
   // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
   await page.waitForTimeout(3000); // 跨過一個輪詢週期（2s）
   const stillHandoff = await page.locator('h1:has-text("已完成簽署")').isVisible();
-  const nextLeaked = await page.locator('h1:has-text("交易紀錄簽收")').isVisible();
+  const nextLeaked = await page.locator('h1:has-text("購物金使用確認")').isVisible();
   ok("交回前不自動帶出下一位任務", stillHandoff && !nextLeaked);
 
   // 解鎖需現場店務員帳密：錯帳密不得解鎖
@@ -199,14 +201,14 @@ try {
   // 正確店務帳密 → 恢復輪詢，下一張任務才出現
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
   ok("店務帳密解鎖後帶出下一張任務", true);
 
-  // ── 回歸：content.items 非陣列時仍完整顯示、不靜默丟棄（Codex K3 high）─────
+  // ── 回歸：K5 第七輪 canonical 內容完整渲染（本次折抵/合計/餘額由後端補齊）─────
   const ackBody = await page.textContent(".kiosk-task-body");
   ok(
-    "非陣列 items 不被丟棄",
-    ackBody.includes("單一字串品項") && ackBody.includes("非陣列 items 也要顯示"),
+    "canonical 扣抵內容完整渲染",
+    ackBody.includes("本次折抵") && ackBody.includes("折抵後剩餘"),
   );
 
   // ── 回歸：5xx 為曖昧（可能已寫入）不得清鎖恢復輪詢＋在途鎖定 payload（Codex K3 第八/九輪）
@@ -223,7 +225,7 @@ try {
   await page.waitForSelector(".kiosk-task-footer .form-error", { timeout: 6000 });
   await page.waitForTimeout(200);
   const recoverable =
-    (await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
+    (await page.locator('h1:has-text("購物金使用確認")').isVisible()) &&
     (await page.locator("button.kiosk-submit").isEnabled());
   ok("5xx 後可重試、不卡死", recoverable);
 
@@ -239,7 +241,7 @@ try {
   await page.waitForSelector('h1:has-text("上一筆簽署尚未確認")', { timeout: 8000 });
   ok(
     "曖昧失敗重整後進恢復畫面、不洩漏任務",
-    !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()),
+    !(await page.locator('h1:has-text("購物金使用確認")').isVisible()),
   );
   // 店員確認並解鎖 → 恢復輪詢，待簽任務重新出現（可重新簽署）
   await page.unroute("**/api/v1/kiosk/tasks/*/sign");
@@ -247,7 +249,7 @@ try {
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
   ok("店員解鎖恢復後任務重現", true);
 
   // 重新簽署 → 成功進交回；再解鎖回待機
@@ -271,26 +273,26 @@ try {
   await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 }); // 顯示 A、釘選
   // 店員改推不同任務 B（建立即取消 A）
   const taskB = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
-    kind: "TRANSACTION_ACK",
+    kind: "STORE_CREDIT_USE",
     contact_id: contactId,
-    content: { note: "下一位客人 B 的內容" },
+    content: { debit: "87654", sale_total: "87654" },
   });
   await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
   ok(
     "改推不同任務不自動換到客人面前",
-    !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()) &&
-      !(await page.locator("text=下一位客人 B 的內容").isVisible()),
+    !(await page.locator('h1:has-text("購物金使用確認")').isVisible()) &&
+      !(await page.locator("text=87,654").isVisible()),
   );
   // 閘門顯示時重整 → 釘選持久，仍停在閘門、不放行 B（Codex K3 第十二輪 high）
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
-  ok("閘門顯示時重整仍被擋", !(await page.locator('h1:has-text("交易紀錄簽收")').isVisible()));
+  ok("閘門顯示時重整仍被擋", !(await page.locator('h1:has-text("購物金使用確認")').isVisible()));
   // 店員確認解鎖 → 採用新任務 B
   await page.click('button:has-text("店員確認並解鎖")');
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("交易紀錄簽收")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
   ok("店員解鎖後採用新任務", true);
 
   // ── 釘選閘門（空窗）：取消 B → current=null 待機 → 建 C，C 仍須被閘門擋，不得因空窗

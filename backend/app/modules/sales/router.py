@@ -41,6 +41,10 @@ from app.shared.exceptions import (
     SaleHasReturns,
     SaleItemNotFound,
     SaleLineInvalid,
+    SignatureContentMismatch,
+    SignatureTaskConflict,
+    SignatureTaskNotFound,
+    SignatureTaskNotPending,
     StoreCreditConflict,
     StoreCreditMemberRequired,
 )
@@ -68,6 +72,11 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InvalidSaleTender: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     EmptySale: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 購物金扣抵手持簽署（docs/23 K5）
+    SignatureContentMismatch: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SignatureTaskNotFound: status.HTTP_404_NOT_FOUND,
+    SignatureTaskNotPending: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SignatureTaskConflict: status.HTTP_409_CONFLICT,
 }
 
 
@@ -96,9 +105,30 @@ async def create_sale(
             buyer_contact_id=payload.buyer_contact_id,
             tenders=payload.to_tender_inputs(),
             idempotency_key=idempotency_key,
+            signature_task_id=payload.signature_task_id,
         )
     except IntegrityError as exc:
         await session.rollback()
+        # 一份購物金扣抵簽署至多綁一筆銷售（docs/23 K5，D3）：撞單次使用唯一約束。並發首寫
+        # 競態（前置回放時尚無既有列、插入互撞）落到這裡——贏家已可見：指紋相符回原單回放、
+        # 不符/已作廢 → 409（Codex K5 第一輪；同 K4 第九輪模式）。
+        if "uq_sales_signature_task" in str(exc.orig):
+            assert payload.signature_task_id is not None  # 無簽署不可能撞此約束
+            try:
+                bound_sale = await svc.find_signature_replay(
+                    user.store_id,
+                    payload.signature_task_id,
+                    lines=payload.to_inputs(),
+                    buyer_contact_id=payload.buyer_contact_id,
+                    tenders=payload.to_tender_inputs(),
+                )
+            except SignatureTaskConflict as conflict:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail=str(conflict)
+                ) from conflict
+            lines = await svc.get_lines(bound_sale.id)
+            tenders = await svc.get_tenders(bound_sale.id)
+            return SaleRead.build(bound_sale, lines, tenders)
         # 僅處理 idempotency 唯一約束違反（並行重送）；其他完整性錯誤不吞、照常往外拋。
         if "uq_sales_store_idempotency_key" not in str(exc.orig):
             raise

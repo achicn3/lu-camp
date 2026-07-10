@@ -26,7 +26,9 @@ from app.shared.exceptions import (
     ContactNotFound,
     InvalidKioskPayout,
     InvalidSignatureImage,
+    SignatureContentMismatch,
     SignatureTaskConflict,
+    SignatureTaskInvalidated,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
@@ -86,6 +88,12 @@ async def create_signature_task(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except AcquisitionRequiresNationalId as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except SignatureContentMismatch as exc:
+        # 交易紀錄簽收的 ref/買方/狀態不符（docs/23 K5b：內容以後端銷售單為準）。
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -214,6 +222,11 @@ async def sign_kiosk_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except SignatureTaskNotPending as exc:
         await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SignatureTaskInvalidated as exc:
+        # 簽名當下發現 ref 銷售已作廢/退貨：service 已把任務改 CANCELLED——**提交**此作廢
+        # （非 rollback，否則任務留在 PENDING、手持端會一直輪詢到；Codex K5 第五輪 high）。
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (InvalidSignatureImage, InvalidKioskPayout) as exc:
         await session.rollback()

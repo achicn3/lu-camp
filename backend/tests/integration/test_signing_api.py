@@ -211,7 +211,11 @@ async def test_non_affidavit_task_has_no_agreement(
 ) -> None:
     s = await _seed(db_session)
     body = await _create_task(
-        client, s.clerk, s.contact_id, kind="STORE_CREDIT_USE", content={"deduct": "300"}
+        client,
+        s.clerk,
+        s.contact_id,
+        kind="STORE_CREDIT_USE",
+        content={"debit": "300", "sale_total": "300"},
     )
     assert body["agreement_version"] is None
 
@@ -406,7 +410,11 @@ async def test_non_affidavit_rejects_payout_choice(
 ) -> None:
     s = await _seed(db_session)
     task = await _create_task(
-        client, s.clerk, s.contact_id, kind="STORE_CREDIT_USE", content={"deduct": "300"}
+        client,
+        s.clerk,
+        s.contact_id,
+        kind="STORE_CREDIT_USE",
+        content={"debit": "300", "sale_total": "300"},
     )
     resp = await client.post(
         f"/api/v1/kiosk/tasks/{task['id']}/sign",

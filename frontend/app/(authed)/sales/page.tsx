@@ -112,6 +112,28 @@ export default function SalesPage() {
   const queryClient = useQueryClient();
   const [voidTarget, setVoidTarget] = useState<SaleSummary | null>(null);
   const [voidedNote, setVoidedNote] = useState<string | null>(null);
+  // 交易紀錄簽收（docs/23 K5b）：推 TRANSACTION_ACK 至手持裝置，客人核對後簽名留存（不擋流程）。
+  const [ackNote, setAckNote] = useState<string | null>(null);
+  const pushAck = useMutation({
+    mutationFn: async (sale: SaleSummary) => {
+      if (sale.buyer_contact_id == null) throw new Error("此單無買方會員，無法推送簽收");
+      // content 由後端以銷售單為準重建（單號/總額/時間），客端不提供（Codex K5 第三輪：
+      // 簽收證據不可由客端敘述）。
+      const { data, error } = await api.POST("/api/v1/signing/tasks", {
+        body: {
+          kind: "TRANSACTION_ACK",
+          contact_id: sale.buyer_contact_id,
+          content: {},
+          ref_type: "sale",
+          ref_id: sale.id,
+        },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "推送簽收失敗");
+      return sale.id;
+    },
+    onSuccess: (saleId) => setAckNote(`已推送 #${saleId} 交易紀錄簽收至手持裝置`),
+    onError: (e: Error) => setAckNote(e.message),
+  });
 
   const sales = useQuery({
     queryKey: ["sales", "today"],
@@ -133,6 +155,7 @@ export default function SalesPage() {
         打錯單請在此作廢（限店長）。已退貨的單不可作廢，請走退貨流程處理剩餘部分。
       </p>
       {voidedNote !== null && <p className="form-success">{voidedNote}</p>}
+      {ackNote !== null && <p className="hint">{ackNote}</p>}
       {sales.isError && (
         <p role="alert" className="form-error">
           {(sales.error as Error).message}
@@ -149,6 +172,7 @@ export default function SalesPage() {
               <th>總額</th>
               <th>發票狀態</th>
               <th>狀態</th>
+              <th aria-label="簽收" />
               {isManager && <th aria-label="操作" />}
             </tr>
           </thead>
@@ -165,6 +189,22 @@ export default function SalesPage() {
                   </td>
                   <td>{labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}</td>
                   <td>{voided ? "已作廢" : labelFor(SALE_STATUS_LABELS, sale.status)}</td>
+                  <td>
+                    {!voided && !returned && sale.buyer_contact_id != null && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`推送銷售 ${sale.id} 簽收`}
+                        disabled={pushAck.isPending}
+                        onClick={() => {
+                          setAckNote(null);
+                          pushAck.mutate(sale);
+                        }}
+                      >
+                        推送簽收
+                      </button>
+                    )}
+                  </td>
                   {isManager && (
                     <td>
                       {!voided && !returned && (

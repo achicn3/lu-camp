@@ -464,6 +464,13 @@ class StoreCreditService:
         account = await self._repo.get_account(store_id, contact_id)
         return Decimal(account.balance) if account is not None else Decimal(0)
 
+    async def get_balance_for_update(self, store_id: int, contact_id: int) -> Decimal:
+        """FOR UPDATE 鎖帳戶列取餘額（docs/23 K5 第六輪）：供結帳綁定驗證「客人簽的剩餘餘額
+        快照」與帳本當下一致——鎖列讀後持鎖至 commit，簽署後的並行入帳/扣抵只能整體先於或
+        後於本次結帳，證據不會描述過期餘額。"""
+        account = await self._repo.lock_account(store_id, contact_id)
+        return Decimal(account.balance)
+
     async def has_store_credit(self, store_id: int, contact_id: int) -> bool:
         """是否已有購物金帳戶或任何帳本分錄（read-only）。
 

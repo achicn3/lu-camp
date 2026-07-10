@@ -61,6 +61,8 @@ from app.shared.exceptions import (
     SaleHasReturns,
     SaleItemNotFound,
     SaleLineInvalid,
+    SignatureContentMismatch,
+    SignatureTaskConflict,
 )
 
 _POINTS_DIVISOR = Decimal(100)  # 會員點數：floor(含稅總額 ÷ 100)，docs/16 §0
@@ -262,6 +264,83 @@ class SalesService:
             return PaymentMethod(plan[0].tender_type.value)
         return PaymentMethod.MIXED
 
+    @staticmethod
+    def _signed_amount(content: dict[str, object], key: str) -> Decimal | None:
+        """自 STORE_CREDIT_USE 快照嚴格解析金額欄（非負整數元）；缺/小數/負/非數 → None。"""
+        raw = content.get(key)
+        if raw is None:
+            return None
+        try:
+            d = Decimal(str(raw))
+        except (ValueError, ArithmeticError):
+            return None
+        if d < 0 or d != d.to_integral_value():
+            return None
+        return d
+
+    async def _bind_store_credit_signature(
+        self,
+        store_id: int,
+        sale: Sale,
+        store_credit_amount: Decimal,
+        sale_total: Decimal,
+        buyer_contact_id: int | None,
+        signature_task_id: int | None,
+        settings: object,
+    ) -> tuple[Decimal, Decimal] | None:
+        """購物金扣抵手持簽署綁定（docs/23 K5，D3）。純讀驗證＋設 sale.signature_task_id，
+        先於任何收款副作用；單次使用由 uq_sales_signature_task 於 flush 守護。
+
+        回傳簽署的餘額快照 (balance_before, balance_after)（有綁定時）供呼叫端於
+        _apply_tenders **之後**（cash→credit 鎖序就位、帳戶列已鎖）做鎖定比對；無綁定回 None。
+        """
+        if store_credit_amount <= 0:
+            # 未以購物金付款卻帶簽署 → 拒（購物金扣抵簽署僅適用購物金結帳）。
+            if signature_task_id is not None:
+                raise SignatureContentMismatch("未以購物金付款，不可綁定購物金扣抵簽署")
+            return None
+
+        if signature_task_id is None:
+            require = getattr(settings, "require_store_credit_signing", False)
+            if require:
+                raise SignatureContentMismatch(
+                    "本店已要求購物金扣抵須手持簽名確認：請先送至手持裝置由客人簽署後再結帳"
+                )
+            return None
+
+        from app.modules.signing.service import SigningService
+
+        assert buyer_contact_id is not None  # store_credit_amount>0 已保證有買方
+        task = await SigningService(self._session).get_signed_store_credit_task(
+            store_id, signature_task_id, contact_id=buyer_contact_id
+        )
+        signed_debit = self._signed_amount(task.content, "debit")
+        if signed_debit is None or signed_debit != store_credit_amount:
+            raise SignatureContentMismatch(
+                "結帳的購物金折抵額與已簽確認不符，請重新推送簽署"
+            )
+        # 客人手持端看到並簽的**本次消費合計**也須與實際結帳總額精確相符（Codex K5 第二輪）：
+        # 否則同折抵額換更大的購物車（現金補差）仍可綁定，留下描述不同交易的簽名證據。
+        # 依店主裁示只綁客人看得到的（debit＋sale_total），購物車內部明細不綁。
+        signed_total = self._signed_amount(task.content, "sale_total")
+        if signed_total is None or signed_total != sale_total:
+            raise SignatureContentMismatch(
+                "結帳總額與已簽確認（本次消費合計）不符，請重新推送簽署"
+            )
+        # 客人簽的**餘額快照**（目前餘額/折抵後剩餘）也不得漂移（Codex K5 第六輪 high）：
+        # 此處只做純解析（缺欄/非整數元即拒）；**與帳本的鎖定比對延後到 _apply_tenders 之後**
+        # ——那時現金已先落地（cash_session 行鎖已持有）、DEBIT 已鎖帳戶列，維持全域
+        # cash→credit 鎖序，避免與 SPLIT 收購（同 contact）AB-BA 死結（Codex K5 第十輪 high）。
+        # 比對失敗在同一交易內拋例外 → 全部回滾，無半套。
+        signed_before = self._signed_amount(task.content, "balance_before")
+        signed_after = self._signed_amount(task.content, "balance_after")
+        if signed_before is None or signed_after is None:
+            raise SignatureContentMismatch(
+                "已簽確認缺少餘額快照（目前餘額/折抵後剩餘），請重新推送簽署"
+            )
+        sale.signature_task_id = signature_task_id
+        return (signed_before, signed_after)
+
     async def create_sale(
         self,
         store_id: int,
@@ -271,6 +350,7 @@ class SalesService:
         buyer_contact_id: int | None = None,
         tenders: list[TenderInput] | None = None,
         idempotency_key: str | None = None,
+        signature_task_id: int | None = None,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -300,6 +380,23 @@ class SalesService:
             )
             if replay is not None:
                 return replay
+
+        # 簽署綁定的**前置**回放（Codex K5 第一輪；同 K4 第十輪教訓）：須先於任何當前狀態檢查
+        # （開帳/庫存），否則首次已 commit、回應遺失後抽屜關帳等會讓重試在插入前就失敗、永遠
+        # 走不到回放。既有綁定＝指紋相符回原單、不符/已作廢 → 409。並發首寫競態由 router 的
+        # IntegrityError 兜底（兩請求都通過前置、插入時互撞）。
+        if signature_task_id is not None:
+            bound = await self._repo.get_by_signature_task_id(
+                store_id, signature_task_id, for_update=True
+            )
+            if bound is not None:
+                return await self.find_signature_replay(
+                    store_id,
+                    signature_task_id,
+                    lines=lines,
+                    buyer_contact_id=buyer_contact_id,
+                    tenders=normalized_tenders,
+                )
 
         has_cash = normalized_tenders is None or any(
             t.tender_type == TenderType.CASH for t in normalized_tenders
@@ -388,6 +485,20 @@ class SalesService:
                 f"才能折抵購物金（目前 {redeemable_max} 元）"
             )
 
+        # 購物金扣抵手持簽署綁定（docs/23 K5，D3）：以購物金付款時，若帶 signature_task_id 則驗證
+        # 其為本店本買方之已簽 STORE_CREDIT_USE 任務，且**簽署的折抵額＋本次消費合計都與實際結帳
+        # 精確相符**（客人手持端看到並簽的就是這筆交易）；單次使用由 uq_sales_signature_task 守護。
+        # 政策開啟後未帶即擋。純讀驗證＋設欄，先於任何收款副作用（_apply_tenders）。
+        signed_balance = await self._bind_store_credit_signature(
+            store_id,
+            sale,
+            store_credit_amount,
+            total,
+            buyer_contact_id,
+            signature_task_id,
+            settings,
+        )
+
         # 稅於發票總額層級推算一次（§6）；不逐項算稅。
         net, tax = split_tax_inclusive(total, settings.tax_rate)
         sale.subtotal = Decimal(net)
@@ -399,6 +510,24 @@ class SalesService:
         # 收款副作用（§3.2）：現金 tender → 錢櫃 SALE_IN（現金部分，非全額）；
         # 購物金 tender → 帳本 DEBIT（買方）。發票/稅/點數不受 tender 組成影響。
         await self._apply_tenders(store_id, sale, plan, clerk_user_id, buyer_contact_id)
+
+        # 簽署餘額快照的鎖定比對（Codex K5 第六/十輪）：置於 _apply_tenders **之後**——現金已
+        # 先落地（cash_session 行鎖持有）、DEBIT 已依全域 cash→credit 鎖序鎖住帳戶列，此處重鎖
+        # 同列為 no-op，不會與 SPLIT 收購形成 AB-BA。扣抵後餘額必須等於客人簽的「折抵後剩餘」
+        # （等價於簽署當下餘額未漂移）；不符即拋 → 同一交易全部回滾（含已記的現金/DEBIT）。
+        if signed_balance is not None:
+            from app.modules.storecredit.service import StoreCreditService
+
+            assert buyer_contact_id is not None
+            signed_before, signed_after = signed_balance
+            final_balance = await StoreCreditService(self._session).get_balance_for_update(
+                store_id, buyer_contact_id
+            )
+            drifted = signed_before != final_balance + store_credit_amount
+            if final_balance != signed_after or drifted:
+                raise SignatureContentMismatch(
+                    "購物金餘額已變動，與已簽確認（目前餘額/折抵後剩餘）不符，請重新推送簽署"
+                )
 
         # 寄售品 → 建 PENDING 結算（店家收入只認抽成，§7.3）。
         for serialized_item_id, gross, commission_pct in consignment_sales:
@@ -488,18 +617,64 @@ class SalesService:
         pre-check（create_sale）與 router 的 IntegrityError handler（並行重送）共用此處，
         避免「修一條路徑、漏另一條」導致併發同 key 不同購物車仍被靜默當成功。
         """
-        existing = await self._repo.get_by_idempotency_key(store_id, idempotency_key)
+        # 鎖列讀（K4 第十五輪同款）：回放決策與並行 void 序列化，不得讀到 void 前舊版誤回成功。
+        existing = await self._repo.get_by_idempotency_key(
+            store_id, idempotency_key, for_update=True
+        )
         if existing is None:
             return None
         if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id, tenders):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
             )
+        # 已作廢的銷售不可回放為成功（K4 第十四/十六輪同款）：作廢已反轉點數/寄售結算，
+        # 回 201 會讓 POS 又開櫃/印明細、與已反轉帳本脫節 → 409。
+        if existing.invoice_status is SaleInvoiceStatus.VOID:
+            raise SaleAlreadyVoid(f"sale {existing.id} 已作廢，不可以原冪等鍵重放；請重新結帳")
+        return existing
+
+    async def find_signature_replay(
+        self,
+        store_id: int,
+        signature_task_id: int,
+        *,
+        lines: list[SaleLineInput],
+        buyer_contact_id: int | None,
+        tenders: list[TenderInput] | None = None,
+    ) -> Sale:
+        """簽署綁定的「回應遺失重試」回放（docs/23 K5，Codex 第一輪；同 K4 第九/十/十三/十五輪）。
+
+        POS 冪等鍵存 ref、重掛會遺失；首次已 commit、回應遺失後以新鍵重試，無法以冪等鍵回放，
+        只會撞 uq_sales_signature_task。若既有那筆銷售的購物車指紋與本次相同（同單重送）→ 回原
+        單讓 POS 跑成功路徑、不重複扣購物金；指紋不同（拿別單的簽署硬綁）或已作廢 → 409。
+        FOR UPDATE 鎖列與並行 void 序列化。
+        """
+        existing = await self._repo.get_by_signature_task_id(
+            store_id, signature_task_id, for_update=True
+        )
+        if existing is None:
+            raise SignatureTaskConflict("此購物金扣抵簽署結帳衝突，請重試")
+        if existing.invoice_status is SaleInvoiceStatus.VOID:
+            raise SignatureTaskConflict(
+                "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
+            )
+        if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id, tenders):
+            raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing
 
     # ── 查詢 ──
     async def get_sale(self, store_id: int, sale_id: int) -> Sale | None:
         return await self._repo.get_sale(store_id, sale_id)
+
+    async def get_sale_for_update(self, store_id: int, sale_id: int) -> Sale | None:
+        """FOR UPDATE 鎖列取銷售：供跨模組（signing 簽收）與 void/return 的行鎖序列化。"""
+        return await self._repo.lock_sale(store_id, sale_id)
+
+    async def find_sale_by_signature_task(
+        self, store_id: int, signature_task_id: int
+    ) -> Sale | None:
+        """已綁定某扣抵簽署的銷售（跨模組供 signing 判斷「已簽未綁」可否作廢；docs/23 K5）。"""
+        return await self._repo.get_by_signature_task_id(store_id, signature_task_id)
 
     async def get_lines(self, sale_id: int) -> list[SaleLine]:
         return await self._repo.list_lines(sale_id)

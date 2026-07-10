@@ -93,8 +93,26 @@ class SalesRepository:
         result: Sale | None = await self._session.scalar(stmt)
         return result
 
-    async def get_by_idempotency_key(self, store_id: int, key: str) -> Sale | None:
+    async def get_by_idempotency_key(
+        self, store_id: int, key: str, *, for_update: bool = False
+    ) -> Sale | None:
         stmt = select(Sale).where(Sale.store_id == store_id, Sale.idempotency_key == key)
+        if for_update:
+            # 回放決策前鎖列（K4 第十五輪同款）：與 void_sale 的 FOR UPDATE 序列化，
+            # 杜絕「回放讀到 void 前舊版而誤回成功」的競態。
+            stmt = stmt.with_for_update()
+        result: Sale | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_by_signature_task_id(
+        self, store_id: int, signature_task_id: int, *, for_update: bool = False
+    ) -> Sale | None:
+        """已綁定某購物金扣抵簽署的銷售（單次使用唯一約束 → 至多一筆；docs/23 K5）。"""
+        stmt = select(Sale).where(
+            Sale.store_id == store_id, Sale.signature_task_id == signature_task_id
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
         result: Sale | None = await self._session.scalar(stmt)
         return result
 

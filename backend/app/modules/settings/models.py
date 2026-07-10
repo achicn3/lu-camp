@@ -55,6 +55,12 @@ class StoreSettings(Base, TimestampMixin):
     require_acquisition_affidavit: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
+    # 購物金扣抵須手持簽名確認（docs/23 K5，D3）：開啟後以購物金付款的結帳必須綁定已簽
+    # STORE_CREDIT_USE 任務（客人手持端確認本次折抵/剩餘後手寫簽名）才可完成。預設關（店家
+    # 就緒後開啟）。
+    require_store_credit_signing: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
     # 購物金溢價率與政策界線（docs/16 §1.5/§6.1）：premium_rate 夾在 [min, max]。
     premium_rate: Mapped[Decimal] = mapped_column(
         Numeric(5, 4), server_default=text("0.10"), nullable=False

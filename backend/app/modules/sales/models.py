@@ -50,6 +50,9 @@ class Sale(Base, TimestampMixin):
         UniqueConstraint("store_id", "idempotency_key", name="uq_sales_store_idempotency_key"),
         # 複合租戶鍵：供 sale_tenders 的 (sale_id, store_id) 複合 FK 綁定（SC-3 P2）。
         UniqueConstraint("id", "store_id", name="uq_sales_id_store"),
+        # 一份購物金扣抵簽署至多綁一筆銷售（docs/23 K5，D3 單次使用）；顯式命名供 IntegrityError
+        # 轉衝突（同 K4 acquisition）。
+        UniqueConstraint("signature_task_id", name="uq_sales_signature_task"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -58,6 +61,8 @@ class Sale(Base, TimestampMixin):
     idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     clerk_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     buyer_contact_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
+    # 購物金扣抵手持簽署（docs/23 K5，D3）：以購物金付款時綁定的已簽 STORE_CREDIT_USE 任務。
+    signature_task_id: Mapped[int | None] = mapped_column(ForeignKey("signature_tasks.id"))
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))

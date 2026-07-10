@@ -622,6 +622,9 @@ export default function PosPage() {
     sig: "",
     key: newIdempotencyKey(),
   });
+  // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
+  // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
+  const [signTaskId, setSignTaskId] = useState<number | null>(null);
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -705,12 +708,94 @@ export default function PosPage() {
     storeCreditMinSpend,
   });
 
+  // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
+  // 改了購物車/收款即失配 → 顯示警告並要求作廢重推（後端結帳時亦精確比對，雙重防線）。
+  const signTask = useQuery({
+    queryKey: ["signing-task", signTaskId],
+    enabled: signTaskId != null,
+    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 2000 : false),
+    queryFn: async () => {
+      if (signTaskId == null) return null;
+      const { data } = await api.GET("/api/v1/signing/tasks/{task_id}", {
+        params: { path: { task_id: signTaskId } },
+      });
+      return data ?? null;
+    },
+  });
+  const signed = signTask.data?.status === "SIGNED";
+  const signedDebit =
+    signTask.data != null
+      ? String((signTask.data.content as Record<string, unknown>).debit ?? "")
+      : null;
+  const signedTotal =
+    signTask.data != null
+      ? String((signTask.data.content as Record<string, unknown>).sale_total ?? "")
+      : null;
+  const signedBalanceBefore =
+    signTask.data != null
+      ? String((signTask.data.content as Record<string, unknown>).balance_before ?? "")
+      : null;
+  // 失配＝折抵額/消費合計/餘額快照任一與簽署不符（客人簽的必須就是這筆交易與當下餘額；
+  // 後端結帳時亦以帳戶行鎖精確比對——此處為即時 UX 提示）。
+  const signMismatch =
+    signTaskId != null &&
+    (signedDebit !== String(plan.storeCredit) ||
+      signedTotal !== String(total) ||
+      (memberBalance !== null && signedBalanceBefore !== String(memberBalance)));
+  const requireScSigning = settings.data?.require_store_credit_signing === true;
+  // 結帳簽署閘門：已推送但未簽/失配 → 擋；政策開啟且以購物金付款而未推送 → 擋。
+  const scSignBlock =
+    (signTaskId != null && (!signed || signMismatch)) ||
+    (requireScSigning && plan.storeCredit > 0 && signTaskId == null);
+
+  const pushSign = useMutation({
+    mutationFn: async () => {
+      if (!member) throw new Error("請先選擇會員");
+      const { data, error } = await api.POST("/api/v1/signing/tasks", {
+        body: {
+          kind: "STORE_CREDIT_USE",
+          contact_id: member.id,
+          content: {
+            debit: String(plan.storeCredit),
+            sale_total: String(total),
+          },
+          ref_type: "sale",
+        },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "推送手持簽署失敗");
+      return data;
+    },
+    onSuccess: (d) => {
+      setNotice(null);
+      setSignTaskId(d.id);
+    },
+    onError: (e: Error) => setNotice(e.message),
+  });
+  const cancelSign = useMutation({
+    mutationFn: async () => {
+      if (signTaskId == null) return;
+      const { response } = await api.POST("/api/v1/signing/tasks/{task_id}/cancel", {
+        params: { path: { task_id: signTaskId } },
+      });
+      // 非 2xx（如客人剛好已簽 → 409）不可視為取消成功而清除綁定（同 K4）：重新輪詢取回
+      // 最新狀態，保留 signTaskId。
+      if (!response.ok) {
+        await signTask.refetch();
+        throw new Error("此簽署已完成或無法取消，請確認手持裝置狀態");
+      }
+    },
+    onSuccess: () => setSignTaskId(null),
+    onError: (e: Error) => setNotice(e.message),
+  });
+
   const checkout = useMutation({
     mutationFn: async (): Promise<SaleRead> => {
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
         tenders: toTenders(plan) ?? null,
+        // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
+        signature_task_id: signed && !signMismatch ? signTaskId : null,
       };
       // 冪等鍵綁定送出內容（Codex F3 P2）：同 payload 的網路重試沿用同鍵（後端冪等回原單）；
       // 改了購物車/會員/收款再送則換新鍵，不會被「同鍵不同內容」的 409 卡死。
@@ -759,6 +844,7 @@ export default function PosPage() {
     setCompletedCampaign(null);
     setShowDialog(false);
     setDrawerNotice(null);
+    setSignTaskId(null); // 本單完成/重來，下一單重新推送簽署
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
@@ -961,6 +1047,59 @@ export default function PosPage() {
             setReceivedInput={setReceivedInput}
           />
 
+          {/* 購物金扣抵手持簽署（docs/23 K5，D3）：客人於手持端核對折抵/剩餘後手寫簽名 */}
+          {plan.storeCredit > 0 && member !== null && (
+            <div className="pos-sign-panel">
+              <h3>扣抵確認簽署</h3>
+              {signTaskId == null ? (
+                <>
+                  {requireScSigning && (
+                    <p className="hint">本店要求購物金扣抵須由客人於手持裝置簽名確認。</p>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={pushSign.isPending || !quoteReady}
+                    onClick={() => pushSign.mutate()}
+                  >
+                    送至手持裝置簽署
+                  </button>
+                </>
+              ) : !signed ? (
+                <>
+                  <p className="hint">已送至手持裝置，等待客人確認並簽署…</p>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={cancelSign.isPending}
+                    onClick={() => cancelSign.mutate()}
+                  >
+                    作廢此簽署（重推）
+                  </button>
+                </>
+              ) : signMismatch ? (
+                <>
+                  <p role="alert" className="form-error">
+                    交易內容已變更（客人簽的是折抵 ${signedDebit}／合計 ${signedTotal}），與目前
+                    結帳不符：請作廢重推簽署。
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={cancelSign.isPending}
+                    onClick={() => cancelSign.mutate()}
+                  >
+                    作廢此簽署（重推）
+                  </button>
+                </>
+              ) : (
+                <p className="pos-sign-done">
+                  ✓ 客人已完成簽署（折抵 <Money value={plan.storeCredit} />）
+                </p>
+              )}
+            </div>
+          )}
+
           {/* 發票區（docs/10 §5/§6）：讀不到設定時不可逕自當「不開票」（Codex F3 P3）。 */}
           {settings.isError ? (
             <p role="alert" className="form-error pos-invoice-off">
@@ -1000,14 +1139,16 @@ export default function PosPage() {
           <button
             type="button"
             className="btn-primary pos-checkout"
-            disabled={!validation.ok || checkout.isPending || !quoteReady}
+            disabled={!validation.ok || checkout.isPending || !quoteReady || scSignBlock}
             onClick={() => checkout.mutate()}
           >
             {checkout.isPending
               ? "結帳中…"
               : lines.length > 0 && !quoteReady
                 ? "試算中…"
-                : "結帳"}
+                : scSignBlock && signTaskId != null
+                  ? "等待簽署…"
+                  : "結帳"}
           </button>
         </aside>
       </div>

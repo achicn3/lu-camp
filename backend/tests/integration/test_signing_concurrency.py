@@ -58,7 +58,7 @@ async def test_concurrent_create_keeps_single_pending() -> None:
                         SignatureTaskCreate(
                             kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
                             contact_id=contact_id,
-                            content={"total": "100"},
+                            content={"items": [{"name": "品", "amount": "100"}], "total": "100"},
                         ),
                         created_by=clerk_id,
                     )
@@ -126,7 +126,7 @@ async def test_repush_and_old_sign_serialized() -> None:
             store_id=store_id,
             kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
             contact_id=contact_id,
-            content={"total": "100"},
+            content={"items": [{"name": "品", "amount": "100"}], "total": "100"},
             agreement_version_id=(await SigningService(s)._get_or_seed_current_agreement()).id,
             created_by=clerk_id,
         )
@@ -147,7 +147,7 @@ async def test_repush_and_old_sign_serialized() -> None:
                         SignatureTaskCreate(
                             kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
                             contact_id=contact_id,
-                            content={"total": "200"},
+                            content={"items": [{"name": "品", "amount": "200"}], "total": "200"},
                         ),
                         created_by=clerk_id,
                     )

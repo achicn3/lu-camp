@@ -107,6 +107,8 @@ class SaleCreateRequest(BaseModel):
     lines: list[SaleLineCreateRequest] = Field(min_length=1)
     buyer_contact_id: int | None = None
     tenders: list[SaleTenderRequest] | None = None
+    # 購物金扣抵手持簽署（docs/23 K5，D3）：以購物金付款時綁定的已簽 STORE_CREDIT_USE 任務。
+    signature_task_id: int | None = None
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]
@@ -236,3 +238,5 @@ class SaleSummaryRead(BaseModel):
     invoice_status: SaleInvoiceStatus
     status: SaleStatus
     created_at: datetime
+    # 買方會員（docs/23 K5b）：有買方的單才能推「交易紀錄簽收」至手持裝置。
+    buyer_contact_id: int | None
