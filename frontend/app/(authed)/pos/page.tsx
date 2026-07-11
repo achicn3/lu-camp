@@ -23,6 +23,7 @@ import {
   validatePlan,
 } from "@/features/pos/tender";
 import { openCashDrawer, printSaleDetail } from "@/lib/agent";
+import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -407,21 +408,39 @@ function TenderPanel({
 }
 
 // ── 完成後：列印商品明細對話框 ──
+export interface CompletedSignature {
+  // 結帳綁定的扣抵簽署快照（docs/23 K6）：明細聯加印折抵/剩餘＋簽名影像。
+  taskId: number;
+  deducted: string;
+  remaining: string;
+}
+
 function PrintDialog({
   sale,
   campaignName,
+  signature,
   onClose,
 }: {
   sale: SaleRead;
   campaignName: string | null;
+  signature: CompletedSignature | null;
   onClose: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [printed, setPrinted] = useState(false);
   const print = useMutation({
     mutationFn: async () => {
-      // 1) 實體列印：把 SaleRead（含折扣留痕）轉送硬體代理 → EPSON 印明細聯。
-      await printSaleDetail(sale, campaignName);
+      // 1) 實體列印：把 SaleRead（含折扣留痕）轉送硬體代理 → EPSON 印明細聯；
+      //    用了購物金且客人簽了扣抵確認 → 加印折抵/剩餘與簽名影像（docs/23 K6）。
+      const extras =
+        signature !== null
+          ? {
+              storeCreditDeducted: signature.deducted,
+              storeCreditRemaining: signature.remaining,
+              signaturePngBase64: await fetchSignaturePngBase64(signature.taskId),
+            }
+          : undefined;
+      await printSaleDetail(sale, campaignName, extras);
       // 2) 列印成功後補稽核（後端記錄補印明細）；稽核失敗不影響已印出的事實。
       await api.POST("/api/v1/sales/{sale_id}/print-detail", {
         params: { path: { sale_id: sale.id } },
@@ -625,6 +644,8 @@ export default function PosPage() {
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
+  // 完成結帳時綁定的簽署快照（K6 明細聯加印折抵/剩餘＋簽名用；未綁定為 null）。
+  const [completedSignature, setCompletedSignature] = useState<CompletedSignature | null>(null);
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -735,6 +756,10 @@ export default function PosPage() {
     signTask.data != null
       ? String((signTask.data.content as Record<string, unknown>).balance_before ?? "")
       : null;
+  const signedBalanceAfter =
+    signTask.data != null
+      ? String((signTask.data.content as Record<string, unknown>).balance_after ?? "")
+      : null;
   // 失配＝折抵額/消費合計/餘額快照任一與簽署不符（客人簽的必須就是這筆交易與當下餘額；
   // 後端結帳時亦以帳戶行鎖精確比對——此處為即時 UX 提示）。
   const signMismatch =
@@ -789,7 +814,7 @@ export default function PosPage() {
   });
 
   const checkout = useMutation({
-    mutationFn: async (): Promise<SaleRead> => {
+    mutationFn: async (): Promise<{ sale: SaleRead; sig: CompletedSignature | null }> => {
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
@@ -797,6 +822,16 @@ export default function PosPage() {
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
       };
+      // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
+      // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。
+      const printSig: CompletedSignature | null =
+        body.signature_task_id != null && signTaskId != null
+          ? {
+              taskId: signTaskId,
+              deducted: String(plan.storeCredit),
+              remaining: signedBalanceAfter ?? "",
+            }
+          : null;
       // 冪等鍵綁定送出內容（Codex F3 P2）：同 payload 的網路重試沿用同鍵（後端冪等回原單）；
       // 改了購物車/會員/收款再送則換新鍵，不會被「同鍵不同內容」的 409 卡死。
       const sig = JSON.stringify(body);
@@ -808,11 +843,13 @@ export default function PosPage() {
         body,
       });
       if (!data) throw new Error(extractDetail(error) ?? "結帳失敗");
-      return data;
+      return { sale: data, sig: printSig };
     },
-    onSuccess: (sale) => {
+    onSuccess: ({ sale, sig }) => {
       setCompleted(sale);
       setCompletedCampaign(campaignNote);
+      // 簽署證據快照＝mutationFn 於送出當下擷取的不可變值（非 callback 時的活狀態）。
+      setCompletedSignature(sig);
       setShowDialog(true);
       // 收現才開錢櫃（docs/10 §5）；純購物金不碰現金、不開櫃。
       // fire-and-forget：交易已寫後端，開櫃失敗只在完成畫面提示、不擋流程。
@@ -845,6 +882,7 @@ export default function PosPage() {
     setShowDialog(false);
     setDrawerNotice(null);
     setSignTaskId(null); // 本單完成/重來，下一單重新推送簽署
+    setCompletedSignature(null);
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
@@ -898,6 +936,7 @@ export default function PosPage() {
           <PrintDialog
             sale={completed}
             campaignName={completedCampaign}
+            signature={completedSignature}
             onClose={() => setShowDialog(false)}
           />
         )}

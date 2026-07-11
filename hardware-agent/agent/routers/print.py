@@ -16,7 +16,12 @@ import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException
 
 from agent.deps import DevicesDep, OkResponse
-from agent.interfaces import InvoicePayload, SalePayload, StoreHeader
+from agent.interfaces import (
+    AcquisitionReceiptPayload,
+    InvoicePayload,
+    SalePayload,
+    StoreHeader,
+)
 from agent.store_client import StoreHeaderClient, StoreHeaderUnavailable, build_store_header_client
 
 
@@ -58,6 +63,16 @@ async def print_detail(
 ) -> OkResponse:
     header = await _fetch_header(client, sale.store_id)
     await anyio.to_thread.run_sync(devices.receipt_printer.print_detail, sale, header)
+    return OkResponse(status="ok")
+
+
+@router.post("/acquisition", response_model=OkResponse, operation_id="printAcquisitionReceipt")
+async def print_acquisition(
+    receipt: AcquisitionReceiptPayload, devices: DevicesDep, client: StoreClientDep
+) -> OkResponse:
+    """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名影像（存證）。"""
+    header = await _fetch_header(client, receipt.store_id)
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_acquisition, receipt, header)
     return OkResponse(status="ok")
 
 

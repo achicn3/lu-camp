@@ -31,6 +31,27 @@ async function apiLogin(u, p) {
 }
 
 function signaturePng() {
+  // 擬真手寫筆跡（非色塊）：主筆劃＝雙頻正弦曲線、加一撇收尾，2px 半徑圓筆頭；
+  // 400x120 RGBA，如實呈現簽名管線的渲染結果（憑證上看起來像真的簽名）。
+  const w = 400, h = 120;
+  const ink = Array.from({ length: h }, () => new Uint8Array(w));
+  const dab = (cx, cy) => {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx * dx + dy * dy > 4) continue;
+        const x = Math.round(cx) + dx, y = Math.round(cy) + dy;
+        if (x >= 0 && x < w && y >= 0 && y < h) ink[y][x] = 1;
+      }
+    }
+  };
+  for (let i = 0; i <= 2400; i++) {
+    const t = i / 2400;
+    dab(20 + t * 360, 62 + 26 * Math.sin(t * Math.PI * 3) + 10 * Math.sin(t * Math.PI * 9 + 1));
+  }
+  for (let i = 0; i <= 700; i++) {
+    const t = i / 700;
+    dab(140 + t * 150, 98 - t * 60); // 收尾一撇
+  }
   const magic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const crc = (buf) => {
     let c = ~0;
@@ -48,7 +69,6 @@ function signaturePng() {
     c.writeUInt32BE(crc(td));
     return Buffer.concat([len, td, c]);
   };
-  const w = 200, h = 80;
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
   ihdr.writeUInt32BE(h, 4);
@@ -57,7 +77,7 @@ function signaturePng() {
   for (let y = 0; y < h; y++) {
     raw.push(0);
     for (let x = 0; x < w; x++) {
-      if (y >= 20 && y <= 40) raw.push(0, 0, 0, 255);
+      if (ink[y][x]) raw.push(0, 0, 0, 255);
       else raw.push(255, 255, 255, 255);
     }
   }
@@ -189,6 +209,26 @@ try {
   await page.waitForSelector("text=已完成", { timeout: 10000 });
   ok("購物金結帳完成", true);
   await page.screenshot({ path: join(SHOTS, "03-done.png"), fullPage: true });
+
+  // K6：明細聯加印折抵/剩餘＋簽名——完成對話框列印
+  await page.click('button:has-text("列印明細")');
+  await page.waitForSelector("text=已送出列印", { timeout: 8000 });
+  ok("明細聯（購物金付款：折抵/剩餘＋簽名）送出列印", true);
+  await page.screenshot({ path: join(SHOTS, "03b-printed.png"), fullPage: true });
+  await page.click('button:has-text("完成")');
+
+  // ── K6 變體：現金付款的明細聯（付款方式：現金；無簽名/購物金尾段）──────────
+  await page.click('button:has-text("開始下一筆")');
+  await page.fill(".pos-scan-input", item2);
+  await page.press(".pos-scan-input", "Enter");
+  await page.waitForSelector("text=露營燈2");
+  await page.click("button.pos-checkout");
+  await page.waitForSelector("text=已完成", { timeout: 10000 });
+  await page.click('button:has-text("列印明細")');
+  await page.waitForSelector("text=已送出列印", { timeout: 8000 });
+  ok("明細聯（現金付款：無簽名尾段）送出列印", true);
+  await page.screenshot({ path: join(SHOTS, "03c-cash-printed.png"), fullPage: true });
+  await page.click('button:has-text("完成")');
 
   // 單次使用：同一簽署綁第二筆結帳（API、同額別件）→ 409
   const dup = await apiJson(

@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import unicodedata
+from datetime import UTC
+from zoneinfo import ZoneInfo
 
 from agent.config import MissingDeviceConfigError
 from agent.drivers.einvoice_format import barcode_text, qr_pair_text, roc_period_label
@@ -18,8 +20,15 @@ from agent.drivers.escpos_raster import (
     qr_pair_rows,
     raster_command,
 )
+from agent.drivers.signature_png import signature_rows
 from agent.escpos_printer import ESC, FS, GS, SupportsWrite
-from agent.interfaces import InvoicePayload, SaleLinePayload, SalePayload, StoreHeader
+from agent.interfaces import (
+    AcquisitionReceiptPayload,
+    InvoicePayload,
+    SaleLinePayload,
+    SalePayload,
+    StoreHeader,
+)
 
 _INIT = ESC + b"@"  # 初始化印表機
 _ALIGN_CENTER = ESC + b"a" + bytes([1])
@@ -141,7 +150,36 @@ def _totals_block(sale: SalePayload) -> bytes:
     out += _line(f"未稅　 {sale.subtotal}")
     out += _line(f"營業稅 {sale.tax}")
     out += _line(f"總計　 {sale.total}")
-    out += _line(f"付款方式：{sale.payment_method}")
+    out += _line(f"付款方式：{_payment_label(sale.payment_method)}")
+    return bytes(out)
+
+
+def _payment_label(method: str) -> str:
+    """付款方式中文標籤（收據為客人看的，不印英文代碼）；未知值原樣印出（不靜默改寫）。"""
+    return {"CASH": "現金", "STORE_CREDIT": "購物金", "MIXED": "現金＋購物金"}.get(method, method)
+
+
+_STORE_TZ = ZoneInfo("Asia/Taipei")  # 店面時區（單店臺灣；未來多店改由 payload/設定帶入）
+
+
+def _store_credit_signature_block(sale: SalePayload) -> bytes:
+    """購物金折抵/剩餘＋客戶簽名影像（docs/23 K6，D6）：欄位缺省時輸出空、不改既有版面。
+
+    簽名 PNG 已由後端 signing 驗證（8-bit RGBA、非空白）；此處再經 signature_rows 同子集
+    解碼——不合法即拋 SignatureImageError（呼叫端轉 422，不印出壞影像當證據）。
+    """
+    out = bytearray()
+    if sale.store_credit_deducted is not None:
+        out += _line(_SEP)
+        out += _line(f"購物金折抵 -{sale.store_credit_deducted}")
+        if sale.store_credit_remaining is not None:
+            out += _line(f"購物金剩餘  {sale.store_credit_remaining}")
+    if sale.signature_png_base64 is not None:
+        out += _line(_SEP)
+        out += _line("客戶簽名：")
+        out += _ALIGN_CENTER
+        out += raster_command(signature_rows(sale.signature_png_base64, max_width_dots=360))
+        out += _ALIGN_LEFT
     return bytes(out)
 
 
@@ -161,6 +199,7 @@ class EscposReceiptPrinter:
     def _emit_doc(self, sale: SalePayload, header: StoreHeader, *, title: str) -> None:
         out = bytearray()
         out += _INIT
+        out += _SET_PRINT_AREA  # 印字區=408 dots：置中光柵（簽名）以紙寬為基準，右緣不被裁切
         out += _ENTER_CHINESE  # 整份文件以中文（Big5）模式列印，ASCII 仍如實
         out += _header_block(header)
         out += _ALIGN_CENTER + _line(title) + _ALIGN_LEFT
@@ -170,6 +209,7 @@ class EscposReceiptPrinter:
             out += _line(_item_row(line))
             out += _discount_sub_rows(line)
         out += _totals_block(sale)
+        out += _store_credit_signature_block(sale)
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT
         out += _CUT
@@ -180,6 +220,48 @@ class EscposReceiptPrinter:
 
     def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
         self._emit_doc(sale, header, title="商品明細聯")
+
+    def print_acquisition(
+        self, receipt: AcquisitionReceiptPayload, header: StoreHeader
+    ) -> None:
+        """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋客戶簽名（存證聯）。"""
+        out = bytearray()
+        out += _INIT
+        out += _SET_PRINT_AREA  # 同上：簽名置中光柵須以 408-dot 印字區為基準
+        out += _ENTER_CHINESE
+        out += _header_block(header)
+        out += _ALIGN_CENTER + _line("收購憑證聯") + _ALIGN_LEFT
+        out += _line(f"收購單號 #{receipt.acquisition_id}")
+        # 憑證時間以**店面時區**呈現（Codex K6 第四輪）：後端 signed_at 為 UTC，直接 strftime
+        # 會差八小時、可能跨日，毀損證據時點。naive 值視為 UTC。
+        local_dt = (
+            receipt.created_at.replace(tzinfo=UTC)
+            if receipt.created_at.tzinfo is None
+            else receipt.created_at
+        ).astimezone(_STORE_TZ)
+        out += _line(f"日期 {local_dt.strftime('%Y-%m-%d %H:%M')}")
+        out += _line(f"賣方 {receipt.seller_name}")
+        out += _line(_SEP)
+        for item in receipt.items:
+            out += _line(
+                _pad_left_field(item.name, _NAME_W + _UNIT_W)
+                + _pad_right_field(item.amount, _QTY_W + _TOTAL_W)
+            )
+        out += _line(_SEP)
+        out += _line(f"收購總額 {receipt.total}")
+        payout_label = "購物金" if receipt.payout_method == "STORE_CREDIT" else "現金"
+        out += _line(f"撥款方式：{payout_label}")
+        if receipt.store_credit_granted is not None:
+            out += _line(f"撥入購物金 +{receipt.store_credit_granted}")
+        out += _line(_SEP)
+        out += _line("賣方簽名：")
+        out += _ALIGN_CENTER
+        out += raster_command(signature_rows(receipt.signature_png_base64, max_width_dots=360))
+        out += _ALIGN_LEFT
+        out += _EXIT_CHINESE
+        out += _FEED_BEFORE_CUT
+        out += _CUT
+        self._writer.write(bytes(out))
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
         """列印電子發票證明聯（附件一格式一；記載順序固定、不得增刪/變更）。

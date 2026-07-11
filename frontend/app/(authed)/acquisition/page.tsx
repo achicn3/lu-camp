@@ -25,7 +25,8 @@ import { canVoid } from "@/features/acquisition/void";
 import { isValidNationalId } from "@/features/member/national-id";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
-import { openCashDrawer, printLabel } from "@/lib/agent";
+import { openCashDrawer, printAcquisitionReceipt, printLabel } from "@/lib/agent";
+import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -572,6 +573,19 @@ export default function AcquisitionPage() {
     },
   });
   // 手持切結任務狀態輪詢（PENDING 時每 2 秒；SIGNED/CANCELLED 停）。
+  // 完成收購時的簽署快照（K6 憑證聯列印用）：**全部取自已簽切結內容與簽署時間**（後端
+  // 綁定驗證過的不可變值）——不用活的 UI 狀態/列印當下讀值，證據欄位不隨時間漂移
+  //（Codex K6 第一輪）。
+  interface ReceiptSnapshot {
+    taskId: number;
+    sellerName: string; // 簽署快照的 seller_name（後端以會員檔覆寫）
+    items: { name: string; amount: string }[];
+    total: string;
+    payout: string;
+    signedAt: string; // 簽署時間＝證據時點
+    creditGranted: string | null; // 簽署凍結溢價的撥入額
+  }
+  const [receiptSnap, setReceiptSnap] = useState<ReceiptSnapshot | null>(null);
   const signTask = useQuery({
     queryKey: ["signing-task", signTaskId],
     enabled: signTaskId != null,
@@ -708,6 +722,35 @@ export default function AcquisitionPage() {
         codes: data.item_codes,
         lot: data.lot_code,
       });
+      // 憑證聯快照（K6）：綁定簽署完成的收購才可列印憑證聯；值取自已簽切結內容
+      // （後端於綁定時逐欄驗證過）。在清除 signTaskId/seller 前擷取。
+      if (signed && signTaskId != null && signTask.data != null) {
+        const c = signTask.data.content as Record<string, unknown>;
+        const items = Array.isArray(c.items)
+          ? (c.items as { name?: unknown; amount?: unknown }[]).map((it) => ({
+              name: String(it.name ?? ""),
+              amount: String(it.amount ?? ""),
+            }))
+          : [];
+        const premium =
+          typeof c.store_credit_premium === "object" && c.store_credit_premium !== null
+            ? (c.store_credit_premium as Record<string, unknown>)
+            : null;
+        setReceiptSnap({
+          taskId: signTaskId,
+          sellerName: String(c.seller_name ?? ""),
+          items,
+          total: String(c.total ?? ""),
+          payout: String(signTask.data.chosen_payout ?? "CASH"),
+          signedAt: String(signTask.data.signed_at ?? new Date().toISOString()),
+          creditGranted:
+            signTask.data.chosen_payout === "STORE_CREDIT" && premium != null
+              ? String(premium.amount ?? "")
+              : null,
+        });
+      } else {
+        setReceiptSnap(null);
+      }
       setVoidedNote(null);
       setRows([emptyItem()]);
       setLot(emptyLot());
@@ -717,6 +760,30 @@ export default function AcquisitionPage() {
       void queryClient.invalidateQueries({ queryKey: ["cash-session"] });
     },
     onError: (e: Error) => setErrors([e.message]),
+  });
+
+  // 憑證聯列印（docs/23 K6）：綁定簽署的收購完成後，印切結品項/總額/撥款＋賣方簽名。
+  const [receiptNote, setReceiptNote] = useState<string | null>(null);
+  const printReceipt = useMutation({
+    mutationFn: async () => {
+      if (receiptSnap == null || result == null) throw new Error("無可列印的憑證資料");
+      // 憑證欄位全取自已簽快照（不可變）：時間＝簽署時間、撥入＝簽署凍結溢價；不印列印
+      // 當下的活餘額（會隨後續交易漂移、非本筆證據）。簽名 PNG 為已簽任務原圖。
+      const signaturePngBase64 = await fetchSignaturePngBase64(receiptSnap.taskId);
+      await printAcquisitionReceipt({
+        storeId: decodeSession()?.storeId ?? 1,
+        acquisitionId: result.acquisitionId,
+        sellerName: receiptSnap.sellerName,
+        items: receiptSnap.items,
+        total: receiptSnap.total,
+        payoutMethod: receiptSnap.payout,
+        createdAt: receiptSnap.signedAt,
+        signaturePngBase64,
+        storeCreditGranted: receiptSnap.creditGranted ?? undefined,
+      });
+    },
+    onSuccess: () => setReceiptNote("憑證聯已送出列印"),
+    onError: (e: Error) => setReceiptNote(e.message),
   });
 
   // 明確放棄未確認的收購鍵（店員已於收購紀錄核對確定「未建立」）：清鍵、解除掛載擁有並清空表單。
@@ -988,6 +1055,19 @@ export default function AcquisitionPage() {
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
           {result.lot !== null && <p>散裝批號：{result.lot}</p>}
           <PrintLabelsAction codes={result.codes} lot={result.lot} />
+          {receiptSnap !== null && (
+            <div className="acq-receipt-print">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={printReceipt.isPending}
+                onClick={() => printReceipt.mutate()}
+              >
+                {printReceipt.isPending ? "列印中…" : "列印收購憑證聯（含簽名）"}
+              </button>
+              {receiptNote !== null && <p className="hint">{receiptNote}</p>}
+            </div>
+          )}
           {voidedNote === null && isManager && canVoid({ voided_at: null, type: result.type }) && (
             <button
               type="button"

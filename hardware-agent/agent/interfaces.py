@@ -39,6 +39,11 @@ class PaperStatus(StrEnum):
     EMPTY = "empty"
 
 
+
+# 簽名 PNG 上限（與後端 signing MAX_SIGNATURE_BYTES=512KB 同源）：手寫簽名綽綽有餘，
+# 於 payload 邊界即擋炸彈級 base64（解碼端另有解壓 max_length 硬限）。
+MAX_SIGNATURE_B64_CHARS = 512_000 * 4 // 3 + 8
+
 class SaleLinePayload(BaseModel):
     """銷售明細行（鏡射後端 `SaleLineRead` JSON）。金額為字串整數元。
 
@@ -76,6 +81,40 @@ class SalePayload(BaseModel):
     # campaign_name 為套用的活動名；無折扣時 "0"/None。代理不做金額運算。
     total_discount: str = "0"
     campaign_name: str | None = None
+    # 購物金×手持簽署（docs/23 K6，D6）：用了購物金且客人簽了扣抵確認時，明細聯加印
+    # 折抵/剩餘與簽名影像。金額為字串整數元（後端算好）；簽名為 base64 PNG（8-bit RGBA，
+    # 後端 signing 已驗證同一子集）。全為 None 時版面與既有完全相同。
+    store_credit_deducted: str | None = None
+    store_credit_remaining: str | None = None
+    signature_png_base64: str | None = Field(default=None, max_length=MAX_SIGNATURE_B64_CHARS)
+
+
+class AcquisitionReceiptItem(BaseModel):
+    """收購憑證聯品項行（鏡射已簽切結快照的 items）。"""
+
+    name: str
+    amount: str
+
+
+class AcquisitionReceiptPayload(BaseModel):
+    """收購憑證聯列印輸入（docs/23 K6）：收購完成後印給賣方的存證聯。
+
+    品項/金額/總額鏡射**已簽切結快照**（後端綁定驗證過的值）；撥款方式為客人手持端所選
+    （D7）；選購物金時附撥入金額（含溢價）與撥入後餘額。簽名影像必要——憑證聯的意義
+    即簽名存證。金額為字串整數元，代理不做金額運算、只如實排版。
+    """
+
+    store_id: int
+    acquisition_id: int
+    seller_name: str
+    items: list[AcquisitionReceiptItem]
+    total: str
+    payout_method: str  # CASH | STORE_CREDIT
+    created_at: datetime
+    signature_png_base64: str = Field(max_length=MAX_SIGNATURE_B64_CHARS)
+    # 撥入購物金＝簽署凍結溢價的金額（已簽快照值）。**不收活餘額**（Codex K6 第二輪）：
+    # 餘額非本筆收購的簽署事實、會隨後續交易漂移，任何呼叫端都不得把它印上憑證。
+    store_credit_granted: str | None = None
 
 
 class StoreHeader(BaseModel):
@@ -171,6 +210,10 @@ class ReceiptPrinter(Protocol):
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
         """列印電子發票證明聯（附件一格式一：標題/年期別/字軌/一維條碼/雙 QR）。"""
+        ...
+
+    def print_acquisition(self, receipt: AcquisitionReceiptPayload, header: StoreHeader) -> None:
+        """列印收購憑證聯（docs/23 K6：切結品項/總額/撥款＋客戶簽名影像）。"""
         ...
 
 

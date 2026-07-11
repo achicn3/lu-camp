@@ -24,6 +24,7 @@ from agent.config import MissingDeviceConfigError
 from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
 from agent.devices import AgentDevices, default_fake_devices, real_epson_devices_from_env
 from agent.drivers.brother_label import LabelContentTooWide
+from agent.drivers.signature_png import SignatureImageError
 from agent.errors import (
     CoverOpen,
     DeviceError,
@@ -92,6 +93,13 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
             status_code=503,
             content={"detail": str(exc), "error": type(exc).__name__},
         )
+
+    @app.exception_handler(SignatureImageError)
+    async def _signature_image_handler(
+        _request: Request, exc: SignatureImageError
+    ) -> JSONResponse:
+        # 簽名影像不可用（非 8-bit RGBA PNG/超限/空白）：呼叫端資料問題 → 422，不印壞證據。
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.exception_handler(LabelContentTooWide)
     async def _label_too_wide_handler(_request: Request, exc: LabelContentTooWide) -> JSONResponse:
