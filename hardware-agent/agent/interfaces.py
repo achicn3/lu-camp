@@ -173,6 +173,11 @@ class InvoicePayload(BaseModel):
     seller_name: str = Field(min_length=1)  # 營業人識別標章（文字）
     buyer_tax_id: str | None = Field(default=None, pattern=r"^\d{8}$")
     lines: list[SaleLinePayload] = Field(min_length=1)
+    # 平台（Amego）回傳的條碼/QR **內容字串**（docs/24）：三欄齊備時直接印平台內容、
+    # 無需本地 AES 金鑰；缺任一即拒（不可混本地推算與平台內容印半套證明聯）。
+    barcode_content: str | None = Field(default=None, min_length=19, max_length=40)
+    qrcode_left_content: str | None = Field(default=None, min_length=1, max_length=500)
+    qrcode_right_content: str | None = Field(default=None, min_length=1, max_length=500)
 
     @field_validator("total_amount")
     @classmethod
@@ -181,6 +186,17 @@ class InvoicePayload(BaseModel):
         if int(value) <= 0:
             raise ValueError("總計額必須大於 0（不得開立零元發票）")
         return value
+
+    @model_validator(mode="after")
+    def _platform_content_all_or_none(self) -> InvoicePayload:
+        provided = [
+            v
+            for v in (self.barcode_content, self.qrcode_left_content, self.qrcode_right_content)
+            if v is not None
+        ]
+        if provided and len(provided) != 3:
+            raise ValueError("平台條碼/QR 內容須三欄齊備（barcode + 左右 QR），缺一不可印")
+        return self
 
 
 class DeviceStatus(BaseModel):

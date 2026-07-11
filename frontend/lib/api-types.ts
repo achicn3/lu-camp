@@ -832,6 +832,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/einvoice/queue/{queue_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Queue Item
+         * @description 把 PENDING 佇列列上送 Amego（限 MANAGER；開立/作廢/折讓共用出口，docs/24）。
+         *
+         *     成功 → UPLOADED；平台拒絕 → 列轉 FAILED 後回 200（front 以 status/last_error 呈現，
+         *     可 retry）；傳輸中斷 → 502（已認領，重呼自動對帳）。
+         */
+        post: operations["sendEInvoiceQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/sales/{sale_id}/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue Invoice For Sale
+         * @description POS 結帳後開立（docs/24）：把該銷售的發票上送 Amego、回開立後發票（冪等）。
+         *
+         *     已開立 → 直接回原發票（重試/重印取號）。平台拒絕 → 502（佇列 FAILED 可重試）；
+         *     傳輸中斷（結果未知）→ 502（已認領，下次呼叫自動對帳）；未設定憑證 → 409。
+         */
+        post: operations["issueEInvoiceForSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -3098,6 +3144,8 @@ export interface components {
          * @description 發票輸出（GET /invoices/{id}）。
          */
         InvoiceRead: {
+            /** Barcode Text */
+            barcode_text: string | null;
             /** Buyer Name */
             buyer_name: string | null;
             /** Buyer Tax Id */
@@ -3128,6 +3176,12 @@ export interface components {
             npoban: string | null;
             /** Print Mark */
             print_mark: boolean;
+            /** Qrcode Left */
+            qrcode_left: string | null;
+            /** Qrcode Right */
+            qrcode_right: string | null;
+            /** Random Number */
+            random_number: string | null;
             /** Sale Id */
             sale_id: number;
             status: components["schemas"]["InvoiceStatus"];
@@ -3813,12 +3867,30 @@ export interface components {
         SaleCreateRequest: {
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
+            invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
             /** Signature Task Id */
             signature_task_id?: number | null;
             /** Tenders */
             tenders?: components["schemas"]["SaleTenderRequest"][] | null;
+        };
+        /**
+         * SaleInvoiceInfoRequest
+         * @description 結帳的發票資訊（docs/24）：買方統編（＝B2B）、手機條碼載具、捐贈碼。
+         *
+         *     互斥：統編/載具/捐贈三者至多一項——B2B 發票不掛個人載具、營業人發票不得捐贈、
+         *     載具與捐贈擇一。載具目前僅收手機條碼（`/` 開頭＋7 碼，CarrierType 3J0002）。
+         */
+        SaleInvoiceInfoRequest: {
+            /** Buyer Name */
+            buyer_name?: string | null;
+            /** Buyer Tax Id */
+            buyer_tax_id?: string | null;
+            /** Mobile Carrier */
+            mobile_carrier?: string | null;
+            /** Npoban */
+            npoban?: string | null;
         };
         /**
          * SaleInvoiceStatus
@@ -6176,6 +6248,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sendEInvoiceQueueItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issueEInvoiceForSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
                 };
             };
             /** @description Validation Error */

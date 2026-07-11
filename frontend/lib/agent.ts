@@ -56,6 +56,42 @@ export async function printSaleDetail(
   });
 }
 
+type InvoiceRead = components["schemas"]["InvoiceRead"];
+
+/**
+ * 列印電子發票證明聯（docs/24）：條碼/QR **內容以 Amego 回傳為準**（代理不本地推算）。
+ * 呼叫端須確認 print_mark 且平台內容齊備（barcode_text/qrcode_left/qrcode_right）才呼叫。
+ */
+export async function printEInvoice(
+  invoice: InvoiceRead,
+  sale: SaleRead,
+  seller: { taxId: string; name: string },
+): Promise<void> {
+  if (!invoice.invoice_no || !invoice.invoice_date || !invoice.invoice_time) {
+    throw new Error("發票尚未取號，無法列印證明聯");
+  }
+  if (!invoice.barcode_text || !invoice.qrcode_left || !invoice.qrcode_right) {
+    throw new Error("發票缺平台條碼內容（對帳復原件），證明聯無法列印");
+  }
+  await postAgent("/print/einvoice", {
+    sale_id: invoice.sale_id,
+    invoice_number: invoice.invoice_no,
+    invoice_date: invoice.invoice_date,
+    invoice_time: invoice.invoice_time,
+    random_code: invoice.random_number ?? "    ",
+    sales_amount: invoice.net,
+    tax_amount: invoice.tax,
+    total_amount: invoice.total,
+    seller_tax_id: seller.taxId,
+    seller_name: seller.name,
+    buyer_tax_id: invoice.buyer_tax_id,
+    lines: sale.lines,
+    barcode_content: invoice.barcode_text,
+    qrcode_left_content: invoice.qrcode_left,
+    qrcode_right_content: invoice.qrcode_right,
+  });
+}
+
 export interface AcquisitionReceiptPrint {
   storeId: number;
   acquisitionId: number;

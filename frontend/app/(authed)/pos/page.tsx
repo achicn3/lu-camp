@@ -22,14 +22,16 @@ import {
   toTenders,
   validatePlan,
 } from "@/features/pos/tender";
-import { openCashDrawer, printSaleDetail } from "@/lib/agent";
+import { openCashDrawer, printEInvoice, printSaleDetail } from "@/lib/agent";
 import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
+import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type SaleRead = components["schemas"]["SaleRead"];
+type InvoiceRead = components["schemas"]["InvoiceRead"];
 type ContactRead = components["schemas"]["ContactRead"];
 type CampaignRead = components["schemas"]["CampaignRead"];
 type MenuItemRead = components["schemas"]["MenuItemRead"];
@@ -655,6 +657,74 @@ export default function PosPage() {
       return data;
     },
   });
+  const einvoiceEnabled = settings.data?.einvoice_enabled ?? false;
+
+  // 電子發票（docs/24）：統編（=B2B）/手機載具/捐贈碼三擇一；結帳成功後自動開立，
+  // 無載具且未捐贈 → 以 Amego 回傳條碼/QR 內容送 EPSON 印證明聯。
+  const [invTaxId, setInvTaxId] = useState("");
+  const [invBuyerName, setInvBuyerName] = useState("");
+  const [invCarrier, setInvCarrier] = useState("");
+  const [invNpoban, setInvNpoban] = useState("");
+  const [invoiceNote, setInvoiceNote] = useState<string | null>(null);
+  const [completedInvoice, setCompletedInvoice] = useState<InvoiceRead | null>(null);
+  const invTaxIdBad = invTaxId !== "" && !/^\d{8}$/.test(invTaxId);
+  const invCarrierBad = invCarrier !== "" && !/^\/[0-9A-Z+\-.]{7}$/.test(invCarrier);
+  const invNpobanBad = invNpoban !== "" && !/^\d{3,7}$/.test(invNpoban);
+  const invoiceInputBad = invTaxIdBad || invCarrierBad || invNpobanBad;
+
+  // 證明聯抬頭（賣方統編/店名）＝後端 stores 單一事實來源（與明細聯同源）。
+  const storeHeader = useQuery({
+    queryKey: ["receipt-header"],
+    enabled: einvoiceEnabled,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/stores/{store_id}/receipt-header", {
+        params: { path: { store_id: decodeSession()?.storeId ?? 1 } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取店家抬頭失敗");
+      return data;
+    },
+  });
+
+  // 結帳後開立（docs/24）：失敗不擋交易（銷售已成立），留待補開清單重試。
+  const issueInvoice = useMutation({
+    mutationFn: async (sale: SaleRead): Promise<{ invoice: InvoiceRead; sale: SaleRead }> => {
+      const { data, error } = await api.POST("/api/v1/einvoice/sales/{sale_id}/issue", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "發票開立失敗");
+      return { invoice: data, sale };
+    },
+    onSuccess: ({ invoice, sale }) => {
+      setCompletedInvoice(invoice);
+      const printable =
+        invoice.print_mark &&
+        invoice.barcode_text != null &&
+        invoice.qrcode_left != null &&
+        invoice.qrcode_right != null;
+      if (printable) {
+        const header = storeHeader.data;
+        if (header?.tax_id == null) {
+          setInvoiceNote("發票已開立，但讀不到店家統編抬頭，證明聯未列印");
+          return;
+        }
+        setInvoiceNote("證明聯列印中…");
+        printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name })
+          .then(() => setInvoiceNote("發票已開立，證明聯已送印"))
+          .catch((err: Error) =>
+            setInvoiceNote(`發票已開立，但證明聯列印失敗：${err.message}`),
+          );
+      } else if (invoice.donate_mark) {
+        setInvoiceNote("發票已開立並捐贈，不印證明聯");
+      } else if (invoice.carrier_type != null) {
+        setInvoiceNote("發票已開立並存入載具，不印證明聯");
+      } else {
+        setInvoiceNote("發票已開立（無平台條碼內容，證明聯不可印）");
+      }
+    },
+    onError: (err: Error) => {
+      setInvoiceNote(`發票尚未開立：${err.message}（銷售已成立，可稍後補開）`);
+    },
+  });
   const balanceQuery = useQuery({
     queryKey: ["store-credit", member?.id],
     enabled: member !== null,
@@ -821,6 +891,16 @@ export default function PosPage() {
         tenders: toTenders(plan) ?? null,
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
+        // 發票資訊（docs/24）：任一欄有值才帶；後端驗互斥與格式並入冪等指紋。
+        invoice:
+          einvoiceEnabled && (invTaxId !== "" || invCarrier !== "" || invNpoban !== "")
+            ? {
+                buyer_tax_id: invTaxId !== "" ? invTaxId : null,
+                buyer_name: invTaxId !== "" && invBuyerName !== "" ? invBuyerName : null,
+                mobile_carrier: invCarrier !== "" ? invCarrier : null,
+                npoban: invNpoban !== "" ? invNpoban : null,
+              }
+            : null,
       };
       // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
       // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。
@@ -851,6 +931,13 @@ export default function PosPage() {
       // 簽署證據快照＝mutationFn 於送出當下擷取的不可變值（非 callback 時的活狀態）。
       setCompletedSignature(sig);
       setShowDialog(true);
+      // 電子發票：結帳成立後自動開立＋（可印時）送印證明聯；失敗只提示、不影響交易。
+      setCompletedInvoice(null);
+      setInvoiceNote(null);
+      if (einvoiceEnabled) {
+        setInvoiceNote("發票開立中…");
+        issueInvoice.mutate(sale);
+      }
       // 收現才開錢櫃（docs/10 §5）；純購物金不碰現金、不開櫃。
       // fire-and-forget：交易已寫後端，開櫃失敗只在完成畫面提示、不擋流程。
       if (plan.cash > 0) {
@@ -883,6 +970,13 @@ export default function PosPage() {
     setDrawerNotice(null);
     setSignTaskId(null); // 本單完成/重來，下一單重新推送簽署
     setCompletedSignature(null);
+    setInvTaxId("");
+    setInvBuyerName("");
+    setInvCarrier("");
+    setInvNpoban("");
+    setInvoiceNote(null);
+    setCompletedInvoice(null);
+    issueInvoice.reset();
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
@@ -919,6 +1013,24 @@ export default function PosPage() {
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
             </p>
           )}
+          {invoiceNote !== null && (
+            <p className="hint pos-invoice-note">
+              {completedInvoice?.invoice_no != null
+                ? `發票 ${completedInvoice.invoice_no}：`
+                : ""}
+              {invoiceNote}
+              {issueInvoice.isError && (
+                <button
+                  type="button"
+                  className="btn-ghost pos-invoice-retry"
+                  disabled={issueInvoice.isPending}
+                  onClick={() => issueInvoice.mutate(completed)}
+                >
+                  重試開立
+                </button>
+              )}
+            </p>
+          )}
           <div className="pos-dialog-actions">
             <button
               type="button"
@@ -944,7 +1056,6 @@ export default function PosPage() {
     );
   }
 
-  const einvoiceEnabled = settings.data?.einvoice_enabled ?? false;
 
   return (
     <section>
@@ -1147,22 +1258,58 @@ export default function PosPage() {
           ) : settings.isPending ? (
             <p className="hint pos-invoice-off">讀取發票設定中…</p>
           ) : einvoiceEnabled ? (
-            // 版面預留載具輸入，但目前後端 /sales 尚不收發票/載具欄位（電子發票於
-            // T13/T14 開立）。停用此欄並明示，避免「看似已帶入卻被靜默丟棄」（Codex F3 P2）。
-            <label className="field pos-invoice-off">
-              <span className="field-label">
-                雲端發票載具（掃描手機條碼，8 碼 / 開頭）
-              </span>
-              <input
-                name="carrier"
-                inputMode="text"
-                placeholder="/XXXXXXX"
-                disabled
-              />
-              <span className="hint">
-                電子發票開立尚未上線（T13/T14），暫不帶入載具。
-              </span>
-            </label>
+            // 發票資訊（docs/24）：統編（=B2B）/手機載具/捐贈碼三擇一（互斥；後端亦驗）。
+            // 全空＝B2C 一般開立、結帳後自動印證明聯。
+            <fieldset className="pos-invoice">
+              <legend className="field-label">電子發票（三擇一，全空＝一般開立並列印）</legend>
+              <label className="field">
+                <span className="field-label">買方統編（B2B）</span>
+                <input
+                  name="inv-tax-id"
+                  inputMode="numeric"
+                  placeholder="8 碼數字"
+                  value={invTaxId}
+                  disabled={invCarrier !== "" || invNpoban !== ""}
+                  onChange={(e) => setInvTaxId(e.target.value.trim())}
+                />
+                {invTaxIdBad && <span className="form-error">統編須為 8 碼數字</span>}
+              </label>
+              {invTaxId !== "" && (
+                <label className="field">
+                  <span className="field-label">買方名稱（選填）</span>
+                  <input
+                    name="inv-buyer-name"
+                    value={invBuyerName}
+                    onChange={(e) => setInvBuyerName(e.target.value)}
+                  />
+                </label>
+              )}
+              <label className="field">
+                <span className="field-label">手機載具（掃描條碼，/ 開頭 8 碼）</span>
+                <input
+                  name="inv-carrier"
+                  placeholder="/XXXXXXX"
+                  value={invCarrier}
+                  disabled={invTaxId !== "" || invNpoban !== ""}
+                  onChange={(e) => setInvCarrier(e.target.value.trim().toUpperCase())}
+                />
+                {invCarrierBad && (
+                  <span className="form-error">載具須為 / 開頭＋7 碼（數字/大寫/+-.）</span>
+                )}
+              </label>
+              <label className="field">
+                <span className="field-label">捐贈碼</span>
+                <input
+                  name="inv-npoban"
+                  inputMode="numeric"
+                  placeholder="3–7 碼數字"
+                  value={invNpoban}
+                  disabled={invTaxId !== "" || invCarrier !== ""}
+                  onChange={(e) => setInvNpoban(e.target.value.trim())}
+                />
+                {invNpobanBad && <span className="form-error">捐贈碼須為 3–7 碼數字</span>}
+              </label>
+            </fieldset>
           ) : (
             <p className="hint pos-invoice-off">
               本期不開票（未啟用電子發票）。
@@ -1178,7 +1325,13 @@ export default function PosPage() {
           <button
             type="button"
             className="btn-primary pos-checkout"
-            disabled={!validation.ok || checkout.isPending || !quoteReady || scSignBlock}
+            disabled={
+              !validation.ok ||
+              checkout.isPending ||
+              !quoteReady ||
+              scSignBlock ||
+              invoiceInputBad
+            }
             onClick={() => checkout.mutate()}
           >
             {checkout.isPending

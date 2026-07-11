@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from agent.config import MissingDeviceConfigError
 from agent.devices import AgentDevices, default_fake_devices
@@ -472,3 +473,30 @@ def test_escpos_einvoice_without_key_raises_and_writes_nothing() -> None:
     with pytest.raises(MissingDeviceConfigError):
         EscposReceiptPrinter(writer).print_einvoice(_INVOICE)
     assert bytes(writer.buffer) == b""
+
+
+_AMEGO_CONTENT = {
+    "barcode_content": "11506AB123456789999",
+    "qrcode_left_content": "AB123456781150610" + "9" * 60,
+    "qrcode_right_content": "**帳篷:1:1000",
+}
+
+
+def test_escpos_einvoice_with_platform_content_needs_no_aes_key() -> None:
+    """Amego 回傳條碼/QR 內容（docs/24）→ 直接印平台內容，無需本地 AES 金鑰。"""
+    writer = FakePrinter()
+    invoice = _INVOICE.model_copy(update=_AMEGO_CONTENT)
+    EscposReceiptPrinter(writer).print_einvoice(invoice)  # 未注入金鑰
+    buf = bytes(writer.buffer)
+    assert "電子發票證明聯".encode("big5") in buf
+    assert buf.count(b"\x1dv0\x00") == 2  # 一維條碼 + 雙 QR 兩塊點陣
+    assert b"\x1dV\x00" in buf  # 切紙
+
+
+def test_einvoice_platform_content_all_or_none() -> None:
+    """平台內容三欄須齊備（缺一即拒）：不可混本地推算與平台內容印出半套證明聯。"""
+    base = _INVOICE.model_dump(mode="json")
+    for missing in ("barcode_content", "qrcode_left_content", "qrcode_right_content"):
+        partial = {**_AMEGO_CONTENT, missing: None}
+        with pytest.raises(ValidationError):
+            InvoicePayload.model_validate({**base, **partial})

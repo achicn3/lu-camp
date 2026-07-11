@@ -3592,6 +3592,17 @@
       "InvoiceRead": {
         "description": "發票輸出（GET /invoices/{id}）。",
         "properties": {
+          "barcode_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode Text"
+          },
           "buyer_name": {
             "anyOf": [
               {
@@ -3705,6 +3716,39 @@
             "title": "Print Mark",
             "type": "boolean"
           },
+          "qrcode_left": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qrcode Left"
+          },
+          "qrcode_right": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qrcode Right"
+          },
+          "random_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Random Number"
+          },
           "sale_id": {
             "title": "Sale Id",
             "type": "integer"
@@ -3733,6 +3777,10 @@
           "invoice_no",
           "invoice_date",
           "invoice_time",
+          "random_number",
+          "barcode_text",
+          "qrcode_left",
+          "qrcode_right",
           "buyer_tax_id",
           "buyer_name",
           "carrier_type",
@@ -5515,6 +5563,16 @@
             ],
             "title": "Buyer Contact Id"
           },
+          "invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SaleInvoiceInfoRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SaleLineCreateRequest"
@@ -5553,6 +5611,62 @@
           "lines"
         ],
         "title": "SaleCreateRequest",
+        "type": "object"
+      },
+      "SaleInvoiceInfoRequest": {
+        "description": "結帳的發票資訊（docs/24）：買方統編（＝B2B）、手機條碼載具、捐贈碼。\n\n互斥：統編/載具/捐贈三者至多一項——B2B 發票不掛個人載具、營業人發票不得捐贈、\n載具與捐贈擇一。載具目前僅收手機條碼（`/` 開頭＋7 碼，CarrierType 3J0002）。",
+        "properties": {
+          "buyer_name": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Name"
+          },
+          "buyer_tax_id": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Tax Id"
+          },
+          "mobile_carrier": {
+            "anyOf": [
+              {
+                "pattern": "^/[0-9A-Z+\\-.]{7}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mobile Carrier"
+          },
+          "npoban": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{3,7}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Npoban"
+          }
+        },
+        "title": "SaleInvoiceInfoRequest",
         "type": "object"
       },
       "SaleInvoiceStatus": {
@@ -10598,6 +10712,102 @@
           }
         ],
         "summary": "Retry Queue Item",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/queue/{queue_id}/send": {
+      "post": {
+        "description": "把 PENDING 佇列列上送 Amego（限 MANAGER；開立/作廢/折讓共用出口，docs/24）。\n\n成功 → UPLOADED；平台拒絕 → 列轉 FAILED 後回 200（front 以 status/last_error 呈現，\n可 retry）；傳輸中斷 → 502（已認領，重呼自動對帳）。",
+        "operationId": "sendEInvoiceQueueItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "queue_id",
+            "required": true,
+            "schema": {
+              "title": "Queue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EInvoiceQueueItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Send Queue Item",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/sales/{sale_id}/issue": {
+      "post": {
+        "description": "POS 結帳後開立（docs/24）：把該銷售的發票上送 Amego、回開立後發票（冪等）。\n\n已開立 → 直接回原發票（重試/重印取號）。平台拒絕 → 502（佇列 FAILED 可重試）；\n傳輸中斷（結果未知）→ 502（已認領，下次呼叫自動對帳）；未設定憑證 → 409。",
+        "operationId": "issueEInvoiceForSale",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Issue Invoice For Sale",
         "tags": [
           "einvoice"
         ]

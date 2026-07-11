@@ -271,12 +271,19 @@ class EscposReceiptPrinter:
         順序：營業人識別標章 → 「電子發票證明聯」 → 年期別 → 字軌號碼 →
         交易日期時間 → 隨機碼/總計 → 賣方（買方）統編 → 一維條碼 → 左右二維條碼。
         """
-        if self._einvoice_aes_key is None:
-            raise MissingDeviceConfigError(
-                "環境變數 AGENT_EINVOICE_AES_KEY 未設定；電子發票 QR 加密驗證資訊"
-                "需要 AES 金鑰（hex），請於 env/.env 提供（金鑰不入 repo）。"
-            )
-        left_qr, right_qr = qr_pair_text(invoice, self._einvoice_aes_key)
+        # 平台內容優先（docs/24）：Amego 回傳的條碼/QR 內容字串直接印（payload 已驗三欄
+        # 齊備），無需本地 AES；未帶平台內容才走本地推算（需 AES 金鑰）。
+        if invoice.qrcode_left_content is not None and invoice.qrcode_right_content is not None:
+            left_qr, right_qr = invoice.qrcode_left_content, invoice.qrcode_right_content
+            barcode = invoice.barcode_content or ""
+        else:
+            if self._einvoice_aes_key is None:
+                raise MissingDeviceConfigError(
+                    "環境變數 AGENT_EINVOICE_AES_KEY 未設定；電子發票 QR 加密驗證資訊"
+                    "需要 AES 金鑰（hex），請於 env/.env 提供（金鑰不入 repo）。"
+                )
+            left_qr, right_qr = qr_pair_text(invoice, self._einvoice_aes_key)
+            barcode = barcode_text(invoice)
         number = invoice.invoice_number
         out = bytearray()
         out += _INIT
@@ -298,7 +305,7 @@ class EscposReceiptPrinter:
         buyer_part = f" 買方{invoice.buyer_tax_id}" if invoice.buyer_tax_id else ""
         out += _line(f"賣方{invoice.seller_tax_id}{buyer_part}")  # 8/9
         out += _ALIGN_CENTER
-        out += raster_command(code39_rows(barcode_text(invoice)))  # 11. 一維條碼 ≥0.5cm 高
+        out += raster_command(code39_rows(barcode))  # 11. 一維條碼 ≥0.5cm 高
         out += b"\n"
         out += raster_command(qr_pair_rows(left_qr, right_qr))  # 12. 二維條碼 ×2 左右並列
         out += _ALIGN_LEFT
