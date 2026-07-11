@@ -54,6 +54,7 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AllowanceExceedsInvoice,
     AmegoIssueFailed,
+    AmegoTransportError,
     DuplicateAllowanceForReturn,
     EInvoiceDropError,
     EInvoiceQueueItemNotFound,
@@ -422,8 +423,11 @@ class EInvoiceService:
             item.dropped_at = datetime.now(UTC)
         await self._session.commit()  # 釋放列鎖——不持鎖打外部 API
 
-        # 已認領的開立：先對帳（前次結果未知，平台可能已開立）。
-        if already_claimed and item.action is EInvoiceAction.ISSUE and sale_id is not None:
+        # 開立的對帳先行（Codex 第一輪）：**已認領**（前次結果未知）或**世代 > 0**（retry 會
+        # 清認領痕跡，但前世代可能已曝光給平台）都先 invoice_query——平台已有 → 補開立、
+        # 絕不重送 f0401（避免在重複 OrderId 錯誤上打轉）。
+        needs_reconcile = already_claimed or claim_attempts > 0
+        if needs_reconcile and item.action is EInvoiceAction.ISSUE and sale_id is not None:
             order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
             query_resp = await client.call(
                 "/json/invoice_query", build_invoice_query_data(order_id=order_id)
@@ -442,6 +446,11 @@ class EInvoiceService:
 
         resp = await client.call(endpoint, payload)  # AmegoTransportError → 維持已認領 PENDING
         code = resp.get("code")
+        # 曖昧回應（缺 code／非整數，schema 漂移）不可當「平台拒絕」記 FAILED（Codex 第一
+        # 輪）：平台可能已開立，誤標 FAILED 後 retry 會清認領、下次重送撞重複 OrderId。
+        # 視為結果未知——維持已認領 PENDING，下次對帳收斂。
+        if not isinstance(code, int):
+            raise AmegoTransportError("Amego 回應缺 code 或型別不明（結果不可信，待對帳）")
         success = code == 0
         issue_result: AmegoIssueResult | None = None
         if success and item.action is EInvoiceAction.ISSUE:
@@ -481,8 +490,21 @@ class EInvoiceService:
                     from app.modules.sales.service import SalesService
 
                     await SalesService(self._session).lock_sale_row(store_id, sale_id)
-                await self._repo.lock_queue_item(store_id, queue_id)
-                invoice = await self._repo.get_invoice(store_id, preview.invoice_id)
+                locked = await self._repo.lock_queue_item(store_id, queue_id)
+                # 回填守衛與 record_result 的世代/狀態檢查同步（Codex 第一輪 critical）：
+                # 佇列已非 PENDING 或世代不符（in-flight 期間被並發送單標 FAILED / retry）
+                # → 本回應屬過期交付，**不回填任何開立欄位**；record_result 會留稽核事件
+                # 並以衝突收斂，不留「有字軌但未開立」的半套狀態。
+                claim_intact = (
+                    locked is not None
+                    and locked.status is UploadStatus.PENDING
+                    and locked.attempts == delivery_attempt
+                )
+                invoice = (
+                    await self._repo.get_invoice(store_id, preview.invoice_id)
+                    if claim_intact
+                    else None
+                )
                 if invoice is not None:
                     if invoice.invoice_no is None:
                         invoice.invoice_no = issue_result.invoice_no

@@ -33,7 +33,11 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
-from app.shared.exceptions import AmegoTransportError, EInvoiceQueueNotDroppable
+from app.shared.exceptions import (
+    AmegoTransportError,
+    EInvoiceQueueNotDroppable,
+    EInvoiceResultConflict,
+)
 
 # f0401 成功回應樣板（doc 回應欄位；invoice_time 為 Unix 秒）。
 _F0401_OK = {
@@ -192,10 +196,13 @@ async def test_send_f0401_api_failure_marks_failed_then_retry(db_session: AsyncS
     invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
     assert invoice is not None and invoice.status is InvoiceStatus.PENDING  # 未開立、可重試
 
-    # retry → PENDING（世代 +1），再送成功
+    # retry → PENDING（世代 +1）；再送時**對帳先行**（前世代可能已曝光平台，Codex 第一輪）：
+    # 查無 → 才重送 f0401 → 成功。
     await svc.retry(store_id, queue_id)
-    transport2 = _ScriptedTransport(dict(_F0401_OK))
+    transport2 = _ScriptedTransport({"code": 9001, "msg": "查無資料"}, dict(_F0401_OK))
     item2 = await svc.send_via_amego(store_id, queue_id, client=_client(transport2))
+    assert transport2.calls[0][0].endswith("/json/invoice_query")
+    assert transport2.calls[1][0].endswith("/json/f0401")
     assert item2.status is UploadStatus.UPLOADED
     await db_session.refresh(invoice)
     assert invoice.status is InvoiceStatus.ISSUED
@@ -333,6 +340,105 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
     assert entry["TotalAmount"] == 1000
     sale = await sales.get_sale(store_id, sale_id)
     assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ALLOWANCE
+
+
+async def test_ambiguous_response_treated_as_unknown_not_failed(
+    db_session: AsyncSession,
+) -> None:
+    """缺 code／code 非整數（schema 漂移）→ 不可標 FAILED（平台可能已開立；Codex 第一輪）：
+    視為結果未知——維持已認領 PENDING，之後對帳收斂。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+
+    # 第一次（未認領）：f0401 回應缺 code → 未知、已認領。
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(
+            store_id, queue_id, client=_client(_ScriptedTransport({"msg": "??"}))
+        )
+    item = await db_session.get(EInvoiceUploadQueue, queue_id)
+    assert item is not None
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.PENDING
+    assert item.xml_path is not None  # 已認領，待對帳
+
+    # 第二次（已認領 → 對帳先行）：查無 → 重送 f0401 回 code 為字串 → 仍未知、維持已認領。
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(
+            store_id,
+            queue_id,
+            client=_client(
+                _ScriptedTransport({"code": 9001, "msg": "查無資料"}, {"code": "0", "msg": ""})
+            ),
+        )
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.PENDING
+    assert item.xml_path is not None
+
+    # 對帳：平台已有 → 補開立
+    transport = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_number": "AB00001111",
+                "invoice_date": "20260711",
+                "invoice_time": "12:34:56",
+                "random_number": "5975",
+            },
+        }
+    )
+    item2 = await svc.send_via_amego(store_id, queue_id, client=_client(transport))
+    assert item2.status is UploadStatus.UPLOADED
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None and invoice.status is InvoiceStatus.ISSUED
+
+
+class _RacingFailTransport:
+    """在 API 呼叫期間（無列鎖）模擬並發送單把佇列標 FAILED＋retry（世代 +1），
+    再回成功——重現「過期成功回應」競態（Codex 第一輪 critical）。"""
+
+    def __init__(self, session: AsyncSession, queue_id: int, response: dict[str, object]) -> None:
+        self._session = session
+        self._queue_id = queue_id
+        self._response = response
+        self.raced = False
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        if not self.raced:
+            self.raced = True
+            item = await self._session.get(EInvoiceUploadQueue, self._queue_id)
+            assert item is not None
+            item.status = UploadStatus.FAILED
+            item.last_error = "並發送單失敗（競態模擬）"
+            await self._session.commit()
+        return self._response
+
+
+async def test_stale_success_after_concurrent_failure_does_not_corrupt(
+    db_session: AsyncSession,
+) -> None:
+    """in-flight 期間佇列被並發標 FAILED → 遲到的成功回應**不回填**開立欄位、
+    record_result 以衝突收斂（事件留稽核），不留「有字軌但未開立」半套狀態。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    transport = _RacingFailTransport(db_session, queue_id, dict(_F0401_OK))
+
+    with pytest.raises(EInvoiceResultConflict):
+        await svc.send_via_amego(store_id, queue_id, client=_client(transport))
+
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None
+    await db_session.refresh(invoice)
+    assert invoice.invoice_no is None  # 過期成功不得回填
+    assert invoice.status is InvoiceStatus.PENDING
+    item = await db_session.get(EInvoiceUploadQueue, queue_id)
+    assert item is not None
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.FAILED  # 競態勝者狀態不被覆寫
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:

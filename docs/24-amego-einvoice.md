@@ -7,8 +7,9 @@
 ## 1. Amego API 規格摘要（api_doc 2026-06-10 版，MIG 4.0）
 
 - **API 網址**：`https://invoice-api.amego.tw`（測試/正式同一網址，以統編＋App Key 區分）。
-- **測試憑證**：統編 `12345678`、App Key `sHeq7t8G1wiQvhAuIM27`；
-  測試後台 `https://invoice.amego.tw/`（test@amego.tw / 12345678）。正式憑證洽客服，**不入 repo**。
+- **測試憑證**：測試公司統編 `12345678`；App Key 見官方 api_doc「API 必備資料」表
+  （公開測試值，仍**不入 repo**——一律經環境變數 `AMEGO_APP_KEY` 注入）。
+  測試後台 `https://invoice.amego.tw/`（test@amego.tw / 12345678）。正式憑證洽客服。
 - **傳輸**：POST `application/x-www-form-urlencoded`（勿用 JSON body），欄位：
   - `invoice`＝賣方統編
   - `data`＝API 參數 JSON 字串（**須 url-encode**；伺服器會先 url-decode 一次）

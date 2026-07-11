@@ -58,8 +58,8 @@ def _invoice(**overrides: object) -> Invoice:
 
 def test_sign_form_md5_of_data_time_key() -> None:
     data = '{"OrderId":"S1-7"}'
-    expected = hashlib.md5(f"{data}1700000000sHeq7t8G1wiQvhAuIM27".encode()).hexdigest()
-    assert sign_form(data, 1700000000, "sHeq7t8G1wiQvhAuIM27") == expected
+    expected = hashlib.md5(f"{data}1700000000unit-test-app-key".encode()).hexdigest()
+    assert sign_form(data, 1700000000, "unit-test-app-key") == expected
 
 
 def test_order_id_deterministic_per_sale() -> None:
@@ -184,7 +184,7 @@ async def test_client_posts_signed_form() -> None:
     transport = _RecordingTransport({"code": 0, "msg": "", "invoice_number": "AB00001111"})
     client = AmegoClient(
         seller_tax_id="12345678",
-        app_key="sHeq7t8G1wiQvhAuIM27",
+        app_key="unit-test-app-key",
         transport=transport,
         base_url="https://invoice-api.amego.tw",
         now=lambda: datetime.fromtimestamp(1700000000, tz=UTC),
@@ -198,7 +198,7 @@ async def test_client_posts_signed_form() -> None:
     data = form["data"]
     assert json.loads(data) == [{"CancelInvoiceNumber": "AB00001111"}]
     assert form["sign"] == hashlib.md5(
-        f"{data}1700000000sHeq7t8G1wiQvhAuIM27".encode()
+        f"{data}1700000000unit-test-app-key".encode()
     ).hexdigest()
 
 

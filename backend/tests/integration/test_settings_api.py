@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,9 +80,15 @@ async def test_manager_patch_updates_and_persists(
 
 
 async def test_enable_einvoice_returns_409_until_ready(
-    client: httpx.AsyncClient, db_session: AsyncSession
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """XSD 序列化器/字軌配號未落地（T13）前，開啟 einvoice_enabled → 409、不持久化。"""
+    """AMEGO_APP_KEY 未設定（docs/24）時，開啟 einvoice_enabled → 409、不持久化。
+
+    以 monkeypatch 固定「未設定」情境——開發機 .env 可能已注入測試金鑰。
+    """
+    from app.core.config import get_settings as get_app_settings
+
+    monkeypatch.setattr(get_app_settings(), "amego_app_key", "")
     token = await _seed_user(db_session, UserRole.MANAGER)
     # 先固定種子（savepoint 釋放；外層交易仍會整批回滾）：409 路徑的 router rollback
     # 只回滾該請求的變更，不吃掉種子 user，後續 GET 才能以同 token 驗證未持久化。
