@@ -36,6 +36,16 @@ type ContactRead = components["schemas"]["ContactRead"];
 type CampaignRead = components["schemas"]["CampaignRead"];
 type MenuItemRead = components["schemas"]["MenuItemRead"];
 
+/** 證明聯可印：print_mark 且 Amego 回傳的條碼/QR 內容齊備（docs/24）。 */
+function invoiceProofPrintable(invoice: components["schemas"]["InvoiceRead"]): boolean {
+  return (
+    invoice.print_mark &&
+    invoice.barcode_text != null &&
+    invoice.qrcode_left != null &&
+    invoice.qrcode_right != null
+  );
+}
+
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
     const detail = (error as { detail: unknown }).detail;
@@ -685,6 +695,21 @@ export default function PosPage() {
     },
   });
 
+  // 證明聯列印（獨立 mutation，Codex 第十六輪）：發票已開立但列印失敗（代理離線/缺紙/
+  // 抬頭未載入）時，完成畫面提供「重印證明聯」重試——不可只留一行提示無路可退。
+  const printProof = useMutation({
+    mutationFn: async ({ invoice, sale }: { invoice: InvoiceRead; sale: SaleRead }) => {
+      // 抬頭：優先用查詢快取；未就緒/曾失敗 → 即時補抓一次，不因慢載入放棄列印。
+      let header = storeHeader.data;
+      if (header == null) header = (await storeHeader.refetch()).data ?? undefined;
+      if (header?.tax_id == null) throw new Error("讀不到店家統編抬頭");
+      await printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name });
+    },
+    onSuccess: () => setInvoiceNote("發票已開立，證明聯已送印"),
+    onError: (err: Error) =>
+      setInvoiceNote(`發票已開立，但證明聯列印失敗：${err.message}（可按重印）`),
+  });
+
   // 結帳後開立（docs/24）：失敗不擋交易（銷售已成立），留待補開清單重試。
   const issueInvoice = useMutation({
     mutationFn: async (sale: SaleRead): Promise<{ invoice: InvoiceRead; sale: SaleRead }> => {
@@ -696,23 +721,9 @@ export default function PosPage() {
     },
     onSuccess: ({ invoice, sale }) => {
       setCompletedInvoice(invoice);
-      const printable =
-        invoice.print_mark &&
-        invoice.barcode_text != null &&
-        invoice.qrcode_left != null &&
-        invoice.qrcode_right != null;
-      if (printable) {
-        const header = storeHeader.data;
-        if (header?.tax_id == null) {
-          setInvoiceNote("發票已開立，但讀不到店家統編抬頭，證明聯未列印");
-          return;
-        }
+      if (invoiceProofPrintable(invoice)) {
         setInvoiceNote("證明聯列印中…");
-        printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name })
-          .then(() => setInvoiceNote("發票已開立，證明聯已送印"))
-          .catch((err: Error) =>
-            setInvoiceNote(`發票已開立，但證明聯列印失敗：${err.message}`),
-          );
+        printProof.mutate({ invoice, sale });
       } else if (invoice.donate_mark) {
         setInvoiceNote("發票已開立並捐贈，不印證明聯");
       } else if (invoice.carrier_type != null) {
@@ -977,6 +988,7 @@ export default function PosPage() {
     setInvoiceNote(null);
     setCompletedInvoice(null);
     issueInvoice.reset();
+    printProof.reset();
     idemRef.current = { sig: "", key: newIdempotencyKey() };
     checkout.reset();
   }
@@ -1027,6 +1039,20 @@ export default function PosPage() {
                   onClick={() => issueInvoice.mutate(completed)}
                 >
                   重試開立
+                </button>
+              )}
+              {completedInvoice != null && invoiceProofPrintable(completedInvoice) && (
+                // 常駐重印（Codex 第十六輪）：抬頭慢載入/代理離線/缺紙時列印可能失敗，
+                // 發票已開立不會進 error 態——店員需有在地重試入口。
+                <button
+                  type="button"
+                  className="btn-ghost pos-invoice-reprint"
+                  disabled={printProof.isPending}
+                  onClick={() =>
+                    printProof.mutate({ invoice: completedInvoice, sale: completed })
+                  }
+                >
+                  {printProof.isPending ? "列印中…" : "重印證明聯"}
                 </button>
               )}
             </p>

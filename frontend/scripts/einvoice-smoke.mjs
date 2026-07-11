@@ -118,10 +118,19 @@ try {
       printA?.buyer_tax_id == null,
     `barcode=${printA?.barcode_content}`,
   );
+  // 重印證明聯（Codex 第十六輪）：完成畫面常駐重印鈕，按下再送一次列印。
+  // 先關自動彈出的明細列印對話框（overlay 會攔截點擊）。
+  await page.click('button:has-text("不用，完成")');
+  const reprintResp = page.waitForResponse(
+    (r) => r.url().includes("/print/einvoice") && r.status() === 200,
+    { timeout: 15000 },
+  );
+  await page.click('button:has-text("重印證明聯")');
+  await reprintResp;
+  ok("完成畫面可重印證明聯", true);
   await page.screenshot({ path: join(SHOTS, "02-b2c-issued.png"), fullPage: true });
 
   // ── B) 手機載具：開立但不印 ───────────────────────────────────────
-  await page.click('button:has-text("不用，完成")'); // 關閉自動彈出的明細列印對話框
   await page.click('button:has-text("開始下一筆")');
   await page.fill(".pos-scan-input", item2);
   await page.press(".pos-scan-input", "Enter");
