@@ -53,6 +53,18 @@
 ### f0501 作廢
 `data` 為**陣列**：`[{"CancelInvoiceNumber": "AB00001111"}, ...]`；回 `code/msg`。
 
+### g0401 開立折讓（data 為陣列，每元素一張折讓）
+- `AllowanceNumber`（**自編**折讓單號，唯一、≤40 字）、`AllowanceDate`（`Ymd`）、
+  `AllowanceType`（1 買方開立／2 賣方折讓證明通知單；114-01-01 起賣方應開立並依限上傳→**用 2**）。
+- `BuyerIdentifier`（B2C 填 `0000000000`）、`BuyerName`、選填地址/電話/信箱。
+- `ProductItem[]`：`OriginalInvoiceNumber`、`OriginalInvoiceDate`（Ymd 數字）、
+  `OriginalDescription`（≤256）、`Quantity`、`UnitPrice`（**不含稅**）、`Amount`（**不含稅**）、
+  `Tax`（稅金）、`TaxType`（1/2/3）。
+- `TaxAmount`（稅額合計）、`TotalAmount`（**不含稅**金額合計）；回 `code/msg`。
+
+### g0501 作廢折讓
+`data` 為陣列：`[{"CancelAllowanceNumber": "..."}]`；回 `code/msg`。
+
 ## 2. 本系統整合設計
 
 - **憑證**：賣方統編用 `stores.tax_id`；App Key 走環境變數 `AMEGO_APP_KEY`（禁入 repo/DB）。

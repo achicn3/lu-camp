@@ -110,10 +110,15 @@ async def test_update_writes_audit(db_session: AsyncSession) -> None:
     assert a.after is not None and a.after.get("allow_clerk_manage_categories") is True
 
 
-async def test_enable_einvoice_blocked_until_serializer_ready(db_session: AsyncSession) -> None:
-    """XSD 序列化器/字軌配號未落地（T13）前不得開啟 einvoice_enabled；關閉不受限。"""
+async def test_enable_einvoice_blocked_until_amego_key_configured(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AMEGO_APP_KEY 未設定前不得開啟 einvoice_enabled（docs/24）；設定後可開；關閉不受限。"""
+    from app.core.config import get_settings as get_app_settings
+
     store_id, user_id = await _seed_store_and_user(db_session)
     svc = StoreSettingsService(db_session)
+    monkeypatch.setattr(get_app_settings(), "amego_app_key", "")
     with pytest.raises(EInvoiceActivationNotReady):
         await svc.update_settings(
             store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
@@ -126,6 +131,12 @@ async def test_enable_einvoice_blocked_until_serializer_ready(db_session: AsyncS
         store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=False)
     )
     assert updated.einvoice_enabled is False
+    # App Key 設定後可開啟。
+    monkeypatch.setattr(get_app_settings(), "amego_app_key", "test-key")
+    enabled = await svc.update_settings(
+        store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
+    )
+    assert enabled.einvoice_enabled is True
 
 
 @pytest.mark.parametrize(

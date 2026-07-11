@@ -31,7 +31,7 @@ from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
-from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.service import StoreSettingsService
@@ -39,6 +39,7 @@ from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     CashMovementType,
+    InvoiceType,
     ItemKind,
     OwnershipType,
     PaymentMethod,
@@ -179,12 +180,25 @@ def _cart_fingerprint(
     lines: list[SaleLineInput],
     buyer_contact_id: int | None,
     tenders: list[TenderInput] | None = None,
+    invoice_info: InvoiceInfoInput | None = None,
 ) -> str:
-    """購物車＋收款組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
+    """購物車＋收款＋發票資訊組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
 
     tenders 納入指紋：同 key 但收款組成不同（影響現金/帳本副作用）→ 視為不同請求。
+    invoice_info 納入指紋（docs/24）：同 key 但統編/載具/捐贈不同（影響發票內容）→ 不同請求。
     """
     canonical = {
+        "invoice_info": (
+            None
+            if invoice_info is None
+            else {
+                "buyer_tax_id": invoice_info.buyer_tax_id,
+                "buyer_name": invoice_info.buyer_name,
+                "carrier_type": invoice_info.carrier_type,
+                "carrier_id": invoice_info.carrier_id,
+                "npoban": invoice_info.npoban,
+            }
+        ),
         "buyer_contact_id": buyer_contact_id,
         "lines": [
             {
@@ -351,6 +365,7 @@ class SalesService:
         tenders: list[TenderInput] | None = None,
         idempotency_key: str | None = None,
         signature_task_id: int | None = None,
+        invoice_info: InvoiceInfoInput | None = None,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -366,7 +381,7 @@ class SalesService:
             raise EmptySale("銷售單必須至少有一筆明細")
 
         normalized_tenders = self._normalize_tenders(tenders)
-        fingerprint = _cart_fingerprint(lines, buyer_contact_id, normalized_tenders)
+        fingerprint = _cart_fingerprint(lines, buyer_contact_id, normalized_tenders, invoice_info)
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
         # 內容不同則拒絕（避免誤用/重用 key 把不同購物車的結帳靜默丟掉）。
@@ -377,6 +392,7 @@ class SalesService:
                 lines=lines,
                 buyer_contact_id=buyer_contact_id,
                 tenders=normalized_tenders,
+                invoice_info=invoice_info,
             )
             if replay is not None:
                 return replay
@@ -396,6 +412,7 @@ class SalesService:
                     lines=lines,
                     buyer_contact_id=buyer_contact_id,
                     tenders=normalized_tenders,
+                    invoice_info=invoice_info,
                 )
 
         has_cash = normalized_tenders is None or any(
@@ -551,9 +568,25 @@ class SalesService:
         # **非「已開立」**（配號/序列化/上傳待 T13 收尾，平台 ProcessResult 核可後才轉 ISSUED）。
         # 關閉時維持 NOT_ISSUED（銷售仍完整記錄、可日後補開）。買方統編未於 POS 收集 → 一律 B2C。
         # create_pending_invoice 以 sale_id 冪等；冪等重送於上方已回原單、不會重複開立。
+        # 發票資訊（docs/24）：帶統編＝B2B；有載具或捐贈 → 不印證明聯（print_mark=False）。
         if settings.einvoice_enabled:
+            info = invoice_info if invoice_info is not None else InvoiceInfoInput()
+            is_b2b = info.buyer_tax_id is not None
+            donate = info.npoban is not None
+            has_carrier = info.carrier_type is not None and info.carrier_id is not None
             await self._einvoice.create_pending_invoice(
-                store_id, sale_id=sale.id, total=total, tax_rate=settings.tax_rate
+                store_id,
+                sale_id=sale.id,
+                total=total,
+                tax_rate=settings.tax_rate,
+                invoice_type=InvoiceType.B2B if is_b2b else InvoiceType.B2C,
+                buyer_tax_id=info.buyer_tax_id,
+                buyer_name=info.buyer_name,
+                carrier_type=info.carrier_type if has_carrier else None,
+                carrier_id=info.carrier_id if has_carrier else None,
+                donate_mark=donate,
+                npoban=info.npoban,
+                print_mark=not donate and not has_carrier,
             )
             sale.invoice_status = SaleInvoiceStatus.PENDING_ISSUE
 
@@ -611,6 +644,7 @@ class SalesService:
         lines: list[SaleLineInput],
         buyer_contact_id: int | None,
         tenders: list[TenderInput] | None = None,
+        invoice_info: InvoiceInfoInput | None = None,
     ) -> Sale | None:
         """同 key 且購物車＋收款相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
@@ -623,7 +657,9 @@ class SalesService:
         )
         if existing is None:
             return None
-        if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id, tenders):
+        if existing.idempotency_fingerprint != _cart_fingerprint(
+            lines, buyer_contact_id, tenders, invoice_info
+        ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
             )
@@ -641,6 +677,7 @@ class SalesService:
         lines: list[SaleLineInput],
         buyer_contact_id: int | None,
         tenders: list[TenderInput] | None = None,
+        invoice_info: InvoiceInfoInput | None = None,
     ) -> Sale:
         """簽署綁定的「回應遺失重試」回放（docs/23 K5，Codex 第一輪；同 K4 第九/十/十三/十五輪）。
 
@@ -658,7 +695,9 @@ class SalesService:
             raise SignatureTaskConflict(
                 "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
             )
-        if existing.idempotency_fingerprint != _cart_fingerprint(lines, buyer_contact_id, tenders):
+        if existing.idempotency_fingerprint != _cart_fingerprint(
+            lines, buyer_contact_id, tenders, invoice_info
+        ):
             raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing
 

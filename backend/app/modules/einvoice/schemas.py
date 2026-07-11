@@ -29,6 +29,11 @@ class InvoiceRead(BaseModel):
     invoice_no: str | None
     invoice_date: date | None
     invoice_time: str | None
+    random_number: str | None
+    # Amego 回傳的證明聯列印內容（docs/24）；查詢復原的發票為 None（證明聯不可印）。
+    barcode_text: str | None
+    qrcode_left: str | None
+    qrcode_right: str | None
     buyer_tax_id: str | None
     buyer_name: str | None
     carrier_type: str | None

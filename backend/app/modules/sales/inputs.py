@@ -26,6 +26,21 @@ class SaleLineInput:
 
 
 @dataclass(frozen=True)
+class InvoiceInfoInput:
+    """結帳的發票資訊輸入（docs/24）：買方統編（＝B2B）、手機載具、捐贈碼。
+
+    互斥規則於 API schema 驗證（統編/載具/捐贈不併存）；service 據此設定發票的
+    invoice_type / carrier / donate / print_mark（有載具或捐贈即不印證明聯）。
+    """
+
+    buyer_tax_id: str | None = None
+    buyer_name: str | None = None
+    carrier_type: str | None = None
+    carrier_id: str | None = None
+    npoban: str | None = None
+
+
+@dataclass(frozen=True)
 class TenderInput:
     """一筆收款明細輸入（SC-3）：型別＋金額（整數元、>0）。
 

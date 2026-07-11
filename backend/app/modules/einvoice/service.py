@@ -14,12 +14,27 @@
 """
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import ClassVar
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import split_tax_inclusive
+from app.modules.einvoice.amego import (
+    AmegoClient,
+    AmegoIssueResult,
+    allowance_number,
+    amego_order_id,
+    build_f0401_data,
+    build_f0501_data,
+    build_g0401_data,
+    build_invoice_query_data,
+    parse_f0401_success,
+    parse_query_issued,
+)
 from app.modules.einvoice.dropper import EInvoiceDropper
 from app.modules.einvoice.models import (
     EInvoiceResultEvent,
@@ -38,6 +53,7 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     AllowanceExceedsInvoice,
+    AmegoIssueFailed,
     DuplicateAllowanceForReturn,
     EInvoiceDropError,
     EInvoiceQueueItemNotFound,
@@ -53,6 +69,9 @@ from app.shared.exceptions import (
 # 回執種類（einvoice_result_events.result_kind）。
 RESULT_KIND_PROCESS = "PROCESS"
 RESULT_KIND_SUMMARY = "SUMMARY"
+
+# 發票開立日以台灣時區呈現（Amego invoice_time 為 Unix 秒；折讓日亦同）。
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 class EInvoiceService:
@@ -343,6 +362,257 @@ class EInvoiceService:
         await self._session.commit()
         await self._session.refresh(locked)
         return locked
+
+    # ── Amego 光貿 API 上送（docs/24）────────────────────────────────────────
+    # 與 drop_pending 同屬「外部副作用出口」：自管交易邊界（先認領 commit、再打 API、
+    # 再落結果）。HTTP 呼叫**不持列鎖**（不跨網路 I/O 持鎖）；in-flight 期間的作廢/回執
+    # 競態由既有狀態機（VOID_PENDING／世代歸屬）收斂——Amego 只是把 Turnkey 的
+    # 「拋檔→非同步回執」壓縮成「同步請求/回應」，暴露窗語意相同。
+
+    _AMEGO_ENDPOINTS: ClassVar[dict[EInvoiceMessageType, str]] = {
+        EInvoiceMessageType.F0401: "/json/f0401",
+        EInvoiceMessageType.F0501: "/json/f0501",
+        EInvoiceMessageType.G0401: "/json/g0401",
+    }
+
+    async def send_via_amego(
+        self, store_id: int, queue_id: int, *, client: AmegoClient
+    ) -> EInvoiceUploadQueue:
+        """把 PENDING 佇列列上送 Amego（F0401 開立／F0501 作廢／G0401 折讓）。
+
+        流程：鎖 sale→queue 驗守衛、組 payload → **認領 commit**（xml_path 記
+        `amego:{endpoint}#a{n}`、sha 為 data JSON、dropped_at＝可能已曝光起點）→ 打 API
+        （無鎖）→ 以 record_result 落結果（成功並轉發票/銷售狀態、失敗轉 FAILED 可 retry）。
+
+        傳輸失敗（結果未知）→ 佇列維持 PENDING＋已認領、AmegoTransportError 往外拋；
+        下次呼叫對「已認領的 F0401」**先 invoice_query 對帳**：平台已有 → 以查詢欄位補
+        開立（無條碼/QR，證明聯不可印）、不重送；查無 → 重送 f0401（OrderId 恆同，
+        平台端唯一約束擋重複開立）。F0501/G0401 已認領者直接重送（作廢/折讓冪等由
+        平台單號唯一性守護）。
+        """
+        preview = await self._repo.get_queue_item(store_id, queue_id)
+        if preview is None:
+            raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
+        sale_id = await self._resolve_sale_id(store_id, preview)
+        if sale_id is not None:
+            from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+            await SalesService(self._session).lock_sale_row(store_id, sale_id)
+        item = await self._repo.lock_queue_item(store_id, queue_id)
+        if item is None:
+            raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
+        if item.status is not UploadStatus.PENDING:
+            raise EInvoiceQueueNotDroppable(
+                f"佇列項目非 PENDING（目前 {item.status.value}），不可上送"
+            )
+        endpoint = self._AMEGO_ENDPOINTS.get(item.message_type)
+        if endpoint is None:
+            raise EInvoiceQueueNotDroppable(
+                f"訊息類型 {item.message_type.value} 不支援 Amego 上送"
+            )
+        already_claimed = item.xml_path is not None
+        claim_attempts = item.attempts
+        payload = await self._build_amego_payload(store_id, item)
+        data_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if not already_claimed:
+            # 認領先於曝光（與 drop_pending 同理）：crash 於 API 呼叫前後，DB 都記得
+            # 「這筆可能已送達平台」，之後只走對帳/重送、不會憑空多開。
+            item.xml_path = f"amego:{endpoint}#a{claim_attempts}"
+            item.xml_sha256 = hashlib.sha256(data_json.encode("utf-8")).hexdigest()
+            item.dropped_at = datetime.now(UTC)
+        await self._session.commit()  # 釋放列鎖——不持鎖打外部 API
+
+        # 已認領的開立：先對帳（前次結果未知，平台可能已開立）。
+        if already_claimed and item.action is EInvoiceAction.ISSUE and sale_id is not None:
+            order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
+            query_resp = await client.call(
+                "/json/invoice_query", build_invoice_query_data(order_id=order_id)
+            )
+            recovered = parse_query_issued(query_resp)
+            if recovered is not None:
+                return await self._record_amego_outcome(
+                    store_id,
+                    queue_id,
+                    success=True,
+                    status_code="0",
+                    message="以 invoice_query 對帳補開立（前次結果未知）",
+                    delivery_attempt=claim_attempts,
+                    issue_result=recovered,
+                )
+
+        resp = await client.call(endpoint, payload)  # AmegoTransportError → 維持已認領 PENDING
+        code = resp.get("code")
+        success = code == 0
+        issue_result: AmegoIssueResult | None = None
+        if success and item.action is EInvoiceAction.ISSUE:
+            issue_result = parse_f0401_success(resp)  # 欄位不合法 → 不可信，維持已認領
+        return await self._record_amego_outcome(
+            store_id,
+            queue_id,
+            success=success,
+            status_code=str(code),
+            message=str(resp.get("msg") or "")[:500] or None,
+            delivery_attempt=claim_attempts,
+            issue_result=issue_result,
+        )
+
+    async def _record_amego_outcome(
+        self,
+        store_id: int,
+        queue_id: int,
+        *,
+        success: bool,
+        status_code: str,
+        message: str | None,
+        delivery_attempt: int,
+        issue_result: AmegoIssueResult | None,
+    ) -> EInvoiceUploadQueue:
+        """把 Amego 回應落庫：先在鎖下補發票開立欄位（ISSUE 成功），再走 record_result
+        （事件稽核＋佇列/發票/銷售狀態轉移），最後 commit。
+
+        record_result 自帶 sale→queue 鎖序與世代歸屬（delivery_attempt）；in-flight 期間
+        被 retry/作廢的過期回應會落稽核事件後以衝突收斂，不污染新世代。
+        """
+        if issue_result is not None:
+            preview = await self._repo.get_queue_item(store_id, queue_id)
+            if preview is not None and preview.invoice_id is not None:
+                sale_id = await self._resolve_sale_id(store_id, preview)
+                if sale_id is not None:
+                    from app.modules.sales.service import SalesService
+
+                    await SalesService(self._session).lock_sale_row(store_id, sale_id)
+                await self._repo.lock_queue_item(store_id, queue_id)
+                invoice = await self._repo.get_invoice(store_id, preview.invoice_id)
+                if invoice is not None:
+                    if invoice.invoice_no is None:
+                        invoice.invoice_no = issue_result.invoice_no
+                        invoice.invoice_date = issue_result.invoice_date
+                        invoice.invoice_time = issue_result.invoice_time
+                        invoice.random_number = issue_result.random_number
+                        invoice.barcode_text = issue_result.barcode_text
+                        invoice.qrcode_left = issue_result.qrcode_left
+                        invoice.qrcode_right = issue_result.qrcode_right
+                        await self._session.flush()
+                    elif invoice.invoice_no != issue_result.invoice_no:
+                        await self._session.commit()  # 釋放鎖；不覆寫既有字軌
+                        raise EInvoiceResultConflict(
+                            f"平台回覆字軌 {issue_result.invoice_no} 與本地既有 "
+                            f"{invoice.invoice_no} 不符，拒絕套用（需人工對帳）"
+                        )
+        try:
+            item = await self.record_result(
+                store_id,
+                queue_id,
+                success=success,
+                status_code=status_code,
+                message=message,
+                source_ref="amego",
+                delivery_attempt=delivery_attempt,
+            )
+        except (EInvoiceResultConflict, EInvoiceResultNotApplicable):
+            await self._session.commit()  # 事件留稽核（router 慣例），衝突往外報
+            raise
+        # G0401 核可 → 把自編折讓單號寫回（供對帳/後續 g0501）。
+        if success and item.action is EInvoiceAction.ALLOWANCE and item.allowance_id is not None:
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id)
+            if allowance is not None and allowance.allowance_no is None:
+                allowance.allowance_no = allowance_number(
+                    store_id=store_id, allowance_id=allowance.id
+                )
+        await self._session.commit()
+        await self._session.refresh(item)
+        return item
+
+    async def issue_for_sale(
+        self, store_id: int, sale_id: int, *, client: AmegoClient
+    ) -> Invoice:
+        """POS 結帳後開立入口：把該銷售的發票上送 Amego，回開立後發票（冪等）。
+
+        已 ISSUED → 直接回（POS 重試/重印取號用）；PENDING → 送其 F0401 佇列列
+        （FAILED 列先 retry 轉回 PENDING 再送，POS 一鍵重試）；其他狀態（作廢中/已作廢）
+        → EInvoiceQueueNotDroppable。平台明確拒絕 → AmegoIssueFailed（佇列已 FAILED、
+        留 last_error）；傳輸中斷 → AmegoTransportError（已認領，之後對帳）。
+        """
+        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
+        if invoice is None:
+            raise InvoiceNotFound(f"銷售 {sale_id} 無發票（einvoice 未啟用或非本店）")
+        if invoice.status is InvoiceStatus.ISSUED:
+            return invoice
+        if invoice.status is not InvoiceStatus.PENDING:
+            raise EInvoiceQueueNotDroppable(
+                f"發票狀態 {invoice.status.value}，不可開立"
+            )
+        issue_item = next(
+            (
+                i
+                for i in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id)
+                if i.action is EInvoiceAction.ISSUE
+                and i.status in (UploadStatus.PENDING, UploadStatus.FAILED)
+            ),
+            None,
+        )
+        if issue_item is None:
+            raise EInvoiceQueueItemNotFound(f"發票 {invoice.id} 無可上送的開立佇列列")
+        if issue_item.status is UploadStatus.FAILED:
+            await self.retry(store_id, issue_item.id)
+        sent = await self.send_via_amego(store_id, issue_item.id, client=client)
+        if sent.status is not UploadStatus.UPLOADED:
+            raise AmegoIssueFailed(
+                f"Amego 拒絕開立：{sent.last_error or '未知錯誤'}（可稍後重試）"
+            )
+        refreshed = await self._repo.get_invoice(store_id, invoice.id)
+        assert refreshed is not None
+        return refreshed
+
+    async def _build_amego_payload(self, store_id: int, item: EInvoiceUploadQueue) -> object:
+        """依佇列列組對應 Amego payload（守衛：目標狀態必須可上送）。"""
+        if item.message_type is EInvoiceMessageType.G0401:
+            if item.allowance_id is None:
+                raise EInvoiceQueueNotDroppable("G0401 佇列列缺折讓目標")
+            allowance = await self._session.get(InvoiceAllowance, item.allowance_id)
+            if allowance is None or allowance.store_id != store_id:
+                raise EInvoiceQueueItemNotFound(f"折讓不存在或不屬於本店：id={item.allowance_id}")
+            if allowance.voided:
+                raise EInvoiceQueueNotDroppable(f"折讓 {allowance.id} 已作廢，不可上送")
+            invoice = await self._repo.get_invoice(store_id, allowance.invoice_id)
+            if invoice is None:
+                raise InvoiceNotFound(f"發票不存在或不屬於本店：id={allowance.invoice_id}")
+            return build_g0401_data(
+                number=allowance_number(store_id=store_id, allowance_id=allowance.id),
+                allowance_date=datetime.now(UTC).astimezone(_TAIPEI_TZ).date(),
+                invoice=invoice,
+                net=Decimal(allowance.net),
+                tax=Decimal(allowance.tax),
+            )
+        invoice = await self._repo.get_invoice(store_id, item.invoice_id or 0)
+        if invoice is None:
+            raise InvoiceNotFound(f"發票不存在或不屬於本店：id={item.invoice_id}")
+        if item.message_type is EInvoiceMessageType.F0501:
+            if not invoice.invoice_no:
+                raise EInvoiceQueueNotDroppable(
+                    f"發票 {invoice.id} 尚無字軌號碼，不可送作廢（F0501）"
+                )
+            return build_f0501_data(invoice.invoice_no)
+        # F0401：僅待開立可送；已認領的 VOID_PENDING 允許恢復完成交付（同 _serialize 規則）。
+        if invoice.status is not InvoiceStatus.PENDING:
+            claimed_recovery = (
+                invoice.status is InvoiceStatus.VOID_PENDING and item.xml_path is not None
+            )
+            if not claimed_recovery:
+                raise EInvoiceQueueNotDroppable(
+                    f"發票 {invoice.id} 非待開立（{invoice.status.value}），不可送開立"
+                )
+        from app.modules.sales.service import SalesService  # 函式內 import 破循環
+        from app.modules.settings.service import StoreSettingsService
+
+        lines = await SalesService(self._session).get_lines(invoice.sale_id)
+        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        return build_f0401_data(
+            invoice,
+            lines,
+            order_id=amego_order_id(store_id=store_id, sale_id=invoice.sale_id),
+            tax_rate=Decimal(settings.tax_rate),
+        )
 
     async def retry(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue:
         """把 FAILED 佇列列轉回 PENDING（attempts+1），供重新拋檔/上傳。

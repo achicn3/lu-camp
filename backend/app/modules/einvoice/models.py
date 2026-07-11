@@ -109,6 +109,11 @@ class Invoice(Base, TimestampMixin):
     net: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 未稅
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 稅額
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 含稅總額
+    # Amego f0401 回傳的證明聯列印內容（docs/24）：一維條碼／左右 QR **內容字串**，
+    # 列印以平台回傳為準。invoice_query 對帳復原的發票拿不到 → NULL（證明聯不可印）。
+    barcode_text: Mapped[str | None] = mapped_column(String(40))
+    qrcode_left: Mapped[str | None] = mapped_column(String(500))
+    qrcode_right: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[InvoiceStatus] = mapped_column(
         _enum_col(InvoiceStatus),
         default=InvoiceStatus.PENDING,

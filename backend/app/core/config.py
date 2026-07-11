@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     pii_enc_key: str
     hmac_key: str
     secret_key: str
+    # Amego 光貿電子發票（docs/24）：App Key 走環境變數、不入 repo/DB；空字串＝未設定，
+    # 未設定時不可啟用 einvoice_enabled、也不可送單。測試/正式同一 API 網址。
+    amego_app_key: str = ""
+    amego_api_base: str = "https://invoice-api.amego.tw"
 
     @field_validator("pii_enc_key")
     @classmethod

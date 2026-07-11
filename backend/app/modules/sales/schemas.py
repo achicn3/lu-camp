@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
-from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.shared.enums import (
     PaymentMethod,
@@ -97,6 +97,39 @@ class SaleTenderRequest(BaseModel):
         return TenderInput(tender_type=self.tender_type, amount=self.amount)
 
 
+class SaleInvoiceInfoRequest(BaseModel):
+    """結帳的發票資訊（docs/24）：買方統編（＝B2B）、手機條碼載具、捐贈碼。
+
+    互斥：統編/載具/捐贈三者至多一項——B2B 發票不掛個人載具、營業人發票不得捐贈、
+    載具與捐贈擇一。載具目前僅收手機條碼（`/` 開頭＋7 碼，CarrierType 3J0002）。
+    """
+
+    buyer_tax_id: str | None = Field(default=None, pattern=r"^\d{8}$")
+    buyer_name: str | None = Field(default=None, min_length=1, max_length=60)
+    mobile_carrier: str | None = Field(default=None, pattern=r"^/[0-9A-Z+\-.]{7}$")
+    npoban: str | None = Field(default=None, pattern=r"^\d{3,7}$")
+
+    @model_validator(mode="after")
+    def _mutually_exclusive(self) -> "SaleInvoiceInfoRequest":
+        chosen = [
+            v for v in (self.buyer_tax_id, self.mobile_carrier, self.npoban) if v is not None
+        ]
+        if len(chosen) > 1:
+            raise ValueError("統編、載具、捐贈碼至多擇一")
+        if self.buyer_name is not None and self.buyer_tax_id is None:
+            raise ValueError("買方名稱僅限打統編（B2B）時填寫")
+        return self
+
+    def to_input(self) -> InvoiceInfoInput:
+        return InvoiceInfoInput(
+            buyer_tax_id=self.buyer_tax_id,
+            buyer_name=self.buyer_name,
+            carrier_type="3J0002" if self.mobile_carrier is not None else None,
+            carrier_id=self.mobile_carrier,
+            npoban=self.npoban,
+        )
+
+
 class SaleCreateRequest(BaseModel):
     """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
 
@@ -109,12 +142,17 @@ class SaleCreateRequest(BaseModel):
     tenders: list[SaleTenderRequest] | None = None
     # 購物金扣抵手持簽署（docs/23 K5，D3）：以購物金付款時綁定的已簽 STORE_CREDIT_USE 任務。
     signature_task_id: int | None = None
+    # 發票資訊（docs/24）：einvoice_enabled 時 POS 可帶統編/載具/捐贈碼；省略＝B2C 一般開立。
+    invoice: SaleInvoiceInfoRequest | None = None
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]
 
     def to_tender_inputs(self) -> list[TenderInput] | None:
         return None if self.tenders is None else [t.to_input() for t in self.tenders]
+
+    def to_invoice_info(self) -> InvoiceInfoInput | None:
+        return None if self.invoice is None else self.invoice.to_input()
 
 
 NTDAmountOpt = Annotated[

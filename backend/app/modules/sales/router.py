@@ -106,6 +106,7 @@ async def create_sale(
             tenders=payload.to_tender_inputs(),
             idempotency_key=idempotency_key,
             signature_task_id=payload.signature_task_id,
+            invoice_info=payload.to_invoice_info(),
         )
     except IntegrityError as exc:
         await session.rollback()
@@ -121,6 +122,7 @@ async def create_sale(
                     lines=payload.to_inputs(),
                     buyer_contact_id=payload.buyer_contact_id,
                     tenders=payload.to_tender_inputs(),
+                    invoice_info=payload.to_invoice_info(),
                 )
             except SignatureTaskConflict as conflict:
                 raise HTTPException(
@@ -140,6 +142,7 @@ async def create_sale(
                 lines=payload.to_inputs(),
                 buyer_contact_id=payload.buyer_contact_id,
                 tenders=payload.to_tender_inputs(),
+                invoice_info=payload.to_invoice_info(),
             )
         except IdempotencyKeyConflict as conflict:
             raise HTTPException(

@@ -350,3 +350,24 @@ class InvalidKioskPayout(DomainError):
 class SignatureContentMismatch(DomainError):
     """收購內容（品項/金額/總額）與已簽切結的內容快照不符（docs/23 K4）：客人簽的必須就是
     這張收購——改了金額/品項就不可沿用舊簽署，須重新推送簽署。"""
+
+
+class AmegoNotConfigured(DomainError):
+    """Amego 光貿 API 憑證未設定（AMEGO_APP_KEY 環境變數／店家統編）。
+
+    docs/24：App Key 走環境變數、不入 repo/DB；未設定時不可啟用電子發票，也不可送單。
+    """
+
+
+class AmegoTransportError(DomainError):
+    """Amego API 呼叫失敗（網路/逾時/非 JSON 回應）——結果未知或未送達。
+
+    呼叫端不得將此視為平台已受理或已拒絕；佇列列維持可重試狀態。訊息不含 App Key。
+    """
+
+
+class AmegoIssueFailed(DomainError):
+    """Amego 明確拒絕本次上送（code≠0）：佇列已轉 FAILED、留 last_error 可重試。
+
+    與 AmegoTransportError 區分：本例外代表平台**已回覆拒絕**（非結果未知）。
+    """

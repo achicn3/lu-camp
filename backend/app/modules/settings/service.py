@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.modules.einvoice import serializer as einvoice_serializer
+from app.core.config import get_settings as get_app_settings
 from app.modules.settings.defaults import (
     DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
     DEFAULT_COMMISSION_PCT,
@@ -88,11 +88,11 @@ class StoreSettingsService:
 
         # exclude_none：明確傳 null 視為「不更動」（這些設定欄皆不可為 NULL；Codex P2 防 500）。
         changes = patch.model_dump(exclude_unset=True, exclude_none=True)
-        # 電子發票啟用閘門：XSD 序列化器/字軌配號未落地（T13 收尾）前不得開啟——
-        # 否則每筆銷售建永遠無法核可的 PENDING 發票、佇列堆積。關閉（False）不受限。
-        if changes.get("einvoice_enabled") is True and not einvoice_serializer.XSD_SERIALIZER_READY:
+        # 電子發票啟用閘門（docs/24）：Amego App Key 未設定前不得開啟——否則每筆銷售建
+        # 永遠無法上送的 PENDING 發票、佇列堆積。關閉（False）不受限。
+        if changes.get("einvoice_enabled") is True and not get_app_settings().amego_app_key.strip():
             raise EInvoiceActivationNotReady(
-                "電子發票尚未可啟用：MIG XML 序列化器與字軌配號待 T13 收尾階段落地（docs/14 §4）"
+                "電子發票尚未可啟用：AMEGO_APP_KEY 環境變數未設定（docs/24；金鑰不入 repo）"
             )
         reason = changes.pop("premium_change_reason", None)  # 非設定欄，僅供 history 留痕
         old_premium = settings.premium_rate
