@@ -762,6 +762,18 @@ async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) 
     await db_session.refresh(invoice)
     assert invoice.tax_rate == Decimal("0.0000")
 
+    # 小額零稅（Codex 第十三輪）：net=total=10 也通過 5% 重現檢查（ROUND(10/1.05)=10）——
+    # 零稅分支必須排最前，不得被搶判 0.05。
+    invoice.net = Decimal(10)
+    invoice.tax = Decimal(0)
+    invoice.total = Decimal(10)
+    invoice.tax_rate = Decimal("0.05")
+    await db_session.flush()
+    await db_session.execute(text(mig.BACKFILL_SQL))
+    await db_session.execute(text(mig.VERIFY_SQL))
+    await db_session.refresh(invoice)
+    assert invoice.tax_rate == Decimal("0.0000")
+
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
     store_id, clerk_id, code = await _seed(db_session)
