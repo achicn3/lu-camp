@@ -191,6 +191,16 @@ def build_invoice_query_data(*, order_id: str) -> dict[str, str]:
     return {"type": "order", "order_id": order_id}
 
 
+def build_invoice_query_by_number_data(*, invoice_number: str) -> dict[str, str]:
+    """invoice_query：以字軌號碼查（F0501 作廢前確認平台作廢態）。"""
+    return {"type": "invoice", "invoice_number": invoice_number}
+
+
+def build_allowance_query_data(*, number: str) -> dict[str, str]:
+    """allowance_query（折讓查詢）payload：以自編折讓單號查（G0401 對帳用）。"""
+    return {"allowance_number": number}
+
+
 # 發票日期/時間以台灣時區呈現（f0401 回傳 invoice_time 為 Unix 秒）。
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 _INVOICE_NO_RE = re.compile(r"^[A-Z]{2}\d{8}$")
@@ -283,6 +293,63 @@ def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
         barcode_text=None,
         qrcode_left=None,
         qrcode_right=None,
+    )
+
+
+# invoice_query data.invoice_type 的存證訊息語意（doc）：開立/作廢。
+_INVOICE_TYPE_ISSUED = frozenset({"C0401", "A0401"})
+_INVOICE_TYPE_VOIDED = frozenset({"C0501", "A0501"})
+# allowance_query data.invoice_type：存證折讓開立/作廢。
+_ALLOWANCE_TYPE_ISSUED = frozenset({"D0401", "B0401"})
+
+
+def parse_query_invoice_voided(resp: dict[str, object]) -> bool:
+    """invoice_query（以字軌查）→ 平台是否已作廢此發票（F0501 對帳，Codex 第七輪）。
+
+    True＝已作廢（invoice_type C0501/A0501）→ 本地補記成功、不重送；
+    False＝仍為開立態（C0401/A0401）→ 可送 F0501；
+    其餘（查無 71——我們確信發票存在、錯誤碼、曖昧欄位）→ AmegoTransportError 待人工/重試。
+    """
+    code = resp.get("code")
+    if type(code) is not int:
+        raise AmegoTransportError("invoice_query 回應 code 型別不明（結果不可信，待對帳）")
+    if code != 0:
+        raise AmegoTransportError(
+            f"invoice_query（作廢確認）回錯誤碼 {code}——查無/錯誤都不證明作廢態，待對帳"
+        )
+    data = resp.get("data")
+    invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
+    if invoice_type in _INVOICE_TYPE_VOIDED:
+        return True
+    if invoice_type in _INVOICE_TYPE_ISSUED:
+        return False
+    raise AmegoTransportError(
+        f"invoice_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
+    )
+
+
+def parse_query_allowance_exists(resp: dict[str, object]) -> bool:
+    """allowance_query → 平台是否已有此折讓單（G0401 對帳，Codex 第七輪）。
+
+    True＝已開立（D0401/B0401）→ 補記成功、不重送；False＝明確查無（code=71）→ 可送；
+    其餘（錯誤碼、已作廢 D0501/B0501——本系統未送過 g0501、屬異常、曖昧欄位）→
+    AmegoTransportError 待對帳。
+    """
+    code = resp.get("code")
+    if type(code) is not int:
+        raise AmegoTransportError("allowance_query 回應 code 型別不明（結果不可信，待對帳）")
+    if code == _QUERY_NOT_FOUND_CODE:
+        return False
+    if code != 0:
+        raise AmegoTransportError(
+            f"allowance_query 回錯誤碼 {code}（非查無，不得據以重送；待對帳）"
+        )
+    data = resp.get("data")
+    invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
+    if invoice_type in _ALLOWANCE_TYPE_ISSUED:
+        return True
+    raise AmegoTransportError(
+        f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
     )
 
 

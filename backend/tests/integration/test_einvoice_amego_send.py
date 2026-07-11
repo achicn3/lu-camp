@@ -80,6 +80,12 @@ def _client(transport: _ScriptedTransport) -> AmegoClient:
 _QUERY_NOT_FOUND = {"code": 71, "msg": "查無資料"}  # 官方明載的查無碼
 
 
+
+_QUERY_INVOICE_OPEN = {"code": 0, "msg": "", "data": {"invoice_type": "C0401"}}
+_QUERY_INVOICE_VOIDED = {"code": 0, "msg": "", "data": {"invoice_type": "C0501"}}
+_QUERY_ALLOWANCE_NOT_FOUND = {"code": 71, "msg": "查無資料"}
+_QUERY_ALLOWANCE_EXISTS = {"code": 0, "msg": "", "data": {"invoice_type": "D0401"}}
+
 def _issue_ok_transport() -> _ScriptedTransport:
     """開立成功的標準回放：對帳先行（查無）→ f0401 成功。"""
     return _ScriptedTransport(dict(_QUERY_NOT_FOUND), dict(_F0401_OK))
@@ -297,15 +303,16 @@ async def test_void_issued_invoice_sends_f0501(db_session: AsyncSession) -> None
         for i in await svc.list_queue(store_id)
         if i.action is EInvoiceAction.VOID and i.status is UploadStatus.PENDING
     )
-    transport = _ScriptedTransport({"code": 0, "msg": ""})
+    transport = _ScriptedTransport(dict(_QUERY_INVOICE_OPEN), {"code": 0, "msg": ""})
     item = await svc.send_via_amego(store_id, void_queue_id, client=_client(transport))
 
     assert item.status is UploadStatus.UPLOADED
+    assert transport.calls[0][0].endswith("/json/invoice_query")  # 作廢也對帳先行
     await db_session.refresh(invoice)
     assert invoice.status is InvoiceStatus.VOID
     import json as _json
 
-    data = _json.loads(transport.calls[0][1]["data"])
+    data = _json.loads(transport.calls[1][1]["data"])
     assert data == [{"CancelInvoiceNumber": "AB00001111"}]
 
 
@@ -331,13 +338,14 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
         for i in await svc.list_queue(store_id)
         if i.action is EInvoiceAction.ALLOWANCE and i.status is UploadStatus.PENDING
     )
-    transport = _ScriptedTransport({"code": 0, "msg": ""})
+    transport = _ScriptedTransport(dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 0, "msg": ""})
     item = await svc.send_via_amego(store_id, allowance_queue_id, client=_client(transport))
 
     assert item.status is UploadStatus.UPLOADED
+    assert transport.calls[0][0].endswith("/json/allowance_query")  # 折讓也對帳先行
     import json as _json
 
-    data = _json.loads(transport.calls[0][1]["data"])
+    data = _json.loads(transport.calls[1][1]["data"])
     assert isinstance(data, list) and len(data) == 1
     entry = data[0]
     assert entry["AllowanceType"] == 2  # 賣方折讓證明通知單（114 年起賣方開立）
@@ -507,6 +515,113 @@ async def test_claimed_resend_uses_frozen_payload(db_session: AsyncSession) -> N
     assert item.status is UploadStatus.UPLOADED
     assert second.calls[1][0].endswith("/json/f0401")
     assert second.calls[1][1]["data"] == first_data  # 凍結內容原封重送
+
+
+async def test_void_reconcile_detects_platform_already_voided(
+    db_session: AsyncSession,
+) -> None:
+    """F0501 crash 窗口復原（Codex 第七輪）：平台已作廢、本地未記——重送時對帳查到
+    C0501 → 補記成功、**不重送 f0501**（重複作廢不會被記成 FAILED）。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    sales = SalesService(db_session)
+    sale = await sales.get_sale(store_id, sale_id)
+    assert sale is not None
+    await sales.void_sale(sale, clerk_id)
+    void_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.VOID and i.status is UploadStatus.PENDING
+    )
+    # 首送：對帳（仍開立）→ f0501 途中斷線（平台其實已受理）
+    broken = _ScriptedTransport(
+        dict(_QUERY_INVOICE_OPEN), AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout")
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, void_queue_id, client=_client(broken))
+    # 重送：對帳查到已作廢 → 補記成功（單一回應；誤送 f0501 會炸 pop）
+    reconcile = _ScriptedTransport(dict(_QUERY_INVOICE_VOIDED))
+    item = await svc.send_via_amego(store_id, void_queue_id, client=_client(reconcile))
+    assert item.status is UploadStatus.UPLOADED
+    assert len(reconcile.calls) == 1
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID
+
+
+async def test_allowance_reconcile_detects_platform_already_issued(
+    db_session: AsyncSession,
+) -> None:
+    """G0401 crash 窗口復原：平台已有折讓——重送時 allowance_query 查到 D0401 →
+    補記成功、不重送 g0401。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    sales = SalesService(db_session)
+    lines = await sales.get_lines(sale_id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale_id,
+        lines=[ReturnLineInput(sale_line_id=lines[0].id, qty=1)],
+        reason="測試退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="amego-return-recover",
+    )
+    allowance_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.ALLOWANCE and i.status is UploadStatus.PENDING
+    )
+    broken = _ScriptedTransport(
+        dict(_QUERY_ALLOWANCE_NOT_FOUND),
+        AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout"),
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, allowance_queue_id, client=_client(broken))
+    reconcile = _ScriptedTransport(dict(_QUERY_ALLOWANCE_EXISTS))
+    item = await svc.send_via_amego(store_id, allowance_queue_id, client=_client(reconcile))
+    assert item.status is UploadStatus.UPLOADED
+    assert len(reconcile.calls) == 1
+    sale = await sales.get_sale(store_id, sale_id)
+    assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ALLOWANCE
+
+
+async def test_allowance_query_error_blocks_resend(db_session: AsyncSession) -> None:
+    """allowance_query 回非查無錯誤碼 → 結果不明、不得重送 g0401。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    sales = SalesService(db_session)
+    lines = await sales.get_lines(sale_id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale_id,
+        lines=[ReturnLineInput(sale_line_id=lines[0].id, qty=1)],
+        reason="測試退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="amego-return-blocked",
+    )
+    allowance_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.ALLOWANCE and i.status is UploadStatus.PENDING
+    )
+    blocked = _ScriptedTransport({"code": 42, "msg": "簽章錯誤"})
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, allowance_queue_id, client=_client(blocked))
+    assert len(blocked.calls) == 1
+    item = await db_session.get(EInvoiceUploadQueue, allowance_queue_id)
+    assert item is not None
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.PENDING
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:

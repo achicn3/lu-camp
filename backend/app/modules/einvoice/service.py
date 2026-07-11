@@ -28,11 +28,15 @@ from app.modules.einvoice.amego import (
     AmegoIssueResult,
     allowance_number,
     amego_order_id,
+    build_allowance_query_data,
     build_f0401_data,
     build_f0501_data,
     build_g0401_data,
+    build_invoice_query_by_number_data,
     build_invoice_query_data,
     parse_f0401_success,
+    parse_query_allowance_exists,
+    parse_query_invoice_voided,
     parse_query_issued,
 )
 from app.modules.einvoice.dropper import EInvoiceDropper
@@ -468,11 +472,10 @@ class EInvoiceService:
             )
         payload = json.loads(frozen)
 
-        # 開立**一律對帳先行**（Codex 第三輪）：本地「是否已認領」快照可能過期——同列的
-        # 另一呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過
-        # 這張 OrderId。每次 f0401 前先 invoice_query：平台已有 → 補開立、絕不重送
-        # （避免重複 OrderId 打轉）；平台**明確查無**才重送（曖昧查詢回應由解析層拋
-        # AmegoTransportError 擋下，不得視為查無）。多一次查詢的成本換確定性（單店）。
+        # **一律對帳先行**（Codex 第三/七輪）：本地「是否已認領」快照可能過期——同列的另一
+        # 呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過這則
+        # 訊息。每次上送前先查平台實態：已套用 → 補記成功、絕不重送；**明確未套用**才送
+        # （曖昧查詢回應由解析層拋 AmegoTransportError 擋下）。多一次查詢換確定性（單店）。
         if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
             order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
             query_resp = await client.call(
@@ -488,6 +491,42 @@ class EInvoiceService:
                     message="以 invoice_query 對帳補開立（前次結果未知）",
                     delivery_attempt=claim_attempts,
                     issue_result=recovered,
+                )
+        elif locked.action is EInvoiceAction.VOID and locked.invoice_id is not None:
+            void_target = await self._repo.get_invoice(store_id, locked.invoice_id)
+            if void_target is not None and void_target.invoice_no:
+                query_resp = await client.call(
+                    "/json/invoice_query",
+                    build_invoice_query_by_number_data(invoice_number=void_target.invoice_no),
+                )
+                if parse_query_invoice_voided(query_resp):
+                    return await self._record_amego_outcome(
+                        store_id,
+                        queue_id,
+                        success=True,
+                        status_code="0",
+                        message="以 invoice_query 對帳確認平台已作廢（前次結果未知）",
+                        delivery_attempt=claim_attempts,
+                        issue_result=None,
+                    )
+        elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
+            query_resp = await client.call(
+                "/json/allowance_query",
+                build_allowance_query_data(
+                    number=allowance_number(
+                        store_id=store_id, allowance_id=locked.allowance_id
+                    )
+                ),
+            )
+            if parse_query_allowance_exists(query_resp):
+                return await self._record_amego_outcome(
+                    store_id,
+                    queue_id,
+                    success=True,
+                    status_code="0",
+                    message="以 allowance_query 對帳確認平台已有折讓（前次結果未知）",
+                    delivery_attempt=claim_attempts,
+                    issue_result=None,
                 )
 
         resp = await client.call(endpoint, payload)  # AmegoTransportError → 維持已認領 PENDING
