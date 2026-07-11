@@ -752,7 +752,7 @@ async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) 
     await db_session.refresh(invoice)
     assert invoice.tax_rate == Decimal("0.0500")
 
-    # 零稅歷史發票：tax=0 → 0。
+    # 無歧義零稅歷史發票（ROUND(11/1.05)=10≠11，5% 不可重現）：tax=0 → 0。
     invoice.net = Decimal(11)
     invoice.tax = Decimal(0)
     invoice.total = Decimal(11)
@@ -762,8 +762,8 @@ async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) 
     await db_session.refresh(invoice)
     assert invoice.tax_rate == Decimal("0.0000")
 
-    # 小額零稅（Codex 第十三輪）：net=total=10 也通過 5% 重現檢查（ROUND(10/1.05)=10）——
-    # 零稅分支必須排最前，不得被搶判 0.05。
+    # 曖昧小額列（Codex 第十四輪裁決）：net=total=10、tax=0 與「5% 應稅但稅捨為 0」
+    # 同形、金額無法區分 → 回填為本店唯一歷史稅率 5%（非 0）。
     invoice.net = Decimal(10)
     invoice.tax = Decimal(0)
     invoice.total = Decimal(10)
@@ -772,7 +772,7 @@ async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) 
     await db_session.execute(text(mig.BACKFILL_SQL))
     await db_session.execute(text(mig.VERIFY_SQL))
     await db_session.refresh(invoice)
-    assert invoice.tax_rate == Decimal("0.0000")
+    assert invoice.tax_rate == Decimal("0.0500")
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
