@@ -21,10 +21,20 @@ down_revision: str | None = "d9e0f1a2b3c4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# 既有列回填（與測試共用同一 SQL 口徑）：法定稅率為整數百分比 → tax/net 四捨五入取 2 位。
+# 既有列回填（與測試共用同一 SQL 口徑；Codex 第十二輪）：**允許稅率比對**而非比率反推——
+# NTD 整數元拆分不可逆（如 5% 的 total=11 → net=10/tax=1，tax/net=0.10 會誤判 10%）。
+# 偏好順序確定性：(1) 法定/本店歷史唯一稅率 5% 能重現拆分 → 0.05；(2) 零稅
+# （tax=0 且 net=total）→ 0；(3) 由 tax/net 推導的候選率能重現拆分 → 候選率；
+# (4) 皆不合 → 留預設 0.05，由 VERIFY_SQL fail-fast 擋下待人工。
 BACKFILL_SQL = """
 UPDATE invoices
-SET tax_rate = CASE WHEN net > 0 THEN ROUND(tax / net, 2) ELSE 0 END
+SET tax_rate = CASE
+    WHEN ROUND(total / 1.05) = net THEN 0.05
+    WHEN tax = 0 AND net = total THEN 0
+    WHEN net > 0 AND ROUND(total / (1 + ROUND(tax / net, 2))) = net
+        THEN ROUND(tax / net, 2)
+    ELSE 0.05
+END
 """
 
 # fail-fast：回填的快照必須重現原 net/tax 拆分（§6：net = ROUND_HALF_UP(total/(1+rate)））。
