@@ -84,6 +84,26 @@
   `g0401`（後續階段）。
 - **OrderId 冪等**：`OrderId` 不可重複＝天然防重複開立；重試沿用同 OrderId。
 
+## 2.1 上送狀態機的強化不變量（Codex 對抗式審查十輪的結論）
+
+1. **認領先於曝光**：上送前先 commit 認領（xml_path=`amego:{endpoint}#a{n}`、sha、
+   `amego_payload` 凍結整份 data JSON、dropped_at）；crash 於任何點，DB 都記得
+   「平台可能收過」。已認領重送 **byte-for-byte**（sha 驗證），retry（世代+1）才可重建。
+2. **CAS＋持鎖上送**：認領後重取 sale→queue 鎖（全域鎖序）驗認領未變——並發送單序列化，
+   後到者冪等回現狀；持列鎖打 API（15s 上限）、同鎖落結果；重取鎖後強制 refresh 目標
+   （identity map 過期會漏看空窗作廢）。
+3. **一律對帳先行**：F0401 前 invoice_query（訂單號）、F0501 前 invoice_query（字軌，
+   C0501/A0501＝已作廢）、G0401 前 allowance_query（D0401/B0401＝已有）——已套用 →
+   補記成功不重送；**僅官方 code=71 視為查無**；其他錯誤碼/曖昧回應（缺 code、bool、
+   欄位缺漏）→ AmegoTransportError，維持已認領 PENDING 待對帳。
+4. **查無＋已作廢 → 取消開立**：空窗作廢後平台查無 → 佇列 CANCELLED、發票收斂 VOID，
+   不為作廢交易開發票。
+5. **稅務快照**：invoices.tax_rate 於結帳凍結；F0401 金額/TaxRate 用 invoice.net/tax/
+   tax_rate 快照，不讀活 settings。回應成功欄位（字軌/隨機碼/時間戳）嚴格驗證
+   （type() is int、合理時間下界）後才回填，且回填守衛與 record_result 世代/狀態檢查同步。
+6. **啟用閘門**：AMEGO_APP_KEY 已設 ＋ stores.tax_id 為 8 碼數字，缺一不可開
+   einvoice_enabled。
+
 ## 3. 分段實作
 
 1. **A1 客戶端＋開立（本分支）**：`einvoice/amego.py`（簽章/傳輸/錯誤碼）、結帳後開立、
