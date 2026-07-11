@@ -216,12 +216,11 @@ class ReturnsService:
         # 已折讓）。折讓金額＝本次退款額；同退貨 return_id 唯一、累計不超過原發票（einvoice 守衛）。
         invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
         if invoice is not None and invoice.status == InvoiceStatus.ISSUED:
-            tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
+            # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
                 invoice_id=invoice.id,
                 total=refund_amount,
-                tax_rate=tax_rate,
                 return_id=customer_return.id,
             )
             sale.invoice_status = SaleInvoiceStatus.PENDING_ALLOWANCE
@@ -273,17 +272,16 @@ class ReturnsService:
         invoice = await self._einvoice.get_invoice_for_sale(store_id, sale_id)
         if invoice is None or invoice.status != InvoiceStatus.ISSUED:
             return
-        tax_rate = (await self._settings.get_effective_settings(store_id)).tax_rate
         created = False
         for customer_return in returns:
             existing = await self._einvoice.get_allowance_for_return(store_id, customer_return.id)
             if existing is not None:
                 continue
+            # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
                 invoice_id=invoice.id,
                 total=customer_return.refund_amount,
-                tax_rate=tax_rate,
                 return_id=customer_return.id,
             )
             created = True

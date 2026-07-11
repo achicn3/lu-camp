@@ -592,6 +592,50 @@ async def test_allowance_reconcile_detects_platform_already_issued(
     assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ALLOWANCE
 
 
+async def test_allowance_split_uses_invoice_snapshot_after_rate_change(
+    db_session: AsyncSession,
+) -> None:
+    """折讓稅拆分用**原發票稅率快照**（Codex 第十輪）：開立後改 settings 稅率再退貨——
+    G0401 金額仍為原發票口徑（1050 → 未稅 1000/稅 50），不受活稅率影響。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+
+    # 開立後改稅率（活狀態漂移源）
+    await db_session.execute(
+        update(StoreSettings)
+        .where(StoreSettings.store_id == store_id)
+        .values(tax_rate=Decimal("0.10"))
+    )
+    await db_session.flush()
+
+    sales = SalesService(db_session)
+    lines = await sales.get_lines(sale_id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale_id,
+        lines=[ReturnLineInput(sale_line_id=lines[0].id, qty=1)],
+        reason="測試退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="amego-return-snapshot",
+    )
+    allowance_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.ALLOWANCE and i.status is UploadStatus.PENDING
+    )
+    transport = _ScriptedTransport(dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 0, "msg": ""})
+    await svc.send_via_amego(store_id, allowance_queue_id, client=_client(transport))
+
+    import json as _json
+
+    entry = _json.loads(transport.calls[1][1]["data"])[0]
+    assert entry["TotalAmount"] == 1000  # 原發票 5% 口徑，非改後 10%
+    assert entry["TaxAmount"] == 50
+
+
 async def test_allowance_query_error_blocks_resend(db_session: AsyncSession) -> None:
     """allowance_query 回非查無錯誤碼 → 結果不明、不得重送 g0401。"""
     store_id, clerk_id, code = await _seed(db_session)

@@ -204,7 +204,6 @@ class EInvoiceService:
         *,
         invoice_id: int,
         total: Decimal,
-        tax_rate: Decimal,
         return_id: int | None = None,
     ) -> InvoiceAllowance:
         """開立折讓單並排入 G0401 上傳佇列（退貨且原發票已開立，§7 不變量 5）。
@@ -212,6 +211,9 @@ class EInvoiceService:
         守衛（F6）：原發票必須已開立（ISSUED，否則 InvoiceNotIssued）；同一退貨至多一張折讓
         （return_id 唯一，否則 DuplicateAllowanceForReturn）；累計折讓不得超過原發票總額
         （否則 AllowanceExceedsInvoice）。
+
+        稅拆分**一律用原發票的稅率快照**（invoice.tax_rate；Codex 第十輪）：呼叫端不得
+        注入活 settings 稅率——結帳後改稅率，折讓的銷項稅沖回必須仍與原發票同口徑。
         """
         invoice = await self._repo.get_invoice(store_id, invoice_id)
         if invoice is None:
@@ -231,7 +233,7 @@ class EInvoiceService:
                 f"折讓累計 {prior + total} 超過原發票總額 {invoice.total}"
             )
 
-        net, tax = split_tax_inclusive(total, tax_rate)
+        net, tax = split_tax_inclusive(total, Decimal(invoice.tax_rate))
         allowance = InvoiceAllowance(
             store_id=store_id,
             invoice_id=invoice_id,

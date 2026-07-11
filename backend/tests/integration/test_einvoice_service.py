@@ -823,7 +823,7 @@ async def test_retry_rejected_when_allowance_voided(
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
     allowance = await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(210), tax_rate=TAX_RATE, return_id=1
+        store_id, invoice_id=invoice.id, total=Decimal(210), return_id=1
     )
     g_item = next(i for i in await svc.list_queue(store_id) if i.allowance_id == allowance.id)
     await svc.drop_pending(
@@ -854,7 +854,7 @@ async def test_record_allowance_on_issued_enqueues_g0401(
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
 
     allowance = await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(210), tax_rate=TAX_RATE, return_id=1
+        store_id, invoice_id=invoice.id, total=Decimal(210), return_id=1
     )
 
     assert allowance.net + allowance.tax == allowance.total
@@ -873,7 +873,7 @@ async def test_record_allowance_rejects_pending_invoice(db_session: AsyncSession
     )
     with pytest.raises(InvoiceNotIssued):
         await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(100), tax_rate=TAX_RATE
+            store_id, invoice_id=invoice.id, total=Decimal(100)
         )
 
 
@@ -884,11 +884,11 @@ async def test_record_allowance_rejects_duplicate_return(
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
     await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(100), tax_rate=TAX_RATE, return_id=7
+        store_id, invoice_id=invoice.id, total=Decimal(100), return_id=7
     )
     with pytest.raises(DuplicateAllowanceForReturn):
         await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(50), tax_rate=TAX_RATE, return_id=7
+            store_id, invoice_id=invoice.id, total=Decimal(50), return_id=7
         )
 
 
@@ -897,11 +897,11 @@ async def test_record_allowance_rejects_overage(db_session: AsyncSession, tmp_pa
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)  # total 1050
     await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(1000), tax_rate=TAX_RATE, return_id=1
+        store_id, invoice_id=invoice.id, total=Decimal(1000), return_id=1
     )
     with pytest.raises(AllowanceExceedsInvoice):
         await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(100), tax_rate=TAX_RATE, return_id=2
+            store_id, invoice_id=invoice.id, total=Decimal(100), return_id=2
         )
 
 
