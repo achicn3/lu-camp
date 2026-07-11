@@ -34,6 +34,7 @@ from app.shared.enums import (
     OwnershipType,
     SaleInvoiceStatus,
     SaleLineType,
+    UploadStatus,
     UserRole,
 )
 
@@ -166,13 +167,29 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
         await _cleanup(sm, store_id)
 
 
-class _PlainTransport:
-    """對帳查無 → f0401 成功（無延遲）。"""
+class _QueryFoundTransport:
+    """對帳查到平台已有此發票（前次未知結果其實成功）；不應再有第二個呼叫。"""
 
     async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
-        if url.endswith("/json/invoice_query"):
-            return {"code": 71, "msg": "查無資料"}
-        return dict(_F0401_OK)
+        assert url.endswith("/json/invoice_query"), f"不應呼叫 {url}"
+        return {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_number": "AB00001111",
+                "invoice_date": "20260711",
+                "invoice_time": "12:34:56",
+                "random_number": "5975",
+            },
+        }
+
+
+class _QueryNotFoundOnlyTransport:
+    """對帳查無（71）；若誤送 f0401 直接斷言失敗（作廢交易不得補開）。"""
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        assert url.endswith("/json/invoice_query"), f"不應呼叫 {url}"
+        return {"code": 71, "msg": "查無資料"}
 
 
 async def test_void_in_claim_gap_still_enqueues_f0501(
@@ -180,7 +197,9 @@ async def test_void_in_claim_gap_still_enqueues_f0501(
 ) -> None:
     """認領 commit → 階段 2 重取鎖的空窗內完成作廢（VOID_PENDING）：成功轉移必須看到
     **刷新後**的發票狀態（expire_on_commit=False 的 identity map 會過期；Codex 第五輪）
-    → 走 VOID_PENDING 分支續排 F0501，不得誤走 →ISSUED 漏作廢。"""
+    → 走 VOID_PENDING 分支續排 F0501，不得誤走 →ISSUED 漏作廢。
+    情境：前次上送結果未知（平台其實已開立）→ 空窗作廢 → 對帳查到 → 補開立欄位
+    並續排 F0501。"""
     sm = app_db.get_sessionmaker()
     store_id, clerk_id, sale_id = await _seed_committed(sm, tag="b")
 
@@ -207,7 +226,7 @@ async def test_void_in_claim_gap_still_enqueues_f0501(
             client = AmegoClient(
                 seller_tax_id="12345678",
                 app_key="test-key",
-                transport=_PlainTransport(),
+                transport=_QueryFoundTransport(),
                 base_url="https://invoice-api.amego.tw",
             )
             svc = EInvoiceService(s1)
@@ -235,5 +254,67 @@ async def test_void_in_claim_gap_still_enqueues_f0501(
                 if q.action is EInvoiceAction.VOID
             ]
             assert len(void_items) == 1  # F0501 已排（續作廢）
+    finally:
+        await _cleanup(sm, store_id)
+
+
+async def test_void_in_claim_gap_with_platform_not_found_cancels_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """空窗作廢＋平台**明確查無**（71）→ **取消開立**（Codex 第八輪）：作廢交易不得
+    再送 f0401 產生真實發票——佇列 CANCELLED、發票收斂 VOID、零 f0401 呼叫。"""
+    sm = app_db.get_sessionmaker()
+    store_id, clerk_id, sale_id = await _seed_committed(sm, tag="c")
+
+    orig_lock = SalesService.lock_sale_row
+    state = {"count": 0}
+
+    async def hooked(self: SalesService, store_id_: int, sale_id_: int) -> Sale | None:
+        state["count"] += 1
+        if state["count"] == 2:
+            async with sm() as s2:
+                sales = SalesService(s2)
+                target = await sales.get_sale_for_update(store_id, sale_id)
+                assert target is not None
+                await sales.void_sale(target, clerk_id)
+                await s2.commit()
+        return await orig_lock(self, store_id_, sale_id_)
+
+    monkeypatch.setattr(SalesService, "lock_sale_row", hooked)
+
+    try:
+        async with sm() as s1:
+            client = AmegoClient(
+                seller_tax_id="12345678",
+                app_key="test-key",
+                transport=_QueryNotFoundOnlyTransport(),  # 誤送 f0401 會在替身內斷言失敗
+                base_url="https://invoice-api.amego.tw",
+            )
+            svc = EInvoiceService(s1)
+            queue_id = next(
+                i.id
+                for i in await svc.list_queue(store_id)
+                if i.action is EInvoiceAction.ISSUE
+            )
+            item = await svc.send_via_amego(store_id, queue_id, client=client)
+            assert item.status is UploadStatus.CANCELLED
+
+        async with sm() as s3:
+            invoice = await s3.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+            assert invoice is not None
+            assert invoice.status is InvoiceStatus.VOID  # 平台沒收過 → 直接收斂 VOID
+            assert invoice.invoice_no is None  # 從未開立
+            void_items = [
+                q
+                for q in (
+                    await s3.scalars(
+                        select(EInvoiceUploadQueue).where(
+                            EInvoiceUploadQueue.invoice_id == invoice.id
+                        )
+                    )
+                ).all()
+                if q.action is EInvoiceAction.VOID
+            ]
+            assert void_items == []  # 無需 F0501（平台無發票可作廢）
     finally:
         await _cleanup(sm, store_id)

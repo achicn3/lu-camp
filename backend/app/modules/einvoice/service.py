@@ -492,6 +492,27 @@ class EInvoiceService:
                     delivery_attempt=claim_attempts,
                     issue_result=recovered,
                 )
+            # 平台**明確查無**且發票已進作廢流程（空窗作廢）→ **取消開立**（Codex 第八
+            # 輪）：作廢交易不得再產生真實稅務發票、靠事後 F0501 收拾——F0401 從未生效，
+            # 佇列 CANCELLED、發票收斂 VOID、銷售同 F0401 失敗轉移（退貨觸發→NOT_ISSUED、
+            # sale-void→no-op）。
+            issue_target = await self._repo.get_invoice(store_id, locked.invoice_id or 0)
+            if issue_target is not None and issue_target.status in (
+                InvoiceStatus.VOID_PENDING,
+                InvoiceStatus.VOID,
+            ):
+                locked.status = UploadStatus.CANCELLED
+                locked.last_error = "平台查無且發票已作廢——取消開立（不重送 F0401）"
+                if issue_target.status is InvoiceStatus.VOID_PENDING:
+                    issue_target.status = InvoiceStatus.VOID
+                    from app.modules.sales.service import SalesService
+
+                    await SalesService(self._session).mark_invoice_not_issued(
+                        store_id, issue_target.sale_id
+                    )
+                await self._session.commit()
+                await self._session.refresh(locked)
+                return locked
         elif locked.action is EInvoiceAction.VOID and locked.invoice_id is not None:
             void_target = await self._repo.get_invoice(store_id, locked.invoice_id)
             if void_target is not None and void_target.invoice_no:
