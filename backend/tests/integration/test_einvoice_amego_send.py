@@ -702,6 +702,45 @@ async def test_b2b_split_uses_checkout_snapshot_after_rate_change(
     assert data["TotalAmount"] == 1050
 
 
+async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) -> None:
+    """migration e0f1a2b3c4d5 回填（Codex 第十一輪）：歷史非 5% 發票的 tax_rate 由
+    net/tax 推導（1000/100/1100 → 0.10），並通過「快照重現拆分」的 fail-fast 驗證；
+    不得被預設 5% 蓋掉。直接執行 migration 模組內的同一份 SQL。"""
+    import importlib.util
+    import os.path
+
+    from sqlalchemy import text
+
+    mig_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "alembic",
+        "versions",
+        "e0f1a2b3c4d5_invoices_tax_rate_snapshot.py",
+    )
+    spec = importlib.util.spec_from_file_location("mig_tax_rate", mig_path)
+    assert spec is not None and spec.loader is not None
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None
+    # 模擬「migration 前」的 10% 歷史發票：只有 net/tax/total 可信、tax_rate 為預設 5%。
+    invoice.net = Decimal(1000)
+    invoice.tax = Decimal(100)
+    invoice.total = Decimal(1100)
+    invoice.tax_rate = Decimal("0.05")
+    await db_session.flush()
+
+    await db_session.execute(text(mig.BACKFILL_SQL))
+    await db_session.execute(text(mig.VERIFY_SQL))
+    await db_session.refresh(invoice)
+    assert invoice.tax_rate == Decimal("0.1000")
+
+
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
     store_id, clerk_id, code = await _seed(db_session)
     await _checkout(db_session, store_id, clerk_id, code)
