@@ -19,7 +19,7 @@ from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class DeviceKind(StrEnum):
@@ -112,12 +112,27 @@ class AcquisitionReceiptPayload(BaseModel):
     payout_method: str  # CASH | STORE_CREDIT
     created_at: datetime
     signature_png_base64: str = Field(max_length=MAX_SIGNATURE_B64_CHARS)
-    # 撥入購物金＝簽署凍結溢價的金額（已簽快照值）。
+    # 撥入購物金實發額與撥入後購物金總額（2026-07-11 裁示加印）＝後端撥款分錄燒進帳本的
+    # signed_amount / balance_after（AcquisitionResult 回傳、本筆交易的不可變事實）。
+    # **仍不收活餘額**（Codex K6 第二輪）：列印當下另查的餘額會隨後續交易漂移。
+    # fail-closed（Codex 本輪）：STORE_CREDIT 兩欄必備、CASH 不得夾帶——缺事實的存證聯
+    # 不可默默印出 200。
     store_credit_granted: str | None = None
-    # 撥入後購物金總額（2026-07-11 裁示加印）＝本筆撥款分錄燒進帳本的 balance_after
-    # （後端 AcquisitionResult 回傳、本筆交易的不可變事實）。**仍不收活餘額**（Codex K6
-    # 第二輪）：列印當下另查的餘額會隨後續交易漂移，呼叫端不得以它代入本欄。
     store_credit_balance_after: str | None = None
+
+    @model_validator(mode="after")
+    def _credit_facts_match_payout(self) -> AcquisitionReceiptPayload:
+        credit = self.payout_method == "STORE_CREDIT"
+        for label, value in (
+            ("store_credit_granted", self.store_credit_granted),
+            ("store_credit_balance_after", self.store_credit_balance_after),
+        ):
+            if credit:
+                if value is None or not value.isdigit():
+                    raise ValueError(f"購物金撥款憑證缺必要金額事實或格式非整數元：{label}")
+            elif value is not None:
+                raise ValueError(f"非購物金撥款不得夾帶 {label}（呼叫端版本錯配？）")
+        return self
 
 
 class StoreHeader(BaseModel):

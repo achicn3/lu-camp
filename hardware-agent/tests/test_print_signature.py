@@ -10,7 +10,9 @@ import base64
 import zlib
 
 import httpx
+import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from agent.devices import AgentDevices, default_fake_devices
 from agent.drivers.escpos_receipt import EscposReceiptPrinter
@@ -157,6 +159,26 @@ def test_acquisition_receipt_cash_payout_omits_credit_lines() -> None:
     assert _big5("撥款方式：現金") in data
     assert _big5("撥入購物金") not in data
     assert _big5("購物金總額") not in data
+
+
+def test_store_credit_receipt_requires_credit_facts() -> None:
+    """STORE_CREDIT 憑證缺撥入額或總額 → 拒收（Codex：不得印出缺必要金額事實的存證聯）。"""
+    with pytest.raises(ValidationError):
+        _acq_receipt(store_credit_granted=None)
+    with pytest.raises(ValidationError):
+        _acq_receipt(store_credit_balance_after=None)
+    with pytest.raises(ValidationError):
+        _acq_receipt(store_credit_granted="abc")  # 非整數元字串
+    with pytest.raises(ValidationError):
+        _acq_receipt(store_credit_balance_after="1,320")
+
+
+def test_cash_receipt_rejects_credit_facts() -> None:
+    """CASH 憑證不得夾帶購物金欄位（版本錯配/呼叫端誤傳 → 拒收，不默默略過）。"""
+    with pytest.raises(ValidationError):
+        _acq_receipt(payout_method="CASH", store_credit_balance_after=None)
+    with pytest.raises(ValidationError):
+        _acq_receipt(payout_method="CASH", store_credit_granted=None)
 
 
 class _FakeClient:

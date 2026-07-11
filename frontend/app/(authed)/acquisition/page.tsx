@@ -542,6 +542,8 @@ export default function AcquisitionPage() {
     type: AcquisitionType;
     codes: string[];
     lot: string | null;
+    /** 撥入購物金實發額（後端帳本分錄 signed_amount；非購物金撥款為 null）。 */
+    creditGranted: string | null;
     /** 撥入後購物金總額（後端帳本分錄 balance_after；非購物金撥款為 null）。 */
     creditBalanceAfter: string | null;
   } | null>(null);
@@ -585,7 +587,6 @@ export default function AcquisitionPage() {
     total: string;
     payout: string;
     signedAt: string; // 簽署時間＝證據時點
-    creditGranted: string | null; // 簽署凍結溢價的撥入額
   }
   const [receiptSnap, setReceiptSnap] = useState<ReceiptSnapshot | null>(null);
   const signTask = useQuery({
@@ -723,6 +724,7 @@ export default function AcquisitionPage() {
         type: data.type,
         codes: data.item_codes,
         lot: data.lot_code,
+        creditGranted: data.payout_credit_granted,
         creditBalanceAfter: data.payout_credit_balance_after,
       });
       // 憑證聯快照（K6）：綁定簽署完成的收購才可列印憑證聯；值取自已簽切結內容
@@ -735,10 +737,6 @@ export default function AcquisitionPage() {
               amount: String(it.amount ?? ""),
             }))
           : [];
-        const premium =
-          typeof c.store_credit_premium === "object" && c.store_credit_premium !== null
-            ? (c.store_credit_premium as Record<string, unknown>)
-            : null;
         setReceiptSnap({
           taskId: signTaskId,
           sellerName: String(c.seller_name ?? ""),
@@ -746,10 +744,6 @@ export default function AcquisitionPage() {
           total: String(c.total ?? ""),
           payout: String(signTask.data.chosen_payout ?? "CASH"),
           signedAt: String(signTask.data.signed_at ?? new Date().toISOString()),
-          creditGranted:
-            signTask.data.chosen_payout === "STORE_CREDIT" && premium != null
-              ? String(premium.amount ?? "")
-              : null,
         });
       } else {
         setReceiptSnap(null);
@@ -770,9 +764,10 @@ export default function AcquisitionPage() {
   const printReceipt = useMutation({
     mutationFn: async () => {
       if (receiptSnap == null || result == null) throw new Error("無可列印的憑證資料");
-      // 憑證欄位取自已簽快照（不可變）：時間＝簽署時間、撥入＝簽署凍結溢價；購物金總額
-      // 取後端收購回應的帳本分錄 balance_after（本筆事實），不印列印當下另查的活餘額
-      // （會隨後續交易漂移、非本筆證據）。簽名 PNG 為已簽任務原圖。
+      // 品項/總額/撥款方式取自已簽快照（不可變）；撥入金額與購物金總額取後端收購回應的
+      // 帳本分錄事實（signed_amount / balance_after，Codex 本輪：兩行同源才內部一致；
+      // 後端以簽署凍結溢價率入帳，帳本值必等於客人所簽），不印列印當下另查的活餘額。
+      // 簽名 PNG 為已簽任務原圖。
       const signaturePngBase64 = await fetchSignaturePngBase64(receiptSnap.taskId);
       await printAcquisitionReceipt({
         storeId: decodeSession()?.storeId ?? 1,
@@ -783,7 +778,7 @@ export default function AcquisitionPage() {
         payoutMethod: receiptSnap.payout,
         createdAt: receiptSnap.signedAt,
         signaturePngBase64,
-        storeCreditGranted: receiptSnap.creditGranted ?? undefined,
+        storeCreditGranted: result.creditGranted ?? undefined,
         storeCreditBalanceAfter: result.creditBalanceAfter ?? undefined,
       });
     },
