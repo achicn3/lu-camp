@@ -598,6 +598,11 @@ class EInvoiceService:
             raise EInvoiceQueueNotDroppable(
                 f"發票狀態 {invoice.status.value}，不可開立"
             )
+        # 全域鎖序 sale → queue（Codex 第四輪）：先鎖 sale 再鎖佇列列——作廢/退貨路徑
+        # 先鎖 sale 再動佇列，此處先鎖佇列會與其 AB-BA 死鎖（結帳後立即作廢的窗口）。
+        from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+        await SalesService(self._session).lock_sale_row(store_id, sale_id)
         issue_item = next(
             (
                 i
