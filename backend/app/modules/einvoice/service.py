@@ -456,11 +456,12 @@ class EInvoiceService:
             )
         payload = json.loads(frozen)
 
-        # 開立的對帳先行（Codex 第一輪）：**已認領**（前次結果未知）或**世代 > 0**（retry
-        # 清認領痕跡，但前世代可能已曝光平台）都先 invoice_query——平台已有 → 補開立、
-        # 絕不重送 f0401（避免在重複 OrderId 錯誤上打轉）。
-        needs_reconcile = already_claimed or claim_attempts > 0
-        if needs_reconcile and locked.action is EInvoiceAction.ISSUE and sale_id is not None:
+        # 開立**一律對帳先行**（Codex 第三輪）：本地「是否已認領」快照可能過期——同列的
+        # 另一呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過
+        # 這張 OrderId。每次 f0401 前先 invoice_query：平台已有 → 補開立、絕不重送
+        # （避免重複 OrderId 打轉）；平台**明確查無**才重送（曖昧查詢回應由解析層拋
+        # AmegoTransportError 擋下，不得視為查無）。多一次查詢的成本換確定性（單店）。
+        if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
             order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
             query_resp = await client.call(
                 "/json/invoice_query", build_invoice_query_data(order_id=order_id)

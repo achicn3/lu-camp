@@ -20,12 +20,14 @@ from app.modules.einvoice.amego import (
     build_f0401_data,
     build_f0501_data,
     build_invoice_query_data,
+    parse_f0401_success,
+    parse_query_issued,
     sign_form,
 )
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
 from app.shared.enums import InvoiceStatus, InvoiceType, SaleLineType
-from app.shared.exceptions import AmegoNotConfigured
+from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError
 
 
 def _line(description: str, qty: int, unit_price: str, line_total: str) -> SaleLine:
@@ -166,6 +168,54 @@ def test_f0501_data_is_array_of_cancel_numbers() -> None:
 
 def test_invoice_query_data_by_order() -> None:
     assert build_invoice_query_data(order_id="S1-7") == {"type": "order", "order_id": "S1-7"}
+
+
+_F0401_RESP = {
+    "code": 0,
+    "msg": "",
+    "invoice_number": "AB00001111",
+    "invoice_time": 1783766130,
+    "random_number": "5975",
+    "barcode": "11507AB000011115975",
+    "qrcode_left": "L",
+    "qrcode_right": "R",
+}
+
+
+def test_parse_f0401_rejects_bool_or_implausible_time() -> None:
+    """invoice_time 為 JSON bool（int 子類）或不合理小值 → 拒收（Codex 第三輪）。"""
+    for bad in (True, False, 100, "1783766130", None):
+        with pytest.raises(AmegoTransportError):
+            parse_f0401_success({**_F0401_RESP, "invoice_time": bad})
+    result = parse_f0401_success(dict(_F0401_RESP))
+    assert result.invoice_no == "AB00001111"
+
+
+def test_parse_query_three_states() -> None:
+    """查詢三態：成功回欄位；**明確查無**（整數非 0）回 None；曖昧一律拋（不得當查無重送）。"""
+    found = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "invoice_number": "AB00001111",
+            "invoice_date": "20260711",
+            "invoice_time": "12:34:56",
+            "random_number": "5975",
+        },
+    }
+    result = parse_query_issued(found)
+    assert result is not None and result.barcode_text is None  # 查詢不回條碼內容
+    assert parse_query_issued({"code": 9001, "msg": "查無資料"}) is None
+    for ambiguous in (
+        {"msg": "??"},
+        {"code": "0", "msg": ""},
+        {"code": True, "msg": ""},
+        {"code": False, "msg": ""},
+        {"code": 0, "msg": ""},  # code=0 卻缺 data
+        {"code": 0, "data": {"invoice_number": "bad"}},
+    ):
+        with pytest.raises(AmegoTransportError):
+            parse_query_issued(ambiguous)
 
 
 class _RecordingTransport:

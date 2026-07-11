@@ -195,6 +195,8 @@ def build_invoice_query_data(*, order_id: str) -> dict[str, str]:
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 _INVOICE_NO_RE = re.compile(r"^[A-Z]{2}\d{8}$")
 _RANDOM_RE = re.compile(r"^\d{4}$")
+# 開立時間戳合理下界（2020-09）：擋 JSON bool/epoch 附近的胡說值被記成開立時間。
+_MIN_PLAUSIBLE_UNIX = 1_600_000_000
 
 
 @dataclass(frozen=True)
@@ -221,7 +223,8 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
     raw_time = resp.get("invoice_time")
     if not _INVOICE_NO_RE.match(number) or not _RANDOM_RE.match(random_number):
         raise AmegoTransportError("Amego f0401 回應欄位不合法（字軌/隨機碼）")
-    if not isinstance(raw_time, int) or raw_time <= 0:
+    # type() 嚴格檢查：Python bool 是 int 子類，JSON true 不得被記成 epoch 附近的開立時間。
+    if type(raw_time) is not int or raw_time < _MIN_PLAUSIBLE_UNIX:
         raise AmegoTransportError("Amego f0401 回應欄位不合法（invoice_time）")
     issued_at = datetime.fromtimestamp(raw_time, tz=_TAIPEI_TZ)
     barcode = str(resp.get("barcode") or "") or None
@@ -239,27 +242,32 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
 
 
 def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
-    """invoice_query 回應 → 若平台已有此訂單的發票，回其開立欄位；查無/不完整 → None。
+    """invoice_query 回應三態（Codex 第三輪）：
 
-    查詢不回傳條碼/QR 內容 → 證明聯欄位為 None（復原的發票不可印證明聯）。
+    - 成功（code=0 且欄位齊備）→ 開立欄位（條碼/QR 查詢不回傳 → None，證明聯不可印）。
+    - **明確查無**（code 為嚴格整數且非 0——平台有回答）→ None，呼叫端才可重送。
+    - 其餘（code 缺/bool/型別不明、或 code=0 但欄位缺漏）→ AmegoTransportError：
+      結果不明**不得視為查無而重送**，維持待對帳。
     """
     code = resp.get("code")
-    if type(code) is not int or code != 0:  # bool 是 int 子類，JSON true/false 不得矇混
-        return None
+    if type(code) is not int:  # bool 是 int 子類，JSON true/false 不得矇混
+        raise AmegoTransportError("invoice_query 回應 code 型別不明（結果不可信，待對帳）")
+    if code != 0:
+        return None  # 平台明確回答查無/錯誤碼
     data = resp.get("data")
     if not isinstance(data, dict):
-        return None
+        raise AmegoTransportError("invoice_query 回 code=0 但缺 data（結果不可信，待對帳）")
     number = str(data.get("invoice_number") or "")
     random_number = str(data.get("random_number") or "")
     raw_date = str(data.get("invoice_date") or "")
     raw_time = str(data.get("invoice_time") or "")
     if not _INVOICE_NO_RE.match(number) or not _RANDOM_RE.match(random_number):
-        return None
+        raise AmegoTransportError("invoice_query 回應欄位不合法（字軌/隨機碼），待對帳")
     try:
         issued_date = datetime.strptime(raw_date, "%Y%m%d").date()
         issued_time = datetime.strptime(raw_time, "%H:%M:%S").strftime("%H:%M:%S")
-    except ValueError:
-        return None
+    except ValueError as exc:
+        raise AmegoTransportError("invoice_query 回應欄位不合法（日期/時間），待對帳") from exc
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,

@@ -77,6 +77,14 @@ def _client(transport: _ScriptedTransport) -> AmegoClient:
     )
 
 
+_QUERY_NOT_FOUND = {"code": 9001, "msg": "查無資料"}
+
+
+def _issue_ok_transport() -> _ScriptedTransport:
+    """開立成功的標準回放：對帳先行（查無）→ f0401 成功。"""
+    return _ScriptedTransport(dict(_QUERY_NOT_FOUND), dict(_F0401_OK))
+
+
 async def _seed(session: AsyncSession) -> tuple[int, int, str]:
     store = Store(name="門市", tax_id="12345678")
     session.add(store)
@@ -127,10 +135,11 @@ async def test_send_f0401_success_issues_invoice(db_session: AsyncSession) -> No
     sale_id = await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    transport = _ScriptedTransport(dict(_F0401_OK))
+    transport = _issue_ok_transport()
 
     item = await svc.send_via_amego(store_id, queue_id, client=_client(transport))
 
+    assert transport.calls[0][0].endswith("/json/invoice_query")  # 一律對帳先行
     assert item.status is UploadStatus.UPLOADED
     invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
     assert invoice is not None
@@ -143,7 +152,7 @@ async def test_send_f0401_success_issues_invoice(db_session: AsyncSession) -> No
     sale = await SalesService(db_session).get_sale(store_id, sale_id)
     assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ISSUED
     # 送出的 f0401 內容：B2C 制式買方、含稅金額
-    _url, form = transport.calls[0]
+    _url, form = transport.calls[1]
     assert _url.endswith("/json/f0401")
     import json as _json
 
@@ -166,13 +175,13 @@ async def test_send_f0401_b2b_uses_buyer_tax_id_and_split(db_session: AsyncSessi
     )
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    transport = _ScriptedTransport(dict(_F0401_OK))
+    transport = _issue_ok_transport()
 
     await svc.send_via_amego(store_id, queue_id, client=_client(transport))
 
     import json as _json
 
-    data = _json.loads(transport.calls[0][1]["data"])
+    data = _json.loads(transport.calls[1][1]["data"])
     assert data["BuyerIdentifier"] == "04595257"
     assert data["BuyerName"] == "範例公司"
     assert data["SalesAmount"] == 1000  # round(1050/1.05)
@@ -187,7 +196,9 @@ async def test_send_f0401_api_failure_marks_failed_then_retry(db_session: AsyncS
     sale_id = await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    transport = _ScriptedTransport({"code": 3021, "msg": "統一編號格式錯誤"})
+    transport = _ScriptedTransport(
+        dict(_QUERY_NOT_FOUND), {"code": 3021, "msg": "統一編號格式錯誤"}
+    )
 
     item = await svc.send_via_amego(store_id, queue_id, client=_client(transport))
 
@@ -199,7 +210,7 @@ async def test_send_f0401_api_failure_marks_failed_then_retry(db_session: AsyncS
     # retry → PENDING（世代 +1）；再送時**對帳先行**（前世代可能已曝光平台，Codex 第一輪）：
     # 查無 → 才重送 f0401 → 成功。
     await svc.retry(store_id, queue_id)
-    transport2 = _ScriptedTransport({"code": 9001, "msg": "查無資料"}, dict(_F0401_OK))
+    transport2 = _issue_ok_transport()
     item2 = await svc.send_via_amego(store_id, queue_id, client=_client(transport2))
     assert transport2.calls[0][0].endswith("/json/invoice_query")
     assert transport2.calls[1][0].endswith("/json/f0401")
@@ -272,9 +283,7 @@ async def test_void_issued_invoice_sends_f0501(db_session: AsyncSession) -> None
     sale_id = await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    await svc.send_via_amego(
-        store_id, queue_id, client=_client(_ScriptedTransport(dict(_F0401_OK)))
-    )
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
 
     sales = SalesService(db_session)
     sale = await sales.get_sale(store_id, sale_id)
@@ -305,9 +314,7 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
     sale_id = await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    await svc.send_via_amego(
-        store_id, queue_id, client=_client(_ScriptedTransport(dict(_F0401_OK)))
-    )
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
 
     sales = SalesService(db_session)
     lines = await sales.get_lines(sale_id)
@@ -352,10 +359,12 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
 
-    # 第一次（未認領）：f0401 回應缺 code → 未知、已認領。
+    # 第一次（未認領）：對帳先行查無 → f0401 回應缺 code → 未知、已認領。
     with pytest.raises(AmegoTransportError):
         await svc.send_via_amego(
-            store_id, queue_id, client=_client(_ScriptedTransport({"msg": "??"}))
+            store_id,
+            queue_id,
+            client=_client(_ScriptedTransport(dict(_QUERY_NOT_FOUND), {"msg": "??"})),
         )
     item = await db_session.get(EInvoiceUploadQueue, queue_id)
     assert item is not None
@@ -370,7 +379,7 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
             await svc.send_via_amego(
                 store_id,
                 queue_id,
-                client=_client(_ScriptedTransport({"code": 9001, "msg": "查無資料"}, weird)),
+                client=_client(_ScriptedTransport(dict(_QUERY_NOT_FOUND), weird)),
             )
         await db_session.refresh(item)
         assert item.status is UploadStatus.PENDING
@@ -406,6 +415,8 @@ class _RacingFailTransport:
         self.raced = False
 
     async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        if url.endswith("/json/invoice_query"):
+            return dict(_QUERY_NOT_FOUND)  # 對帳先行：查無 → 進入 f0401
         if not self.raced:
             self.raced = True
             item = await self._session.get(EInvoiceUploadQueue, self._queue_id)
@@ -449,10 +460,12 @@ async def test_claimed_resend_uses_frozen_payload(db_session: AsyncSession) -> N
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
 
-    first = _ScriptedTransport(AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout"))
+    first = _ScriptedTransport(
+        dict(_QUERY_NOT_FOUND), AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout")
+    )
     with pytest.raises(AmegoTransportError):
         await svc.send_via_amego(store_id, queue_id, client=_client(first))
-    first_data = first.calls[0][1]["data"]
+    first_data = first.calls[1][1]["data"]
 
     # 認領後稅率被改（活狀態漂移源）
     await db_session.execute(
@@ -462,7 +475,7 @@ async def test_claimed_resend_uses_frozen_payload(db_session: AsyncSession) -> N
     )
     await db_session.commit()
 
-    second = _ScriptedTransport({"code": 9001, "msg": "查無資料"}, dict(_F0401_OK))
+    second = _issue_ok_transport()
     item = await svc.send_via_amego(store_id, queue_id, client=_client(second))
     assert item.status is UploadStatus.UPLOADED
     assert second.calls[1][0].endswith("/json/f0401")
@@ -474,11 +487,7 @@ async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
     await _checkout(db_session, store_id, clerk_id, code)
     svc = EInvoiceService(db_session)
     queue_id = await _issue_queue_id(svc, store_id)
-    await svc.send_via_amego(
-        store_id, queue_id, client=_client(_ScriptedTransport(dict(_F0401_OK)))
-    )
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
 
     with pytest.raises(EInvoiceQueueNotDroppable):
-        await svc.send_via_amego(
-            store_id, queue_id, client=_client(_ScriptedTransport(dict(_F0401_OK)))
-        )
+        await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
