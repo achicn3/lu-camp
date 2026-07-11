@@ -118,6 +118,7 @@ class EInvoiceService:
         invoice = Invoice(
             store_id=store_id,
             sale_id=sale_id,
+            tax_rate=Decimal(tax_rate),
             invoice_type=invoice_type,
             buyer_tax_id=buyer_tax_id,
             buyer_name=buyer_name,
@@ -746,15 +747,14 @@ class EInvoiceService:
                     f"發票 {invoice.id} 非待開立（{invoice.status.value}），不可送開立"
                 )
         from app.modules.sales.service import SalesService  # 函式內 import 破循環
-        from app.modules.settings.service import StoreSettingsService
 
         lines = await SalesService(self._session).get_lines(invoice.sale_id)
-        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        # 金額/稅率一律用發票**落地快照**（invoice.net/tax/tax_rate），不讀活 settings
+        # （結帳後改稅率不得改變申報內容，Codex 第九輪）。
         return build_f0401_data(
             invoice,
             lines,
             order_id=amego_order_id(store_id=store_id, sale_id=invoice.sale_id),
-            tax_rate=Decimal(settings.tax_rate),
         )
 
     async def retry(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue:

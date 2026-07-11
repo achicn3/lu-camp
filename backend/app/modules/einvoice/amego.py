@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from app.core.money import round_ntd, split_tax_inclusive
+from app.core.money import round_ntd
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
 from app.shared.enums import InvoiceType
@@ -63,14 +63,14 @@ def build_f0401_data(
     lines: list[SaleLine],
     *,
     order_id: str,
-    tax_rate: Decimal,
 ) -> dict[str, object]:
     """組 f0401（開立發票）payload——含稅品項（DetailVat 預設 1）。
 
     金額規則（doc「含稅商品金額計算邏輯」）：SalesAmount = Σ 含稅小計；
-    B2C（無統編）TaxAmount=0；B2B TaxAmount = Sales − Round(Sales/(1+rate))、
-    SalesAmount −= TaxAmount——與本系統 `split_tax_inclusive` 同式，直接以發票的
-    net/tax（結帳時同函式算出）為準。Σ小計必須等於發票總額，不等即程式錯誤拒送。
+    B2C（無統編）TaxAmount=0；B2B 直接以發票**落地快照** net/tax（結帳時
+    split_tax_inclusive 算出、DB CHECK net+tax=total 守護）為準——不得在上送時
+    以活 settings 稅率重算（結帳後改稅率會讓申報與本地帳不一致，Codex 第九輪）。
+    TaxRate 同用發票的 tax_rate 快照。Σ小計必須等於發票總額，不等即程式錯誤拒送。
     """
     if not lines:
         raise ValueError("發票沒有品項行，不可送開立")
@@ -99,10 +99,9 @@ def build_f0401_data(
     if invoice.invoice_type is InvoiceType.B2B:
         if not invoice.buyer_tax_id:
             raise ValueError("B2B 發票缺買方統編")
-        net, tax = split_tax_inclusive(total, tax_rate)
         buyer_identifier = invoice.buyer_tax_id
         buyer_name = invoice.buyer_name or invoice.buyer_tax_id
-        sales_amount, tax_amount = int(net), int(tax)
+        sales_amount, tax_amount = int(invoice.net), int(invoice.tax)
     else:
         buyer_identifier = _B2C_BUYER_IDENTIFIER
         buyer_name = invoice.buyer_name or _B2C_BUYER_NAME
@@ -117,7 +116,7 @@ def build_f0401_data(
         "FreeTaxSalesAmount": 0,
         "ZeroTaxSalesAmount": 0,
         "TaxType": _TAX_TYPE_TAXABLE,
-        "TaxRate": _decimal_str(tax_rate),
+        "TaxRate": _decimal_str(Decimal(invoice.tax_rate)),
         "TaxAmount": tax_amount,
         "TotalAmount": sales_amount + tax_amount,
     }

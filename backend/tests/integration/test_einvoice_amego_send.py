@@ -624,6 +624,40 @@ async def test_allowance_query_error_blocks_resend(db_session: AsyncSession) -> 
     assert item.status is UploadStatus.PENDING
 
 
+async def test_b2b_split_uses_checkout_snapshot_after_rate_change(
+    db_session: AsyncSession,
+) -> None:
+    """B2B 分稅用結帳快照（Codex 第九輪）：結帳後、首次上送前改 settings 稅率——
+    送出的 F0401 仍為結帳當下的 5% 分拆（1000/50），與本地帳一致。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(
+        db_session,
+        store_id,
+        clerk_id,
+        code,
+        invoice_info=InvoiceInfoInput(buyer_tax_id="04595257", buyer_name="範例公司"),
+    )
+    await db_session.execute(
+        update(StoreSettings)
+        .where(StoreSettings.store_id == store_id)
+        .values(tax_rate=Decimal("0.10"))
+    )
+    await db_session.flush()
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    transport = _issue_ok_transport()
+
+    await svc.send_via_amego(store_id, queue_id, client=_client(transport))
+
+    import json as _json
+
+    data = _json.loads(transport.calls[1][1]["data"])
+    assert data["SalesAmount"] == 1000  # 結帳快照（5%），非改後的 10%
+    assert data["TaxAmount"] == 50
+    assert data["TaxRate"] == "0.05"
+    assert data["TotalAmount"] == 1050
+
+
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
     store_id, clerk_id, code = await _seed(db_session)
     await _checkout(db_session, store_id, clerk_id, code)

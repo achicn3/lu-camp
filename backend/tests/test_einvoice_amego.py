@@ -50,6 +50,7 @@ def _invoice(**overrides: object) -> Invoice:
         "net": Decimal(952),
         "tax": Decimal(48),
         "total": Decimal(1000),
+        "tax_rate": Decimal("0.05"),
         "status": InvoiceStatus.PENDING,
         "donate_mark": False,
         "print_mark": True,
@@ -76,7 +77,6 @@ def test_f0401_b2c_amounts_tax_zero() -> None:
         inv,
         [_line("帳篷", 1, "1000", "1000")],
         order_id="S1-7",
-        tax_rate=Decimal("0.05"),
     )
     assert data["OrderId"] == "S1-7"
     assert data["BuyerIdentifier"] == "0000000000"
@@ -107,7 +107,6 @@ def test_f0401_b2b_split_tax() -> None:
         inv,
         [_line("帳篷", 1, "1000", "1000")],
         order_id="S1-7",
-        tax_rate=Decimal("0.05"),
     )
     assert data["BuyerIdentifier"] == "12345678"
     assert data["BuyerName"] == "測試環境有限公司"
@@ -119,7 +118,7 @@ def test_f0401_b2b_split_tax() -> None:
 def test_f0401_carrier_and_donation_fields() -> None:
     carrier = _invoice(carrier_type="3J0002", carrier_id="/ABC+123", print_mark=False)
     data = build_f0401_data(
-        carrier, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7", tax_rate=Decimal("0.05")
+        carrier, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7"
     )
     assert data["CarrierType"] == "3J0002"
     assert data["CarrierId1"] == "/ABC+123"
@@ -128,7 +127,7 @@ def test_f0401_carrier_and_donation_fields() -> None:
 
     donate = _invoice(donate_mark=True, npoban="919", print_mark=False)
     data2 = build_f0401_data(
-        donate, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7", tax_rate=Decimal("0.05")
+        donate, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7"
     )
     assert data2["NPOBAN"] == "919"
     assert "CarrierType" not in data2
@@ -141,7 +140,6 @@ def test_f0401_discounted_line_uses_effective_unit_price() -> None:
         inv,
         [_line("帳篷", 2, "500", "900")],  # 原價 500×2、折 100 → 小計 900
         order_id="S1-7",
-        tax_rate=Decimal("0.05"),
     )
     item = data["ProductItem"][0]
     assert item["Quantity"] == 2
@@ -158,7 +156,6 @@ def test_f0401_rejects_line_total_mismatch_with_invoice_total() -> None:
             inv,
             [_line("帳篷", 1, "600", "600")],
             order_id="S1-7",
-            tax_rate=Decimal("0.05"),
         )
 
 

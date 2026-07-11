@@ -110,6 +110,9 @@ class Invoice(Base, TimestampMixin):
     net: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 未稅
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 稅額
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 含稅總額
+    # 結帳當下稅率快照（Codex 第九輪）：F0401 金額/TaxRate 以此計——結帳後改 settings
+    # 稅率不得改變已落地發票的申報內容。
+    tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), server_default=text("0.05"))
     # Amego f0401 回傳的證明聯列印內容（docs/24）：一維條碼／左右 QR **內容字串**，
     # 列印以平台回傳為準。invoice_query 對帳復原的發票拿不到 → NULL（證明聯不可印）。
     barcode_text: Mapped[str | None] = mapped_column(String(40))
