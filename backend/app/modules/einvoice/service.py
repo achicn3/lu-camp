@@ -381,16 +381,22 @@ class EInvoiceService:
     ) -> EInvoiceUploadQueue:
         """把 PENDING 佇列列上送 Amego（F0401 開立／F0501 作廢／G0401 折讓）。
 
-        流程：鎖 sale→queue 驗守衛、組 payload → **認領 commit**（xml_path 記
-        `amego:{endpoint}#a{n}`、sha 為 data JSON、dropped_at＝可能已曝光起點）→ 打 API
-        （無鎖）→ 以 record_result 落結果（成功並轉發票/銷售狀態、失敗轉 FAILED 可 retry）。
+        兩階段（Codex 第二輪）：
+        1. **認領（鎖下守衛＋commit 先於曝光）**：xml_path 記 `amego:{endpoint}#a{n}`、
+           sha＝data JSON、`amego_payload` 凍結整份 data JSON（重送 byte-for-byte——
+           稅率變更/跨日不得讓同一 OrderId/AllowanceNumber 送出不同內容）、dropped_at＝
+           可能已曝光起點。crash 於 API 前後，DB 都記得「這筆可能已送達平台」。
+        2. **執行（重取鎖 CAS ＋ 持鎖打 API）**：重鎖 sale→queue 驗認領未變（並發送單
+           在此序列化——後到者見已收斂終態即冪等回現狀、絕不重送）；持列鎖呼叫 Amego
+           （單店、15s timeout 上限，鎖成本可接受），回應在同一鎖下落庫。
 
-        傳輸失敗（結果未知）→ 佇列維持 PENDING＋已認領、AmegoTransportError 往外拋；
-        下次呼叫對「已認領的 F0401」**先 invoice_query 對帳**：平台已有 → 以查詢欄位補
-        開立（無條碼/QR，證明聯不可印）、不重送；查無 → 重送 f0401（OrderId 恆同，
-        平台端唯一約束擋重複開立）。F0501/G0401 已認領者直接重送（作廢/折讓冪等由
-        平台單號唯一性守護）。
+        傳輸失敗/曖昧回應（結果未知）→ 佇列維持 PENDING＋已認領、AmegoTransportError
+        往外拋；下次呼叫對「已認領或世代>0 的 F0401」**先 invoice_query 對帳**：平台已有
+        → 以查詢欄位補開立（無條碼/QR，證明聯不可印）、不重送；查無 → 以凍結 payload
+        重送（OrderId 恆同，平台唯一約束擋重複開立）。F0501/G0401 已認領者以凍結 payload
+        重送（作廢/折讓冪等由平台單號唯一性守護）。
         """
+        # ── 階段 1：鎖下守衛＋認領 ──
         preview = await self._repo.get_queue_item(store_id, queue_id)
         if preview is None:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
@@ -413,21 +419,48 @@ class EInvoiceService:
             )
         already_claimed = item.xml_path is not None
         claim_attempts = item.attempts
-        payload = await self._build_amego_payload(store_id, item)
-        data_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         if not already_claimed:
-            # 認領先於曝光（與 drop_pending 同理）：crash 於 API 呼叫前後，DB 都記得
-            # 「這筆可能已送達平台」，之後只走對帳/重送、不會憑空多開。
+            payload = await self._build_amego_payload(store_id, item)
+            data_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
             item.xml_path = f"amego:{endpoint}#a{claim_attempts}"
             item.xml_sha256 = hashlib.sha256(data_json.encode("utf-8")).hexdigest()
+            item.amego_payload = data_json
             item.dropped_at = datetime.now(UTC)
-        await self._session.commit()  # 釋放列鎖——不持鎖打外部 API
+        await self._session.commit()  # 認領持久化（先於任何曝光）；釋放列鎖
 
-        # 開立的對帳先行（Codex 第一輪）：**已認領**（前次結果未知）或**世代 > 0**（retry 會
-        # 清認領痕跡，但前世代可能已曝光給平台）都先 invoice_query——平台已有 → 補開立、
+        # ── 階段 2：重取鎖 CAS ＋ 持鎖打 API ──
+        if sale_id is not None:
+            from app.modules.sales.service import SalesService
+
+            await SalesService(self._session).lock_sale_row(store_id, sale_id)
+        locked = await self._repo.lock_queue_item(store_id, queue_id)
+        assert locked is not None  # 認領已 commit，列必存在
+        if not (
+            locked.status is UploadStatus.PENDING
+            and locked.attempts == claim_attempts
+            and locked.xml_path is not None
+        ):
+            # 並發送單已把此列收斂（UPLOADED/FAILED）或 retry 換代：本次呼叫冪等回現狀、
+            # 絕不重送過期世代（Codex 第二輪：兩並發送單只有一個真的打 API）。
+            await self._session.commit()  # 無變更；純釋放列鎖
+            await self._session.refresh(locked)
+            return locked
+        frozen = locked.amego_payload
+        if (
+            frozen is None
+            or hashlib.sha256(frozen.encode("utf-8")).hexdigest() != locked.xml_sha256
+        ):
+            await self._session.commit()
+            raise EInvoiceDropError(
+                f"佇列 {queue_id} 認領 payload 遺失或與 sha 不符，拒絕重送（需人工對帳）"
+            )
+        payload = json.loads(frozen)
+
+        # 開立的對帳先行（Codex 第一輪）：**已認領**（前次結果未知）或**世代 > 0**（retry
+        # 清認領痕跡，但前世代可能已曝光平台）都先 invoice_query——平台已有 → 補開立、
         # 絕不重送 f0401（避免在重複 OrderId 錯誤上打轉）。
         needs_reconcile = already_claimed or claim_attempts > 0
-        if needs_reconcile and item.action is EInvoiceAction.ISSUE and sale_id is not None:
+        if needs_reconcile and locked.action is EInvoiceAction.ISSUE and sale_id is not None:
             order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
             query_resp = await client.call(
                 "/json/invoice_query", build_invoice_query_data(order_id=order_id)
@@ -446,14 +479,14 @@ class EInvoiceService:
 
         resp = await client.call(endpoint, payload)  # AmegoTransportError → 維持已認領 PENDING
         code = resp.get("code")
-        # 曖昧回應（缺 code／非整數，schema 漂移）不可當「平台拒絕」記 FAILED（Codex 第一
-        # 輪）：平台可能已開立，誤標 FAILED 後 retry 會清認領、下次重送撞重複 OrderId。
-        # 視為結果未知——維持已認領 PENDING，下次對帳收斂。
-        if not isinstance(code, int):
+        # 曖昧回應不可當「平台拒絕」記 FAILED（Codex 第一/二輪）：平台可能已開立，誤標
+        # FAILED 後 retry 會清認領、重送撞重複 OrderId。缺 code／非整數／**bool**（Python
+        # bool 是 int 子類，JSON true/false 不得矇混）→ 結果未知，維持已認領待對帳。
+        if type(code) is not int:
             raise AmegoTransportError("Amego 回應缺 code 或型別不明（結果不可信，待對帳）")
         success = code == 0
         issue_result: AmegoIssueResult | None = None
-        if success and item.action is EInvoiceAction.ISSUE:
+        if success and locked.action is EInvoiceAction.ISSUE:
             issue_result = parse_f0401_success(resp)  # 欄位不合法 → 不可信，維持已認領
         return await self._record_amego_outcome(
             store_id,
@@ -668,6 +701,7 @@ class EInvoiceService:
         item.last_error = None
         item.xml_path = None
         item.xml_sha256 = None
+        item.amego_payload = None  # 明確失敗後的新世代允許以當下狀態重建內容
         item.dropped_at = None
         await self._session.flush()
         await self._session.refresh(item)  # onupdate updated_at 由 DB 設，刷回避免 lazy IO

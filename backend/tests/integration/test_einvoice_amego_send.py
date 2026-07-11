@@ -9,7 +9,7 @@ invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.service import CashDrawerService
@@ -364,17 +364,17 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
     assert item.xml_path is not None  # 已認領，待對帳
 
     # 第二次（已認領 → 對帳先行）：查無 → 重送 f0401 回 code 為字串 → 仍未知、維持已認領。
-    with pytest.raises(AmegoTransportError):
-        await svc.send_via_amego(
-            store_id,
-            queue_id,
-            client=_client(
-                _ScriptedTransport({"code": 9001, "msg": "查無資料"}, {"code": "0", "msg": ""})
-            ),
-        )
-    await db_session.refresh(item)
-    assert item.status is UploadStatus.PENDING
-    assert item.xml_path is not None
+    # 第三次：code 為 JSON bool（Python bool 是 int 子類，Codex 第二輪）→ 同樣未知。
+    for weird in ({"code": "0", "msg": ""}, {"code": False, "msg": ""}, {"code": True, "msg": ""}):
+        with pytest.raises(AmegoTransportError):
+            await svc.send_via_amego(
+                store_id,
+                queue_id,
+                client=_client(_ScriptedTransport({"code": 9001, "msg": "查無資料"}, weird)),
+            )
+        await db_session.refresh(item)
+        assert item.status is UploadStatus.PENDING
+        assert item.xml_path is not None
 
     # 對帳：平台已有 → 補開立
     transport = _ScriptedTransport(
@@ -439,6 +439,34 @@ async def test_stale_success_after_concurrent_failure_does_not_corrupt(
     assert item is not None
     await db_session.refresh(item)
     assert item.status is UploadStatus.FAILED  # 競態勝者狀態不被覆寫
+
+
+async def test_claimed_resend_uses_frozen_payload(db_session: AsyncSession) -> None:
+    """已認領重送必須 byte-for-byte（Codex 第二輪）：認領後改稅率，重送內容仍等於首送
+    ——同一 OrderId 不得送出不同 payload。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+
+    first = _ScriptedTransport(AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout"))
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(first))
+    first_data = first.calls[0][1]["data"]
+
+    # 認領後稅率被改（活狀態漂移源）
+    await db_session.execute(
+        update(StoreSettings)
+        .where(StoreSettings.store_id == store_id)
+        .values(tax_rate=Decimal("0.10"))
+    )
+    await db_session.commit()
+
+    second = _ScriptedTransport({"code": 9001, "msg": "查無資料"}, dict(_F0401_OK))
+    item = await svc.send_via_amego(store_id, queue_id, client=_client(second))
+    assert item.status is UploadStatus.UPLOADED
+    assert second.calls[1][0].endswith("/json/f0401")
+    assert second.calls[1][1]["data"] == first_data  # 凍結內容原封重送
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:

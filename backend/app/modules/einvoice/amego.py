@@ -243,7 +243,8 @@ def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
 
     查詢不回傳條碼/QR 內容 → 證明聯欄位為 None（復原的發票不可印證明聯）。
     """
-    if resp.get("code") != 0:
+    code = resp.get("code")
+    if type(code) is not int or code != 0:  # bool 是 int 子類，JSON true/false 不得矇混
         return None
     data = resp.get("data")
     if not isinstance(data, dict):

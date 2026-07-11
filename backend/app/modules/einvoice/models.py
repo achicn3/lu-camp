@@ -26,6 +26,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -215,6 +216,8 @@ class EInvoiceUploadQueue(Base, TimestampMixin):
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     xml_path: Mapped[str | None] = mapped_column(String(500))  # 落檔路徑（拋檔後）
     xml_sha256: Mapped[str | None] = mapped_column(String(64))  # 內容 checksum（拋檔後）
+    # Amego 認領時凍結的 data JSON 全文（docs/24）：重送 byte-for-byte 用；Turnkey 路徑 NULL。
+    amego_payload: Mapped[str | None] = mapped_column(Text)
     dropped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
