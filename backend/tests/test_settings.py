@@ -131,8 +131,17 @@ async def test_enable_einvoice_blocked_until_amego_key_configured(
         store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=False)
     )
     assert updated.einvoice_enabled is False
-    # App Key 設定後可開啟。
+    # App Key 已設但店家統編未填 → 仍擋（Amego 賣方識別；Codex 第五輪）。
     monkeypatch.setattr(get_app_settings(), "amego_app_key", "test-key")
+    with pytest.raises(EInvoiceActivationNotReady):
+        await svc.update_settings(
+            store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
+        )
+    # 補齊統編後可開啟。
+    store = await db_session.get(Store, store_id)
+    assert store is not None
+    store.tax_id = "12345678"
+    await db_session.flush()
     enabled = await svc.update_settings(
         store_id, actor_user_id=user_id, patch=SettingsUpdateRequest(einvoice_enabled=True)
     )

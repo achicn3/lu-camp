@@ -9,6 +9,7 @@ VOID_PENDING（平台已開 → 續 F0501 作廢）、銷售 VOID。
 import asyncio
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import delete, select
 
 import app.core.db as app_db
@@ -58,14 +59,14 @@ class _SlowTransport:
         return dict(_F0401_OK)
 
 
-async def test_issue_and_void_concurrently_no_deadlock() -> None:
-    sm = app_db.get_sessionmaker()
-    async with sm() as s:
-        store = Store(name="併發開立店", tax_id="12345678")
+async def _seed_committed(sm: object, *, tag: str) -> tuple[int, int, int]:
+    """建店/店員/設定/在庫品/銷售並 commit（雙 session 測試需要真提交）。"""
+    async with sm() as s:  # type: ignore[operator]
+        store = Store(name=f"併發開立店{tag}", tax_id="12345678")
         s.add(store)
         await s.flush()
         clerk = User(
-            store_id=store.id, username="amego-cc", password_hash="h", role=UserRole.MANAGER
+            store_id=store.id, username=f"amego-cc-{tag}", password_hash="h", role=UserRole.MANAGER
         )
         s.add(clerk)
         await s.flush()
@@ -74,7 +75,7 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
         await CashDrawerService(s).open_session(store.id, clerk.id, Decimal("1000"))
         item = await InventoryService(s).create_serialized_item(
             store.id,
-            item_code="SN-CC-1",
+            item_code=f"SN-CC-{tag}",
             name="相機",
             grade=Grade.A,
             ownership_type=OwnershipType.OWNED,
@@ -86,8 +87,37 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
             clerk.id,
             lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
         )
-        store_id, clerk_id, sale_id = store.id, clerk.id, sale.id
+        ids = (store.id, clerk.id, sale.id)
         await s.commit()
+    return ids
+
+
+async def _cleanup(sm: object, store_id: int) -> None:
+    """清掉本測試真 commit 的整條鏈（其他測試有全域計數斷言/整表清理）。"""
+    async with sm() as s4:  # type: ignore[operator]
+        for stmt in (
+            delete(EInvoiceResultEvent).where(EInvoiceResultEvent.store_id == store_id),
+            delete(EInvoiceUploadQueue).where(EInvoiceUploadQueue.store_id == store_id),
+            delete(Invoice).where(Invoice.store_id == store_id),
+            delete(AuditLog).where(AuditLog.store_id == store_id),
+            delete(SaleTender).where(SaleTender.store_id == store_id),
+            delete(SaleLine).where(SaleLine.store_id == store_id),
+            delete(StockMovement).where(StockMovement.store_id == store_id),
+            delete(CashMovement).where(CashMovement.store_id == store_id),
+            delete(Sale).where(Sale.store_id == store_id),
+            delete(SerializedItem).where(SerializedItem.store_id == store_id),
+            delete(CashSession).where(CashSession.store_id == store_id),
+            delete(StoreSettings).where(StoreSettings.store_id == store_id),
+            delete(User).where(User.store_id == store_id),
+            delete(Store).where(Store.id == store_id),
+        ):
+            await s4.execute(stmt)
+        await s4.commit()
+
+
+async def test_issue_and_void_concurrently_no_deadlock() -> None:
+    sm = app_db.get_sessionmaker()
+    store_id, clerk_id, sale_id = await _seed_committed(sm, tag="a")
 
     async def do_issue() -> None:
         async with sm() as s1:
@@ -133,23 +163,77 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
             sale_row = await SalesService(s3).get_sale(store_id, sale_id)
             assert sale_row is not None and sale_row.invoice_status is SaleInvoiceStatus.VOID
     finally:
-        # 清理本測試真 commit 的整條鏈（其他測試有全域計數斷言/整表清理，不得留殘料）。
-        async with sm() as s4:
-            for stmt in (
-                delete(EInvoiceResultEvent).where(EInvoiceResultEvent.store_id == store_id),
-                delete(EInvoiceUploadQueue).where(EInvoiceUploadQueue.store_id == store_id),
-                delete(Invoice).where(Invoice.store_id == store_id),
-                delete(AuditLog).where(AuditLog.store_id == store_id),
-                delete(SaleTender).where(SaleTender.store_id == store_id),
-                delete(SaleLine).where(SaleLine.store_id == store_id),
-                delete(StockMovement).where(StockMovement.store_id == store_id),
-                delete(CashMovement).where(CashMovement.store_id == store_id),
-                delete(Sale).where(Sale.store_id == store_id),
-                delete(SerializedItem).where(SerializedItem.store_id == store_id),
-                delete(CashSession).where(CashSession.store_id == store_id),
-                delete(StoreSettings).where(StoreSettings.store_id == store_id),
-                delete(User).where(User.store_id == store_id),
-                delete(Store).where(Store.id == store_id),
-            ):
-                await s4.execute(stmt)
-            await s4.commit()
+        await _cleanup(sm, store_id)
+
+
+class _PlainTransport:
+    """對帳查無 → f0401 成功（無延遲）。"""
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        if url.endswith("/json/invoice_query"):
+            return {"code": 9001, "msg": "查無資料"}
+        return dict(_F0401_OK)
+
+
+async def test_void_in_claim_gap_still_enqueues_f0501(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """認領 commit → 階段 2 重取鎖的空窗內完成作廢（VOID_PENDING）：成功轉移必須看到
+    **刷新後**的發票狀態（expire_on_commit=False 的 identity map 會過期；Codex 第五輪）
+    → 走 VOID_PENDING 分支續排 F0501，不得誤走 →ISSUED 漏作廢。"""
+    sm = app_db.get_sessionmaker()
+    store_id, clerk_id, sale_id = await _seed_committed(sm, tag="b")
+
+    # hook 掛在**階段 2 取 sale 鎖之前**（＝認領已 commit、主交易尚未持任何鎖的真空窗）；
+    # 掛在 lock_queue_item 前會死鎖——那時主交易已持 sale 鎖，作廢在 hook 裡等不到鎖。
+    orig_lock = SalesService.lock_sale_row
+    state = {"count": 0}
+
+    async def hooked(self: SalesService, store_id_: int, sale_id_: int) -> Sale | None:
+        state["count"] += 1
+        if state["count"] == 2:  # 第 1 次＝階段 1；第 2 次＝階段 2 重取鎖前（空窗）
+            async with sm() as s2:
+                sales = SalesService(s2)
+                target = await sales.get_sale_for_update(store_id, sale_id)
+                assert target is not None
+                await sales.void_sale(target, clerk_id)
+                await s2.commit()
+        return await orig_lock(self, store_id_, sale_id_)
+
+    monkeypatch.setattr(SalesService, "lock_sale_row", hooked)
+
+    try:
+        async with sm() as s1:
+            client = AmegoClient(
+                seller_tax_id="12345678",
+                app_key="test-key",
+                transport=_PlainTransport(),
+                base_url="https://invoice-api.amego.tw",
+            )
+            svc = EInvoiceService(s1)
+            queue_id = next(
+                i.id
+                for i in await svc.list_queue(store_id)
+                if i.action is EInvoiceAction.ISSUE
+            )
+            await svc.send_via_amego(store_id, queue_id, client=client)
+
+        async with sm() as s3:
+            invoice = await s3.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+            assert invoice is not None
+            assert invoice.status is InvoiceStatus.VOID_PENDING  # 不得誤標 ISSUED
+            assert invoice.invoice_no == "AB00001111"  # 平台已開 → 字軌照填
+            void_items = [
+                q
+                for q in (
+                    await s3.scalars(
+                        select(EInvoiceUploadQueue).where(
+                            EInvoiceUploadQueue.invoice_id == invoice.id
+                        )
+                    )
+                ).all()
+                if q.action is EInvoiceAction.VOID
+            ]
+            assert len(void_items) == 1  # F0501 已排（續作廢）
+    finally:
+        await _cleanup(sm, store_id)

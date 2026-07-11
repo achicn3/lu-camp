@@ -445,6 +445,18 @@ class EInvoiceService:
             await self._session.commit()  # 無變更；純釋放列鎖
             await self._session.refresh(locked)
             return locked
+        # 強制刷新目標（Codex 第五輪）：session expire_on_commit=False，認領 commit → 重取鎖
+        # 的空窗內別的交易可能已把發票轉 VOID_PENDING（作廢先鎖 sale——所有發票狀態寫入者
+        # 都持 sale 鎖，故此刻刷新後直到本交易 commit 前不會再變）。不刷新會以過期的
+        # PENDING 走「→ISSUED」分支、漏排 F0501。
+        if locked.invoice_id is not None:
+            stale_invoice = await self._repo.get_invoice(store_id, locked.invoice_id)
+            if stale_invoice is not None:
+                await self._session.refresh(stale_invoice)
+        if locked.allowance_id is not None:
+            stale_allowance = await self._session.get(InvoiceAllowance, locked.allowance_id)
+            if stale_allowance is not None:
+                await self._session.refresh(stale_allowance)
         frozen = locked.amego_payload
         if (
             frozen is None

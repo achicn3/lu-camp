@@ -29,6 +29,7 @@ from app.modules.settings.defaults import (
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
 from app.modules.settings.repository import SettingsRepository
 from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.store.service import StoreService
 from app.shared.exceptions import EInvoiceActivationNotReady, InvalidPremiumRate
 
 
@@ -88,12 +89,18 @@ class StoreSettingsService:
 
         # exclude_none：明確傳 null 視為「不更動」（這些設定欄皆不可為 NULL；Codex P2 防 500）。
         changes = patch.model_dump(exclude_unset=True, exclude_none=True)
-        # 電子發票啟用閘門（docs/24）：Amego App Key 未設定前不得開啟——否則每筆銷售建
-        # 永遠無法上送的 PENDING 發票、佇列堆積。關閉（False）不受限。
-        if changes.get("einvoice_enabled") is True and not get_app_settings().amego_app_key.strip():
-            raise EInvoiceActivationNotReady(
-                "電子發票尚未可啟用：AMEGO_APP_KEY 環境變數未設定（docs/24；金鑰不入 repo）"
-            )
+        # 電子發票啟用閘門（docs/24）：Amego App Key 與店家統編（賣方識別）都須就緒，
+        # 否則每筆銷售建永遠無法上送的 PENDING 發票、佇列堆積。關閉（False）不受限。
+        if changes.get("einvoice_enabled") is True:
+            if not get_app_settings().amego_app_key.strip():
+                raise EInvoiceActivationNotReady(
+                    "電子發票尚未可啟用：AMEGO_APP_KEY 環境變數未設定（docs/24；金鑰不入 repo）"
+                )
+            store = await StoreService(self._session).get_receipt_header(store_id)
+            if not (store.tax_id or "").strip():
+                raise EInvoiceActivationNotReady(
+                    "電子發票尚未可啟用：店家統編未設定（stores.tax_id 為 Amego 賣方識別）"
+                )
         reason = changes.pop("premium_change_reason", None)  # 非設定欄，僅供 history 留痕
         old_premium = settings.premium_rate
         before = {k: _jsonable(getattr(settings, k)) for k in changes}
