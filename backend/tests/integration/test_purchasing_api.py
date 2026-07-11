@@ -331,3 +331,159 @@ async def test_list_purchase_orders_filters_by_status_and_paginates(
     )
     assert len(page0.json()) == 1 and len(page1.json()) == 1
     assert page0.json()[0]["id"] != page1.json()[0]["id"]
+
+
+# ── 進項發票（裁示 2026-07-11：收貨時登錄；漏登可補登一次）──────────────────
+
+
+async def test_receive_with_input_invoice_stores_and_splits_tax(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收貨帶進項發票 → 落庫且稅額拆分（total 1050、5% → net 1000/tax 50）；列表可見。"""
+    token, store_id, _clerk_id = await _seed_store(db_session)
+    product_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token)
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=product_id)
+
+    received = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive",
+        json={
+            "invoice": {
+                "invoice_number": "AB12345678",
+                "invoice_date": "2026-07-11",
+                "invoice_total": "1050",
+            }
+        },
+        headers=_auth(token),
+    )
+    assert received.status_code == 200, received.text
+    invoice = received.json()["purchase_order"]["invoice"]
+    assert invoice == {
+        "invoice_number": "AB12345678",
+        "invoice_date": "2026-07-11",
+        "invoice_total": "1050",
+        "invoice_net": "1000",
+        "invoice_tax": "50",
+    }
+
+
+async def test_receive_without_invoice_then_backfill_once(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收貨未帶發票 → invoice=None；補登一次成功；再補登 → 409（不可覆寫）。"""
+    token, store_id, _clerk_id = await _seed_store(db_session)
+    product_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token)
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=product_id)
+
+    received = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive", headers=_auth(token)
+    )
+    assert received.status_code == 200, received.text
+    assert received.json()["purchase_order"]["invoice"] is None
+
+    backfill = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/invoice",
+        json={
+            "invoice_number": "CD98765432",
+            "invoice_date": "2026-07-11",
+            "invoice_total": "2100",
+        },
+        headers=_auth(token),
+    )
+    assert backfill.status_code == 200, backfill.text
+    assert backfill.json()["invoice_net"] == "2000"
+    assert backfill.json()["invoice_tax"] == "100"
+
+    again = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/invoice",
+        json={
+            "invoice_number": "EF11111111",
+            "invoice_date": "2026-07-11",
+            "invoice_total": "999",
+        },
+        headers=_auth(token),
+    )
+    assert again.status_code == 409, again.text
+
+
+async def test_backfill_requires_received_order(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """未收貨的採購單不可補登發票 → 409。"""
+    token, store_id, _clerk_id = await _seed_store(db_session)
+    product_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token)
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=product_id)
+
+    resp = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/invoice",
+        json={
+            "invoice_number": "GH22222222",
+            "invoice_date": "2026-07-11",
+            "invoice_total": "500",
+        },
+        headers=_auth(token),
+    )
+    assert resp.status_code == 409, resp.text
+
+
+async def test_invoice_number_format_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """號碼非 2 英文＋8 數字 → 422（pydantic pattern）。"""
+    token, store_id, _clerk_id = await _seed_store(db_session)
+    product_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token)
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=product_id)
+    resp = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive",
+        json={
+            "invoice": {
+                "invoice_number": "1234567890",
+                "invoice_date": "2026-07-11",
+                "invoice_total": "1050",
+            }
+        },
+        headers=_auth(token),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_duplicate_invoice_number_rejected_across_pos(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同店同號同日的實體發票不可重複入帳（收貨與補登皆擋 409；Codex 第一輪 high）。"""
+    token, store_id, _clerk_id = await _seed_store(db_session)
+    p1 = await _seed_catalog(db_session, store_id, sku="DUP-1")
+    p2 = await _seed_catalog(db_session, store_id, sku="DUP-2")
+    supplier_id = await _create_supplier(client, token)
+    po1 = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=p1)
+    po2 = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=p2)
+    invoice = {
+        "invoice_number": "ZZ55667788",
+        "invoice_date": "2026-07-11",
+        "invoice_total": "1050",
+    }
+    first = await client.post(
+        f"/api/v1/purchase-orders/{po1}/receive", json={"invoice": invoice}, headers=_auth(token)
+    )
+    assert first.status_code == 200, first.text
+    # 收貨路徑重複 → 409
+    dup_receive = await client.post(
+        f"/api/v1/purchase-orders/{po2}/receive", json={"invoice": invoice}, headers=_auth(token)
+    )
+    assert dup_receive.status_code == 409, dup_receive.text
+    # po2 未收貨成功（原子回滾）：再收一次（無發票）→ 200，補登同號 → 409
+    ok2 = await client.post(f"/api/v1/purchase-orders/{po2}/receive", headers=_auth(token))
+    assert ok2.status_code == 200, ok2.text
+    dup_backfill = await client.post(
+        f"/api/v1/purchase-orders/{po2}/invoice", json=invoice, headers=_auth(token)
+    )
+    assert dup_backfill.status_code == 409, dup_backfill.text
+    # 不同日期＝不同期別回收字軌 → 允許
+    other_date = {**invoice, "invoice_date": "2026-09-11"}
+    ok3 = await client.post(
+        f"/api/v1/purchase-orders/{po2}/invoice", json=other_date, headers=_auth(token)
+    )
+    assert ok3.status_code == 200, ok3.text

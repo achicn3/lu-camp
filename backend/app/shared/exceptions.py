@@ -188,6 +188,18 @@ class PurchaseOrderNotReceivable(DomainError):
     """採購單目前不可收貨（已收貨/關閉/仍為草稿）。"""
 
 
+class InputInvoiceInvalid(DomainError):
+    """進項發票資料不合法（號碼格式/金額）。"""
+
+
+class InputInvoiceAlreadySet(DomainError):
+    """該收貨單已登錄進項發票，不可重複登錄/覆寫。"""
+
+
+class PurchaseOrderNotReceived(DomainError):
+    """採購單尚未收貨，無法補登進項發票。"""
+
+
 class InvalidPurchaseOrder(DomainError):
     """採購單內容不合法（空白、重複商品、金額非整數元等）。"""
 

@@ -3212,6 +3212,74 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InputInvoiceIn": {
+        "description": "進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。\n\n號碼＝2 英文大寫＋8 數字；金額為含稅整數元字串（>0）。未稅/稅額由後端以\nsettings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。",
+        "properties": {
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "invoice_number": {
+            "pattern": "^[A-Z]{2}[0-9]{8}$",
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "invoice_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Invoice Total"
+          }
+        },
+        "required": [
+          "invoice_number",
+          "invoice_date",
+          "invoice_total"
+        ],
+        "title": "InputInvoiceIn",
+        "type": "object"
+      },
+      "InputInvoiceRead": {
+        "properties": {
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "invoice_net": {
+            "title": "Invoice Net",
+            "type": "string"
+          },
+          "invoice_number": {
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "invoice_tax": {
+            "title": "Invoice Tax",
+            "type": "string"
+          },
+          "invoice_total": {
+            "title": "Invoice Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invoice_number",
+          "invoice_date",
+          "invoice_total",
+          "invoice_net",
+          "invoice_tax"
+        ],
+        "title": "InputInvoiceRead",
+        "type": "object"
+      },
       "InsightsBreakdownRow": {
         "description": "經營洞察：單一品牌或類型的售出彙整列。",
         "properties": {
@@ -5043,6 +5111,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InputInvoiceRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/PurchaseOrderLineRead"
@@ -5191,6 +5269,23 @@
           "invoice_track_info"
         ],
         "title": "ReceiptHeaderRead",
+        "type": "object"
+      },
+      "ReceivePurchaseOrderRequest": {
+        "description": "收貨請求：進項發票選填（供應商發票通常隨貨送達，收貨時一併登錄）。",
+        "properties": {
+          "invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InputInvoiceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ReceivePurchaseOrderRequest",
         "type": "object"
       },
       "ReceivePurchaseOrderResult": {
@@ -11195,6 +11290,64 @@
         ]
       }
     },
+    "/api/v1/purchase-orders/{purchase_order_id}/invoice": {
+      "post": {
+        "description": "補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。",
+        "operationId": "registerInputInvoice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_order_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputInvoiceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputInvoiceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register Input Invoice",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
     "/api/v1/purchase-orders/{purchase_order_id}/receive": {
       "post": {
         "operationId": "receivePurchaseOrder",
@@ -11209,6 +11362,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReceivePurchaseOrderRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

@@ -1,10 +1,12 @@
 """purchasing 業務邏輯：供應商、採購單與一次性收貨入庫。"""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.money import split_tax_inclusive
 from app.modules.inventory.service import InventoryService
 from app.modules.purchasing.models import (
     GoodsReceipt,
@@ -13,13 +15,16 @@ from app.modules.purchasing.models import (
     Supplier,
 )
 from app.modules.purchasing.repository import PurchasingRepository
-from app.modules.purchasing.schemas import PurchaseOrderCreate, SupplierCreate
+from app.modules.purchasing.schemas import InputInvoiceIn, PurchaseOrderCreate, SupplierCreate
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
+    InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
+    PurchaseOrderNotReceived,
 )
 
 
@@ -28,6 +33,7 @@ class PurchasingService:
         self._session = session
         self._repo = PurchasingRepository(session)
         self._inventory = InventoryService(session)
+        self._settings = StoreSettingsService(session)
 
     async def create_supplier(self, store_id: int, payload: SupplierCreate) -> Supplier:
         name = payload.name.strip()
@@ -122,8 +128,49 @@ class PurchasingService:
     ) -> PurchaseOrder | None:
         return await self._repo.get_purchase_order(store_id, purchase_order_id)
 
+    @staticmethod
+    def _invoice_fields(
+        invoice: "InputInvoiceIn", tax_rate: Decimal
+    ) -> dict[str, object]:
+        """進項發票欄位＋稅額拆分（§6：net = round_ntd(total/(1+rate))、tax = total − net）。"""
+        net, tax = split_tax_inclusive(Decimal(invoice.invoice_total), tax_rate)
+        return {
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date,
+            "invoice_total": Decimal(invoice.invoice_total),
+            "invoice_net": Decimal(net),
+            "invoice_tax": Decimal(tax),
+        }
+
+    async def register_input_invoice(
+        self, store_id: int, purchase_order_id: int, *, invoice: "InputInvoiceIn"
+    ) -> GoodsReceipt:
+        """補登進項發票（裁示：漏登可事後補登**一次**；已登錄不可覆寫——打錯屬更正流程，另議）。"""
+        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
+        if purchase_order is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        receipt = purchase_order.receipt
+        if purchase_order.status != PurchaseOrderStatus.RECEIVED or receipt is None:
+            raise PurchaseOrderNotReceived(
+                f"採購單 {purchase_order_id} 尚未收貨，無法登錄進項發票"
+            )
+        if receipt.invoice_number is not None:
+            raise InputInvoiceAlreadySet(
+                f"採購單 {purchase_order_id} 已登錄發票 {receipt.invoice_number}，不可覆寫"
+            )
+        settings = await self._settings.get_effective_settings(store_id)
+        for key, value in self._invoice_fields(invoice, Decimal(settings.tax_rate)).items():
+            setattr(receipt, key, value)
+        await self._session.flush()
+        return receipt
+
     async def receive_purchase_order(
-        self, store_id: int, purchase_order_id: int, *, actor_user_id: int
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        *,
+        actor_user_id: int,
+        invoice: "InputInvoiceIn | None" = None,
     ) -> tuple[PurchaseOrder, GoodsReceipt]:
         purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
         if purchase_order is None:
@@ -140,14 +187,22 @@ class PurchasingService:
                 ref_type="purchase_order",
                 ref_id=purchase_order.id,
             )
+        invoice_fields: dict[str, object] = {}
+        if invoice is not None:
+            settings = await self._settings.get_effective_settings(store_id)
+            invoice_fields = self._invoice_fields(invoice, Decimal(settings.tax_rate))
         receipt = await self._repo.add_receipt(
             GoodsReceipt(
                 store_id=store_id,
                 purchase_order_id=purchase_order.id,
                 received_by=actor_user_id,
+                **invoice_fields,
             )
         )
         purchase_order.status = PurchaseOrderStatus.RECEIVED
+        # 剛建立的收貨單（含發票欄）要反映到 po.receipt（selectin 於鎖定查詢時已快取 None）。
+        await self._session.flush()
+        await self._session.refresh(purchase_order, ["receipt"])
         purchase_order.received_at = datetime.now(UTC)
         purchase_order.received_by = actor_user_id
         await self._session.flush()

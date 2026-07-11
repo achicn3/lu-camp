@@ -364,7 +364,20 @@ function PurchaseOrderDetailModal({
             <dt>收貨時間</dt>
             <dd>{dt(po.received_at)}</dd>
           </div>
+          <div>
+            <dt>進項發票</dt>
+            <dd>
+              {po.invoice
+                ? `${po.invoice.invoice_number}（${po.invoice.invoice_date}）含稅 ${money(
+                    po.invoice.invoice_total,
+                  )}｜未稅 ${money(po.invoice.invoice_net)}／稅 ${money(po.invoice.invoice_tax)}`
+                : po.status === "RECEIVED"
+                  ? "未登錄"
+                  : "—"}
+            </dd>
+          </div>
         </dl>
+        {po.status === "RECEIVED" && !po.invoice && <BackfillInvoiceForm poId={po.id} />}
         <table className="data-table pur-detail-table">
           <thead>
             <tr>
@@ -409,11 +422,89 @@ function PurchaseOrderDetailModal({
   );
 }
 
+// ── 進項發票補登（已收貨、漏登時；登錄後不可覆寫）─────────────
+function BackfillInvoiceForm({ poId }: { poId: number }) {
+  const queryClient = useQueryClient();
+  const [number, setNumber] = useState("");
+  const [dateStr, setDateStr] = useState("");
+  const [total, setTotal] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const backfill = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await api.POST(
+        "/api/v1/purchase-orders/{purchase_order_id}/invoice",
+        {
+          params: { path: { purchase_order_id: poId } },
+          body: {
+            invoice_number: number.trim().toUpperCase(),
+            invoice_date: dateStr,
+            invoice_total: total.trim(),
+          },
+        },
+      );
+      if (!data) throw new Error(extractDetail(error) ?? "補登失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setNote("已補登進項發票");
+      void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+    },
+    onError: (e: Error) => setNote(e.message),
+  });
+  return (
+    <div className="pur-backfill-invoice">
+      <h3>補登進項發票</h3>
+      <div className="pur-invoice-row">
+        <input
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+          placeholder="AB12345678"
+          maxLength={10}
+          aria-label="補登發票號碼"
+        />
+        <input
+          type="date"
+          value={dateStr}
+          onChange={(e) => setDateStr(e.target.value)}
+          aria-label="補登發票日期"
+        />
+        <input
+          value={total}
+          onChange={(e) => setTotal(e.target.value)}
+          inputMode="numeric"
+          placeholder="含稅金額"
+          aria-label="補登發票含稅金額"
+        />
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={backfill.isPending || !number || !dateStr || !total}
+          onClick={() => backfill.mutate()}
+        >
+          補登
+        </button>
+      </div>
+      {note !== null && <p className="hint">{note}</p>}
+    </div>
+  );
+}
+
 // ── 採購單清單 + 收貨 ────────────────────────────────────────
 function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const queryClient = useQueryClient();
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
+  // 進項發票（裁示 2026-07-11）：收貨時選填登錄；三欄全空＝不登錄（可事後補登）。
+  // 草稿以「開啟對話框」為生命週期：開啟/取消都清空——避免 A 單打到一半取消、B 單收貨時
+  // 殘留 A 的發票被誤登（登錄不可覆寫，錯了難以回復；Codex 第一輪 high）。
+  const [invNumber, setInvNumber] = useState("");
+  const [invDate, setInvDate] = useState("");
+  const [invTotal, setInvTotal] = useState("");
+  const resetInvoiceDraft = () => {
+    setInvNumber("");
+    setInvDate("");
+    setInvTotal("");
+  };
   // 預設只看「待收貨」——最常用、且避免歷史採購單把頁面拉長；要看全部可切「全部」。
   const [status, setStatus] = useState<PoStatus | "ALL">("ORDERED");
   const [page, setPage] = useState(0);
@@ -457,8 +548,18 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
 
   const receive = useMutation({
     mutationFn: async (po: PurchaseOrder) => {
+      const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
       const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/receive", {
         params: { path: { purchase_order_id: po.id } },
+        body: hasInvoice
+          ? {
+              invoice: {
+                invoice_number: invNumber.trim().toUpperCase(),
+                invoice_date: invDate,
+                invoice_total: invTotal.trim(),
+              },
+            }
+          : {},
       });
       if (!data) throw new Error(extractDetail(error) ?? "收貨失敗，請重新整理後再試");
       return data;
@@ -466,6 +567,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
     onSuccess: () => {
       setReceiving(null);
       setReceiveError(null);
+      resetInvoiceDraft();
       void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
     },
@@ -546,6 +648,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                         className="btn-primary"
                         disabled={receive.isPending}
                         onClick={() => {
+                          resetInvoiceDraft();
                           setReceiving(po);
                           setReceiveError(null);
                         }}
@@ -572,6 +675,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           productLabel={productLabel}
           onClose={() => setDetailPo(null)}
           onReceive={() => {
+            resetInvoiceDraft();
             setReceiving(detailPo);
             setReceiveError(null);
             setDetailPo(null);
@@ -587,6 +691,37 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
               採購單 #{receiving.id}（{supplierName(receiving.supplier_id)}）共 {receiving.lines.length} 項、
               合計 <span className="money">{money(receiving.total_cost)}</span>。確認後將補入庫存且無法復原。
             </p>
+            <fieldset className="pur-invoice-fields">
+              <legend>進項發票（選填；供應商發票隨貨時一併登錄，漏登可事後補登）</legend>
+              <label className="field">
+                <span className="field-label">發票號碼（2 英文＋8 數字）</span>
+                <input
+                  value={invNumber}
+                  onChange={(e) => setInvNumber(e.target.value)}
+                  placeholder="AB12345678"
+                  maxLength={10}
+                  aria-label="發票號碼"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">發票日期</span>
+                <input
+                  type="date"
+                  value={invDate}
+                  onChange={(e) => setInvDate(e.target.value)}
+                  aria-label="發票日期"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">含稅金額（整數元）</span>
+                <input
+                  value={invTotal}
+                  onChange={(e) => setInvTotal(e.target.value)}
+                  inputMode="numeric"
+                  aria-label="發票含稅金額"
+                />
+              </label>
+            </fieldset>
             {receiveError !== null && (
               <p role="alert" className="form-error">
                 {receiveError}
@@ -608,6 +743,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                 onClick={() => {
                   setReceiving(null);
                   setReceiveError(null);
+                  resetInvoiceDraft();
                 }}
               >
                 取消

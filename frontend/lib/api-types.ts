@@ -1020,6 +1020,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-orders/{purchase_order_id}/invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Input Invoice
+         * @description 補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
+         */
+        post: operations["registerInputInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-orders/{purchase_order_id}/receive": {
         parameters: {
             query?: never;
@@ -2911,6 +2931,40 @@ export interface components {
             status: string;
         };
         /**
+         * InputInvoiceIn
+         * @description 進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。
+         *
+         *     號碼＝2 英文大寫＋8 數字；金額為含稅整數元字串（>0）。未稅/稅額由後端以
+         *     settings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。
+         */
+        InputInvoiceIn: {
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Invoice Total */
+            invoice_total: number | string;
+        };
+        /** InputInvoiceRead */
+        InputInvoiceRead: {
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Invoice Net */
+            invoice_net: string;
+            /** Invoice Number */
+            invoice_number: string;
+            /** Invoice Tax */
+            invoice_tax: string;
+            /** Invoice Total */
+            invoice_total: string;
+        };
+        /**
          * InsightsBreakdownRow
          * @description 經營洞察：單一品牌或類型的售出彙整列。
          */
@@ -3611,6 +3665,7 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            invoice?: components["schemas"]["InputInvoiceRead"] | null;
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineRead"][];
             /**
@@ -3658,6 +3713,13 @@ export interface components {
             phone: string | null;
             /** Tax Id */
             tax_id: string | null;
+        };
+        /**
+         * ReceivePurchaseOrderRequest
+         * @description 收貨請求：進項發票選填（供應商發票通常隨貨送達，收貨時一併登錄）。
+         */
+        ReceivePurchaseOrderRequest: {
+            invoice?: components["schemas"]["InputInvoiceIn"] | null;
         };
         /** ReceivePurchaseOrderResult */
         ReceivePurchaseOrderResult: {
@@ -6553,6 +6615,41 @@ export interface operations {
             };
         };
     };
+    registerInputInvoice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputInvoiceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InputInvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     receivePurchaseOrder: {
         parameters: {
             query?: never;
@@ -6562,7 +6659,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReceivePurchaseOrderRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
 from app.modules.purchasing.schemas import (
+    InputInvoiceIn,
+    InputInvoiceRead,
     PurchaseOrderCreate,
     PurchaseOrderRead,
+    ReceivePurchaseOrderRequest,
     ReceivePurchaseOrderResult,
     SupplierCreate,
     SupplierRead,
@@ -20,9 +23,11 @@ from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
+    InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
+    PurchaseOrderNotReceived,
 )
 
 router = APIRouter(tags=["purchasing"])
@@ -35,6 +40,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InvalidPurchaseOrder: status.HTTP_422_UNPROCESSABLE_CONTENT,
     PurchaseOrderNotFound: status.HTTP_404_NOT_FOUND,
     PurchaseOrderNotReceivable: status.HTTP_409_CONFLICT,
+    InputInvoiceAlreadySet: status.HTTP_409_CONFLICT,
+    PurchaseOrderNotReceived: status.HTTP_409_CONFLICT,
 }
 
 
@@ -142,21 +149,62 @@ async def get_purchase_order(
     operation_id="receivePurchaseOrder",
 )
 async def receive_purchase_order(
-    purchase_order_id: int, session: SessionDep, user: CurrentUserDep
+    purchase_order_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+    payload: ReceivePurchaseOrderRequest | None = None,
 ) -> ReceivePurchaseOrderResult:
     svc = PurchasingService(session)
     try:
         purchase_order, receipt = await svc.receive_purchase_order(
-            user.store_id, purchase_order_id, actor_user_id=user.id
+            user.store_id,
+            purchase_order_id,
+            actor_user_id=user.id,
+            invoice=payload.invoice if payload is not None else None,
         )
     except DomainError as exc:
         await session.rollback()
         raise _map_domain_error(exc) from exc
     except IntegrityError as exc:
         await session.rollback()
+        if "uq_goods_receipts_store_invoice" in str(exc.orig):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
+            ) from exc
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="採購單已收貨") from exc
     await session.commit()
     return ReceivePurchaseOrderResult(
         receipt_id=receipt.id,
         purchase_order=PurchaseOrderRead.from_model(purchase_order),
     )
+
+
+@router.post(
+    "/purchase-orders/{purchase_order_id}/invoice",
+    response_model=InputInvoiceRead,
+    operation_id="registerInputInvoice",
+)
+async def register_input_invoice(
+    purchase_order_id: int,
+    payload: InputInvoiceIn,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> InputInvoiceRead:
+    """補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。"""
+    svc = PurchasingService(session)
+    try:
+        receipt = await svc.register_input_invoice(
+            user.store_id, purchase_order_id, invoice=payload
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
+        ) from exc
+    await session.commit()
+    return InputInvoiceRead.model_validate(receipt)

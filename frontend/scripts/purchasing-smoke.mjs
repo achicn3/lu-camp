@@ -38,7 +38,8 @@ try {
   await page.waitForSelector("h1:has-text('採購 / 補貨')");
   ok("採購/補貨頁載入", true);
 
-  // 3) 低庫存提醒：列出 seed 低庫存品（現量/補貨點）
+  // 3) 低庫存提醒：列出 seed 低庫存品（現量/補貨點）——工具區為收合 details，先展開
+  await page.click(".pur-tools summary");
   await page.waitForSelector(".pur-lowstock .pur-lowstock-list li");
   const lowText = (await page.locator(".pur-lowstock").innerText()) ?? "";
   const hasGas = lowText.includes("高山瓦斯罐 230g");
@@ -59,8 +60,12 @@ try {
 
   // 5) 採購單分頁：選供應商、搜尋數量品加入、填單價 → 建立採購單（已下單 + 收貨入庫鈕）
   await page.click('.settle-tabs button:has-text("採購單")');
+  await page.click(".pur-tools summary"); // 工具區收合，重新展開
   await page.waitForSelector(".pur-create");
-  await page.selectOption('select[aria-label="供應商"]', { label: supplierName });
+  const supplierCombo = page.getByLabel("供應商");
+  await supplierCombo.click();
+  await supplierCombo.fill(supplierName);
+  await page.click(`.combo-option:has-text("${supplierName}")`);
   await page.fill('input[aria-label="搜尋數量品"]', "瓦斯");
   // 從搜尋結果加入「高山瓦斯罐」這筆數量品
   await page.waitForSelector('.pur-search-results li button:has-text("高山瓦斯罐")');
@@ -97,22 +102,20 @@ try {
 
   await newRow.locator('button:has-text("收貨入庫")').click();
   await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]');
+  // 進項發票（裁示 2026-07-11）：收貨時登錄——號碼/日期/含稅金額
+  const invoiceNo = `AB${Date.now().toString().slice(-8)}`; // 每次唯一（同號同日不可重複入帳）
+  await page.fill('input[aria-label="發票號碼"]', invoiceNo);
+  await page.fill('input[aria-label="發票日期"]', "2026-07-11");
+  await page.fill('input[aria-label="發票含稅金額"]', "1050");
+  ok("收貨對話框含進項發票欄位", true);
   ok("收貨二次確認對話框跳出", true);
   await page.screenshot({ path: `${SHOTS}/05-receive-dialog.png`, fullPage: true });
   await page.click('[role="dialog"] button:has-text("確認收貨")');
   await page.waitForSelector('[role="dialog"]', { state: "detached" });
 
-  // PO 變已收貨：同一供應商的列，狀態含「已收貨」且不再有收貨入庫鈕
-  await page.waitForFunction(
-    () =>
-      [...document.querySelectorAll(".pur-order-table tbody tr")].some(
-        (tr) =>
-          tr.textContent?.includes("已收貨") &&
-          !tr.querySelector("button"),
-      ),
-    undefined,
-    { timeout: 8000 },
-  );
+  // PO 變已收貨：預設篩「待收貨」該列會消失，切「已收貨」籤應看得到（id 倒序、首列即最新）
+  await page.click('.chip:has-text("已收貨")');
+  await page.waitForSelector('.pur-order-table tbody tr:has-text("已收貨")', { timeout: 8000 });
   ok("採購單變為已收貨", true);
 
   // 低庫存卡刷新後現量應增加（建單數量預設 1）
@@ -133,6 +136,24 @@ try {
     ok("收貨後現量增加", false, "收貨前讀不到高山瓦斯罐現量");
   }
   await page.screenshot({ path: `${SHOTS}/06-received.png`, fullPage: true });
+
+  // 詳情應顯示已登錄的進項發票（含未稅/稅額拆分：1050 → 1000/50）
+  await page
+    .locator('.pur-order-table tbody tr:has-text("已收貨")')
+    .first()
+    .locator('button:has-text("詳細")')
+    .click();
+  await page.waitForSelector('[role="dialog"][aria-label="採購單詳情"]');
+  const detailText = await page.textContent(".pur-detail");
+  ok(
+    "詳情顯示進項發票＋稅額拆分",
+    detailText.includes(invoiceNo) &&
+      detailText.includes("1,000") &&
+      detailText.includes("50"),
+    detailText.match(/進項發票[^｜]*/)?.[0] ?? "(missing)",
+  );
+  await page.screenshot({ path: `${SHOTS}/07-invoice.png`, fullPage: true });
+  await page.click('[role="dialog"] button:has-text("關閉")');
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

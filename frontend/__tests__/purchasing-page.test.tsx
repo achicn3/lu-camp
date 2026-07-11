@@ -142,6 +142,29 @@ describe("/purchasing", () => {
     expect(await screen.findByText("已收貨", { selector: "span.inv-badge" })).toBeTruthy();
   });
 
+  it("收貨對話框發票草稿不跨單殘留（取消/重開即清空）", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    // 開啟 → 打半張發票 → 取消
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    const numberInput = await screen.findByLabelText("發票號碼");
+    await user.type(numberInput, "AB12345678");
+    await user.click(screen.getByRole("button", { name: "取消" }));
+
+    // 重開 → 草稿必須清空（登錄不可覆寫，殘留誤登難以回復；Codex 第一輪）
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    const reopened = await screen.findByLabelText("發票號碼");
+    expect((reopened as HTMLInputElement).value).toBe("");
+  });
+
   it("builds a purchase order from a searched catalog product", async () => {
     loginAs("CLERK");
     let createdBody: string | null = null;
