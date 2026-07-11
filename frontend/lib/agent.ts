@@ -66,6 +66,8 @@ export interface AcquisitionReceiptPrint {
   createdAt: string; // ISO
   signaturePngBase64: string;
   storeCreditGranted?: string;
+  /** 撥入後購物金總額＝後端 AcquisitionResult.payout_credit_balance_after（帳本分錄事實，非活餘額）。 */
+  storeCreditBalanceAfter?: string;
 }
 
 /** 列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名（存證聯）。 */
@@ -80,6 +82,7 @@ export async function printAcquisitionReceipt(r: AcquisitionReceiptPrint): Promi
     created_at: r.createdAt,
     signature_png_base64: r.signaturePngBase64,
     store_credit_granted: r.storeCreditGranted ?? null,
+    store_credit_balance_after: r.storeCreditBalanceAfter ?? null,
   });
 }
 

@@ -145,6 +145,10 @@ class AcquisitionResult(BaseModel):
     payout_method: PayoutMethod
     payout_cash_amount: NTDAmount | None
     payout_credit_cash_equivalent: NTDAmount | None
+    # 撥入購物金的帳本權威事實（2026-07-11 裁示：憑證聯加印撥入後購物金總額）——
+    # 實發金額（含溢價）與本筆分錄的 balance_after；非購物金撥款為 None。
+    payout_credit_granted: NTDAmount | None
+    payout_credit_balance_after: NTDAmount | None
     item_codes: list[str]
     lot_code: str | None
 

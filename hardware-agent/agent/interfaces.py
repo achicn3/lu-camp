@@ -112,9 +112,12 @@ class AcquisitionReceiptPayload(BaseModel):
     payout_method: str  # CASH | STORE_CREDIT
     created_at: datetime
     signature_png_base64: str = Field(max_length=MAX_SIGNATURE_B64_CHARS)
-    # 撥入購物金＝簽署凍結溢價的金額（已簽快照值）。**不收活餘額**（Codex K6 第二輪）：
-    # 餘額非本筆收購的簽署事實、會隨後續交易漂移，任何呼叫端都不得把它印上憑證。
+    # 撥入購物金＝簽署凍結溢價的金額（已簽快照值）。
     store_credit_granted: str | None = None
+    # 撥入後購物金總額（2026-07-11 裁示加印）＝本筆撥款分錄燒進帳本的 balance_after
+    # （後端 AcquisitionResult 回傳、本筆交易的不可變事實）。**仍不收活餘額**（Codex K6
+    # 第二輪）：列印當下另查的餘額會隨後續交易漂移，呼叫端不得以它代入本欄。
+    store_credit_balance_after: str | None = None
 
 
 class StoreHeader(BaseModel):

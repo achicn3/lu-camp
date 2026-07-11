@@ -101,6 +101,10 @@ async def test_full_store_credit_payout(
     assert body["payout_cash_amount"] == "0"
     assert body["payout_credit_cash_equivalent"] == "1000"
     assert body["total_cash_paid"] == "0"
+    # 撥款回應帶帳本權威事實（2026-07-11 裁示：憑證聯要印撥入後購物金總額）：
+    # 實發（含溢價）與本筆分錄的 balance_after。
+    assert body["payout_credit_granted"] == "1100"
+    assert body["payout_credit_balance_after"] == "1100"
     # 帳本入帳 1100（1000 × 1.10）
     balance = await StoreCreditService(db_session).get_balance(store_id, seller_id)
     assert balance == Decimal(1100)
@@ -122,6 +126,8 @@ async def test_split_payout(client: httpx.AsyncClient, db_session: AsyncSession)
     assert body["payout_cash_amount"] == "400"
     assert body["payout_credit_cash_equivalent"] == "600"
     assert body["total_cash_paid"] == "400"
+    assert body["payout_credit_granted"] == "660"
+    assert body["payout_credit_balance_after"] == "660"
     balance = await StoreCreditService(db_session).get_balance(store_id, seller_id)
     assert balance == Decimal(660)
     amount = await db_session.scalar(select(func.sum(CashMovement.amount)))
@@ -138,7 +144,28 @@ async def test_cash_payout_unchanged(client: httpx.AsyncClient, db_session: Asyn
     body = resp.json()
     assert body["payout_method"] == "CASH"
     assert body["total_cash_paid"] == "1000"
+    assert body["payout_credit_granted"] is None
+    assert body["payout_credit_balance_after"] is None
     assert await StoreCreditService(db_session).get_balance(store_id, seller_id) == Decimal(0)
+
+
+async def test_balance_after_accumulates_prior_credit(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已有餘額再收購入帳：balance_after ＝ 既有餘額 ＋ 本筆實發（帳本分錄值，非另查活餘額）。"""
+    token, store_id, seller_id = await _seed(db_session, open_drawer=False)
+    for _ in range(2):
+        resp = await client.post(
+            "/api/v1/acquisitions",
+            json=_buyout_payload(seller_id, payout_method="STORE_CREDIT"),
+            headers=_auth(token),
+        )
+        assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["payout_credit_granted"] == "1100"
+    assert body["payout_credit_balance_after"] == "2200"  # 1100（前筆）+ 1100（本筆）
+    balance = await StoreCreditService(db_session).get_balance(store_id, seller_id)
+    assert balance == Decimal(2200)
 
 
 async def test_store_credit_requires_member(

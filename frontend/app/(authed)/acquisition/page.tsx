@@ -542,6 +542,8 @@ export default function AcquisitionPage() {
     type: AcquisitionType;
     codes: string[];
     lot: string | null;
+    /** 撥入後購物金總額（後端帳本分錄 balance_after；非購物金撥款為 null）。 */
+    creditBalanceAfter: string | null;
   } | null>(null);
   // 作廢剛建立的這筆（限管理者）：開啟確認對話框／顯示作廢結果。
   const [voidTarget, setVoidTarget] = useState<number | null>(null);
@@ -721,6 +723,7 @@ export default function AcquisitionPage() {
         type: data.type,
         codes: data.item_codes,
         lot: data.lot_code,
+        creditBalanceAfter: data.payout_credit_balance_after,
       });
       // 憑證聯快照（K6）：綁定簽署完成的收購才可列印憑證聯；值取自已簽切結內容
       // （後端於綁定時逐欄驗證過）。在清除 signTaskId/seller 前擷取。
@@ -767,8 +770,9 @@ export default function AcquisitionPage() {
   const printReceipt = useMutation({
     mutationFn: async () => {
       if (receiptSnap == null || result == null) throw new Error("無可列印的憑證資料");
-      // 憑證欄位全取自已簽快照（不可變）：時間＝簽署時間、撥入＝簽署凍結溢價；不印列印
-      // 當下的活餘額（會隨後續交易漂移、非本筆證據）。簽名 PNG 為已簽任務原圖。
+      // 憑證欄位取自已簽快照（不可變）：時間＝簽署時間、撥入＝簽署凍結溢價；購物金總額
+      // 取後端收購回應的帳本分錄 balance_after（本筆事實），不印列印當下另查的活餘額
+      // （會隨後續交易漂移、非本筆證據）。簽名 PNG 為已簽任務原圖。
       const signaturePngBase64 = await fetchSignaturePngBase64(receiptSnap.taskId);
       await printAcquisitionReceipt({
         storeId: decodeSession()?.storeId ?? 1,
@@ -780,6 +784,7 @@ export default function AcquisitionPage() {
         createdAt: receiptSnap.signedAt,
         signaturePngBase64,
         storeCreditGranted: receiptSnap.creditGranted ?? undefined,
+        storeCreditBalanceAfter: result.creditBalanceAfter ?? undefined,
       });
     },
     onSuccess: () => setReceiptNote("憑證聯已送出列印"),

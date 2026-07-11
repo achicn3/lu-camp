@@ -405,6 +405,17 @@
             ],
             "title": "Payout Cash Amount"
           },
+          "payout_credit_balance_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Credit Balance After"
+          },
           "payout_credit_cash_equivalent": {
             "anyOf": [
               {
@@ -415,6 +426,17 @@
               }
             ],
             "title": "Payout Credit Cash Equivalent"
+          },
+          "payout_credit_granted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Credit Granted"
           },
           "payout_method": {
             "$ref": "#/components/schemas/PayoutMethod"
@@ -442,6 +464,8 @@
           "payout_method",
           "payout_cash_amount",
           "payout_credit_cash_equivalent",
+          "payout_credit_granted",
+          "payout_credit_balance_after",
           "item_codes",
           "lot_code"
         ],

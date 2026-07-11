@@ -253,6 +253,8 @@ class EscposReceiptPrinter:
         out += _line(f"撥款方式：{payout_label}")
         if receipt.store_credit_granted is not None:
             out += _line(f"撥入購物金 +{receipt.store_credit_granted}")
+        if receipt.store_credit_balance_after is not None:
+            out += _line(f"購物金總額 {receipt.store_credit_balance_after}")
         out += _line(_SEP)
         out += _line("賣方簽名：")
         out += _ALIGN_CENTER

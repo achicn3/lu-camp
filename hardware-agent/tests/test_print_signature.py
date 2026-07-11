@@ -88,6 +88,7 @@ def _acq_receipt(**overrides: object) -> AcquisitionReceiptPayload:
         "created_at": "2026-07-10T10:30:00Z",
         "signature_png_base64": _signature_b64(),
         "store_credit_granted": "1320",
+        "store_credit_balance_after": "2520",
     }
     base.update(overrides)
     return AcquisitionReceiptPayload.model_validate(base)
@@ -135,22 +136,27 @@ def test_acquisition_receipt_layout() -> None:
         "收購總額 1200",
         "撥款方式：購物金",
         "撥入購物金 +1320",
+        "購物金總額 2520",
         "賣方簽名：",
     ):
         assert _big5(text) in data, text
     assert _RASTER_PREFIX in data
     assert _big5("路營二手") in data  # 抬頭
-    # 活餘額非簽署事實，憑證聯不得出現（Codex K6 第二輪）。
+    # 「活餘額」（列印當下另查的餘額）仍不可入憑證（Codex K6 第二輪）；「購物金總額」
+    # 是本筆撥款分錄燒進帳本的 balance_after（本筆交易事實，2026-07-11 裁示要求加印）。
     assert _big5("購物金餘額") not in data
 
 
 def test_acquisition_receipt_cash_payout_omits_credit_lines() -> None:
     buf = FakePrinter()
-    receipt = _acq_receipt(payout_method="CASH", store_credit_granted=None)
+    receipt = _acq_receipt(
+        payout_method="CASH", store_credit_granted=None, store_credit_balance_after=None
+    )
     EscposReceiptPrinter(buf).print_acquisition(receipt, _HEADER)
     data = bytes(buf.buffer)
     assert _big5("撥款方式：現金") in data
     assert _big5("撥入購物金") not in data
+    assert _big5("購物金總額") not in data
 
 
 class _FakeClient:

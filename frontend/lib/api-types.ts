@@ -1829,8 +1829,12 @@ export interface components {
             lot_code: string | null;
             /** Payout Cash Amount */
             payout_cash_amount: string | null;
+            /** Payout Credit Balance After */
+            payout_credit_balance_after: string | null;
             /** Payout Credit Cash Equivalent */
             payout_credit_cash_equivalent: string | null;
+            /** Payout Credit Granted */
+            payout_credit_granted: string | null;
             payout_method: components["schemas"]["PayoutMethod"];
             /** Total Cash Paid */
             total_cash_paid: string | null;

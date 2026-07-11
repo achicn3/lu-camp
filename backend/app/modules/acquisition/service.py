@@ -38,6 +38,7 @@ from app.shared.enums import (
     OwnershipType,
     PayoutMethod,
     StockReason,
+    StoreCreditEntryType,
     StoreCreditSourceType,
 )
 from app.shared.exceptions import (
@@ -129,6 +130,19 @@ class AcquisitionService:
     ) -> AcquisitionResult:
         """自既有收購單重建對外結果（識別碼補齊）——供冪等/切結重放共用。"""
         item_codes, lot_code = await self._repo.get_codes(store_id, existing.id)
+        # 重放也要帶撥入購物金的帳本事實（與首發回應同值）：自帳本以來源反查本筆 CREDIT
+        # 分錄（不可變），非另查活餘額。
+        credit_granted: Decimal | None = None
+        credit_balance_after: Decimal | None = None
+        entry = await self._storecredit.find_entry_by_source(
+            store_id,
+            StoreCreditSourceType.ACQUISITION,
+            existing.id,
+            StoreCreditEntryType.CREDIT,
+        )
+        if entry is not None:
+            credit_granted = Decimal(entry.signed_amount)
+            credit_balance_after = Decimal(entry.balance_after)
         return AcquisitionResult(
             acquisition_id=existing.id,
             type=existing.type,
@@ -137,6 +151,8 @@ class AcquisitionService:
             payout_method=existing.payout_method,
             payout_cash_amount=existing.payout_cash_amount,
             payout_credit_cash_equivalent=existing.payout_credit_cash_equivalent,
+            payout_credit_granted=credit_granted,
+            payout_credit_balance_after=credit_balance_after,
             item_codes=item_codes,
             lot_code=lot_code,
         )
@@ -519,6 +535,8 @@ class AcquisitionService:
             )
             lot_code = None
 
+        credit_granted: Decimal | None = None
+        credit_balance_after: Decimal | None = None
         if pays_out:
             total_payout = Decimal(round_ntd(total_cash))
             cash_part, credit_part = self._split_payout(data, total_payout)
@@ -544,7 +562,7 @@ class AcquisitionService:
                         (await self._settings.get_effective_settings(store_id)).premium_rate
                     )
                 )
-                await self._storecredit.credit(
+                entry = await self._storecredit.credit(
                     store_id,
                     contact.id,
                     cash_equivalent=credit_part,
@@ -553,6 +571,10 @@ class AcquisitionService:
                     source_id=acquisition.id,
                     created_by=clerk_user_id,
                 )
+                # 憑證聯要印的帳本事實（2026-07-11 裁示）：實發（含溢價）與本筆分錄的
+                # balance_after——取自剛寫入的不可變分錄，非另查會漂移的活餘額。
+                credit_granted = Decimal(entry.signed_amount)
+                credit_balance_after = Decimal(entry.balance_after)
             await self._session.flush()
 
         # 收購入庫稽核（溯源）：只記參照與彙總，絕不含 national_id 等 PII 明文（§5）。
@@ -584,6 +606,8 @@ class AcquisitionService:
             payout_method=acquisition.payout_method,
             payout_cash_amount=acquisition.payout_cash_amount,
             payout_credit_cash_equivalent=acquisition.payout_credit_cash_equivalent,
+            payout_credit_granted=credit_granted,
+            payout_credit_balance_after=credit_balance_after,
             item_codes=item_codes,
             lot_code=lot_code,
         )
