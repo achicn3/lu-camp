@@ -181,6 +181,17 @@ def test_cash_receipt_rejects_credit_facts() -> None:
         _acq_receipt(payout_method="CASH", store_credit_granted=None)
 
 
+def test_unknown_payout_method_rejected() -> None:
+    """SPLIT/未知撥款值 → 拒收（Codex 第二輪：不得默默印成現金憑證）。"""
+    for method in ("SPLIT", "cash", "FOO"):
+        with pytest.raises(ValidationError):
+            _acq_receipt(
+                payout_method=method, store_credit_granted=None, store_credit_balance_after=None
+            )
+        with pytest.raises(ValidationError):
+            _acq_receipt(payout_method=method)
+
+
 class _FakeClient:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail

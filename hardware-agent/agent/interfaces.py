@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -109,7 +109,9 @@ class AcquisitionReceiptPayload(BaseModel):
     seller_name: str
     items: list[AcquisitionReceiptItem]
     total: str
-    payout_method: str  # CASH | STORE_CREDIT
+    # 僅收手持端可選的兩種撥款（Codex 第二輪）：其他值（SPLIT/未知）拒收，不得
+    # 被「非購物金」分支默默印成現金憑證。
+    payout_method: Literal["CASH", "STORE_CREDIT"]
     created_at: datetime
     signature_png_base64: str = Field(max_length=MAX_SIGNATURE_B64_CHARS)
     # 撥入購物金實發額與撥入後購物金總額（2026-07-11 裁示加印）＝後端撥款分錄燒進帳本的
