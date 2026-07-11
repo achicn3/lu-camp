@@ -197,6 +197,8 @@ _INVOICE_NO_RE = re.compile(r"^[A-Z]{2}\d{8}$")
 _RANDOM_RE = re.compile(r"^\d{4}$")
 # 開立時間戳合理下界（2020-09）：擋 JSON bool/epoch 附近的胡說值被記成開立時間。
 _MIN_PLAUSIBLE_UNIX = 1_600_000_000
+# 官方文件明載的「查無資料」錯誤碼（invoice_query/invoice_file/invoice_print 通用）。
+_QUERY_NOT_FOUND_CODE = 71
 
 
 @dataclass(frozen=True)
@@ -245,15 +247,20 @@ def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
     """invoice_query 回應三態（Codex 第三輪）：
 
     - 成功（code=0 且欄位齊備）→ 開立欄位（條碼/QR 查詢不回傳 → None，證明聯不可印）。
-    - **明確查無**（code 為嚴格整數且非 0——平台有回答）→ None，呼叫端才可重送。
-    - 其餘（code 缺/bool/型別不明、或 code=0 但欄位缺漏）→ AmegoTransportError：
-      結果不明**不得視為查無而重送**，維持待對帳。
+    - **明確查無**（code=71「查無資料」——官方文件明載的查無碼）→ None，呼叫端才可重送。
+    - 其餘（code 缺/bool/型別不明、code=0 但欄位缺漏、或**其他錯誤碼**——授權失敗/
+      限流/超過查詢期限等都不證明平台沒開過）→ AmegoTransportError：
+      結果不明**不得視為查無而重送**，維持待對帳（Codex 第六輪）。
     """
     code = resp.get("code")
     if type(code) is not int:  # bool 是 int 子類，JSON true/false 不得矇混
         raise AmegoTransportError("invoice_query 回應 code 型別不明（結果不可信，待對帳）")
+    if code == _QUERY_NOT_FOUND_CODE:
+        return None  # 平台明確回答「查無資料」
     if code != 0:
-        return None  # 平台明確回答查無/錯誤碼
+        raise AmegoTransportError(
+            f"invoice_query 回錯誤碼 {code}（非查無，不得據以重送；待對帳）"
+        )
     data = resp.get("data")
     if not isinstance(data, dict):
         raise AmegoTransportError("invoice_query 回 code=0 但缺 data（結果不可信，待對帳）")
@@ -319,8 +326,10 @@ class AmegoClient:
         base_url: str,
         now: Callable[[], datetime] | None = None,
     ) -> None:
-        if not seller_tax_id.strip():
-            raise AmegoNotConfigured("店家統編未設定（stores.tax_id），不可呼叫 Amego API")
+        if not re.fullmatch(r"\d{8}", seller_tax_id.strip() or ""):
+            raise AmegoNotConfigured(
+                "店家統編未設定或格式不符（stores.tax_id 須為 8 碼數字），不可呼叫 Amego API"
+            )
         if not app_key.strip():
             raise AmegoNotConfigured("AMEGO_APP_KEY 未設定（環境變數），不可呼叫 Amego API")
         self._seller_tax_id = seller_tax_id

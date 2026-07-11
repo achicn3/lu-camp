@@ -77,7 +77,7 @@ def _client(transport: _ScriptedTransport) -> AmegoClient:
     )
 
 
-_QUERY_NOT_FOUND = {"code": 9001, "msg": "查無資料"}
+_QUERY_NOT_FOUND = {"code": 71, "msg": "查無資料"}  # 官方明載的查無碼
 
 
 def _issue_ok_transport() -> _ScriptedTransport:
@@ -271,7 +271,7 @@ async def test_claimed_pending_query_not_found_resends_f0401(db_session: AsyncSe
     with pytest.raises(AmegoTransportError):
         await svc.send_via_amego(store_id, queue_id, client=_client(transport))
 
-    transport2 = _ScriptedTransport({"code": 9001, "msg": "查無資料"}, dict(_F0401_OK))
+    transport2 = _ScriptedTransport(dict(_QUERY_NOT_FOUND), dict(_F0401_OK))
     item = await svc.send_via_amego(store_id, queue_id, client=_client(transport2))
     assert transport2.calls[0][0].endswith("/json/invoice_query")
     assert transport2.calls[1][0].endswith("/json/f0401")
@@ -450,6 +450,33 @@ async def test_stale_success_after_concurrent_failure_does_not_corrupt(
     assert item is not None
     await db_session.refresh(item)
     assert item.status is UploadStatus.FAILED  # 競態勝者狀態不被覆寫
+
+
+async def test_query_error_code_blocks_resend(db_session: AsyncSession) -> None:
+    """已認領後對帳若回**非查無**錯誤碼（51 超過期限/授權失敗等）→ 結果不明，
+    不得重送 f0401（Codex 第六輪）；佇列維持已認領 PENDING。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+
+    transport = _ScriptedTransport(
+        dict(_QUERY_NOT_FOUND), AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout")
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(transport))
+
+    # 對帳回 51（超過查詢期限）→ 不重送（transport 只給一個回應；若誤送 f0401 會炸 pop）
+    blocked = _ScriptedTransport({"code": 51, "msg": "該發票超過查詢期限"})
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(blocked))
+    assert len(blocked.calls) == 1
+    assert blocked.calls[0][0].endswith("/json/invoice_query")
+    item = await db_session.get(EInvoiceUploadQueue, queue_id)
+    assert item is not None
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.PENDING
+    assert item.xml_path is not None
 
 
 async def test_claimed_resend_uses_frozen_payload(db_session: AsyncSession) -> None:

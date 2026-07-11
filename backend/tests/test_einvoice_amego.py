@@ -205,7 +205,7 @@ def test_parse_query_three_states() -> None:
     }
     result = parse_query_issued(found)
     assert result is not None and result.barcode_text is None  # 查詢不回條碼內容
-    assert parse_query_issued({"code": 9001, "msg": "查無資料"}) is None
+    assert parse_query_issued({"code": 71, "msg": "查無資料"}) is None  # 官方查無碼
     for ambiguous in (
         {"msg": "??"},
         {"code": "0", "msg": ""},
@@ -213,6 +213,8 @@ def test_parse_query_three_states() -> None:
         {"code": False, "msg": ""},
         {"code": 0, "msg": ""},  # code=0 卻缺 data
         {"code": 0, "data": {"invoice_number": "bad"}},
+        {"code": 51, "msg": "該發票超過查詢期限"},  # 非查無錯誤碼：不得當查無（Codex 第六輪）
+        {"code": 9001, "msg": "簽章錯誤"},
     ):
         with pytest.raises(AmegoTransportError):
             parse_query_issued(ambiguous)

@@ -4,6 +4,7 @@ GET 端的有效值：若該店尚未建列，回傳以 defaults 組成的「暫
 PATCH 端：首次更新才建列（get-or-create），套用有帶入的欄位並寫稽核（config 變更可追溯）。
 """
 
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -97,9 +98,10 @@ class StoreSettingsService:
                     "電子發票尚未可啟用：AMEGO_APP_KEY 環境變數未設定（docs/24；金鑰不入 repo）"
                 )
             store = await StoreService(self._session).get_receipt_header(store_id)
-            if not (store.tax_id or "").strip():
+            if not re.fullmatch(r"\d{8}", (store.tax_id or "").strip()):
                 raise EInvoiceActivationNotReady(
-                    "電子發票尚未可啟用：店家統編未設定（stores.tax_id 為 Amego 賣方識別）"
+                    "電子發票尚未可啟用：店家統編未設定或格式不符"
+                    "（stores.tax_id 須為 8 碼數字，為 Amego 賣方識別）"
                 )
         reason = changes.pop("premium_change_reason", None)  # 非設定欄，僅供 history 留痕
         old_premium = settings.premium_rate

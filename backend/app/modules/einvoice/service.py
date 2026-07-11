@@ -615,6 +615,15 @@ class EInvoiceService:
         from app.modules.sales.service import SalesService  # 函式內 import 破循環
 
         await SalesService(self._session).lock_sale_row(store_id, sale_id)
+        # 鎖後刷新（Codex 第六輪）：等鎖期間另一請求可能已完成開立（POS 雙擊/重試）——
+        # 過期的 PENDING 會誤判「無可上送佇列列」丟 404，或回無字軌的 stale 發票。
+        await self._session.refresh(invoice)
+        # refresh 會改動 status，重新讀一次（也讓 mypy 解除先前的型別窄化）。
+        locked_status: InvoiceStatus = invoice.status
+        if locked_status is InvoiceStatus.ISSUED:
+            return invoice  # 並發贏家已開立 → 冪等回原發票（取號印證明聯）
+        if locked_status is not InvoiceStatus.PENDING:
+            raise EInvoiceQueueNotDroppable(f"發票狀態 {locked_status.value}，不可開立")
         issue_item = next(
             (
                 i
@@ -635,6 +644,7 @@ class EInvoiceService:
             )
         refreshed = await self._repo.get_invoice(store_id, invoice.id)
         assert refreshed is not None
+        await self._session.refresh(refreshed)  # send 自管 commit，identity map 需刷新
         return refreshed
 
     async def _build_amego_payload(self, store_id: int, item: EInvoiceUploadQueue) -> object:

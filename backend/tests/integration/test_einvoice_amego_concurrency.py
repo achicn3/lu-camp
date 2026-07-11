@@ -55,7 +55,7 @@ class _SlowTransport:
     async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
         if url.endswith("/json/invoice_query"):
             await asyncio.sleep(0.4)
-            return {"code": 9001, "msg": "查無資料"}
+            return {"code": 71, "msg": "查無資料"}
         return dict(_F0401_OK)
 
 
@@ -171,7 +171,7 @@ class _PlainTransport:
 
     async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
         if url.endswith("/json/invoice_query"):
-            return {"code": 9001, "msg": "查無資料"}
+            return {"code": 71, "msg": "查無資料"}
         return dict(_F0401_OK)
 
 
