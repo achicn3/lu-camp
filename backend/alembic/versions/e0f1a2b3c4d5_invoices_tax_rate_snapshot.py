@@ -1,10 +1,15 @@
 """invoices：結帳當下的稅率快照（F0401 金額欄位以快照計，不用活 settings）
 
-docs/24（Codex 第九/十一輪）：B2B 分稅若在上送時讀活 settings.tax_rate，結帳後改稅率會讓
-送出的 F0401 與本地帳（invoice.net/tax）不一致。稅率隨發票落地凍結；**既有列自其
-net/tax 推導回填**（法定稅率皆整數百分比 → tax/net 取 2 位小數；tax=0 → 0），不得一刀切
-5% 蓋掉非 5% 的歷史發票。回填後 fail-fast 驗證：快照必須能重現原拆分
-（ROUND(total/(1+rate)) = net），否則整個 migration 失敗、需人工修正。
+docs/24（Codex 第九/十一〜十四輪）：B2B 分稅若在上送時讀活 settings.tax_rate，結帳後改
+稅率會讓送出的 F0401 與本地帳（invoice.net/tax）不一致。稅率隨發票落地凍結；既有列
+以**允許稅率比對**回填，最終優先序（歧義裁決）：
+1. 5% 能重現拆分 → 0.05——**含 tax=0 的曖昧小額列**（如 10/10/0：5% 應稅的稅捨為 0
+   與真零稅同形，金額無法區分；本店 settings 歷史僅用過 5%，判歷史唯一稅率）。
+2. tax=0 且 net=total 且 5% **不可**重現（如 11/11/0）→ 無歧義零稅 → 0。
+3. 由 tax/net 推導的候選率能重現拆分（如 1100/1000/100 → 0.10）→ 候選率。
+4. 皆不合 → 留預設，由 VERIFY fail-fast 擋下待人工。
+回填後 fail-fast 驗證：快照必須能重現原拆分（ROUND(total/(1+rate)) = net）且
+tax>0 ⇒ rate≠0，否則整個 migration 失敗、需人工修正。
 
 Revision ID: e0f1a2b3c4d5
 Revises: d9e0f1a2b3c4
