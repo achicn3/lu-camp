@@ -5,7 +5,6 @@ description = "POS 硬體代理（localhost）：收據/證明聯/條碼標籤/�
 requires-python = ">=3.12"
 dependencies = [
     "brother-ql>=0.9.4",
-    "cryptography>=48.0.1",
     "fastapi>=0.136.3",
     "httpx>=0.28.1",
     "pydantic>=2.13.4",

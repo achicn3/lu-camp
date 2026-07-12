@@ -12,8 +12,7 @@ import unicodedata
 from datetime import UTC
 from zoneinfo import ZoneInfo
 
-from agent.config import MissingDeviceConfigError
-from agent.drivers.einvoice_format import barcode_text, qr_pair_text, roc_period_label
+from agent.drivers.einvoice_format import roc_period_label
 from agent.drivers.escpos_raster import (
     PRINT_WIDTH_DOTS,
     code39_rows,
@@ -188,13 +187,10 @@ class EscposReceiptPrinter:
 
     Args:
         writer: 位元組輸出端（實機為 EPSON 網路連線；測試為 byte buffer）。
-        einvoice_aes_key: 電子發票 QR 加密驗證資訊之 AES 金鑰（hex，環境變數
-            `AGENT_EINVOICE_AES_KEY` 提供）；未設時列印證明聯即報設定缺漏。
     """
 
-    def __init__(self, writer: SupportsWrite, *, einvoice_aes_key: str | None = None) -> None:
+    def __init__(self, writer: SupportsWrite) -> None:
         self._writer = writer
-        self._einvoice_aes_key = einvoice_aes_key
 
     def _emit_doc(self, sale: SalePayload, header: StoreHeader, *, title: str) -> None:
         out = bytearray()
@@ -271,19 +267,10 @@ class EscposReceiptPrinter:
         順序：營業人識別標章 → 「電子發票證明聯」 → 年期別 → 字軌號碼 →
         交易日期時間 → 隨機碼/總計 → 賣方（買方）統編 → 一維條碼 → 左右二維條碼。
         """
-        # 平台內容優先（docs/24）：Amego 回傳的條碼/QR 內容字串直接印（payload 已驗三欄
-        # 齊備），無需本地 AES；未帶平台內容才走本地推算（需 AES 金鑰）。
-        if invoice.qrcode_left_content is not None and invoice.qrcode_right_content is not None:
-            left_qr, right_qr = invoice.qrcode_left_content, invoice.qrcode_right_content
-            barcode = invoice.barcode_content or ""
-        else:
-            if self._einvoice_aes_key is None:
-                raise MissingDeviceConfigError(
-                    "環境變數 AGENT_EINVOICE_AES_KEY 未設定；電子發票 QR 加密驗證資訊"
-                    "需要 AES 金鑰（hex），請於 env/.env 提供（金鑰不入 repo）。"
-                )
-            left_qr, right_qr = qr_pair_text(invoice, self._einvoice_aes_key)
-            barcode = barcode_text(invoice)
+        # 條碼/QR 內容**一律以 Amego 回傳為準**（docs/24；Codex 第十八輪）：payload 三欄
+        # 必填，無本地 AES 後備——半套/自算內容不得被印成證明聯。
+        left_qr, right_qr = invoice.qrcode_left_content, invoice.qrcode_right_content
+        barcode = invoice.barcode_content
         number = invoice.invoice_number
         out = bytearray()
         out += _INIT

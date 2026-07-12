@@ -113,27 +113,6 @@ def label_font_path_from_env(env: Mapping[str, str] | None = None) -> str:
     return str(_BUNDLED_LABEL_FONT)
 
 
-def einvoice_aes_key_from_env(env: Mapping[str, str] | None = None) -> str | None:
-    """讀電子發票 QR 加密驗證之 AES 金鑰（`AGENT_EINVOICE_AES_KEY`，32 位 hex）。
-
-    選填：未設回 `None`（列印證明聯時才會要求）；有設但非 32 位 hex（AES-128 金鑰
-    16 bytes）即報設定錯誤，避免帶錯金鑰印出無法驗證的發票。金鑰不入 repo。
-    """
-    resolved = os.environ if env is None else env
-    key = resolved.get("AGENT_EINVOICE_AES_KEY", "").strip()
-    if not key:
-        return None
-    try:
-        valid = len(bytes.fromhex(key)) == 16
-    except ValueError:
-        valid = False
-    if not valid:
-        raise MissingDeviceConfigError(
-            "AGENT_EINVOICE_AES_KEY 須為 32 位十六進位字串（AES-128 金鑰 16 bytes）。"
-        )
-    return key
-
-
 def epson_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndpoint:
     """只讀 EPSON 連線端點（測 A：只接 EPSON 收據機+錢櫃，**不要求** Brother host）。
 

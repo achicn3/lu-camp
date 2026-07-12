@@ -10,7 +10,6 @@ from dataclasses import dataclass
 
 from agent.config import (
     brother_endpoint_from_env,
-    einvoice_aes_key_from_env,
     epson_endpoint_from_env,
     label_font_path_from_env,
 )
@@ -73,7 +72,7 @@ def real_epson_devices_from_env() -> AgentDevices:
     )
     return AgentDevices(
         label_printer=label_printer,
-        receipt_printer=EscposReceiptPrinter(writer, einvoice_aes_key=einvoice_aes_key_from_env()),
+        receipt_printer=EscposReceiptPrinter(writer),
         cash_drawer=RealCashDrawer(writer),
         status_provider=RealStatusProvider(epson=epson, brother=brother),
     )

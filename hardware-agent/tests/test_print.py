@@ -13,7 +13,6 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from agent.config import MissingDeviceConfigError
 from agent.devices import AgentDevices, default_fake_devices
 from agent.drivers.escpos_receipt import (
     _ITEM_HEADER,
@@ -137,8 +136,10 @@ _INVOICE = InvoicePayload(
             line_type="CATALOG", description="帳篷", qty=1, unit_price="1000", line_total="1000"
         )
     ],
+    barcode_content="11506AB123456789999",
+    qrcode_left_content="AB123456781150610" + "9" * 60,
+    qrcode_right_content="**帳篷:1:1000",
 )
-_TEST_AES_KEY = "0123456789abcdef0123456789abcdef"
 
 
 async def test_print_einvoice_prints_and_returns_ok() -> None:
@@ -158,17 +159,6 @@ async def test_print_einvoice_rejects_invalid_payload() -> None:
     assert resp.status_code == 422
     assert printer.einvoices == []
 
-
-async def test_print_einvoice_without_aes_key_returns_503() -> None:
-    """真機驅動未設 AGENT_EINVOICE_AES_KEY → 503 設定缺漏，不印、不偽裝成功。"""
-    writer = FakePrinter()
-    printer = EscposReceiptPrinter(writer)  # 未注入金鑰
-    resp = await _post(
-        _app_with(printer, _FakeClient()), "/print/einvoice", _INVOICE.model_dump(mode="json")
-    )
-    assert resp.status_code == 503
-    assert resp.json()["error"] == "MissingDeviceConfigError"
-    assert bytes(writer.buffer) == b""  # 完全沒送位元組到印表機
 
 
 async def test_receipt_header_unavailable_returns_503() -> None:
@@ -435,7 +425,7 @@ def test_escpos_receipt_no_discount_omits_discount_rows() -> None:
 def test_escpos_einvoice_renders_official_layout() -> None:
     """證明聯版面（附件一格式一）：標題/年期別/字軌/日期/隨機碼/總計/賣方 + 兩塊點陣。"""
     writer = FakePrinter()
-    EscposReceiptPrinter(writer, einvoice_aes_key=_TEST_AES_KEY).print_einvoice(_INVOICE)
+    EscposReceiptPrinter(writer).print_einvoice(_INVOICE)
     buf = bytes(writer.buffer)
     assert b"\x1c&" in buf  # 中文（Big5）模式
     assert "路營二手".encode("big5") in buf  # 1. 營業人識別標章
@@ -463,40 +453,23 @@ def test_escpos_einvoice_renders_official_layout() -> None:
 def test_escpos_einvoice_b2b_prints_buyer() -> None:
     writer = FakePrinter()
     invoice = _INVOICE.model_copy(update={"buyer_tax_id": "87654321"})
-    EscposReceiptPrinter(writer, einvoice_aes_key=_TEST_AES_KEY).print_einvoice(invoice)
+    EscposReceiptPrinter(writer).print_einvoice(invoice)
     buf = bytes(writer.buffer)
     assert "買方".encode("big5") + b"87654321" in buf
 
 
-def test_escpos_einvoice_without_key_raises_and_writes_nothing() -> None:
-    writer = FakePrinter()
-    with pytest.raises(MissingDeviceConfigError):
-        EscposReceiptPrinter(writer).print_einvoice(_INVOICE)
-    assert bytes(writer.buffer) == b""
 
 
-_AMEGO_CONTENT = {
-    "barcode_content": "11506AB123456789999",
-    "qrcode_left_content": "AB123456781150610" + "9" * 60,
-    "qrcode_right_content": "**帳篷:1:1000",
-}
-
-
-def test_escpos_einvoice_with_platform_content_needs_no_aes_key() -> None:
-    """Amego 回傳條碼/QR 內容（docs/24）→ 直接印平台內容，無需本地 AES 金鑰。"""
-    writer = FakePrinter()
-    invoice = _INVOICE.model_copy(update=_AMEGO_CONTENT)
-    EscposReceiptPrinter(writer).print_einvoice(invoice)  # 未注入金鑰
-    buf = bytes(writer.buffer)
-    assert "電子發票證明聯".encode("big5") in buf
-    assert buf.count(b"\x1dv0\x00") == 2  # 一維條碼 + 雙 QR 兩塊點陣
-    assert b"\x1dV\x00" in buf  # 切紙
-
-
-def test_einvoice_platform_content_all_or_none() -> None:
-    """平台內容三欄須齊備（缺一即拒）：不可混本地推算與平台內容印出半套證明聯。"""
+def test_einvoice_platform_content_required() -> None:
+    """平台條碼/QR 內容三欄**必填**（Codex 第十八輪）：缺任一欄 422——無本地 AES 後備，
+    直呼端點也印不出本機自算的半套證明聯。"""
     base = _INVOICE.model_dump(mode="json")
     for missing in ("barcode_content", "qrcode_left_content", "qrcode_right_content"):
-        partial = {**_AMEGO_CONTENT, missing: None}
         with pytest.raises(ValidationError):
-            InvoicePayload.model_validate({**base, **partial})
+            InvoicePayload.model_validate({**base, missing: None})
+        stripped = dict(base)
+        del stripped[missing]
+        with pytest.raises(ValidationError):
+            InvoicePayload.model_validate(stripped)
+
+

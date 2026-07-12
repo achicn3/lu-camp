@@ -948,9 +948,11 @@ export default function PosPage() {
       setCompletedSignature(sig);
       setShowDialog(true);
       // 電子發票：結帳成立後自動開立＋（可印時）送印證明聯；失敗只提示、不影響交易。
+      // 以**後端回傳的 invoice_status** 為權威（Codex 第十八輪）：settings 查詢延遲/失敗
+      // 時前端旗標可能為 false，但後端已建 PENDING 發票——不得因此漏開立。
       setCompletedInvoice(null);
       setInvoiceNote(null);
-      if (einvoiceEnabled) {
+      if (sale.invoice_status === "PENDING_ISSUE") {
         setInvoiceNote("發票開立中…");
         issueInvoice.mutate(sale);
       }
