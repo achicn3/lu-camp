@@ -1364,10 +1364,14 @@ export default function PosPage() {
               !quoteReady ||
               scSignBlock ||
               invoiceInputBad ||
-              // fail-closed（Codex 第十九輪）：settings 未成功載入（pending/失敗）時
-              // einvoiceEnabled 不可信——若後端實際啟用，結帳會以 invoice:null 開出
-              // 預設 B2C、丟失客人的統編/載具/捐贈選擇且不可逆。先擋結帳待重試。
-              !settings.isSuccess
+              // fail-closed（Codex 第十九/二十輪）：結帳需要**新鮮的** settings——
+              // pending/失敗、掛載後重抓仍在途（isFetching）、或上次重抓失敗
+              // （failureCount>0，快取值可能過期）時 einvoiceEnabled 都不可信：若後端
+              // 實際已啟用，結帳會以 invoice:null 開出預設 B2C、不可逆丟失統編/載具/
+              // 捐贈選擇。擋結帳待設定讀取成功。
+              !settings.isSuccess ||
+              settings.isFetching ||
+              settings.failureCount > 0
             }
             onClick={() => checkout.mutate()}
           >

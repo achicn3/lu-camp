@@ -71,7 +71,7 @@ try {
     {
       type: "BUYOUT",
       contact_id: contact.data.id,
-      items: [1, 2, 3].map((n) => ({
+      items: [1, 2, 3, 4].map((n) => ({
         name: `發票測試品${n}`,
         grade: "A",
         listed_price: "500",
@@ -82,7 +82,7 @@ try {
     { "Idempotency-Key": `einv-acq-${Date.now()}` },
   );
   ok("備貨（收購三件）", acq.status === 201, `status=${acq.status}`);
-  const [item1, item2, item3] = acq.data.item_codes;
+  const [item1, item2, item3, item4] = acq.data.item_codes;
 
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
@@ -184,14 +184,26 @@ try {
   await page2.fill('input[name="password"]', "dev-test-123456");
   await page2.click('button:has-text("登入")');
   await page2.waitForURL(`${BASE}/`);
+  const salesRequests = [];
+  page2.on("request", (req) => {
+    // 只認結帳本體（排除 /sales/quote 試算）
+    if (/\/api\/v1\/sales$/.test(new URL(req.url()).pathname) && req.method() === "POST")
+      salesRequests.push(req);
+  });
   await page2.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
   await page2.waitForSelector("text=無法讀取發票設定");
-  const acqItem = acq.data.item_codes[0]; // 已售出——僅驗證鈕態，不真結帳
-  await page2.fill(".pos-scan-input", acqItem).catch(() => {});
+  // 掃**未售**品成立有效購物車（其他結帳前置全綠），唯獨 settings 失敗 → 仍不可結帳。
+  await page2.fill(".pos-scan-input", item4);
+  await page2.press(".pos-scan-input", "Enter");
+  await page2.waitForSelector("text=發票測試品4");
+  await page2.waitForTimeout(800); // 等試算完成（quote 與 settings 無關）
   ok(
-    "settings 失敗時結帳鈕停用（fail-closed）",
+    "settings 失敗＋有效購物車：結帳鈕仍停用（fail-closed）",
     await page2.locator(".pos-checkout").isDisabled(),
   );
+  await page2.locator(".pos-checkout").click({ force: true }).catch(() => {});
+  await page2.waitForTimeout(500);
+  ok("settings 失敗時零 /sales 請求", salesRequests.length === 0);
   await page2.screenshot({ path: join(SHOTS, "05-settings-failclosed.png"), fullPage: true });
   await ctx2.close();
 } catch (err) {
