@@ -38,8 +38,7 @@ try {
   await page.waitForSelector("h1:has-text('採購 / 補貨')");
   ok("採購/補貨頁載入", true);
 
-  // 3) 低庫存提醒：列出 seed 低庫存品（現量/補貨點）——工具區為收合 details，先展開
-  await page.click(".pur-tools summary");
+  // 3) 低庫存提醒：常駐置頂，列出 seed 低庫存品（現量/補貨點）
   await page.waitForSelector(".pur-lowstock .pur-lowstock-list li");
   const lowText = (await page.locator(".pur-lowstock").innerText()) ?? "";
   const hasGas = lowText.includes("高山瓦斯罐 230g");
@@ -60,7 +59,7 @@ try {
 
   // 5) 採購單分頁：選供應商、搜尋數量品加入、填單價 → 建立採購單（已下單 + 收貨入庫鈕）
   await page.click('.settle-tabs button:has-text("採購單")');
-  await page.click(".pur-tools summary"); // 工具區收合，重新展開
+  await page.click('.pur-create-toggle:has-text("建立採購單")'); // 展開建立採購單面板
   await page.waitForSelector(".pur-create");
   const supplierCombo = page.getByLabel("供應商");
   await supplierCombo.click();

@@ -1023,6 +1023,33 @@ body {
   color: var(--ink-soft);
   font-size: var(--text-sm);
 }
+/* 上架數量型商品：以折疊 details 收起，不干擾以檢視為主的數量品清單。 */
+.inv-catalog-create {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--sp-2) var(--sp-3);
+}
+.inv-catalog-create > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: revert;
+}
+.inv-catalog-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.inv-catalog-create-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--sp-3);
+}
+.inv-catalog-create-form .btn-primary {
+  align-self: flex-start;
+}
 .inv-table-wrap {
   overflow-x: auto;
 }
@@ -1565,26 +1592,14 @@ body {
   flex-direction: column;
   gap: var(--sp-4);
 }
-.pur-grid {
-  display: grid;
-  gap: var(--sp-4);
+/* 建立採購單面板：以「＋ 建立採購單」按鈕展開，收合時只佔一顆按鈕（清單為主畫面）。 */
+.pur-create-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
 }
-/* 採購單頁：建立/上架/低庫存收進可展開區，讓清單為短頁面主畫面 */
-.pur-tools {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  padding: var(--sp-2) var(--sp-3);
-}
-.pur-tools > summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--accent);
-  list-style: revert;
-}
-.pur-grid-tools {
-  margin-top: var(--sp-3);
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+.pur-create-toggle {
+  align-self: flex-start;
 }
 .pur-row-actions {
   display: flex;
@@ -1660,7 +1675,7 @@ body {
 }
 .pur-lowstock-list li {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
@@ -1669,6 +1684,12 @@ body {
   margin-left: auto;
   color: var(--warn);
   font-variant-numeric: tabular-nums;
+}
+.pur-reorder-btn {
+  flex: 0 0 auto;
+  min-height: auto;
+  padding: var(--sp-1) var(--sp-3);
+  white-space: nowrap;
 }
 .pur-search-results {
   border: 1px solid var(--border);
@@ -1694,6 +1715,19 @@ body {
   font-size: var(--text-md);
   background: var(--surface);
   font-variant-numeric: tabular-nums;
+}
+/* 建單明細表：兩個固定寬輸入＋商品/小計/移除，於窄卡片內可能撐出邊界（小計看似超出頁面）。
+   讓輸入可縮、表格橫向可捲以保底，內容不外溢卡片。 */
+.pur-lines-wrap {
+  overflow-x: auto;
+}
+.pur-lines {
+  min-width: 100%;
+}
+.pur-lines .pur-qty,
+.pur-lines .pur-cost {
+  width: 100%;
+  min-width: 3.5rem;
 }
 .input-error {
   border-color: var(--danger);
@@ -2027,12 +2061,18 @@ body {
 
 .pur-invoice-fields {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* 收貨對話框僅 420px，type=date 有較大的固有最小寬度，三欄並排會撐破對話框。
+     以 auto-fit + 可縮輸入自適應：窄則單欄堆疊、寬則並排，皆不溢出。 */
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   gap: 10px;
   border: 1px solid var(--border, #ddd);
   border-radius: 8px;
   padding: 10px 12px;
   margin: 10px 0;
+}
+.pur-invoice-fields .field input {
+  width: 100%;
+  min-width: 0;
 }
 .pur-invoice-fields legend {
   font-size: 0.85rem;

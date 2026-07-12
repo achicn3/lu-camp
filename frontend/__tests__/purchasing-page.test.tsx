@@ -110,11 +110,16 @@ describe("/purchasing", () => {
 
     expect(await screen.findByText("瓦斯罐")).toBeTruthy();
     expect(screen.getByText(/現量 1 \/ 補貨點 5/)).toBeTruthy();
-    // 供應商欄改為「查無即建」combobox（與收購頁品牌一致），採購單清單仍以文字顯示供應商名。
-    expect(screen.getByLabelText("供應商")).toBeTruthy();
+    // 採購單清單以文字顯示供應商名（常駐）。
     expect(await screen.findByText("山林供應商")).toBeTruthy();
     expect(screen.getByRole("button", { name: "收貨入庫" })).toBeTruthy();
     expect(screen.getByText("已下單")).toBeTruthy();
+
+    // 建立採購單面板預設收合；點「＋ 建立採購單」展開後才有供應商 combobox
+    // （欄位改為「查無即建」combobox，與收購頁品牌一致）。
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "＋ 建立採購單" }));
+    expect(await screen.findByLabelText("供應商")).toBeTruthy();
   });
 
   it("receives a purchase order after confirmation", async () => {
@@ -182,6 +187,8 @@ describe("/purchasing", () => {
     const user = userEvent.setup();
     renderPage();
 
+    // 建立採購單面板預設收合，先展開再建單。
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
     const supplierInput = screen.getByLabelText("供應商");
     await user.click(supplierInput);
     await user.type(supplierInput, "山林");
@@ -195,6 +202,25 @@ describe("/purchasing", () => {
     const parsed = JSON.parse(createdBody as unknown as string);
     expect(parsed.supplier_id).toBe(5);
     expect(parsed.lines).toEqual([{ catalog_product_id: 42, qty: 1, unit_cost: "60" }]);
+  });
+
+  it("低庫存「補貨」把該品帶入建單草稿並展開面板", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && url.includes("low_stock=true")) return json([CATALOG]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    // 低庫存卡的「補貨」→ 面板展開、明細已含該品（進貨單價欄以品名標記）。
+    await user.click(await screen.findByRole("button", { name: "補貨 瓦斯罐" }));
+    expect(await screen.findByLabelText("進貨單價 瓦斯罐")).toBeTruthy();
+    // 已在草稿中，供應商 combobox 亦已可見（面板展開）。
+    expect(screen.getByLabelText("供應商")).toBeTruthy();
   });
 
   it("creates a supplier from the suppliers tab", async () => {
