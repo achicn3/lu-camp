@@ -834,6 +834,32 @@ async def test_checkout_rejects_invoice_info_when_einvoice_disabled(
     assert count == 0  # 整筆未成立（庫存未售、無銷售列）
 
 
+async def test_send_rejects_legacy_turnkey_claimed_row(db_session: AsyncSession) -> None:
+    """部署防護（Codex 第廿五輪）：PENDING 但由舊 Turnkey outbox 認領的列（xml_path 為
+    檔案路徑、amego_payload 為 NULL）→ 經 Amego 上送須回 409（不 500、不 clobber、
+    導向人工對帳），保留可稽核狀態。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    # 模擬 migration 前/舊路徑認領：xml_path 為 Turnkey 檔名、無 amego_payload
+    item = await db_session.get(EInvoiceUploadQueue, queue_id)
+    assert item is not None
+    item.xml_path = "F0401-1-1-a0.xml"
+    item.xml_sha256 = "deadbeef"
+    item.amego_payload = None
+    item.dropped_at = None
+    await db_session.flush()
+
+    with pytest.raises(EInvoiceQueueNotDroppable):
+        await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    # 列狀態不被 clobber（仍 PENDING、xml_path 未被改成 amego:）
+    await db_session.refresh(item)
+    assert item.status is UploadStatus.PENDING
+    assert item.xml_path == "F0401-1-1-a0.xml"
+    assert item.amego_payload is None
+
+
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
     store_id, clerk_id, code = await _seed(db_session)
     await _checkout(db_session, store_id, clerk_id, code)

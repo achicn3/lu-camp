@@ -424,6 +424,16 @@ class EInvoiceService:
             raise EInvoiceQueueNotDroppable(
                 f"訊息類型 {item.message_type.value} 不支援 Amego 上送"
             )
+        # 認領來源辨識（Codex 第廿五輪）：只有 Amego 認領（xml_path 前綴 amego:）才走凍結
+        # payload 重送路徑。**非 amego: 前綴**＝舊 Turnkey outbox 認領（drop_pending 寫的
+        # 檔案路徑，可能已曝光給 Turnkey）——不可經 Amego 上送（不同交付通道），以 409
+        # 導向人工對帳；未認領（None）則走 Amego 全新認領。
+        _AMEGO_CLAIM_PREFIX = "amego:"
+        if item.xml_path is not None and not item.xml_path.startswith(_AMEGO_CLAIM_PREFIX):
+            raise EInvoiceQueueNotDroppable(
+                f"佇列 {queue_id} 由非 Amego 路徑認領（舊 Turnkey outbox），"
+                "不可經 Amego 上送，需人工對帳"
+            )
         already_claimed = item.xml_path is not None
         claim_attempts = item.attempts
         if not already_claimed:
