@@ -901,6 +901,18 @@ export default function PosPage() {
 
   const checkout = useMutation({
     mutationFn: async (): Promise<{ sale: SaleRead; sig: CompletedSignature | null }> => {
+      // 結帳當下重讀 settings（Codex 第二十一輪）：他端可能剛改 einvoice_enabled，
+      // 畫面上的快取值不足採信。刷新失敗 → fail-closed 不送單；剛從停用變啟用 →
+      // 擋下請店員確認發票欄位（刷新已更新快取，欄位隨之顯示），避免以 invoice:null
+      // 開出預設 B2C、不可逆丟失統編/載具/捐贈選擇。
+      const fresh = await settings.refetch();
+      if (fresh.data == null) {
+        throw new Error("無法讀取發票設定，結帳未送出——請重試");
+      }
+      const freshEnabled = fresh.data.einvoice_enabled;
+      if (freshEnabled && !einvoiceEnabled) {
+        throw new Error("電子發票設定剛變更為啟用：請確認發票欄位（統編/載具/捐贈）後再結帳");
+      }
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
@@ -908,8 +920,9 @@ export default function PosPage() {
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
         // 發票資訊（docs/24）：任一欄有值才帶；後端驗互斥與格式並入冪等指紋。
+        // 以**結帳當下刷新**的設定判斷（非畫面快取）。
         invoice:
-          einvoiceEnabled && (invTaxId !== "" || invCarrier !== "" || invNpoban !== "")
+          freshEnabled && (invTaxId !== "" || invCarrier !== "" || invNpoban !== "")
             ? {
                 buyer_tax_id: invTaxId !== "" ? invTaxId : null,
                 buyer_name: invTaxId !== "" && invBuyerName !== "" ? invBuyerName : null,

@@ -71,7 +71,7 @@ try {
     {
       type: "BUYOUT",
       contact_id: contact.data.id,
-      items: [1, 2, 3, 4].map((n) => ({
+      items: [1, 2, 3, 4, 5].map((n) => ({
         name: `發票測試品${n}`,
         grade: "A",
         listed_price: "500",
@@ -82,7 +82,7 @@ try {
     { "Idempotency-Key": `einv-acq-${Date.now()}` },
   );
   ok("備貨（收購三件）", acq.status === 201, `status=${acq.status}`);
-  const [item1, item2, item3, item4] = acq.data.item_codes;
+  const [item1, item2, item3, item4, item5] = acq.data.item_codes;
 
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
@@ -206,6 +206,42 @@ try {
   ok("settings 失敗時零 /sales 請求", salesRequests.length === 0);
   await page2.screenshot({ path: join(SHOTS, "05-settings-failclosed.png"), fullPage: true });
   await ctx2.close();
+  // ── E) 結帳當下設定變更（停用→啟用）→ 擋下重確認（Codex 第二十一輪）─────
+  const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 950 } });
+  const page3 = await ctx3.newPage();
+  const salesPosts3 = [];
+  page3.on("request", (req) => {
+    if (/\/api\/v1\/sales$/.test(new URL(req.url()).pathname) && req.method() === "POST")
+      salesPosts3.push(req);
+  });
+  // 先讓頁面拿到「停用」的設定快取
+  await page3.route("**/api/v1/settings", async (route) => {
+    const resp = await route.fetch();
+    const json = await resp.json();
+    await route.fulfill({ response: resp, json: { ...json, einvoice_enabled: false } });
+  });
+  await page3.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page3.waitForTimeout(400);
+  await page3.fill('input[name="username"]', "dev-manager");
+  await page3.fill('input[name="password"]', "dev-test-123456");
+  await page3.click('button:has-text("登入")');
+  await page3.waitForURL(`${BASE}/`);
+  await page3.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await page3.waitForSelector("text=本期不開票");
+  await page3.fill(".pos-scan-input", item5);
+  await page3.press(".pos-scan-input", "Enter");
+  await page3.waitForSelector("text=發票測試品5");
+  await page3.waitForTimeout(800);
+  // 他端此刻把設定改回啟用（解除攔截 → 結帳當下刷新拿到真值）
+  await page3.unroute("**/api/v1/settings");
+  await page3.click(".pos-checkout");
+  await page3.waitForSelector("text=設定剛變更為啟用", { timeout: 8000 });
+  ok("結帳當下偵測設定變更 → 擋下重確認", true);
+  ok("設定變更被擋時零 /sales 請求", salesPosts3.length === 0);
+  await page3.waitForSelector(".pos-invoice"); // 刷新後發票欄位已顯示，可補統編/載具
+  ok("刷新後發票欄位顯示（可補統編/載具再結帳）", true);
+  await page3.screenshot({ path: join(SHOTS, "06-settings-flip-blocked.png"), fullPage: true });
+  await ctx3.close();
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {
