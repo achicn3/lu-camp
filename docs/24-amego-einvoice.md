@@ -98,6 +98,10 @@
    欄位缺漏）→ AmegoTransportError，維持已認領 PENDING 待對帳。
 4. **查無＋已作廢 → 取消開立**：空窗作廢後平台查無 → 佇列 CANCELLED、發票收斂 VOID，
    不為作廢交易開發票。
+4b. **復原件＝人工補印狀態**：以 invoice_query 補開立的發票拿不到條碼/QR 內容
+   （平台查詢不回傳；QR 驗證資訊需 Amego 端 AES，本機不可重算；invoice_print 回的是
+   印表機專用 ESC/POS blob、不入自家排版管線）→ 發票 ISSUED 但列印欄位 NULL，POS
+   明確導引至光貿後台補印。此為罕見 crash 窗口的誠實退路，不印半套證明聯。
 5. **稅務快照**：invoices.tax_rate 於結帳凍結；F0401 金額/TaxRate 用 invoice.net/tax/
    tax_rate 快照，不讀活 settings。回應成功欄位（字軌/隨機碼/時間戳）嚴格驗證
    （type() is int、合理時間下界）後才回填，且回填守衛與 record_result 世代/狀態檢查同步。

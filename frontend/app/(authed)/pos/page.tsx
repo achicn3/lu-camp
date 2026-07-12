@@ -729,7 +729,12 @@ export default function PosPage() {
       } else if (invoice.carrier_type != null) {
         setInvoiceNote("發票已開立並存入載具，不印證明聯");
       } else {
-        setInvoiceNote("發票已開立（無平台條碼內容，證明聯不可印）");
+        // 復原件（前次連線中斷、以平台查詢補開立）：條碼/QR 內容平台查詢不回傳，
+        // 本機無法印合規證明聯（QR 需 Amego 端 AES）——明確導引人工補印（Codex 第十七輪）。
+        setInvoiceNote(
+          "發票已開立（連線中斷後復原），證明聯內容未能取回——請至光貿後台" +
+            "（invoice.amego.tw）補印或由客人以載具歸戶",
+        );
       }
     },
     onError: (err: Error) => {
