@@ -1363,7 +1363,11 @@ export default function PosPage() {
               checkout.isPending ||
               !quoteReady ||
               scSignBlock ||
-              invoiceInputBad
+              invoiceInputBad ||
+              // fail-closed（Codex 第十九輪）：settings 未成功載入（pending/失敗）時
+              // einvoiceEnabled 不可信——若後端實際啟用，結帳會以 invoice:null 開出
+              // 預設 B2C、丟失客人的統編/載具/捐贈選擇且不可逆。先擋結帳待重試。
+              !settings.isSuccess
             }
             onClick={() => checkout.mutate()}
           >

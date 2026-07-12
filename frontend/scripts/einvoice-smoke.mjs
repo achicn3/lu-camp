@@ -173,6 +173,27 @@ try {
   ok("B2B 結帳開立＋送印", /發票 [A-Z]{2}\d{8}/.test(noteC ?? ""), noteC ?? "");
   ok("B2B 證明聯帶買方統編", printC?.buyer_tax_id === "22099131", `buyer=${printC?.buyer_tax_id}`);
   await page.screenshot({ path: join(SHOTS, "04-b2b-issued.png"), fullPage: true });
+  // ── D) fail-closed：settings 讀取失敗 → 結帳鈕停用（Codex 第十九輪）──────
+  // 降級的 settings 不得讓結帳以 invoice:null 開出預設 B2C（丟失統編/載具選擇）。
+  const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 950 } });
+  const page2 = await ctx2.newPage();
+  await page2.route("**/api/v1/settings", (route) => route.abort());
+  await page2.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page2.waitForTimeout(400);
+  await page2.fill('input[name="username"]', "dev-manager");
+  await page2.fill('input[name="password"]', "dev-test-123456");
+  await page2.click('button:has-text("登入")');
+  await page2.waitForURL(`${BASE}/`);
+  await page2.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await page2.waitForSelector("text=無法讀取發票設定");
+  const acqItem = acq.data.item_codes[0]; // 已售出——僅驗證鈕態，不真結帳
+  await page2.fill(".pos-scan-input", acqItem).catch(() => {});
+  ok(
+    "settings 失敗時結帳鈕停用（fail-closed）",
+    await page2.locator(".pos-checkout").isDisabled(),
+  );
+  await page2.screenshot({ path: join(SHOTS, "05-settings-failclosed.png"), fullPage: true });
+  await ctx2.close();
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {
