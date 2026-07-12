@@ -16,14 +16,28 @@ class SettingsRepository:
         self._session = session
 
     async def acquire_store_lock(self, store_id: int) -> None:
-        """取得該店設定的交易級 advisory lock（pg_advisory_xact_lock，commit 時自動釋放）。
+        """取得該店設定的交易級**互斥** advisory lock（pg_advisory_xact_lock，commit 釋放）。
 
-        create_sale（讀 einvoice_enabled 決策）與 update_settings（改該欄）都先取此鎖，
-        使兩者對同店序列化：結帳的設定比對與其後的發票決策之間，設定不可被 PATCH 改掉
-        （Codex 第二十三輪 TOCTOU）。單一鎖鍵、無 AB-BA 死鎖之虞。
+        update_settings（改 einvoice_enabled 等）用；與結帳的共享鎖形成 reader/writer：
+        PATCH（writer）需等所有在途結帳（reader）結束、並擋住新結帳，直到本交易 commit
+        （Codex 第廿三/廿四輪 TOCTOU）。單一鎖鍵、無 AB-BA 死鎖之虞。
         """
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:classid, :store_id)").bindparams(
+                bindparam("classid", _SETTINGS_LOCK_CLASSID),
+                bindparam("store_id", store_id),
+            )
+        )
+
+    async def acquire_store_lock_shared(self, store_id: int) -> None:
+        """取得該店設定的交易級**共享** advisory lock（pg_advisory_xact_lock_shared）。
+
+        結帳（reader：讀 einvoice_enabled 決策）用——多筆結帳可同時持有、彼此不阻塞；
+        僅與 update_settings 的互斥鎖（writer）互斥，使「讀設定→發票決策→commit」期間
+        設定不可被 PATCH 改掉，又不犧牲並發結帳吞吐。
+        """
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock_shared(:classid, :store_id)").bindparams(
                 bindparam("classid", _SETTINGS_LOCK_CLASSID),
                 bindparam("store_id", store_id),
             )

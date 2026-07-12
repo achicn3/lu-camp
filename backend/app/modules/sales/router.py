@@ -110,6 +110,7 @@ async def create_sale(
             signature_task_id=payload.signature_task_id,
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
+            require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
         )
     except IntegrityError as exc:
         await session.rollback()

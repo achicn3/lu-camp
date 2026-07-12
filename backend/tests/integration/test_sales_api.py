@@ -452,3 +452,46 @@ async def test_quote_endpoint_returns_discounted_total(
     assert product is not None
     await db_session.refresh(product)
     assert product.quantity_on_hand == 10
+
+
+async def test_http_checkout_requires_einvoice_confirmation_when_enabled(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTTP 邊界強制（Codex 第廿四輪）：einvoice 啟用時，POST /sales **省略**
+    expected_einvoice_enabled → 409（不靜默開出預設 B2C 漏收統編/載具）；帶了則照常。
+
+    模擬版本落後客戶端：發票啟用（含 App Key 與統編），但請求不宣告設定狀態。
+    """
+    from app.core.config import get_settings as get_app_settings
+    from app.modules.settings.models import StoreSettings
+
+    monkeypatch.setattr(get_app_settings(), "amego_app_key", "test-key")
+    token, store_id, _ = await _seed(db_session)
+    # 店家統編 + 啟用電子發票
+    store = await db_session.get(Store, store_id)
+    assert store is not None
+    store.tax_id = "12345678"
+    db_session.add(StoreSettings(store_id=store_id, einvoice_enabled=True))
+    await db_session.flush()
+    cat = await _seed_catalog(db_session, store_id, price="105", qty=10)
+    # 固定種子（409 路徑的 router rollback 只回滾該請求；種子須先 commit 才不被吃掉）。
+    await db_session.commit()
+
+    # 省略 expected_einvoice_enabled → 409
+    resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 1)]},
+        headers=_auth(token, idem="no-confirm"),
+    )
+    assert resp.status_code == 409, resp.text
+    count = await db_session.scalar(select(func.count()).select_from(Sale))
+    assert count == 0  # 未建單、零副作用
+
+    # 帶 expected_einvoice_enabled=true → 照常開立
+    resp2 = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 1)], "expected_einvoice_enabled": True},
+        headers=_auth(token, idem="with-confirm"),
+    )
+    assert resp2.status_code == 201, resp2.text
+    assert resp2.json()["invoice_status"] == "PENDING_ISSUE"

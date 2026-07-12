@@ -75,9 +75,9 @@ class StoreSettingsService:
             return existing
         return _new_settings(store_id)
 
-    async def lock_store(self, store_id: int) -> None:
-        """取得該店設定的交易級鎖：結帳讀設定決策前呼叫，序列化並發 PATCH（Codex 第廿三輪）。"""
-        await self._repo.acquire_store_lock(store_id)
+    async def lock_store_shared(self, store_id: int) -> None:
+        """結帳讀設定決策前取共享鎖（reader）：與 PATCH（writer）互斥，並發結帳彼此不阻塞。"""
+        await self._repo.acquire_store_lock_shared(store_id)
 
     async def update_settings(
         self, store_id: int, *, actor_user_id: int | None, patch: SettingsUpdateRequest

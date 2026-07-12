@@ -358,17 +358,17 @@ async def test_settings_patch_serialized_with_checkout(
         store_id, clerk_id, item_code = store.id, clerk.id, item.item_code
         await s0.commit()
 
-    orig_lock = StoreSettingsService.lock_store
+    orig_lock = StoreSettingsService.lock_store_shared
     checkout_has_lock = asyncio.Event()
     release = asyncio.Event()
     commit_order: list[str] = []
 
     async def hooked_lock(self: StoreSettingsService, store_id_: int) -> None:
-        await orig_lock(self, store_id_)  # 結帳先取鎖
+        await orig_lock(self, store_id_)  # 結帳先取共享鎖
         checkout_has_lock.set()
-        await release.wait()  # 持鎖暫停，讓 PATCH 有機會嘗試（並卡在鎖上）
+        await release.wait()  # 持鎖暫停，讓 PATCH（互斥）有機會嘗試（並卡在鎖上）
 
-    monkeypatch.setattr(StoreSettingsService, "lock_store", hooked_lock)
+    monkeypatch.setattr(StoreSettingsService, "lock_store_shared", hooked_lock)
 
     async def do_checkout() -> str:
         async with sm() as s1:
