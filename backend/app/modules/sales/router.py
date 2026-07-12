@@ -27,6 +27,7 @@ from app.shared.enums import UserRole
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
+    EInvoiceSettingsChanged,
     EmptySale,
     IdempotencyKeyConflict,
     InsufficientStock,
@@ -64,6 +65,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InvalidStateTransition: status.HTTP_409_CONFLICT,
     SaleAlreadyVoid: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
+    EInvoiceSettingsChanged: status.HTTP_409_CONFLICT,
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemUnavailable: status.HTTP_409_CONFLICT,
@@ -107,6 +109,7 @@ async def create_sale(
             idempotency_key=idempotency_key,
             signature_task_id=payload.signature_task_id,
             invoice_info=payload.to_invoice_info(),
+            expected_einvoice_enabled=payload.expected_einvoice_enabled,
         )
     except IntegrityError as exc:
         await session.rollback()

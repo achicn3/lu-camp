@@ -5563,6 +5563,17 @@
             ],
             "title": "Buyer Contact Id"
           },
+          "expected_einvoice_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Einvoice Enabled"
+          },
           "invoice": {
             "anyOf": [
               {

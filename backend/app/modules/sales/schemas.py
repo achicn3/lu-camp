@@ -144,6 +144,9 @@ class SaleCreateRequest(BaseModel):
     signature_task_id: int | None = None
     # 發票資訊（docs/24）：einvoice_enabled 時 POS 可帶統編/載具/捐贈碼；省略＝B2C 一般開立。
     invoice: SaleInvoiceInfoRequest | None = None
+    # 結帳當下 POS 觀察到的 einvoice_enabled（Codex 第二十二輪）：後端於結帳交易內
+    # 與現值比對，不符 → 409（他端切換設定的 TOCTOU 防護）。舊客戶端可省略。
+    expected_einvoice_enabled: bool | None = None
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]

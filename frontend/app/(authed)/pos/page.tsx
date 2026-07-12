@@ -2,7 +2,7 @@
 // /pos 結帳（docs/10 §5、docs/16 §3.2）：掃碼加入購物車（序號品／散裝堆）→ 會員歸戶（選填）
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
@@ -636,6 +636,7 @@ function MenuPanel({ onAdd }: { onAdd: (line: CartLine) => void }) {
 }
 
 export default function PosPage() {
+  const queryClient = useQueryClient();
   const [lines, setLines] = useState<CartLine[]>([]);
   const [member, setMember] = useState<ContactRead | null>(null);
   const [mode, setMode] = useState<TenderMode>("CASH");
@@ -902,14 +903,23 @@ export default function PosPage() {
   const checkout = useMutation({
     mutationFn: async (): Promise<{ sale: SaleRead; sig: CompletedSignature | null }> => {
       // 結帳當下重讀 settings（Codex 第二十一輪）：他端可能剛改 einvoice_enabled，
-      // 畫面上的快取值不足採信。刷新失敗 → fail-closed 不送單；剛從停用變啟用 →
-      // 擋下請店員確認發票欄位（刷新已更新快取，欄位隨之顯示），避免以 invoice:null
-      // 開出預設 B2C、不可逆丟失統編/載具/捐贈選擇。
-      const fresh = await settings.refetch();
-      if (fresh.data == null) {
+      // 畫面上的快取值不足採信。以**直接 GET**重讀（非 query.refetch——TanStack v5 的
+      // refetch 失敗仍回舊 data，會繞過 fail-closed）：失敗 → 不送單；剛從停用變啟用 →
+      // 擋下請店員確認發票欄位（順手更新快取讓欄位顯示），避免以 invoice:null 開出
+      // 預設 B2C、不可逆丟失統編/載具/捐贈選擇。
+      let freshRes;
+      try {
+        freshRes = await api.GET("/api/v1/settings");
+      } catch {
+        // 網路中斷：api.GET 直接 throw（非回 {error}）——包成明確訊息，不讓
+        // 「Failed to fetch」外洩給店員。
         throw new Error("無法讀取發票設定，結帳未送出——請重試");
       }
-      const freshEnabled = fresh.data.einvoice_enabled;
+      if (!freshRes.data) {
+        throw new Error("無法讀取發票設定，結帳未送出——請重試");
+      }
+      queryClient.setQueryData(["settings"], freshRes.data); // 讓畫面欄位隨新值顯示
+      const freshEnabled = freshRes.data.einvoice_enabled;
       if (freshEnabled && !einvoiceEnabled) {
         throw new Error("電子發票設定剛變更為啟用：請確認發票欄位（統編/載具/捐贈）後再結帳");
       }
@@ -920,7 +930,7 @@ export default function PosPage() {
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
         // 發票資訊（docs/24）：任一欄有值才帶；後端驗互斥與格式並入冪等指紋。
-        // 以**結帳當下刷新**的設定判斷（非畫面快取）。
+        // 以**結帳當下重讀**的設定判斷（非畫面快取）。
         invoice:
           freshEnabled && (invTaxId !== "" || invCarrier !== "" || invNpoban !== "")
             ? {
@@ -930,6 +940,9 @@ export default function PosPage() {
                 npoban: invNpoban !== "" ? invNpoban : null,
               }
             : null,
+        // 後端 TOCTOU 防護（Codex 第二十二輪）：帶結帳當下觀察到的設定，後端於交易內
+        // 與現值比對，不符 → 409（前端重讀與 POST 間仍有他端切換的殘餘空窗）。
+        expected_einvoice_enabled: freshEnabled,
       };
       // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
       // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。

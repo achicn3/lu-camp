@@ -57,7 +57,7 @@ try {
   const mgr = login.data.access_token;
   await apiJson("POST", "/api/v1/cash-sessions/open", mgr, { opening_float: "1000" });
 
-  // 備貨：收購三件可售品（現金撥款）。
+  // 備貨：收購六件可售品（現金撥款）。
   const contact = await apiJson("POST", "/api/v1/contacts", mgr, {
     name: "發票測試賣家",
     phone: `09${Date.now().toString().slice(-8)}`,
@@ -71,7 +71,7 @@ try {
     {
       type: "BUYOUT",
       contact_id: contact.data.id,
-      items: [1, 2, 3, 4, 5].map((n) => ({
+      items: [1, 2, 3, 4, 5, 6].map((n) => ({
         name: `發票測試品${n}`,
         grade: "A",
         listed_price: "500",
@@ -81,8 +81,8 @@ try {
     },
     { "Idempotency-Key": `einv-acq-${Date.now()}` },
   );
-  ok("備貨（收購三件）", acq.status === 201, `status=${acq.status}`);
-  const [item1, item2, item3, item4, item5] = acq.data.item_codes;
+  ok("備貨（收購六件）", acq.status === 201, `status=${acq.status}`);
+  const [item1, item2, item3, item4, item5, item6] = acq.data.item_codes;
 
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
@@ -242,6 +242,43 @@ try {
   ok("刷新後發票欄位顯示（可補統編/載具再結帳）", true);
   await page3.screenshot({ path: join(SHOTS, "06-settings-flip-blocked.png"), fullPage: true });
   await ctx3.close();
+
+  // ── F) 有快取值，但結帳當下的 settings GET 失敗 → fail-closed（Codex 第二十二輪）──
+  // TanStack refetch 失敗仍回舊 data；本系統改用直接 GET，失敗即不送單。
+  const ctx4 = await browser.newContext({ viewport: { width: 1280, height: 950 } });
+  const page4 = await ctx4.newPage();
+  const salesPosts4 = [];
+  page4.on("request", (req) => {
+    if (/\/api\/v1\/sales$/.test(new URL(req.url()).pathname) && req.method() === "POST")
+      salesPosts4.push(req);
+  });
+  await page4.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page4.waitForTimeout(400);
+  await page4.fill('input[name="username"]', "dev-manager");
+  await page4.fill('input[name="password"]', "dev-test-123456");
+  await page4.click('button:has-text("登入")');
+  await page4.waitForURL(`${BASE}/`);
+  await page4.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await page4.waitForSelector(".pos-invoice"); // 首次載入成功（有快取值）
+  await page4.fill(".pos-scan-input", item6);
+  await page4.press(".pos-scan-input", "Enter");
+  await page4.waitForSelector("text=發票測試品6");
+  await page4.waitForTimeout(800);
+  // 此刻起結帳當下的 settings GET 全數失敗（含背景 query 重抓）。fail-closed 有兩種
+  // 合法表現：背景重抓失敗 → 鈕停用；或鈕仍啟用但結帳當下 GET 失敗 → 錯誤提示。
+  // 關鍵不變量：無論哪種都**不得送出 /sales**。
+  await page4.route("**/api/v1/settings", (route) => route.abort());
+  await page4.locator(".pos-checkout").click({ force: true }).catch(() => {});
+  await page4.waitForTimeout(1500);
+  const btnDisabled4 = await page4.locator(".pos-checkout").isDisabled();
+  const errShown4 = await page4
+    .locator("text=無法讀取發票設定")
+    .isVisible()
+    .catch(() => false);
+  ok("有快取但結帳當下 settings 失敗 → fail-closed（鈕停用或錯誤提示）", btnDisabled4 || errShown4);
+  ok("結帳當下 settings 失敗時零 /sales 請求", salesPosts4.length === 0);
+  await page4.screenshot({ path: join(SHOTS, "07-refetch-fail-closed.png"), fullPage: true });
+  await ctx4.close();
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

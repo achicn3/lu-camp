@@ -9,7 +9,7 @@ invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.service import CashDrawerService
@@ -37,6 +37,7 @@ from app.shared.exceptions import (
     AmegoTransportError,
     EInvoiceQueueNotDroppable,
     EInvoiceResultConflict,
+    EInvoiceSettingsChanged,
 )
 
 # f0401 成功回應樣板（doc 回應欄位；invoice_time 為 Unix 秒）。
@@ -773,6 +774,29 @@ async def test_tax_rate_backfill_derives_from_amounts(db_session: AsyncSession) 
     await db_session.execute(text(mig.VERIFY_SQL))
     await db_session.refresh(invoice)
     assert invoice.tax_rate == Decimal("0.0500")
+
+
+async def test_checkout_rejects_stale_einvoice_expectation(db_session: AsyncSession) -> None:
+    """expected_einvoice_enabled 與現值不符 → 整筆 409、零副作用（Codex 第二十二輪
+    TOCTOU 防護：他端於前端刷新與 POST 間切換設定）。相符/省略 → 照常。"""
+    store_id, clerk_id, code = await _seed(db_session)  # einvoice_enabled=True
+    svc = SalesService(db_session)
+    with pytest.raises(EInvoiceSettingsChanged):
+        await svc.create_sale(
+            store_id,
+            clerk_id,
+            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+            expected_einvoice_enabled=False,  # POS 以為停用，實際已啟用
+        )
+    count = await db_session.scalar(select(func.count()).select_from(Invoice))
+    assert count == 0  # 無發票副作用（銷售整筆未成立）
+    sale = await svc.create_sale(
+        store_id,
+        clerk_id,
+        lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+        expected_einvoice_enabled=True,
+    )
+    assert sale.invoice_status is SaleInvoiceStatus.PENDING_ISSUE
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:

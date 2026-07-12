@@ -3867,6 +3867,8 @@ export interface components {
         SaleCreateRequest: {
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
+            /** Expected Einvoice Enabled */
+            expected_einvoice_enabled?: boolean | null;
             invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];

@@ -52,6 +52,7 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     CrossStoreReference,
+    EInvoiceSettingsChanged,
     EmptySale,
     IdempotencyKeyConflict,
     InvalidSaleTender,
@@ -366,6 +367,7 @@ class SalesService:
         idempotency_key: str | None = None,
         signature_task_id: int | None = None,
         invoice_info: InvoiceInfoInput | None = None,
+        expected_einvoice_enabled: bool | None = None,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -437,6 +439,23 @@ class SalesService:
         ):
             raise CrossStoreReference(f"buyer contact {buyer_contact_id} 不屬於 store {store_id}")
 
+        # 設定於**動任何庫存/收款之前**讀一次（整個結帳沿用同一份，避免請求內漂移）。
+        settings = await self._settings.get_effective_settings(store_id)
+        # 發票設定確認（docs/24；Codex 第二十二輪）：POS 帶「結帳當下觀察到的
+        # einvoice_enabled」，於結帳交易內與現值比對——前端刷新與 POST 間的空窗（他端
+        # 切換設定）不得讓結帳以錯誤前提送出（停用→啟用會漏收統編/載具、啟用→停用會
+        # 靜默丟棄發票欄位）。不符 → 409，**先於任何副作用**（此處尚未賣出庫存/收款）；
+        # 舊客戶端（None）不受影響。置於冪等/簽署回放之後：回應遺失重試回原單永遠正確。
+        if (
+            expected_einvoice_enabled is not None
+            and settings.einvoice_enabled != expected_einvoice_enabled
+        ):
+            raise EInvoiceSettingsChanged(
+                "電子發票設定於結帳期間變更"
+                f"（目前{'啟用' if settings.einvoice_enabled else '停用'}），"
+                "請重新確認發票欄位後再結帳"
+            )
+
         sale = await self._repo.add_sale(
             Sale(
                 store_id=store_id,
@@ -494,8 +513,8 @@ class SalesService:
                 f"購物金最多折抵 {redeemable_max} 元（內用 {food_subtotal} 元不得以購物金折抵）"
             )
 
-        settings = await self._settings.get_effective_settings(store_id)
         # 購物金低消門檻（彈性設定，預設 0＝不限）：非餐飲消費未達門檻則完全不可用購物金。
+        # settings 已於動庫存前讀取、沿用同一份（見上）。
         if store_credit_amount > 0 and redeemable_max < settings.store_credit_min_spend:
             raise InvalidSaleTender(
                 f"未達購物金低消門檻：非餐飲消費需滿 {settings.store_credit_min_spend} 元"

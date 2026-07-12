@@ -371,3 +371,10 @@ class AmegoIssueFailed(DomainError):
 
     與 AmegoTransportError 區分：本例外代表平台**已回覆拒絕**（非結果未知）。
     """
+
+
+class EInvoiceSettingsChanged(DomainError):
+    """結帳當下的發票設定與 POS 觀察值不符（他端切換 einvoice_enabled 的 TOCTOU 空窗）。
+
+    結帳整筆拒絕、無副作用；店員重新確認發票欄位（統編/載具/捐贈）後再送。
+    """
