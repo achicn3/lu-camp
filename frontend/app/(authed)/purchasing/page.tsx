@@ -954,9 +954,10 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
         : [...prev, { key: nextDraftKey(), product, qty: 1, unitCost: "" }],
     );
     setCreateOpen(true);
-    // 面板可能剛掛上，等下一幀再捲入視野。
+    // 面板可能剛掛上，等下一幀再捲入視野。scrollIntoView 於 jsdom（測試環境）不存在，
+    // 以可選呼叫守衛避免拋錯。
     requestAnimationFrame(() =>
-      createRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      createRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }),
     );
   }
 
