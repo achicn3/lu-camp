@@ -439,13 +439,15 @@ class SalesService:
         ):
             raise CrossStoreReference(f"buyer contact {buyer_contact_id} 不屬於 store {store_id}")
 
+        # 發票設定確認（docs/24；Codex 第二十二/二十三輪）：einvoice-aware 客戶端帶
+        # 「結帳當下觀察到的 einvoice_enabled」。先取該店設定的**交易級鎖**，再讀設定
+        # 比對——鎖持有至本交易 commit，並發 PATCH 於此期間被序列化（read→發票決策→
+        # commit 之間設定不可被改），杜絕 TOCTOU。不符 → 409，**先於任何副作用**
+        # （此處尚未賣出庫存/收款）。舊客戶端（None）不取鎖、維持原行為。
+        if expected_einvoice_enabled is not None:
+            await self._settings.lock_store(store_id)
         # 設定於**動任何庫存/收款之前**讀一次（整個結帳沿用同一份，避免請求內漂移）。
         settings = await self._settings.get_effective_settings(store_id)
-        # 發票設定確認（docs/24；Codex 第二十二輪）：POS 帶「結帳當下觀察到的
-        # einvoice_enabled」，於結帳交易內與現值比對——前端刷新與 POST 間的空窗（他端
-        # 切換設定）不得讓結帳以錯誤前提送出（停用→啟用會漏收統編/載具、啟用→停用會
-        # 靜默丟棄發票欄位）。不符 → 409，**先於任何副作用**（此處尚未賣出庫存/收款）；
-        # 舊客戶端（None）不受影響。置於冪等/簽署回放之後：回應遺失重試回原單永遠正確。
         if (
             expected_einvoice_enabled is not None
             and settings.einvoice_enabled != expected_einvoice_enabled
@@ -454,6 +456,14 @@ class SalesService:
                 "電子發票設定於結帳期間變更"
                 f"（目前{'啟用' if settings.einvoice_enabled else '停用'}），"
                 "請重新確認發票欄位後再結帳"
+            )
+        # 防禦縱深（Codex 第廿三輪）：帶了發票欄位卻停用電子發票 → 拒絕（不靜默丟棄客人的
+        # 統編/載具/捐贈而開出未開發票的單）。einvoice-aware 客戶端於設定切換時會被上方
+        # 409 擋下；此為對任何客戶端的伺服端保險。
+        if invoice_info is not None and not settings.einvoice_enabled:
+            raise EInvoiceSettingsChanged(
+                "本店未啟用電子發票，但結帳帶了發票欄位（統編/載具/捐贈）；"
+                "請確認發票設定後再結帳"
             )
 
         sale = await self._repo.add_sale(

@@ -19,6 +19,7 @@ from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput
+from app.modules.sales.models import Sale
 from app.modules.sales.service import SalesService
 from app.modules.settings.models import StoreSettings
 from app.modules.store.models import Store
@@ -797,6 +798,40 @@ async def test_checkout_rejects_stale_einvoice_expectation(db_session: AsyncSess
         expected_einvoice_enabled=True,
     )
     assert sale.invoice_status is SaleInvoiceStatus.PENDING_ISSUE
+
+
+async def test_checkout_rejects_invoice_info_when_einvoice_disabled(
+    db_session: AsyncSession,
+) -> None:
+    """帶發票欄位卻停用電子發票 → 409、零副作用（Codex 第廿三輪防禦縱深：不靜默丟棄
+    客人統編/載具而開出未開發票的單）。啟用→停用 flip 的伺服端保險。"""
+    store = Store(name="門市", tax_id="12345678")
+    db_session.add(store)
+    await db_session.flush()
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.MANAGER)
+    db_session.add(clerk)
+    await db_session.flush()
+    db_session.add(StoreSettings(store_id=store.id, einvoice_enabled=False))
+    await db_session.flush()
+    await CashDrawerService(db_session).open_session(store.id, clerk.id, Decimal("1000"))
+    item = await InventoryService(db_session).create_serialized_item(
+        store.id,
+        item_code="SN-DIS",
+        name="相機",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal(1050),
+        acquisition_cost=Decimal(500),
+    )
+    with pytest.raises(EInvoiceSettingsChanged):
+        await SalesService(db_session).create_sale(
+            store.id,
+            clerk.id,
+            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
+            invoice_info=InvoiceInfoInput(buyer_tax_id="04595257", buyer_name="範例公司"),
+        )
+    count = await db_session.scalar(select(func.count()).select_from(Sale))
+    assert count == 0  # 整筆未成立（庫存未售、無銷售列）
 
 
 async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:

@@ -71,7 +71,7 @@ try {
     {
       type: "BUYOUT",
       contact_id: contact.data.id,
-      items: [1, 2, 3, 4, 5, 6].map((n) => ({
+      items: [1, 2, 3, 4, 5, 6, 7].map((n) => ({
         name: `發票測試品${n}`,
         grade: "A",
         listed_price: "500",
@@ -81,8 +81,8 @@ try {
     },
     { "Idempotency-Key": `einv-acq-${Date.now()}` },
   );
-  ok("備貨（收購六件）", acq.status === 201, `status=${acq.status}`);
-  const [item1, item2, item3, item4, item5, item6] = acq.data.item_codes;
+  ok("備貨（收購七件）", acq.status === 201, `status=${acq.status}`);
+  const [item1, item2, item3, item4, item5, item6, item7] = acq.data.item_codes;
 
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
@@ -242,6 +242,42 @@ try {
   ok("刷新後發票欄位顯示（可補統編/載具再結帳）", true);
   await page3.screenshot({ path: join(SHOTS, "06-settings-flip-blocked.png"), fullPage: true });
   await ctx3.close();
+
+  // ── E2) 反向切換（啟用→停用）：畫面已填發票欄位不得被靜默丟棄（Codex 第廿三輪）──
+  const ctx5 = await browser.newContext({ viewport: { width: 1280, height: 950 } });
+  const page5 = await ctx5.newPage();
+  const salesPosts5 = [];
+  page5.on("request", (req) => {
+    if (/\/api\/v1\/sales$/.test(new URL(req.url()).pathname) && req.method() === "POST")
+      salesPosts5.push(req);
+  });
+  // 先讓頁面拿到「啟用」的設定快取（真值就是啟用），填入統編後再於結帳當下改為停用
+  let flipToDisabled = false;
+  await page5.route("**/api/v1/settings", async (route) => {
+    const resp = await route.fetch();
+    const json = await resp.json();
+    await route.fulfill({ response: resp, json: { ...json, einvoice_enabled: !flipToDisabled } });
+  });
+  await page5.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+  await page5.waitForTimeout(400);
+  await page5.fill('input[name="username"]', "dev-manager");
+  await page5.fill('input[name="password"]', "dev-test-123456");
+  await page5.click('button:has-text("登入")');
+  await page5.waitForURL(`${BASE}/`);
+  await page5.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await page5.waitForSelector(".pos-invoice");
+  await page5.fill(".pos-scan-input", item7);
+  await page5.press(".pos-scan-input", "Enter");
+  await page5.waitForSelector("text=發票測試品7");
+  await page5.fill('input[name="inv-tax-id"]', "22099131"); // 店員已填統編
+  await page5.waitForTimeout(600);
+  flipToDisabled = true; // 他端此刻改為停用（結帳當下刷新拿到停用）
+  await page5.click(".pos-checkout");
+  await page5.waitForSelector("text=設定剛變更為停用", { timeout: 8000 });
+  ok("啟用→停用切換 → 擋下（不靜默丟棄已填發票欄位）", true);
+  ok("啟用→停用被擋時零 /sales 請求", salesPosts5.length === 0);
+  await page5.screenshot({ path: join(SHOTS, "08-flip-to-disabled.png"), fullPage: true });
+  await ctx5.close();
 
   // ── F) 有快取值，但結帳當下的 settings GET 失敗 → fail-closed（Codex 第二十二輪）──
   // TanStack refetch 失敗仍回舊 data；本系統改用直接 GET，失敗即不送單。

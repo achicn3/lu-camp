@@ -75,6 +75,10 @@ class StoreSettingsService:
             return existing
         return _new_settings(store_id)
 
+    async def lock_store(self, store_id: int) -> None:
+        """取得該店設定的交易級鎖：結帳讀設定決策前呼叫，序列化並發 PATCH（Codex 第廿三輪）。"""
+        await self._repo.acquire_store_lock(store_id)
+
     async def update_settings(
         self, store_id: int, *, actor_user_id: int | None, patch: SettingsUpdateRequest
     ) -> StoreSettings:
@@ -84,6 +88,9 @@ class StoreSettingsService:
         一併更動，套用後再驗）。premium_rate 實際變動時，寫一筆 premium_rate_history（old→new、
         actor、事由）並寫 UPDATE_SETTINGS 稽核。
         """
+        # 先取該店設定鎖：與結帳（create_sale 讀 einvoice_enabled 決策）序列化——PATCH
+        # 不得在對方比對與發票決策之間插隊改設定（Codex 第廿三輪 TOCTOU）。
+        await self._repo.acquire_store_lock(store_id)
         settings = await self._repo.get_by_store(store_id)
         if settings is None:
             settings = await self._repo.add(_new_settings(store_id))

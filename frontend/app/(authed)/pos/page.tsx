@@ -920,8 +920,15 @@ export default function PosPage() {
       }
       queryClient.setQueryData(["settings"], freshRes.data); // 讓畫面欄位隨新值顯示
       const freshEnabled = freshRes.data.einvoice_enabled;
-      if (freshEnabled && !einvoiceEnabled) {
-        throw new Error("電子發票設定剛變更為啟用：請確認發票欄位（統編/載具/捐贈）後再結帳");
+      // 任一方向切換都擋（Codex 第二十三輪）：停用→啟用會漏收統編/載具；**啟用→停用**
+      // 會把畫面已填的發票欄位靜默丟棄、開出未開發票的單。都先擋下請店員按新狀態重確認
+      // （setQueryData 已讓發票欄位隨新值顯示/隱藏）。
+      if (freshEnabled !== einvoiceEnabled) {
+        throw new Error(
+          freshEnabled
+            ? "電子發票設定剛變更為啟用：請確認發票欄位（統編/載具/捐贈）後再結帳"
+            : "電子發票設定剛變更為停用：本單將不開發票，請確認後再結帳",
+        );
       }
       const body = {
         lines: toSaleLines(lines),

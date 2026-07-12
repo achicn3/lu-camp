@@ -318,3 +318,94 @@ async def test_void_in_claim_gap_with_platform_not_found_cancels_issue(
             assert void_items == []  # 無需 F0501（平台無發票可作廢）
     finally:
         await _cleanup(sm, store_id)
+
+
+
+async def test_settings_patch_serialized_with_checkout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """並發：結帳（expected_einvoice_enabled=True）× PATCH 關閉電子發票（Codex 第廿三輪）。
+
+    交易級 advisory lock 使兩者對同店序列化：以 hook 讓結帳在**取設定鎖後**暫停，其間
+    發動 PATCH——PATCH 卡在同一鎖上直到結帳 commit。驗證：結帳以啟用態成立
+    （PENDING_ISSUE），PATCH 被序列化在其後才生效（commit 順序：結帳先於 PATCH）。
+    """
+    from app.modules.settings.schemas import SettingsUpdateRequest
+    from app.modules.settings.service import StoreSettingsService
+
+    sm = app_db.get_sessionmaker()
+    async with sm() as s0:
+        store = Store(name="設定並發店", tax_id="12345678")
+        s0.add(store)
+        await s0.flush()
+        clerk = User(
+            store_id=store.id, username="cc-settings", password_hash="h", role=UserRole.MANAGER
+        )
+        s0.add(clerk)
+        await s0.flush()
+        s0.add(StoreSettings(store_id=store.id, einvoice_enabled=True))
+        await s0.flush()
+        await CashDrawerService(s0).open_session(store.id, clerk.id, Decimal("1000"))
+        item = await InventoryService(s0).create_serialized_item(
+            store.id,
+            item_code="SN-SET-1",
+            name="相機",
+            grade=Grade.A,
+            ownership_type=OwnershipType.OWNED,
+            listed_price=Decimal(1050),
+            acquisition_cost=Decimal(500),
+        )
+        store_id, clerk_id, item_code = store.id, clerk.id, item.item_code
+        await s0.commit()
+
+    orig_lock = StoreSettingsService.lock_store
+    checkout_has_lock = asyncio.Event()
+    release = asyncio.Event()
+    commit_order: list[str] = []
+
+    async def hooked_lock(self: StoreSettingsService, store_id_: int) -> None:
+        await orig_lock(self, store_id_)  # 結帳先取鎖
+        checkout_has_lock.set()
+        await release.wait()  # 持鎖暫停，讓 PATCH 有機會嘗試（並卡在鎖上）
+
+    monkeypatch.setattr(StoreSettingsService, "lock_store", hooked_lock)
+
+    async def do_checkout() -> str:
+        async with sm() as s1:
+            sale = await SalesService(s1).create_sale(
+                store_id,
+                clerk_id,
+                lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item_code)],
+                expected_einvoice_enabled=True,
+            )
+            status = sale.invoice_status.value
+            await s1.commit()
+            commit_order.append("checkout")
+            return status
+
+    async def do_patch() -> None:
+        await checkout_has_lock.wait()  # 等結帳已持鎖
+        await asyncio.sleep(0.2)  # 讓 PATCH 真正卡在 advisory lock 上
+        release.set()  # 放行結帳（結帳 commit→釋放鎖→PATCH 才取得鎖）
+        async with sm() as s2:
+            await StoreSettingsService(s2).update_settings(
+                store_id,
+                actor_user_id=clerk_id,
+                patch=SettingsUpdateRequest(einvoice_enabled=False),
+            )
+            await s2.commit()
+            commit_order.append("patch")
+
+    try:
+        status_value, _ = await asyncio.gather(do_checkout(), do_patch())
+        assert status_value == "PENDING_ISSUE"  # 結帳以啟用態成立
+        assert commit_order == ["checkout", "patch"]  # 序列化：結帳先於 PATCH
+        async with sm() as s3:
+            invoices = (
+                await s3.scalars(select(Invoice).where(Invoice.store_id == store_id))
+            ).all()
+            assert len(invoices) == 1  # 啟用態建了 PENDING 發票
+            settings = await StoreSettingsService(s3).get_effective_settings(store_id)
+            assert settings.einvoice_enabled is False  # PATCH 最終生效（在結帳之後）
+    finally:
+        await _cleanup(sm, store_id)
