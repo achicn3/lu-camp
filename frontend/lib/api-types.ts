@@ -6940,6 +6940,15 @@ export interface operations {
                     "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
                 };
             };
+            /** @description 收貨衝突；回應標頭提供穩定錯誤代碼以區分冪等與已回滾的業務衝突。 */
+            409: {
+                headers: {
+                    /** @description IDEMPOTENCY_KEY_CONFLICT、DUPLICATE_INPUT_INVOICE 等穩定代碼 */
+                    "X-Lu-Camp-Error-Code"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Validation Error */
             422: {
                 headers: {

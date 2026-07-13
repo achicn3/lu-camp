@@ -35,6 +35,7 @@ from app.modules.store.router import router as store_router
 from app.modules.storecredit.router import router as storecredit_router
 from app.modules.storecredit.router import store_router as storecredit_store_router
 from app.modules.user.router import router as auth_router
+from app.shared.http import ERROR_CODE_HEADER
 
 API_PREFIX = "/api/v1"
 # 手持端請求體上限：簽名 base64（≈683KB）＋ JSON 外殼的寬裕值。手持裝置在客人手上，
@@ -60,6 +61,7 @@ def create_app() -> FastAPI:
         ],
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[ERROR_CODE_HEADER],
     )
 
     @app.middleware("http")

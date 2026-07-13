@@ -50,6 +50,7 @@ type PurchaseOrderReceiveBody = components["schemas"]["ReceivePurchaseOrderReque
 type Tab = "orders" | "suppliers";
 
 const PAGE_SIZE = 20;
+const RECEIVE_ERROR_CODE_HEADER = "X-Lu-Camp-Error-Code";
 
 // 「待收貨」＝ORDERED＋PARTIAL（部分到貨仍有待收量，不可從待收清單消失）。
 const PO_STATUS_FILTERS: { key: string; label: string; statuses: PoStatus[] }[] = [
@@ -66,6 +67,14 @@ function extractDetail(error: unknown): string | null {
     if (typeof detail === "string") return detail;
   }
   return null;
+}
+
+function canDiscardReceivePending(response: Response): boolean {
+  if (canDiscardIdempotencyKey(response.status)) return true;
+  if (response.status !== 409) return false;
+  const code = response.headers.get(RECEIVE_ERROR_CODE_HEADER);
+  // 精確重播若已有同 key＋同 body 的 receipt，後端會回 200；有穩定代碼的其他 409 均已 rollback。
+  return code !== null && code !== "IDEMPOTENCY_KEY_CONFLICT";
 }
 
 function money(value: string): string {
@@ -672,19 +681,26 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           return { reconciled: true };
         }
         // 重播非成功：僅「確定未提交」的 4xx 可丟棄舊鍵、續本次收貨；否則保留、請店員稍後再試。
-        if (!canDiscardIdempotencyKey(response.status)) {
+        if (!canDiscardReceivePending(response)) {
           throw new Error("上一次收貨狀態未定，請稍後再試。");
         }
         clearPendingReceive(po.id);
       }
       // 2) 本次收貨（新鍵）
-      const lines = po.lines
-        .map((l) => ({ line_id: l.id, qty: Number.parseInt(receiveQty[l.id] ?? "", 10) }))
-        .filter((x) => Number.isFinite(x.qty) && x.qty > 0);
+      const parsedLines = po.lines.map((line) => {
+        const raw = (receiveQty[line.id] ?? "").trim();
+        const qty = raw === "" ? 0 : Number(raw);
+        if (!Number.isFinite(qty) || !Number.isInteger(qty) || qty < 0) {
+          throw new Error("本次實收量必須為正整數");
+        }
+        return { line, qty };
+      });
+      const lines = parsedLines
+        .filter(({ qty }) => qty > 0)
+        .map(({ line, qty }) => ({ line_id: line.id, qty }));
       if (lines.length === 0) throw new Error("請至少輸入一項的本次實收量");
-      for (const l of po.lines) {
-        const q = Number.parseInt(receiveQty[l.id] ?? "", 10);
-        if (Number.isFinite(q) && q > lineRemaining(l.qty, l.received_qty)) {
+      for (const { line, qty } of parsedLines) {
+        if (qty > lineRemaining(line.qty, line.received_qty)) {
           throw new Error("本次實收量不可超過待收量");
         }
       }
@@ -711,7 +727,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
         body,
       });
       if (!data) {
-        if (canDiscardIdempotencyKey(response.status)) clearPendingReceive(po.id);
+        if (canDiscardReceivePending(response)) clearPendingReceive(po.id);
         throw new Error(extractDetail(error) ?? "收貨失敗，請稍後再試");
       }
       clearPendingReceive(po.id);

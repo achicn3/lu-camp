@@ -34,6 +34,7 @@ from app.shared.exceptions import (
     PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
 )
+from app.shared.http import ERROR_CODE_HEADER
 
 router = APIRouter(tags=["purchasing"])
 
@@ -52,11 +53,18 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
 }
 
+_ERROR_CODE_BY_EXC: dict[type[DomainError], str] = {
+    IdempotencyKeyConflict: "IDEMPOTENCY_KEY_CONFLICT",
+    PurchaseOrderNotReceivable: "PURCHASE_ORDER_NOT_RECEIVABLE",
+}
+
 
 def _map_domain_error(exc: DomainError) -> HTTPException:
+    error_code = _ERROR_CODE_BY_EXC.get(type(exc))
     return HTTPException(
         status_code=_STATUS_BY_EXC.get(type(exc), status.HTTP_400_BAD_REQUEST),
         detail=str(exc),
+        headers={ERROR_CODE_HEADER: error_code} if error_code is not None else None,
     )
 
 
@@ -217,6 +225,17 @@ async def get_purchase_order(
     "/purchase-orders/{purchase_order_id}/receive",
     response_model=ReceivePurchaseOrderResult,
     operation_id="receivePurchaseOrder",
+    responses={
+        409: {
+            "description": "收貨衝突；回應標頭提供穩定錯誤代碼以區分冪等與已回滾的業務衝突。",
+            "headers": {
+                ERROR_CODE_HEADER: {
+                    "description": "IDEMPOTENCY_KEY_CONFLICT、DUPLICATE_INPUT_INVOICE 等穩定代碼",
+                    "schema": {"type": "string"},
+                }
+            },
+        }
+    },
 )
 async def receive_purchase_order(
     purchase_order_id: int,
@@ -272,8 +291,13 @@ async def receive_purchase_order(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
+                headers={ERROR_CODE_HEADER: "DUPLICATE_INPUT_INVOICE"},
             ) from exc
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="收貨失敗") from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="收貨失敗",
+            headers={ERROR_CODE_HEADER: "RECEIVE_CONFLICT"},
+        ) from exc
     await session.commit()
     return ReceivePurchaseOrderResult(
         receipt_id=receipt.id,

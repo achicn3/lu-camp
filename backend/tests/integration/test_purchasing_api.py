@@ -439,6 +439,7 @@ async def test_receive_idempotent_retry_does_not_double_stock(
         headers=_recv_headers(token, key),
     )
     assert conflict.status_code == 409, conflict.text
+    assert conflict.headers["X-Lu-Camp-Error-Code"] == "IDEMPOTENCY_KEY_CONFLICT"
 
 
 async def test_list_outstanding_includes_ordered_and_partial(
@@ -784,6 +785,7 @@ async def test_duplicate_invoice_number_rejected_across_pos(
     # 收貨路徑重複 → 409
     dup_receive = await _receive_all(client, token, po2, invoice=invoice)
     assert dup_receive.status_code == 409, dup_receive.text
+    assert dup_receive.headers["X-Lu-Camp-Error-Code"] == "DUPLICATE_INPUT_INVOICE"
     # po2 未收貨成功（原子回滾）：再收一次（無發票）→ 200，補登同號 → 409
     ok2 = await _receive_all(client, token, po2)
     assert ok2.status_code == 200, ok2.text

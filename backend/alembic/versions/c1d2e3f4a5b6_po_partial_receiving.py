@@ -72,20 +72,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("uq_goods_receipts_store_idempotency", table_name="goods_receipts")
-    op.drop_column("goods_receipts", "request_fingerprint")
-    op.drop_column("goods_receipts", "idempotency_key")
-    # 還原前須確保無一 PO 多收貨列，否則唯一約束建立會失敗。
-    op.create_unique_constraint(
-        "uq_goods_receipts_purchase_order_id", "goods_receipts", ["purchase_order_id"]
+    """此版不可無損降級；在任何 schema 變更前明確拒絕。
+
+    舊版一張 PO 只能有一張 receipt，且沒有 PARTIAL/CANCELLED/received_qty，無法保留正常使用
+    後產生的多批收貨與部分到貨語意。事故復原請保留目前 DB、修正程式後 roll forward；若必須回復
+    應用程式，應部署相容目前 schema 的 hotfix，不可執行 alembic downgrade。
+    """
+    raise RuntimeError(
+        "irreversible purchasing migration; preserve the database and roll forward with a "
+        "schema-compatible hotfix"
     )
-    op.drop_constraint("purchase_orders_status_check", "purchase_orders", type_="check")
-    op.create_check_constraint(
-        "purchase_orders_status_check", "purchase_orders", _status_check(_STATUS_OLD)
-    )
-    op.drop_constraint(
-        "ck_purchase_order_lines_received_qty_range",
-        "purchase_order_lines",
-        type_="check",
-    )
-    op.drop_column("purchase_order_lines", "received_qty")

@@ -50,3 +50,13 @@ async def test_unknown_origin_not_allowed(client: httpx.AsyncClient) -> None:
         },
     )
     assert "access-control-allow-origin" not in resp.headers
+
+
+async def test_error_code_header_is_exposed_to_browser(client: httpx.AsyncClient) -> None:
+    resp = await client.get(
+        "/api/v1/health",
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    exposed = resp.headers.get("access-control-expose-headers", "").lower().split(", ")
+    assert "x-lu-camp-error-code" in exposed

@@ -23,10 +23,10 @@ function loginAs(role: "MANAGER" | "CLERK") {
   setToken(fakeJwt({ sub: "1", role, store_id: 1 }));
 }
 
-function json(data: unknown, status = 200): Response {
+function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -345,6 +345,76 @@ describe("/purchasing", () => {
     await waitFor(() => expect(calls).toHaveLength(3));
     expect(calls[2].key).not.toBe(firstKey); // 新鍵
     expect(calls[2].lines).toEqual([{ line_id: 1, qty: 7 }]);
+  });
+
+  it("重複發票 409 會清除 pending，修正後以新鍵和新發票重送", async () => {
+    loginAs("CLERK");
+    const calls: { key: string | undefined; invoice: string | undefined }[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/receive") && init.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        const invoice = body.invoice?.invoice_number as string | undefined;
+        calls.push({ key: headerVal(init), invoice });
+        if (invoice === "AB12345678") {
+          return json(
+            { detail: "此發票號碼（同日期）已登錄於其他採購單，不可重複入帳" },
+            409,
+            { "X-Lu-Camp-Error-Code": "DUPLICATE_INPUT_INVOICE" },
+          );
+        }
+        return json({ receipt_id: 2, purchase_order: { ...ORDERED_PO, status: "PARTIAL" } });
+      }
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    await user.clear(await screen.findByLabelText("本次實收 瓦斯罐"));
+    await user.type(screen.getByLabelText("本次實收 瓦斯罐"), "3");
+    await user.type(screen.getByLabelText("發票號碼"), "AB12345678");
+    await user.type(screen.getByLabelText("發票日期"), "2026-07-11");
+    await user.type(screen.getByLabelText("發票含稅金額"), "1050");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(loadPendingReceive(ORDERED_PO.id)).toBeNull();
+
+    await user.clear(screen.getByLabelText("發票號碼"));
+    await user.type(screen.getByLabelText("發票號碼"), "CD87654321");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls.map((call) => call.invoice)).toEqual(["AB12345678", "CD87654321"]);
+    expect(calls[1].key).not.toBe(calls[0].key);
+  });
+
+  it("收貨數量含小數時拒絕送出，不可用 parseInt 靜默截斷", async () => {
+    loginAs("CLERK");
+    let receiveCalled = false;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/receive") && init.method === "POST") {
+        receiveCalled = true;
+        return json({ receipt_id: 1, purchase_order: ORDERED_PO });
+      }
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    const qty = await screen.findByLabelText("本次實收 瓦斯罐");
+    await user.clear(qty);
+    await user.type(qty, "1.5");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+
+    expect(await screen.findByText("本次實收量必須為正整數")).toBeTruthy();
+    expect(receiveCalled).toBe(false);
+    expect(loadPendingReceive(ORDERED_PO.id)).toBeNull();
   });
 
   it("已下單可取消（呼叫 cancel 端點）", async () => {
