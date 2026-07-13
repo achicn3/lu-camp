@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import PurchasingPage from "@/app/(authed)/purchasing/page";
+import { clearPendingReceive, loadPendingReceive } from "@/lib/idempotency";
 import { clearToken, setToken } from "@/lib/token";
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -70,6 +71,21 @@ const ORDERED_PO = {
 
 type FetchRoute = (url: string, init: RequestInit) => Response | null;
 
+function headerVal(init?: RequestInit, name = "idempotency-key"): string | undefined {
+  const h = init?.headers;
+  if (h == null) return undefined;
+  const entries =
+    h instanceof Headers
+      ? Object.fromEntries(h)
+      : Array.isArray(h)
+        ? Object.fromEntries(h)
+        : (h as Record<string, string>);
+  const lower = Object.fromEntries(
+    Object.entries(entries).map(([k, v]) => [k.toLowerCase(), v]),
+  );
+  return lower[name];
+}
+
 function stubFetch(route: FetchRoute) {
   vi.stubGlobal(
     "fetch",
@@ -78,7 +94,8 @@ function stubFetch(route: FetchRoute) {
       const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
       const body =
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
-      const resp = route(url, { method, body } as RequestInit);
+      const headers = input instanceof Request ? input.headers : init?.headers;
+      const resp = route(url, { method, body, headers } as RequestInit);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
     }),
@@ -98,6 +115,12 @@ afterEach(() => {
   clearToken();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  clearPendingReceive(ORDERED_PO.id); // 避免收貨 pending 冪等狀態跨測試殘留
+  try {
+    globalThis.localStorage?.clear();
+  } catch {
+    // jsdom 無 localStorage 時忽略
+  }
 });
 
 describe("/purchasing", () => {
@@ -266,6 +289,62 @@ describe("/purchasing", () => {
     await waitFor(() => expect(receiveBody).not.toBeNull());
     const parsed = JSON.parse(receiveBody as unknown as string);
     expect(parsed.lines).toEqual([{ line_id: 1, qty: 4 }]);
+  });
+
+  it("收貨回應遺失：以原 body＋原鍵重播和解，再以新鍵收剩餘", async () => {
+    loginAs("CLERK");
+    const calls: { key: string | undefined; lines: unknown }[] = [];
+    let firstDone = false;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/receive") && init.method === "POST") {
+        calls.push({
+          key: headerVal(init),
+          lines: JSON.parse(String(init.body)).lines,
+        });
+        if (!firstDone) {
+          firstDone = true; // 模擬「後端已提交但回應遺失」：先回 503（非可丟棄）
+          return json({ detail: "服務暫時無法使用" }, 503);
+        }
+        return json({ receipt_id: 1, purchase_order: { ...ORDERED_PO, status: "PARTIAL" } });
+      }
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    // 1) 收 3 → 回應遺失（503）：鍵＋原 body 已持久化、未清（非可丟棄）
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    const qty = await screen.findByLabelText("本次實收 瓦斯罐");
+    await user.clear(qty);
+    await user.type(qty, "3");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0].lines).toEqual([{ line_id: 1, qty: 3 }]);
+    expect(loadPendingReceive(ORDERED_PO.id)).not.toBeNull();
+    const firstKey = calls[0].key;
+
+    // 2) 對話框仍開；店員誤改輸入 7 → 但應先以「原 body(3)＋原鍵」重播和解（非送出 7）
+    await user.clear(qty);
+    await user.type(qty, "7");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].key).toBe(firstKey); // 原鍵
+    expect(calls[1].lines).toEqual([{ line_id: 1, qty: 3 }]); // 原 body，非 7
+    await waitFor(() => expect(loadPendingReceive(ORDERED_PO.id)).toBeNull()); // 和解後清鍵
+    expect(await screen.findByText(/已為您同步/)).toBeTruthy(); // 復原提示
+
+    // 3) 下一批以新鍵收剩餘（重開對話框）
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    const qty2 = await screen.findByLabelText("本次實收 瓦斯罐");
+    await user.clear(qty2);
+    await user.type(qty2, "7");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2].key).not.toBe(firstKey); // 新鍵
+    expect(calls[2].lines).toEqual([{ line_id: 1, qty: 7 }]);
   });
 
   it("已下單可取消（呼叫 cancel 端點）", async () => {

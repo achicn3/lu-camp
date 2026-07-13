@@ -81,39 +81,49 @@ export function pendingAcqIdemKeyServerSnapshot(): string | null {
   return null;
 }
 
-// ── 分批收貨的 pending 冪等鍵（依採購單 id 分別保存）────────────────────────
-// 收貨鍵只存 React ref 會在重新整理後遺失：若收貨已於後端 commit、回應途中斷線、店員重整後
-// 再送，換新鍵便會被視為新收貨事件而重複入庫（Codex 第二輪 high）。故送出前先以「採購單 id」
-// 為界持久化（localStorage＋記憶體後備，跨重整存活），成功或「確定未提交的 4xx」才清；
-// 依 PO 分界避免某單殘留鍵誤用於另一單（後端會因 PO 不符回 409 擋下新單收貨）。
+// ── 分批收貨的 pending 冪等（依採購單 id 分別保存 鍵＋原始請求 body）──────────
+// 收貨鍵只存 React ref 會在重新整理後遺失：若收貨已 commit、回應途中斷線、店員重整後再送，
+// 換新鍵便會被視為新收貨事件而重複入庫（Codex 第二輪 high）。故送出前先以「採購單 id」為界
+// 持久化（localStorage＋記憶體後備，跨重整存活）。
+// 且須連同**原始 body** 一起存（Codex 第三輪 high）：重整後 PO 待收量已變（如 10→7），若以新
+// 待收量沿用舊鍵重送，後端會因指紋不符永久回 409 卡死。復原時應以「原 body＋原鍵」重播和解，
+// 200 後清除、刷新，之後才收下一批。成功或「確定未提交的 4xx」才清。
+export interface PendingReceive {
+  key: string;
+  body: unknown;
+}
+
 const RECEIVE_IDEM_PREFIX = "lu-camp.receive-pending-idem";
-const memoryReceiveKeys = new Map<number, string>();
+const memoryReceive = new Map<number, PendingReceive>();
 
 function receiveStorageKey(poId: number): string {
   return `${RECEIVE_IDEM_PREFIX}.${poId}`;
 }
 
-export function loadPendingReceiveIdemKey(poId: number): string | null {
+export function loadPendingReceive(poId: number): PendingReceive | null {
   try {
-    const stored = globalThis.localStorage?.getItem(receiveStorageKey(poId)) ?? null;
-    if (stored != null) return stored;
+    const stored = globalThis.localStorage?.getItem(receiveStorageKey(poId));
+    if (stored != null) {
+      const parsed = JSON.parse(stored) as PendingReceive;
+      if (parsed && typeof parsed.key === "string") return parsed;
+    }
   } catch {
-    // 讀取失敗：退回記憶體後備。
+    // 讀取/解析失敗：退回記憶體後備。
   }
-  return memoryReceiveKeys.get(poId) ?? null;
+  return memoryReceive.get(poId) ?? null;
 }
 
-export function savePendingReceiveIdemKey(poId: number, key: string): void {
-  memoryReceiveKeys.set(poId, key);
+export function savePendingReceive(poId: number, entry: PendingReceive): void {
+  memoryReceive.set(poId, entry);
   try {
-    globalThis.localStorage?.setItem(receiveStorageKey(poId), key);
+    globalThis.localStorage?.setItem(receiveStorageKey(poId), JSON.stringify(entry));
   } catch {
     // 配額/隱私政策：僅記憶體後備（本 session 仍防重複，重整不保證）。
   }
 }
 
-export function clearPendingReceiveIdemKey(poId: number): void {
-  memoryReceiveKeys.delete(poId);
+export function clearPendingReceive(poId: number): void {
+  memoryReceive.delete(poId);
   try {
     globalThis.localStorage?.removeItem(receiveStorageKey(poId));
   } catch {

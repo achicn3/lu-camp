@@ -34,9 +34,10 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import {
   canDiscardIdempotencyKey,
-  clearPendingReceiveIdemKey,
-  loadPendingReceiveIdemKey,
-  savePendingReceiveIdemKey,
+  clearPendingReceive,
+  loadPendingReceive,
+  type PendingReceive,
+  savePendingReceive,
 } from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
@@ -44,6 +45,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 type Supplier = components["schemas"]["SupplierRead"];
 type PurchaseOrder = components["schemas"]["PurchaseOrderRead"];
 type PoStatus = components["schemas"]["PurchaseOrderStatus"];
+type PurchaseOrderReceiveBody = components["schemas"]["ReceivePurchaseOrderRequest"];
 
 type Tab = "orders" | "suppliers";
 
@@ -583,6 +585,8 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [invDate, setInvDate] = useState("");
   const [invTotal, setInvTotal] = useState("");
   const [rowError, setRowError] = useState<string | null>(null);
+  // 復原提示（非錯誤）：偵測到上一次未確認收貨、已和解時告知店員確認剩餘數量。
+  const [receiveNotice, setReceiveNotice] = useState<string | null>(null);
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
@@ -590,6 +594,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   };
   function openReceive(po: PurchaseOrder) {
     resetInvoiceDraft();
+    setReceiveNotice(null);
     setReceiveQty(
       Object.fromEntries(
         po.lines.map((l) => [l.id, String(lineRemaining(l.qty, l.received_qty))]),
@@ -649,7 +654,30 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   };
 
   const receive = useMutation({
-    mutationFn: async (po: PurchaseOrder) => {
+    mutationFn: async (po: PurchaseOrder): Promise<{ reconciled: boolean }> => {
+      const receiveUrl = "/api/v1/purchase-orders/{purchase_order_id}/receive" as const;
+      // 1) 先和解上一次未確認的收貨：以「原 body＋原鍵」重播（冪等）。避免重整後 PO 待收量已變、
+      //    卻以新待收量沿用舊鍵重送而永久 409 卡死（Codex 第三輪）。
+      const pending = loadPendingReceive(po.id);
+      if (pending) {
+        const { data, response } = await api.POST(receiveUrl, {
+          params: {
+            path: { purchase_order_id: po.id },
+            header: { "Idempotency-Key": pending.key },
+          },
+          body: pending.body as PurchaseOrderReceiveBody,
+        });
+        if (data) {
+          clearPendingReceive(po.id);
+          return { reconciled: true };
+        }
+        // 重播非成功：僅「確定未提交」的 4xx 可丟棄舊鍵、續本次收貨；否則保留、請店員稍後再試。
+        if (!canDiscardIdempotencyKey(response.status)) {
+          throw new Error("上一次收貨狀態未定，請稍後再試。");
+        }
+        clearPendingReceive(po.id);
+      }
+      // 2) 本次收貨（新鍵）
       const lines = po.lines
         .map((l) => ({ line_id: l.id, qty: Number.parseInt(receiveQty[l.id] ?? "", 10) }))
         .filter((x) => Number.isFinite(x.qty) && x.qty > 0);
@@ -661,42 +689,44 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
         }
       }
       const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
-      // 冪等鍵沿用該 PO 殘留的 pending 鍵（跨重整存活）或鑄新鍵；送出前先持久化，回應
-      // 遺失/重整後重送沿用同鍵 → 後端只入庫一次（防重複入庫）。
-      const key = loadPendingReceiveIdemKey(po.id) ?? newIdempotencyKey();
-      savePendingReceiveIdemKey(po.id, key);
-      const { data, error, response } = await api.POST(
-        "/api/v1/purchase-orders/{purchase_order_id}/receive",
-        {
-          params: {
-            path: { purchase_order_id: po.id },
-            header: { "Idempotency-Key": key },
-          },
-          body: hasInvoice
-            ? {
-                lines,
-                invoice: {
-                  invoice_number: invNumber.trim().toUpperCase(),
-                  invoice_date: invDate,
-                  invoice_total: invTotal.trim(),
-                },
-              }
-            : { lines },
+      const body: PurchaseOrderReceiveBody = hasInvoice
+        ? {
+            lines,
+            invoice: {
+              invoice_number: invNumber.trim().toUpperCase(),
+              invoice_date: invDate,
+              invoice_total: invTotal.trim(),
+            },
+          }
+        : { lines };
+      const key = newIdempotencyKey();
+      // 送出前先連同 body 持久化：回應遺失/重整後由此重播和解，後端只入庫一次（防重複入庫）。
+      const entry: PendingReceive = { key, body };
+      savePendingReceive(po.id, entry);
+      const { data, error, response } = await api.POST(receiveUrl, {
+        params: {
+          path: { purchase_order_id: po.id },
+          header: { "Idempotency-Key": key },
         },
-      );
+        body,
+      });
       if (!data) {
-        // 僅「確定後端未提交」的 4xx（非 409）可丟棄鍵換新；409/5xx/網路曖昧 → 保留沿用。
-        if (canDiscardIdempotencyKey(response.status)) clearPendingReceiveIdemKey(po.id);
+        if (canDiscardIdempotencyKey(response.status)) clearPendingReceive(po.id);
         throw new Error(extractDetail(error) ?? "收貨失敗，請稍後再試");
       }
-      clearPendingReceiveIdemKey(po.id);
-      return data;
+      clearPendingReceive(po.id);
+      return { reconciled: false };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setReceiving(null);
       setReceiveError(null);
       resetInvoiceDraft();
       invalidateOrders();
+      setReceiveNotice(
+        result.reconciled
+          ? "偵測到上一次收貨尚未確認、已為您同步；請確認待收數量後再收剩餘。"
+          : null,
+      );
     },
     onError: (err: Error) => setReceiveError(err.message),
   });
@@ -756,6 +786,11 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       {rowError !== null && (
         <p role="alert" className="form-error">
           {rowError}
+        </p>
+      )}
+      {receiveNotice !== null && (
+        <p role="status" className="hint pur-notice">
+          {receiveNotice}
         </p>
       )}
       {orders.isPending ? (
