@@ -66,9 +66,12 @@
 
 ### F. Purchasing / 供應商與採購（數量型商品）
 - `supplier` 主檔。
-- 採購單 `purchase_order` → 收貨 `goods_receipt` → 增加 `catalog_product` 數量、寫 `stock_movement`(IN)。
+- 採購單可存草稿、送出或在未收貨前取消；送出後支援分批收貨，狀態依序為
+  `DRAFT → ORDERED → PARTIAL → RECEIVED`，`DRAFT/ORDERED → CANCELLED`。
+- 每批收貨建立一筆 `goods_receipt`，累加各明細的 `received_qty`、增加
+  `catalog_product` 數量並寫 `stock_movement`(IN)；收足前仍可繼續收貨。
 - 補貨點/低庫存提醒（可設定 reorder point）。
-- 向供應商進貨之進項憑證資訊欄位（供會計使用）。
+- 每批收貨可登錄一張進項發票；漏登可事後補登一次（供會計使用）。
 
 ### G. Sales / POS 銷售
 - 純現金結帳。掃 `item_code`（序號品）或選 `catalog_product`（數量品）加入購物車；E 級散裝則選/掃 `bulk_lot`，以該堆均一價售出（可一次多件），扣 `remaining_qty`。

@@ -92,9 +92,9 @@ erDiagram
 
 ### supplier / purchase_order / purchase_order_line / goods_receipt
 - `supplier`: `id, store_id, name, contact, tax_id?`
-- `purchase_order`: `id, store_id, supplier_id, status(DRAFT|ORDERED|RECEIVED|CLOSED), date`
-- `purchase_order_line`: `id, po_id, catalog_product_id, qty, unit_cost`
-- `goods_receipt`: `id, po_id, received_at, received_by`
+- `purchase_order`: `id, store_id, supplier_id, status(DRAFT|ORDERED|PARTIAL|RECEIVED|CANCELLED), ordered_at, ordered_by, received_at?, received_by?`
+- `purchase_order_line`: `id, store_id, po_id, catalog_product_id, qty, received_qty, unit_cost`
+- `goods_receipt`: `id, store_id, po_id, received_at, received_by, invoice_*, idempotency_key?, request_fingerprint?`；一張採購單可有多筆收貨批次
 
 ### sale（POS 交易）
 `id, store_id, clerk_user_id, buyer_contact_id?, datetime, subtotal, tax, total, payment_method(CASH), invoice_status(ISSUED|NOT_ISSUED|VOID|ALLOWANCE), invoice_id?, status(COMPLETED|RETURNED)`

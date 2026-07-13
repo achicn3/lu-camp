@@ -117,7 +117,10 @@ GET    /api/v1/consignment/payables                # 應付未付彙總
 ```
 GET/POST   /api/v1/suppliers
 GET/POST   /api/v1/purchase-orders
-POST       /api/v1/purchase-orders/{id}/receive    # 收貨 -> 加數量 + stock_movement(IN)
+POST       /api/v1/purchase-orders/{id}/submit     # 草稿送出 -> ORDERED
+POST       /api/v1/purchase-orders/{id}/cancel     # 未收貨前取消 -> CANCELLED
+POST       /api/v1/purchase-orders/{id}/receive    # 分批收貨 -> 累加 received_qty + stock_movement(IN)
+POST       /api/v1/purchase-orders/{id}/receipts/{receipt_id}/invoice  # 補登該批進項發票
 ```
 
 ## E-Invoice

@@ -421,8 +421,8 @@ function PurchaseOrderDetailModal({
             </dd>
           </div>
           <div>
-            <dt>下單時間</dt>
-            <dd>{dt(po.ordered_at)}</dd>
+            <dt>{po.status === "DRAFT" ? "建立時間" : "下單時間"}</dt>
+            <dd>{dt(po.status === "DRAFT" ? po.created_at : po.ordered_at)}</dd>
           </div>
           <div>
             <dt>收貨完成</dt>
@@ -826,7 +826,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
             <tr>
               <th>單號</th>
               <th>供應商</th>
-              <th>下單時間</th>
+              <th>建立 / 下單時間</th>
               <th>項數</th>
               <th>總額</th>
               <th>狀態</th>
@@ -845,7 +845,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                   </td>
                   <td>{supplierName(po.supplier_id)}</td>
                   <td>
-                    {dt(po.ordered_at)}
+                    {dt(po.status === "DRAFT" ? po.created_at : po.ordered_at)}
                     {po.received_at && <span className="row-sub">收貨 {dt(po.received_at)}</span>}
                   </td>
                   <td>{po.lines.length}</td>

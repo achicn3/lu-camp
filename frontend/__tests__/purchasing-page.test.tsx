@@ -148,6 +148,30 @@ describe("/purchasing", () => {
     expect(await screen.findByLabelText("供應商")).toBeTruthy();
   });
 
+  it("草稿詳情顯示建立時間，不把尚未送出的時間稱為下單時間", async () => {
+    loginAs("CLERK");
+    const draft = {
+      ...ORDERED_PO,
+      status: "DRAFT",
+      created_at: "2026-06-19T01:00:00Z",
+      ordered_at: "2099-01-01T01:00:00Z",
+    };
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders")) return json([draft]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "詳細" }));
+    const dialog = screen.getByRole("dialog", { name: "採購單詳情" });
+    expect(within(dialog).getByText("建立時間")).toBeTruthy();
+    expect(within(dialog).queryByText("下單時間")).toBeNull();
+    expect(within(dialog).queryByText(/2099/)).toBeNull();
+  });
+
   it("receives a purchase order after confirmation", async () => {
     loginAs("CLERK");
     const received = { ...ORDERED_PO, status: "RECEIVED", received_at: "2026-06-20T02:00:00Z" };
