@@ -67,19 +67,32 @@ class PurchasingRepository:
         self,
         store_id: int,
         *,
-        status: PurchaseOrderStatus | None = None,
+        statuses: list[PurchaseOrderStatus] | None = None,
         limit: int,
         offset: int,
     ) -> list[PurchaseOrder]:
         stmt = (
             select(PurchaseOrder)
-            .options(selectinload(PurchaseOrder.lines))
+            .options(
+                selectinload(PurchaseOrder.lines),
+                selectinload(PurchaseOrder.receipts),
+            )
             .where(PurchaseOrder.store_id == store_id)
         )
-        if status is not None:
-            stmt = stmt.where(PurchaseOrder.status == status)
+        if statuses:
+            stmt = stmt.where(PurchaseOrder.status.in_(statuses))
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def get_receipt_by_idempotency_key(
+        self, store_id: int, idempotency_key: str
+    ) -> GoodsReceipt | None:
+        stmt = select(GoodsReceipt).where(
+            GoodsReceipt.store_id == store_id,
+            GoodsReceipt.idempotency_key == idempotency_key,
+        )
+        result: GoodsReceipt | None = await self._session.scalar(stmt)
+        return result
 
     async def lines_for_catalog(
         self, store_id: int, catalog_product_id: int

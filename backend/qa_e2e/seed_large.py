@@ -16,6 +16,7 @@ import os
 import random
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -490,7 +491,12 @@ async def _seed() -> None:
             if _RNG.random() < 0.8:
                 receive_lines = [ReceiveLineIn(line_id=ln.id, qty=ln.qty) for ln in po.lines]
                 await purch.receive_purchase_order(
-                    store_id, po.id, actor_user_id=clerk_id, lines=receive_lines
+                    store_id,
+                    po.id,
+                    actor_user_id=clerk_id,
+                    lines=receive_lines,
+                    idempotency_key=uuid4().hex,
+                    request_fingerprint=f"seed-{po.id}",
                 )
                 await session.commit()
                 n_recv += 1

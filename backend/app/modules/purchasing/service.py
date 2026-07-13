@@ -26,6 +26,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
+    IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
     PurchaseOrderNotCancellable,
@@ -114,6 +115,9 @@ class PurchasingService:
                 f"採購單 {purchase_order_id} 狀態為 {purchase_order.status.value}，僅草稿可送出"
             )
         purchase_order.status = PurchaseOrderStatus.ORDERED
+        # 正式下單時間/下單人以「送出」當下為準（草稿建立者/時間不代表下單）。
+        purchase_order.ordered_at = datetime.now(UTC)
+        purchase_order.ordered_by = actor_user_id
         await self._session.flush()
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
@@ -155,12 +159,12 @@ class PurchasingService:
         self,
         store_id: int,
         *,
-        status: PurchaseOrderStatus | None = None,
+        statuses: list[PurchaseOrderStatus] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[PurchaseOrder]:
         return await self._repo.list_purchase_orders(
-            store_id, status=status, limit=limit, offset=offset
+            store_id, statuses=statuses, limit=limit, offset=offset
         )
 
     async def purchase_history_for_catalog(
@@ -174,6 +178,7 @@ class PurchasingService:
                 "supplier_id": supplier.id,
                 "supplier_name": supplier.name,
                 "qty": line.qty,
+                "received_qty": line.received_qty,
                 "unit_cost": line.unit_cost,
                 "status": po.status.value,
                 "ordered_at": po.ordered_at,
@@ -235,10 +240,28 @@ class PurchasingService:
         *,
         actor_user_id: int,
         lines: list["ReceiveLineIn"],
+        idempotency_key: str,
+        request_fingerprint: str,
         invoice: "InputInvoiceIn | None" = None,
     ) -> tuple[PurchaseOrder, GoodsReceipt]:
         """分批收貨：對指定明細各收 qty（不得超過待收），更新庫存＋寫庫存異動，
-        建立一張收貨批次（可選填進項發票），並依是否全數收足轉 PARTIAL/RECEIVED。"""
+        建立一張收貨批次（可選填進項發票），並依是否全數收足轉 PARTIAL/RECEIVED。
+
+        冪等（防網路重試重複入庫）：同店同 idempotency_key 只成立一筆收貨——重送且指紋相符回原
+        結果、不重複加庫存；指紋不符 → 409。並行首寫競態由唯一索引擋下（router 收攏回放）。
+        """
+        # 前置回放：同 key 已有收貨 → 指紋相符回原結果、不同 → 衝突。
+        existing = await self._repo.get_receipt_by_idempotency_key(store_id, idempotency_key)
+        if existing is not None:
+            if (
+                existing.purchase_order_id == purchase_order_id
+                and existing.request_fingerprint == request_fingerprint
+            ):
+                replayed = await self._repo.get_purchase_order(store_id, purchase_order_id)
+                assert replayed is not None
+                return replayed, existing
+            raise IdempotencyKeyConflict("Idempotency-Key 已用於不同的收貨請求")
+
         purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
         if purchase_order is None:
             raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
@@ -276,11 +299,14 @@ class PurchasingService:
             settings = await self._settings.get_effective_settings(store_id)
             invoice_fields = self._invoice_fields(invoice, Decimal(settings.tax_rate))
         # 先建收貨批次取得 id，庫存異動以 ref_type="goods_receipt" 指向本批。
+        # 冪等鍵/指紋落在同一交易：並行首寫互撞由 (store, key) 唯一索引擋下（router 回放）。
         receipt = await self._repo.add_receipt(
             GoodsReceipt(
                 store_id=store_id,
                 purchase_order_id=purchase_order.id,
                 received_by=actor_user_id,
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
                 **invoice_fields,
             )
         )

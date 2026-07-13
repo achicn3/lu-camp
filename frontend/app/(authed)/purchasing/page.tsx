@@ -33,6 +33,7 @@ import {
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
 
 type Supplier = components["schemas"]["SupplierRead"];
 type PurchaseOrder = components["schemas"]["PurchaseOrderRead"];
@@ -42,13 +43,13 @@ type Tab = "orders" | "suppliers";
 
 const PAGE_SIZE = 20;
 
-const PO_STATUS_FILTERS: { value: PoStatus | "ALL"; label: string }[] = [
-  { value: "ALL", label: "全部" },
-  { value: "DRAFT", label: "草稿" },
-  { value: "ORDERED", label: "待收貨" },
-  { value: "PARTIAL", label: "部分到貨" },
-  { value: "RECEIVED", label: "已收貨" },
-  { value: "CANCELLED", label: "已取消" },
+// 「待收貨」＝ORDERED＋PARTIAL（部分到貨仍有待收量，不可從待收清單消失）。
+const PO_STATUS_FILTERS: { key: string; label: string; statuses: PoStatus[] }[] = [
+  { key: "ALL", label: "全部", statuses: [] },
+  { key: "DRAFT", label: "草稿", statuses: ["DRAFT"] },
+  { key: "OUTSTANDING", label: "待收貨", statuses: ["ORDERED", "PARTIAL"] },
+  { key: "RECEIVED", label: "已收貨", statuses: ["RECEIVED"] },
+  { key: "CANCELLED", label: "已取消", statuses: ["CANCELLED"] },
 ];
 
 function extractDetail(error: unknown): string | null {
@@ -576,6 +577,8 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [invDate, setInvDate] = useState("");
   const [invTotal, setInvTotal] = useState("");
   const [rowError, setRowError] = useState<string | null>(null);
+  // 本次收貨的冪等鍵：開啟對話框時產生一次，逾時重按沿用同鍵 → 後端只入庫一次（防重複入庫）。
+  const receiveKey = useRef<string>("");
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
@@ -583,6 +586,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   };
   function openReceive(po: PurchaseOrder) {
     resetInvoiceDraft();
+    receiveKey.current = newIdempotencyKey();
     setReceiveQty(
       Object.fromEntries(
         po.lines.map((l) => [l.id, String(lineRemaining(l.qty, l.received_qty))]),
@@ -591,10 +595,14 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
     setReceiving(po);
     setReceiveError(null);
   }
-  // 預設只看「待收貨」——最常用；要看全部/草稿/部分到貨可切籤。
-  const [status, setStatus] = useState<PoStatus | "ALL">("ORDERED");
+  // 預設「待收貨」＝ORDERED＋PARTIAL——最常用；要看全部/草稿/已取消可切籤。
+  const [statusKey, setStatusKey] = useState("OUTSTANDING");
   const [page, setPage] = useState(0);
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
+  const statuses = useMemo(
+    () => PO_STATUS_FILTERS.find((f) => f.key === statusKey)?.statuses ?? [],
+    [statusKey],
+  );
 
   const supplierName = useMemo(() => {
     const map = new Map(suppliers.map((s) => [s.id, s.name] as const));
@@ -617,13 +625,13 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   }, [catalog.data]);
 
   const orders = useQuery({
-    queryKey: ["purchase-orders", status, page],
+    queryKey: ["purchase-orders", statusKey, page],
     queryFn: async () => {
-      const query: { limit: number; offset: number; status?: PoStatus } = {
+      const query: { limit: number; offset: number; status?: PoStatus[] } = {
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       };
-      if (status !== "ALL") query.status = status;
+      if (statuses.length > 0) query.status = statuses;
       const { data, error } = await api.GET("/api/v1/purchase-orders", {
         params: { query },
       });
@@ -651,7 +659,10 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       }
       const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
       const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/receive", {
-        params: { path: { purchase_order_id: po.id } },
+        params: {
+          path: { purchase_order_id: po.id },
+          header: { "Idempotency-Key": receiveKey.current },
+        },
         body: hasInvoice
           ? {
               lines,
@@ -715,11 +726,11 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       <div className="settle-tabs" aria-label="採購單狀態篩選">
         {PO_STATUS_FILTERS.map((f) => (
           <button
-            key={f.value}
+            key={f.key}
             type="button"
-            className={`chip ${status === f.value ? "chip-active" : ""}`}
+            className={`chip ${statusKey === f.key ? "chip-active" : ""}`}
             onClick={() => {
-              setStatus(f.value);
+              setStatusKey(f.key);
               setPage(0);
             }}
           >

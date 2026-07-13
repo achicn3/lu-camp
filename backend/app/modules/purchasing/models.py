@@ -136,6 +136,14 @@ class GoodsReceipt(Base):
             unique=True,
             postgresql_where=text("invoice_number IS NOT NULL"),
         ),
+        # 分批收貨冪等：同店同 Idempotency-Key 只成立一筆收貨（防網路重試重複入庫）。
+        Index(
+            "uq_goods_receipts_store_idempotency",
+            "store_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -154,3 +162,6 @@ class GoodsReceipt(Base):
     invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     invoice_net: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     invoice_tax: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    # 分批收貨冪等鍵＋請求指紋（同 key 重送回原結果、不同 payload → 409）。
+    idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))

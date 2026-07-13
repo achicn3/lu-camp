@@ -1038,7 +1038,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Purchase Orders */
+        /**
+         * List Purchase Orders
+         * @description 狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。
+         */
         get: operations["listPurchaseOrders"];
         put?: never;
         /** Create Purchase Order */
@@ -1118,6 +1121,8 @@ export interface paths {
         /**
          * Receive Purchase Order
          * @description 分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
+         *
+         *     帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。
          */
         post: operations["receivePurchaseOrder"];
         delete?: never;
@@ -2389,7 +2394,7 @@ export interface components {
         };
         /**
          * CatalogPurchaseRead
-         * @description 數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。
+         * @description 數量品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。
          */
         CatalogPurchaseRead: {
             /**
@@ -2403,6 +2408,8 @@ export interface components {
             qty: number;
             /** Received At */
             received_at: string | null;
+            /** Received Qty */
+            received_qty: number;
             /** Status */
             status: string;
             /** Supplier Id */
@@ -6746,7 +6753,7 @@ export interface operations {
     listPurchaseOrders: {
         parameters: {
             query?: {
-                status?: components["schemas"]["PurchaseOrderStatus"] | null;
+                status?: components["schemas"]["PurchaseOrderStatus"][] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -6910,7 +6917,9 @@ export interface operations {
     receivePurchaseOrder: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 purchase_order_id: number;
             };

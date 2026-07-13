@@ -1538,7 +1538,7 @@
         "type": "object"
       },
       "CatalogPurchaseRead": {
-        "description": "數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。",
+        "description": "數量品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。",
         "properties": {
           "ordered_at": {
             "format": "date-time",
@@ -1565,6 +1565,10 @@
             ],
             "title": "Received At"
           },
+          "received_qty": {
+            "title": "Received Qty",
+            "type": "integer"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -1587,6 +1591,7 @@
           "supplier_id",
           "supplier_name",
           "qty",
+          "received_qty",
           "unit_cost",
           "status",
           "ordered_at",
@@ -11440,6 +11445,7 @@
     },
     "/api/v1/purchase-orders": {
       "get": {
+        "description": "狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。",
         "operationId": "listPurchaseOrders",
         "parameters": [
           {
@@ -11449,7 +11455,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/PurchaseOrderStatus"
+                  "items": {
+                    "$ref": "#/components/schemas/PurchaseOrderStatus"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
@@ -11727,7 +11736,7 @@
     },
     "/api/v1/purchase-orders/{purchase_order_id}/receive": {
       "post": {
-        "description": "分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。",
+        "description": "分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。\n\n帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。",
         "operationId": "receivePurchaseOrder",
         "parameters": [
           {
@@ -11737,6 +11746,17 @@
             "schema": {
               "title": "Purchase Order Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
             }
           }
         ],

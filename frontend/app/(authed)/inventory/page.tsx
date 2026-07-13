@@ -457,8 +457,9 @@ type BulkDetail = components["schemas"]["BulkLotDetailRead"];
 const PO_STATUS_TEXT: Record<string, string> = {
   DRAFT: "草稿",
   ORDERED: "已下單",
+  PARTIAL: "部分到貨",
   RECEIVED: "已收貨",
-  CLOSED: "已結案",
+  CANCELLED: "已取消",
 };
 
 function HistoryList({ history }: { history: { at: string; event: string; note?: string | null }[] }) {
@@ -531,7 +532,7 @@ function CatalogDetailModal({ productId, onClose }: { productId: number; onClose
                 <thead>
                   <tr>
                     <th>供應商</th>
-                    <th>數量</th>
+                    <th>訂購 / 已收</th>
                     <th>進貨單價</th>
                     <th>狀態</th>
                     <th>下單</th>
@@ -542,7 +543,9 @@ function CatalogDetailModal({ productId, onClose }: { productId: number; onClose
                   {d.purchases.map((p) => (
                     <tr key={p.po_id}>
                       <td>{p.supplier_name}</td>
-                      <td>{p.qty}</td>
+                      <td>
+                        {p.qty} / {p.received_qty}
+                      </td>
                       <td>
                         <MoneyText value={p.unit_cost} />
                       </td>

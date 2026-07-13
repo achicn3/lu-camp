@@ -36,12 +36,21 @@ def upgrade() -> None:
         "purchase_order_lines",
         sa.Column("received_qty", sa.Integer(), nullable=False, server_default="0"),
     )
+    # 舊資料回填：既有 CLOSED 語意為「已結案（已收貨）」→ 併入 RECEIVED；已收貨（含剛併入的
+    # CLOSED）採購單的明細其待收為 0，故 received_qty 補為 qty，避免升級後顯示「已收貨但已收 0」
+    # 且卡在完成狀態無法再收（Codex 第一輪 blocker）。
+    op.execute("UPDATE purchase_orders SET status = 'RECEIVED' WHERE status = 'CLOSED'")
+    op.execute(
+        "UPDATE purchase_order_lines l SET received_qty = l.qty "
+        "FROM purchase_orders p "
+        "WHERE l.purchase_order_id = p.id AND p.status = 'RECEIVED'"
+    )
     op.create_check_constraint(
         "ck_purchase_order_lines_received_qty_range",
         "purchase_order_lines",
         "received_qty >= 0 AND received_qty <= qty",
     )
-    # 2) 狀態值集：移除 CLOSED、加入 PARTIAL/CANCELLED
+    # 2) 狀態值集：移除 CLOSED、加入 PARTIAL/CANCELLED（CLOSED 已於上一步併入 RECEIVED）
     op.drop_constraint("purchase_orders_status_check", "purchase_orders", type_="check")
     op.create_check_constraint(
         "purchase_orders_status_check", "purchase_orders", _status_check(_STATUS_NEW)
@@ -50,10 +59,23 @@ def upgrade() -> None:
     op.drop_constraint(
         "uq_goods_receipts_purchase_order_id", "goods_receipts", type_="unique"
     )
+    # 4) 分批收貨冪等（防網路重試重複入庫）：Idempotency-Key＋請求指紋，(store, key) 部分唯一。
+    op.add_column("goods_receipts", sa.Column("idempotency_key", sa.String(length=80)))
+    op.add_column("goods_receipts", sa.Column("request_fingerprint", sa.String(length=64)))
+    op.create_index(
+        "uq_goods_receipts_store_idempotency",
+        "goods_receipts",
+        ["store_id", "idempotency_key"],
+        unique=True,
+        postgresql_where=sa.text("idempotency_key IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
-    # 還原前須確保無 CLOSED 以外的新狀態列、且無一 PO 多收貨列，否則約束建立會失敗。
+    op.drop_index("uq_goods_receipts_store_idempotency", table_name="goods_receipts")
+    op.drop_column("goods_receipts", "request_fingerprint")
+    op.drop_column("goods_receipts", "idempotency_key")
+    # 還原前須確保無一 PO 多收貨列，否則唯一約束建立會失敗。
     op.create_unique_constraint(
         "uq_goods_receipts_purchase_order_id", "goods_receipts", ["purchase_order_id"]
     )

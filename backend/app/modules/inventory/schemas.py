@@ -183,12 +183,13 @@ class SerializedItemDetailRead(BaseModel):
 
 
 class CatalogPurchaseRead(BaseModel):
-    """數量品的一筆進貨（供應商/數量/進貨單價/狀態/時間）。"""
+    """數量品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。"""
 
     po_id: int
     supplier_id: int
     supplier_name: str
     qty: int
+    received_qty: int
     unit_cost: NTDAmount
     status: str
     ordered_at: datetime

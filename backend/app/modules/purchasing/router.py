@@ -1,8 +1,10 @@
 """purchasing 路由：供應商、採購單與補貨收貨。"""
 
+import hashlib
+import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +25,7 @@ from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
     DomainError,
+    IdempotencyKeyConflict,
     InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
     PurchaseOrderNotCancellable,
@@ -46,6 +49,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     PurchaseOrderNotCancellable: status.HTTP_409_CONFLICT,
     InputInvoiceAlreadySet: status.HTTP_409_CONFLICT,
     PurchaseOrderNotReceived: status.HTTP_409_CONFLICT,
+    IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
 }
 
 
@@ -54,6 +58,25 @@ def _map_domain_error(exc: DomainError) -> HTTPException:
         status_code=_STATUS_BY_EXC.get(type(exc), status.HTTP_400_BAD_REQUEST),
         detail=str(exc),
     )
+
+
+def _receive_fingerprint(purchase_order_id: int, payload: ReceivePurchaseOrderRequest) -> str:
+    """收貨請求指紋：同 Idempotency-Key 重送時用以辨識「同一請求（回放）」vs「不同請求（409）」。"""
+    canonical = {
+        "purchase_order_id": purchase_order_id,
+        "lines": sorted((line.line_id, line.qty) for line in payload.lines),
+        "invoice": (
+            None
+            if payload.invoice is None
+            else [
+                payload.invoice.invoice_number,
+                payload.invoice.invoice_date.isoformat(),
+                str(payload.invoice.invoice_total),
+            ]
+        ),
+    }
+    blob = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 @router.post(
@@ -163,12 +186,13 @@ async def cancel_purchase_order(
 async def list_purchase_orders(
     session: SessionDep,
     user: CurrentUserDep,
-    po_status: Annotated[PurchaseOrderStatus | None, Query(alias="status")] = None,
+    po_status: Annotated[list[PurchaseOrderStatus] | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PurchaseOrderRead]:
+    """狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。"""
     purchase_orders = await PurchasingService(session).list_purchase_orders(
-        user.store_id, status=po_status, limit=limit, offset=offset
+        user.store_id, statuses=po_status, limit=limit, offset=offset
     )
     return [PurchaseOrderRead.from_model(po) for po in purchase_orders]
 
@@ -199,8 +223,15 @@ async def receive_purchase_order(
     payload: ReceivePurchaseOrderRequest,
     session: SessionDep,
     user: CurrentUserDep,
+    idempotency_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=80)
+    ],
 ) -> ReceivePurchaseOrderResult:
-    """分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。"""
+    """分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
+
+    帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。
+    """
+    fingerprint = _receive_fingerprint(purchase_order_id, payload)
     svc = PurchasingService(session)
     try:
         purchase_order, receipt = await svc.receive_purchase_order(
@@ -208,6 +239,8 @@ async def receive_purchase_order(
             purchase_order_id,
             actor_user_id=user.id,
             lines=payload.lines,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint,
             invoice=payload.invoice,
         )
     except DomainError as exc:
@@ -215,12 +248,32 @@ async def receive_purchase_order(
         raise _map_domain_error(exc) from exc
     except IntegrityError as exc:
         await session.rollback()
+        # 並行首寫競態：同 key 兩請求同時插入，唯一索引擋下輸家 → 回放贏家的結果／或指紋不符 409。
+        if "uq_goods_receipts_store_idempotency" in str(exc.orig):
+            try:
+                purchase_order, receipt = await svc.receive_purchase_order(
+                    user.store_id,
+                    purchase_order_id,
+                    actor_user_id=user.id,
+                    lines=payload.lines,
+                    idempotency_key=idempotency_key,
+                    request_fingerprint=fingerprint,
+                    invoice=payload.invoice,
+                )
+            except DomainError as replay_exc:
+                await session.rollback()
+                raise _map_domain_error(replay_exc) from replay_exc
+            await session.commit()
+            return ReceivePurchaseOrderResult(
+                receipt_id=receipt.id,
+                purchase_order=PurchaseOrderRead.from_model(purchase_order),
+            )
         if "uq_goods_receipts_store_invoice" in str(exc.orig):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="此發票號碼（同日期）已登錄於其他採購單，不可重複入帳",
             ) from exc
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="採購單已收貨") from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="收貨失敗") from exc
     await session.commit()
     return ReceivePurchaseOrderResult(
         receipt_id=receipt.id,

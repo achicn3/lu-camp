@@ -1,5 +1,6 @@
 """採購/補貨 API 整合測試：supplier → 採購單（草稿/送出）→ 分批收貨 → catalog 入庫。"""
 
+import uuid
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from typing import Any
@@ -34,6 +35,11 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _recv_headers(token: str, key: str | None = None) -> dict[str, str]:
+    """收貨需帶 Idempotency-Key；預設每次唯一（不同收貨事件）。"""
+    return {**_auth(token), "Idempotency-Key": key or uuid.uuid4().hex}
 
 
 async def _seed_store(session: AsyncSession, *, name: str = "採購店") -> tuple[str, int, int]:
@@ -124,6 +130,7 @@ async def _receive_all(
     po_id: int,
     *,
     invoice: dict[str, str] | None = None,
+    key: str | None = None,
 ) -> httpx.Response:
     """一次收足所有明細的待收數量（qty − received_qty）。"""
     lines = await _po_lines(client, token, po_id)
@@ -132,7 +139,7 @@ async def _receive_all(
     if invoice is not None:
         body["invoice"] = invoice
     return await client.post(
-        f"/api/v1/purchase-orders/{po_id}/receive", json=body, headers=_auth(token)
+        f"/api/v1/purchase-orders/{po_id}/receive", json=body, headers=_recv_headers(token, key)
     )
 
 
@@ -201,12 +208,12 @@ async def test_receive_after_fully_received_returns_409_without_double_stock(
     first = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": line_id, "qty": 10}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     second = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": line_id, "qty": 10}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
 
     assert first.status_code == 200, first.text
@@ -279,7 +286,7 @@ async def test_partial_receive_then_full_transitions_status_and_stock(
     part = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": line_id, "qty": 12}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     assert part.status_code == 200, part.text
     po_body = part.json()["purchase_order"]
@@ -293,7 +300,7 @@ async def test_partial_receive_then_full_transitions_status_and_stock(
     rest = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": line_id, "qty": 8}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     assert rest.status_code == 200, rest.text
     po_body = rest.json()["purchase_order"]
@@ -323,7 +330,7 @@ async def test_receive_over_remaining_rejected(
     resp = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": line_id, "qty": 6}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     assert resp.status_code == 422, resp.text
     product = await db_session.get(CatalogProduct, catalog_id)
@@ -344,7 +351,7 @@ async def test_receive_line_from_other_order_rejected(
     resp = await client.post(
         f"/api/v1/purchase-orders/{po_id}/receive",
         json={"lines": [{"line_id": 999999, "qty": 1}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     assert resp.status_code == 422, resp.text
 
@@ -386,12 +393,108 @@ async def test_cancel_draft_and_ordered_but_not_received(
     await client.post(
         f"/api/v1/purchase-orders/{partial}/receive",
         json={"lines": [{"line_id": line_id, "qty": 4}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     blocked = await client.post(
         f"/api/v1/purchase-orders/{partial}/cancel", headers=_auth(token)
     )
     assert blocked.status_code == 409, blocked.text
+
+
+# ── 收貨冪等（防網路重試重複入庫）────────────────────────────────────
+
+
+async def test_receive_idempotent_retry_does_not_double_stock(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同 Idempotency-Key 重送：回原收貨、庫存與異動只加一次；同 key 不同 payload → 409。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, qty=0, reorder_point=100)
+    supplier_id = await _create_supplier(client, token)
+    po_id = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=10
+    )
+    line_id = (await _po_lines(client, token, po_id))[0]["id"]
+    key = uuid.uuid4().hex
+    body = {"lines": [{"line_id": line_id, "qty": 3}]}
+
+    first = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive", json=body, headers=_recv_headers(token, key)
+    )
+    retry = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive", json=body, headers=_recv_headers(token, key)
+    )
+    assert first.status_code == 200, first.text
+    assert retry.status_code == 200, retry.text
+    assert first.json()["receipt_id"] == retry.json()["receipt_id"]
+
+    product = await db_session.get(CatalogProduct, catalog_id)
+    assert product is not None and product.quantity_on_hand == 3  # 只加一次
+    movements = await _purchase_movements(db_session, store_id, catalog_id)
+    assert len(movements) == 1 and movements[0].qty == 3
+
+    conflict = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/receive",
+        json={"lines": [{"line_id": line_id, "qty": 5}]},
+        headers=_recv_headers(token, key),
+    )
+    assert conflict.status_code == 409, conflict.text
+
+
+async def test_list_outstanding_includes_ordered_and_partial(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """待收貨清單（status=ORDERED&status=PARTIAL）同時含已下單與部分到貨。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, qty=0, reorder_point=100)
+    supplier_id = await _create_supplier(client, token)
+    po_ordered = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=5
+    )
+    po_partial = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=10
+    )
+    line_id = (await _po_lines(client, token, po_partial))[0]["id"]
+    await client.post(
+        f"/api/v1/purchase-orders/{po_partial}/receive",
+        json={"lines": [{"line_id": line_id, "qty": 4}]},
+        headers=_recv_headers(token),
+    )
+
+    resp = await client.get(
+        "/api/v1/purchase-orders",
+        params={"status": ["ORDERED", "PARTIAL"]},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    ids = [po["id"] for po in resp.json()]
+    assert po_ordered in ids and po_partial in ids
+
+
+async def test_submit_records_submit_actor(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """草稿由 A 建、由 B 送出 → 正式下單人記為 B（非草稿建立者）。"""
+    token_a, store_id, clerk_a = await _seed_store(db_session)
+    manager = User(
+        store_id=store_id, username=f"mgr-{store_id}", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    token_b = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store_id)
+    catalog_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token_a)
+    po_id = await _create_po(
+        client, token_a, supplier_id=supplier_id, catalog_product_id=catalog_id, submit=False
+    )
+    draft = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=_auth(token_a))
+    assert draft.json()["ordered_by"] == clerk_a
+
+    submitted = await client.post(
+        f"/api/v1/purchase-orders/{po_id}/submit", headers=_auth(token_b)
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["ordered_by"] == manager.id
 
 
 # ── 建單驗證 ─────────────────────────────────────────────────────────
@@ -502,7 +605,7 @@ async def test_receive_unknown_purchase_order_returns_404(
     resp = await client.post(
         "/api/v1/purchase-orders/999999/receive",
         json={"lines": [{"line_id": 1, "qty": 1}]},
-        headers=_auth(token),
+        headers=_recv_headers(token),
     )
     assert resp.status_code == 404, resp.text
 
