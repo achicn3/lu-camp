@@ -80,3 +80,43 @@ export function pendingAcqIdemKeySnapshot(): string | null {
 export function pendingAcqIdemKeyServerSnapshot(): string | null {
   return null;
 }
+
+// ── 分批收貨的 pending 冪等鍵（依採購單 id 分別保存）────────────────────────
+// 收貨鍵只存 React ref 會在重新整理後遺失：若收貨已於後端 commit、回應途中斷線、店員重整後
+// 再送，換新鍵便會被視為新收貨事件而重複入庫（Codex 第二輪 high）。故送出前先以「採購單 id」
+// 為界持久化（localStorage＋記憶體後備，跨重整存活），成功或「確定未提交的 4xx」才清；
+// 依 PO 分界避免某單殘留鍵誤用於另一單（後端會因 PO 不符回 409 擋下新單收貨）。
+const RECEIVE_IDEM_PREFIX = "lu-camp.receive-pending-idem";
+const memoryReceiveKeys = new Map<number, string>();
+
+function receiveStorageKey(poId: number): string {
+  return `${RECEIVE_IDEM_PREFIX}.${poId}`;
+}
+
+export function loadPendingReceiveIdemKey(poId: number): string | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(receiveStorageKey(poId)) ?? null;
+    if (stored != null) return stored;
+  } catch {
+    // 讀取失敗：退回記憶體後備。
+  }
+  return memoryReceiveKeys.get(poId) ?? null;
+}
+
+export function savePendingReceiveIdemKey(poId: number, key: string): void {
+  memoryReceiveKeys.set(poId, key);
+  try {
+    globalThis.localStorage?.setItem(receiveStorageKey(poId), key);
+  } catch {
+    // 配額/隱私政策：僅記憶體後備（本 session 仍防重複，重整不保證）。
+  }
+}
+
+export function clearPendingReceiveIdemKey(poId: number): void {
+  memoryReceiveKeys.delete(poId);
+  try {
+    globalThis.localStorage?.removeItem(receiveStorageKey(poId));
+  } catch {
+    // 清除失敗不阻斷流程（記憶體後備已清）。
+  }
+}

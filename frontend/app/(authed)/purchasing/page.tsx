@@ -32,6 +32,12 @@ import {
 } from "@/features/purchasing/purchasing";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import {
+  canDiscardIdempotencyKey,
+  clearPendingReceiveIdemKey,
+  loadPendingReceiveIdemKey,
+  savePendingReceiveIdemKey,
+} from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
@@ -577,8 +583,6 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [invDate, setInvDate] = useState("");
   const [invTotal, setInvTotal] = useState("");
   const [rowError, setRowError] = useState<string | null>(null);
-  // 本次收貨的冪等鍵：開啟對話框時產生一次，逾時重按沿用同鍵 → 後端只入庫一次（防重複入庫）。
-  const receiveKey = useRef<string>("");
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
@@ -586,7 +590,6 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   };
   function openReceive(po: PurchaseOrder) {
     resetInvoiceDraft();
-    receiveKey.current = newIdempotencyKey();
     setReceiveQty(
       Object.fromEntries(
         po.lines.map((l) => [l.id, String(lineRemaining(l.qty, l.received_qty))]),
@@ -658,23 +661,35 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
         }
       }
       const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
-      const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/receive", {
-        params: {
-          path: { purchase_order_id: po.id },
-          header: { "Idempotency-Key": receiveKey.current },
+      // 冪等鍵沿用該 PO 殘留的 pending 鍵（跨重整存活）或鑄新鍵；送出前先持久化，回應
+      // 遺失/重整後重送沿用同鍵 → 後端只入庫一次（防重複入庫）。
+      const key = loadPendingReceiveIdemKey(po.id) ?? newIdempotencyKey();
+      savePendingReceiveIdemKey(po.id, key);
+      const { data, error, response } = await api.POST(
+        "/api/v1/purchase-orders/{purchase_order_id}/receive",
+        {
+          params: {
+            path: { purchase_order_id: po.id },
+            header: { "Idempotency-Key": key },
+          },
+          body: hasInvoice
+            ? {
+                lines,
+                invoice: {
+                  invoice_number: invNumber.trim().toUpperCase(),
+                  invoice_date: invDate,
+                  invoice_total: invTotal.trim(),
+                },
+              }
+            : { lines },
         },
-        body: hasInvoice
-          ? {
-              lines,
-              invoice: {
-                invoice_number: invNumber.trim().toUpperCase(),
-                invoice_date: invDate,
-                invoice_total: invTotal.trim(),
-              },
-            }
-          : { lines },
-      });
-      if (!data) throw new Error(extractDetail(error) ?? "收貨失敗，請重新整理後再試");
+      );
+      if (!data) {
+        // 僅「確定後端未提交」的 4xx（非 409）可丟棄鍵換新；409/5xx/網路曖昧 → 保留沿用。
+        if (canDiscardIdempotencyKey(response.status)) clearPendingReceiveIdemKey(po.id);
+        throw new Error(extractDetail(error) ?? "收貨失敗，請稍後再試");
+      }
+      clearPendingReceiveIdemKey(po.id);
       return data;
     },
     onSuccess: () => {

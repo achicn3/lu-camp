@@ -24,12 +24,16 @@ function strip(v) {
   return v.replace(/\/+$/, "");
 }
 
-async function apiJson(path, { method = "GET", token = null, body, expected = [200] } = {}) {
+async function apiJson(
+  path,
+  { method = "GET", token = null, body, expected = [200], headers = {} } = {},
+) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -76,12 +80,15 @@ try {
     body: {
       supplier_id: supplier.id,
       lines: [{ catalog_product_id: product.id, qty: 3, unit_cost: "100" }],
+      submit: true,
     },
     expected: [201],
   });
   await apiJson(`/api/v1/purchase-orders/${po.id}/receive`, {
     method: "POST",
     token,
+    body: { lines: [{ line_id: po.lines[0].id, qty: po.lines[0].qty }] },
+    headers: { "Idempotency-Key": `void-recv-${runId}` },
     expected: [200, 201],
   });
   ok("API 測試資料準備完成", true, product.sku);

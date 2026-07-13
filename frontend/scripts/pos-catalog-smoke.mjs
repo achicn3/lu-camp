@@ -107,12 +107,15 @@ async function createStockedCatalogProduct(token, runId, { qty, unitPrice, unitC
     body: {
       supplier_id: supplier.id,
       lines: [{ catalog_product_id: product.id, qty, unit_cost: String(unitCost) }],
+      submit: true,
     },
     expected: [201],
   });
   await apiJson(`/api/v1/purchase-orders/${po.id}/receive`, {
     method: "POST",
     token,
+    body: { lines: [{ line_id: po.lines[0].id, qty: po.lines[0].qty }] },
+    headers: { "Idempotency-Key": `poscat-recv-${runId}` },
     expected: [200, 201],
   });
   const stocked = await apiJson(
