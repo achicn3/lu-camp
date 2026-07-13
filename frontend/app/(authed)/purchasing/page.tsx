@@ -1,7 +1,7 @@
 "use client";
-// /purchasing 採購/補貨工作台（docs/10 §/purchasing，Phase 5）：低庫存提醒、採購單建立/清單、
-// 一次性收貨入庫、供應商建檔。全走 OpenAPI 生成型別 client（docs/11，禁手刻型別）。
-// 後端負責交易原子性與重複收貨守衛；前端只做清楚的工作流與防呆（不重複入庫）。
+// /purchasing 採購/補貨工作台（docs/10 §/purchasing）：低庫存提醒、採購單建立（草稿/送出）、
+// 清單/搜尋、分批收貨入庫、取消、供應商建檔。全走 OpenAPI 生成型別 client（docs/11，禁手刻型別）。
+// 後端負責交易原子性、待收守衛與狀態機；前端只做清楚的工作流與防呆。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type Dispatch,
@@ -16,10 +16,13 @@ import { CreatableCombobox, type ComboOption } from "@/features/acquisition/Crea
 import { Pagination } from "@/features/common/Pagination";
 import {
   type CatalogProduct,
+  canCancel,
   canReceive,
+  canSubmit,
   canSubmitPo,
   type DraftLine,
   draftTotal,
+  lineRemaining,
   lineTotal,
   poStatusBadge,
   qtyError,
@@ -41,9 +44,11 @@ const PAGE_SIZE = 20;
 
 const PO_STATUS_FILTERS: { value: PoStatus | "ALL"; label: string }[] = [
   { value: "ALL", label: "全部" },
+  { value: "DRAFT", label: "草稿" },
   { value: "ORDERED", label: "待收貨" },
+  { value: "PARTIAL", label: "部分到貨" },
   { value: "RECEIVED", label: "已收貨" },
-  { value: "CLOSED", label: "已結案" },
+  { value: "CANCELLED", label: "已取消" },
 ];
 
 function extractDetail(error: unknown): string | null {
@@ -221,10 +226,10 @@ function CreatePurchaseOrder({
   });
 
   const create = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (submit: boolean) => {
       if (supplierId === null) throw new Error("請選擇供應商");
       const { data, error } = await api.POST("/api/v1/purchase-orders", {
-        body: { supplier_id: supplierId, lines: toLinePayload(lines) },
+        body: { supplier_id: supplierId, lines: toLinePayload(lines), submit },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立採購單失敗");
       return data;
@@ -336,31 +341,45 @@ function CreatePurchaseOrder({
           {formError}
         </p>
       )}
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={!submittable || create.isPending}
-        onClick={() => create.mutate()}
-      >
-        {create.isPending ? "建立中…" : "建立採購單"}
-      </button>
+      <div className="pur-create-actions">
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!submittable || create.isPending}
+          onClick={() => create.mutate(false)}
+        >
+          {create.isPending ? "處理中…" : "存草稿"}
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!submittable || create.isPending}
+          onClick={() => create.mutate(true)}
+        >
+          {create.isPending ? "處理中…" : "送出採購"}
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── 採購單詳情（點單號/詳細）：供應商、狀態、時間、完整明細＋總額 ──────────
+// ── 採購單詳情（點單號/詳細）：供應商、狀態、時間、逐項訂購/已收/待收＋收貨批次 ──────
 function PurchaseOrderDetailModal({
   po,
   supplierName,
   productLabel,
   onClose,
   onReceive,
+  onCancel,
+  cancelPending,
 }: {
   po: PurchaseOrder;
   supplierName: (id: number) => string;
   productLabel: (id: number) => CatalogProduct | null;
   onClose: () => void;
   onReceive: () => void;
+  onCancel: () => void;
+  cancelPending: boolean;
 }) {
   const badge = poStatusBadge(po.status);
   return (
@@ -388,28 +407,17 @@ function PurchaseOrderDetailModal({
             <dd>{dt(po.ordered_at)}</dd>
           </div>
           <div>
-            <dt>收貨時間</dt>
+            <dt>收貨完成</dt>
             <dd>{dt(po.received_at)}</dd>
           </div>
-          <div>
-            <dt>進項發票</dt>
-            <dd>
-              {po.invoice
-                ? `${po.invoice.invoice_number}（${po.invoice.invoice_date}）含稅 ${money(
-                    po.invoice.invoice_total,
-                  )}｜未稅 ${money(po.invoice.invoice_net)}／稅 ${money(po.invoice.invoice_tax)}`
-                : po.status === "RECEIVED"
-                  ? "未登錄"
-                  : "—"}
-            </dd>
-          </div>
         </dl>
-        {po.status === "RECEIVED" && !po.invoice && <BackfillInvoiceForm poId={po.id} />}
         <table className="data-table pur-detail-table">
           <thead>
             <tr>
               <th>商品</th>
-              <th>數量</th>
+              <th>訂購</th>
+              <th>已收</th>
+              <th>待收</th>
               <th>進貨單價</th>
               <th>小計</th>
             </tr>
@@ -417,6 +425,7 @@ function PurchaseOrderDetailModal({
           <tbody>
             {po.lines.map((line) => {
               const prod = productLabel(line.catalog_product_id);
+              const remaining = lineRemaining(line.qty, line.received_qty);
               return (
                 <tr key={line.id}>
                   <td>
@@ -424,6 +433,8 @@ function PurchaseOrderDetailModal({
                     {prod && <span className="row-sub">{prod.sku}</span>}
                   </td>
                   <td>{line.qty}</td>
+                  <td>{line.received_qty}</td>
+                  <td className={remaining > 0 ? "pur-remaining" : ""}>{remaining}</td>
                   <td className="money">{money(line.unit_cost)}</td>
                   <td className="money">{money(line.line_total)}</td>
                 </tr>
@@ -432,16 +443,53 @@ function PurchaseOrderDetailModal({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={3}>合計</td>
+              <td colSpan={5}>合計</td>
               <td className="money">{money(po.total_cost)}</td>
             </tr>
           </tfoot>
         </table>
-        {canReceive(po.status) && (
+
+        {po.receipts.length > 0 && (
+          <div className="pur-receipts">
+            <h3>收貨批次</h3>
+            <ul className="pur-receipts-list">
+              {po.receipts.map((r, idx) => (
+                <li key={r.id}>
+                  <span className="pur-receipt-head">
+                    第 {idx + 1} 批・{dt(r.received_at)}
+                  </span>
+                  {r.invoice ? (
+                    <span className="row-sub">
+                      發票 {r.invoice.invoice_number}（{r.invoice.invoice_date}）含稅{" "}
+                      {money(r.invoice.invoice_total)}｜未稅 {money(r.invoice.invoice_net)}／稅{" "}
+                      {money(r.invoice.invoice_tax)}
+                    </span>
+                  ) : (
+                    <BackfillInvoiceForm poId={po.id} receiptId={r.id} />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {(canReceive(po.status) || canCancel(po.status)) && (
           <div className="pos-dialog-actions">
-            <button type="button" className="btn-primary" onClick={onReceive}>
-              收貨入庫
-            </button>
+            {canReceive(po.status) && (
+              <button type="button" className="btn-primary" onClick={onReceive}>
+                收貨入庫
+              </button>
+            )}
+            {canCancel(po.status) && (
+              <button
+                type="button"
+                className="btn-ghost pur-cancel-btn"
+                disabled={cancelPending}
+                onClick={onCancel}
+              >
+                {cancelPending ? "取消中…" : "取消採購單"}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -449,8 +497,8 @@ function PurchaseOrderDetailModal({
   );
 }
 
-// ── 進項發票補登（已收貨、漏登時；登錄後不可覆寫）─────────────
-function BackfillInvoiceForm({ poId }: { poId: number }) {
+// ── 進項發票補登（某收貨批次漏登時；登錄後不可覆寫）─────────────
+function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: number }) {
   const queryClient = useQueryClient();
   const [number, setNumber] = useState("");
   const [dateStr, setDateStr] = useState("");
@@ -459,9 +507,9 @@ function BackfillInvoiceForm({ poId }: { poId: number }) {
   const backfill = useMutation({
     mutationFn: async () => {
       const { data, error } = await api.POST(
-        "/api/v1/purchase-orders/{purchase_order_id}/invoice",
+        "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice",
         {
-          params: { path: { purchase_order_id: poId } },
+          params: { path: { purchase_order_id: poId, receipt_id: receiptId } },
           body: {
             invoice_number: number.trim().toUpperCase(),
             invoice_date: dateStr,
@@ -516,23 +564,34 @@ function BackfillInvoiceForm({ poId }: { poId: number }) {
   );
 }
 
-// ── 採購單清單 + 收貨 ────────────────────────────────────────
+// ── 採購單清單 + 分批收貨 + 送出/取消 ────────────────────────
 function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const queryClient = useQueryClient();
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
-  // 進項發票（裁示 2026-07-11）：收貨時選填登錄；三欄全空＝不登錄（可事後補登）。
-  // 草稿以「開啟對話框」為生命週期：開啟/取消都清空——避免 A 單打到一半取消、B 單收貨時
-  // 殘留 A 的發票被誤登（登錄不可覆寫，錯了難以回復；Codex 第一輪 high）。
+  // 本次各明細實收量（line_id → 字串）。開啟收貨對話框時預設帶入待收量。
+  const [receiveQty, setReceiveQty] = useState<Record<number, string>>({});
+  // 進項發票（選填；三欄全空＝不登錄，可事後補登）。開啟/取消都清空避免跨單殘留誤登。
   const [invNumber, setInvNumber] = useState("");
   const [invDate, setInvDate] = useState("");
   const [invTotal, setInvTotal] = useState("");
+  const [rowError, setRowError] = useState<string | null>(null);
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
     setInvTotal("");
   };
-  // 預設只看「待收貨」——最常用、且避免歷史採購單把頁面拉長；要看全部可切「全部」。
+  function openReceive(po: PurchaseOrder) {
+    resetInvoiceDraft();
+    setReceiveQty(
+      Object.fromEntries(
+        po.lines.map((l) => [l.id, String(lineRemaining(l.qty, l.received_qty))]),
+      ),
+    );
+    setReceiving(po);
+    setReceiveError(null);
+  }
+  // 預設只看「待收貨」——最常用；要看全部/草稿/部分到貨可切籤。
   const [status, setStatus] = useState<PoStatus | "ALL">("ORDERED");
   const [page, setPage] = useState(0);
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
@@ -573,20 +632,36 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
     },
   });
 
+  const invalidateOrders = () => {
+    void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+    void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+  };
+
   const receive = useMutation({
     mutationFn: async (po: PurchaseOrder) => {
+      const lines = po.lines
+        .map((l) => ({ line_id: l.id, qty: Number.parseInt(receiveQty[l.id] ?? "", 10) }))
+        .filter((x) => Number.isFinite(x.qty) && x.qty > 0);
+      if (lines.length === 0) throw new Error("請至少輸入一項的本次實收量");
+      for (const l of po.lines) {
+        const q = Number.parseInt(receiveQty[l.id] ?? "", 10);
+        if (Number.isFinite(q) && q > lineRemaining(l.qty, l.received_qty)) {
+          throw new Error("本次實收量不可超過待收量");
+        }
+      }
       const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
       const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/receive", {
         params: { path: { purchase_order_id: po.id } },
         body: hasInvoice
           ? {
+              lines,
               invoice: {
                 invoice_number: invNumber.trim().toUpperCase(),
                 invoice_date: invDate,
                 invoice_total: invTotal.trim(),
               },
             }
-          : {},
+          : { lines },
       });
       if (!data) throw new Error(extractDetail(error) ?? "收貨失敗，請重新整理後再試");
       return data;
@@ -595,13 +670,44 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       setReceiving(null);
       setReceiveError(null);
       resetInvoiceDraft();
-      void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
-      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+      invalidateOrders();
     },
     onError: (err: Error) => setReceiveError(err.message),
   });
 
+  const submit = useMutation({
+    mutationFn: async (po: PurchaseOrder) => {
+      const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/submit", {
+        params: { path: { purchase_order_id: po.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "送出失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setRowError(null);
+      invalidateOrders();
+    },
+    onError: (err: Error) => setRowError(err.message),
+  });
+
+  const cancel = useMutation({
+    mutationFn: async (po: PurchaseOrder) => {
+      const { data, error } = await api.POST("/api/v1/purchase-orders/{purchase_order_id}/cancel", {
+        params: { path: { purchase_order_id: po.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "取消失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setRowError(null);
+      setDetailPo(null);
+      invalidateOrders();
+    },
+    onError: (err: Error) => setRowError(err.message),
+  });
+
   const rows = orders.data ?? [];
+  const busy = submit.isPending || cancel.isPending || receive.isPending;
 
   return (
     <div className="card pur-orders">
@@ -621,6 +727,11 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           </button>
         ))}
       </div>
+      {rowError !== null && (
+        <p role="alert" className="form-error">
+          {rowError}
+        </p>
+      )}
       {orders.isPending ? (
         <p>載入中…</p>
       ) : orders.isError ? (
@@ -669,18 +780,34 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                     <button type="button" className="btn-ghost" onClick={() => setDetailPo(po)}>
                       詳細
                     </button>
+                    {canSubmit(po.status) && (
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={busy}
+                        onClick={() => submit.mutate(po)}
+                      >
+                        送出
+                      </button>
+                    )}
                     {canReceive(po.status) && (
                       <button
                         type="button"
                         className="btn-primary"
-                        disabled={receive.isPending}
-                        onClick={() => {
-                          resetInvoiceDraft();
-                          setReceiving(po);
-                          setReceiveError(null);
-                        }}
+                        disabled={busy}
+                        onClick={() => openReceive(po)}
                       >
                         收貨入庫
+                      </button>
+                    )}
+                    {canCancel(po.status) && (
+                      <button
+                        type="button"
+                        className="btn-ghost pur-cancel-btn"
+                        disabled={busy}
+                        onClick={() => cancel.mutate(po)}
+                      >
+                        取消
                       </button>
                     )}
                   </td>
@@ -702,22 +829,65 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           productLabel={productLabel}
           onClose={() => setDetailPo(null)}
           onReceive={() => {
-            resetInvoiceDraft();
-            setReceiving(detailPo);
-            setReceiveError(null);
+            const po = detailPo;
             setDetailPo(null);
+            openReceive(po);
           }}
+          onCancel={() => cancel.mutate(detailPo)}
+          cancelPending={cancel.isPending}
         />
       )}
 
       {receiving !== null && (
         <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="確認收貨">
-          <div className="card pos-dialog">
-            <h2>確認收貨入庫</h2>
+          <div className="card pos-dialog pur-receive-dialog">
+            <h2>收貨入庫</h2>
             <p className="hint">
-              採購單 #{receiving.id}（{supplierName(receiving.supplier_id)}）共 {receiving.lines.length} 項、
-              合計 <span className="money">{money(receiving.total_cost)}</span>。確認後將補入庫存且無法復原。
+              採購單 #{receiving.id}（{supplierName(receiving.supplier_id)}）。輸入本次各項實收量，
+              未收足將轉為「部分到貨」，可日後再收。
             </p>
+            <div className="pur-lines-wrap">
+              <table className="data-table pur-receive-table">
+                <thead>
+                  <tr>
+                    <th>商品</th>
+                    <th>訂購</th>
+                    <th>已收</th>
+                    <th>待收</th>
+                    <th>本次實收</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {receiving.lines.map((line) => {
+                    const prod = productLabel(line.catalog_product_id);
+                    const name = prod ? prod.name : `#${line.catalog_product_id}`;
+                    const remaining = lineRemaining(line.qty, line.received_qty);
+                    return (
+                      <tr key={line.id}>
+                        <td>{name}</td>
+                        <td>{line.qty}</td>
+                        <td>{line.received_qty}</td>
+                        <td>{remaining}</td>
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            max={remaining}
+                            step={1}
+                            className="pur-qty"
+                            aria-label={`本次實收 ${name}`}
+                            value={receiveQty[line.id] ?? ""}
+                            onChange={(e) =>
+                              setReceiveQty((prev) => ({ ...prev, [line.id]: e.target.value }))
+                            }
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             <fieldset className="pur-invoice-fields">
               <legend>進項發票（選填；供應商發票隨貨時一併登錄，漏登可事後補登）</legend>
               <label className="field">

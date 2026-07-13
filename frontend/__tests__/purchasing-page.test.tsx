@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // /purchasing 採購工作台：採購單清單 + 收貨、建單、供應商建檔、低庫存提醒。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -62,7 +62,10 @@ const ORDERED_PO = {
   created_at: "2026-06-20T01:00:00Z",
   updated_at: "2026-06-20T01:00:00Z",
   total_cost: "600",
-  lines: [{ id: 1, catalog_product_id: 42, qty: 10, unit_cost: "60", line_total: "600" }],
+  lines: [
+    { id: 1, catalog_product_id: 42, qty: 10, received_qty: 0, unit_cost: "60", line_total: "600" },
+  ],
+  receipts: [],
 };
 
 type FetchRoute = (url: string, init: RequestInit) => Response | null;
@@ -158,11 +161,12 @@ describe("/purchasing", () => {
     const user = userEvent.setup();
     renderPage();
 
-    // 開啟 → 打半張發票 → 取消
+    // 開啟 → 打半張發票 → 取消（鎖定收貨對話框內的「取消」，列上也有取消採購單鈕）
     await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
     const numberInput = await screen.findByLabelText("發票號碼");
     await user.type(numberInput, "AB12345678");
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    const dialog = screen.getByRole("dialog", { name: "確認收貨" });
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
 
     // 重開 → 草稿必須清空（登錄不可覆寫，殘留誤登難以回復；Codex 第一輪）
     await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
@@ -196,12 +200,93 @@ describe("/purchasing", () => {
     await user.type(screen.getByLabelText("搜尋數量品"), "瓦斯");
     await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
     await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
-    await user.click(screen.getByRole("button", { name: "建立採購單" }));
+    await user.click(screen.getByRole("button", { name: "送出採購" }));
 
     await waitFor(() => expect(createdBody).not.toBeNull());
     const parsed = JSON.parse(createdBody as unknown as string);
     expect(parsed.supplier_id).toBe(5);
     expect(parsed.lines).toEqual([{ catalog_product_id: 42, qty: 1, unit_cost: "60" }]);
+    expect(parsed.submit).toBe(true);
+  });
+
+  it("存草稿以 submit=false 建立採購單", async () => {
+    loginAs("CLERK");
+    let createdBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && url.includes("low_stock=true")) return json([]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/purchase-orders") && init.method === "POST") {
+        createdBody = init.body as string;
+        return json({ ...ORDERED_PO, status: "DRAFT" }, 201);
+      }
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    const supplierInput = screen.getByLabelText("供應商");
+    await user.click(supplierInput);
+    await user.type(supplierInput, "山林");
+    await user.click(await screen.findByRole("option", { name: "山林供應商" }));
+    await user.type(screen.getByLabelText("搜尋數量品"), "瓦斯");
+    await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
+    await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
+    await user.click(screen.getByRole("button", { name: "存草稿" }));
+
+    await waitFor(() => expect(createdBody).not.toBeNull());
+    expect(JSON.parse(createdBody as unknown as string).submit).toBe(false);
+  });
+
+  it("分批收貨：送出各明細本次實收量", async () => {
+    loginAs("CLERK");
+    let receiveBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/receive") && init.method === "POST") {
+        receiveBody = init.body as string;
+        return json({ receipt_id: 1, purchase_order: { ...ORDERED_PO, status: "PARTIAL" } });
+      }
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "收貨入庫" }));
+    // 待收預設帶入 10；改為本次只收 4。
+    const qtyInput = await screen.findByLabelText("本次實收 瓦斯罐");
+    await user.clear(qtyInput);
+    await user.type(qtyInput, "4");
+    await user.click(screen.getByRole("button", { name: "確認收貨" }));
+
+    await waitFor(() => expect(receiveBody).not.toBeNull());
+    const parsed = JSON.parse(receiveBody as unknown as string);
+    expect(parsed.lines).toEqual([{ line_id: 1, qty: 4 }]);
+  });
+
+  it("已下單可取消（呼叫 cancel 端點）", async () => {
+    loginAs("CLERK");
+    let cancelled = false;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([CATALOG]);
+      if (url.includes("/cancel") && init.method === "POST") {
+        cancelled = true;
+        return json({ ...ORDERED_PO, status: "CANCELLED" });
+      }
+      if (url.includes("/purchase-orders")) return json([ORDERED_PO]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    // 列上的「取消」（狀態徽章「已下單」也含「取消」字，故鎖定 button）。
+    await user.click(await screen.findByRole("button", { name: "取消" }));
+    await waitFor(() => expect(cancelled).toBe(true));
   });
 
   it("低庫存「補貨」把該品帶入建單草稿並展開面板", async () => {

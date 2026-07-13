@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.core.money import split_tax_inclusive
 from app.modules.inventory.service import InventoryService
 from app.modules.purchasing.models import (
@@ -15,16 +16,23 @@ from app.modules.purchasing.models import (
     Supplier,
 )
 from app.modules.purchasing.repository import PurchasingRepository
-from app.modules.purchasing.schemas import InputInvoiceIn, PurchaseOrderCreate, SupplierCreate
+from app.modules.purchasing.schemas import (
+    InputInvoiceIn,
+    PurchaseOrderCreate,
+    ReceiveLineIn,
+    SupplierCreate,
+)
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
     InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
+    PurchaseOrderNotCancellable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
+    PurchaseOrderNotSubmittable,
 )
 
 
@@ -71,12 +79,14 @@ class PurchasingService:
                     f"數量型商品 {line.catalog_product_id} 不屬於 store {store_id}"
                 )
 
+        # 預設建為草稿；payload.submit=True 則建立即送出（ORDERED、計入待到貨、可收貨）。
+        status = PurchaseOrderStatus.ORDERED if payload.submit else PurchaseOrderStatus.DRAFT
         purchase_order = await self._repo.add_purchase_order(
             PurchaseOrder(
                 store_id=store_id,
                 supplier_id=payload.supplier_id,
                 ordered_by=actor_user_id,
-                status=PurchaseOrderStatus.ORDERED,
+                status=status,
             )
         )
         for line in payload.lines:
@@ -91,6 +101,55 @@ class PurchasingService:
             )
         await self._session.refresh(purchase_order, attribute_names=["lines"])
         return purchase_order
+
+    async def submit_purchase_order(
+        self, store_id: int, purchase_order_id: int, *, actor_user_id: int
+    ) -> PurchaseOrder:
+        """草稿送出 → ORDERED（計入待到貨、可收貨）。僅草稿可送出。"""
+        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
+        if purchase_order is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        if purchase_order.status != PurchaseOrderStatus.DRAFT:
+            raise PurchaseOrderNotSubmittable(
+                f"採購單 {purchase_order_id} 狀態為 {purchase_order.status.value}，僅草稿可送出"
+            )
+        purchase_order.status = PurchaseOrderStatus.ORDERED
+        await self._session.flush()
+        refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
+        assert refreshed is not None
+        return refreshed
+
+    async def cancel_purchase_order(
+        self, store_id: int, purchase_order_id: int, *, actor_user_id: int
+    ) -> PurchaseOrder:
+        """取消採購單 → CANCELLED。僅草稿/已下單且尚未收任何貨可取消（部分/已收貨不可）。"""
+        purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
+        if purchase_order is None:
+            raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
+        if purchase_order.status not in (
+            PurchaseOrderStatus.DRAFT,
+            PurchaseOrderStatus.ORDERED,
+        ):
+            raise PurchaseOrderNotCancellable(
+                f"採購單 {purchase_order_id} 狀態為 {purchase_order.status.value}，"
+                "僅草稿/已下單且尚未收貨可取消"
+            )
+        before = purchase_order.status.value
+        purchase_order.status = PurchaseOrderStatus.CANCELLED
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="CANCEL_PURCHASE_ORDER",
+            entity_type="purchase_order",
+            entity_id=str(purchase_order.id),
+            before={"status": before},
+            after={"status": PurchaseOrderStatus.CANCELLED.value},
+        )
+        refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
+        assert refreshed is not None
+        return refreshed
 
     async def list_purchase_orders(
         self,
@@ -143,20 +202,25 @@ class PurchasingService:
         }
 
     async def register_input_invoice(
-        self, store_id: int, purchase_order_id: int, *, invoice: "InputInvoiceIn"
+        self,
+        store_id: int,
+        purchase_order_id: int,
+        receipt_id: int,
+        *,
+        invoice: "InputInvoiceIn",
     ) -> GoodsReceipt:
-        """補登進項發票（裁示：漏登可事後補登**一次**；已登錄不可覆寫——打錯屬更正流程，另議）。"""
+        """補登某收貨批次的進項發票（漏登可事後補登；已登錄不可覆寫——打錯屬更正流程，另議）。"""
         purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
         if purchase_order is None:
             raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
-        receipt = purchase_order.receipt
-        if purchase_order.status != PurchaseOrderStatus.RECEIVED or receipt is None:
+        receipt = next((r for r in purchase_order.receipts if r.id == receipt_id), None)
+        if receipt is None:
             raise PurchaseOrderNotReceived(
-                f"採購單 {purchase_order_id} 尚未收貨，無法登錄進項發票"
+                f"採購單 {purchase_order_id} 無收貨批次 {receipt_id}，無法登錄進項發票"
             )
         if receipt.invoice_number is not None:
             raise InputInvoiceAlreadySet(
-                f"採購單 {purchase_order_id} 已登錄發票 {receipt.invoice_number}，不可覆寫"
+                f"收貨批次 {receipt_id} 已登錄發票 {receipt.invoice_number}，不可覆寫"
             )
         settings = await self._settings.get_effective_settings(store_id)
         for key, value in self._invoice_fields(invoice, Decimal(settings.tax_rate)).items():
@@ -170,27 +234,48 @@ class PurchasingService:
         purchase_order_id: int,
         *,
         actor_user_id: int,
+        lines: list["ReceiveLineIn"],
         invoice: "InputInvoiceIn | None" = None,
     ) -> tuple[PurchaseOrder, GoodsReceipt]:
+        """分批收貨：對指定明細各收 qty（不得超過待收），更新庫存＋寫庫存異動，
+        建立一張收貨批次（可選填進項發票），並依是否全數收足轉 PARTIAL/RECEIVED。"""
         purchase_order = await self._repo.lock_purchase_order(store_id, purchase_order_id)
         if purchase_order is None:
             raise PurchaseOrderNotFound(f"找不到採購單 {purchase_order_id}")
-        if purchase_order.status != PurchaseOrderStatus.ORDERED:
+        if purchase_order.status not in (
+            PurchaseOrderStatus.ORDERED,
+            PurchaseOrderStatus.PARTIAL,
+        ):
             raise PurchaseOrderNotReceivable(
                 f"採購單 {purchase_order_id} 狀態為 {purchase_order.status.value}，不可收貨"
             )
-        for line in purchase_order.lines:
-            await self._inventory.restock_catalog_items(
-                store_id,
-                line.catalog_product_id,
-                line.qty,
-                ref_type="purchase_order",
-                ref_id=purchase_order.id,
-            )
+        line_by_id = {line.id: line for line in purchase_order.lines}
+        # 驗證：明細須屬本單、不得重複、qty 不得超過待收（qty − received_qty）。
+        seen: set[int] = set()
+        to_receive: list[tuple[PurchaseOrderLine, int]] = []
+        for item in lines:
+            if item.line_id in seen:
+                raise InvalidPurchaseOrder(f"收貨明細重複：line {item.line_id}")
+            seen.add(item.line_id)
+            po_line = line_by_id.get(item.line_id)
+            if po_line is None:
+                raise InvalidPurchaseOrder(
+                    f"明細 {item.line_id} 不屬於採購單 {purchase_order_id}"
+                )
+            remaining = po_line.qty - po_line.received_qty
+            if item.qty > remaining:
+                raise InvalidPurchaseOrder(
+                    f"明細 {item.line_id} 本次收 {item.qty} 超過待收 {remaining}"
+                )
+            to_receive.append((po_line, item.qty))
+        if not to_receive:
+            raise InvalidPurchaseOrder("收貨至少需一筆明細")
+
         invoice_fields: dict[str, object] = {}
         if invoice is not None:
             settings = await self._settings.get_effective_settings(store_id)
             invoice_fields = self._invoice_fields(invoice, Decimal(settings.tax_rate))
+        # 先建收貨批次取得 id，庫存異動以 ref_type="goods_receipt" 指向本批。
         receipt = await self._repo.add_receipt(
             GoodsReceipt(
                 store_id=store_id,
@@ -199,15 +284,33 @@ class PurchasingService:
                 **invoice_fields,
             )
         )
-        purchase_order.status = PurchaseOrderStatus.RECEIVED
-        # 剛建立的收貨單（含發票欄）要反映到 po.receipt（selectin 於鎖定查詢時已快取 None）。
+        for po_line, qty in to_receive:
+            await self._inventory.restock_catalog_items(
+                store_id,
+                po_line.catalog_product_id,
+                qty,
+                ref_type="goods_receipt",
+                ref_id=receipt.id,
+            )
+            ok = await self._repo.increment_received_qty(store_id, po_line.id, qty)
+            if not ok:  # 併發下另一交易先收了；主列列鎖下不應發生，防禦性守衛。
+                raise PurchaseOrderNotReceivable(
+                    f"明細 {po_line.id} 收貨數量超過待收（併發衝突），請重試"
+                )
+
         await self._session.flush()
-        await self._session.refresh(purchase_order, ["receipt"])
-        purchase_order.received_at = datetime.now(UTC)
-        purchase_order.received_by = actor_user_id
+        # 重載 lines（received_qty 由 bulk UPDATE 改動）與 receipts（鎖定時載入為空、剛新增一筆），
+        # 否則 identity-map 內已載入的空 receipts 集合不會被後續 SELECT 覆寫。
+        await self._session.refresh(purchase_order, ["lines", "receipts"])
+        fully = all(line.received_qty >= line.qty for line in purchase_order.lines)
+        purchase_order.status = (
+            PurchaseOrderStatus.RECEIVED if fully else PurchaseOrderStatus.PARTIAL
+        )
+        if fully:
+            purchase_order.received_at = datetime.now(UTC)
+            purchase_order.received_by = actor_user_id
         await self._session.flush()
-        # 收貨 UPDATE 會讓 server onupdate 欄（updated_at）過期；重抓一次（含 lines）取得
-        # 已載入的完整列，避免 router 序列化時對過期欄做同步 lazy IO（MissingGreenlet）。
+        # 重抓完整列（含 lines/receipts），避免 router 序列化觸發同步 lazy IO（MissingGreenlet）。
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
-        assert refreshed is not None  # 同交易內剛收貨，必存在
+        assert refreshed is not None
         return refreshed, receipt

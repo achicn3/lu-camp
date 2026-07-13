@@ -3196,6 +3196,41 @@
         "title": "FlowsReport",
         "type": "object"
       },
+      "GoodsReceiptRead": {
+        "description": "單一收貨批次（分批收貨事件）＋其選填進項發票。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "invoice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InputInvoiceRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "received_by": {
+            "title": "Received By",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "received_at",
+          "received_by"
+        ],
+        "title": "GoodsReceiptRead",
+        "type": "object"
+      },
       "Grade": {
         "description": "成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。",
         "enum": [
@@ -5095,6 +5130,11 @@
             "title": "Lines",
             "type": "array"
           },
+          "submit": {
+            "default": false,
+            "title": "Submit",
+            "type": "boolean"
+          },
           "supplier_id": {
             "title": "Supplier Id",
             "type": "integer"
@@ -5157,6 +5197,10 @@
             "title": "Qty",
             "type": "integer"
           },
+          "received_qty": {
+            "title": "Received Qty",
+            "type": "integer"
+          },
           "unit_cost": {
             "title": "Unit Cost",
             "type": "string"
@@ -5166,6 +5210,7 @@
           "id",
           "catalog_product_id",
           "qty",
+          "received_qty",
           "unit_cost",
           "line_total"
         ],
@@ -5183,16 +5228,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "invoice": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/InputInvoiceRead"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/PurchaseOrderLineRead"
@@ -5208,6 +5243,14 @@
           "ordered_by": {
             "title": "Ordered By",
             "type": "integer"
+          },
+          "receipts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/GoodsReceiptRead"
+            },
+            "title": "Receipts",
+            "type": "array"
           },
           "received_at": {
             "anyOf": [
@@ -5271,12 +5314,13 @@
         "type": "object"
       },
       "PurchaseOrderStatus": {
-        "description": "採購單狀態。第一版建立即 ORDERED，收貨後轉 RECEIVED。",
+        "description": "採購單狀態機。\n\nDRAFT ─送出→ ORDERED ─分批收貨→ PARTIAL ─收足→ RECEIVED；\nDRAFT/ORDERED ─取消→ CANCELLED（僅在尚未收任何貨時可取消）。",
         "enum": [
           "DRAFT",
           "ORDERED",
+          "PARTIAL",
           "RECEIVED",
-          "CLOSED"
+          "CANCELLED"
         ],
         "title": "PurchaseOrderStatus",
         "type": "string"
@@ -5343,8 +5387,28 @@
         "title": "ReceiptHeaderRead",
         "type": "object"
       },
+      "ReceiveLineIn": {
+        "description": "本次收貨的單一明細實收量（不得超過該明細待收 qty − received_qty）。",
+        "properties": {
+          "line_id": {
+            "title": "Line Id",
+            "type": "integer"
+          },
+          "qty": {
+            "exclusiveMinimum": 0.0,
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line_id",
+          "qty"
+        ],
+        "title": "ReceiveLineIn",
+        "type": "object"
+      },
       "ReceivePurchaseOrderRequest": {
-        "description": "收貨請求：進項發票選填（供應商發票通常隨貨送達，收貨時一併登錄）。",
+        "description": "分批收貨請求：各明細本次實收量＋選填進項發票（供應商發票隨貨時一併登錄）。",
         "properties": {
           "invoice": {
             "anyOf": [
@@ -5355,8 +5419,19 @@
                 "type": "null"
               }
             ]
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiveLineIn"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
           }
         },
+        "required": [
+          "lines"
+        ],
         "title": "ReceivePurchaseOrderRequest",
         "type": "object"
       },
@@ -11535,9 +11610,57 @@
         ]
       }
     },
-    "/api/v1/purchase-orders/{purchase_order_id}/invoice": {
+    "/api/v1/purchase-orders/{purchase_order_id}/cancel": {
       "post": {
-        "description": "補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。",
+        "description": "取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。",
+        "operationId": "cancelPurchaseOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_order_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Purchase Order",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
+      "post": {
+        "description": "補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。",
         "operationId": "registerInputInvoice",
         "parameters": [
           {
@@ -11546,6 +11669,15 @@
             "required": true,
             "schema": {
               "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "receipt_id",
+            "required": true,
+            "schema": {
+              "title": "Receipt Id",
               "type": "integer"
             }
           }
@@ -11595,6 +11727,7 @@
     },
     "/api/v1/purchase-orders/{purchase_order_id}/receive": {
       "post": {
+        "description": "分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。",
         "operationId": "receivePurchaseOrder",
         "parameters": [
           {
@@ -11611,18 +11744,11 @@
           "content": {
             "application/json": {
               "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/ReceivePurchaseOrderRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Payload"
+                "$ref": "#/components/schemas/ReceivePurchaseOrderRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -11652,6 +11778,54 @@
           }
         ],
         "summary": "Receive Purchase Order",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/purchase-orders/{purchase_order_id}/submit": {
+      "post": {
+        "description": "草稿送出 → 已下單（計入待到貨、可收貨）。",
+        "operationId": "submitPurchaseOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_order_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Order Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseOrderRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Purchase Order",
         "tags": [
           "purchasing"
         ]

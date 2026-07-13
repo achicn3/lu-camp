@@ -37,6 +37,7 @@ from app.modules.menu.service import MenuService
 from app.modules.purchasing.schemas import (
     PurchaseOrderCreate,
     PurchaseOrderLineCreate,
+    ReceiveLineIn,
     SupplierCreate,
 )
 from app.modules.purchasing.service import PurchasingService
@@ -480,12 +481,17 @@ async def _seed() -> None:
                 for pid in picks
             ]
             po = await purch.create_purchase_order(
-                store_id, PurchaseOrderCreate(supplier_id=sup, lines=lines), actor_user_id=clerk_id
+                store_id,
+                PurchaseOrderCreate(supplier_id=sup, lines=lines, submit=True),
+                actor_user_id=clerk_id,
             )
             await session.commit()
             n_po += 1
             if _RNG.random() < 0.8:
-                await purch.receive_purchase_order(store_id, po.id, actor_user_id=clerk_id)
+                receive_lines = [ReceiveLineIn(line_id=ln.id, qty=ln.qty) for ln in po.lines]
+                await purch.receive_purchase_order(
+                    store_id, po.id, actor_user_id=clerk_id, lines=receive_lines
+                )
                 await session.commit()
                 n_recv += 1
 

@@ -7,7 +7,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 from sqlalchemy import inspect
 
-from app.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine
+from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, PurchaseOrderLine
 from app.shared.enums import PurchaseOrderStatus
 
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
@@ -49,6 +49,8 @@ class PurchaseOrderLineCreate(BaseModel):
 class PurchaseOrderCreate(BaseModel):
     supplier_id: int
     lines: list[PurchaseOrderLineCreate] = Field(min_length=1)
+    # False（預設）建為草稿；True 建立即送出（ORDERED、計入待到貨、可收貨）。
+    submit: bool = False
 
 
 class PurchaseOrderLineRead(BaseModel):
@@ -57,6 +59,7 @@ class PurchaseOrderLineRead(BaseModel):
     id: int
     catalog_product_id: int
     qty: int
+    received_qty: int
     unit_cost: NTDAmount
     line_total: NTDAmount
 
@@ -67,6 +70,7 @@ class PurchaseOrderLineRead(BaseModel):
                 "id": line.id,
                 "catalog_product_id": line.catalog_product_id,
                 "qty": line.qty,
+                "received_qty": line.received_qty,
                 "unit_cost": line.unit_cost,
                 "line_total": Decimal(line.qty) * line.unit_cost,
             }
@@ -88,26 +92,25 @@ class PurchaseOrderRead(BaseModel):
     updated_at: datetime
     total_cost: NTDAmount
     lines: list[PurchaseOrderLineRead]
-    # 進項發票（收貨單上；未收貨/未登錄 → None）
-    invoice: "InputInvoiceRead | None" = None
+    # 各收貨批次（分批收貨；每批可各自選填進項發票）。未收貨 → 空陣列。
+    receipts: list["GoodsReceiptRead"] = []
 
     @classmethod
     def from_model(cls, purchase_order: PurchaseOrder) -> "PurchaseOrderRead":
         lines = [PurchaseOrderLineRead.from_model(line) for line in purchase_order.lines]
         total = sum((line.line_total for line in lines), Decimal(0))
-        # receipt 為 selectin 關聯：SELECT 載入的 PO 已就緒；**剛 add/flush 的新 PO** 尚未
+        # receipts 為 selectin 關聯：SELECT 載入的 PO 已就緒；**剛 add/flush 的新 PO** 尚未
         # 載入（同步 context 讀取會觸發 lazy IO → MissingGreenlet），而新建 PO 必無收貨單，
-        # 以 unloaded 檢查安全視為 None。
+        # 以 unloaded 檢查安全視為空。
         insp = inspect(purchase_order)
-        receipt = None if "receipt" in insp.unloaded else purchase_order.receipt
-        invoice = (
-            InputInvoiceRead.model_validate(receipt)
-            if receipt is not None and receipt.invoice_number is not None
-            else None
+        receipts = (
+            []
+            if "receipts" in insp.unloaded
+            else [GoodsReceiptRead.from_model(r) for r in purchase_order.receipts]
         )
         return cls.model_validate(
             {
-                "invoice": invoice,
+                "receipts": receipts,
                 "id": purchase_order.id,
                 "store_id": purchase_order.store_id,
                 "supplier_id": purchase_order.supplier_id,
@@ -143,9 +146,17 @@ class InputInvoiceIn(BaseModel):
         return v
 
 
-class ReceivePurchaseOrderRequest(BaseModel):
-    """收貨請求：進項發票選填（供應商發票通常隨貨送達，收貨時一併登錄）。"""
+class ReceiveLineIn(BaseModel):
+    """本次收貨的單一明細實收量（不得超過該明細待收 qty − received_qty）。"""
 
+    line_id: int
+    qty: int = Field(gt=0)
+
+
+class ReceivePurchaseOrderRequest(BaseModel):
+    """分批收貨請求：各明細本次實收量＋選填進項發票（供應商發票隨貨時一併登錄）。"""
+
+    lines: list[ReceiveLineIn] = Field(min_length=1)
     invoice: InputInvoiceIn | None = None
 
 
@@ -157,6 +168,33 @@ class InputInvoiceRead(BaseModel):
     invoice_total: NTDAmount
     invoice_net: NTDAmount
     invoice_tax: NTDAmount
+
+
+class GoodsReceiptRead(BaseModel):
+    """單一收貨批次（分批收貨事件）＋其選填進項發票。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    received_at: datetime
+    received_by: int
+    invoice: InputInvoiceRead | None = None
+
+    @classmethod
+    def from_model(cls, receipt: "GoodsReceipt") -> "GoodsReceiptRead":
+        invoice = (
+            InputInvoiceRead.model_validate(receipt)
+            if receipt.invoice_number is not None
+            else None
+        )
+        return cls.model_validate(
+            {
+                "id": receipt.id,
+                "received_at": receipt.received_at,
+                "received_by": receipt.received_by,
+                "invoice": invoice,
+            }
+        )
 
 
 class ReceivePurchaseOrderResult(BaseModel):

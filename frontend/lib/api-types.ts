@@ -1066,7 +1066,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/purchase-orders/{purchase_order_id}/invoice": {
+    "/api/v1/purchase-orders/{purchase_order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Purchase Order
+         * @description 取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。
+         */
+        post: operations["cancelPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
         parameters: {
             query?: never;
             header?: never;
@@ -1077,7 +1097,7 @@ export interface paths {
         put?: never;
         /**
          * Register Input Invoice
-         * @description 補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
+         * @description 補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
          */
         post: operations["registerInputInvoice"];
         delete?: never;
@@ -1095,8 +1115,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Receive Purchase Order */
+        /**
+         * Receive Purchase Order
+         * @description 分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
+         */
         post: operations["receivePurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Purchase Order
+         * @description 草稿送出 → 已下單（計入待到貨、可收貨）。
+         */
+        post: operations["submitPurchaseOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2962,6 +3005,22 @@ export interface components {
             store_id: number;
         };
         /**
+         * GoodsReceiptRead
+         * @description 單一收貨批次（分批收貨事件）＋其選填進項發票。
+         */
+        GoodsReceiptRead: {
+            /** Id */
+            id: number;
+            invoice?: components["schemas"]["InputInvoiceRead"] | null;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Received By */
+            received_by: number;
+        };
+        /**
          * Grade
          * @description 成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
          * @enum {string}
@@ -3689,6 +3748,11 @@ export interface components {
         PurchaseOrderCreate: {
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineCreate"][];
+            /**
+             * Submit
+             * @default false
+             */
+            submit: boolean;
             /** Supplier Id */
             supplier_id: number;
         };
@@ -3711,6 +3775,8 @@ export interface components {
             line_total: string;
             /** Qty */
             qty: number;
+            /** Received Qty */
+            received_qty: number;
             /** Unit Cost */
             unit_cost: string;
         };
@@ -3723,7 +3789,6 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
-            invoice?: components["schemas"]["InputInvoiceRead"] | null;
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineRead"][];
             /**
@@ -3733,6 +3798,11 @@ export interface components {
             ordered_at: string;
             /** Ordered By */
             ordered_by: number;
+            /**
+             * Receipts
+             * @default []
+             */
+            receipts: components["schemas"]["GoodsReceiptRead"][];
             /** Received At */
             received_at: string | null;
             /** Received By */
@@ -3752,10 +3822,13 @@ export interface components {
         };
         /**
          * PurchaseOrderStatus
-         * @description 採購單狀態。第一版建立即 ORDERED，收貨後轉 RECEIVED。
+         * @description 採購單狀態機。
+         *
+         *     DRAFT ─送出→ ORDERED ─分批收貨→ PARTIAL ─收足→ RECEIVED；
+         *     DRAFT/ORDERED ─取消→ CANCELLED（僅在尚未收任何貨時可取消）。
          * @enum {string}
          */
-        PurchaseOrderStatus: "DRAFT" | "ORDERED" | "RECEIVED" | "CLOSED";
+        PurchaseOrderStatus: "DRAFT" | "ORDERED" | "PARTIAL" | "RECEIVED" | "CANCELLED";
         /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
@@ -3773,11 +3846,23 @@ export interface components {
             tax_id: string | null;
         };
         /**
+         * ReceiveLineIn
+         * @description 本次收貨的單一明細實收量（不得超過該明細待收 qty − received_qty）。
+         */
+        ReceiveLineIn: {
+            /** Line Id */
+            line_id: number;
+            /** Qty */
+            qty: number;
+        };
+        /**
          * ReceivePurchaseOrderRequest
-         * @description 收貨請求：進項發票選填（供應商發票通常隨貨送達，收貨時一併登錄）。
+         * @description 分批收貨請求：各明細本次實收量＋選填進項發票（供應商發票隨貨時一併登錄）。
          */
         ReceivePurchaseOrderRequest: {
             invoice?: components["schemas"]["InputInvoiceIn"] | null;
+            /** Lines */
+            lines: components["schemas"]["ReceiveLineIn"][];
         };
         /** ReceivePurchaseOrderResult */
         ReceivePurchaseOrderResult: {
@@ -6755,12 +6840,44 @@ export interface operations {
             };
         };
     };
+    cancelPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     registerInputInvoice: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 purchase_order_id: number;
+                receipt_id: number;
             };
             cookie?: never;
         };
@@ -6799,9 +6916,9 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: {
+        requestBody: {
             content: {
-                "application/json": components["schemas"]["ReceivePurchaseOrderRequest"] | null;
+                "application/json": components["schemas"]["ReceivePurchaseOrderRequest"];
             };
         };
         responses: {
@@ -6812,6 +6929,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceivePurchaseOrderResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submitPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                purchase_order_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
                 };
             };
             /** @description Validation Error */

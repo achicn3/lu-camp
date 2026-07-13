@@ -204,6 +204,14 @@ class InvalidPurchaseOrder(DomainError):
     """採購單內容不合法（空白、重複商品、金額非整數元等）。"""
 
 
+class PurchaseOrderNotSubmittable(DomainError):
+    """採購單目前不可送出（僅草稿可送出）。"""
+
+
+class PurchaseOrderNotCancellable(DomainError):
+    """採購單目前不可取消（僅草稿/已下單且尚未收任何貨可取消）。"""
+
+
 class DuplicateSupplier(DomainError):
     """同店供應商名稱重複。"""
 

@@ -25,9 +25,11 @@ from app.shared.exceptions import (
     DomainError,
     InputInvoiceAlreadySet,
     InvalidPurchaseOrder,
+    PurchaseOrderNotCancellable,
     PurchaseOrderNotFound,
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
+    PurchaseOrderNotSubmittable,
 )
 
 router = APIRouter(tags=["purchasing"])
@@ -40,6 +42,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     InvalidPurchaseOrder: status.HTTP_422_UNPROCESSABLE_CONTENT,
     PurchaseOrderNotFound: status.HTTP_404_NOT_FOUND,
     PurchaseOrderNotReceivable: status.HTTP_409_CONFLICT,
+    PurchaseOrderNotSubmittable: status.HTTP_409_CONFLICT,
+    PurchaseOrderNotCancellable: status.HTTP_409_CONFLICT,
     InputInvoiceAlreadySet: status.HTTP_409_CONFLICT,
     PurchaseOrderNotReceived: status.HTTP_409_CONFLICT,
 }
@@ -109,6 +113,48 @@ async def create_purchase_order(
     return PurchaseOrderRead.from_model(purchase_order)
 
 
+@router.post(
+    "/purchase-orders/{purchase_order_id}/submit",
+    response_model=PurchaseOrderRead,
+    operation_id="submitPurchaseOrder",
+)
+async def submit_purchase_order(
+    purchase_order_id: int, session: SessionDep, user: CurrentUserDep
+) -> PurchaseOrderRead:
+    """草稿送出 → 已下單（計入待到貨、可收貨）。"""
+    svc = PurchasingService(session)
+    try:
+        purchase_order = await svc.submit_purchase_order(
+            user.store_id, purchase_order_id, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return PurchaseOrderRead.from_model(purchase_order)
+
+
+@router.post(
+    "/purchase-orders/{purchase_order_id}/cancel",
+    response_model=PurchaseOrderRead,
+    operation_id="cancelPurchaseOrder",
+)
+async def cancel_purchase_order(
+    purchase_order_id: int, session: SessionDep, user: CurrentUserDep
+) -> PurchaseOrderRead:
+    """取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。"""
+    svc = PurchasingService(session)
+    try:
+        purchase_order = await svc.cancel_purchase_order(
+            user.store_id, purchase_order_id, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return PurchaseOrderRead.from_model(purchase_order)
+
+
 @router.get(
     "/purchase-orders",
     response_model=list[PurchaseOrderRead],
@@ -150,17 +196,19 @@ async def get_purchase_order(
 )
 async def receive_purchase_order(
     purchase_order_id: int,
+    payload: ReceivePurchaseOrderRequest,
     session: SessionDep,
     user: CurrentUserDep,
-    payload: ReceivePurchaseOrderRequest | None = None,
 ) -> ReceivePurchaseOrderResult:
+    """分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。"""
     svc = PurchasingService(session)
     try:
         purchase_order, receipt = await svc.receive_purchase_order(
             user.store_id,
             purchase_order_id,
             actor_user_id=user.id,
-            invoice=payload.invoice if payload is not None else None,
+            lines=payload.lines,
+            invoice=payload.invoice,
         )
     except DomainError as exc:
         await session.rollback()
@@ -181,21 +229,22 @@ async def receive_purchase_order(
 
 
 @router.post(
-    "/purchase-orders/{purchase_order_id}/invoice",
+    "/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice",
     response_model=InputInvoiceRead,
     operation_id="registerInputInvoice",
 )
 async def register_input_invoice(
     purchase_order_id: int,
+    receipt_id: int,
     payload: InputInvoiceIn,
     session: SessionDep,
     user: CurrentUserDep,
 ) -> InputInvoiceRead:
-    """補登進項發票（收貨時漏登；已登錄不可覆寫 → 409）。"""
+    """補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。"""
     svc = PurchasingService(session)
     try:
         receipt = await svc.register_input_invoice(
-            user.store_id, purchase_order_id, invoice=payload
+            user.store_id, purchase_order_id, receipt_id, invoice=payload
         )
     except DomainError as exc:
         await session.rollback()

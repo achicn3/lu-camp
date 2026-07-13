@@ -15,17 +15,33 @@ export interface Badge {
 const PO_STATUS_BADGES: Record<PurchaseOrderStatus, Badge> = {
   DRAFT: { label: "草稿", tone: "neutral" },
   ORDERED: { label: "已下單", tone: "warn" },
+  PARTIAL: { label: "部分到貨", tone: "warn" },
   RECEIVED: { label: "已收貨", tone: "ok" },
-  CLOSED: { label: "已結案", tone: "muted" },
+  CANCELLED: { label: "已取消", tone: "muted" },
 };
 
 export function poStatusBadge(status: PurchaseOrderStatus): Badge {
   return PO_STATUS_BADGES[status];
 }
 
-/** 只有 ORDERED 的採購單可一次性收貨入庫。 */
+/** 已下單或部分到貨的採購單可（繼續）收貨入庫。 */
 export function canReceive(status: PurchaseOrderStatus): boolean {
-  return status === "ORDERED";
+  return status === "ORDERED" || status === "PARTIAL";
+}
+
+/** 僅草稿可送出（→ 已下單）。 */
+export function canSubmit(status: PurchaseOrderStatus): boolean {
+  return status === "DRAFT";
+}
+
+/** 僅草稿/已下單且尚未收任何貨可取消。 */
+export function canCancel(status: PurchaseOrderStatus): boolean {
+  return status === "DRAFT" || status === "ORDERED";
+}
+
+/** 某明細的待收數量（訂購 − 已收，不小於 0）。 */
+export function lineRemaining(qty: number, receivedQty: number): number {
+  return Math.max(qty - receivedQty, 0);
 }
 
 /** 採購單明細草稿（建單畫面暫存，尚未送後端）。 */

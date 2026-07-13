@@ -1,6 +1,8 @@
 """purchasing 資料存取層。"""
 
-from sqlalchemy import select
+from typing import Any, cast
+
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,7 +54,10 @@ class PurchasingRepository:
     ) -> PurchaseOrder | None:
         stmt = (
             select(PurchaseOrder)
-            .options(selectinload(PurchaseOrder.lines))
+            .options(
+                selectinload(PurchaseOrder.lines),
+                selectinload(PurchaseOrder.receipts),
+            )
             .where(PurchaseOrder.id == purchase_order_id, PurchaseOrder.store_id == store_id)
         )
         result: PurchaseOrder | None = await self._session.scalar(stmt)
@@ -96,15 +101,34 @@ class PurchasingRepository:
     async def lock_purchase_order(
         self, store_id: int, purchase_order_id: int
     ) -> PurchaseOrder | None:
+        # FOR UPDATE 只作用於 purchase_orders 主列；selectin 的 lines/receipts 走各自 SELECT。
+        # 分批收貨的並發防護靠主列列鎖 + received_qty 原子更新（increment_received_qty）。
         stmt = (
             select(PurchaseOrder)
-            .options(selectinload(PurchaseOrder.lines))
+            .options(
+                selectinload(PurchaseOrder.lines),
+                selectinload(PurchaseOrder.receipts),
+            )
             .where(PurchaseOrder.id == purchase_order_id, PurchaseOrder.store_id == store_id)
-            .with_for_update()
+            .with_for_update(of=PurchaseOrder)
             .execution_options(populate_existing=True)
         )
         result: PurchaseOrder | None = await self._session.scalar(stmt)
         return result
+
+    async def increment_received_qty(self, store_id: int, line_id: int, delta: int) -> bool:
+        """原子累加某明細的已收數量；守衛 received_qty + delta <= qty，成功回 True。"""
+        stmt = (
+            update(PurchaseOrderLine)
+            .where(
+                PurchaseOrderLine.id == line_id,
+                PurchaseOrderLine.store_id == store_id,
+                PurchaseOrderLine.received_qty + delta <= PurchaseOrderLine.qty,
+            )
+            .values(received_qty=PurchaseOrderLine.received_qty + delta)
+        )
+        result = cast("CursorResult[Any]", await self._session.execute(stmt))
+        return result.rowcount == 1
 
     async def add_receipt(self, receipt: GoodsReceipt) -> GoodsReceipt:
         self._session.add(receipt)

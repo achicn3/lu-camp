@@ -1,6 +1,7 @@
 """purchasing 模型：供應商、採購單、採購明細與收貨紀錄。
 
-第一版只處理店內補貨用的數量型商品（catalog_products），不處理發票、應付帳款或部分收貨。
+只處理店內補貨用的數量型商品（catalog_products），不處理應付帳款。
+支援**分批收貨**：每明細記已收數量（received_qty），一張採購單可多次收貨（多筆 goods_receipts）。
 金額一律 NUMERIC(scale 0) → Decimal（NT$ 整數元）。
 """
 
@@ -44,7 +45,11 @@ class Supplier(Base, TimestampMixin):
 
 
 class PurchaseOrder(Base, TimestampMixin):
-    """採購單。第一版建立後即 ORDERED；收貨一次後轉 RECEIVED。"""
+    """採購單。DRAFT→ORDERED→PARTIAL→RECEIVED；DRAFT/ORDERED 可取消為 CANCELLED。
+
+    received_at/received_by 於**全部收足**（RECEIVED）時記錄；部分到貨期間為 None，
+    各批收貨時間見各 GoodsReceipt.received_at。
+    """
 
     __tablename__ = "purchase_orders"
 
@@ -53,16 +58,19 @@ class PurchaseOrder(Base, TimestampMixin):
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
     status: Mapped[PurchaseOrderStatus] = mapped_column(
         _enum_col(PurchaseOrderStatus),
-        default=PurchaseOrderStatus.ORDERED,
-        server_default=PurchaseOrderStatus.ORDERED.value,
+        default=PurchaseOrderStatus.DRAFT,
+        server_default=PurchaseOrderStatus.DRAFT.value,
     )
     ordered_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
-    receipt: Mapped["GoodsReceipt | None"] = relationship(
-        back_populates="purchase_order", lazy="selectin", uselist=False
+    receipts: Mapped[list["GoodsReceipt"]] = relationship(
+        back_populates="purchase_order",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="GoodsReceipt.id",
     )
     lines: Mapped[list["PurchaseOrderLine"]] = relationship(
         back_populates="purchase_order",
@@ -73,9 +81,18 @@ class PurchaseOrder(Base, TimestampMixin):
 
 
 class PurchaseOrderLine(Base):
-    """採購明細。只允許 catalog_product_id；序號品/散裝品不走此流程。"""
+    """採購明細。只允許 catalog_product_id；序號品/散裝品不走此流程。
+
+    received_qty：累計已收數量（分批收貨累加）；0 <= received_qty <= qty。
+    """
 
     __tablename__ = "purchase_order_lines"
+    __table_args__ = (
+        CheckConstraint(
+            "received_qty >= 0 AND received_qty <= qty",
+            name="ck_purchase_order_lines_received_qty_range",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -84,17 +101,17 @@ class PurchaseOrderLine(Base):
     )
     catalog_product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id"), index=True)
     qty: Mapped[int] = mapped_column()
+    received_qty: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 0))
 
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="lines")
 
 
 class GoodsReceipt(Base):
-    """採購收貨紀錄。第一版一張 PO 最多一筆 receipt。"""
+    """採購收貨紀錄（一次收貨事件）。分批收貨下一張 PO 可有多筆 receipt，各自選填進項發票。"""
 
     __tablename__ = "goods_receipts"
     __table_args__ = (
-        UniqueConstraint("purchase_order_id", name="uq_goods_receipts_purchase_order_id"),
         # 進項發票一致性：全空（未登錄）或全備；金額守恆 net + tax = total。
         CheckConstraint(
             "(invoice_number IS NULL AND invoice_date IS NULL AND invoice_total IS NULL"
@@ -124,7 +141,7 @@ class GoodsReceipt(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     purchase_order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id"), index=True)
-    purchase_order: Mapped["PurchaseOrder"] = relationship(back_populates="receipt")
+    purchase_order: Mapped["PurchaseOrder"] = relationship(back_populates="receipts")
     received_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

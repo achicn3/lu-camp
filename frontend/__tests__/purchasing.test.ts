@@ -2,10 +2,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canCancel,
   canReceive,
+  canSubmit,
   canSubmitPo,
   type DraftLine,
   draftTotal,
+  lineRemaining,
   lineTotal,
   poStatusBadge,
   qtyError,
@@ -106,17 +109,46 @@ describe("supplierNameError", () => {
 });
 
 describe("canReceive", () => {
-  it("only ORDERED can be received", () => {
+  it("ORDERED and PARTIAL can be (further) received", () => {
     expect(canReceive("ORDERED")).toBe(true);
+    expect(canReceive("PARTIAL")).toBe(true);
     expect(canReceive("DRAFT")).toBe(false);
     expect(canReceive("RECEIVED")).toBe(false);
-    expect(canReceive("CLOSED")).toBe(false);
+    expect(canReceive("CANCELLED")).toBe(false);
+  });
+});
+
+describe("canSubmit", () => {
+  it("only DRAFT can be submitted", () => {
+    expect(canSubmit("DRAFT")).toBe(true);
+    expect(canSubmit("ORDERED")).toBe(false);
+    expect(canSubmit("PARTIAL")).toBe(false);
+  });
+});
+
+describe("canCancel", () => {
+  it("only DRAFT / ORDERED (no goods received yet) can be cancelled", () => {
+    expect(canCancel("DRAFT")).toBe(true);
+    expect(canCancel("ORDERED")).toBe(true);
+    expect(canCancel("PARTIAL")).toBe(false);
+    expect(canCancel("RECEIVED")).toBe(false);
+    expect(canCancel("CANCELLED")).toBe(false);
+  });
+});
+
+describe("lineRemaining", () => {
+  it("is ordered minus received, clamped at 0", () => {
+    expect(lineRemaining(20, 12)).toBe(8);
+    expect(lineRemaining(10, 10)).toBe(0);
+    expect(lineRemaining(5, 8)).toBe(0);
   });
 });
 
 describe("poStatusBadge", () => {
   it("maps every status to a label + tone", () => {
     expect(poStatusBadge("ORDERED").label).toBe("已下單");
+    expect(poStatusBadge("PARTIAL").label).toBe("部分到貨");
+    expect(poStatusBadge("CANCELLED").label).toBe("已取消");
     expect(poStatusBadge("RECEIVED").tone).toBe("ok");
   });
 });

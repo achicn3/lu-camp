@@ -130,12 +130,17 @@ class StockReason(StrEnum):
 
 
 class PurchaseOrderStatus(StrEnum):
-    """採購單狀態。第一版建立即 ORDERED，收貨後轉 RECEIVED。"""
+    """採購單狀態機。
+
+    DRAFT ─送出→ ORDERED ─分批收貨→ PARTIAL ─收足→ RECEIVED；
+    DRAFT/ORDERED ─取消→ CANCELLED（僅在尚未收任何貨時可取消）。
+    """
 
     DRAFT = "DRAFT"
     ORDERED = "ORDERED"
+    PARTIAL = "PARTIAL"
     RECEIVED = "RECEIVED"
-    CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
 
 
 class StocktakeStatus(StrEnum):
