@@ -14,6 +14,7 @@ import asyncio
 from decimal import Decimal
 
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.main  # noqa: F401  # 觸發模型註冊
 from app.core.db import get_sessionmaker
@@ -31,7 +32,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"[{mark}] {name}" + (f" — {detail}" if detail else ""))
 
 
-async def b0_data_volume_thresholds(session) -> None:
+async def b0_data_volume_thresholds(session: AsyncSession) -> None:
     """B0：確認本 QA DB 達到一年級距與指定資料量門檻。"""
     members = (
         await session.execute(text("SELECT COUNT(*) FROM contacts WHERE 'MEMBER'=ANY(roles)"))
@@ -72,7 +73,7 @@ async def b0_data_volume_thresholds(session) -> None:
     check("B0 活動折扣銷售行 > 0", discounted_lines > 0, f"discounted_lines={discounted_lines}")
 
 
-async def b1_serialized_no_double_sell(session) -> None:
+async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
     """B1：任一序號品在未作廢銷售中至多被售一次；status=SOLD ⇔ 恰一筆未作廢售出行。"""
     rows = (
         await session.execute(
@@ -113,7 +114,7 @@ async def b1_serialized_no_double_sell(session) -> None:
     )
 
 
-async def b2_consignment_math(session) -> None:
+async def b2_consignment_math(session: AsyncSession) -> None:
     """B2：每筆寄售結算 commission/payout 算術正確且 gross 對齊售出行金額。"""
     rows = (
         await session.execute(
@@ -151,7 +152,7 @@ async def b2_consignment_math(session) -> None:
     check("B2 寄售 gross=成交行金額", len(bad_gross) == 0, f"不符 {bad_gross[:5]}")
 
 
-async def b3_tender_and_cash_links(session) -> None:
+async def b3_tender_and_cash_links(session: AsyncSession) -> None:
     """B3：CASH tender 對應 SALE_IN；STORE_CREDIT tender 對應 ledger DEBIT。"""
     cash_bad = (
         await session.execute(
@@ -203,7 +204,7 @@ async def b3_tender_and_cash_links(session) -> None:
     )
 
 
-async def b4_cash_reconcile(session) -> None:
+async def b4_cash_reconcile(session: AsyncSession) -> None:
     """B4：每個 CLOSED session 的 expected = 服務層公式重算；variance = counted − expected。"""
     svc = CashDrawerService(session)
     sessions = (
@@ -219,8 +220,9 @@ async def b4_cash_reconcile(session) -> None:
     for cs in sessions:
         recomputed = await svc.expected_amount(cs)
         stored = cs.expected_amount
-        var_ok = cs.variance is None or (
-            cs.counted_amount is not None and cs.variance == cs.counted_amount - stored
+        var_ok = stored is not None and (
+            cs.variance is None
+            or (cs.counted_amount is not None and cs.variance == cs.counted_amount - stored)
         )
         if stored != recomputed or not var_ok:
             bad.append(
@@ -233,7 +235,7 @@ async def b4_cash_reconcile(session) -> None:
     )
 
 
-async def b6_bulk_lot(session) -> None:
+async def b6_bulk_lot(session: AsyncSession) -> None:
     """B6：散裝批 remaining/status/售出量三者守恆。"""
     rows = (
         await session.execute(
@@ -260,7 +262,7 @@ async def b6_bulk_lot(session) -> None:
     check("B6 散裝 售出qty+remaining=total", len(qty_bad) == 0, f"守恆破 {qty_bad[:5]}")
 
 
-async def b8_store_credit(session) -> None:
+async def b8_store_credit(session: AsyncSession) -> None:
     """B8：每個帳戶 balance = Σ ledger.signed_amount；balance_after 滾動正確且非負。"""
     accts = (
         await session.execute(
@@ -307,7 +309,7 @@ async def b8_store_credit(session) -> None:
     check("B8 購物金 balance_after 滾動=累積和", len(roll_bad) == 0, f"漂移 {roll_bad[:5]}")
 
 
-async def b10_money_integrity(session) -> None:
+async def b10_money_integrity(session: AsyncSession) -> None:
     """B10：銷售稅額與 tender 對平；金額皆整數。"""
     nt = (
         await session.execute(
@@ -331,7 +333,7 @@ async def b10_money_integrity(session) -> None:
     check("B10 非作廢單 Σtender=total", len(tender_bad) == 0, f"不對平 {tender_bad[:5]}")
 
 
-async def b11_food_store_credit_controls(session) -> None:
+async def b11_food_store_credit_controls(session: AsyncSession) -> None:
     """B11：餐飲不得以購物金折抵；餐飲行不得套活動折扣。"""
     food_credit_bad = (
         await session.execute(
@@ -374,7 +376,7 @@ async def b11_food_store_credit_controls(session) -> None:
     check("B11 餐飲不套門市活動折扣", len(menu_discount_bad) == 0, f"違規 {menu_discount_bad[:5]}")
 
 
-async def b12_campaign_discounts(session) -> None:
+async def b12_campaign_discounts(session: AsyncSession) -> None:
     """B12：活動折扣留痕正確；同店至多一個 ACTIVE 活動。"""
     active_bad = (
         await session.execute(
@@ -410,13 +412,12 @@ async def b12_campaign_discounts(session) -> None:
     check("B12 活動折扣留痕與成交價一致", len(discount_bad) == 0, f"違規 {discount_bad[:5]}")
 
 
-async def b13_audit_presence(session) -> None:
+async def b13_audit_presence(session: AsyncSession) -> None:
     """B13：金流/活動級敏感操作有稽核紀錄，且稽核 JSON 不含身分證明文。"""
-    counts = dict(
-        (
-            await session.execute(
-                text(
-                    """
+    count_rows = (
+        await session.execute(
+            text(
+                """
         SELECT action, COUNT(*)
         FROM audit_log
         WHERE action IN (
@@ -424,11 +425,11 @@ async def b13_audit_presence(session) -> None:
           'STORE_CREDIT_ADJUST', 'VOID_SALE'
         )
         GROUP BY action
-        """
-                )
+                """
             )
-        ).all()
-    )
+        )
+    ).all()
+    counts: dict[str, int] = {str(row[0]): int(row[1]) for row in count_rows}
     required = ["CAMPAIGN_CREATE", "CAMPAIGN_ACTIVATE", "CAMPAIGN_END", "STORE_CREDIT_ADJUST"]
     missing = [name for name in required if counts.get(name, 0) == 0]
     check("B13 活動/購物金敏感操作有 audit_log", not missing, f"缺少 {missing}")
@@ -453,7 +454,7 @@ async def b13_audit_presence(session) -> None:
     )
 
 
-async def data_volume(session) -> None:
+async def data_volume(session: AsyncSession) -> None:
     for tbl in [
         "sales",
         "sale_lines",

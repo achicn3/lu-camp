@@ -368,7 +368,9 @@ async def _seed() -> None:
         member_ids = [
             r[0]
             for r in (
-                await session.execute(select(Contact.id).where(Contact.roles.any("MEMBER")))
+                await session.execute(
+                    select(Contact.id).where(Contact.roles.contains(["MEMBER"]))
+                )
             ).all()
         ]
 
@@ -377,16 +379,16 @@ async def _seed() -> None:
         for i in range(N_CONSIGNORS):
             name = _RNG.choice(SURNAMES) + _RNG.choice(GIVEN)
             phone = "098" + str(1_000_000 + i)
-            c = Contact(
+            consignor = Contact(
                 store_id=store_id,
                 name=name,
                 phone=phone,
                 roles=["CONSIGNOR", "SELLER"],
                 national_id_enc=f"enc-con-{i}",
             )
-            session.add(c)
+            session.add(consignor)
             await session.flush()
-            consignor_ids.append(c.id)
+            consignor_ids.append(consignor.id)
         await session.commit()
 
         # 序號品（二手裝備，真實命名；自有 + 寄售）
@@ -645,9 +647,9 @@ async def _seed() -> None:
         recent = (
             (await session.execute(select(Sale).order_by(Sale.id.desc()).limit(40))).scalars().all()
         )
-        for s in recent:
+        for recent_sale in recent:
             if _RNG.random() < 0.25:
-                got = await sales_svc.get_sale(store_id, s.id)
+                got = await sales_svc.get_sale(store_id, recent_sale.id)
                 if got is not None:
                     try:
                         await sales_svc.void_sale(got, clerk_id)
@@ -690,7 +692,7 @@ async def _seed() -> None:
                 await session.rollback()
 
         total_members = (
-            await session.execute(select(Contact).where(Contact.roles.any("MEMBER")))
+            await session.execute(select(Contact).where(Contact.roles.contains(["MEMBER"])))
         ).scalars()
         n_members = len(list(total_members))
         print(

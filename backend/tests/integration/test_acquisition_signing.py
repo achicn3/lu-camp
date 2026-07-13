@@ -799,12 +799,13 @@ async def test_unsigned_changed_payload_same_key_conflicts(
     await client.post(
         "/api/v1/cash-sessions/open", json={"opening_float": "5000"}, headers=_auth(token)
     )
-    base = {
+    base_items: list[dict[str, object]] = [
+        {"name": "相機", "grade": "A", "listed_price": "3000", "acquisition_cost": "1800"}
+    ]
+    base: dict[str, object] = {
         "type": "BUYOUT",
         "contact_id": contact_id,
-        "items": [
-            {"name": "相機", "grade": "A", "listed_price": "3000", "acquisition_cost": "1800"}
-        ],
+        "items": base_items,
         "payout_method": "CASH",
     }
     hdr = {"Authorization": f"Bearer {token}", "Idempotency-Key": "unsigned-changed-key"}
@@ -812,7 +813,7 @@ async def test_unsigned_changed_payload_same_key_conflicts(
     first = await client.post("/api/v1/acquisitions", json=base, headers=hdr)
     assert first.status_code == 201, first.text
     # 同鍵、改內容（金額變）→ 指紋不符 → 409（先前已提交的證據）
-    changed = {**base, "items": [{**base["items"][0], "acquisition_cost": "2500"}]}
+    changed = {**base, "items": [{**base_items[0], "acquisition_cost": "2500"}]}
     conflict = await client.post("/api/v1/acquisitions", json=changed, headers=hdr)
     assert conflict.status_code == 409, conflict.text
 

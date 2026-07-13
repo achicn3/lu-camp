@@ -12,12 +12,16 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Callable
 from decimal import Decimal
+from typing import cast
 
 import httpx
 
 BASE = os.environ.get("BASE", "http://localhost:8010") + "/api/v1"
 results: list[tuple[str, bool, str]] = []
+ProbeResponse = httpx.Response | BaseException
+RequestSpec = tuple[str, str, object | None, dict[str, str] | None]
 
 
 def record(name: str, ok: bool, detail: str = "") -> None:
@@ -25,21 +29,23 @@ def record(name: str, ok: bool, detail: str = "") -> None:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
 
 
-def codes(responses: list) -> list:
-    out = []
+def codes(responses: list[ProbeResponse]) -> list[int | str]:
+    out: list[int | str] = []
     for r in responses:
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             out.append(f"EXC:{type(r).__name__}")
         else:
             out.append(r.status_code)
     return out
 
 
-async def fire(client: httpx.AsyncClient, n: int, build):
+async def fire(
+    client: httpx.AsyncClient, n: int, build: Callable[[int], RequestSpec]
+) -> list[ProbeResponse]:
     """同時送出 n 個請求；以 barrier 讓它們盡量同時離開。build(i)->(method,url,json,headers)."""
     start = asyncio.Event()
 
-    async def one(i: int):
+    async def one(i: int) -> httpx.Response:
         method, url, body, headers = build(i)
         await start.wait()
         return await client.request(method, url, json=body, headers=headers or {})
@@ -47,25 +53,27 @@ async def fire(client: httpx.AsyncClient, n: int, build):
     tasks = [asyncio.create_task(one(i)) for i in range(n)]
     await asyncio.sleep(0.05)
     start.set()
-    return await asyncio.gather(*tasks, return_exceptions=True)
+    return list(await asyncio.gather(*tasks, return_exceptions=True))
 
 
-def n_success(responses: list) -> int:
-    return sum(1 for r in responses if not isinstance(r, Exception) and r.status_code < 300)
+def n_success(responses: list[ProbeResponse]) -> int:
+    return sum(1 for r in responses if not isinstance(r, BaseException) and r.status_code < 300)
 
 
-def n_5xx(responses: list) -> int:
-    return sum(1 for r in responses if not isinstance(r, Exception) and r.status_code >= 500)
+def n_5xx(responses: list[ProbeResponse]) -> int:
+    return sum(1 for r in responses if not isinstance(r, BaseException) and r.status_code >= 500)
 
 
 async def login(client: httpx.AsyncClient) -> str:
     r = await client.post(
         f"{BASE}/auth/login", json={"username": "dev-manager", "password": "dev-test-123456"}
     )
-    return r.json()["access_token"]
+    return cast("str", r.json()["access_token"])
 
 
-async def make_buyout_item(client, seller_id: int, price: str = "1000") -> str:
+async def make_buyout_item(
+    client: httpx.AsyncClient, seller_id: int, price: str = "1000"
+) -> str:
     key = f"qa-acq-{time.time_ns()}"
     r = await client.post(
         f"{BASE}/acquisitions",
@@ -80,10 +88,10 @@ async def make_buyout_item(client, seller_id: int, price: str = "1000") -> str:
         },
     )
     r.raise_for_status()
-    return r.json()["item_codes"][0]
+    return cast("str", r.json()["item_codes"][0])
 
 
-async def ensure_seller(client) -> int:
+async def ensure_seller(client: httpx.AsyncClient) -> int:
     r = await client.post(
         f"{BASE}/contacts",
         json={
@@ -94,35 +102,35 @@ async def ensure_seller(client) -> int:
         },
     )
     if r.status_code < 300:
-        return r.json()["id"]
+        return cast("int", r.json()["id"])
     # 已存在 → 用列表搜尋手機找回；/contacts/lookup 是 national_id 專用。
     found = await client.get(f"{BASE}/contacts", params={"q": "0911000777", "limit": 10})
     if found.status_code < 300:
         items = found.json()
         for item in items:
             if item.get("phone") == "0911000777":
-                return item["id"]
+                return cast("int", item["id"])
     return 7
 
 
-async def ensure_menu_item(client) -> dict:
+async def ensure_menu_item(client: httpx.AsyncClient) -> dict[str, object]:
     name = f"QA餐飲{time.time_ns()}"
     r = await client.post(
         f"{BASE}/menu-items",
         json={"name": name, "unit_price": "180", "category": "QA", "sort_order": 999},
     )
     if r.status_code < 300:
-        return r.json()
+        return cast("dict[str, object]", r.json())
     items = await client.get(f"{BASE}/menu-items", params={"available_only": True})
     items.raise_for_status()
     existing = items.json()
     if not existing:
         raise RuntimeError(f"無法建立或取得餐飲品項：{r.status_code} {r.text[:120]}")
-    return existing[0]
+    return cast("dict[str, object]", existing[0])
 
 
 # ─────────────────────────── 探針 ───────────────────────────
-async def p1_double_sell_serialized(client, seller_id):
+async def p1_double_sell_serialized(client: httpx.AsyncClient, seller_id: int) -> None:
     code = await make_buyout_item(client, seller_id)
     resp = await fire(
         client,
@@ -142,7 +150,7 @@ async def p1_double_sell_serialized(client, seller_id):
     )
 
 
-async def p8_idempotent_replay(client, seller_id):
+async def p8_idempotent_replay(client: httpx.AsyncClient, seller_id: int) -> None:
     code = await make_buyout_item(client, seller_id)
     key = f"qa-p8-{time.time_ns()}"
     resp = await fire(
@@ -156,7 +164,9 @@ async def p8_idempotent_replay(client, seller_id):
         ),
     )
     ok_ids = {
-        r.json().get("id") for r in resp if not isinstance(r, Exception) and r.status_code < 300
+        r.json().get("id")
+        for r in resp
+        if not isinstance(r, BaseException) and r.status_code < 300
     }
     record(
         "P8 同冪等鍵並發重放：同一張單、無重複",
@@ -165,7 +175,7 @@ async def p8_idempotent_replay(client, seller_id):
     )
 
 
-async def p6_bulk_oversell(client):
+async def p6_bulk_oversell(client: httpx.AsyncClient) -> None:
     lots = (await client.get(f"{BASE}/bulk-lots")).json()
     lots = lots.get("items", lots) if isinstance(lots, dict) else lots
     lot = next(
@@ -194,7 +204,7 @@ async def p6_bulk_oversell(client):
     )
 
 
-async def p7_consignment_double_pay(client):
+async def p7_consignment_double_pay(client: httpx.AsyncClient) -> None:
     setts = (await client.get(f"{BASE}/consignment/settlements?status=PENDING")).json()
     setts = setts.get("items", setts) if isinstance(setts, dict) else setts
     if not setts:
@@ -219,13 +229,13 @@ async def p7_consignment_double_pay(client):
     )
 
 
-async def p4_member_dedup_race(client):
+async def p4_member_dedup_race(client: httpx.AsyncClient) -> None:
     nid = "B200000004"  # 有效身分證（與既有 seller 的 A123456789 不同）
     phones = ["0922000001", "0922000002", "0922000003", "0922000004"]
     # 每個請求 body 不同（不同電話、同 national_id）→ 自訂 barrier 平行送出
     start = asyncio.Event()
 
-    async def one(i):
+    async def one(i: int) -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/contacts",
@@ -240,8 +250,12 @@ async def p4_member_dedup_race(client):
     tasks = [asyncio.create_task(one(i)) for i in range(4)]
     await asyncio.sleep(0.05)
     start.set()
-    resp = await asyncio.gather(*tasks, return_exceptions=True)
-    ids = {r.json().get("id") for r in resp if not isinstance(r, Exception) and r.status_code < 300}
+    resp: list[ProbeResponse] = list(await asyncio.gather(*tasks, return_exceptions=True))
+    ids = {
+        r.json().get("id")
+        for r in resp
+        if not isinstance(r, BaseException) and r.status_code < 300
+    }
     no5xx = n_5xx(resp) == 0
     # 期望：去重 → 至多一個獨立 contact（其餘回同一既有或 409），且絕不 500
     record(
@@ -251,7 +265,7 @@ async def p4_member_dedup_race(client):
     )
 
 
-async def p2_concurrent_real_cash_flows(client, seller_id):
+async def p2_concurrent_real_cash_flows(client: httpx.AsyncClient, seller_id: int) -> None:
     """多開現金核心：POS 賣現(SALE_IN) + 收購買斷付現(BUYOUT_OUT) + 手動調整，
     三台同時寫入同一個 OPEN session。斷言全數成功、無 500（帳本守恆由 Layer B 重跑驗證）。"""
     code = await make_buyout_item(client, seller_id)  # POS 端要賣的二手品
@@ -259,7 +273,7 @@ async def p2_concurrent_real_cash_flows(client, seller_id):
     sid = sess["id"]
     start = asyncio.Event()
 
-    async def pos_sale():
+    async def pos_sale() -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/sales",
@@ -267,7 +281,7 @@ async def p2_concurrent_real_cash_flows(client, seller_id):
             json={"lines": [{"line_type": "SERIALIZED", "item_code": code}]},
         )
 
-    async def acq_buyout():
+    async def acq_buyout() -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/acquisitions",
@@ -287,7 +301,7 @@ async def p2_concurrent_real_cash_flows(client, seller_id):
             },
         )
 
-    async def manual_adj():
+    async def manual_adj() -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/cash-sessions/{sid}/movements",
@@ -301,7 +315,7 @@ async def p2_concurrent_real_cash_flows(client, seller_id):
     ]
     await asyncio.sleep(0.05)
     start.set()
-    resp = await asyncio.gather(*tasks, return_exceptions=True)
+    resp: list[ProbeResponse] = list(await asyncio.gather(*tasks, return_exceptions=True))
     ns = n_success(resp)
     record(
         "P2 同一現金 session 並發(賣現+收購付現+調整)：全數入帳、無 500",
@@ -310,7 +324,7 @@ async def p2_concurrent_real_cash_flows(client, seller_id):
     )
 
 
-async def p5_store_credit_double_spend(client):
+async def p5_store_credit_double_spend(client: httpx.AsyncClient) -> None:
     # 建會員（每次跑用唯一電話避免衝突）+ 撥入購物金 1000，再兩台同時扣 1000
     phone = f"09{str(time.time_ns())[-8:]}"
     m = await client.post(
@@ -342,7 +356,7 @@ async def p5_store_credit_double_spend(client):
     )
 
 
-async def p9_food_store_credit_guard(client, seller_id):
+async def p9_food_store_credit_guard(client: httpx.AsyncClient, seller_id: int) -> None:
     """餐飲不得抵用購物金：混合購物車若用購物金付全額必擋；
     只用購物金付非餐飲上限、餐飲現金支付則可成立。"""
     phone = f"09{str(time.time_ns())[-8:]}"
@@ -418,20 +432,20 @@ async def p9_food_store_credit_guard(client, seller_id):
     )
 
 
-async def p3_close_vs_acquisition(client, seller_id):
+async def p3_close_vs_acquisition(client: httpx.AsyncClient, seller_id: int) -> None:
     """一台關帳、另一台同時收購買斷付現（需開帳中、產生 BUYOUT_OUT）。
     斷言：無 500；收購要嘛入本班(關帳前)、要嘛被擋(已無開帳)，不得把現金算進已關班別。"""
     sess = (await client.get(f"{BASE}/cash-sessions/current")).json()
     sid = sess["id"]
     start = asyncio.Event()
 
-    async def do_close():
+    async def do_close() -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/cash-sessions/{sid}/close", json={"counted_amount": "99999"}
         )
 
-    async def do_buyout():
+    async def do_buyout() -> httpx.Response:
         await start.wait()
         return await client.post(
             f"{BASE}/acquisitions",
@@ -454,17 +468,17 @@ async def p3_close_vs_acquisition(client, seller_id):
     t = [asyncio.create_task(do_close()), asyncio.create_task(do_buyout())]
     await asyncio.sleep(0.05)
     start.set()
-    resp = await asyncio.gather(*t, return_exceptions=True)
+    resp: list[ProbeResponse] = list(await asyncio.gather(*t, return_exceptions=True))
     close_r, buy_r = resp[0], resp[1]
     no5xx = n_5xx(resp) == 0
-    cc = close_r.status_code if not isinstance(close_r, Exception) else f"EXC:{close_r}"
-    bc = buy_r.status_code if not isinstance(buy_r, Exception) else f"EXC:{buy_r}"
+    cc = close_r.status_code if not isinstance(close_r, BaseException) else f"EXC:{close_r}"
+    bc = buy_r.status_code if not isinstance(buy_r, BaseException) else f"EXC:{buy_r}"
     record("P3 關帳 vs 收購付現競態：互斥、無 500", no5xx, f"close={cc}, buyout={bc}")
     # 重開一個 session，保持後續(UI 層 / Layer B 重跑)可用
     await client.post(f"{BASE}/cash-sessions/open", json={"opening_float": "5000"})
 
 
-async def main():
+async def main() -> None:
     async with httpx.AsyncClient(timeout=30) as client:
         tok = await login(client)
         client.headers["Authorization"] = f"Bearer {tok}"

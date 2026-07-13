@@ -11,6 +11,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -88,7 +89,7 @@ def test_f0401_b2c_amounts_tax_zero() -> None:
     assert data["TotalAmount"] == 1000
     assert data["TaxType"] == 1
     assert data["TaxRate"] == "0.05"
-    item = data["ProductItem"][0]
+    item = cast("list[dict[str, object]]", data["ProductItem"])[0]
     assert item == {
         "Description": "帳篷",
         "Quantity": 1,
@@ -141,7 +142,7 @@ def test_f0401_discounted_line_uses_effective_unit_price() -> None:
         [_line("帳篷", 2, "500", "900")],  # 原價 500×2、折 100 → 小計 900
         order_id="S1-7",
     )
-    item = data["ProductItem"][0]
+    item = cast("list[dict[str, object]]", data["ProductItem"])[0]
     assert item["Quantity"] == 2
     assert item["Amount"] == "900"
     assert item["UnitPrice"] == "450"
@@ -203,7 +204,7 @@ def test_parse_query_three_states() -> None:
     result = parse_query_issued(found)
     assert result is not None and result.barcode_text is None  # 查詢不回條碼內容
     assert parse_query_issued({"code": 71, "msg": "查無資料"}) is None  # 官方查無碼
-    for ambiguous in (
+    ambiguous_responses: tuple[dict[str, object], ...] = (
         {"msg": "??"},
         {"code": "0", "msg": ""},
         {"code": True, "msg": ""},
@@ -212,7 +213,8 @@ def test_parse_query_three_states() -> None:
         {"code": 0, "data": {"invoice_number": "bad"}},
         {"code": 51, "msg": "該發票超過查詢期限"},  # 非查無錯誤碼：不得當查無（Codex 第六輪）
         {"code": 9001, "msg": "簽章錯誤"},
-    ):
+    )
+    for ambiguous in ambiguous_responses:
         with pytest.raises(AmegoTransportError):
             parse_query_issued(ambiguous)
 

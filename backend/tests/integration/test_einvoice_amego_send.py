@@ -7,13 +7,14 @@ invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 """
 
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.service import CashDrawerService
-from app.modules.einvoice.amego import AmegoClient
+from app.modules.einvoice.amego import AmegoClient, AmegoTransport
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
@@ -70,7 +71,7 @@ class _ScriptedTransport:
         return result
 
 
-def _client(transport: _ScriptedTransport) -> AmegoClient:
+def _client(transport: AmegoTransport) -> AmegoClient:
     return AmegoClient(
         seller_tax_id="12345678",
         app_key="test-key",
@@ -224,7 +225,7 @@ async def test_send_f0401_api_failure_marks_failed_then_retry(db_session: AsyncS
     assert transport2.calls[1][0].endswith("/json/f0401")
     assert item2.status is UploadStatus.UPLOADED
     await db_session.refresh(invoice)
-    assert invoice.status is InvoiceStatus.ISSUED
+    assert cast("InvoiceStatus", invoice.status) is InvoiceStatus.ISSUED
 
 
 async def test_transport_error_leaves_claimed_pending_then_query_reconciles(
@@ -311,7 +312,7 @@ async def test_void_issued_invoice_sends_f0501(db_session: AsyncSession) -> None
     assert item.status is UploadStatus.UPLOADED
     assert transport.calls[0][0].endswith("/json/invoice_query")  # 作廢也對帳先行
     await db_session.refresh(invoice)
-    assert invoice.status is InvoiceStatus.VOID
+    assert cast("InvoiceStatus", invoice.status) is InvoiceStatus.VOID
     import json as _json
 
     data = _json.loads(transport.calls[1][1]["data"])
