@@ -208,10 +208,15 @@ async def list_catalog(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CatalogProductRead]:
-    products = await InventoryService(session).list_catalog(
+    products, incoming = await InventoryService(session).list_catalog_with_incoming(
         user.store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
-    return [CatalogProductRead.model_validate(product) for product in products]
+    return [
+        CatalogProductRead.model_validate(product).model_copy(
+            update={"incoming_qty": incoming.get(product.id, 0)}
+        )
+        for product in products
+    ]
 
 
 @router.get(

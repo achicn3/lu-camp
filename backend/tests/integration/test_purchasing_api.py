@@ -611,6 +611,50 @@ async def test_receive_unknown_purchase_order_returns_404(
     assert resp.status_code == 404, resp.text
 
 
+async def test_low_stock_incoming_qty_counts_open_pos_only(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """低庫存品 incoming_qty＝Σ 未收完（ORDERED＋PARTIAL）的 訂購−已收；
+    不含 RECEIVED/DRAFT/CANCELLED。避免重複採購用。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, qty=0, reorder_point=100)
+    supplier_id = await _create_supplier(client, token)
+
+    # ORDERED：訂 10、未收 → 在途 10
+    await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=10)
+    # PARTIAL：訂 8、收 3 → 在途 5
+    po_partial = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=8
+    )
+    line_id = (await _po_lines(client, token, po_partial))[0]["id"]
+    await client.post(
+        f"/api/v1/purchase-orders/{po_partial}/receive",
+        json={"lines": [{"line_id": line_id, "qty": 3}]},
+        headers=_recv_headers(token),
+    )
+    # RECEIVED：訂 4、全收 → 不計
+    po_recv = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=4
+    )
+    await _receive_all(client, token, po_recv)
+    # DRAFT：訂 20、未送出 → 不計
+    await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=20, submit=False
+    )
+    # CANCELLED：訂 7、取消 → 不計
+    po_cancel = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, qty=7
+    )
+    await client.post(f"/api/v1/purchase-orders/{po_cancel}/cancel", headers=_auth(token))
+
+    resp = await client.get(
+        "/api/v1/catalog-products", params={"low_stock": "true"}, headers=_auth(token)
+    )
+    assert resp.status_code == 200, resp.text
+    row = next(r for r in resp.json() if r["id"] == catalog_id)
+    assert row["incoming_qty"] == 15  # 10 + 5
+
+
 async def test_list_purchase_orders_filters_by_status_and_paginates(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

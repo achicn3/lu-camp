@@ -167,6 +167,12 @@ class PurchasingService:
             store_id, statuses=statuses, limit=limit, offset=offset
         )
 
+    async def incoming_qty_by_catalog(
+        self, store_id: int, catalog_ids: list[int]
+    ) -> dict[int, int]:
+        """各數量品在途待到貨量（Σ 未收完採購單的 訂購−已收）；供低庫存提醒避免重複採購。"""
+        return await self._repo.incoming_qty_by_catalog(store_id, catalog_ids)
+
     async def purchase_history_for_catalog(
         self, store_id: int, catalog_product_id: int
     ) -> list[dict[str, Any]]:

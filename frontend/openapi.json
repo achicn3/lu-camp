@@ -1482,7 +1482,7 @@
         "type": "object"
       },
       "CatalogProductRead": {
-        "description": "數量型商品輸出（POS 選件/庫存列表）。",
+        "description": "數量型商品輸出（POS 選件/庫存列表）。\n\nincoming_qty＝在途待到貨量（未收完的採購單累計待收：Σ(訂購−已收)，狀態 ORDERED/PARTIAL）；\n供低庫存提醒判斷是否已有補貨在路上、避免重複採購。清單以外的情境預設 0。",
         "properties": {
           "brand_id": {
             "anyOf": [
@@ -1497,6 +1497,11 @@
           },
           "id": {
             "title": "Id",
+            "type": "integer"
+          },
+          "incoming_qty": {
+            "default": 0,
+            "title": "Incoming Qty",
             "type": "integer"
           },
           "name": {

@@ -2373,12 +2373,20 @@ export interface components {
         /**
          * CatalogProductRead
          * @description 數量型商品輸出（POS 選件/庫存列表）。
+         *
+         *     incoming_qty＝在途待到貨量（未收完的採購單累計待收：Σ(訂購−已收)，狀態 ORDERED/PARTIAL）；
+         *     供低庫存提醒判斷是否已有補貨在路上、避免重複採購。清單以外的情境預設 0。
          */
         CatalogProductRead: {
             /** Brand Id */
             brand_id: number | null;
             /** Id */
             id: number;
+            /**
+             * Incoming Qty
+             * @default 0
+             */
+            incoming_qty: number;
             /** Name */
             name: string;
             /** Quantity On Hand */

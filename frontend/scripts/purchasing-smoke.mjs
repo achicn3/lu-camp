@@ -89,6 +89,13 @@ try {
   ok("送出採購 → 已下單", badge1.includes("已下單"), badge1);
   await page.screenshot({ path: `${SHOTS}/03-ordered.png`, fullPage: true });
 
+  // 5b) 待到貨（Phase 2）：下單後低庫存卡的該品應顯示在途待到貨量（避免重複採購）
+  await page.waitForSelector(`.pur-lowstock-list li:has-text("${PROD}")`);
+  const gasRow = page.locator(`.pur-lowstock-list li:has-text("${PROD}")`).first();
+  await gasRow.locator(".pur-incoming").waitFor({ timeout: 5000 }).catch(() => {});
+  const gasText = await gasRow.innerText();
+  ok("低庫存卡顯示在途待到貨量", /待到貨\s*6/.test(gasText), gasText.replace(/\n/g, " "));
+
   // 6) 分批收貨：收 4（部分到貨）＋登錄進項發票
   await firstRow().locator('button:has-text("收貨入庫")').click();
   await page.waitForSelector('[role="dialog"][aria-label="確認收貨"]');

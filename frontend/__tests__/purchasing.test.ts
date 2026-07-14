@@ -30,6 +30,7 @@ function product(id: number): CatalogProduct {
     unit_price: "100",
     quantity_on_hand: 5,
     reorder_point: 3,
+    incoming_qty: 0,
   };
 }
 

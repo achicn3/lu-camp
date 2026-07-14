@@ -121,23 +121,33 @@ function LowStockCard({ onReorder }: { onReorder: (product: CatalogProduct) => v
         <p className="empty-state">目前沒有低於補貨點的數量品。</p>
       ) : (
         <ul className="pur-lowstock-list">
-          {rows.map((p) => (
-            <li key={p.id}>
-              <span className="pur-lowstock-name">{p.name}</span>
-              <span className="row-sub">{p.sku}</span>
-              <span className="pur-lowstock-qty">
-                現量 {p.quantity_on_hand} / 補貨點 {p.reorder_point}
-              </span>
-              <button
-                type="button"
-                className="btn-secondary pur-reorder-btn"
-                onClick={() => onReorder(p)}
-                aria-label={`補貨 ${p.name}`}
-              >
-                補貨 →
-              </button>
-            </li>
-          ))}
+          {rows.map((p) => {
+            // 在途已足＝現量＋待到貨已達補貨點：提醒可能無需再採購，避免重複下單。
+            const covered = p.quantity_on_hand + p.incoming_qty >= p.reorder_point;
+            return (
+              <li key={p.id}>
+                <span className="pur-lowstock-name">{p.name}</span>
+                <span className="row-sub">{p.sku}</span>
+                <span className="pur-lowstock-qty">
+                  現量 {p.quantity_on_hand} / 補貨點 {p.reorder_point}
+                  {p.incoming_qty > 0 && (
+                    <span className="pur-incoming">
+                      ・待到貨 {p.incoming_qty}
+                      {covered && <span className="pur-covered">（在途已足）</span>}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="btn-secondary pur-reorder-btn"
+                  onClick={() => onReorder(p)}
+                  aria-label={`補貨 ${p.name}`}
+                >
+                  補貨 →
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -259,6 +269,8 @@ function CreatePurchaseOrder({
       setSupplierKey((k) => k + 1);
       setFormError(null);
       void queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      // 建立採購單會改變在途待到貨量：一併刷新低庫存提醒（待到貨欄）。
+      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
     },
     onError: (err: Error) => setFormError(err.message),
   });

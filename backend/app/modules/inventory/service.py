@@ -663,6 +663,26 @@ class InventoryService:
             store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
         )
 
+    async def list_catalog_with_incoming(
+        self,
+        store_id: int,
+        *,
+        q: str | None = None,
+        low_stock: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[CatalogProduct], dict[int, int]]:
+        """列數量型商品＋各品在途待到貨量（跨模組經 purchasing service 取得，不直碰其資料表）。"""
+        from app.modules.purchasing.service import PurchasingService
+
+        products = await self._repo.list_catalog(
+            store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+        )
+        incoming = await PurchasingService(self._session).incoming_qty_by_catalog(
+            store_id, [p.id for p in products]
+        )
+        return products, incoming
+
     async def list_bulk_lots(
         self,
         store_id: int,

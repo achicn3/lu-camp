@@ -1739,6 +1739,14 @@ body {
   color: var(--warn);
   font-variant-numeric: tabular-nums;
 }
+/* 在途待到貨量：中性色標示已有補貨在路上；「在途已足」以 ok 色提醒可能無需重複採購。 */
+.pur-incoming {
+  color: var(--ink-soft);
+}
+.pur-covered {
+  color: var(--ok, #2f7d4f);
+  margin-left: 4px;
+}
 .pur-reorder-btn {
   flex: 0 0 auto;
   min-height: auto;

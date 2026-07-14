@@ -2,7 +2,7 @@
 
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, select, update
+from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -83,6 +83,30 @@ class PurchasingRepository:
             stmt = stmt.where(PurchaseOrder.status.in_(statuses))
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def incoming_qty_by_catalog(
+        self, store_id: int, catalog_ids: list[int]
+    ) -> dict[int, int]:
+        """各數量品的在途待到貨量：Σ(qty − received_qty)，僅計 ORDERED/PARTIAL 採購單。"""
+        if not catalog_ids:
+            return {}
+        stmt = (
+            select(
+                PurchaseOrderLine.catalog_product_id,
+                func.sum(PurchaseOrderLine.qty - PurchaseOrderLine.received_qty),
+            )
+            .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLine.purchase_order_id)
+            .where(
+                PurchaseOrderLine.store_id == store_id,
+                PurchaseOrderLine.catalog_product_id.in_(catalog_ids),
+                PurchaseOrder.status.in_(
+                    [PurchaseOrderStatus.ORDERED, PurchaseOrderStatus.PARTIAL]
+                ),
+            )
+            .group_by(PurchaseOrderLine.catalog_product_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {int(cid): int(total or 0) for cid, total in rows}
 
     async def get_receipt_by_idempotency_key(
         self, store_id: int, idempotency_key: str

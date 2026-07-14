@@ -49,6 +49,7 @@ const CATALOG = {
   unit_price: "120",
   quantity_on_hand: 1,
   reorder_point: 5,
+  incoming_qty: 0,
 };
 
 const ORDERED_PO = {
@@ -146,6 +147,22 @@ describe("/purchasing", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "＋ 建立採購單" }));
     expect(await screen.findByLabelText("供應商")).toBeTruthy();
+  });
+
+  it("低庫存提醒顯示在途待到貨量（避免重複採購）", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && url.includes("low_stock=true"))
+        return json([{ ...CATALOG, quantity_on_hand: 1, reorder_point: 5, incoming_qty: 8 }]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    renderPage();
+
+    // 現量 1 + 待到貨 8 ≥ 補貨點 5 → 顯示待到貨並標「在途已足」。
+    expect(await screen.findByText(/待到貨 8/)).toBeTruthy();
+    expect(screen.getByText(/在途已足/)).toBeTruthy();
   });
 
   it("草稿詳情顯示建立時間，不把尚未送出的時間稱為下單時間", async () => {
