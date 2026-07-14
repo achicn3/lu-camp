@@ -30,9 +30,17 @@ class PurchasingRepository:
         return result
 
     async def list_suppliers(
-        self, store_id: int, *, q: str | None, limit: int, offset: int
+        self,
+        store_id: int,
+        *,
+        q: str | None,
+        limit: int,
+        offset: int,
+        include_inactive: bool = False,
     ) -> list[Supplier]:
         stmt = select(Supplier).where(Supplier.store_id == store_id)
+        if not include_inactive:
+            stmt = stmt.where(Supplier.is_active.is_(True))
         if q:
             pattern = f"%{q}%"
             stmt = stmt.where(Supplier.name.ilike(pattern) | Supplier.contact.ilike(pattern))

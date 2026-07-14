@@ -21,6 +21,7 @@ from app.modules.purchasing.schemas import (
     PurchaseOrderCreate,
     ReceiveLineIn,
     SupplierCreate,
+    SupplierUpdate,
 )
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import PurchaseOrderStatus
@@ -34,6 +35,7 @@ from app.shared.exceptions import (
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    SupplierNotFound,
 )
 
 
@@ -57,9 +59,73 @@ class PurchasingService:
         return await self._repo.add_supplier(supplier)
 
     async def list_suppliers(
-        self, store_id: int, *, q: str | None = None, limit: int = 50, offset: int = 0
+        self,
+        store_id: int,
+        *,
+        q: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        include_inactive: bool = False,
     ) -> list[Supplier]:
-        return await self._repo.list_suppliers(store_id, q=q, limit=limit, offset=offset)
+        return await self._repo.list_suppliers(
+            store_id, q=q, limit=limit, offset=offset, include_inactive=include_inactive
+        )
+
+    async def get_supplier(self, store_id: int, supplier_id: int) -> Supplier:
+        supplier = await self._repo.get_supplier(store_id, supplier_id)
+        if supplier is None:
+            raise SupplierNotFound(f"找不到供應商 {supplier_id}")
+        return supplier
+
+    async def update_supplier(
+        self, store_id: int, supplier_id: int, payload: "SupplierUpdate", *, actor_user_id: int
+    ) -> Supplier:
+        """編輯供應商名稱/聯絡方式/統編（名稱不可空白；同店重名由唯一約束於 router 轉 409）。"""
+        supplier = await self.get_supplier(store_id, supplier_id)
+        name = payload.name.strip()
+        if not name:
+            raise InvalidPurchaseOrder("供應商名稱不可空白")
+        before = {"name": supplier.name, "contact": supplier.contact, "tax_id": supplier.tax_id}
+        supplier.name = name
+        supplier.contact = payload.contact.strip() if payload.contact else None
+        supplier.tax_id = payload.tax_id.strip() if payload.tax_id else None
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_SUPPLIER",
+            entity_type="supplier",
+            entity_id=str(supplier.id),
+            before=before,
+            after={"name": supplier.name, "contact": supplier.contact, "tax_id": supplier.tax_id},
+        )
+        # UPDATE 讓 server onupdate 欄（updated_at）過期；重抓以免 router 序列化觸發同步 lazy IO。
+        await self._session.refresh(supplier)
+        return supplier
+
+    async def set_supplier_active(
+        self, store_id: int, supplier_id: int, active: bool, *, actor_user_id: int
+    ) -> Supplier:
+        """停用/啟用供應商。停用者不進建單選單，但保留供既有採購單歷史參照。"""
+        supplier = await self.get_supplier(store_id, supplier_id)
+        if supplier.is_active == active:
+            return supplier
+        supplier.is_active = active
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="ACTIVATE_SUPPLIER" if active else "DEACTIVATE_SUPPLIER",
+            entity_type="supplier",
+            entity_id=str(supplier.id),
+            before={"is_active": not active},
+            after={"is_active": active},
+        )
+        # UPDATE 讓 server onupdate 欄（updated_at）過期；重抓以免 router 序列化觸發同步 lazy IO。
+        await self._session.refresh(supplier)
+        return supplier
 
     async def create_purchase_order(
         self,

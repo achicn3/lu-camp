@@ -19,6 +19,14 @@ class SupplierCreate(BaseModel):
     tax_id: str | None = Field(default=None, max_length=20)
 
 
+class SupplierUpdate(BaseModel):
+    """編輯供應商：名稱必填（不可清空），聯絡方式/統編可填可清（null）。"""
+
+    name: str = Field(min_length=1, max_length=150)
+    contact: str | None = Field(default=None, max_length=200)
+    tax_id: str | None = Field(default=None, max_length=20)
+
+
 class SupplierRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -27,6 +35,7 @@ class SupplierRead(BaseModel):
     name: str
     contact: str | None
     tax_id: str | None
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 

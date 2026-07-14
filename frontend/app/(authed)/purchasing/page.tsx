@@ -1052,7 +1052,10 @@ function SupplierManager() {
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [editing, setEditing] = useState<Supplier | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
 
+  // 管理清單含停用者（include_inactive）；建單供應商選單另走頁面頂層查詢（預設只取啟用中）。
   const list = useQuery({
     queryKey: ["suppliers", "list", submittedSearch, page],
     queryFn: async () => {
@@ -1060,6 +1063,7 @@ function SupplierManager() {
         params: {
           query: {
             q: submittedSearch || undefined,
+            include_inactive: true,
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
           },
@@ -1070,6 +1074,22 @@ function SupplierManager() {
     },
   });
   const rows = list.data ?? [];
+
+  const setActive = useMutation({
+    mutationFn: async ({ id, active }: { id: number; active: boolean }) => {
+      const params = { params: { path: { supplier_id: id } } };
+      const { data, error } = active
+        ? await api.POST("/api/v1/suppliers/{supplier_id}/activate", params)
+        : await api.POST("/api/v1/suppliers/{supplier_id}/deactivate", params);
+      if (!data) throw new Error(extractDetail(error) ?? "更新供應商狀態失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setRowError(null);
+      void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+    },
+    onError: (err: Error) => setRowError(err.message),
+  });
 
   const create = useMutation({
     mutationFn: async () => {
@@ -1173,26 +1193,165 @@ function SupplierManager() {
             {submittedSearch ? "查無符合的供應商。" : "尚無供應商。"}
           </p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>名稱</th>
-                <th>聯絡方式</th>
-                <th>統編</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.name}</td>
-                  <td>{s.contact ?? "—"}</td>
-                  <td>{s.tax_id ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            {rowError !== null && (
+              <p role="alert" className="form-error">
+                {rowError}
+              </p>
+            )}
+            <div className="pur-order-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>名稱</th>
+                    <th>聯絡方式</th>
+                    <th>統編</th>
+                    <th>狀態</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((s) => (
+                    <tr key={s.id} className={s.is_active ? "" : "pur-supplier-inactive"}>
+                      <td>{s.name}</td>
+                      <td>{s.contact ?? "—"}</td>
+                      <td>{s.tax_id ?? "—"}</td>
+                      <td>
+                        <span className={`inv-badge inv-tone-${s.is_active ? "ok" : "muted"}`}>
+                          {s.is_active ? "啟用中" : "已停用"}
+                        </span>
+                      </td>
+                      <td className="pur-row-actions">
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          onClick={() => {
+                            setRowError(null);
+                            setEditing(s);
+                          }}
+                        >
+                          編輯
+                        </button>
+                        {s.is_active ? (
+                          <button
+                            type="button"
+                            className="btn-ghost pur-cancel-btn"
+                            disabled={setActive.isPending}
+                            onClick={() => setActive.mutate({ id: s.id, active: false })}
+                          >
+                            停用
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={setActive.isPending}
+                            onClick={() => setActive.mutate({ id: s.id, active: true })}
+                          >
+                            啟用
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+      </div>
+
+      {editing !== null && (
+        <SupplierEditModal
+          supplier={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void queryClient.invalidateQueries({ queryKey: ["suppliers"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── 供應商編輯（名稱/聯絡方式/統編）─────────────────────────────
+function SupplierEditModal({
+  supplier,
+  onClose,
+  onSaved,
+}: {
+  supplier: Supplier;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(supplier.name);
+  const [contact, setContact] = useState(supplier.contact ?? "");
+  const [taxId, setTaxId] = useState(supplier.tax_id ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  const update = useMutation({
+    mutationFn: async () => {
+      const nameErr = supplierNameError(name);
+      if (nameErr !== null) throw new Error(nameErr);
+      const { data, error: err } = await api.PATCH("/api/v1/suppliers/{supplier_id}", {
+        params: { path: { supplier_id: supplier.id } },
+        body: {
+          name: name.trim(),
+          contact: contact.trim() === "" ? null : contact.trim(),
+          tax_id: taxId.trim() === "" ? null : taxId.trim(),
+        },
+      });
+      if (!data) throw new Error(extractDetail(err) ?? "更新供應商失敗");
+      return data;
+    },
+    onSuccess: onSaved,
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="編輯供應商">
+      <div className="card pos-dialog">
+        <h2>編輯供應商</h2>
+        <label className="field">
+          <span>名稱 *</span>
+          <input aria-label="編輯供應商名稱" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>聯絡方式</span>
+          <input
+            aria-label="編輯聯絡方式"
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span>統一編號</span>
+          <input
+            aria-label="編輯統一編號"
+            value={taxId}
+            onChange={(e) => setTaxId(e.target.value)}
+          />
+        </label>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={update.isPending}
+            onClick={() => update.mutate()}
+          >
+            {update.isPending ? "儲存中…" : "儲存"}
+          </button>
+          <button type="button" className="btn-ghost" disabled={update.isPending} onClick={onClose}>
+            取消
+          </button>
+        </div>
       </div>
     </div>
   );

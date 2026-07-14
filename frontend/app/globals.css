@@ -1615,6 +1615,10 @@ body {
 .pur-supplier-list {
   max-width: none;
 }
+/* 已停用供應商列淡化（仍保留供歷史查閱與重新啟用）。 */
+.pur-supplier-inactive td {
+  color: var(--ink-soft);
+}
 .pur-order-wrap {
   overflow-x: auto;
 }

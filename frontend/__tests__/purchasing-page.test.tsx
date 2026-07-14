@@ -36,6 +36,7 @@ const SUPPLIER = {
   name: "山林供應商",
   contact: "0911-222-333",
   tax_id: "12345678",
+  is_active: true,
   created_at: "2026-06-20T00:00:00Z",
   updated_at: "2026-06-20T00:00:00Z",
 };
@@ -523,6 +524,50 @@ describe("/purchasing", () => {
     const parsed = JSON.parse(createdBody as unknown as string);
     expect(parsed.name).toBe("新供應商");
     expect(parsed.tax_id).toBe("87654321");
+  });
+
+  it("供應商可編輯名稱、可停用（列出含停用者）", async () => {
+    loginAs("MANAGER");
+    let patchBody: string | null = null;
+    let deactivated = false;
+    const inactive = { ...SUPPLIER, id: 9, name: "已停用商", is_active: false };
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers/5/deactivate") && init.method === "POST") {
+        deactivated = true;
+        return json({ ...SUPPLIER, is_active: false });
+      }
+      if (url.match(/\/suppliers\/5$/) && init.method === "PATCH") {
+        patchBody = init.body as string;
+        return json({ ...SUPPLIER, name: "改後名" });
+      }
+      // 管理清單帶 include_inactive → 含停用者
+      if (url.includes("/suppliers")) return json([SUPPLIER, inactive]);
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "供應商" }));
+    // 清單含停用者（already 已停用 badge）
+    expect(await screen.findByText("已停用商")).toBeTruthy();
+    expect(screen.getByText("已停用")).toBeTruthy();
+
+    // 編輯山林供應商 → 改名 → PATCH
+    const rows = screen.getAllByRole("row");
+    const active = rows.find((r) => within(r).queryByText("山林供應商"));
+    await user.click(within(active as HTMLElement).getByRole("button", { name: "編輯" }));
+    const nameInput = await screen.findByLabelText("編輯供應商名稱");
+    await user.clear(nameInput);
+    await user.type(nameInput, "改後名");
+    await user.click(screen.getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(patchBody).not.toBeNull());
+    expect(JSON.parse(patchBody as unknown as string).name).toBe("改後名");
+
+    // 停用山林供應商 → deactivate 端點
+    await user.click(within(active as HTMLElement).getByRole("button", { name: "停用" }));
+    await waitFor(() => expect(deactivated).toBe(true));
   });
 
   it("點採購單單號開啟詳情，顯示明細品名與合計", async () => {

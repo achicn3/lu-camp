@@ -216,6 +216,10 @@ class DuplicateSupplier(DomainError):
     """同店供應商名稱重複。"""
 
 
+class SupplierNotFound(DomainError):
+    """指定的供應商不存在（或不屬於本店）。"""
+
+
 class DuplicateCatalogProduct(DomainError):
     """同店 SKU 重複（數量型商品上架）。"""
 

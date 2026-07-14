@@ -19,6 +19,7 @@ from app.modules.purchasing.schemas import (
     ReceivePurchaseOrderResult,
     SupplierCreate,
     SupplierRead,
+    SupplierUpdate,
 )
 from app.modules.purchasing.service import PurchasingService
 from app.shared.enums import PurchaseOrderStatus
@@ -33,6 +34,7 @@ from app.shared.exceptions import (
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    SupplierNotFound,
 )
 from app.shared.http import ERROR_CODE_HEADER
 
@@ -45,6 +47,7 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidPurchaseOrder: status.HTTP_422_UNPROCESSABLE_CONTENT,
     PurchaseOrderNotFound: status.HTTP_404_NOT_FOUND,
+    SupplierNotFound: status.HTTP_404_NOT_FOUND,
     PurchaseOrderNotReceivable: status.HTTP_409_CONFLICT,
     PurchaseOrderNotSubmittable: status.HTTP_409_CONFLICT,
     PurchaseOrderNotCancellable: status.HTTP_409_CONFLICT,
@@ -116,11 +119,91 @@ async def list_suppliers(
     q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    include_inactive: Annotated[bool, Query()] = False,
 ) -> list[SupplierRead]:
+    """預設只列啟用中供應商（建單選單用）；include_inactive=true 列全部（供應商管理用）。"""
     suppliers = await PurchasingService(session).list_suppliers(
-        user.store_id, q=q, limit=limit, offset=offset
+        user.store_id, q=q, limit=limit, offset=offset, include_inactive=include_inactive
     )
     return [SupplierRead.model_validate(supplier) for supplier in suppliers]
+
+
+@router.get(
+    "/suppliers/{supplier_id}", response_model=SupplierRead, operation_id="getSupplier"
+)
+async def get_supplier(
+    supplier_id: int, session: SessionDep, user: CurrentUserDep
+) -> SupplierRead:
+    svc = PurchasingService(session)
+    try:
+        supplier = await svc.get_supplier(user.store_id, supplier_id)
+    except DomainError as exc:
+        raise _map_domain_error(exc) from exc
+    return SupplierRead.model_validate(supplier)
+
+
+@router.patch(
+    "/suppliers/{supplier_id}", response_model=SupplierRead, operation_id="updateSupplier"
+)
+async def update_supplier(
+    supplier_id: int, payload: SupplierUpdate, session: SessionDep, user: CurrentUserDep
+) -> SupplierRead:
+    """編輯供應商名稱/聯絡方式/統編。"""
+    svc = PurchasingService(session)
+    try:
+        supplier = await svc.update_supplier(
+            user.store_id, supplier_id, payload, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="供應商名稱重複") from exc
+    await session.commit()
+    return SupplierRead.model_validate(supplier)
+
+
+@router.post(
+    "/suppliers/{supplier_id}/deactivate",
+    response_model=SupplierRead,
+    operation_id="deactivateSupplier",
+)
+async def deactivate_supplier(
+    supplier_id: int, session: SessionDep, user: CurrentUserDep
+) -> SupplierRead:
+    """停用供應商（不進建單選單，保留歷史）。"""
+    svc = PurchasingService(session)
+    try:
+        supplier = await svc.set_supplier_active(
+            user.store_id, supplier_id, False, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return SupplierRead.model_validate(supplier)
+
+
+@router.post(
+    "/suppliers/{supplier_id}/activate",
+    response_model=SupplierRead,
+    operation_id="activateSupplier",
+)
+async def activate_supplier(
+    supplier_id: int, session: SessionDep, user: CurrentUserDep
+) -> SupplierRead:
+    """重新啟用供應商。"""
+    svc = PurchasingService(session)
+    try:
+        supplier = await svc.set_supplier_active(
+            user.store_id, supplier_id, True, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise _map_domain_error(exc) from exc
+    await session.commit()
+    return SupplierRead.model_validate(supplier)
 
 
 @router.post(

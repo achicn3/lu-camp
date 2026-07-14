@@ -556,7 +556,76 @@ async def test_list_suppliers_returns_created(
     supplier_id = await _create_supplier(client, token, name="阿里山補給")
     resp = await client.get("/api/v1/suppliers", headers=_auth(token))
     assert resp.status_code == 200
-    assert any(s["id"] == supplier_id for s in resp.json())
+    created = next(s for s in resp.json() if s["id"] == supplier_id)
+    assert created["is_active"] is True  # 新建預設啟用
+
+
+async def test_get_and_update_supplier(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """查看單一供應商；編輯名稱/聯絡/統編後反映；不存在 → 404。"""
+    token, _store_id, _ = await _seed_store(db_session)
+    supplier_id = await _create_supplier(client, token, name="舊名稱")
+
+    got = await client.get(f"/api/v1/suppliers/{supplier_id}", headers=_auth(token))
+    assert got.status_code == 200 and got.json()["name"] == "舊名稱"
+
+    patched = await client.patch(
+        f"/api/v1/suppliers/{supplier_id}",
+        json={"name": "新名稱", "contact": "0912-000-000", "tax_id": None},
+        headers=_auth(token),
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "新名稱"
+    assert patched.json()["contact"] == "0912-000-000"
+    assert patched.json()["tax_id"] is None
+
+    missing = await client.get("/api/v1/suppliers/999999", headers=_auth(token))
+    assert missing.status_code == 404
+
+
+async def test_update_supplier_duplicate_name_returns_409(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """改名撞同店既有供應商名 → 409。"""
+    token, _store_id, _ = await _seed_store(db_session)
+    await _create_supplier(client, token, name="甲供應商")
+    b_id = await _create_supplier(client, token, name="乙供應商")
+    resp = await client.patch(
+        f"/api/v1/suppliers/{b_id}", json={"name": "甲供應商"}, headers=_auth(token)
+    )
+    assert resp.status_code == 409, resp.text
+
+
+async def test_deactivate_supplier_hides_from_default_list_but_keeps_record(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停用供應商：預設清單（建單選單）隱藏，include_inactive 仍可見、可查、可重新啟用。"""
+    token, _store_id, _ = await _seed_store(db_session)
+    supplier_id = await _create_supplier(client, token, name="待停用商")
+
+    deact = await client.post(
+        f"/api/v1/suppliers/{supplier_id}/deactivate", headers=_auth(token)
+    )
+    assert deact.status_code == 200 and deact.json()["is_active"] is False
+
+    # 預設清單（建單選單）不含停用者
+    default_list = await client.get("/api/v1/suppliers", headers=_auth(token))
+    assert all(s["id"] != supplier_id for s in default_list.json())
+    # include_inactive 仍列出（供應商管理）
+    all_list = await client.get(
+        "/api/v1/suppliers", params={"include_inactive": "true"}, headers=_auth(token)
+    )
+    assert any(s["id"] == supplier_id for s in all_list.json())
+    # 單筆查詢仍可取得（保留歷史）
+    got = await client.get(f"/api/v1/suppliers/{supplier_id}", headers=_auth(token))
+    assert got.status_code == 200
+
+    # 重新啟用 → 回到預設清單
+    react = await client.post(f"/api/v1/suppliers/{supplier_id}/activate", headers=_auth(token))
+    assert react.status_code == 200 and react.json()["is_active"] is True
+    back = await client.get("/api/v1/suppliers", headers=_auth(token))
+    assert any(s["id"] == supplier_id for s in back.json())
 
 
 async def test_create_po_duplicate_product_returns_422(

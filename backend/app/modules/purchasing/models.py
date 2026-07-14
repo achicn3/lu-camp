@@ -32,7 +32,10 @@ def _enum_col(enum_type: type) -> Enum:
 
 
 class Supplier(Base, TimestampMixin):
-    """店內供應商主檔。"""
+    """店內供應商主檔。
+
+    is_active＝啟用中；停用（False）者不出現在建單供應商選單，但保留供既有採購單歷史參照。
+    """
 
     __tablename__ = "suppliers"
     __table_args__ = (UniqueConstraint("store_id", "name", name="uq_suppliers_store_name"),)
@@ -42,6 +45,7 @@ class Supplier(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     contact: Mapped[str | None] = mapped_column(String(200))
     tax_id: Mapped[str | None] = mapped_column(String(20))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
 
 
 class PurchaseOrder(Base, TimestampMixin):

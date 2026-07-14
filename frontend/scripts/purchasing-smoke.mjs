@@ -148,6 +148,25 @@ try {
   await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}") .inv-badge:has-text("已取消")`);
   ok("草稿取消 → 已取消", true);
   await page.screenshot({ path: `${SHOTS}/08-cancelled.png`, fullPage: true });
+
+  // 10) 供應商管理（Phase 3）：編輯 → 停用 → 清單顯示已停用 → 重新啟用
+  await page.click('.settle-tabs button:has-text("供應商")');
+  const supRow = page.locator(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`).first();
+  await supRow.waitFor();
+  await supRow.locator('button:has-text("編輯")').click();
+  await page.waitForSelector('[role="dialog"][aria-label="編輯供應商"]');
+  await page.fill('input[aria-label="編輯聯絡方式"]', "0900-123-456");
+  await page.click('[role="dialog"] button:has-text("儲存")');
+  await page.waitForSelector('[role="dialog"]', { state: "detached" });
+  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("0900-123-456")`);
+  ok("供應商編輯（聯絡方式）成功", true);
+  await supRow.locator('button:has-text("停用")').click();
+  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}") .inv-badge:has-text("已停用")`);
+  ok("供應商停用 → 顯示已停用", true);
+  await supRow.locator('button:has-text("啟用")').click();
+  await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}") .inv-badge:has-text("啟用中")`);
+  ok("供應商重新啟用 → 顯示啟用中", true);
+  await page.screenshot({ path: `${SHOTS}/09-supplier-manage.png`, fullPage: true });
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {
