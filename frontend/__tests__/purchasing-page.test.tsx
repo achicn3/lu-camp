@@ -274,6 +274,36 @@ describe("/purchasing", () => {
     expect(parsed.submit).toBe(true);
   });
 
+  it("建單供應商 combobox 以伺服器端搜尋（帶 q、只搜啟用中）", async () => {
+    loginAs("CLERK");
+    const supplierUrls: string[] = [];
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) {
+        supplierUrls.push(url);
+        return json([SUPPLIER]);
+      }
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    const supplierInput = screen.getByLabelText("供應商");
+    await user.click(supplierInput);
+    await user.type(supplierInput, "山林");
+    await user.click(await screen.findByRole("option", { name: "山林供應商" }));
+    // combobox 查詢伺服器端帶 q，且不帶 include_inactive=true（只搜啟用中；不受前端預載上限影響）。
+    await waitFor(() =>
+      expect(
+        supplierUrls.some(
+          (u) => decodeURIComponent(u).includes("q=山林") && !u.includes("include_inactive=true"),
+        ),
+      ).toBe(true),
+    );
+  });
+
   it("存草稿以 submit=false 建立採購單", async () => {
     loginAs("CLERK");
     let createdBody: string | null = null;
@@ -580,7 +610,11 @@ describe("/purchasing", () => {
     await user.type(nameInput, "改後名");
     await user.click(screen.getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(patchBody).not.toBeNull());
-    expect(JSON.parse(patchBody as unknown as string).name).toBe("改後名");
+    // 稀疏 PATCH：只改名 → body 只含 name，未動的 contact/tax_id 不重送（不覆蓋並發修改）。
+    const parsed = JSON.parse(patchBody as unknown as string);
+    expect(parsed.name).toBe("改後名");
+    expect("contact" in parsed).toBe(false);
+    expect("tax_id" in parsed).toBe(false);
 
     // 停用山林供應商 → deactivate 端點
     await user.click(within(active as HTMLElement).getByRole("button", { name: "停用" }));

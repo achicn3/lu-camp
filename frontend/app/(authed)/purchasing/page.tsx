@@ -209,11 +209,9 @@ function DraftLineRow({
 // ── 建立採購單 ───────────────────────────────────────────────
 // 明細草稿（lines）由外層工作台持有，好讓低庫存「補貨」也能帶入同一張草稿。
 function CreatePurchaseOrder({
-  suppliers,
   lines,
   setLines,
 }: {
-  suppliers: Supplier[];
   lines: DraftLine[];
   setLines: Dispatch<SetStateAction<DraftLine[]>>;
 }) {
@@ -224,14 +222,13 @@ function CreatePurchaseOrder({
   // 送出成功後遞增 → 重掛供應商 combobox，連同內部文字一併清空（避免顯示舊值卻無 id）。
   const [supplierKey, setSupplierKey] = useState(0);
 
-  function searchSuppliers(q: string): Promise<ComboOption[]> {
-    const needle = q.trim().toLowerCase();
-    return Promise.resolve(
-      suppliers
-        // 建單選單只列啟用中供應商（停用者保留於清單供歷史對照，但不可用於新單）。
-        .filter((s) => s.is_active && (needle === "" || s.name.toLowerCase().includes(needle)))
-        .map((s) => ({ id: s.id, name: s.name })),
-    );
+  // 伺服器端搜尋啟用中供應商（預設 include_inactive=false）：不受前端預載上限影響，
+  // 停用者累積也不會把啟用供應商擠出選單（Codex 對抗審 medium）。
+  async function searchSuppliers(q: string): Promise<ComboOption[]> {
+    const { data } = await api.GET("/api/v1/suppliers", {
+      params: { query: { q: q.trim() || undefined, limit: 20, offset: 0 } },
+    });
+    return (data ?? []).map((s) => ({ id: s.id, name: s.name }));
   }
   function createSupplier(name: string): Promise<ComboOption> {
     return api.POST("/api/v1/suppliers", { body: { name, contact: null, tax_id: null } }).then(
@@ -1335,13 +1332,18 @@ function SupplierEditModal({
     mutationFn: async () => {
       const nameErr = supplierNameError(name);
       if (nameErr !== null) throw new Error(nameErr);
+      // 只送「有更動」的欄位（稀疏 PATCH）：未動的欄位不重送舊快照，避免蓋掉他人並發修改
+      // （Codex 對抗審 medium）。以正規化值比對原值判斷是否更動。
+      const nextContact = contact.trim() === "" ? null : contact.trim();
+      const nextTaxId = taxId.trim() === "" ? null : taxId.trim();
+      const body: components["schemas"]["SupplierUpdate"] = {};
+      if (name.trim() !== supplier.name) body.name = name.trim();
+      if (nextContact !== (supplier.contact ?? null)) body.contact = nextContact;
+      if (nextTaxId !== (supplier.tax_id ?? null)) body.tax_id = nextTaxId;
+      if (Object.keys(body).length === 0) return supplier; // 無更動：不打 API
       const { data, error: err } = await api.PATCH("/api/v1/suppliers/{supplier_id}", {
         params: { path: { supplier_id: supplier.id } },
-        body: {
-          name: name.trim(),
-          contact: contact.trim() === "" ? null : contact.trim(),
-          tax_id: taxId.trim() === "" ? null : taxId.trim(),
-        },
+        body,
       });
       if (!data) throw new Error(extractDetail(err) ?? "更新供應商失敗");
       return data;
@@ -1435,9 +1437,7 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
           >
             {createOpen ? "收合建立採購單" : "＋ 建立採購單"}
           </button>
-          {createOpen && (
-            <CreatePurchaseOrder suppliers={suppliers} lines={lines} setLines={setLines} />
-          )}
+          {createOpen && <CreatePurchaseOrder lines={lines} setLines={setLines} />}
         </div>
         <PurchaseOrderList suppliers={suppliers} />
       </div>
