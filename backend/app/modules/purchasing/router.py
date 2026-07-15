@@ -34,6 +34,7 @@ from app.shared.exceptions import (
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    SupplierInactive,
     SupplierNotFound,
 )
 from app.shared.http import ERROR_CODE_HEADER
@@ -46,6 +47,7 @@ CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
 _STATUS_BY_EXC: dict[type[DomainError], int] = {
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidPurchaseOrder: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    SupplierInactive: status.HTTP_422_UNPROCESSABLE_CONTENT,
     PurchaseOrderNotFound: status.HTTP_404_NOT_FOUND,
     SupplierNotFound: status.HTTP_404_NOT_FOUND,
     PurchaseOrderNotReceivable: status.HTTP_409_CONFLICT,

@@ -7644,7 +7644,7 @@
         "type": "object"
       },
       "SupplierUpdate": {
-        "description": "編輯供應商：名稱必填（不可清空），聯絡方式/統編可填可清（null）。",
+        "description": "編輯供應商（稀疏 PATCH）：只更新有帶的欄位。\n\n未帶的欄位維持原值（省略 ≠ 清空，Codex 對抗審 medium）；帶 null 才是明確清空聯絡方式/統編。\n名稱有帶時不可為空白。",
         "properties": {
           "contact": {
             "anyOf": [
@@ -7659,10 +7659,17 @@
             "title": "Contact"
           },
           "name": {
-            "maxLength": 150,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           },
           "tax_id": {
             "anyOf": [
@@ -7677,9 +7684,6 @@
             "title": "Tax Id"
           }
         },
-        "required": [
-          "name"
-        ],
         "title": "SupplierUpdate",
         "type": "object"
       },

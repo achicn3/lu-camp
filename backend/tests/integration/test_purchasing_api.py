@@ -597,6 +597,62 @@ async def test_update_supplier_duplicate_name_returns_409(
     assert resp.status_code == 409, resp.text
 
 
+async def test_cannot_create_or_submit_order_with_inactive_supplier(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停用供應商為可執行的業務控制（後端強制）：不可用停用商建單、草稿供應商停用後不可送出。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token, name="停用商")
+
+    # 先建一張草稿（供應商此時仍啟用）
+    draft = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, submit=False
+    )
+    # 停用供應商
+    await client.post(f"/api/v1/suppliers/{supplier_id}/deactivate", headers=_auth(token))
+
+    # 直接以停用商建單（含 submit）→ 422
+    resp = await client.post(
+        "/api/v1/purchase-orders",
+        json={
+            "supplier_id": supplier_id,
+            "lines": [{"catalog_product_id": catalog_id, "qty": 3, "unit_cost": "100"}],
+            "submit": True,
+        },
+        headers=_auth(token),
+    )
+    assert resp.status_code == 422, resp.text
+
+    # 草稿供應商已停用 → 送出被擋 422
+    submitted = await client.post(
+        f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token)
+    )
+    assert submitted.status_code == 422, submitted.text
+
+
+async def test_patch_supplier_only_name_keeps_contact_and_tax(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """稀疏 PATCH：只帶 name 不清空 contact/tax；帶 null 才明確清空。"""
+    token, _store_id, _ = await _seed_store(db_session)
+    supplier_id = await _create_supplier(client, token, name="原商")  # 含 contact/tax_id
+
+    only_name = await client.patch(
+        f"/api/v1/suppliers/{supplier_id}", json={"name": "新商"}, headers=_auth(token)
+    )
+    assert only_name.status_code == 200, only_name.text
+    assert only_name.json()["name"] == "新商"
+    assert only_name.json()["contact"] == "sales@example.test"  # 未帶 → 保留
+    assert only_name.json()["tax_id"] == "12345678"
+
+    cleared = await client.patch(
+        f"/api/v1/suppliers/{supplier_id}", json={"contact": None}, headers=_auth(token)
+    )
+    assert cleared.json()["contact"] is None  # 明確帶 null → 清空
+    assert cleared.json()["tax_id"] == "12345678"  # 未帶 → 仍保留
+
+
 async def test_deactivate_supplier_hides_from_default_list_but_keeps_record(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

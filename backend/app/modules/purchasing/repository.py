@@ -29,6 +29,18 @@ class PurchasingRepository:
         result: Supplier | None = await self._session.scalar(stmt)
         return result
 
+    async def get_supplier_for_update(
+        self, store_id: int, supplier_id: int
+    ) -> Supplier | None:
+        """鎖定供應商列（FOR UPDATE）：建單/送出檢查啟用狀態時序列化，擋下並發停用競態。"""
+        stmt = (
+            select(Supplier)
+            .where(Supplier.id == supplier_id, Supplier.store_id == store_id)
+            .with_for_update()
+        )
+        result: Supplier | None = await self._session.scalar(stmt)
+        return result
+
     async def list_suppliers(
         self,
         store_id: int,

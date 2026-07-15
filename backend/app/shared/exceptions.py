@@ -220,6 +220,10 @@ class SupplierNotFound(DomainError):
     """指定的供應商不存在（或不屬於本店）。"""
 
 
+class SupplierInactive(DomainError):
+    """供應商已停用，不可用於新採購單。"""
+
+
 class DuplicateCatalogProduct(DomainError):
     """同店 SKU 重複（數量型商品上架）。"""
 

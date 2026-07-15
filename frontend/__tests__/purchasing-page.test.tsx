@@ -526,6 +526,23 @@ describe("/purchasing", () => {
     expect(parsed.tax_id).toBe("87654321");
   });
 
+  it("停用供應商的既有採購單仍顯示供應商名（保留歷史）", async () => {
+    loginAs("CLERK");
+    const inactive = { ...SUPPLIER, id: 9, name: "已停用商", is_active: false };
+    const po = { ...ORDERED_PO, id: 8, supplier_id: 9 };
+    stubFetch((url) => {
+      // 頂層供應商查詢帶 include_inactive → 對照表含停用者，歷史單顯示名稱而非 #id。
+      if (url.includes("/suppliers")) return json([SUPPLIER, inactive]);
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([po]);
+      return null;
+    });
+    renderPage();
+
+    expect(await screen.findByText("已停用商")).toBeTruthy();
+    expect(screen.queryByText("#9")).toBeNull(); // 不應掉成 fallback 數字 id
+  });
+
   it("供應商可編輯名稱、可停用（列出含停用者）", async () => {
     loginAs("MANAGER");
     let patchBody: string | null = null;

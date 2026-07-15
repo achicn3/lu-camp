@@ -20,9 +20,13 @@ class SupplierCreate(BaseModel):
 
 
 class SupplierUpdate(BaseModel):
-    """編輯供應商：名稱必填（不可清空），聯絡方式/統編可填可清（null）。"""
+    """編輯供應商（稀疏 PATCH）：只更新有帶的欄位。
 
-    name: str = Field(min_length=1, max_length=150)
+    未帶的欄位維持原值（省略 ≠ 清空，Codex 對抗審 medium）；帶 null 才是明確清空聯絡方式/統編。
+    名稱有帶時不可為空白。
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=150)
     contact: str | None = Field(default=None, max_length=200)
     tax_id: str | None = Field(default=None, max_length=20)
 

@@ -35,6 +35,7 @@ from app.shared.exceptions import (
     PurchaseOrderNotReceivable,
     PurchaseOrderNotReceived,
     PurchaseOrderNotSubmittable,
+    SupplierInactive,
     SupplierNotFound,
 )
 
@@ -80,15 +81,22 @@ class PurchasingService:
     async def update_supplier(
         self, store_id: int, supplier_id: int, payload: "SupplierUpdate", *, actor_user_id: int
     ) -> Supplier:
-        """編輯供應商名稱/聯絡方式/統編（名稱不可空白；同店重名由唯一約束於 router 轉 409）。"""
+        """稀疏 PATCH：只更新有帶的欄位（省略維持原值，避免只改名卻清空聯絡/統編）。
+        名稱有帶時不可空白；同店重名由唯一約束於 router 轉 409。"""
         supplier = await self.get_supplier(store_id, supplier_id)
-        name = payload.name.strip()
-        if not name:
-            raise InvalidPurchaseOrder("供應商名稱不可空白")
+        fields = payload.model_fields_set
+        if not fields:
+            return supplier
         before = {"name": supplier.name, "contact": supplier.contact, "tax_id": supplier.tax_id}
-        supplier.name = name
-        supplier.contact = payload.contact.strip() if payload.contact else None
-        supplier.tax_id = payload.tax_id.strip() if payload.tax_id else None
+        if "name" in fields:
+            name = (payload.name or "").strip()
+            if not name:
+                raise InvalidPurchaseOrder("供應商名稱不可空白")
+            supplier.name = name
+        if "contact" in fields:
+            supplier.contact = payload.contact.strip() if payload.contact else None
+        if "tax_id" in fields:
+            supplier.tax_id = payload.tax_id.strip() if payload.tax_id else None
         await self._session.flush()
         await write_audit_log(
             self._session,
@@ -108,7 +116,10 @@ class PurchasingService:
         self, store_id: int, supplier_id: int, active: bool, *, actor_user_id: int
     ) -> Supplier:
         """停用/啟用供應商。停用者不進建單選單，但保留供既有採購單歷史參照。"""
-        supplier = await self.get_supplier(store_id, supplier_id)
+        # 鎖列：與建單/送出的啟用檢查序列化，避免「停用 vs 建單」競態繞過控制。
+        supplier = await self._repo.get_supplier_for_update(store_id, supplier_id)
+        if supplier is None:
+            raise SupplierNotFound(f"找不到供應商 {supplier_id}")
         if supplier.is_active == active:
             return supplier
         supplier.is_active = active
@@ -134,8 +145,13 @@ class PurchasingService:
         *,
         actor_user_id: int,
     ) -> PurchaseOrder:
-        if await self._repo.get_supplier(store_id, payload.supplier_id) is None:
+        # 鎖定供應商列：擋下「並發停用 vs 建單」競態，並禁止用停用中的供應商建單（後端強制，
+        # 不僅靠前端選單隱藏——停用才是可執行的業務控制，Codex 對抗審 high）。
+        supplier = await self._repo.get_supplier_for_update(store_id, payload.supplier_id)
+        if supplier is None:
             raise CrossStoreReference(f"供應商 {payload.supplier_id} 不屬於 store {store_id}")
+        if not supplier.is_active:
+            raise SupplierInactive(f"供應商 {payload.supplier_id} 已停用，不可用於新採購單")
         seen_products: set[int] = set()
         for line in payload.lines:
             if line.catalog_product_id in seen_products:
@@ -179,6 +195,12 @@ class PurchasingService:
         if purchase_order.status != PurchaseOrderStatus.DRAFT:
             raise PurchaseOrderNotSubmittable(
                 f"採購單 {purchase_order_id} 狀態為 {purchase_order.status.value}，僅草稿可送出"
+            )
+        # 草稿建立後供應商可能已被停用：送出前重新驗證（鎖列序列化並發停用）。
+        supplier = await self._repo.get_supplier_for_update(store_id, purchase_order.supplier_id)
+        if supplier is None or not supplier.is_active:
+            raise SupplierInactive(
+                f"採購單 {purchase_order_id} 的供應商已停用，不可送出；請改供應商或重新啟用"
             )
         purchase_order.status = PurchaseOrderStatus.ORDERED
         # 正式下單時間/下單人以「送出」當下為準（草稿建立者/時間不代表下單）。

@@ -228,7 +228,8 @@ function CreatePurchaseOrder({
     const needle = q.trim().toLowerCase();
     return Promise.resolve(
       suppliers
-        .filter((s) => needle === "" || s.name.toLowerCase().includes(needle))
+        // 建單選單只列啟用中供應商（停用者保留於清單供歷史對照，但不可用於新單）。
+        .filter((s) => s.is_active && (needle === "" || s.name.toLowerCase().includes(needle)))
         .map((s) => ({ id: s.id, name: s.name })),
     );
   }
@@ -1447,11 +1448,13 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
 export default function PurchasingPage() {
   const [tab, setTab] = useState<Tab>("orders");
 
+  // 含停用者（include_inactive）：採購單清單以此對照供應商名，停用後歷史單仍顯示名稱、不掉成 #id。
+  // 建單供應商選單另在 CreatePurchaseOrder 以 is_active 過濾（停用者不可用於新單）。
   const suppliers = useQuery({
     queryKey: ["suppliers"],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/suppliers", {
-        params: { query: { limit: 200, offset: 0 } },
+        params: { query: { include_inactive: true, limit: 200, offset: 0 } },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取供應商失敗");
       return data;

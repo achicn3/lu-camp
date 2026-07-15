@@ -4707,13 +4707,16 @@ export interface components {
         };
         /**
          * SupplierUpdate
-         * @description 編輯供應商：名稱必填（不可清空），聯絡方式/統編可填可清（null）。
+         * @description 編輯供應商（稀疏 PATCH）：只更新有帶的欄位。
+         *
+         *     未帶的欄位維持原值（省略 ≠ 清空，Codex 對抗審 medium）；帶 null 才是明確清空聯絡方式/統編。
+         *     名稱有帶時不可為空白。
          */
         SupplierUpdate: {
             /** Contact */
             contact?: string | null;
             /** Name */
-            name: string;
+            name?: string | null;
             /** Tax Id */
             tax_id?: string | null;
         };
