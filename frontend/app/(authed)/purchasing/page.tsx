@@ -40,6 +40,7 @@ import {
   savePendingReceive,
 } from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type Supplier = components["schemas"]["SupplierRead"];
@@ -412,6 +413,7 @@ function PurchaseOrderDetailModal({
   cancelPending: boolean;
 }) {
   const badge = poStatusBadge(po.status);
+  useBodyScrollLock(true);
   return (
     <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="採購單詳情">
       <div className="card pos-dialog pur-detail">
@@ -608,6 +610,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [rowError, setRowError] = useState<string | null>(null);
   // 復原提示（非錯誤）：偵測到上一次未確認收貨、已和解時告知店員確認剩餘數量。
   const [receiveNotice, setReceiveNotice] = useState<string | null>(null);
+  useBodyScrollLock(receiving !== null); // 收貨對話框開啟時鎖背景捲動
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
@@ -628,6 +631,9 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   const [statusKey, setStatusKey] = useState("OUTSTANDING");
   const [page, setPage] = useState(0);
   const [detailPo, setDetailPo] = useState<PurchaseOrder | null>(null);
+  // 單號/供應商搜尋（提交式）：輸入框與已提交值分開，避免每次按鍵都打 API。
+  const [search, setSearch] = useState("");
+  const [submittedSearch, setSubmittedSearch] = useState("");
   const statuses = useMemo(
     () => PO_STATUS_FILTERS.find((f) => f.key === statusKey)?.statuses ?? [],
     [statusKey],
@@ -654,13 +660,14 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
   }, [catalog.data]);
 
   const orders = useQuery({
-    queryKey: ["purchase-orders", statusKey, page],
+    queryKey: ["purchase-orders", statusKey, submittedSearch, page],
     queryFn: async () => {
-      const query: { limit: number; offset: number; status?: PoStatus[] } = {
+      const query: { limit: number; offset: number; status?: PoStatus[]; q?: string } = {
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       };
       if (statuses.length > 0) query.status = statuses;
+      if (submittedSearch) query.q = submittedSearch;
       const { data, error } = await api.GET("/api/v1/purchase-orders", {
         params: { query },
       });
@@ -811,6 +818,37 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           </button>
         ))}
       </div>
+      <form
+        className="member-allsearch"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setPage(0);
+          setSubmittedSearch(search.trim());
+        }}
+      >
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="以單號或供應商搜尋"
+          aria-label="採購單搜尋"
+        />
+        <button type="submit" className="btn-secondary">
+          搜尋
+        </button>
+        {submittedSearch && (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setSearch("");
+              setSubmittedSearch("");
+              setPage(0);
+            }}
+          >
+            清除（{submittedSearch}）
+          </button>
+        )}
+      </form>
       {rowError !== null && (
         <p role="alert" className="form-error">
           {rowError}
@@ -1290,6 +1328,7 @@ function SupplierEditModal({
   const [contact, setContact] = useState(supplier.contact ?? "");
   const [taxId, setTaxId] = useState(supplier.tax_id ?? "");
   const [error, setError] = useState<string | null>(null);
+  useBodyScrollLock(true);
 
   const update = useMutation({
     mutationFn: async () => {
@@ -1380,23 +1419,28 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
   }
 
   return (
-    <>
-      <LowStockCard onReorder={reorder} />
-      <div ref={createRef} className="pur-create-panel">
-        <button
-          type="button"
-          className="btn-primary pur-create-toggle"
-          aria-expanded={createOpen}
-          onClick={() => setCreateOpen((o) => !o)}
-        >
-          {createOpen ? "收合建立採購單" : "＋ 建立採購單"}
-        </button>
-        {createOpen && (
-          <CreatePurchaseOrder suppliers={suppliers} lines={lines} setLines={setLines} />
-        )}
+    <div className="pur-workbench">
+      {/* 右側欄（桌面）：低庫存提醒常駐、可 sticky；窄螢幕回到單欄置頂。 */}
+      <aside className="pur-workbench-rail">
+        <LowStockCard onReorder={reorder} />
+      </aside>
+      <div className="pur-workbench-main">
+        <div ref={createRef} className="pur-create-panel">
+          <button
+            type="button"
+            className="btn-primary pur-create-toggle"
+            aria-expanded={createOpen}
+            onClick={() => setCreateOpen((o) => !o)}
+          >
+            {createOpen ? "收合建立採購單" : "＋ 建立採購單"}
+          </button>
+          {createOpen && (
+            <CreatePurchaseOrder suppliers={suppliers} lines={lines} setLines={setLines} />
+          )}
+        </div>
+        <PurchaseOrderList suppliers={suppliers} />
       </div>
-      <PurchaseOrderList suppliers={suppliers} />
-    </>
+    </div>
   );
 }
 

@@ -1592,6 +1592,41 @@ body {
   flex-direction: column;
   gap: var(--sp-4);
 }
+/* 採購單工作台桌面雙欄：主欄（建單＋清單）＋右側低庫存欄（sticky）；窄螢幕回單欄、低庫存置頂。
+   aside 於 DOM 在前，桌面以 grid 置右欄；min-width:0 讓主欄表格可縮不撐破。 */
+.pur-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.pur-workbench-main {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.pur-workbench-rail {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: var(--sp-4);
+}
+@media (max-width: 900px) {
+  .pur-workbench {
+    grid-template-columns: 1fr;
+  }
+  .pur-workbench-main,
+  .pur-workbench-rail {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .pur-workbench-rail {
+    position: static;
+  }
+}
 /* 建立採購單面板：以「＋ 建立採購單」按鈕展開，收合時只佔一顆按鈕（清單為主畫面）。 */
 .pur-create-panel {
   display: flex;

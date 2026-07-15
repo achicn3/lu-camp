@@ -278,12 +278,14 @@ async def list_purchase_orders(
     session: SessionDep,
     user: CurrentUserDep,
     po_status: Annotated[list[PurchaseOrderStatus] | None, Query(alias="status")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PurchaseOrderRead]:
-    """狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。"""
+    """狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。
+    q 以單號（純數字）或供應商名搜尋。"""
     purchase_orders = await PurchasingService(session).list_purchase_orders(
-        user.store_id, statuses=po_status, limit=limit, offset=offset
+        user.store_id, statuses=po_status, q=q, limit=limit, offset=offset
     )
     return [PurchaseOrderRead.from_model(po) for po in purchase_orders]
 

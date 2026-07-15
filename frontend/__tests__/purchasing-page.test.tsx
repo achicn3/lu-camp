@@ -614,4 +614,27 @@ describe("/purchasing", () => {
       ),
     );
   });
+
+  it("採購單以單號/供應商搜尋帶上 q 參數", async () => {
+    loginAs("CLERK");
+    const poUrls: string[] = [];
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) {
+        poUrls.push(url);
+        return json([ORDERED_PO]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText("已下單");
+    await user.type(screen.getByLabelText("採購單搜尋"), "山林");
+    await user.click(screen.getByRole("button", { name: "搜尋" }));
+    await waitFor(() =>
+      expect(poUrls.some((u) => decodeURIComponent(u).includes("q=山林"))).toBe(true),
+    );
+  });
 });

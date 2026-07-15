@@ -226,11 +226,12 @@ class PurchasingService:
         store_id: int,
         *,
         statuses: list[PurchaseOrderStatus] | None = None,
+        q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[PurchaseOrder]:
         return await self._repo.list_purchase_orders(
-            store_id, statuses=statuses, limit=limit, offset=offset
+            store_id, statuses=statuses, q=q, limit=limit, offset=offset
         )
 
     async def incoming_qty_by_catalog(

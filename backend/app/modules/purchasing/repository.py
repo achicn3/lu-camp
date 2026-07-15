@@ -2,7 +2,7 @@
 
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -76,6 +76,7 @@ class PurchasingRepository:
         store_id: int,
         *,
         statuses: list[PurchaseOrderStatus] | None = None,
+        q: str | None = None,
         limit: int,
         offset: int,
     ) -> list[PurchaseOrder]:
@@ -89,6 +90,15 @@ class PurchasingRepository:
         )
         if statuses:
             stmt = stmt.where(PurchaseOrder.status.in_(statuses))
+        if q:
+            needle = q.strip().lstrip("#")
+            # 搜尋供應商名（ilike）或單號（純數字精確比對 PO id）。
+            conditions: list[ColumnElement[bool]] = [Supplier.name.ilike(f"%{needle}%")]
+            if needle.isdigit():
+                conditions.append(PurchaseOrder.id == int(needle))
+            stmt = stmt.join(Supplier, Supplier.id == PurchaseOrder.supplier_id).where(
+                or_(*conditions)
+            )
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 

@@ -1041,6 +1041,7 @@ export interface paths {
         /**
          * List Purchase Orders
          * @description 狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。
+         *     q 以單號（純數字）或供應商名搜尋。
          */
         get: operations["listPurchaseOrders"];
         put?: never;
@@ -6840,6 +6841,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["PurchaseOrderStatus"][] | null;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };

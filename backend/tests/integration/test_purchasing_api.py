@@ -724,6 +724,30 @@ async def test_low_stock_incoming_qty_counts_open_pos_only(
     assert row["incoming_qty"] == 15  # 10 + 5
 
 
+async def test_list_purchase_orders_search_by_number_or_supplier(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購單清單 q 以單號（純數字）或供應商名搜尋。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, reorder_point=100)
+    sup_a = await _create_supplier(client, token, name="山之屋")
+    sup_b = await _create_supplier(client, token, name="海之家")
+    po_a = await _create_po(client, token, supplier_id=sup_a, catalog_product_id=catalog_id, qty=1)
+    po_b = await _create_po(client, token, supplier_id=sup_b, catalog_product_id=catalog_id, qty=2)
+
+    # 供應商名搜尋
+    by_name = await client.get("/api/v1/purchase-orders", params={"q": "山之"}, headers=_auth(token))
+    ids = [p["id"] for p in by_name.json()]
+    assert po_a in ids and po_b not in ids
+
+    # 單號搜尋（帶不帶 # 皆可）
+    by_no = await client.get(
+        "/api/v1/purchase-orders", params={"q": f"#{po_b}"}, headers=_auth(token)
+    )
+    ids = [p["id"] for p in by_no.json()]
+    assert po_b in ids and po_a not in ids
+
+
 async def test_list_purchase_orders_filters_by_status_and_paginates(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

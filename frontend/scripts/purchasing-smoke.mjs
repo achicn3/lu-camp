@@ -167,6 +167,38 @@ try {
   await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}") .inv-badge:has-text("啟用中")`);
   ok("供應商重新啟用 → 顯示啟用中", true);
   await page.screenshot({ path: `${SHOTS}/09-supplier-manage.png`, fullPage: true });
+
+  // 11) Phase 4 版面：桌面雙欄、單號/供應商搜尋、Modal 背景鎖捲動
+  await page.click('.settle-tabs button:has-text("採購單")');
+  await page.click('.settle-tabs button:has-text("全部")');
+  // 桌面雙欄：低庫存欄（rail）在主欄右側
+  const mainBox = await page.locator(".pur-workbench-main").boundingBox();
+  const railBox = await page.locator(".pur-workbench-rail").boundingBox();
+  ok(
+    "桌面雙欄：低庫存欄在主欄右側",
+    railBox && mainBox && railBox.x > mainBox.x + mainBox.width / 2,
+    `main.x=${Math.round(mainBox?.x)} rail.x=${Math.round(railBox?.x)}`,
+  );
+  // 搜尋：以供應商名過濾
+  await page.fill('input[aria-label="採購單搜尋"]', supplierName);
+  await page.click('.pur-orders form.member-allsearch button:has-text("搜尋")');
+  await page.waitForSelector(`.pur-order-table tbody tr:has-text("${supplierName}")`);
+  const allSupplierRows = await page.locator(".pur-order-table tbody tr").count();
+  const matchRows = await page
+    .locator(`.pur-order-table tbody tr:has-text("${supplierName}")`)
+    .count();
+  ok("採購單搜尋（供應商名）過濾", allSupplierRows > 0 && allSupplierRows === matchRows);
+  await page.click('.pur-orders form.member-allsearch button:has-text("清除")');
+  // Modal 背景鎖捲動：開詳情 → body overflow hidden；關閉 → 還原
+  await page.locator('.pur-order-table tbody tr button:has-text("詳細")').first().click();
+  await page.waitForSelector('[role="dialog"][aria-label="採購單詳情"]');
+  const lockedOverflow = await page.evaluate(() => document.body.style.overflow);
+  ok("開 Modal 時鎖背景捲動（body overflow hidden）", lockedOverflow === "hidden", lockedOverflow);
+  await page.click('[role="dialog"] button:has-text("關閉")');
+  await page.waitForSelector('[role="dialog"]', { state: "detached" });
+  const restoredOverflow = await page.evaluate(() => document.body.style.overflow);
+  ok("關 Modal 後還原背景捲動", restoredOverflow !== "hidden", `overflow="${restoredOverflow}"`);
+  await page.screenshot({ path: `${SHOTS}/10-desktop-layout.png`, fullPage: true });
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

@@ -11495,7 +11495,7 @@
     },
     "/api/v1/purchase-orders": {
       "get": {
-        "description": "狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。",
+        "description": "狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。\nq 以單號（純數字）或供應商名搜尋。",
         "operationId": "listPurchaseOrders",
         "parameters": [
           {
@@ -11515,6 +11515,23 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
             }
           },
           {
