@@ -34,4 +34,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("purchase_orders", "supplier_name")
+    # 供應商名快照為不可變的歷史身分：drop 後再升級的回填會以「目前」供應商名覆寫、改寫歷史，
+    # 且無法還原（Codex 對抗審 high）。與同一採購 v2 線的 c1d2e3f4a5b6 一致採「明確不可降級」，
+    # 在改動任何 schema 前即拒絕；復原請改用前滾修復（roll forward）而非降級。
+    raise RuntimeError(
+        "此版不可降級（irreversible）：drop supplier_name 會遺失歷史供應商名快照且不可還原。"
+        "請改用前滾修復（roll forward）。"
+    )

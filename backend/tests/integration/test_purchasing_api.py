@@ -658,6 +658,28 @@ async def test_supplier_rename_does_not_rewrite_po_history(
     assert po_id not in [p["id"] for p in by_new.json()]
 
 
+async def test_submit_snapshots_supplier_name_at_submit_time(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """草稿建立後供應商改名，送出後正式單以送出當下的名為快照（Codex 對抗審 medium）。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token, name="草稿時名")
+    draft = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, submit=False
+    )
+
+    # 送出前改名
+    await client.patch(
+        f"/api/v1/suppliers/{supplier_id}", json={"name": "送出時名"}, headers=_auth(token)
+    )
+    submitted = await client.post(
+        f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token)
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["supplier_name"] == "送出時名"  # 快照＝送出當下的名
+
+
 async def test_patch_supplier_only_name_keeps_contact_and_tax(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

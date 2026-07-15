@@ -84,8 +84,9 @@ class PurchasingService:
         """稀疏 PATCH：只更新有帶的欄位（省略維持原值，避免只改名卻清空聯絡/統編）。
         名稱有帶時不可空白；同店重名由唯一約束於 router 轉 409。
 
-        鎖列後才讀原值（get_supplier_for_update）：序列化並發 PATCH，before/after 稽核反映真實
-        前後值、同欄更新不互相覆蓋（Codex 對抗審 medium）。"""
+        鎖列後才讀原值（get_supplier_for_update）：序列化並發 PATCH，稽核 before 反映真實鎖定前值。
+        註：本鎖僅序列化並確保稽核正確，不做樂觀鎖——同欄並發覆寫（後寫者贏）仍可能發生，惟單店
+        單機為循序操作不會遇到；日後多終端需嚴格避免，再加版本符記做條件更新回 409。"""
         supplier = await self._repo.get_supplier_for_update(store_id, supplier_id)
         if supplier is None:
             raise SupplierNotFound(f"找不到供應商 {supplier_id}")
@@ -209,9 +210,11 @@ class PurchasingService:
                 f"採購單 {purchase_order_id} 的供應商已停用，不可送出；請改供應商或重新啟用"
             )
         purchase_order.status = PurchaseOrderStatus.ORDERED
-        # 正式下單時間/下單人以「送出」當下為準（草稿建立者/時間不代表下單）。
+        # 正式下單時間/下單人/供應商名快照皆以「送出」當下為準：草稿期間供應商若改名，
+        # 送出後的正式單以送出當下的名為準（Codex 對抗審 medium）。
         purchase_order.ordered_at = datetime.now(UTC)
         purchase_order.ordered_by = actor_user_id
+        purchase_order.supplier_name = supplier.name
         await self._session.flush()
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
