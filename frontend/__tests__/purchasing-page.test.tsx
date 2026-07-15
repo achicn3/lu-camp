@@ -57,6 +57,7 @@ const ORDERED_PO = {
   id: 7,
   store_id: 1,
   supplier_id: 5,
+  supplier_name: "山林供應商",
   status: "ORDERED",
   ordered_by: 1,
   ordered_at: "2026-06-20T01:00:00Z",
@@ -556,21 +557,21 @@ describe("/purchasing", () => {
     expect(parsed.tax_id).toBe("87654321");
   });
 
-  it("停用供應商的既有採購單仍顯示供應商名（保留歷史）", async () => {
+  it("採購單顯示下單當下的供應商名快照（改名/停用不改寫歷史）", async () => {
     loginAs("CLERK");
-    const inactive = { ...SUPPLIER, id: 9, name: "已停用商", is_active: false };
-    const po = { ...ORDERED_PO, id: 8, supplier_id: 9 };
+    // 供應商目前叫「新名」，但採購單快照仍是下單當下的「舊名商」→ 歷史顯示快照、不被改名回溯改寫。
+    const po = { ...ORDERED_PO, id: 8, supplier_id: 9, supplier_name: "舊名商" };
     stubFetch((url) => {
-      // 頂層供應商查詢帶 include_inactive → 對照表含停用者，歷史單顯示名稱而非 #id。
-      if (url.includes("/suppliers")) return json([SUPPLIER, inactive]);
+      if (url.includes("/suppliers")) return json([{ ...SUPPLIER, id: 9, name: "新名" }]);
       if (url.includes("/catalog-products")) return json([]);
       if (url.includes("/purchase-orders")) return json([po]);
       return null;
     });
     renderPage();
 
-    expect(await screen.findByText("已停用商")).toBeTruthy();
-    expect(screen.queryByText("#9")).toBeNull(); // 不應掉成 fallback 數字 id
+    expect(await screen.findByText("舊名商")).toBeTruthy(); // PO 快照名
+    expect(screen.queryByText("新名")).toBeNull(); // 不顯示供應商目前名
+    expect(screen.queryByText("#9")).toBeNull(); // 不掉成 fallback 數字 id
   });
 
   it("供應商可編輯名稱、可停用（列出含停用者）", async () => {

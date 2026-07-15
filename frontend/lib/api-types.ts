@@ -3892,6 +3892,8 @@ export interface components {
             store_id: number;
             /** Supplier Id */
             supplier_id: number;
+            /** Supplier Name */
+            supplier_name: string;
             /** Total Cost */
             total_cost: string;
             /**

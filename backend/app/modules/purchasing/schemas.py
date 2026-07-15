@@ -96,6 +96,7 @@ class PurchaseOrderRead(BaseModel):
     id: int
     store_id: int
     supplier_id: int
+    supplier_name: str  # 下單當下的供應商名快照（改名/停用不影響歷史顯示）
     status: PurchaseOrderStatus
     ordered_by: int
     ordered_at: datetime
@@ -127,6 +128,7 @@ class PurchaseOrderRead(BaseModel):
                 "id": purchase_order.id,
                 "store_id": purchase_order.store_id,
                 "supplier_id": purchase_order.supplier_id,
+                "supplier_name": purchase_order.supplier_name,
                 "status": purchase_order.status,
                 "ordered_by": purchase_order.ordered_by,
                 "ordered_at": purchase_order.ordered_at,

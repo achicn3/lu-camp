@@ -104,13 +104,13 @@ class PurchasingRepository:
             stmt = stmt.where(PurchaseOrder.status.in_(statuses))
         if q:
             needle = q.strip().lstrip("#")
-            # 搜尋供應商名（ilike）或單號（純數字精確比對 PO id）。
-            conditions: list[ColumnElement[bool]] = [Supplier.name.ilike(f"%{needle}%")]
+            # 搜尋供應商名快照（ilike，改名不影響歷史搜尋）或單號（純數字精確比對 PO id）。
+            conditions: list[ColumnElement[bool]] = [
+                PurchaseOrder.supplier_name.ilike(f"%{needle}%")
+            ]
             if needle.isdigit():
                 conditions.append(PurchaseOrder.id == int(needle))
-            stmt = stmt.join(Supplier, Supplier.id == PurchaseOrder.supplier_id).where(
-                or_(*conditions)
-            )
+            stmt = stmt.where(or_(*conditions))
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
@@ -150,12 +150,12 @@ class PurchasingRepository:
 
     async def lines_for_catalog(
         self, store_id: int, catalog_product_id: int
-    ) -> list[tuple[PurchaseOrderLine, PurchaseOrder, Supplier]]:
-        """某數量品的所有採購明細＋採購單＋供應商（庫存明細「進貨歷史」用，新到舊）。"""
+    ) -> list[tuple[PurchaseOrderLine, PurchaseOrder]]:
+        """某數量品的所有採購明細＋採購單（庫存明細「進貨歷史」用，新到舊）。
+        供應商名取自採購單快照 supplier_name（改名不改寫歷史），故不再 join Supplier。"""
         stmt = (
-            select(PurchaseOrderLine, PurchaseOrder, Supplier)
+            select(PurchaseOrderLine, PurchaseOrder)
             .join(PurchaseOrder, PurchaseOrder.id == PurchaseOrderLine.purchase_order_id)
-            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
             .where(
                 PurchaseOrderLine.store_id == store_id,
                 PurchaseOrderLine.catalog_product_id == catalog_product_id,
@@ -163,7 +163,7 @@ class PurchasingRepository:
             .order_by(PurchaseOrder.id.desc())
         )
         rows = (await self._session.execute(stmt)).all()
-        return [(row[0], row[1], row[2]) for row in rows]
+        return [(row[0], row[1]) for row in rows]
 
     async def lock_purchase_order(
         self, store_id: int, purchase_order_id: int

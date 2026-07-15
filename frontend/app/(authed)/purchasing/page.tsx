@@ -395,7 +395,6 @@ function CreatePurchaseOrder({
 // ── 採購單詳情（點單號/詳細）：供應商、狀態、時間、逐項訂購/已收/待收＋收貨批次 ──────
 function PurchaseOrderDetailModal({
   po,
-  supplierName,
   productLabel,
   onClose,
   onReceive,
@@ -403,7 +402,6 @@ function PurchaseOrderDetailModal({
   cancelPending,
 }: {
   po: PurchaseOrder;
-  supplierName: (id: number) => string;
   productLabel: (id: number) => CatalogProduct | null;
   onClose: () => void;
   onReceive: () => void;
@@ -424,7 +422,7 @@ function PurchaseOrderDetailModal({
         <dl className="pur-detail-grid">
           <div>
             <dt>供應商</dt>
-            <dd>{supplierName(po.supplier_id)}</dd>
+            <dd>{po.supplier_name}</dd>
           </div>
           <div>
             <dt>狀態</dt>
@@ -595,7 +593,7 @@ function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: num
 }
 
 // ── 採購單清單 + 分批收貨 + 送出/取消 ────────────────────────
-function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
+function PurchaseOrderList() {
   const queryClient = useQueryClient();
   const [receiving, setReceiving] = useState<PurchaseOrder | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
@@ -636,11 +634,6 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
     () => PO_STATUS_FILTERS.find((f) => f.key === statusKey)?.statuses ?? [],
     [statusKey],
   );
-
-  const supplierName = useMemo(() => {
-    const map = new Map(suppliers.map((s) => [s.id, s.name] as const));
-    return (id: number) => map.get(id) ?? `#${id}`;
-  }, [suppliers]);
 
   // 數量品名稱對照（採購單明細以 catalog_product_id 記錄；詳情頁顯示品名/SKU）。
   const catalog = useQuery({
@@ -891,7 +884,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
                       #{po.id}
                     </button>
                   </td>
-                  <td>{supplierName(po.supplier_id)}</td>
+                  <td>{po.supplier_name}</td>
                   <td>
                     {dt(po.status === "DRAFT" ? po.created_at : po.ordered_at)}
                     {po.received_at && <span className="row-sub">收貨 {dt(po.received_at)}</span>}
@@ -950,7 +943,6 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
       {detailPo !== null && (
         <PurchaseOrderDetailModal
           po={detailPo}
-          supplierName={supplierName}
           productLabel={productLabel}
           onClose={() => setDetailPo(null)}
           onReceive={() => {
@@ -968,7 +960,7 @@ function PurchaseOrderList({ suppliers }: { suppliers: Supplier[] }) {
           <div className="card pos-dialog pur-receive-dialog">
             <h2>收貨入庫</h2>
             <p className="hint">
-              採購單 #{receiving.id}（{supplierName(receiving.supplier_id)}）。輸入本次各項實收量，
+              採購單 #{receiving.id}（{receiving.supplier_name}）。輸入本次各項實收量，
               未收足將轉為「部分到貨」，可日後再收。
             </p>
             <div className="pur-lines-wrap">
@@ -1402,7 +1394,7 @@ function SupplierEditModal({
 // ── 採購單工作台（採購單分頁主體）───────────────────────────
 // 順著補貨動線排：低庫存提醒（起點，可一鍵帶入草稿）→ 建立採購單（主要動作，展開式面板）→
 // 採購單清單（待收貨／收貨）。上架數量型商品屬主檔建檔，已移至 /庫存「數量品」分頁。
-function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
+function OrdersWorkbench() {
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const createRef = useRef<HTMLDivElement>(null);
@@ -1439,7 +1431,7 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
           </button>
           {createOpen && <CreatePurchaseOrder lines={lines} setLines={setLines} />}
         </div>
-        <PurchaseOrderList suppliers={suppliers} />
+        <PurchaseOrderList />
       </div>
     </div>
   );
@@ -1447,21 +1439,6 @@ function OrdersWorkbench({ suppliers }: { suppliers: Supplier[] }) {
 
 export default function PurchasingPage() {
   const [tab, setTab] = useState<Tab>("orders");
-
-  // 含停用者（include_inactive）：採購單清單以此對照供應商名，停用後歷史單仍顯示名稱、不掉成 #id。
-  // 建單供應商選單另在 CreatePurchaseOrder 以 is_active 過濾（停用者不可用於新單）。
-  const suppliers = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/suppliers", {
-        params: { query: { include_inactive: true, limit: 200, offset: 0 } },
-      });
-      if (!data) throw new Error(extractDetail(error) ?? "讀取供應商失敗");
-      return data;
-    },
-  });
-
-  const supplierList = suppliers.data ?? [];
 
   return (
     <section className="pur-page">
@@ -1484,17 +1461,7 @@ export default function PurchasingPage() {
         </button>
       </div>
 
-      {suppliers.isError && (
-        <p role="alert" className="form-error">
-          {suppliers.error.message}
-        </p>
-      )}
-
-      {tab === "orders" ? (
-        <OrdersWorkbench suppliers={supplierList} />
-      ) : (
-        <SupplierManager />
-      )}
+      {tab === "orders" ? <OrdersWorkbench /> : <SupplierManager />}
     </section>
   );
 }

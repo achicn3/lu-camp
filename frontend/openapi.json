@@ -5296,6 +5296,10 @@
             "title": "Supplier Id",
             "type": "integer"
           },
+          "supplier_name": {
+            "title": "Supplier Name",
+            "type": "string"
+          },
           "total_cost": {
             "title": "Total Cost",
             "type": "string"
@@ -5310,6 +5314,7 @@
           "id",
           "store_id",
           "supplier_id",
+          "supplier_name",
           "status",
           "ordered_by",
           "ordered_at",

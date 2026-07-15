@@ -60,6 +60,8 @@ class PurchaseOrder(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"), index=True)
+    # 下單當下的供應商名快照：歷史顯示/搜尋用此，供應商改名不回溯改寫歷史單。
+    supplier_name: Mapped[str] = mapped_column(String(150))
     status: Mapped[PurchaseOrderStatus] = mapped_column(
         _enum_col(PurchaseOrderStatus),
         default=PurchaseOrderStatus.DRAFT,

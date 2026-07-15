@@ -726,7 +726,9 @@ async def test_catalog_detail_shows_supplier_purchase_history(
     )
     db_session.add_all([supplier, product])
     await db_session.flush()
-    po = PurchaseOrder(store_id=store_id, supplier_id=supplier.id, ordered_by=clerk_id)
+    po = PurchaseOrder(
+        store_id=store_id, supplier_id=supplier.id, supplier_name=supplier.name, ordered_by=clerk_id
+    )
     db_session.add(po)
     await db_session.flush()
     db_session.add_all([

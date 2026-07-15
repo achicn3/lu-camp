@@ -631,6 +631,33 @@ async def test_cannot_create_or_submit_order_with_inactive_supplier(
     assert submitted.status_code == 422, submitted.text
 
 
+async def test_supplier_rename_does_not_rewrite_po_history(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購單存下單當下的供應商名快照：供應商改名後，既有單顯示/搜尋仍以舊名為準。"""
+    token, store_id, _ = await _seed_store(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id)
+    supplier_id = await _create_supplier(client, token, name="原名商")
+    po_id = await _create_po(
+        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id
+    )
+
+    # 改名
+    await client.patch(
+        f"/api/v1/suppliers/{supplier_id}", json={"name": "改名商"}, headers=_auth(token)
+    )
+
+    # 既有採購單仍顯示下單當下的快照名
+    got = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=_auth(token))
+    assert got.json()["supplier_name"] == "原名商"
+
+    # 搜尋以快照為準：舊名找得到、新名找不到（不回溯改寫歷史）
+    by_old = await client.get("/api/v1/purchase-orders", params={"q": "原名"}, headers=_auth(token))
+    assert po_id in [p["id"] for p in by_old.json()]
+    by_new = await client.get("/api/v1/purchase-orders", params={"q": "改名"}, headers=_auth(token))
+    assert po_id not in [p["id"] for p in by_new.json()]
+
+
 async def test_patch_supplier_only_name_keeps_contact_and_tax(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -792,7 +819,9 @@ async def test_list_purchase_orders_search_by_number_or_supplier(
     po_b = await _create_po(client, token, supplier_id=sup_b, catalog_product_id=catalog_id, qty=2)
 
     # 供應商名搜尋
-    by_name = await client.get("/api/v1/purchase-orders", params={"q": "山之"}, headers=_auth(token))
+    by_name = await client.get(
+        "/api/v1/purchase-orders", params={"q": "山之"}, headers=_auth(token)
+    )
     ids = [p["id"] for p in by_name.json()]
     assert po_a in ids and po_b not in ids
 

@@ -56,6 +56,7 @@ async def _setup(sm: async_sessionmaker[AsyncSession]) -> tuple[str, int, int, i
         po = PurchaseOrder(
             store_id=store.id,
             supplier_id=supplier.id,
+            supplier_name=supplier.name,
             ordered_by=clerk.id,
             status=PurchaseOrderStatus.ORDERED,
         )

@@ -82,8 +82,13 @@ class PurchasingService:
         self, store_id: int, supplier_id: int, payload: "SupplierUpdate", *, actor_user_id: int
     ) -> Supplier:
         """稀疏 PATCH：只更新有帶的欄位（省略維持原值，避免只改名卻清空聯絡/統編）。
-        名稱有帶時不可空白；同店重名由唯一約束於 router 轉 409。"""
-        supplier = await self.get_supplier(store_id, supplier_id)
+        名稱有帶時不可空白；同店重名由唯一約束於 router 轉 409。
+
+        鎖列後才讀原值（get_supplier_for_update）：序列化並發 PATCH，before/after 稽核反映真實
+        前後值、同欄更新不互相覆蓋（Codex 對抗審 medium）。"""
+        supplier = await self._repo.get_supplier_for_update(store_id, supplier_id)
+        if supplier is None:
+            raise SupplierNotFound(f"找不到供應商 {supplier_id}")
         fields = payload.model_fields_set
         if not fields:
             return supplier
@@ -168,6 +173,7 @@ class PurchasingService:
             PurchaseOrder(
                 store_id=store_id,
                 supplier_id=payload.supplier_id,
+                supplier_name=supplier.name,  # 快照下單當下的供應商名（改名不改寫歷史）
                 ordered_by=actor_user_id,
                 status=status,
             )
@@ -270,8 +276,8 @@ class PurchasingService:
         return [
             {
                 "po_id": po.id,
-                "supplier_id": supplier.id,
-                "supplier_name": supplier.name,
+                "supplier_id": po.supplier_id,
+                "supplier_name": po.supplier_name,  # 下單當下快照（改名不改寫歷史）
                 "qty": line.qty,
                 "received_qty": line.received_qty,
                 "unit_cost": line.unit_cost,
@@ -279,7 +285,7 @@ class PurchasingService:
                 "ordered_at": po.ordered_at,
                 "received_at": po.received_at,
             }
-            for line, po, supplier in rows
+            for line, po in rows
         ]
 
     async def get_purchase_order(
