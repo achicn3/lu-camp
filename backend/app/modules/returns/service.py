@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.models import CustomerReturn, ReturnLine
-from app.modules.returns.repository import ReturnsRepository
+from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.service import StoreSettingsService
@@ -69,6 +70,12 @@ class ReturnsService:
 
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
+
+    async def margin_adjustments(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> "ReturnsMarginAdjustments":
+        """期間退貨的毛利扣減（D-8(1)；供 sales.margin_breakdown 同源扣除，read-only）。"""
+        return await self._repo.margin_adjustments(store_id, date_from, date_to)
 
     async def has_returns_for_sale(self, store_id: int, sale_id: int) -> bool:
         """該銷售是否已有退貨（供 sales.void_sale 前置檢查：已退貨者不可作廢）。"""
@@ -209,6 +216,24 @@ class ReturnsService:
             returned_after[sale_line_id] = returned_after.get(sale_line_id, 0) + qty
         if all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines):
             sale.status = SaleStatus.RETURNED
+
+        # 退貨按比例沖回會員點數（D-8(2)，裁示 2026-07-16）：
+        # claw = floor(awarded_points × 本次退款 ÷ 原總額)。每次部分退貨各自按比例，
+        # Σfloor ≤ awarded 不會超沖。點數可能已被會員用掉 → clamp 至現有餘額、
+        # 不阻擋退貨（與作廢「整筆同生共死」不同：退款本身必須成立）。
+        if sale.buyer_contact_id is not None and sale.awarded_points > 0 and sale.total > 0:
+            claw = int(sale.awarded_points * refund_amount / sale.total)
+            if claw > 0:
+                from app.modules.contacts.service import ContactService
+
+                contacts = ContactService(self._session)
+                buyer = await contacts.get_contact_for_update(store_id, sale.buyer_contact_id)
+                if buyer is not None:
+                    clawed = min(claw, int(buyer.member_points))
+                    if clawed > 0:
+                        await contacts.add_member_points(
+                            store_id, sale.buyer_contact_id, -clawed
+                        )
 
         # 折讓（§7.5、不變量 5）：原銷售已「正式開票」（發票 ISSUED）→ 產 G0401 折讓單並標
         # sale.invoice_status=PENDING_ALLOWANCE；而非直接刪除發票。**比照 ISSUE/VOID：等 G0401

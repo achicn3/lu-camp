@@ -10,6 +10,8 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
+import { computeRefund, isReturnable, validateReturnPlan } from "@/features/returns/plan";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
 
@@ -107,11 +109,148 @@ function VoidConfirmDialog({
   );
 }
 
+function ReturnDialog({
+  sale,
+  onClose,
+  onReturned,
+}: {
+  sale: SaleSummary;
+  onClose: () => void;
+  onReturned: (refund: number) => void;
+}) {
+  const [qtys, setQtys] = useState<Record<number, number>>({});
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const detail = useQuery({
+    queryKey: ["sale-detail", sale.id],
+    queryFn: async () => {
+      const { data, error: apiError } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取銷售明細失敗");
+      return data;
+    },
+  });
+  const lines = detail.data?.lines ?? [];
+  const returnable = lines.filter(isReturnable);
+  const refund = computeRefund(lines, qtys);
+
+  const submit = useMutation({
+    mutationFn: async () => {
+      const invalid = validateReturnPlan(lines, qtys, reason);
+      if (invalid) throw new Error(invalid);
+      const { data, error: apiError } = await api.POST("/api/v1/returns", {
+        params: { header: { "Idempotency-Key": newIdempotencyKey() } },
+        body: {
+          sale_id: sale.id,
+          reason: reason.trim(),
+          lines: Object.entries(qtys)
+            .filter(([, q]) => q > 0)
+            .map(([id, q]) => ({ sale_line_id: Number(id), qty: q })),
+        },
+      });
+      if (!data) throw new Error(extractDetail(apiError) ?? "退貨失敗");
+      return data;
+    },
+    onSuccess: (data) => onReturned(parseNtd(data.refund_amount) ?? 0),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="退貨">
+      <div className="card pos-dialog" style={{ maxWidth: 560 }}>
+        <h2>退貨 #{sale.id}</h2>
+        <p className="hint">
+          選擇退貨品項與數量：現金退還（自錢櫃取出，關帳對帳核對）、庫存回補、
+          寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。
+        </p>
+        {detail.isLoading && <p>載入明細中…</p>}
+        {returnable.length > 0 && (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>品項</th>
+                <th>單價</th>
+                <th>購買數</th>
+                <th>退貨數</th>
+              </tr>
+            </thead>
+            <tbody>
+              {returnable.map((line) => (
+                <tr key={line.id}>
+                  <td>{line.description}</td>
+                  <td>${formatNtd(parseNtd(line.unit_price) ?? 0)}</td>
+                  <td>{line.qty}</td>
+                  <td>
+                    <input
+                      type="number"
+                      min={0}
+                      max={line.qty}
+                      value={qtys[line.id] ?? 0}
+                      aria-label={`${line.description} 退貨數量`}
+                      style={{ width: 72 }}
+                      onChange={(e) =>
+                        setQtys((prev) => ({
+                          ...prev,
+                          [line.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        }))
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {detail.isSuccess && returnable.length === 0 && (
+          <p className="hint">此單沒有可退貨的品項（餐飲不支援退貨）。</p>
+        )}
+        <label style={{ display: "block", marginTop: 12 }}>
+          退貨原因{" "}
+          <input
+            type="text"
+            value={reason}
+            maxLength={200}
+            style={{ width: "100%" }}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="例：尺寸不合／商品瑕疵"
+          />
+        </label>
+        <p style={{ marginTop: 8 }}>
+          預估退款 <span className="money">${formatNtd(refund)}</span>
+        </p>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={submit.isPending || refund <= 0}
+            onClick={() => {
+              setError(null);
+              submit.mutate();
+            }}
+          >
+            {submit.isPending ? "退貨處理中…" : `確認退貨 $${formatNtd(refund)}`}
+          </button>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SalesPage() {
   const isManager = useIsManager();
   const queryClient = useQueryClient();
   const [voidTarget, setVoidTarget] = useState<SaleSummary | null>(null);
   const [voidedNote, setVoidedNote] = useState<string | null>(null);
+  const [returnTarget, setReturnTarget] = useState<SaleSummary | null>(null);
   // 交易紀錄簽收（docs/23 K5b）：推 TRANSACTION_ACK 至手持裝置，客人核對後簽名留存（不擋流程）。
   const [ackNote, setAckNote] = useState<string | null>(null);
   const pushAck = useMutation({
@@ -190,6 +329,19 @@ export default function SalesPage() {
                   <td>{labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}</td>
                   <td>{voided ? "已作廢" : labelFor(SALE_STATUS_LABELS, sale.status)}</td>
                   <td>
+                    {!voided && !returned && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`退貨銷售 ${sale.id}`}
+                        onClick={() => {
+                          setVoidedNote(null);
+                          setReturnTarget(sale);
+                        }}
+                      >
+                        退貨
+                      </button>
+                    )}
                     {!voided && !returned && sale.buyer_contact_id != null && (
                       <button
                         type="button"
@@ -228,6 +380,17 @@ export default function SalesPage() {
           </tbody>
           </table>
         </div>
+      )}
+      {returnTarget !== null && (
+        <ReturnDialog
+          sale={returnTarget}
+          onClose={() => setReturnTarget(null)}
+          onReturned={(refund) => {
+            setVoidedNote(`銷售 #${returnTarget.id} 退貨完成，退還現金 $${formatNtd(refund)}。`);
+            setReturnTarget(null);
+            void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
+          }}
+        />
       )}
       {voidTarget !== null && (
         <VoidConfirmDialog
