@@ -81,8 +81,11 @@ export function contentRows(content: Record<string, unknown>): ContentRow[] {
   }
   for (const [key, value] of Object.entries(content)) {
     if (key === "items" || key === "lot" || key === "store_credit_premium") continue;
-    if (value === null || value === undefined || typeof value === "object") continue;
-    rows.push({ label: KNOWN_FIELD_LABELS[key] ?? key, value: String(value) });
+    if (value === null || value === undefined) continue;
+    // 未知巢狀值不可默默丟棄（簽了什麼就呈現什麼——不完整投影＝錯誤證據）：
+    // 以 JSON 字串如實呈現（Codex 第二輪 P2）。
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    rows.push({ label: KNOWN_FIELD_LABELS[key] ?? key, value: text });
   }
   return rows;
 }

@@ -41,10 +41,10 @@ describe("contentRows", () => {
     expect(rows).toContainEqual({ label: "散裝批", value: "數量 30（計價基準 BAG）" });
   });
 
-  it("未知鍵以原鍵名呈現、巢狀物件略過", () => {
+  it("未知鍵以原鍵名呈現、未知巢狀物件以 JSON 如實呈現（不可默默丟棄）", () => {
     const rows = contentRows({ custom_key: "x", nested: { a: 1 } });
     expect(rows).toContainEqual({ label: "custom_key", value: "x" });
-    expect(rows.find((r) => r.label === "nested")).toBeUndefined();
+    expect(rows).toContainEqual({ label: "nested", value: '{"a":1}' });
   });
 });
 

@@ -84,10 +84,11 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
       return data;
     },
   });
+  // 一律以 detail 的**當前實態**渲染（清單快照可能已過期：待簽→已簽/作廢；Codex 第二輪 P2）
   const full = detail.data ?? task;
   const { url: imageUrl, error: imageError } = useSignatureImage(
-    task.id,
-    task.has_signature,
+    full.id,
+    full.has_signature,
     retryKey,
   );
   const rows = contentRows(full.content as Record<string, unknown>);
@@ -105,17 +106,17 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
         style={{ maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }}
       >
         <h2>
-          {SIGNING_KIND_LABELS[task.kind] ?? task.kind} #{task.id}
+          {SIGNING_KIND_LABELS[full.kind] ?? full.kind} #{full.id}
         </h2>
         <p>
-          狀態：{SIGNING_STATUS_LABELS[task.status] ?? task.status}
-          {task.signed_at ? `｜簽署於 ${timeLabel(task.signed_at)}` : ""}
-          {task.chosen_payout
-            ? `｜撥款 ${SIGNING_PAYOUT_LABELS[task.chosen_payout] ?? task.chosen_payout}`
+          狀態：{SIGNING_STATUS_LABELS[full.status] ?? full.status}
+          {full.signed_at ? `｜簽署於 ${timeLabel(full.signed_at)}` : ""}
+          {full.chosen_payout
+            ? `｜撥款 ${SIGNING_PAYOUT_LABELS[full.chosen_payout] ?? full.chosen_payout}`
             : ""}
         </p>
         {ref ? <p>綁定單據：{ref}</p> : null}
-        {task.agreement_version != null ? <p>切結書版本：v{task.agreement_version}</p> : null}
+        {full.agreement_version != null ? <p>切結書版本：v{full.agreement_version}</p> : null}
         <h3>簽署當下內容快照</h3>
         <table className="data-table">
           <tbody>
@@ -128,12 +129,20 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
           </tbody>
         </table>
         <h3>手寫簽名</h3>
-        {task.has_signature ? (
+        {detail.isError ? (
+          <p role="alert">
+            證據明細載入失敗（綁定單據/最新狀態可能不完整）。{" "}
+            <button type="button" onClick={() => void detail.refetch()}>
+              重試
+            </button>
+          </p>
+        ) : null}
+        {full.has_signature ? (
           imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- blob URL 無法用 next/image
             <img
               src={imageUrl}
-              alt={`任務 ${task.id} 簽名影像`}
+              alt={`任務 ${full.id} 簽名影像`}
               style={{ maxWidth: "100%", border: "1px solid var(--border, #ccc)", background: "#fff" }}
             />
           ) : imageError ? (
