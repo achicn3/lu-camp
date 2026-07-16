@@ -3428,6 +3428,8 @@ export interface components {
             ref_type: string | null;
             /** Signed At */
             signed_at: string | null;
+            /** Signer Name */
+            signer_name?: string | null;
             status: components["schemas"]["SignatureTaskStatus"];
             /** Store Id */
             store_id: number;
@@ -4512,6 +4514,10 @@ export interface components {
         SignatureTaskKind: "ACQUISITION_AFFIDAVIT" | "STORE_CREDIT_USE" | "TRANSACTION_ACK";
         /** SignatureTaskRead */
         SignatureTaskRead: {
+            /** Agreement Body */
+            agreement_body?: string | null;
+            /** Agreement Title */
+            agreement_title?: string | null;
             /** Agreement Version */
             agreement_version: number | null;
             /** Bound Acquisition Id */
@@ -4543,6 +4549,8 @@ export interface components {
             ref_type: string | null;
             /** Signed At */
             signed_at: string | null;
+            /** Signer Name */
+            signer_name?: string | null;
             status: components["schemas"]["SignatureTaskStatus"];
             /** Store Id */
             store_id: number;

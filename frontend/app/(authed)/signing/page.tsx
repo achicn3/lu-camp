@@ -56,8 +56,10 @@ function useSignatureImage(
           setImg({ id: taskId, error: `影像載入失敗（HTTP ${res.status}）` });
           return;
         }
-        objectUrl = URL.createObjectURL(await res.blob());
-        if (!cancelled) setImg({ id: taskId, url: objectUrl });
+        const blob = await res.blob();
+        if (cancelled) return; // 已卸載：不建 object URL（否則清理已跑過、URL 洩漏，Codex P3）
+        objectUrl = URL.createObjectURL(blob);
+        setImg({ id: taskId, url: objectUrl });
       } catch {
         if (!cancelled) setImg({ id: taskId, error: "影像載入失敗（連線錯誤）" });
       }
@@ -109,6 +111,7 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
           {SIGNING_KIND_LABELS[full.kind] ?? full.kind} #{full.id}
         </h2>
         <p>
+          {full.signer_name ? `簽署人：${full.signer_name}｜` : ""}
           狀態：{SIGNING_STATUS_LABELS[full.status] ?? full.status}
           {full.signed_at ? `｜簽署於 ${timeLabel(full.signed_at)}` : ""}
           {full.chosen_payout
@@ -117,6 +120,14 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
         </p>
         {ref ? <p>綁定單據：{ref}</p> : null}
         {full.agreement_version != null ? <p>切結書版本：v{full.agreement_version}</p> : null}
+        {full.agreement_body ? (
+          <details>
+            <summary>切結書全文{full.agreement_title ? `：${full.agreement_title}` : ""}（客人簽署的條款）</summary>
+            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85em", marginTop: 8 }}>
+              {full.agreement_body}
+            </pre>
+          </details>
+        ) : null}
         <h3>簽署當下內容快照</h3>
         <table className="data-table">
           <tbody>

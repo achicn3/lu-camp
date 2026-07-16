@@ -44,6 +44,10 @@ class SignatureTaskRead(BaseModel):
     # 反向綁定（僅單筆調閱端點回填；清單為 None 以免 N+1）：切結→收購單、扣抵確認→銷售單。
     bound_acquisition_id: int | None = None
     bound_sale_id: int | None = None
+    # 調閱端點另回填（清單為 None）：客人簽的切結書全文與簽署人姓名，證據才完整。
+    agreement_title: str | None = None
+    agreement_body: str | None = None
+    signer_name: str | None = None
 
 
 class KioskTaskRead(SignatureTaskRead):

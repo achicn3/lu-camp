@@ -4125,6 +4125,17 @@
             ],
             "title": "Signed At"
           },
+          "signer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Name"
+          },
           "status": {
             "$ref": "#/components/schemas/SignatureTaskStatus"
           },
@@ -7097,6 +7108,28 @@
       },
       "SignatureTaskRead": {
         "properties": {
+          "agreement_body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Body"
+          },
+          "agreement_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agreement Title"
+          },
           "agreement_version": {
             "anyOf": [
               {
@@ -7210,6 +7243,17 @@
               }
             ],
             "title": "Signed At"
+          },
+          "signer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signer Name"
           },
           "status": {
             "$ref": "#/components/schemas/SignatureTaskStatus"

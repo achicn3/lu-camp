@@ -47,10 +47,15 @@ def _to_read(
     *,
     bound_acquisition_id: int | None = None,
     bound_sale_id: int | None = None,
+    signer_name: str | None = None,
+    with_agreement_text: bool = False,
 ) -> SignatureTaskRead:
     return SignatureTaskRead(
         bound_acquisition_id=bound_acquisition_id,
         bound_sale_id=bound_sale_id,
+        signer_name=signer_name,
+        agreement_title=agreement.title if with_agreement_text and agreement else None,
+        agreement_body=agreement.body if with_agreement_text and agreement else None,
         id=task.id,
         store_id=task.store_id,
         kind=task.kind,
@@ -158,11 +163,18 @@ async def get_signature_task(
 
         sale = await SalesService(session).find_sale_by_signature_task(user.store_id, task.id)
         bound_sale_id = sale.id if sale is not None else None
+    # 簽署人姓名（證據需標明誰簽的，尤其 ACK 內容不含姓名）——經 contacts service（§2）。
+    from app.modules.contacts.service import ContactService
+
+    contact = await ContactService(session).get_contact(user.store_id, task.contact_id)
+    signer_name = getattr(contact, "name", None)
     return _to_read(
         task,
         await service.get_agreement_for_task(task),
         bound_acquisition_id=bound_acq_id,
         bound_sale_id=bound_sale_id,
+        signer_name=signer_name,
+        with_agreement_text=True,
     )
 
 
