@@ -1,0 +1,16 @@
+{
+  "recorded_at": "2026-07-16T01:05+08:00",
+  "git_sha": "31b954a9dc1a966ff6e2b69393a3cd0b2fff4cdf",
+  "alembic_head": "a2b3c4d5e6f7",
+  "sim_db": "lucamp_sim (fresh, alembic upgrade head from zero: PASS)",
+  "gates": {
+    "backend_ruff": "pass",
+    "backend_mypy": "pass (298 files)",
+    "backend_pytest": "pass, coverage 92.98% (DB lucamp_pytest)",
+    "frontend_eslint": "pass",
+    "frontend_tsc": "pass",
+    "frontend_vitest": "299 passed",
+    "contract_drift": "none (openapi.json / api-types.ts regenerated, no diff)"
+  },
+  "r2": {"bucket": "camping", "verified": "2026-07-16 put/get/delete roundtrip OK", "cost_discipline": "minimal uploads only"}
+}

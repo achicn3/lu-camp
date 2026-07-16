@@ -242,7 +242,7 @@ async def b6_bulk_lot(session: AsyncSession) -> None:
             text(
                 """
         SELECT bl.id, bl.total_qty, bl.remaining_qty, bl.status,
-               COALESCE(sold.q,0) AS sold_qty
+               COALESCE(sold.q,0) - COALESCE(ret.q,0) AS sold_qty
         FROM bulk_lots bl
         LEFT JOIN (
           SELECT sl.bulk_lot_id AS lid, SUM(sl.qty) q
@@ -250,6 +250,13 @@ async def b6_bulk_lot(session: AsyncSession) -> None:
           WHERE sl.line_type='BULK_LOT' AND s.invoice_status <> 'VOID'
           GROUP BY sl.bulk_lot_id
         ) sold ON sold.lid = bl.id
+        LEFT JOIN (
+          -- 退貨回補：售出量須扣回退貨件數（退回的可再售出，Σ售出−退貨+剩餘=total）
+          SELECT sl.bulk_lot_id AS lid, SUM(rl.qty) q
+          FROM return_lines rl JOIN sale_lines sl ON sl.id = rl.sale_line_id
+          WHERE sl.line_type='BULK_LOT'
+          GROUP BY sl.bulk_lot_id
+        ) ret ON ret.lid = bl.id
         """
             )
         )

@@ -1,0 +1,466 @@
+{
+  "base": "http://127.0.0.1:8010",
+  "total": 66,
+  "server_errors": [],
+  "slow_over_1s": [],
+  "results": [
+    {
+      "path": "/api/v1/store-credit/premium-suggestion/today",
+      "url": "/api/v1/store-credit/premium-suggestion/today",
+      "status": 200,
+      "ms": 168.8,
+      "operation_id": "storeCreditPremiumSuggestionToday"
+    },
+    {
+      "path": "/api/v1/reports/store-credit/reconciliation",
+      "url": "/api/v1/reports/store-credit/reconciliation",
+      "status": 200,
+      "ms": 156.3,
+      "operation_id": "storeCreditReconciliation"
+    },
+    {
+      "path": "/api/v1/reports/store-credit/effectiveness",
+      "url": "/api/v1/reports/store-credit/effectiveness",
+      "status": 200,
+      "ms": 152.6,
+      "operation_id": "storeCreditEffectiveness"
+    },
+    {
+      "path": "/api/v1/reports/insights",
+      "url": "/api/v1/reports/insights",
+      "status": 200,
+      "ms": 129.0,
+      "operation_id": "businessInsightsReport"
+    },
+    {
+      "path": "/api/v1/reports/trends",
+      "url": "/api/v1/reports/trends",
+      "status": 200,
+      "ms": 128.4,
+      "operation_id": "financeTrendsReport"
+    },
+    {
+      "path": "/api/v1/reports/campaign-performance",
+      "url": "/api/v1/reports/campaign-performance",
+      "status": 200,
+      "ms": 90.8,
+      "operation_id": "campaignPerformanceReport"
+    },
+    {
+      "path": "/api/v1/reports/store-credit/liability",
+      "url": "/api/v1/reports/store-credit/liability",
+      "status": 200,
+      "ms": 63.7,
+      "operation_id": "storeCreditLiability"
+    },
+    {
+      "path": "/api/v1/reports/sales-margin",
+      "url": "/api/v1/reports/sales-margin",
+      "status": 200,
+      "ms": 54.3,
+      "operation_id": "salesMarginReport"
+    },
+    {
+      "path": "/api/v1/signing/tasks",
+      "url": "/api/v1/signing/tasks",
+      "status": 200,
+      "ms": 34.1,
+      "operation_id": "listSignatureTasks"
+    },
+    {
+      "path": "/api/v1/catalog-products/{product_id}/detail",
+      "url": "/api/v1/catalog-products/1/detail",
+      "status": 200,
+      "ms": 18.0,
+      "operation_id": "getCatalogProductDetail"
+    },
+    {
+      "path": "/api/v1/bulk-lots/{lot_id}/detail",
+      "url": "/api/v1/bulk-lots/1/detail",
+      "status": 200,
+      "ms": 15.4,
+      "operation_id": "getBulkLotDetail"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/overview",
+      "url": "/api/v1/contacts/1/overview",
+      "status": 200,
+      "ms": 14.1,
+      "operation_id": "getMemberOverview"
+    },
+    {
+      "path": "/api/v1/purchase-orders",
+      "url": "/api/v1/purchase-orders",
+      "status": 200,
+      "ms": 12.0,
+      "operation_id": "listPurchaseOrders"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/consignments",
+      "url": "/api/v1/contacts/1/consignments",
+      "status": 200,
+      "ms": 11.5,
+      "operation_id": "listMemberConsignments"
+    },
+    {
+      "path": "/api/v1/reports/inventory-value",
+      "url": "/api/v1/reports/inventory-value",
+      "status": 200,
+      "ms": 10.4,
+      "operation_id": "inventoryValueReport"
+    },
+    {
+      "path": "/api/v1/stocktakes",
+      "url": "/api/v1/stocktakes",
+      "status": 200,
+      "ms": 10.2,
+      "operation_id": "listStocktakes"
+    },
+    {
+      "path": "/api/v1/reports/consignment-payables",
+      "url": "/api/v1/reports/consignment-payables",
+      "status": 200,
+      "ms": 10.1,
+      "operation_id": "consignmentPayablesReport"
+    },
+    {
+      "path": "/api/v1/serialized-items/{item_id}/detail",
+      "url": "/api/v1/serialized-items/1/detail",
+      "status": 200,
+      "ms": 9.4,
+      "operation_id": "getSerializedItemDetail"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/sourced-items",
+      "url": "/api/v1/contacts/1/sourced-items",
+      "status": 200,
+      "ms": 8.8,
+      "operation_id": "listMemberSourcedItems"
+    },
+    {
+      "path": "/api/v1/returns/{return_id}",
+      "url": "/api/v1/returns/1",
+      "status": 200,
+      "ms": 8.2,
+      "operation_id": "getReturn"
+    },
+    {
+      "path": "/api/v1/acquisitions/{acquisition_id}",
+      "url": "/api/v1/acquisitions/945",
+      "status": 200,
+      "ms": 7.7,
+      "operation_id": "getAcquisition"
+    },
+    {
+      "path": "/api/v1/sales/{sale_id}",
+      "url": "/api/v1/sales/5329",
+      "status": 200,
+      "ms": 7.3,
+      "operation_id": "getSale"
+    },
+    {
+      "path": "/api/v1/catalog-products",
+      "url": "/api/v1/catalog-products",
+      "status": 200,
+      "ms": 7.2,
+      "operation_id": "listCatalogProducts"
+    },
+    {
+      "path": "/api/v1/consignment/settlements",
+      "url": "/api/v1/consignment/settlements",
+      "status": 200,
+      "ms": 7.1,
+      "operation_id": "listConsignmentSettlements"
+    },
+    {
+      "path": "/api/v1/purchase-orders/{purchase_order_id}",
+      "url": "/api/v1/purchase-orders/91",
+      "status": 200,
+      "ms": 6.9,
+      "operation_id": "getPurchaseOrder"
+    },
+    {
+      "path": "/api/v1/reports/store-credit/flows",
+      "url": "/api/v1/reports/store-credit/flows",
+      "status": 200,
+      "ms": 6.6,
+      "operation_id": "storeCreditFlows"
+    },
+    {
+      "path": "/api/v1/contacts/members",
+      "url": "/api/v1/contacts/members",
+      "status": 200,
+      "ms": 6.4,
+      "operation_id": "listMembersWithCredit"
+    },
+    {
+      "path": "/api/v1/invoices/{invoice_id}",
+      "url": "/api/v1/invoices/1",
+      "status": 404,
+      "ms": 6.1,
+      "operation_id": "getInvoice"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/national-id",
+      "url": "/api/v1/contacts/1/national-id",
+      "status": 200,
+      "ms": 6.0,
+      "operation_id": "revealContactNationalId"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/store-credit",
+      "url": "/api/v1/contacts/1/store-credit",
+      "status": 200,
+      "ms": 5.8,
+      "operation_id": "getStoreCredit"
+    },
+    {
+      "path": "/api/v1/sales",
+      "url": "/api/v1/sales",
+      "status": 200,
+      "ms": 5.5,
+      "operation_id": "listSales"
+    },
+    {
+      "path": "/api/v1/bulk-lots",
+      "url": "/api/v1/bulk-lots",
+      "status": 200,
+      "ms": 5.4,
+      "operation_id": "listBulkLots"
+    },
+    {
+      "path": "/api/v1/contacts",
+      "url": "/api/v1/contacts",
+      "status": 200,
+      "ms": 5.4,
+      "operation_id": "listContacts"
+    },
+    {
+      "path": "/api/v1/brands",
+      "url": "/api/v1/brands",
+      "status": 200,
+      "ms": 5.3,
+      "operation_id": "listBrands"
+    },
+    {
+      "path": "/api/v1/campaigns",
+      "url": "/api/v1/campaigns",
+      "status": 200,
+      "ms": 5.3,
+      "operation_id": "listCampaigns"
+    },
+    {
+      "path": "/api/v1/categories/{category_id}/pricing-rules",
+      "url": "/api/v1/categories/1/pricing-rules",
+      "status": 200,
+      "ms": 5.3,
+      "operation_id": "listCategoryPricingRules"
+    },
+    {
+      "path": "/api/v1/stocktakes/{stocktake_id}",
+      "url": "/api/v1/stocktakes/1",
+      "status": 200,
+      "ms": 5.3,
+      "operation_id": "getStocktake"
+    },
+    {
+      "path": "/api/v1/einvoice/queue",
+      "url": "/api/v1/einvoice/queue",
+      "status": 200,
+      "ms": 5.2,
+      "operation_id": "listEInvoiceQueue"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/purchases",
+      "url": "/api/v1/contacts/1/purchases",
+      "status": 200,
+      "ms": 5.0,
+      "operation_id": "listMemberPurchases"
+    },
+    {
+      "path": "/api/v1/menu-items",
+      "url": "/api/v1/menu-items",
+      "status": 200,
+      "ms": 4.8,
+      "operation_id": "listMenuItems"
+    },
+    {
+      "path": "/api/v1/serialized-items",
+      "url": "/api/v1/serialized-items",
+      "status": 200,
+      "ms": 4.8,
+      "operation_id": "listSerializedItems"
+    },
+    {
+      "path": "/api/v1/suppliers",
+      "url": "/api/v1/suppliers",
+      "status": 200,
+      "ms": 4.8,
+      "operation_id": "listSuppliers"
+    },
+    {
+      "path": "/api/v1/cash-sessions/current",
+      "url": "/api/v1/cash-sessions/current",
+      "status": 200,
+      "ms": 4.6,
+      "operation_id": "getCurrentCashSession"
+    },
+    {
+      "path": "/api/v1/bulk-lots/by-code/{lot_code}",
+      "url": "/api/v1/bulk-lots/by-code/S1-9BD2007331",
+      "status": 404,
+      "ms": 4.5,
+      "operation_id": "getBulkLotByCode"
+    },
+    {
+      "path": "/api/v1/categories",
+      "url": "/api/v1/categories",
+      "status": 200,
+      "ms": 4.5,
+      "operation_id": "listCategories"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/purchases/{sale_id}",
+      "url": "/api/v1/contacts/1/purchases/5329",
+      "status": 404,
+      "ms": 4.4,
+      "operation_id": "getMemberPurchaseDetail"
+    },
+    {
+      "path": "/api/v1/product-models",
+      "url": "/api/v1/product-models",
+      "status": 200,
+      "ms": 4.3,
+      "operation_id": "listProductModels"
+    },
+    {
+      "path": "/api/v1/stores/{store_id}/receipt-header",
+      "url": "/api/v1/stores/1/receipt-header",
+      "status": 200,
+      "ms": 4.2,
+      "operation_id": "getStoreReceiptHeader"
+    },
+    {
+      "path": "/api/v1/reports/daily-cash",
+      "url": "/api/v1/reports/daily-cash",
+      "status": 422,
+      "ms": 4.0,
+      "operation_id": "dailyCashReport"
+    },
+    {
+      "path": "/api/v1/reports/daily-summary",
+      "url": "/api/v1/reports/daily-summary",
+      "status": 422,
+      "ms": 4.0,
+      "operation_id": "dailySummaryReport"
+    },
+    {
+      "path": "/api/v1/settings/premium-rate/history",
+      "url": "/api/v1/settings/premium-rate/history",
+      "status": 200,
+      "ms": 4.0,
+      "operation_id": "getPremiumRateHistory"
+    },
+    {
+      "path": "/api/v1/signing/tasks/{task_id}",
+      "url": "/api/v1/signing/tasks/1",
+      "status": 200,
+      "ms": 4.0,
+      "operation_id": "getSignatureTask"
+    },
+    {
+      "path": "/api/v1/campaigns/{campaign_id}",
+      "url": "/api/v1/campaigns/1",
+      "status": 200,
+      "ms": 3.8,
+      "operation_id": "getCampaign"
+    },
+    {
+      "path": "/api/v1/catalog-products/by-sku/{sku}",
+      "url": "/api/v1/catalog-products/by-sku/1",
+      "status": 404,
+      "ms": 3.8,
+      "operation_id": "getCatalogProductBySku"
+    },
+    {
+      "path": "/api/v1/serialized-items/by-code/{item_code}",
+      "url": "/api/v1/serialized-items/by-code/S1-9BD2007331",
+      "status": 200,
+      "ms": 3.7,
+      "operation_id": "getSerializedItemByCode"
+    },
+    {
+      "path": "/api/v1/suppliers/{supplier_id}",
+      "url": "/api/v1/suppliers/1",
+      "status": 200,
+      "ms": 3.7,
+      "operation_id": "getSupplier"
+    },
+    {
+      "path": "/api/v1/contacts [超大分頁]",
+      "url": "/api/v1/contacts",
+      "status": 422,
+      "ms": 3.6
+    },
+    {
+      "path": "/api/v1/reports/trends [反向區間]",
+      "url": "/api/v1/reports/trends",
+      "status": 422,
+      "ms": 3.5
+    },
+    {
+      "path": "/api/v1/settings",
+      "url": "/api/v1/settings",
+      "status": 200,
+      "ms": 3.4,
+      "operation_id": "getSettings"
+    },
+    {
+      "path": "/api/v1/sales [零分頁]",
+      "url": "/api/v1/sales",
+      "status": 422,
+      "ms": 3.4
+    },
+    {
+      "path": "/api/v1/kiosk/tasks/current",
+      "url": "/api/v1/kiosk/tasks/current",
+      "status": 403,
+      "ms": 3.2,
+      "operation_id": "getCurrentKioskTask"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}",
+      "url": "/api/v1/contacts/1",
+      "status": 200,
+      "ms": 3.1,
+      "operation_id": "getContact"
+    },
+    {
+      "path": "/api/v1/signing/tasks/{task_id}/signature",
+      "url": "/api/v1/signing/tasks/1/signature",
+      "status": 200,
+      "ms": 3.1,
+      "operation_id": "getSignatureImage"
+    },
+    {
+      "path": "/api/v1/reports/trends [naive-datetime(F-1 回歸)]",
+      "url": "/api/v1/reports/trends",
+      "status": 422,
+      "ms": 2.7
+    },
+    {
+      "path": "/api/v1/kiosk/tasks/{task_id}",
+      "url": "/api/v1/kiosk/tasks/1",
+      "status": 403,
+      "ms": 2.6,
+      "operation_id": "getKioskTask"
+    },
+    {
+      "path": "/api/v1/health",
+      "url": "/api/v1/health",
+      "status": 200,
+      "ms": 1.0,
+      "operation_id": "getHealth"
+    }
+  ]
+}

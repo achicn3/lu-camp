@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-07-16T00:24:19.005683+00:00",
+  "seed": 20260716,
+  "days": 200,
+  "date_span": [
+    "2025-12-28 02:01:27.076375+00:00",
+    "2026-07-15 11:57:47.684549+00:00"
+  ],
+  "counts": {
+    "contacts": 2324,
+    "sales": 5325,
+    "sale_lines": 11888,
+    "acquisitions": 945,
+    "serialized_items": 1531,
+    "bulk_lots": 40,
+    "signature_tasks": 746,
+    "consignment_settlements": 259,
+    "store_credit_ledger": 219,
+    "cash_sessions": 200,
+    "cash_movements": 6152,
+    "purchase_orders": 91,
+    "goods_receipts": 109,
+    "stocktakes": 8,
+    "returns": 38,
+    "audit_log": 1574,
+    "campaigns": 4,
+    "menu_items": 25
+  },
+  "stats": {
+    "sales": 5325,
+    "voids": 81,
+    "returns": 38,
+    "buyouts": 645,
+    "consign_intakes": 260,
+    "bulk_lots": 40,
+    "affidavits": 635,
+    "scu_tasks": 66,
+    "ack_tasks": 45,
+    "pos": 91,
+    "receipts": 109,
+    "input_invoices": 97,
+    "stocktakes": 8,
+    "settle_paid": 249,
+    "credit_grants": 145,
+    "sc_sales": 73,
+    "cash_sessions": 200,
+    "members": 2264
+  },
+  "errors": {
+    "sale:InsufficientStock": 4
+  }
+}
