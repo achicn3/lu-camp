@@ -251,6 +251,17 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
         ),
         {"wm": sim.watermarks["signature_tasks"]},
     )
+    # 因果鏈修正（Codex 第三輪 P1）：綁定切結的收購，其建立時間必須**晚於**該切結的
+    # 簽署時間（先簽才收）——同日同序的泛用平移會讓兩者同刻、簽名反而在收購之後。
+    await sim.s.execute(
+        text(
+            "UPDATE acquisitions a SET created_at = t.signed_at + interval '2 minutes', "
+            "updated_at = t.signed_at + interval '2 minutes' "
+            "FROM signature_tasks t WHERE t.id = a.signature_task_id "
+            "AND a.id > :wm AND t.signed_at IS NOT NULL"
+        ),
+        {"wm": sim.watermarks["acquisitions"]},
+    )
     await sim.s.execute(
         text(
             "UPDATE cash_sessions SET "
@@ -333,7 +344,8 @@ async def _do_buyout(sim: Sim, day: int) -> None:
     task_id: int | None = None
     if day >= FIRST_AFFIDAVIT_DAY:
         task_id = await _sign_affidavit(sim, seller, aff_items, total, payout)
-    result = await AcquisitionService(sim.s).create_acquisition(
+    svc = AcquisitionService(sim.s)
+    result = await svc.create_acquisition(
         sim.store_id,
         sim.clerk_id,
         AcquisitionCreate(
@@ -349,6 +361,16 @@ async def _do_buyout(sim: Sim, day: int) -> None:
     sim.stats["buyouts"] += 1
     if payout is PayoutMethod.STORE_CREDIT:
         sim.stats["credit_grants"] += 1
+    # ~2% 收購作廢（docs/27 承諾的高風險路徑：庫存回收、ACQUISITION_VOID_IN 退現、
+    # 購物金沖回、稽核；當場反悔=項目未售出、購物金未花用，符合 F6.5 擋則）
+    if _RNG.random() < 0.02:
+        await svc.void_acquisition(
+            sim.store_id, result.acquisition_id,
+            actor_user_id=sim.manager_id, reason="模擬客人當場反悔（F6.5）",
+        )
+        await sim.s.commit()
+        sim.stats["acq_voids"] = sim.stats.get("acq_voids", 0) + 1
+        return
     for code in result.item_codes or []:
         sim.owned_codes.append(code)
 
@@ -855,15 +877,16 @@ async def _bootstrap(sim: Sim) -> None:
             )
     await sim.s.commit()
 
-    from app.modules.inventory.models import CatalogProduct
+    # 期初庫存走可稽核路徑（Codex 第三輪 P1）：建檔一律 0 → 「開店進貨」採購單收貨補足，
+    # 使每一單位現量都能從 stock_movements 對帳回來（直接插量＝帳外庫存）。
+    from app.modules.inventory.service import InventoryService
 
+    inv_svc = InventoryService(sim.s)
     for sku, name, price in CATALOG_ITEMS:
-        p = CatalogProduct(
-            store_id=sim.store_id, sku=sku, name=name, unit_price=Decimal(price),
-            quantity_on_hand=_RNG.randint(300, 900), reorder_point=_RNG.choice([20, 30, 50]),
+        p = await inv_svc.create_catalog(
+            sim.store_id, sku=sku, name=name, unit_price=Decimal(price),
+            reorder_point=_RNG.choice([20, 30, 50]),
         )
-        sim.s.add(p)
-        await sim.s.flush()
         sim.catalog_ids.append(p.id)
     await sim.s.commit()
 
@@ -881,6 +904,38 @@ async def _bootstrap(sim: Sim) -> None:
         s = await purch.create_supplier(sim.store_id, SupplierCreate(name=sname))
         sim.supplier_ids.append(s.id)
     await sim.s.commit()
+
+    # 開店進貨：期初庫存唯一入口（採購→收貨→PURCHASE stock_movement，全程可對帳）
+    opening_po = await purch.create_purchase_order(
+        sim.store_id,
+        PurchaseOrderCreate(
+            supplier_id=sim.supplier_ids[0],
+            lines=[
+                PurchaseOrderLineCreate(
+                    catalog_product_id=cid,
+                    qty=_RNG.randint(300, 900),
+                    unit_cost=Decimal(_RNG.choice([40, 60, 90, 120])),
+                )
+                for cid in sim.catalog_ids
+            ],
+            submit=True,
+        ),
+        actor_user_id=sim.manager_id,
+    )
+    await sim.s.commit()
+    po_full = await purch.get_purchase_order(sim.store_id, opening_po.id)
+    assert po_full is not None
+    await purch.receive_purchase_order(
+        sim.store_id, opening_po.id,
+        actor_user_id=sim.manager_id,
+        lines=[ReceiveLineIn(line_id=ln.id, qty=ln.qty) for ln in po_full.lines],
+        idempotency_key=sim.key("recv"),
+        request_fingerprint=sim.key("rfp"),
+        invoice=None,
+    )
+    await sim.s.commit()
+    sim.stats["pos"] += 1
+    sim.stats["receipts"] += 1
 
     contacts = ContactService(sim.s)
     for i in range(60):

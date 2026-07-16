@@ -182,6 +182,69 @@ async def s2_acquisition_binding(session: AsyncSession) -> None:
         ).scalar_one()
         check("S2 強制簽署生效後付現收購全綁切結", unbound == 0, f"未綁 {unbound} 筆")
 
+    # 內容快照 ↔ 實際單據深度比對（Codex 第三輪 P2：kind/status/人對了但金額品項不對
+    # 也該抓）。客人簽的 items/total/lot/撥款，必須與綁定收購的實體庫存與撥款一致。
+    pairs = (
+        await session.execute(
+            text(
+                """
+        SELECT a.id, a.type, a.payout_method, t.content, t.chosen_payout
+        FROM acquisitions a JOIN signature_tasks t ON t.id = a.signature_task_id
+        WHERE a.signature_task_id IS NOT NULL AND a.voided_at IS NULL
+        """
+            )
+        )
+    ).all()
+    ser = (
+        await session.execute(
+            text(
+                "SELECT acquisition_id, name, acquisition_cost FROM serialized_items "
+                "WHERE acquisition_id IS NOT NULL AND acquisition_cost IS NOT NULL"
+            )
+        )
+    ).all()
+    lots = (
+        await session.execute(
+            text(
+                "SELECT acquisition_id, name, acquisition_cost, total_qty, acquisition_basis "
+                "FROM bulk_lots WHERE acquisition_id IS NOT NULL"
+            )
+        )
+    ).all()
+    ser_by_acq: dict[int, list[tuple[str, int]]] = {}
+    for aid, name, cost in ser:
+        ser_by_acq.setdefault(aid, []).append((name, int(cost)))
+    lot_by_acq = {aid: (name, int(cost), int(q), basis) for aid, name, cost, q, basis in lots}
+    mismatch: list[tuple[int, str]] = []
+    for aid, typ, payout, content_raw, chosen in pairs:
+        content = content_raw if isinstance(content_raw, dict) else json.loads(content_raw)
+        if chosen != payout:
+            mismatch.append((aid, f"payout {chosen}≠{payout}"))
+            continue
+        signed_items = sorted(
+            (str(i.get("name")), int(str(i.get("amount")))) for i in content.get("items", [])
+        )
+        signed_total = int(str(content.get("total", "-1")))
+        if typ == "BULK_LOT":
+            got = lot_by_acq.get(aid)
+            lot_signed = content.get("lot", {})
+            if (
+                got is None
+                or got[1] != signed_total
+                or int(lot_signed.get("total_qty", -1)) != got[2]
+                or str(lot_signed.get("acquisition_basis")) != str(got[3])
+            ):
+                mismatch.append((aid, f"lot 快照≠實體 {got}"))
+        else:
+            got_items = sorted(ser_by_acq.get(aid, []))
+            if got_items != signed_items or sum(c for _, c in got_items) != signed_total:
+                mismatch.append((aid, "items/total 快照≠實體"))
+    check(
+        "S2 快照內容＝綁定收購實體（items/total/lot/撥款）",
+        len(mismatch) == 0,
+        f"不符 {mismatch[:5]}（綁定 {len(pairs)} 筆）",
+    )
+
 
 async def s3_input_invoice(session: AsyncSession) -> None:
     """S3：進項發票——全空或全備；net+tax=total；同店同號同日唯一；格式 2英8數。"""

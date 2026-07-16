@@ -1,52 +1,53 @@
 {
-  "generated_at": "2026-07-16T12:03:07.761034+00:00",
+  "generated_at": "2026-07-16T12:23:44.523949+00:00",
   "seed": 20260716,
   "days": 200,
   "date_span": [
     "2025-12-28 02:01:15+00:00",
-    "2026-07-15 02:26:15+00:00"
+    "2026-07-15 02:25:00+00:00"
   ],
   "counts": {
-    "contacts": 2355,
-    "sales": 5318,
+    "contacts": 2260,
+    "sales": 5309,
     "sale_lines": 12007,
     "acquisitions": 945,
-    "serialized_items": 1566,
+    "serialized_items": 1520,
     "bulk_lots": 40,
-    "signature_tasks": 747,
+    "signature_tasks": 735,
     "consignment_settlements": 259,
-    "store_credit_ledger": 242,
+    "store_credit_ledger": 239,
     "cash_sessions": 200,
-    "cash_movements": 6130,
-    "purchase_orders": 87,
-    "goods_receipts": 113,
+    "cash_movements": 6125,
+    "purchase_orders": 90,
+    "goods_receipts": 112,
     "stocktakes": 8,
-    "returns": 44,
-    "audit_log": 1594,
+    "returns": 37,
+    "audit_log": 1583,
     "campaigns": 4,
     "menu_items": 25
   },
   "stats": {
-    "sales": 5318,
-    "voids": 99,
-    "returns": 44,
+    "sales": 5309,
+    "voids": 83,
+    "returns": 37,
     "buyouts": 645,
     "consign_intakes": 260,
     "bulk_lots": 40,
     "affidavits": 635,
-    "scu_tasks": 67,
-    "ack_tasks": 45,
-    "pos": 87,
-    "receipts": 113,
-    "input_invoices": 96,
+    "scu_tasks": 66,
+    "ack_tasks": 34,
+    "pos": 90,
+    "receipts": 112,
+    "input_invoices": 91,
     "stocktakes": 8,
-    "settle_paid": 249,
-    "credit_grants": 166,
-    "sc_sales": 75,
+    "settle_paid": 248,
+    "credit_grants": 161,
+    "sc_sales": 73,
     "cash_sessions": 200,
-    "members": 2295
+    "members": 2200,
+    "acq_voids": 11
   },
   "errors": {
-    "sale:InsufficientStock": 4
+    "sale:InsufficientStock": 9
   }
 }

@@ -13,11 +13,20 @@
 全部在 `<repo>/.env.r2`（受 `.gitignore` 保護，**嚴禁 commit**）：
 `R2_ENDPOINT`／`R2_ACCESS_KEY_ID`／`R2_SECRET_ACCESS_KEY`／`R2_BUCKET=pos`／
 `R2_BACKUP_PASSPHRASE`（AES 加密口令）。
-⚠️ **口令遺失＝備份全部作廢**。請將 `.env.r2` 另抄一份放店外實體保管（例如店主手機備忘錄）。
+
+⚠️ **店外必須同時保管兩組金鑰，缺一備份即廢**（Codex 第三輪 P1）：
+
+1. `.env.r2` 全檔（含 AES 口令）——沒有口令，R2 上的備份解不開。
+2. repo 根 `.env` 的 **`PII_ENC_KEY`、`HMAC_KEY`、`SECRET_KEY`**——dump 裡的身分證是
+   「用 PII_ENC_KEY 加密後」的密文、去重索引是「用 HMAC_KEY 算的」；整機滅失後若只還原
+   資料庫而金鑰不同，**所有身分證永遠解不開、去重索引全部失效**。
+   （店主手機備忘錄或紙本保險箱各抄一份；換金鑰時同步更新。）
 
 ## 1. 備份（dump → 加密 → 上傳）
 
 ```bash
+set -euo pipefail   # 任一步失敗即中止——dump 失敗仍繼續加密/上傳＝回報成功卻還原不了
+                    # 的假備份（Codex 第三輪 P1）
 DOCKER="/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe"
 # set -a：source 的變數必須 export，否則後面的 Python 子行程拿不到 R2 憑證
 # （乾淨 shell 會 KeyError、上傳靜默失敗；Codex 第二輪 P1）。
@@ -28,6 +37,9 @@ DB=lucamp            # 正式庫名；演練用 lucamp_sim
 # 1) 容器內 dump（custom format，含 BYTEA 簽名影像）
 "$DOCKER" exec lu-camp-db-1 pg_dump -U lucamp -Fc -d "$DB" -f /tmp/backup.dump
 "$DOCKER" exec lu-camp-db-1 cat /tmp/backup.dump > /home/test/lu-camp-backups/${DB}_${STAMP}.dump
+# 上傳前驗 dump 可讀（pg_restore --list 解析目錄；空檔/壞檔在此擋下）
+"$DOCKER" exec lu-camp-db-1 pg_restore --list /tmp/backup.dump > /dev/null
+test -s /home/test/lu-camp-backups/${DB}_${STAMP}.dump
 
 # 2) 加密（AES-256-CBC + PBKDF2 20 萬次）
 openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \

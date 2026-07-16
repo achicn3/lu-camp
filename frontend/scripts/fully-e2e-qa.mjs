@@ -121,10 +121,18 @@ async function sweepRoutes(page) {
   for (const [route, folder, slug] of ROUTES) {
     const before = jsErrors.length;
     try {
-      await page.goto(`${BASE}${route}`, { waitUntil: "networkidle", timeout: 20000 });
+      const resp = await page.goto(`${BASE}${route}`, {
+        waitUntil: "networkidle",
+        timeout: 20000,
+      });
+      // goto 對 404/500 一樣正常 resolve——靜態錯誤頁不丟 console error 也能綠燈出場，
+      // 必須驗 HTTP 狀態（Codex 第三輪 P1）。
+      if (resp && resp.status() >= 400) {
+        note(folder, "缺陷", `路由 ${route} 回 HTTP ${resp.status()}`, "非 2xx/3xx 頁面");
+      }
       await page.waitForTimeout(700); // 等資料載入/渲染
     } catch (e) {
-      note(folder, "系統壞", `路由 ${route} 載入失敗`, String(e).slice(0, 160));
+      note(folder, "缺陷", `路由 ${route} 載入失敗`, String(e).slice(0, 160));
     }
     await shot(page, folder, slug);
     try {
@@ -180,7 +188,8 @@ async function checkContactValidation(page) {
       note(folder, "資訊", "會員建檔表單未自動開啟", "找不到 name 輸入框，略過此防呆檢查（非缺陷）");
     }
   } catch (e) {
-    note(folder, "資訊", "會員防呆檢查例外", String(e).slice(0, 160));
+    // 探針自身壞掉（selector 失效等）不得默默出綠燈——必測項未執行＝缺陷（Codex 第三輪 P1）
+    note(folder, "缺陷", "會員防呆檢查例外（必測項未完成）", String(e).slice(0, 160));
   }
 }
 
