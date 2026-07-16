@@ -532,10 +532,15 @@ class SigningService:
         store_id: int,
         status: SignatureTaskStatus | None,
         *,
+        kind: SignatureTaskKind | None = None,
+        contact_id: int | None = None,
         limit: int,
         offset: int,
     ) -> list[SignatureTask]:
-        return await self._repo.list_tasks(store_id, status, limit=limit, offset=offset)
+        """簽署任務清單（店務端調閱證據用）：支援狀態/類型/對象過濾。"""
+        return await self._repo.list_tasks(
+            store_id, status, kind=kind, contact_id=contact_id, limit=limit, offset=offset
+        )
 
     async def get_agreement_for_task(self, task: SignatureTask) -> AgreementVersion | None:
         """取任務綁定的切結書版本列（手持端顯示全文用）。"""

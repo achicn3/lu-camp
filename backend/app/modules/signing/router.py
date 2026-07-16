@@ -20,7 +20,7 @@ from app.modules.signing.schemas import (
     SignatureTaskRead,
 )
 from app.modules.signing.service import SigningService
-from app.shared.enums import SignatureTaskStatus
+from app.shared.enums import SignatureTaskKind, SignatureTaskStatus
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
@@ -114,11 +114,15 @@ async def list_signature_tasks(
     session: SessionDep,
     user: StaffDep,
     task_status: Annotated[SignatureTaskStatus | None, Query(alias="status")] = None,
+    kind: Annotated[SignatureTaskKind | None, Query()] = None,
+    contact_id: Annotated[int | None, Query(ge=1)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[SignatureTaskRead]:
     service = SigningService(session)
-    tasks = await service.list_tasks(user.store_id, task_status, limit=limit, offset=offset)
+    tasks = await service.list_tasks(
+        user.store_id, task_status, kind=kind, contact_id=contact_id, limit=limit, offset=offset
+    )
     return [_to_read(t, await service.get_agreement_for_task(t)) for t in tasks]
 
 

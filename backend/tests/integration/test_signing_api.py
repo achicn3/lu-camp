@@ -759,3 +759,50 @@ async def test_cross_store_isolation(client: httpx.AsyncClient, db_session: Asyn
         headers=_auth(kiosk2),
     )
     assert resp.status_code == 404
+
+
+# ── 簽署紀錄調閱：kind / contact_id 過濾（簽署證據調閱 UI 後端） ─────────────
+
+
+async def test_list_tasks_filters_by_kind_and_contact(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """列表支援 kind 與 contact_id 過濾（店長調閱證據用；同店單一待簽→先作廢再建下一張）。"""
+    s = await _seed(db_session)
+    other = Contact(
+        store_id=s.store_id,
+        name="李小華",
+        phone="0922333444",
+        national_id_enc=get_pii_cipher().encrypt("B123456780"),
+        national_id_blind_index=national_id_blind_index("B123456780"),
+        roles=["SELLER", "MEMBER"],
+    )
+    db_session.add(other)
+    await db_session.commit()
+
+    t1 = await _create_task(client, s.clerk, s.contact_id)  # AFFIDAVIT / contact A
+    await client.post(f"/api/v1/signing/tasks/{t1['id']}/cancel", headers=_auth(s.clerk))
+    t2 = await _create_task(
+        client, s.clerk, s.contact_id,
+        kind="STORE_CREDIT_USE", content={"debit": "300", "sale_total": "300"},
+    )  # SCU / contact A
+    await client.post(f"/api/v1/signing/tasks/{t2['id']}/cancel", headers=_auth(s.clerk))
+    t3 = await _create_task(client, s.clerk, other.id)  # AFFIDAVIT / contact B（留 PENDING）
+
+    resp = await client.get(
+        "/api/v1/signing/tasks", params={"kind": "STORE_CREDIT_USE"}, headers=_auth(s.clerk)
+    )
+    assert resp.status_code == 200
+    assert [t["id"] for t in resp.json()] == [t2["id"]]
+
+    resp = await client.get(
+        "/api/v1/signing/tasks", params={"contact_id": s.contact_id}, headers=_auth(s.clerk)
+    )
+    assert {t["id"] for t in resp.json()} == {t1["id"], t2["id"]}
+
+    resp = await client.get(
+        "/api/v1/signing/tasks",
+        params={"kind": "ACQUISITION_AFFIDAVIT", "contact_id": other.id},
+        headers=_auth(s.clerk),
+    )
+    assert [t["id"] for t in resp.json()] == [t3["id"]]

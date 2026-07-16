@@ -7957,6 +7957,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["SignatureTaskStatus"] | null;
+                kind?: components["schemas"]["SignatureTaskKind"] | null;
+                contact_id?: number | null;
                 limit?: number;
                 offset?: number;
             };

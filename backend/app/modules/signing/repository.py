@@ -6,7 +6,7 @@ from sqlalchemy import CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.signing.models import AgreementVersion, SignatureTask
-from app.shared.enums import SignatureTaskStatus
+from app.shared.enums import SignatureTaskKind, SignatureTaskStatus
 
 
 class SigningRepository:
@@ -68,12 +68,18 @@ class SigningRepository:
         store_id: int,
         status: SignatureTaskStatus | None,
         *,
+        kind: SignatureTaskKind | None = None,
+        contact_id: int | None = None,
         limit: int,
         offset: int,
     ) -> list[SignatureTask]:
         stmt = select(SignatureTask).where(SignatureTask.store_id == store_id)
         if status is not None:
             stmt = stmt.where(SignatureTask.status == status)
+        if kind is not None:
+            stmt = stmt.where(SignatureTask.kind == kind)
+        if contact_id is not None:
+            stmt = stmt.where(SignatureTask.contact_id == contact_id)
         stmt = stmt.order_by(SignatureTask.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
