@@ -851,3 +851,27 @@ async def test_lot_bearing_affidavit_cannot_bind_buyout(
         "/api/v1/acquisitions", json=_buyout_body(contact_id, task.id, "CASH"), headers=_auth(token)
     )
     assert resp.status_code == 422, resp.text
+
+
+async def test_signature_task_detail_backfills_bound_acquisition(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """調閱端點反向回填綁定收購單（任務先建、收購後綁——ref_id 不會有值）。"""
+    store_id, token, contact_id = await _seed(db_session)
+    await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "1000"}, headers=_auth(token)
+    )
+    clerk_id = await _clerk_id(db_session, store_id)
+    task_id = await _signed_affidavit(db_session, store_id, contact_id, clerk_id, PayoutMethod.CASH)
+
+    resp = await client.post(
+        "/api/v1/acquisitions", json=_buyout_body(contact_id, task_id, "CASH"), headers=_auth(token)
+    )
+    assert resp.status_code == 201, resp.text
+    acq_id = resp.json()["acquisition_id"]
+
+    detail = await client.get(f"/api/v1/signing/tasks/{task_id}", headers=_auth(token))
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["bound_acquisition_id"] == acq_id
+    assert body["bound_sale_id"] is None

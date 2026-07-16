@@ -41,6 +41,9 @@ class SignatureTaskRead(BaseModel):
     ref_type: str | None
     ref_id: int | None
     created_at: datetime
+    # 反向綁定（僅單筆調閱端點回填；清單為 None 以免 N+1）：切結→收購單、扣抵確認→銷售單。
+    bound_acquisition_id: int | None = None
+    bound_sale_id: int | None = None
 
 
 class KioskTaskRead(SignatureTaskRead):

@@ -49,8 +49,26 @@ describe("contentRows", () => {
 });
 
 describe("refLabel", () => {
-  it("ACK 指向銷售單；其他類型回 null", () => {
+  it("ACK 指向銷售單；未回填反向綁定時回 null", () => {
     expect(refLabel("TRANSACTION_ACK", "sale", 123)).toBe("銷售單 #123");
     expect(refLabel("ACQUISITION_AFFIDAVIT", null, null)).toBeNull();
+  });
+
+  it("反向綁定：切結→收購單、扣抵確認→銷售單", () => {
+    expect(refLabel("ACQUISITION_AFFIDAVIT", null, null, 77, null)).toBe("收購單 #77");
+    expect(refLabel("STORE_CREDIT_USE", null, null, null, 88)).toBe("銷售單 #88");
+  });
+});
+
+describe("store_credit_premium 快照", () => {
+  it("溢價物件結構化呈現（率/實發/多得），不再被物件過濾吃掉", () => {
+    const rows = contentRows({
+      total: "1000",
+      store_credit_premium: { rate: "0.12", amount: "1120", extra: "120" },
+    });
+    const row = rows.find((r) => r.label === "購物金溢價（凍結）");
+    expect(row?.value).toContain("12.0%");
+    expect(row?.value).toContain("1120");
+    expect(row?.value).toContain("120");
   });
 });

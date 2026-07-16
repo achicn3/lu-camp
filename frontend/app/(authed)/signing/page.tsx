@@ -33,37 +33,77 @@ function timeLabel(iso: string | null | undefined): string {
 }
 
 /** 簽名影像需帶 Bearer token 取回（img src 無法帶標頭）→ blob URL，卸載時釋放。
- *  以 (taskId, url) 配對存放並於回傳時比對，避免 effect 內同步 setState 與跨任務殘影。 */
-function useSignatureImage(taskId: number | null, hasSignature: boolean): string | null {
-  const [img, setImg] = useState<{ id: number; url: string } | null>(null);
+ *  以 (taskId, url|error) 配對存放並於回傳時比對，避免 effect 內同步 setState 與跨任務殘影；
+ *  失敗必須成為可見錯誤態，不可永遠「載入中」（Codex P2）。 */
+function useSignatureImage(
+  taskId: number | null,
+  hasSignature: boolean,
+  retryKey: number,
+): { url: string | null; error: string | null } {
+  const [img, setImg] = useState<{ id: number; url?: string; error?: string } | null>(null);
   useEffect(() => {
     if (taskId == null || !hasSignature) return;
     let objectUrl: string | null = null;
     let cancelled = false;
     (async () => {
-      const token = getToken();
-      const res = await fetch(`${API_BASE}/api/v1/signing/tasks/${taskId}/signature`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      }).catch(() => null);
-      if (!res || !res.ok || cancelled) return;
-      objectUrl = URL.createObjectURL(await res.blob());
-      if (!cancelled) setImg({ id: taskId, url: objectUrl });
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE}/api/v1/signing/tasks/${taskId}/signature`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setImg({ id: taskId, error: `影像載入失敗（HTTP ${res.status}）` });
+          return;
+        }
+        objectUrl = URL.createObjectURL(await res.blob());
+        if (!cancelled) setImg({ id: taskId, url: objectUrl });
+      } catch {
+        if (!cancelled) setImg({ id: taskId, error: "影像載入失敗（連線錯誤）" });
+      }
     })();
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [taskId, hasSignature]);
-  return img !== null && img.id === taskId ? img.url : null;
+  }, [taskId, hasSignature, retryKey]);
+  if (img === null || img.id !== taskId) return { url: null, error: null };
+  return { url: img.url ?? null, error: img.error ?? null };
 }
 
 function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () => void }) {
-  const imageUrl = useSignatureImage(task.id, task.has_signature);
-  const rows = contentRows(task.content as Record<string, unknown>);
-  const ref = refLabel(task.kind, task.ref_type ?? null, task.ref_id ?? null);
+  const [retryKey, setRetryKey] = useState(0);
+  // 清單列缺反向綁定（避免 N+1）→ 開啟時取單筆 detail 回填 bound_*（Codex P1）
+  const detail = useQuery({
+    queryKey: ["signing-task-detail", task.id],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/signing/tasks/{task_id}", {
+        params: { path: { task_id: task.id } },
+      });
+      if (!data) throw new Error(String(error ?? "載入失敗"));
+      return data;
+    },
+  });
+  const full = detail.data ?? task;
+  const { url: imageUrl, error: imageError } = useSignatureImage(
+    task.id,
+    task.has_signature,
+    retryKey,
+  );
+  const rows = contentRows(full.content as Record<string, unknown>);
+  const ref = refLabel(
+    full.kind,
+    full.ref_type ?? null,
+    full.ref_id ?? null,
+    full.bound_acquisition_id ?? null,
+    full.bound_sale_id ?? null,
+  );
   return (
     <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="簽署證據">
-      <div className="card pos-dialog" style={{ maxWidth: 560 }}>
+      <div
+        className="card pos-dialog"
+        style={{ maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }}
+      >
         <h2>
           {SIGNING_KIND_LABELS[task.kind] ?? task.kind} #{task.id}
         </h2>
@@ -96,6 +136,13 @@ function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () 
               alt={`任務 ${task.id} 簽名影像`}
               style={{ maxWidth: "100%", border: "1px solid var(--border, #ccc)", background: "#fff" }}
             />
+          ) : imageError ? (
+            <p role="alert">
+              {imageError}{" "}
+              <button type="button" onClick={() => setRetryKey((k) => k + 1)}>
+                重試
+              </button>
+            </p>
           ) : (
             <p>簽名影像載入中…</p>
           )
@@ -138,7 +185,7 @@ export default function SigningPage() {
 
   const tasks = query.data ?? [];
   return (
-    <main>
+    <section>
       <h1>簽署紀錄</h1>
       <p>調閱客人簽署證據：切結書、購物金扣抵確認、交易簽收（內容快照＋手寫簽名）。</p>
       <div className="filter-row" style={{ display: "flex", gap: 12, margin: "12px 0" }}>
@@ -224,6 +271,6 @@ export default function SigningPage() {
         </button>
       </div>
       {selected ? <TaskDetailDialog task={selected} onClose={() => setSelected(null)} /> : null}
-    </main>
+    </section>
   );
 }

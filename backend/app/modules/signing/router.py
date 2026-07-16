@@ -41,8 +41,16 @@ StaffDep = Annotated[CurrentUser, Depends(get_current_user)]
 KioskDep = Annotated[CurrentUser, Depends(get_kiosk_user)]
 
 
-def _to_read(task: SignatureTask, agreement: AgreementVersion | None) -> SignatureTaskRead:
+def _to_read(
+    task: SignatureTask,
+    agreement: AgreementVersion | None,
+    *,
+    bound_acquisition_id: int | None = None,
+    bound_sale_id: int | None = None,
+) -> SignatureTaskRead:
     return SignatureTaskRead(
+        bound_acquisition_id=bound_acquisition_id,
+        bound_sale_id=bound_sale_id,
         id=task.id,
         store_id=task.store_id,
         kind=task.kind,
@@ -136,7 +144,26 @@ async def get_signature_task(
     task = await service.get_task(user.store_id, task_id)
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="簽署任務不存在")
-    return _to_read(task, await service.get_agreement_for_task(task))
+    # 反向綁定（調閱證據→跳轉單據）：任務建立在單據之前，ref_id 不會回填；
+    # 綁定事實記在對方單據的 signature_task_id，經對方 service 反查（§2）。
+    bound_acq_id: int | None = None
+    bound_sale_id: int | None = None
+    if task.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
+        from app.modules.acquisition.service import AcquisitionService
+
+        acq = await AcquisitionService(session).find_by_signature_task(user.store_id, task.id)
+        bound_acq_id = acq.id if acq is not None else None
+    elif task.kind is SignatureTaskKind.STORE_CREDIT_USE:
+        from app.modules.sales.service import SalesService
+
+        sale = await SalesService(session).find_sale_by_signature_task(user.store_id, task.id)
+        bound_sale_id = sale.id if sale is not None else None
+    return _to_read(
+        task,
+        await service.get_agreement_for_task(task),
+        bound_acquisition_id=bound_acq_id,
+        bound_sale_id=bound_sale_id,
+    )
 
 
 @staff_router.post(

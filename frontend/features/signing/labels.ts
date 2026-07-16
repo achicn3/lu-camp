@@ -64,20 +64,44 @@ export function contentRows(content: Record<string, unknown>): ContentRow[] {
       value: `數量 ${String(l.total_qty ?? "—")}（計價基準 ${String(l.acquisition_basis ?? "—")}）`,
     });
   }
+  // 購物金溢價快照（簽署當下凍結的撥款條款：客人看到並簽的內容，必須完整呈現）
+  const premium = content["store_credit_premium"];
+  if (premium && typeof premium === "object") {
+    const p = premium as { rate?: unknown; amount?: unknown; extra?: unknown };
+    const pct =
+      typeof p.rate === "string" || typeof p.rate === "number"
+        ? `${(Number(p.rate) * 100).toFixed(1)}%`
+        : "—";
+    const amount = p.amount != null ? `$${String(p.amount)}` : "—";
+    const extra = p.extra != null ? `（多得 $${String(p.extra)}）` : "";
+    rows.push({
+      label: "購物金溢價（凍結）",
+      value: `${pct}，選購物金實發 ${amount}${extra}`,
+    });
+  }
   for (const [key, value] of Object.entries(content)) {
-    if (key === "items" || key === "lot") continue;
+    if (key === "items" || key === "lot" || key === "store_credit_premium") continue;
     if (value === null || value === undefined || typeof value === "object") continue;
     rows.push({ label: KNOWN_FIELD_LABELS[key] ?? key, value: String(value) });
   }
   return rows;
 }
 
-/** 綁定單據的顯示文字（AFFIDAVIT→收購單、SCU→銷售單、ACK→ref 銷售單）。 */
+/** 綁定單據的顯示文字。切結/扣抵確認的綁定記在對方單據（signature_task_id），
+ *  由 detail 端點反查回填 bound_*；ACK 則於建立時就指向銷售（ref_id）。 */
 export function refLabel(
   kind: string,
   refType: string | null,
   refId: number | null,
+  boundAcquisitionId?: number | null,
+  boundSaleId?: number | null,
 ): string | null {
+  if (kind === "ACQUISITION_AFFIDAVIT" && boundAcquisitionId != null) {
+    return `收購單 #${boundAcquisitionId}`;
+  }
+  if (kind === "STORE_CREDIT_USE" && boundSaleId != null) {
+    return `銷售單 #${boundSaleId}`;
+  }
   if (kind === "TRANSACTION_ACK" && refType === "sale" && refId != null) {
     return `銷售單 #${refId}`;
   }

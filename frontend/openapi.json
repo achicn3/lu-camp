@@ -4022,6 +4022,28 @@
             ],
             "title": "Agreement Version"
           },
+          "bound_acquisition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Acquisition Id"
+          },
+          "bound_sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Sale Id"
+          },
           "cancelled_at": {
             "anyOf": [
               {
@@ -7085,6 +7107,28 @@
               }
             ],
             "title": "Agreement Version"
+          },
+          "bound_acquisition_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Acquisition Id"
+          },
+          "bound_sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bound Sale Id"
           },
           "cancelled_at": {
             "anyOf": [

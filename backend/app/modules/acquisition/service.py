@@ -75,6 +75,14 @@ class AcquisitionService:
         self._storecredit = StoreCreditService(session)
         self._cash = CashDrawerService(session)
 
+    async def find_by_signature_task(
+        self, store_id: int, signature_task_id: int
+    ) -> Acquisition | None:
+        """以切結任務反查綁定的收購單（簽署證據調閱用，read-only）。"""
+        return await self._repo.get_by_signature_task_id(
+            store_id, signature_task_id, for_update=False
+        )
+
     async def get_acquisition(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         return await self._repo.get(store_id, acquisition_id)
 

@@ -3399,6 +3399,10 @@ export interface components {
             agreement_title: string | null;
             /** Agreement Version */
             agreement_version: number | null;
+            /** Bound Acquisition Id */
+            bound_acquisition_id?: number | null;
+            /** Bound Sale Id */
+            bound_sale_id?: number | null;
             /** Cancelled At */
             cancelled_at: string | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
@@ -4510,6 +4514,10 @@ export interface components {
         SignatureTaskRead: {
             /** Agreement Version */
             agreement_version: number | null;
+            /** Bound Acquisition Id */
+            bound_acquisition_id?: number | null;
+            /** Bound Sale Id */
+            bound_sale_id?: number | null;
             /** Cancelled At */
             cancelled_at: string | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
