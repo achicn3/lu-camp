@@ -19,7 +19,9 @@
 
 ```bash
 DOCKER="/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe"
-source /home/test/lu-camp/.env.r2
+# set -a：source 的變數必須 export，否則後面的 Python 子行程拿不到 R2 憑證
+# （乾淨 shell 會 KeyError、上傳靜默失敗；Codex 第二輪 P1）。
+set -a; source /home/test/lu-camp/.env.r2; set +a
 STAMP=$(date +%Y%m%d)
 DB=lucamp            # 正式庫名；演練用 lucamp_sim
 
@@ -52,12 +54,29 @@ PY
 
 ## 2. 還原（下載 → 解密 → pg_restore → 驗證）
 
+> 本節**自足可執行**（災難復原時多半是從這裡開始的乾淨 shell；Codex 第二輪 P1）。
+
 ```bash
-source /home/test/lu-camp/.env.r2
-# 1) 下載（boto3 download_file 同上，鍵 backups/<檔名>）→ /home/test/lu-camp-backups/restore.dump.enc
+DOCKER="/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe"
+set -a; source /home/test/lu-camp/.env.r2; set +a
+cd /home/test/lu-camp-backups
+
+# 1) 從 R2 下載指定備份（改 KEY 為要還原的檔名；可先用 list_objects 檢視）
+KEY=backups/<要還原的檔名>.dump.enc \
+uv run --directory /home/test/lu-camp/backend --with boto3 python - <<'PY'
+import boto3, os
+e = os.environ
+s3 = boto3.client("s3", endpoint_url=e["R2_ENDPOINT"],
+    aws_access_key_id=e["R2_ACCESS_KEY_ID"],
+    aws_secret_access_key=e["R2_SECRET_ACCESS_KEY"], region_name="auto")
+s3.download_file(e["R2_BUCKET"], e["KEY"], "/home/test/lu-camp-backups/restore.dump.enc")
+print("downloaded", e["KEY"])
+PY
+
 # 2) 解密
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
   -in restore.dump.enc -out restore.dump -pass "pass:$R2_BACKUP_PASSPHRASE"
+
 # 3) 還原到全新庫（絕不直接覆蓋正式庫；驗證後才切換）
 "$DOCKER" exec lu-camp-db-1 psql -U lucamp -d postgres -c "CREATE DATABASE lucamp_restore"
 cat restore.dump | "$DOCKER" exec -i lu-camp-db-1 sh -c 'cat > /tmp/r.dump'

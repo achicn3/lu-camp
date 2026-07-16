@@ -103,6 +103,7 @@ _SHIFT_COLS = (
     "submitted_at",
     "ordered_at",
     "voided_at",
+    "changed_at",  # premium_rate_history：政策時間線須與帳本同步平移（Codex 第二輪 P2）
 )
 _SHIFT_TABLES = (
     "contacts",
@@ -127,6 +128,7 @@ _SHIFT_TABLES = (
     "returns",
     "return_lines",
     "audit_log",
+    "premium_rate_history",
     "brands",
     "categories",
     "product_models",
@@ -447,18 +449,24 @@ async def _one_sale(sim: Sim, day: int) -> None:
             )
         elif roll < 0.28 and sim.bulk_ids:
             qty = _RNG.randint(1, 4)
-            lot_id = await sim.s.scalar(
-                text(
-                    "SELECT id FROM bulk_lots WHERE store_id = :sid AND remaining_qty >= :q "
-                    "AND status = 'ON_SALE' ORDER BY random() LIMIT 1"
-                ),
-                {"sid": sim.store_id, "q": qty},
-            )
-            if lot_id is None:
+            # 候選由 SQL 取、選擇由 _RNG 決定：DB random() 不受 SIM_SEED 控制，
+            # 會破壞可重現性（Codex 第二輪 P2）。
+            lot_ids = (
+                await sim.s.execute(
+                    text(
+                        "SELECT id FROM bulk_lots WHERE store_id = :sid "
+                        "AND remaining_qty >= :q AND status = 'ON_SALE' ORDER BY id"
+                    ),
+                    {"sid": sim.store_id, "q": qty},
+                )
+            ).scalars().all()
+            if not lot_ids:
                 continue  # 各批皆售罄（自然 SOLD_OUT 覆蓋），改走其他品類
             lines.append(
                 SaleLineInput(
-                    line_type=SaleLineType.BULK_LOT, bulk_lot_id=int(lot_id), qty=qty
+                    line_type=SaleLineType.BULK_LOT,
+                    bulk_lot_id=int(_RNG.choice(list(lot_ids))),
+                    qty=qty,
                 )
             )
         elif roll < 0.52:
@@ -471,17 +479,23 @@ async def _one_sale(sim: Sim, day: int) -> None:
             )
         else:
             qty = _RNG.randint(1, 4)
-            pid = await sim.s.scalar(
-                text(
-                    "SELECT id FROM catalog_products WHERE store_id = :sid "
-                    "AND quantity_on_hand >= :q ORDER BY random() LIMIT 1"
-                ),
-                {"sid": sim.store_id, "q": qty},
-            )
-            if pid is None:
+            pids = (
+                await sim.s.execute(
+                    text(
+                        "SELECT id FROM catalog_products WHERE store_id = :sid "
+                        "AND quantity_on_hand >= :q ORDER BY id"
+                    ),
+                    {"sid": sim.store_id, "q": qty},
+                )
+            ).scalars().all()
+            if not pids:
                 continue  # 全面缺貨（採購補貨會回補），改走其他品類
             lines.append(
-                SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=int(pid), qty=qty)
+                SaleLineInput(
+                    line_type=SaleLineType.CATALOG,
+                    catalog_product_id=int(_RNG.choice(list(pids))),
+                    qty=qty,
+                )
             )
     if not lines:
         return  # 空車不送單（POS 前端本就擋空車）
@@ -531,17 +545,18 @@ async def _store_credit_sale(sim: Sim, day: int) -> None:
     """購物金折抵銷售：用寄售品（活動不折寄售 → 總額＝標價可精準拆帳）＋SCU 簽署（生效後）。"""
     if not sim.sc_reserved:
         return
-    row = (
+    holders = (
         await sim.s.execute(
             text(
                 "SELECT contact_id, balance FROM store_credit_accounts "
-                "WHERE store_id = :sid AND balance > 0 ORDER BY random() LIMIT 1"
+                "WHERE store_id = :sid AND balance > 0 ORDER BY contact_id"
             ),
             {"sid": sim.store_id},
         )
-    ).first()
-    if row is None:
+    ).all()
+    if not holders:
         return
+    row = _RNG.choice(holders)
     cid, bal = int(row[0]), Decimal(row[1])
     from app.modules.inventory.models import SerializedItem
 
@@ -1098,8 +1113,11 @@ async def _main() -> None:
         raise SystemExit(f"拒絕：APP_ENV={settings.app_env}")
     if os.environ.get("ALLOW_DEV_SEED") != "true":
         raise SystemExit("需 ALLOW_DEV_SEED=true")
-    if "lucamp_sim" not in str(settings.database_url):
-        raise SystemExit("安全閘：sim_180d 只允許對 lucamp_sim 資料庫執行")
+    # 安全閘以「URL 的資料庫名精確比對」為準——子字串比對會被密碼含該字樣或
+    # lucamp_sim_restore 之類的鄰居庫騙過，灌錯庫（Codex 第二輪 P1）。
+    db_name = str(settings.database_url).rsplit("/", 1)[-1].split("?", 1)[0]
+    if db_name != "lucamp_sim":
+        raise SystemExit(f"安全閘：sim_180d 只允許對 lucamp_sim 執行（目前 db={db_name}）")
 
     sm = get_sessionmaker()
     async with sm() as session:

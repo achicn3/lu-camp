@@ -289,6 +289,15 @@ async function main() {
     console.log("  ⚠️ 未捕捉 JS 例外：");
     for (const e of pageerrors.slice(0, 10)) console.log(`    - ${e.route}: ${e.text.slice(0, 160)}`);
   }
+  // fail-closed（Codex 第二輪 P1）：收集到 JS 例外/console.error/缺陷級 finding，
+  // 結束碼必須非零——否則「有壞的 run」也能綠燈出場。
+  const defectFindings = findings.filter((f) => f.severity === "缺陷" || f.severity === "系統壞");
+  if (pageerrors.length || consoleErrors.length || defectFindings.length) {
+    console.log(
+      `  ❌ fail-closed：pageerror=${pageerrors.length} console.error=${consoleErrors.length} 缺陷=${defectFindings.length}`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e) => {

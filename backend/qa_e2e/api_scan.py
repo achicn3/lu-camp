@@ -61,6 +61,8 @@ async def _sample_ids() -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, sql in q.items():
         out[k] = await conn.fetchval(sql)
+    # 發票樣本：sim 可能整輪關閉開票（無資料）→ None，由呼叫端明確標 skip 而非啞 404
+    out["invoice_id"] = await conn.fetchval("SELECT id FROM invoices ORDER BY id LIMIT 1")
     # 一致 tuple：會員消費明細路由需要「該買方自己的銷售」（獨立取值會 404，Codex P2）
     row = await conn.fetchrow(
         "SELECT buyer_contact_id, id FROM sales "
@@ -136,6 +138,11 @@ async def main() -> None:
                     {"path": raw_path, "reason": "KIOSK 角色專用（staff 403 by design）"}
                 )
                 continue
+            if "{invoice_id}" in raw_path and ids.get("invoice_id") is None:
+                skipped.append(
+                    {"path": raw_path, "reason": "資料集無發票（einvoice 關閉情境）"}
+                )
+                continue
             path = _fill_path(raw_path, ids)
             if path is None:
                 continue
@@ -174,8 +181,10 @@ async def main() -> None:
         edge_cases: list[tuple[str, dict[str, Any], str, set[int]]] = [
             ("/api/v1/reports/trends", naive, "naive-datetime(F-1 回歸)", {200}),
             ("/api/v1/reports/trends", reversed_range, "反向區間", {200, 400, 422}),
-            ("/api/v1/contacts", {"limit": 100000}, "超大分頁", {200, 422}),
-            ("/api/v1/sales", {"limit": 0}, "零分頁", {200, 422}),
+            # 分頁越界**必須被驗證擋下**（schema le=200/ge=1）——接受 200 等於允許驗證
+            # 被拿掉而掃描仍綠（Codex 第二輪 P2）。
+            ("/api/v1/contacts", {"limit": 100000}, "超大分頁", {422}),
+            ("/api/v1/sales", {"limit": 0}, "零分頁", {422}),
         ]
         edge_failures = 0
         for path, params2, label, expected in edge_cases:

@@ -1,12 +1,8 @@
 {
   "base": "http://127.0.0.1:8010",
-  "total_probed": 64,
+  "total_probed": 63,
   "exercised_2xx": 60,
   "not_exercised_4xx": [
-    {
-      "path": "/api/v1/invoices/{invoice_id}",
-      "status": 404
-    },
     {
       "path": "/api/v1/reports/trends [反向區間]",
       "status": 422
@@ -21,6 +17,10 @@
     }
   ],
   "skipped": [
+    {
+      "path": "/api/v1/invoices/{invoice_id}",
+      "reason": "資料集無發票（einvoice 關閉情境）"
+    },
     {
       "path": "/api/v1/kiosk/tasks/current",
       "reason": "KIOSK 角色專用（staff 403 by design）"
@@ -42,329 +42,423 @@
         200
       ],
       "edge_ok": true,
-      "ms": 807.7
+      "ms": 872.2
     },
     {
-      "path": "/api/v1/reports/store-credit/reconciliation",
-      "url": "/api/v1/reports/store-credit/reconciliation",
+      "path": "/api/v1/store-credit/premium-suggestion/today",
+      "url": "/api/v1/store-credit/premium-suggestion/today",
       "status": 200,
-      "ms": 191.3,
-      "operation_id": "storeCreditReconciliation"
-    },
-    {
-      "path": "/api/v1/reports/insights",
-      "url": "/api/v1/reports/insights",
-      "status": 200,
-      "ms": 188.2,
-      "operation_id": "businessInsightsReport"
+      "ms": 220.8,
+      "operation_id": "storeCreditPremiumSuggestionToday"
     },
     {
       "path": "/api/v1/reports/store-credit/effectiveness",
       "url": "/api/v1/reports/store-credit/effectiveness",
       "status": 200,
-      "ms": 166.1,
+      "ms": 219.0,
       "operation_id": "storeCreditEffectiveness"
+    },
+    {
+      "path": "/api/v1/reports/store-credit/reconciliation",
+      "url": "/api/v1/reports/store-credit/reconciliation",
+      "status": 200,
+      "ms": 197.3,
+      "operation_id": "storeCreditReconciliation"
     },
     {
       "path": "/api/v1/reports/trends",
       "url": "/api/v1/reports/trends",
       "status": 200,
-      "ms": 157.3,
+      "ms": 161.0,
       "operation_id": "financeTrendsReport"
     },
     {
-      "path": "/api/v1/reports/campaign-performance",
-      "url": "/api/v1/reports/campaign-performance",
+      "path": "/api/v1/reports/insights",
+      "url": "/api/v1/reports/insights",
       "status": 200,
-      "ms": 80.1,
-      "operation_id": "campaignPerformanceReport"
+      "ms": 149.2,
+      "operation_id": "businessInsightsReport"
     },
     {
       "path": "/api/v1/reports/store-credit/liability",
       "url": "/api/v1/reports/store-credit/liability",
       "status": 200,
-      "ms": 72.9,
+      "ms": 87.1,
       "operation_id": "storeCreditLiability"
+    },
+    {
+      "path": "/api/v1/reports/campaign-performance",
+      "url": "/api/v1/reports/campaign-performance",
+      "status": 200,
+      "ms": 83.1,
+      "operation_id": "campaignPerformanceReport"
     },
     {
       "path": "/api/v1/reports/sales-margin",
       "url": "/api/v1/reports/sales-margin",
       "status": 200,
-      "ms": 66.5,
+      "ms": 64.7,
       "operation_id": "salesMarginReport"
     },
     {
       "path": "/api/v1/signing/tasks",
       "url": "/api/v1/signing/tasks",
       "status": 200,
-      "ms": 37.3,
+      "ms": 39.9,
       "operation_id": "listSignatureTasks"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/overview",
-      "url": "/api/v1/contacts/319/overview",
-      "status": 200,
-      "ms": 28.6,
-      "operation_id": "getMemberOverview"
     },
     {
       "path": "/api/v1/reports/daily-summary",
       "url": "/api/v1/reports/daily-summary",
       "status": 200,
-      "ms": 20.2,
+      "ms": 21.2,
       "operation_id": "dailySummaryReport"
-    },
-    {
-      "path": "/api/v1/purchase-orders",
-      "url": "/api/v1/purchase-orders",
-      "status": 200,
-      "ms": 18.7,
-      "operation_id": "listPurchaseOrders"
-    },
-    {
-      "path": "/api/v1/catalog-products/{product_id}/detail",
-      "url": "/api/v1/catalog-products/1/detail",
-      "status": 200,
-      "ms": 12.6,
-      "operation_id": "getCatalogProductDetail"
-    },
-    {
-      "path": "/api/v1/reports/inventory-value",
-      "url": "/api/v1/reports/inventory-value",
-      "status": 200,
-      "ms": 11.4,
-      "operation_id": "inventoryValueReport"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/sourced-items",
-      "url": "/api/v1/contacts/319/sourced-items",
-      "status": 200,
-      "ms": 10.4,
-      "operation_id": "listMemberSourcedItems"
-    },
-    {
-      "path": "/api/v1/serialized-items/{item_id}/detail",
-      "url": "/api/v1/serialized-items/1/detail",
-      "status": 200,
-      "ms": 9.3,
-      "operation_id": "getSerializedItemDetail"
-    },
-    {
-      "path": "/api/v1/purchase-orders/{purchase_order_id}",
-      "url": "/api/v1/purchase-orders/89",
-      "status": 200,
-      "ms": 9.2,
-      "operation_id": "getPurchaseOrder"
-    },
-    {
-      "path": "/api/v1/reports/consignment-payables",
-      "url": "/api/v1/reports/consignment-payables",
-      "status": 200,
-      "ms": 9.2,
-      "operation_id": "consignmentPayablesReport"
-    },
-    {
-      "path": "/api/v1/reports/daily-cash",
-      "url": "/api/v1/reports/daily-cash",
-      "status": 200,
-      "ms": 8.7,
-      "operation_id": "dailyCashReport"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/store-credit",
-      "url": "/api/v1/contacts/319/store-credit",
-      "status": 200,
-      "ms": 8.6,
-      "operation_id": "getStoreCredit"
     },
     {
       "path": "/api/v1/bulk-lots/{lot_id}/detail",
       "url": "/api/v1/bulk-lots/1/detail",
       "status": 200,
-      "ms": 7.2,
+      "ms": 18.8,
       "operation_id": "getBulkLotDetail"
     },
     {
-      "path": "/api/v1/product-models",
-      "url": "/api/v1/product-models",
+      "path": "/api/v1/catalog-products/{product_id}/detail",
+      "url": "/api/v1/catalog-products/1/detail",
       "status": 200,
-      "ms": 7.0,
-      "operation_id": "listProductModels"
+      "ms": 17.2,
+      "operation_id": "getCatalogProductDetail"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/overview",
+      "url": "/api/v1/contacts/471/overview",
+      "status": 200,
+      "ms": 15.9,
+      "operation_id": "getMemberOverview"
+    },
+    {
+      "path": "/api/v1/purchase-orders",
+      "url": "/api/v1/purchase-orders",
+      "status": 200,
+      "ms": 15.0,
+      "operation_id": "listPurchaseOrders"
     },
     {
       "path": "/api/v1/stocktakes",
       "url": "/api/v1/stocktakes",
       "status": 200,
-      "ms": 6.9,
+      "ms": 13.1,
       "operation_id": "listStocktakes"
     },
     {
-      "path": "/api/v1/contacts/{contact_id}/purchases/{sale_id}",
-      "url": "/api/v1/contacts/319/purchases/5328",
+      "path": "/api/v1/serialized-items/{item_id}/detail",
+      "url": "/api/v1/serialized-items/1/detail",
       "status": 200,
-      "ms": 6.8,
-      "operation_id": "getMemberPurchaseDetail"
+      "ms": 12.0,
+      "operation_id": "getSerializedItemDetail"
+    },
+    {
+      "path": "/api/v1/reports/consignment-payables",
+      "url": "/api/v1/reports/consignment-payables",
+      "status": 200,
+      "ms": 10.5,
+      "operation_id": "consignmentPayablesReport"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/sourced-items",
+      "url": "/api/v1/contacts/471/sourced-items",
+      "status": 200,
+      "ms": 10.4,
+      "operation_id": "listMemberSourcedItems"
+    },
+    {
+      "path": "/api/v1/reports/daily-cash",
+      "url": "/api/v1/reports/daily-cash",
+      "status": 200,
+      "ms": 9.9,
+      "operation_id": "dailyCashReport"
+    },
+    {
+      "path": "/api/v1/reports/inventory-value",
+      "url": "/api/v1/reports/inventory-value",
+      "status": 200,
+      "ms": 9.6,
+      "operation_id": "inventoryValueReport"
     },
     {
       "path": "/api/v1/catalog-products",
       "url": "/api/v1/catalog-products",
       "status": 200,
-      "ms": 6.5,
+      "ms": 9.5,
       "operation_id": "listCatalogProducts"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/consignments",
-      "url": "/api/v1/contacts/319/consignments",
-      "status": 200,
-      "ms": 6.2,
-      "operation_id": "listMemberConsignments"
-    },
-    {
-      "path": "/api/v1/einvoice/queue",
-      "url": "/api/v1/einvoice/queue",
-      "status": 200,
-      "ms": 6.1,
-      "operation_id": "listEInvoiceQueue"
-    },
-    {
-      "path": "/api/v1/menu-items",
-      "url": "/api/v1/menu-items",
-      "status": 200,
-      "ms": 6.1,
-      "operation_id": "listMenuItems"
-    },
-    {
-      "path": "/api/v1/contacts/members",
-      "url": "/api/v1/contacts/members",
-      "status": 200,
-      "ms": 6.0,
-      "operation_id": "listMembersWithCredit"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/purchases",
-      "url": "/api/v1/contacts/319/purchases",
-      "status": 200,
-      "ms": 5.7,
-      "operation_id": "listMemberPurchases"
-    },
-    {
-      "path": "/api/v1/returns/{return_id}",
-      "url": "/api/v1/returns/1",
-      "status": 200,
-      "ms": 5.6,
-      "operation_id": "getReturn"
     },
     {
       "path": "/api/v1/consignment/settlements",
       "url": "/api/v1/consignment/settlements",
       "status": 200,
-      "ms": 5.4,
+      "ms": 9.4,
       "operation_id": "listConsignmentSettlements"
     },
     {
-      "path": "/api/v1/reports/store-credit/flows",
-      "url": "/api/v1/reports/store-credit/flows",
+      "path": "/api/v1/returns/{return_id}",
+      "url": "/api/v1/returns/1",
       "status": 200,
-      "ms": 5.2,
-      "operation_id": "storeCreditFlows"
+      "ms": 9.4,
+      "operation_id": "getReturn"
     },
     {
-      "path": "/api/v1/invoices/{invoice_id}",
-      "url": "/api/v1/invoices/1",
-      "status": 404,
-      "ms": 5.1,
-      "operation_id": "getInvoice"
+      "path": "/api/v1/contacts/{contact_id}/consignments",
+      "url": "/api/v1/contacts/471/consignments",
+      "status": 200,
+      "ms": 9.2,
+      "operation_id": "listMemberConsignments"
     },
     {
-      "path": "/api/v1/sales",
-      "url": "/api/v1/sales",
+      "path": "/api/v1/contacts/{contact_id}/purchases/{sale_id}",
+      "url": "/api/v1/contacts/471/purchases/5322",
       "status": 200,
-      "ms": 5.1,
-      "operation_id": "listSales"
+      "ms": 8.9,
+      "operation_id": "getMemberPurchaseDetail"
     },
     {
       "path": "/api/v1/stocktakes/{stocktake_id}",
       "url": "/api/v1/stocktakes/1",
       "status": 200,
-      "ms": 4.8,
+      "ms": 8.6,
       "operation_id": "getStocktake"
+    },
+    {
+      "path": "/api/v1/serialized-items",
+      "url": "/api/v1/serialized-items",
+      "status": 200,
+      "ms": 7.8,
+      "operation_id": "listSerializedItems"
+    },
+    {
+      "path": "/api/v1/acquisitions/{acquisition_id}",
+      "url": "/api/v1/acquisitions/945",
+      "status": 200,
+      "ms": 7.5,
+      "operation_id": "getAcquisition"
+    },
+    {
+      "path": "/api/v1/contacts/members",
+      "url": "/api/v1/contacts/members",
+      "status": 200,
+      "ms": 7.3,
+      "operation_id": "listMembersWithCredit"
+    },
+    {
+      "path": "/api/v1/purchase-orders/{purchase_order_id}",
+      "url": "/api/v1/purchase-orders/87",
+      "status": 200,
+      "ms": 7.3,
+      "operation_id": "getPurchaseOrder"
+    },
+    {
+      "path": "/api/v1/suppliers/{supplier_id}",
+      "url": "/api/v1/suppliers/1",
+      "status": 200,
+      "ms": 7.3,
+      "operation_id": "getSupplier"
+    },
+    {
+      "path": "/api/v1/campaigns",
+      "url": "/api/v1/campaigns",
+      "status": 200,
+      "ms": 7.1,
+      "operation_id": "listCampaigns"
+    },
+    {
+      "path": "/api/v1/sales/{sale_id}",
+      "url": "/api/v1/sales/5322",
+      "status": 200,
+      "ms": 6.9,
+      "operation_id": "getSale"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/national-id",
+      "url": "/api/v1/contacts/471/national-id",
+      "status": 200,
+      "ms": 6.8,
+      "operation_id": "revealContactNationalId"
     },
     {
       "path": "/api/v1/categories/{category_id}/pricing-rules",
       "url": "/api/v1/categories/1/pricing-rules",
       "status": 200,
-      "ms": 4.6,
+      "ms": 6.7,
       "operation_id": "listCategoryPricingRules"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/purchases",
+      "url": "/api/v1/contacts/471/purchases",
+      "status": 200,
+      "ms": 6.7,
+      "operation_id": "listMemberPurchases"
+    },
+    {
+      "path": "/api/v1/suppliers",
+      "url": "/api/v1/suppliers",
+      "status": 200,
+      "ms": 6.7,
+      "operation_id": "listSuppliers"
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}/store-credit",
+      "url": "/api/v1/contacts/471/store-credit",
+      "status": 200,
+      "ms": 6.2,
+      "operation_id": "getStoreCredit"
+    },
+    {
+      "path": "/api/v1/bulk-lots",
+      "url": "/api/v1/bulk-lots",
+      "status": 200,
+      "ms": 6.0,
+      "operation_id": "listBulkLots"
+    },
+    {
+      "path": "/api/v1/sales",
+      "url": "/api/v1/sales",
+      "status": 200,
+      "ms": 5.7,
+      "operation_id": "listSales"
     },
     {
       "path": "/api/v1/settings/premium-rate/history",
       "url": "/api/v1/settings/premium-rate/history",
       "status": 200,
-      "ms": 4.6,
+      "ms": 5.7,
       "operation_id": "getPremiumRateHistory"
     },
     {
       "path": "/api/v1/contacts",
       "url": "/api/v1/contacts",
       "status": 200,
-      "ms": 4.5,
+      "ms": 5.6,
       "operation_id": "listContacts"
     },
     {
-      "path": "/api/v1/serialized-items",
-      "url": "/api/v1/serialized-items",
+      "path": "/api/v1/einvoice/queue",
+      "url": "/api/v1/einvoice/queue",
       "status": 200,
-      "ms": 4.5,
-      "operation_id": "listSerializedItems"
+      "ms": 5.6,
+      "operation_id": "listEInvoiceQueue"
     },
     {
-      "path": "/api/v1/sales/{sale_id}",
-      "url": "/api/v1/sales/5328",
+      "path": "/api/v1/reports/store-credit/flows",
+      "url": "/api/v1/reports/store-credit/flows",
       "status": 200,
-      "ms": 4.2,
-      "operation_id": "getSale"
-    },
-    {
-      "path": "/api/v1/acquisitions/{acquisition_id}",
-      "url": "/api/v1/acquisitions/945",
-      "status": 200,
-      "ms": 4.1,
-      "operation_id": "getAcquisition"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}/national-id",
-      "url": "/api/v1/contacts/319/national-id",
-      "status": 200,
-      "ms": 4.1,
-      "operation_id": "revealContactNationalId"
+      "ms": 5.6,
+      "operation_id": "storeCreditFlows"
     },
     {
       "path": "/api/v1/brands",
       "url": "/api/v1/brands",
       "status": 200,
-      "ms": 4.0,
+      "ms": 5.5,
       "operation_id": "listBrands"
     },
     {
-      "path": "/api/v1/cash-sessions/current",
-      "url": "/api/v1/cash-sessions/current",
+      "path": "/api/v1/campaigns/{campaign_id}",
+      "url": "/api/v1/campaigns/1",
       "status": 200,
-      "ms": 4.0,
-      "operation_id": "getCurrentCashSession"
+      "ms": 5.5,
+      "operation_id": "getCampaign"
     },
     {
       "path": "/api/v1/categories",
       "url": "/api/v1/categories",
       "status": 200,
-      "ms": 3.9,
+      "ms": 5.5,
       "operation_id": "listCategories"
     },
     {
-      "path": "/api/v1/suppliers",
-      "url": "/api/v1/suppliers",
+      "path": "/api/v1/stores/{store_id}/receipt-header",
+      "url": "/api/v1/stores/1/receipt-header",
       "status": 200,
-      "ms": 3.9,
-      "operation_id": "listSuppliers"
+      "ms": 5.5,
+      "operation_id": "getStoreReceiptHeader"
+    },
+    {
+      "path": "/api/v1/cash-sessions/current",
+      "url": "/api/v1/cash-sessions/current",
+      "status": 200,
+      "ms": 5.4,
+      "operation_id": "getCurrentCashSession"
+    },
+    {
+      "path": "/api/v1/product-models",
+      "url": "/api/v1/product-models",
+      "status": 200,
+      "ms": 5.3,
+      "operation_id": "listProductModels"
+    },
+    {
+      "path": "/api/v1/menu-items",
+      "url": "/api/v1/menu-items",
+      "status": 200,
+      "ms": 5.2,
+      "operation_id": "listMenuItems"
+    },
+    {
+      "path": "/api/v1/catalog-products/by-sku/{sku}",
+      "url": "/api/v1/catalog-products/by-sku/GAS-HI-230",
+      "status": 200,
+      "ms": 5.1,
+      "operation_id": "getCatalogProductBySku"
+    },
+    {
+      "path": "/api/v1/signing/tasks/{task_id}",
+      "url": "/api/v1/signing/tasks/1",
+      "status": 200,
+      "ms": 4.9,
+      "operation_id": "getSignatureTask"
+    },
+    {
+      "path": "/api/v1/serialized-items/by-code/{item_code}",
+      "url": "/api/v1/serialized-items/by-code/S1-43498D45B1",
+      "status": 200,
+      "ms": 4.8,
+      "operation_id": "getSerializedItemByCode"
+    },
+    {
+      "path": "/api/v1/signing/tasks/{task_id}/signature",
+      "url": "/api/v1/signing/tasks/1/signature",
+      "status": 200,
+      "ms": 4.6,
+      "operation_id": "getSignatureImage"
+    },
+    {
+      "path": "/api/v1/bulk-lots/by-code/{lot_code}",
+      "url": "/api/v1/bulk-lots/by-code/L1-D5521340C6",
+      "status": 200,
+      "ms": 4.5,
+      "operation_id": "getBulkLotByCode"
+    },
+    {
+      "path": "/api/v1/settings",
+      "url": "/api/v1/settings",
+      "status": 200,
+      "ms": 4.1,
+      "operation_id": "getSettings"
+    },
+    {
+      "path": "/api/v1/sales [零分頁]",
+      "url": "/api/v1/sales",
+      "status": 422,
+      "expected": [
+        422
+      ],
+      "edge_ok": true,
+      "ms": 3.9
+    },
+    {
+      "path": "/api/v1/contacts/{contact_id}",
+      "url": "/api/v1/contacts/471",
+      "status": 200,
+      "ms": 3.4,
+      "operation_id": "getContact"
     },
     {
       "path": "/api/v1/reports/trends [反向區間]",
@@ -376,126 +470,23 @@
         422
       ],
       "edge_ok": true,
-      "ms": 3.9
-    },
-    {
-      "path": "/api/v1/bulk-lots",
-      "url": "/api/v1/bulk-lots",
-      "status": 200,
-      "ms": 3.8,
-      "operation_id": "listBulkLots"
-    },
-    {
-      "path": "/api/v1/campaigns",
-      "url": "/api/v1/campaigns",
-      "status": 200,
-      "ms": 3.8,
-      "operation_id": "listCampaigns"
-    },
-    {
-      "path": "/api/v1/signing/tasks/{task_id}",
-      "url": "/api/v1/signing/tasks/1",
-      "status": 200,
-      "ms": 3.6,
-      "operation_id": "getSignatureTask"
-    },
-    {
-      "path": "/api/v1/store-credit/premium-suggestion/today",
-      "url": "/api/v1/store-credit/premium-suggestion/today",
-      "status": 200,
-      "ms": 3.5,
-      "operation_id": "storeCreditPremiumSuggestionToday"
-    },
-    {
-      "path": "/api/v1/campaigns/{campaign_id}",
-      "url": "/api/v1/campaigns/1",
-      "status": 200,
-      "ms": 3.4,
-      "operation_id": "getCampaign"
-    },
-    {
-      "path": "/api/v1/catalog-products/by-sku/{sku}",
-      "url": "/api/v1/catalog-products/by-sku/GAS-HI-230",
-      "status": 200,
-      "ms": 3.3,
-      "operation_id": "getCatalogProductBySku"
-    },
-    {
-      "path": "/api/v1/serialized-items/by-code/{item_code}",
-      "url": "/api/v1/serialized-items/by-code/S1-E49FD4C81E",
-      "status": 200,
-      "ms": 3.3,
-      "operation_id": "getSerializedItemByCode"
-    },
-    {
-      "path": "/api/v1/suppliers/{supplier_id}",
-      "url": "/api/v1/suppliers/1",
-      "status": 200,
-      "ms": 3.3,
-      "operation_id": "getSupplier"
-    },
-    {
-      "path": "/api/v1/bulk-lots/by-code/{lot_code}",
-      "url": "/api/v1/bulk-lots/by-code/L1-388B11FFF5",
-      "status": 200,
-      "ms": 3.1,
-      "operation_id": "getBulkLotByCode"
-    },
-    {
-      "path": "/api/v1/settings",
-      "url": "/api/v1/settings",
-      "status": 200,
-      "ms": 3.0,
-      "operation_id": "getSettings"
-    },
-    {
-      "path": "/api/v1/contacts/{contact_id}",
-      "url": "/api/v1/contacts/319",
-      "status": 200,
-      "ms": 2.9,
-      "operation_id": "getContact"
-    },
-    {
-      "path": "/api/v1/signing/tasks/{task_id}/signature",
-      "url": "/api/v1/signing/tasks/1/signature",
-      "status": 200,
-      "ms": 2.9,
-      "operation_id": "getSignatureImage"
+      "ms": 3.3
     },
     {
       "path": "/api/v1/contacts [超大分頁]",
       "url": "/api/v1/contacts",
       "status": 422,
       "expected": [
-        200,
         422
       ],
       "edge_ok": true,
-      "ms": 2.9
-    },
-    {
-      "path": "/api/v1/stores/{store_id}/receipt-header",
-      "url": "/api/v1/stores/1/receipt-header",
-      "status": 200,
-      "ms": 2.7,
-      "operation_id": "getStoreReceiptHeader"
-    },
-    {
-      "path": "/api/v1/sales [零分頁]",
-      "url": "/api/v1/sales",
-      "status": 422,
-      "expected": [
-        200,
-        422
-      ],
-      "edge_ok": true,
-      "ms": 2.7
+      "ms": 3.0
     },
     {
       "path": "/api/v1/health",
       "url": "/api/v1/health",
       "status": 200,
-      "ms": 1.6,
+      "ms": 1.4,
       "operation_id": "getHealth"
     }
   ]
