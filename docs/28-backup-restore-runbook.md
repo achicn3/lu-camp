@@ -34,13 +34,17 @@ openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt \
   -pass "pass:$R2_BACKUP_PASSPHRASE"
 
 # 3) 上傳 R2（boto3；bucket=pos，鍵名 backups/<檔名>）
-cd /home/test/lu-camp/backend && uv run --with boto3 python - <<'PY'
-import boto3, os, glob
+#    ⚠️ 一律上傳「本次產生的確切檔名」（BACKUP_FILE 環境變數傳入），
+#    不可用 glob 排序挑檔——目錄裡若有演練/還原殘檔會選錯（Codex P1）。
+cd /home/test/lu-camp/backend && \
+BACKUP_FILE=/home/test/lu-camp-backups/${DB}_${STAMP}.dump.enc uv run --with boto3 python - <<'PY'
+import boto3, os
 e = os.environ
+f = e["BACKUP_FILE"]
+assert os.path.isfile(f), f"備份檔不存在：{f}"
 s3 = boto3.client("s3", endpoint_url=e["R2_ENDPOINT"],
     aws_access_key_id=e["R2_ACCESS_KEY_ID"],
     aws_secret_access_key=e["R2_SECRET_ACCESS_KEY"], region_name="auto")
-f = sorted(glob.glob("/home/test/lu-camp-backups/*.dump.enc"))[-1]
 s3.upload_file(f, e["R2_BUCKET"], f"backups/{os.path.basename(f)}")
 print("uploaded", f)
 PY

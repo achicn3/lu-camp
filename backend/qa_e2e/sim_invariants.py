@@ -55,9 +55,16 @@ async def s0_manifest_binding(session: AsyncSession) -> None:
             print("S0 綁定失敗——非同一份資料集，中止。")
             sys.exit(1)
     check("S0 全表筆數綁定", True, f"{len(m['counts'])} 表一致")
-    lo, hi = (datetime.fromisoformat(x) for x in m["date_span"])
-    span = (hi - lo).days
-    check("S0 銷售跨度 ≥ 180 天", span >= 180, f"span={span}d")
+    # 跨度以「連線中 DB 實查」為準，並與 manifest 互相核對（Codex P2：只讀 manifest
+    # 會讓錯庫/過期 manifest 假通過）。
+    db_lo, db_hi = (
+        await session.execute(text("SELECT MIN(created_at), MAX(created_at) FROM sales"))
+    ).one()
+    m_lo, m_hi = (datetime.fromisoformat(x) for x in m["date_span"])
+    span = (db_hi - db_lo).days
+    drift = abs((db_lo - m_lo).total_seconds()) + abs((db_hi - m_hi).total_seconds())
+    check("S0 銷售跨度 ≥ 180 天（DB 實查）", span >= 180, f"db span={span}d")
+    check("S0 DB 跨度＝manifest 跨度", drift < 1, f"drift={drift:.0f}s")
     check("S0 銷售 ≥ 4000", m["counts"]["sales"] >= 4000, f"sales={m['counts']['sales']}")
     check(
         "S0 簽署任務 ≥ 600",
@@ -88,12 +95,19 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
             text("SELECT id, signature_image FROM signature_tasks WHERE status='SIGNED'")
         )
     ).all()
-    bad_png = []
+    # 以後端簽署驗證器全量重驗（chunk 結構/CRC/IHDR/zlib 解壓/可見墨跡）——魔術字節
+    # 淺檢查抓不到截斷/壞損證據（Codex P2）。
+    from app.modules.signing.service import SigningService
+
+    bad_png: list[tuple[int, str]] = []
     for tid, img in imgs:
         raw = bytes(img)
-        if not raw.startswith(b"\x89PNG\r\n\x1a\n") or raw[25] != 6 or raw[24] != 8:
-            bad_png.append(tid)
-    check("S1 簽名影像全為 8-bit RGBA PNG", len(bad_png) == 0, f"異常 {bad_png[:5]}")
+        try:
+            idat = SigningService._validate_png_chunks(raw)
+            SigningService._validate_png_renderable(raw, idat)
+        except Exception as exc:
+            bad_png.append((tid, type(exc).__name__))
+    check("S1 簽名影像通過後端完整驗證器", len(bad_png) == 0, f"壞損 {bad_png[:5]}")
 
     ts_bad = (
         await session.execute(

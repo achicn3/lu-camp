@@ -11,6 +11,28 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 const BASE = process.env.QA_BASE ?? "http://localhost:3010";
+const API = process.env.QA_API ?? "http://127.0.0.1:8010";
+
+// Node 端直查後端（防呆斷言用）：以 dev 帳號取 token 查 contacts 筆數；失敗回 -1（略過該斷言）
+async function countContactsByName(q) {
+  try {
+    const login = await fetch(`${API}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "dev-manager", password: process.env.SEED_USER_PASSWORD ?? "dev-test-123456" }),
+    });
+    if (!login.ok) return -1;
+    const { access_token } = await login.json();
+    const res = await fetch(`${API}/api/v1/contacts?q=${encodeURIComponent(q)}&limit=5`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    if (!res.ok) return -1;
+    const data = await res.json();
+    return Array.isArray(data) ? data.length : (data.items?.length ?? -1);
+  } catch {
+    return -1;
+  }
+}
 const ROOT = process.env.QA_SHOTS ?? "/home/test/test/tmp/fully-e2e-test";
 const USER = "dev-manager";
 const PASS = "dev-test-123456";
@@ -131,21 +153,29 @@ async function checkContactValidation(page) {
     }
     const nameInput = page.locator('input[name="name"]').first();
     if (await nameInput.count()) {
-      // 填無效身分證 + 有效姓名電話 → 期望出現檢核錯誤、不成功送出
-      await page.locator('input[name="name"]').first().fill("QA防呆測試");
-      await page.locator('input[name="phone"]').first().fill("0987000111");
-      const nid = page.locator('input[name="national_id"]').first();
+      // 一切 selector 收斂到「含 name 輸入框的那張建檔表單」內：頁面另有搜尋表單，
+      // 未 scope 會按到搜尋鈕、且 body 全文 regex 永遠命中欄位標籤→假通過（Codex P2）。
+      const form = page.locator("form", { has: page.locator('input[name="name"]') }).first();
+      await form.locator('input[name="name"]').fill("QA防呆測試");
+      await form.locator('input[name="phone"]').fill("0987000111");
+      const nid = form.locator('input[name="national_id"]').first();
       if (await nid.count()) await nid.fill("A123456788"); // 檢核碼錯
       await shot(page, folder, "10-contact-invalid-nid-filled");
-      const submit = page.locator('button:has-text("儲存"), button:has-text("建立"), button[type="submit"]').first();
-      await submit.click().catch(() => {});
+      const beforeCount = await countContactsByName("QA防呆測試");
+      await form.locator('button[type="submit"]').first().click().catch(() => {});
       await page.waitForTimeout(800);
       await shot(page, folder, "11-contact-invalid-nid-result");
-      const bodyText = await page.locator("body").innerText();
-      const blocked = /身分證|檢核|格式|錯誤|無效/.test(bodyText);
-      note(folder, blocked ? "資訊" : "體驗",
-        blocked ? "會員建檔身分證防呆：有擋下無效輸入" : "會員建檔身分證防呆：未見明顯錯誤提示（需人工確認）",
-        "填入檢核碼錯誤的身分證後送出");
+      // 斷言 1：建檔表單內出現錯誤提示（scope 在表單，不吃頁面靜態文字）
+      const formText = await form.innerText().catch(() => "");
+      const blocked = /檢核|格式不正確|無效|錯誤/.test(formText);
+      // 斷言 2：資料未新增（以後端 API 實查，防「畫面沒動但已寫入」）
+      const afterCount = await countContactsByName("QA防呆測試");
+      const notCreated = beforeCount >= 0 && afterCount === beforeCount;
+      const pass = blocked && (notCreated || beforeCount < 0);
+      note(folder, pass ? "資訊" : "缺陷",
+        pass ? "會員建檔身分證防呆：表單內擋下且未寫入" : "會員建檔身分證防呆：未確認擋下（需人工複核）",
+        `表單錯誤提示=${blocked}；API 筆數 前=${beforeCount} 後=${afterCount}`);
+      if (!pass) process.exitCode = 1;
     } else {
       note(folder, "資訊", "會員建檔表單未自動開啟", "找不到 name 輸入框，略過此防呆檢查（非缺陷）");
     }

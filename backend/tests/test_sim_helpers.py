@@ -8,8 +8,6 @@ import zlib
 from decimal import Decimal
 
 import pytest
-
-from app.core.national_id import is_valid_national_id
 from qa_e2e.sim_helpers import (
     build_schedule,
     daily_sales_target,
@@ -18,6 +16,8 @@ from qa_e2e.sim_helpers import (
     signature_png,
     suggested_price,
 )
+
+from app.core.national_id import is_valid_national_id
 
 
 def test_national_id_generator_passes_backend_validator() -> None:

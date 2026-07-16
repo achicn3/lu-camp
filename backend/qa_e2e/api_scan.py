@@ -55,10 +55,19 @@ async def _sample_ids() -> dict[str, Any]:
         "user_id": "SELECT id FROM users ORDER BY id LIMIT 1",
         "product_id": "SELECT id FROM catalog_products ORDER BY id LIMIT 1",
         "item_code": "SELECT item_code FROM serialized_items ORDER BY id LIMIT 1",
+        "sku": "SELECT sku FROM catalog_products ORDER BY id LIMIT 1",
+        "lot_code": "SELECT lot_code FROM bulk_lots ORDER BY id LIMIT 1",
     }
     out: dict[str, Any] = {}
     for k, sql in q.items():
         out[k] = await conn.fetchval(sql)
+    # 一致 tuple：會員消費明細路由需要「該買方自己的銷售」（獨立取值會 404，Codex P2）
+    row = await conn.fetchrow(
+        "SELECT buyer_contact_id, id FROM sales "
+        "WHERE buyer_contact_id IS NOT NULL AND invoice_status <> 'VOID' ORDER BY id DESC LIMIT 1"
+    )
+    if row is not None:
+        out["contact_id"], out["sale_id"] = row[0], row[1]
     await conn.close()
     return out
 
@@ -92,6 +101,8 @@ def _query_for(params: list[dict[str, Any]]) -> dict[str, Any]:
             out[n] = "2026-07-15T00:00:00Z"
         elif n == "granularity":
             out[n] = "month"
+        elif n in ("date", "day", "business_date"):
+            out[n] = "2026-07-10"
         elif n == "q":
             out[n] = "a"
         else:
@@ -113,9 +124,17 @@ async def main() -> None:
         token = login_resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
+        skipped: list[dict[str, Any]] = []
         for raw_path, methods in sorted(spec["paths"].items()):
             get = methods.get("get")
             if get is None:
+                continue
+            if "/kiosk" in raw_path:
+                # kiosk 端點需 KIOSK 角色 token（staff 被中央拒絕）→ 明確標記略過，
+                # 不計入「已掃描」（Codex P2：403 不可謊稱覆蓋）。
+                skipped.append(
+                    {"path": raw_path, "reason": "KIOSK 角色專用（staff 403 by design）"}
+                )
                 continue
             path = _fill_path(raw_path, ids)
             if path is None:
@@ -140,44 +159,62 @@ async def main() -> None:
                 )
 
         # 邊界加測（F-1 回歸與極端參數；同樣只有 5xx 算缺陷）
+        # 邊界加測：**必須用實際 query 別名 from/to**（先前誤用 date_from → 422 根本沒
+        # 進到日期解析，F-1 回歸形同未測；Codex P1）。每案帶預期狀態並斷言。
         naive = {
-            "date_from": "2026-01-01T00:00:00",
-            "date_to": "2026-03-01T00:00:00",
+            "from": "2026-01-01T00:00:00",
+            "to": "2026-03-01T00:00:00",
             "granularity": "day",
         }
         reversed_range = {
-            "date_from": "2026-03-01T00:00:00Z",
-            "date_to": "2026-01-01T00:00:00Z",
+            "from": "2026-03-01T00:00:00Z",
+            "to": "2026-01-01T00:00:00Z",
             "granularity": "day",
         }
-        edge_cases: list[tuple[str, dict[str, Any], str]] = [
-            ("/api/v1/reports/trends", naive, "naive-datetime(F-1 回歸)"),
-            ("/api/v1/reports/trends", reversed_range, "反向區間"),
-            ("/api/v1/contacts", {"limit": 100000}, "超大分頁"),
-            ("/api/v1/sales", {"limit": 0}, "零分頁"),
+        edge_cases: list[tuple[str, dict[str, Any], str, set[int]]] = [
+            ("/api/v1/reports/trends", naive, "naive-datetime(F-1 回歸)", {200}),
+            ("/api/v1/reports/trends", reversed_range, "反向區間", {200, 400, 422}),
+            ("/api/v1/contacts", {"limit": 100000}, "超大分頁", {200, 422}),
+            ("/api/v1/sales", {"limit": 0}, "零分頁", {200, 422}),
         ]
-        for path, params2, label in edge_cases:
+        edge_failures = 0
+        for path, params2, label, expected in edge_cases:
             t0 = time.perf_counter()
             try:
                 resp = await client.get(path, params=params2, headers=headers)
+                ok = resp.status_code in expected
+                if not ok:
+                    edge_failures += 1
                 results.append(
                     {
                         "path": f"{path} [{label}]",
                         "url": path,
                         "status": resp.status_code,
+                        "expected": sorted(expected),
+                        "edge_ok": ok,
                         "ms": round((time.perf_counter() - t0) * 1000, 1),
                     }
                 )
             except Exception as exc:
+                edge_failures += 1
                 results.append({"path": f"{path} [{label}]", "status": -1, "err": str(exc)[:150]})
 
     server_errors = [r for r in results if r["status"] >= 500 or r["status"] == -1]
+    # 誠實分桶（Codex P2）：2xx 才算「已運動到」；4xx 是探針打不進去、列名單，不謊稱覆蓋。
+    exercised = [r for r in results if 200 <= r["status"] < 300]
+    not_exercised = [r for r in results if 300 <= r["status"] < 500]
     slow = sorted(
         (r for r in results if r.get("ms", 0) > SLOW_MS), key=lambda r: -r["ms"]
     )
     report = {
         "base": BASE,
-        "total": len(results),
+        "total_probed": len(results),
+        "exercised_2xx": len(exercised),
+        "not_exercised_4xx": [
+            {"path": r["path"], "status": r["status"]} for r in not_exercised
+        ],
+        "skipped": skipped,
+        "edge_failures": edge_failures,
         "server_errors": server_errors,
         "slow_over_1s": slow,
         "results": sorted(results, key=lambda r: -r.get("ms", 0)),
@@ -185,11 +222,19 @@ async def main() -> None:
     Path(__file__).with_name("api_scan_report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2)
     )
-    print(f"掃描 {len(results)} 端點；5xx/連線失敗 {len(server_errors)}；>1s {len(slow)}")
+    print(
+        f"探測 {len(results)}：2xx 運動到 {len(exercised)}、4xx 未進入 {len(not_exercised)}、"
+        f"略過 {len(skipped)}；5xx/連線失敗 {len(server_errors)}；邊界失敗 {edge_failures}；"
+        f">1s {len(slow)}"
+    )
+    for r in not_exercised:
+        print(f"  [4xx] {r['path']} → {r['status']}")
     for r in server_errors:
         print(f"  [5xx] {r['path']} → {r['status']} {r.get('err', '')}")
     for r in slow[:10]:
         print(f"  [slow] {r['path']} {r['ms']}ms")
+    if server_errors or edge_failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

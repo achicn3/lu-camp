@@ -82,6 +82,7 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
         SELECT sl.serialized_item_id, COUNT(*) AS n
         FROM sale_lines sl JOIN sales s ON s.id = sl.sale_id
         WHERE sl.line_type = 'SERIALIZED' AND s.invoice_status <> 'VOID'
+          AND NOT EXISTS (SELECT 1 FROM return_lines rl WHERE rl.sale_line_id = sl.id)
         GROUP BY sl.serialized_item_id HAVING COUNT(*) > 1
         """
             )
@@ -89,7 +90,7 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
     ).all()
     check("B1 序號品無重複售出", len(rows) == 0, f"重複售出 item_id={[r[0] for r in rows]}")
 
-    # status 與售出行對齊
+    # status 與售出行對齊（退貨行不算「持有中售出」：退貨後合法回到 IN_STOCK 可再售）
     mism = (
         await session.execute(
             text(
@@ -100,6 +101,7 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
           SELECT sl.serialized_item_id AS iid, COUNT(*) n
           FROM sale_lines sl JOIN sales s ON s.id = sl.sale_id
           WHERE sl.line_type='SERIALIZED' AND s.invoice_status <> 'VOID'
+            AND NOT EXISTS (SELECT 1 FROM return_lines rl WHERE rl.sale_line_id = sl.id)
           GROUP BY sl.serialized_item_id
         ) cnt ON cnt.iid = si.id
         WHERE (si.status='SOLD') <> (COALESCE(cnt.n,0) = 1)

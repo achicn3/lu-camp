@@ -215,7 +215,13 @@ async def _snapshot_watermarks(sim: Sim, cols: dict[str, list[str]]) -> None:
 
 
 async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) -> None:
-    """把本日新增列（id > watermark）的時間戳平移到模擬日 10:00–21:00 隨機時刻。
+    """把本日新增列（id > watermark）的時間戳平移到模擬日營業時段。
+
+    偏移量以列序決定性計算（同一列所有欄同值：`(id − watermark) × 75s`，上限 11 小時），
+    保證 updated_at ≥/= created_at、同表內時間順序＝建立順序，跨表亦大致依當日事件序
+    （Codex P1：獨立 random() 會倒置因果）。已知界限（文件化）：對「舊列」的當日更新
+    （如舊結算轉 PAID）其 updated_at 不平移——分析口徑一律以事件產生的新列
+    （cash_movements/ledger）之時間為準，該些新列有平移。
 
     store_credit_ledger 等表有 insert-only／守衛觸發器（ADR-012）擋任何 UPDATE；
     時間平移只動時間欄、不碰金額與鏈，故以 session_replication_role=replica 暫時
@@ -225,7 +231,8 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
     for tab, cs in cols.items():
         wm = sim.watermarks[tab]
         sets = ", ".join(
-            f"{c} = CAST(:base AS timestamptz) + (random() * interval '11 hours')"
+            f"{c} = CAST(:base AS timestamptz)"
+            f" + make_interval(secs => LEAST((id - :wm) * 75, 39600))"
             if c != "intake_date"
             else f"{c} = CAST(:day AS date)"
             for c in cs
@@ -603,8 +610,13 @@ async def _maybe_void_and_return(sim: Sim) -> None:
     if sim.recent_cash_sales and _RNG.random() < 0.22:
         sid = _RNG.choice(sim.recent_cash_sales)
         lines = await sales_svc.get_lines(sid)
+        # 含序號品（自有＋寄售）：寄售退貨會反轉結算（未付→CANCELLED），高風險路徑
+        # 必須有代表性資料（Codex P2）。序號品退貨數量固定 1。
         returnable = [
-            ln for ln in lines if ln.line_type in (SaleLineType.CATALOG, SaleLineType.BULK_LOT)
+            ln
+            for ln in lines
+            if ln.line_type
+            in (SaleLineType.CATALOG, SaleLineType.BULK_LOT, SaleLineType.SERIALIZED)
         ]
         if returnable:
             ln = _RNG.choice(returnable)
@@ -940,25 +952,43 @@ async def _campaigns(sim: Sim, day: int) -> None:
     for name, pct, s_ago, e_ago, ended in plans:
         if day != DAYS - s_ago:
             continue
+        # 折扣引擎以真實 now 判斷生效（get_effective）：活動「在模擬期間 ACTIVE 的日子」
+        # 其視窗必須涵蓋真實 now，歷史銷售才真的吃到折扣（Codex P2：過去視窗＝白開活動）。
+        # 先以涵蓋 now 的視窗建立/啟用，結束日 end() 後再把視窗回填成模擬歷史區間。
         cp = await camp.create_campaign(
             sim.store_id, name=name, discount_pct=pct,
-            starts_at=_NOW - timedelta(days=s_ago), ends_at=_NOW - timedelta(days=e_ago),
+            starts_at=_NOW - timedelta(hours=1), ends_at=_NOW + timedelta(days=400),
             applies_owned_serialized=True, applies_owned_bulk=True,
             applies_catalog=True, applies_consignment=False,
             created_by=sim.manager_id,
         )
         await camp.activate(sim.store_id, cp.id, actor_user_id=sim.manager_id)
         await sim.s.commit()
-        sim.s.info.setdefault("live_campaigns", {})[cp.id] = DAYS - e_ago if ended else None
+        sim.s.info.setdefault("live_campaigns", {})[cp.id] = (
+            DAYS - e_ago if ended else None,
+            s_ago,
+            e_ago,
+        )
 
 
 async def _end_due_campaigns(sim: Sim, day: int) -> None:
     camp = CampaignService(sim.s)
-    live: dict[int, int | None] = sim.s.info.get("live_campaigns", {})
-    for cid, end_day in list(live.items()):
+    live: dict[int, tuple[int | None, int, int]] = sim.s.info.get("live_campaigns", {})
+    for cid, (end_day, s_ago, e_ago) in list(live.items()):
         if end_day is not None and day >= end_day:
             try:
                 await camp.end(sim.store_id, cid, actor_user_id=sim.manager_id)
+                # 視窗回填為模擬歷史區間（僅時間欄；折扣留痕/金額不受影響）
+                await sim.s.execute(
+                    text(
+                        "UPDATE campaigns SET starts_at = :s, ends_at = :e WHERE id = :cid"
+                    ),
+                    {
+                        "s": _NOW - timedelta(days=s_ago),
+                        "e": _NOW - timedelta(days=e_ago),
+                        "cid": cid,
+                    },
+                )
                 await sim.s.commit()
             except Exception as exc:
                 sim.note_err("camp_end", exc)
@@ -1091,6 +1121,17 @@ async def _main() -> None:
                     f"day {plan.day_index}/{DAYS} sales={sim.stats['sales']} "
                     f"buyouts={sim.stats['buyouts']} affidavits={sim.stats['affidavits']}"
                 )
+        # 仍進行中的活動：起始時間回填為模擬歷史（迄未來、維持 ACTIVE 供 POS 現況展示）
+        for cid, (_end, s_ago, _e) in sim.s.info.get("live_campaigns", {}).items():
+            await session.execute(
+                text("UPDATE campaigns SET starts_at = :s, ends_at = :e WHERE id = :cid"),
+                {
+                    "s": _NOW - timedelta(days=s_ago),
+                    "e": _NOW + timedelta(days=10),
+                    "cid": cid,
+                },
+            )
+        await session.commit()
         await _write_manifest(sim)
 
 

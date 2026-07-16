@@ -248,14 +248,22 @@ try {
   await page.click('button:has-text("列印收購憑證聯")');
   const printReq2 = (await printResp2).request().postDataJSON();
   ok("收購憑證聯送出列印（購物金撥款＋撥入行）", true);
-  // 撥入 800×1.10＝880；購物金總額＝後端帳本分錄 balance_after（同一會員跨執行累積，
-  // 只驗為正整數字串且 ≥ 本筆實發）。
+  // 撥入 800×(1+premium_rate)：溢價率**動態取自 settings**（環境可能非預設 0.10，
+  // 例如 sim 資料集期中調 0.12——寫死 880 會誤報系統錯）；購物金總額＝後端帳本
+  // balance_after（同一會員跨執行累積，只驗為正整數字串且 ≥ 本筆實發）。
+  const settingsResp = await fetch(`${API}/api/v1/settings`, {
+    headers: {
+      Authorization: `Bearer ${await apiLogin("dev-manager", "dev-test-123456")}`,
+    },
+  });
+  const premiumRate = Number((await settingsResp.json()).premium_rate);
+  const expectedGranted = String(Math.round(800 * (1 + premiumRate)));
   ok(
     "列印 payload 帶撥入金額與購物金總額",
-    printReq2.store_credit_granted === "880" &&
+    printReq2.store_credit_granted === expectedGranted &&
       /^\d+$/.test(String(printReq2.store_credit_balance_after)) &&
-      Number(printReq2.store_credit_balance_after) >= 880,
-    `granted=${printReq2.store_credit_granted} balance_after=${printReq2.store_credit_balance_after}`,
+      Number(printReq2.store_credit_balance_after) >= Number(expectedGranted),
+    `granted=${printReq2.store_credit_granted}（預期 ${expectedGranted}＝800×(1+${premiumRate})） balance_after=${printReq2.store_credit_balance_after}`,
   );
   await page.screenshot({ path: join(SHOTS, "03c-receipt-credit.png"), fullPage: true });
 
