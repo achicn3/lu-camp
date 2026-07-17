@@ -45,7 +45,11 @@ class TenderInput:
     """一筆收款明細輸入（SC-3）：型別＋金額（整數元、>0）。
 
     省略整份 tenders 時，service 預設單一 CASH 全額（向後相容）。
+
+    line_pay_one_time_key（docs/30 P2）：LINE_PAY tender 專用——店家掃客人 My Code 得到的
+    一次性付款碼（單次使用、會過期）。僅 LINE_PAY 需要；其他型別為 None。不寫入 log/稽核。
     """
 
     tender_type: TenderType
     amount: Decimal
+    line_pay_one_time_key: str | None = None

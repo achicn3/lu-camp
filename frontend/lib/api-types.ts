@@ -4320,10 +4320,15 @@ export interface components {
         /**
          * SaleTenderRequest
          * @description 單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。
+         *
+         *     line_pay_one_time_key（docs/30 P2）：LINE_PAY 專用，店家掃客人 My Code 得到的一次性付款碼；
+         *     僅 LINE_PAY 需要（其他型別帶入即拒）。單次使用、會過期，不寫入 log/稽核。
          */
         SaleTenderRequest: {
             /** Amount */
             amount: number | string;
+            /** Line Pay One Time Key */
+            line_pay_one_time_key?: string | null;
             tender_type: components["schemas"]["TenderType"];
         };
         /**

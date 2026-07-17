@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # 未設定時不可啟用 einvoice_enabled、也不可送單。測試/正式同一 API 網址。
     amego_app_key: str = ""
     amego_api_base: str = "https://invoice-api.amego.tw"
+    # LINE Pay Offline API v4（docs/30）：Channel 憑證走環境變數、不入 repo/DB；空字串＝未設定，
+    # 未設定或 settings.linepay_enabled=False 時，帶 LINE_PAY tender 的結帳一律 fail-closed 拒絕。
+    # 沙盒/正式以不同 base_url 區分（預設沙盒；正式以 env 覆寫為 https://api-pay.line.me）。
+    linepay_channel_id: str = ""
+    linepay_channel_secret: str = ""
+    linepay_api_base: str = "https://sandbox-api-pay.line.me"
 
     @field_validator("pii_enc_key")
     @classmethod

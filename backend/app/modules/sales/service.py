@@ -32,7 +32,8 @@ from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
-from app.modules.sales.models import Sale, SaleLine, SaleTender
+from app.modules.sales.linepay import LinePayClient, linepay_order_id
+from app.modules.sales.models import LinePayTransaction, Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.models import StoreSettings
 from app.modules.settings.service import StoreSettingsService
@@ -42,6 +43,7 @@ from app.shared.enums import (
     CashMovementType,
     InvoiceType,
     ItemKind,
+    LinePayStatus,
     OwnershipType,
     PaymentMethod,
     SaleInvoiceStatus,
@@ -57,6 +59,7 @@ from app.shared.exceptions import (
     EmptySale,
     IdempotencyKeyConflict,
     InvalidSaleTender,
+    LinePayChargeFailed,
     MenuItemNotFound,
     MenuItemUnavailable,
     NoOpenCashSession,
@@ -370,6 +373,7 @@ class SalesService:
         invoice_info: InvoiceInfoInput | None = None,
         expected_einvoice_enabled: bool | None = None,
         require_einvoice_confirmation: bool = False,
+        linepay_client: LinePayClient | None = None,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -425,6 +429,22 @@ class SalesService:
         has_store_credit = normalized_tenders is not None and any(
             t.tender_type == TenderType.STORE_CREDIT for t in normalized_tenders
         )
+        line_pay_tenders = [
+            t
+            for t in (normalized_tenders or [])
+            if t.tender_type == TenderType.LINE_PAY
+        ]
+        # LINE Pay 收款前置守衛（docs/30 P2；先於動庫存/收款）：
+        # ①冪等鍵必填——orderId 由冪等鍵確定性導出（非 sale.id），rollback/retry 恆同號、
+        #   先 check(orderId) 防重複扣款。無鍵則無法安全重試 → 擋。
+        # ②每筆 LINE_PAY 須帶 oneTimeKey（掃客人碼）。③client 必須注入（router 依 config 建）。
+        if line_pay_tenders:
+            if idempotency_key is None:
+                raise InvalidSaleTender("LINE Pay 收款必須帶冪等鍵（Idempotency-Key）")
+            if any(t.line_pay_one_time_key is None for t in line_pay_tenders):
+                raise InvalidSaleTender("LINE Pay 收款必須帶一次性付款碼（掃客人條碼）")
+            if linepay_client is None:
+                raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法收款")
         # 購物金付款必須有買方（扣誰的購物金）；於動任何庫存前就擋（§3.2、I-8）。
         if has_store_credit and buyer_contact_id is None:
             raise InvalidSaleTender("以購物金付款必須指定買方會員（buyer_contact_id）")
@@ -447,6 +467,10 @@ class SalesService:
         # 彼此不阻塞）。設定於**動任何庫存/收款之前**讀一次、全程沿用同份（免請求內漂移）。
         await self._settings.lock_store_shared(store_id)
         settings = await self._settings.get_effective_settings(store_id)
+        # LINE Pay 功能閘門（docs/30）：未啟用即拒帶 LINE_PAY tender 的結帳（fail-closed，
+        # 先於任何庫存/收款副作用）。設定於上方共享鎖下讀取、全程沿用同份（免請求內漂移）。
+        if line_pay_tenders and not settings.linepay_enabled:
+            raise LinePayChargeFailed("本店未啟用 LINE Pay 收款（請於設定頁啟用）")
         # fail-closed（Codex 第廿四輪）：einvoice 啟用時，**HTTP 客戶端**必須帶
         # expected_einvoice_enabled 宣告其觀察值——省略者不得靜默開出預設 B2C（會漏收
         # 統編/載具/捐贈）。由 router 設 require_einvoice_confirmation=True 於 HTTP 邊界
@@ -568,7 +592,14 @@ class SalesService:
         # 收款副作用（§3.2）：現金 tender → 錢櫃 SALE_IN（現金部分，非全額）；
         # 購物金 tender → 帳本 DEBIT（買方）。發票/稅/點數不受 tender 組成影響。
         await self._apply_tenders(
-            store_id, sale, plan, clerk_user_id, buyer_contact_id, settings
+            store_id,
+            sale,
+            plan,
+            clerk_user_id,
+            buyer_contact_id,
+            settings,
+            idempotency_key=idempotency_key,
+            linepay_client=linepay_client,
         )
 
         # 簽署餘額快照的鎖定比對（Codex K5 第六/十輪）：置於 _apply_tenders **之後**——現金已
@@ -644,6 +675,9 @@ class SalesService:
         clerk_user_id: int,
         buyer_contact_id: int | None,
         settings: StoreSettings,
+        *,
+        idempotency_key: str | None = None,
+        linepay_client: LinePayClient | None = None,
     ) -> None:
         """落地收款：現金入錢櫃 SALE_IN、購物金扣帳本 DEBIT、行動支付僅記 tender（非現金、不進
         抽屜，docs/30），並記 sale_tenders（含手續費快照）。
@@ -681,8 +715,13 @@ class SalesService:
                 # 非現金、不進抽屜、無外部 API（店員於台灣Pay App 收款）；僅記手續費快照。
                 fee = Decimal(round_ntd(tender.amount * settings.taiwanpay_fee_pct))
             elif tender.tender_type == TenderType.LINE_PAY:
-                # P2 實作：呼叫 Offline v4 pay（fail-closed）。本階段拒絕，避免留下未串接的收款。
-                raise InvalidSaleTender("LINE Pay 收款尚未啟用（P2 實作中）")
+                # 非現金、不進抽屜；手續費快照為店家成本。API 授權（fail-closed）見下。
+                fee = Decimal(round_ntd(tender.amount * settings.linepay_fee_pct))
+                assert idempotency_key is not None  # create_sale 已於前置守衛強制
+                assert linepay_client is not None
+                await self._charge_line_pay(
+                    store_id, sale, tender, idempotency_key, linepay_client
+                )
             await self._repo.add_tender(
                 SaleTender(
                     store_id=store_id,
@@ -692,6 +731,56 @@ class SalesService:
                     fee_amount=fee,
                 )
             )
+
+    async def _charge_line_pay(
+        self,
+        store_id: int,
+        sale: Sale,
+        tender: TenderInput,
+        idempotency_key: str,
+        client: LinePayClient,
+    ) -> None:
+        """LINE Pay Offline v4 收款（fail-closed、冪等；docs/30 §4）。
+
+        orderId 由 (store, 冪等鍵) 確定性導出——rollback/retry 恆同號。**check-first**：先向平台
+        查此 orderId：
+        - 已 COMPLETE（前次已扣款、回應在網路上遺失而本地回滾）→ **重用**該交易、不重扣。
+        - 否則 → 呼叫 pay（消耗 oneTimeKey）。0000 成立、非 0000 → LinePayChargeFailed（整筆回滾）。
+        傳輸錯誤（結果未知）沿 LinePayTransportError 上拋 → 整筆回滾（fail-closed，不留無付款單）。
+        成立後記 linepay_transactions(COMPLETE)。order_id 唯一約束天然擋同單重扣。
+        """
+        assert tender.line_pay_one_time_key is not None  # create_sale 前置守衛已強制
+        order_id = linepay_order_id(store_id=store_id, idempotency_key=idempotency_key)
+
+        # check-first：平台已請款完成 → 重用（防重複扣款）。
+        checked = await client.check(order_id=order_id)
+        if checked.is_complete and checked.transaction_id is not None:
+            result = checked
+        else:
+            result = await client.pay(
+                order_id=order_id,
+                amount=tender.amount,
+                one_time_key=tender.line_pay_one_time_key,
+                product_name="門市消費",
+            )
+            if not result.is_success or result.transaction_id is None:
+                raise LinePayChargeFailed(
+                    f"LINE Pay 收款失敗（returnCode={result.return_code}），"
+                    "整筆交易取消，請改用其他方式或重新掃碼"
+                )
+
+        await self._repo.add_linepay_transaction(
+            LinePayTransaction(
+                store_id=store_id,
+                sale_id=sale.id,
+                order_id=order_id,
+                transaction_id=result.transaction_id,
+                status=LinePayStatus.COMPLETE,
+                amount=tender.amount,
+                refunded_amount=Decimal(0),
+                raw_response=result.raw,
+            )
+        )
 
     async def find_idempotent_replay(
         self,

@@ -19,11 +19,13 @@ from sqlalchemy import (
     event,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
 from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import (
+    LinePayStatus,
     PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
@@ -145,6 +147,44 @@ class SaleTender(Base, TimestampMixin):
     fee_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 0), default=Decimal(0), server_default=text("0")
     )
+
+
+class LinePayTransaction(Base, TimestampMixin):
+    """LINE Pay 交易紀錄（docs/30）：對帳/退款/稽核。一筆 LINE_PAY 收款的銷售對應一列。
+
+    order_id 由 (store, 冪等鍵) 確定性導出、唯一——重試恆同號、天然防重複扣款（先 check(order_id)）。
+    transaction_id 為平台 64-bit 長整數，以字串保存（避免 JS/JSON Number 失真）。
+    refunded_amount 累計退款、不得超過 amount（退貨/作廢反轉時累加）。raw_response 存 pay 原始回應
+    （對帳存證）。status 見 LinePayStatus（正常路徑只 commit COMPLETE/REFUNDED）。
+    """
+
+    __tablename__ = "linepay_transactions"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="uq_linepay_transactions_order_id"),
+        UniqueConstraint("sale_id", name="uq_linepay_transactions_sale_id"),
+        CheckConstraint("amount > 0", name="ck_linepay_transactions_amount_positive"),
+        CheckConstraint(
+            "refunded_amount >= 0 AND refunded_amount <= amount",
+            name="ck_linepay_transactions_refund_bounds",
+        ),
+        ForeignKeyConstraint(
+            ["sale_id", "store_id"],
+            ["sales.id", "sales.store_id"],
+            name="fk_linepay_transactions_sale_tenant",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
+    order_id: Mapped[str] = mapped_column(String(64))
+    transaction_id: Mapped[str] = mapped_column(String(32))
+    status: Mapped[LinePayStatus] = mapped_column(_enum_col(LinePayStatus))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    refunded_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 0), default=Decimal(0), server_default=text("0")
+    )
+    raw_response: Mapped[dict[str, object]] = mapped_column(JSONB)
 
 
 # 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：

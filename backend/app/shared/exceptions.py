@@ -394,3 +394,21 @@ class EInvoiceSettingsChanged(DomainError):
 
     結帳整筆拒絕、無副作用；店員重新確認發票欄位（統編/載具/捐贈）後再送。
     """
+
+
+class LinePayNotConfigured(DomainError):
+    """LINE Pay 憑證未設定（Channel ID/Secret 缺）——不可呼叫 Offline API。訊息不含 Secret。"""
+
+
+class LinePayTransportError(DomainError):
+    """LINE Pay API 呼叫失敗（網路/逾時/非 JSON）——結果未知（可能已扣款或未送達）。
+
+    呼叫端據 fail-closed 整筆回滾；重試須以同 orderId 先 check，避免重複扣款。訊息不含 Secret。
+    """
+
+
+class LinePayChargeFailed(DomainError):
+    """LINE Pay 明確拒付/授權失敗（returnCode≠0000）或查詢非 COMPLETE。
+
+    fail-closed：整筆銷售不成立、回滾（不得留下無付款的已完成單）。店員改用其他方式或重掃。
+    """

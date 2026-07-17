@@ -79,10 +79,15 @@ class SaleLineCreateRequest(BaseModel):
 
 
 class SaleTenderRequest(BaseModel):
-    """單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。"""
+    """單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。
+
+    line_pay_one_time_key（docs/30 P2）：LINE_PAY 專用，店家掃客人 My Code 得到的一次性付款碼；
+    僅 LINE_PAY 需要（其他型別帶入即拒）。單次使用、會過期，不寫入 log/稽核。
+    """
 
     tender_type: TenderType
     amount: NTDAmount
+    line_pay_one_time_key: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("amount")
     @classmethod
@@ -93,8 +98,18 @@ class SaleTenderRequest(BaseModel):
             raise ValueError("金額必須為正")
         return value
 
+    @model_validator(mode="after")
+    def _one_time_key_only_for_line_pay(self) -> "SaleTenderRequest":
+        if self.line_pay_one_time_key is not None and self.tender_type != TenderType.LINE_PAY:
+            raise ValueError("line_pay_one_time_key 僅適用於 LINE_PAY 收款")
+        return self
+
     def to_input(self) -> TenderInput:
-        return TenderInput(tender_type=self.tender_type, amount=self.amount)
+        return TenderInput(
+            tender_type=self.tender_type,
+            amount=self.amount,
+            line_pay_one_time_key=self.line_pay_one_time_key,
+        )
 
 
 class SaleInvoiceInfoRequest(BaseModel):

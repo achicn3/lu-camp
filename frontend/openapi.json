@@ -6351,7 +6351,7 @@
         "type": "object"
       },
       "SaleTenderRequest": {
-        "description": "單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。",
+        "description": "單筆收款明細輸入（SC-3）：金額以字串傳輸（§11）、整數元、>0。\n\nline_pay_one_time_key（docs/30 P2）：LINE_PAY 專用，店家掃客人 My Code 得到的一次性付款碼；\n僅 LINE_PAY 需要（其他型別帶入即拒）。單次使用、會過期，不寫入 log/稽核。",
         "properties": {
           "amount": {
             "anyOf": [
@@ -6364,6 +6364,19 @@
               }
             ],
             "title": "Amount"
+          },
+          "line_pay_one_time_key": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Pay One Time Key"
           },
           "tender_type": {
             "$ref": "#/components/schemas/TenderType"

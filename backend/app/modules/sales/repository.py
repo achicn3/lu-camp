@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
-from app.modules.sales.models import Sale, SaleLine, SaleTender
+from app.modules.sales.models import LinePayTransaction, Sale, SaleLine, SaleTender
 from app.shared.enums import OwnershipType, SaleInvoiceStatus, SaleLineType, TenderType
 
 # 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
@@ -76,6 +76,37 @@ class SalesRepository:
         stmt = select(SaleTender).where(SaleTender.sale_id == sale_id).order_by(SaleTender.id)
         result = await self._session.scalars(stmt)
         return list(result)
+
+    async def add_linepay_transaction(self, txn: LinePayTransaction) -> LinePayTransaction:
+        self._session.add(txn)
+        await self._session.flush()
+        return txn
+
+    async def get_linepay_by_order_id(
+        self, store_id: int, order_id: str, *, for_update: bool = False
+    ) -> LinePayTransaction | None:
+        """以 order_id 查 LINE Pay 交易（重試 check-first 用）。for_update 行鎖與並發重試序列化。"""
+        stmt = select(LinePayTransaction).where(
+            LinePayTransaction.store_id == store_id,
+            LinePayTransaction.order_id == order_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: LinePayTransaction | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_linepay_by_sale_id(
+        self, store_id: int, sale_id: int, *, for_update: bool = False
+    ) -> LinePayTransaction | None:
+        """以 sale_id 查 LINE Pay 交易（退貨/作廢反轉時取交易反轉）。"""
+        stmt = select(LinePayTransaction).where(
+            LinePayTransaction.store_id == store_id,
+            LinePayTransaction.sale_id == sale_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: LinePayTransaction | None = await self._session.scalar(stmt)
+        return result
 
     async def get_sale(self, store_id: int, sale_id: int) -> Sale | None:
         stmt = select(Sale).where(Sale.id == sale_id, Sale.store_id == store_id)

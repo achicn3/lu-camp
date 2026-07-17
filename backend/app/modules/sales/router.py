@@ -12,8 +12,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings as get_app_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.sales.linepay import HttpxLinePayTransport, LinePayClient
 from app.modules.sales.schemas import (
     SaleCreateRequest,
     SaleQuoteLineRead,
@@ -34,6 +36,7 @@ from app.shared.exceptions import (
     InsufficientStoreCredit,
     InvalidSaleTender,
     InvalidStateTransition,
+    LinePayChargeFailed,
     MemberPointsAdjustFailed,
     MenuItemNotFound,
     MenuItemUnavailable,
@@ -66,6 +69,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     SaleAlreadyVoid: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     EInvoiceSettingsChanged: status.HTTP_409_CONFLICT,
+    # LINE Pay 拒付/未設定/未啟用（fail-closed，整筆不成立）→ 402 Payment Required。
+    LinePayChargeFailed: status.HTTP_402_PAYMENT_REQUIRED,
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemUnavailable: status.HTTP_409_CONFLICT,
@@ -84,6 +89,20 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
 
 def _http_status_for(exc: DomainError) -> int:
     return _STATUS_BY_EXC.get(type(exc), status.HTTP_400_BAD_REQUEST)
+
+
+def _linepay_client() -> LinePayClient | None:
+    """依 config 建 LINE Pay 客戶端（憑證來自環境變數、不入 repo）。未設定 → None，
+    由 create_sale 對帶 LINE_PAY tender 的結帳 fail-closed 拒絕（不留無付款單）。"""
+    cfg = get_app_settings()
+    if not cfg.linepay_channel_id.strip() or not cfg.linepay_channel_secret.strip():
+        return None
+    return LinePayClient(
+        channel_id=cfg.linepay_channel_id,
+        channel_secret=cfg.linepay_channel_secret,
+        base_url=cfg.linepay_api_base,
+        transport=HttpxLinePayTransport(),
+    )
 
 
 @router.post(
@@ -111,6 +130,7 @@ async def create_sale(
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
+            linepay_client=_linepay_client(),
         )
     except IntegrityError as exc:
         await session.rollback()

@@ -262,6 +262,21 @@ class EInvoiceAction(StrEnum):
     ALLOWANCE = "ALLOWANCE"
 
 
+class LinePayStatus(StrEnum):
+    """LINE Pay 交易狀態（linepay_transactions.status，docs/30）。
+
+    COMPLETE：pay 授權+請款成功（0000）、銷售成立；FAILED：平台拒付（結帳整筆回滾，
+    此列不落庫——僅供對帳時記錄，正常路徑不會 commit 出 FAILED）；REFUNDED：退貨/作廢已呼叫
+    refund 成功反轉（refunded_amount 累計，不超過 amount）；VOIDED：授權未請款前作廢（少用，
+    oneTimeKeys/pay 為同步請款、反轉一律走 refund）。
+    """
+
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
+    VOIDED = "VOIDED"
+
+
 class EInvoiceMessageType(StrEnum):
     """MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。
 
