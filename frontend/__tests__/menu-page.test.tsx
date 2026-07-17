@@ -40,6 +40,8 @@ function stubFetch(route: Route) {
       const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
       const body =
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+      // 角色以 DB 現值為準（menu 頁 gate 改用 useCurrentRole）：測試一律回 MANAGER。
+      if (url.includes("/auth/me")) return json({ id: 1, role: "MANAGER", store_id: 1 });
       const resp = route(url, method, body);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);

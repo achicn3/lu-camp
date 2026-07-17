@@ -9,9 +9,11 @@ import { decodeSession } from "@/lib/auth";
 import { getToken } from "@/lib/token";
 
 export interface CurrentRole {
-  /** DB 現值角色（載入中回退 token claim）。 */
+  /** DB 現值角色；初次載入中回退 token claim，查詢失敗則 null（fail-closed）。 */
   role: string | null;
   isManager: boolean;
+  /** 權威查詢失敗（重試耗盡且從無成功資料）：呼叫端可據此顯示提示。 */
+  roleUnavailable: boolean;
 }
 
 export function useCurrentRole(): CurrentRole {
@@ -29,6 +31,10 @@ export function useCurrentRole(): CurrentRole {
     staleTime: 30_000,
     refetchInterval: 60_000, // 角色變更於留在受保護頁時傳播（無重登需求）
   });
-  const role = query.data?.role ?? claimRole;
-  return { role, isManager: role === "MANAGER" };
+  // 權威優先：有 data 即用 DB 現值（背景輪詢失敗時仍保留上次成功值，非 stale JWT）。
+  // 僅「初次載入中（從未取得）」回退 token claim 避免閃爍；查詢失敗（重試耗盡、從無資料）
+  // 則 fail-closed 回 null——降權者於 /auth/me 中斷期間不得續顯管理 UI（Codex 波次三第三輪 P2）。
+  const role = query.data?.role ?? (query.isPending ? claimRole : null);
+  const roleUnavailable = query.data === undefined && !query.isPending;
+  return { role, isManager: role === "MANAGER", roleUnavailable };
 }
