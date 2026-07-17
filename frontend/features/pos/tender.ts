@@ -2,14 +2,16 @@
 // 後端規則：Σ tenders = total；購物金扣買方餘額（不足 409）；純購物金不需開帳。
 import type { components } from "@/lib/api-types";
 
-export type TenderMode = "CASH" | "STORE_CREDIT" | "MIXED";
+export type TenderMode = "CASH" | "STORE_CREDIT" | "TAIWAN_PAY" | "MIXED";
 
 export interface TenderPlan {
   mode: TenderMode;
-  /** 現金部分（MIXED 時為使用者輸入；CASH 時 = total；STORE_CREDIT 時 0）。 */
+  /** 現金部分（MIXED 時為使用者輸入；CASH 時 = total；其餘 0）。 */
   cash: number;
-  /** 購物金部分（MIXED 時 = total − cash；STORE_CREDIT 時 = total；CASH 時 0）。 */
+  /** 購物金部分（MIXED 時 = total − cash；STORE_CREDIT 時 = total；其餘 0）。 */
   storeCredit: number;
+  /** 台灣Pay 部分（docs/30）：TAIWAN_PAY 時 = total；其餘 0。非現金、不進抽屜、不需會員。 */
+  taiwanPay: number;
 }
 
 export interface TenderValidation {
@@ -28,10 +30,14 @@ export function resolvePlan(
   total: number,
   cashInput: number,
 ): TenderPlan {
-  if (mode === "CASH") return { mode, cash: total, storeCredit: 0 };
-  if (mode === "STORE_CREDIT") return { mode, cash: 0, storeCredit: total };
+  if (mode === "CASH")
+    return { mode, cash: total, storeCredit: 0, taiwanPay: 0 };
+  if (mode === "STORE_CREDIT")
+    return { mode, cash: 0, storeCredit: total, taiwanPay: 0 };
+  if (mode === "TAIWAN_PAY")
+    return { mode, cash: 0, storeCredit: 0, taiwanPay: total };
   const cash = clampInt(cashInput);
-  return { mode, cash, storeCredit: total - cash };
+  return { mode, cash, storeCredit: total - cash, taiwanPay: 0 };
 }
 
 export function validatePlan(
@@ -75,7 +81,7 @@ export function validatePlan(
       };
     }
   }
-  if (plan.cash + plan.storeCredit !== total) {
+  if (plan.cash + plan.storeCredit + plan.taiwanPay !== total) {
     return {
       ok: false,
       error: "收款金額必須等於應付總額",
@@ -162,6 +168,8 @@ export function toTenders(
       tender_type: "STORE_CREDIT",
       amount: String(plan.storeCredit),
     });
+  if (plan.taiwanPay > 0)
+    tenders.push({ tender_type: "TAIWAN_PAY", amount: String(plan.taiwanPay) });
   return tenders.length > 0 ? tenders : undefined;
 }
 

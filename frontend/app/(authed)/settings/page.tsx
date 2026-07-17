@@ -194,6 +194,105 @@ function GeneralSettingsCard({
   );
 }
 
+function MobilePaymentCard({
+  settings,
+  onSaved,
+}: {
+  settings: SettingsRead;
+  onSaved: () => void;
+}) {
+  // 行動支付（docs/30）：LINE Pay 啟用開關＋各方式手續費率（店家成本，非向客人收取）。
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: async (body: components["schemas"]["SettingsUpdateRequest"]) => {
+      const { data, error: apiError } = await api.PATCH("/api/v1/settings", { body });
+      if (!data) throw new Error(extractDetail(apiError) ?? "儲存失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setSuccess(true);
+      setError(null);
+      onSaved();
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setSuccess(false);
+    },
+  });
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSuccess(false);
+    const form = new FormData(event.currentTarget);
+
+    const linepayEnabled = form.get("linepay_enabled") === "on";
+    const linepayRate = parseRateInput(String(form.get("linepay_fee_pct") ?? ""));
+    if (linepayRate === null) {
+      setError("LINE Pay 手續費率請輸入有效百分比數字");
+      return;
+    }
+    const taiwanpayRate = parseRateInput(String(form.get("taiwanpay_fee_pct") ?? ""));
+    if (taiwanpayRate === null) {
+      setError("台灣Pay 手續費率請輸入有效百分比數字");
+      return;
+    }
+
+    // 只送有變更的欄位（數值比較，避免 "0.02"→"0.0200" 字串不等誤判為變更）。
+    const body: components["schemas"]["SettingsUpdateRequest"] = {};
+    if (linepayEnabled !== settings.linepay_enabled) body.linepay_enabled = linepayEnabled;
+    if (parseFloat(linepayRate) !== parseFloat(settings.linepay_fee_pct))
+      body.linepay_fee_pct = linepayRate;
+    if (parseFloat(taiwanpayRate) !== parseFloat(settings.taiwanpay_fee_pct))
+      body.taiwanpay_fee_pct = taiwanpayRate;
+
+    if (Object.keys(body).length === 0) {
+      setSuccess(true);
+      return;
+    }
+    mutation.mutate(body);
+  }
+
+  const linepayPct = (parseFloat(settings.linepay_fee_pct) * 100).toString();
+  const taiwanpayPct = (parseFloat(settings.taiwanpay_fee_pct) * 100).toString();
+
+  return (
+    <form className="card" onSubmit={onSubmit}>
+      <h2>行動支付設定</h2>
+      <label className="field field-toggle">
+        <input
+          type="checkbox"
+          name="linepay_enabled"
+          defaultChecked={settings.linepay_enabled}
+        />
+        <span className="field-label">啟用 LINE Pay（店家掃客人條碼收款）</span>
+      </label>
+      <label className="field">
+        <span className="field-label">LINE Pay 手續費率 (%)</span>
+        <input name="linepay_fee_pct" inputMode="decimal" defaultValue={linepayPct} required />
+      </label>
+      <label className="field">
+        <span className="field-label">台灣Pay 手續費率 (%)</span>
+        <input name="taiwanpay_fee_pct" inputMode="decimal" defaultValue={taiwanpayPct} required />
+        <span className="hint">
+          手續費為店家負擔的成本、不向客人加收；行動支付款項不計入現金抽屜（關帳另列）。
+        </span>
+      </label>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {success && <p className="form-success">行動支付設定已儲存</p>}
+      <button type="submit" className="btn-primary" disabled={mutation.isPending}>
+        儲存行動支付設定
+      </button>
+    </form>
+  );
+}
+
 function PremiumRateCard({
   settings,
   suggestion,
@@ -508,6 +607,7 @@ export default function SettingsPage() {
       <h1 className="page-title">設定</h1>
       <div className="card-stack">
         <GeneralSettingsCard settings={settings} onSaved={refresh} />
+        <MobilePaymentCard settings={settings} onSaved={refresh} />
         <PremiumRateCard
           settings={settings}
           suggestion={suggestionQuery.data ?? null}

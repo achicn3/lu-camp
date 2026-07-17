@@ -326,6 +326,7 @@ function TenderPanel({
   storeCreditMax,
   storeCreditMinSpend,
   cartHasItems,
+  taiwanpayFeePct,
   mode,
   setMode,
   cashInput,
@@ -340,6 +341,8 @@ function TenderPanel({
   storeCreditMax: number;
   storeCreditMinSpend: number;
   cartHasItems: boolean;
+  /** 台灣Pay 手續費率（小數，如 0.02=2%；docs/30）。僅供顯示店家負擔，不向客人收取。 */
+  taiwanpayFeePct: number;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -361,7 +364,7 @@ function TenderPanel({
   return (
     <div className="pos-tender">
       <div className="pos-tender-modes" role="radiogroup" aria-label="收款方式">
-        {(["CASH", "STORE_CREDIT", "MIXED"] as const).map((m) => (
+        {(["CASH", "STORE_CREDIT", "TAIWAN_PAY", "MIXED"] as const).map((m) => (
           <label
             key={m}
             className={`pos-tender-mode ${mode === m ? "is-active" : ""}`}
@@ -372,7 +375,13 @@ function TenderPanel({
               checked={mode === m}
               onChange={() => setMode(m)}
             />
-            {m === "CASH" ? "現金" : m === "STORE_CREDIT" ? "購物金" : "混合"}
+            {m === "CASH"
+              ? "現金"
+              : m === "STORE_CREDIT"
+                ? "購物金"
+                : m === "TAIWAN_PAY"
+                  ? "台灣Pay"
+                  : "混合"}
           </label>
         ))}
       </div>
@@ -394,6 +403,19 @@ function TenderPanel({
             <>
               {" "}
               · 餘額 <Money value={memberBalance} />
+            </>
+          )}
+        </p>
+      )}
+      {plan.taiwanPay > 0 && (
+        <p className="hint">
+          台灣Pay 收款 <Money value={plan.taiwanPay} />（請於台灣Pay App 完成收款）
+          {taiwanpayFeePct > 0 && (
+            <>
+              {" "}
+              · 本筆手續費{" "}
+              <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
+              （店家負擔，不向客人收取）
             </>
           )}
         </p>
@@ -1060,7 +1082,11 @@ export default function PosPage() {
                   ? "現金"
                   : completed.payment_method === "STORE_CREDIT"
                     ? "購物金"
-                    : "混合"}
+                    : completed.payment_method === "TAIWAN_PAY"
+                      ? "台灣Pay"
+                      : completed.payment_method === "LINE_PAY"
+                        ? "LINE Pay"
+                        : "混合"}
               </dd>
             </div>
           </dl>
@@ -1260,6 +1286,7 @@ export default function PosPage() {
             drawerOpen={drawerOpen}
             storeCreditMax={storeCreditMax}
             storeCreditMinSpend={storeCreditMinSpend}
+            taiwanpayFeePct={Number(settings.data?.taiwanpay_fee_pct ?? 0)}
             mode={mode}
             setMode={setMode}
             cashInput={cashInput}

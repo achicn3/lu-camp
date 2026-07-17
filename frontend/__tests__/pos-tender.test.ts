@@ -12,7 +12,12 @@ const OPEN = { drawerOpen: true } as const;
 describe("tender 純邏輯", () => {
   it("CASH：全額現金、不需會員、需開帳", () => {
     const plan = resolvePlan("CASH", 1850, 0);
-    expect(plan).toEqual({ mode: "CASH", cash: 1850, storeCredit: 0 });
+    expect(plan).toEqual({
+      mode: "CASH",
+      cash: 1850,
+      storeCredit: 0,
+      taiwanPay: 0,
+    });
     const v = validatePlan(plan, 1850, {
       hasMember: false,
       memberBalance: null,
@@ -68,6 +73,25 @@ describe("tender 純邏輯", () => {
     ).toMatch(/餘額不足/);
   });
 
+  it("TAIWAN_PAY：全額台灣Pay、非現金（不需會員、不需開帳）", () => {
+    const plan = resolvePlan("TAIWAN_PAY", 680, 0);
+    expect(plan).toEqual({
+      mode: "TAIWAN_PAY",
+      cash: 0,
+      storeCredit: 0,
+      taiwanPay: 680,
+    });
+    // 非現金：drawerOpen=false（未開帳）也放行；不需會員。
+    const v = validatePlan(plan, 680, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: false,
+    });
+    expect(v.ok).toBe(true);
+    expect(v.needsDrawer).toBe(false);
+    expect(v.needsMember).toBe(false);
+  });
+
   it("購物金餘額未載入（null）時不放行", () => {
     const plan = resolvePlan("STORE_CREDIT", 500, 0);
     const v = validatePlan(plan, 500, {
@@ -81,7 +105,12 @@ describe("tender 純邏輯", () => {
 
   it("MIXED：現金+購物金須等於 total、兩腿皆 >0", () => {
     const plan = resolvePlan("MIXED", 500, 300);
-    expect(plan).toEqual({ mode: "MIXED", cash: 300, storeCredit: 200 });
+    expect(plan).toEqual({
+      mode: "MIXED",
+      cash: 300,
+      storeCredit: 200,
+      taiwanPay: 0,
+    });
     expect(
       validatePlan(plan, 500, { hasMember: true, memberBalance: 500, ...OPEN })
         .ok,
@@ -163,6 +192,9 @@ describe("tender 純邏輯", () => {
     expect(toTenders(resolvePlan("MIXED", 500, 300))).toEqual([
       { tender_type: "CASH", amount: "300" },
       { tender_type: "STORE_CREDIT", amount: "200" },
+    ]);
+    expect(toTenders(resolvePlan("TAIWAN_PAY", 680, 0))).toEqual([
+      { tender_type: "TAIWAN_PAY", amount: "680" },
     ]);
   });
 
