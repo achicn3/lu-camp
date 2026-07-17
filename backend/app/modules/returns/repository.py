@@ -93,6 +93,16 @@ class ReturnsRepository:
         o_ser_rev = o_ser_cogs = Decimal(0)
         o_bulk_rev = o_bulk_cogs = Decimal(0)
         c_ser_rev = c_bulk_rev = cat_rev = nocost_rev = Decimal(0)
+        _zero = ReturnsMarginAdjustments(
+            owned_serialized_revenue=Decimal(0),
+            owned_serialized_cogs=Decimal(0),
+            owned_bulk_revenue=Decimal(0),
+            owned_bulk_cogs=Decimal(0),
+            consignment_serialized_revenue=Decimal(0),
+            consignment_bulk_revenue=Decimal(0),
+            catalog_revenue=Decimal(0),
+            no_cost_serialized_revenue=Decimal(0),
+        )
 
         base = (
             select(SaleLine, ReturnLine.qty, CustomerReturn.created_at, ReturnLine.id)
@@ -107,6 +117,10 @@ class ReturnsRepository:
             )
         )
         rows = [(r[0], r[1]) for r in (await self._session.execute(base)).all()]
+        # 無退貨窗口（如 trends 逐桶大量呼叫）：即早返回零調整，避免 IN(0) 空查詢
+        # 每桶多打兩趟 DB（365 天報表 = 730 次無謂往返；Codex 波次二第三輪 P2）。
+        if not rows:
+            return _zero
         # 散裝 COGS 反轉須用「差額法」逐行累積（Codex 第二輪 P2）：對每件成本捨入的散裝，
         # 三次退 1 件 ≠ 一次退 3 件。先算每個 sale_line 在**本期之前**的累積退貨量，
         # 反轉額＝round(cost×已退含本期/total) − round(cost×已退不含本期/total)。
@@ -145,22 +159,30 @@ class ReturnsRepository:
             for r in rows
             if r[0].line_type == SaleLineType.BULK_LOT and r[0].bulk_lot_id
         ]
-        items = {
-            i.id: i
-            for i in (
-                await self._session.scalars(
-                    select(SerializedItem).where(SerializedItem.id.in_(ser_ids or [0]))
-                )
-            ).all()
-        }
-        lots = {
-            b.id: b
-            for b in (
-                await self._session.scalars(
-                    select(BulkLot).where(BulkLot.id.in_(lot_ids or [0]))
-                )
-            ).all()
-        }
+        items = (
+            {
+                i.id: i
+                for i in (
+                    await self._session.scalars(
+                        select(SerializedItem).where(SerializedItem.id.in_(ser_ids))
+                    )
+                ).all()
+            }
+            if ser_ids
+            else {}
+        )
+        lots = (
+            {
+                b.id: b
+                for b in (
+                    await self._session.scalars(
+                        select(BulkLot).where(BulkLot.id.in_(lot_ids))
+                    )
+                ).all()
+            }
+            if lot_ids
+            else {}
+        )
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
         for line, rqty in rows:
             refund = line.unit_price * rqty

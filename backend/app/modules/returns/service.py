@@ -224,12 +224,31 @@ class ReturnsService:
         if all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines):
             sale.status = SaleStatus.RETURNED
 
-        # 退貨按比例沖回會員點數（D-8(2)，裁示 2026-07-16）：
-        # claw = floor(awarded_points × 本次退款 ÷ 原總額)。每次部分退貨各自按比例，
-        # Σfloor ≤ awarded 不會超沖。點數可能已被會員用掉 → clamp 至現有餘額、
-        # 不阻擋退貨（與作廢「整筆同生共死」不同：退款本身必須成立）。
-        if sale.buyer_contact_id is not None and sale.awarded_points > 0 and sale.total > 0:
-            claw = int(sale.awarded_points * refund_amount / sale.total)
+        # 退貨按比例沖回會員點數（D-8(2)，裁示 2026-07-16；Codex 波次二第三輪 P1 修正口徑）：
+        # 點數當初只發**非餐飲**部分 floor((total−餐飲)/100)，故沖點須以「非餐飲」為分母，
+        # 且用**差額法累積**（非逐次獨立 floor，否則 $150/3 件分退會殘留 1 點；同散裝 COGS）：
+        #   entitlement(x) = floor(awarded × 累積非餐飲退款 x ÷ 原非餐飲小計)
+        #   本次沖點 = entitlement(含本次) − entitlement(本次前)
+        # 全退時 entitlement=awarded、逐次差額加總=awarded，餐飲混單也不會少沖。
+        # 點數可能已被會員用掉 → clamp 至現有餘額、不阻擋退貨（退款本身必須成立）。
+        non_menu_subtotal = sum(
+            (line.line_total for line in sale_lines if line.line_type != SaleLineType.MENU),
+            Decimal(0),
+        )
+        if sale.buyer_contact_id is not None and sale.awarded_points > 0 and non_menu_subtotal > 0:
+            prior_refund = sum(
+                (
+                    previous.get(line.id, 0) * line.unit_price
+                    for line in sale_lines
+                    if line.line_type != SaleLineType.MENU
+                ),
+                Decimal(0),
+            )
+            # 本次退貨全為非餐飲（餐飲不可退，_validate_supported_line 已擋）→ refund_amount
+            awarded = Decimal(sale.awarded_points)
+            prior_ent = int(awarded * prior_refund / non_menu_subtotal)
+            now_ent = int(awarded * (prior_refund + refund_amount) / non_menu_subtotal)
+            claw = now_ent - prior_ent
             if claw > 0:
                 from app.modules.contacts.service import ContactService
 

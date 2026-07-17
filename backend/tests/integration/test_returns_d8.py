@@ -269,3 +269,85 @@ async def test_bulk_return_cogs_reversal_is_cumulative(
     # 全退後：bulk_cogs 淨額 = 10 − 10 = 0（差額法逐次反轉 3+4+3=10，非 3+3+3=9）
     after = await svc.margin_breakdown(store_id, t0, t1)
     assert after.bulk_cogs == Decimal("0"), f"cogs={after.bulk_cogs}（差額法應為 0）"
+
+
+async def test_return_clawback_uses_non_menu_subtotal_and_cumulative(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """混單（貨 $1000＋餐飲 $1000）awarded=floor(1000/100)=10；退全部貨 → 沖全部 10 點
+    （分母是非餐飲小計 $1000，非 total $2000）。Codex 波次二第三輪 P1。"""
+    from decimal import Decimal
+
+    from app.modules.menu.models import MenuItem
+
+    token, store_id, _, member_id = await _seed(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, price="100", qty=20)
+    menu = MenuItem(store_id=store_id, name="拿鐵", unit_price=Decimal("1000"))
+    db_session.add(menu)
+    await db_session.flush()
+    menu_id = menu.id
+    await db_session.commit()
+
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [
+                {"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 10},
+                {"line_type": "MENU", "menu_item_id": menu_id, "qty": 1},
+            ],
+            "buyer_contact_id": member_id,
+        },
+        headers=_auth(token, idem="d8-mix-sale"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    assert await _member_points(db_session, member_id) == 10  # floor((2000-1000)/100)
+    catalog_line = next(ln for ln in sale["lines"] if ln["line_type"] == "CATALOG")
+
+    resp = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "退全部貨",
+            "lines": [{"sale_line_id": catalog_line["id"], "qty": 10}],
+        },
+        headers=_auth(token, idem="d8-mix-ret"),
+    )
+    assert resp.status_code == 201, resp.text
+    db_session.expire_all()
+    # 退全部非餐飲 → 沖全部 10 點（舊口徑除以 total 只會沖 5）
+    assert await _member_points(db_session, member_id) == 0
+
+
+async def test_return_clawback_rounding_full_return_claws_all(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """$150（3 件×$50）awarded=1；三件分開退 → 差額法累計沖 1（逐次獨立 floor 會殘留 1）。"""
+    token, store_id, _, member_id = await _seed(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, price="50", qty=20)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 3}],
+            "buyer_contact_id": member_id,
+        },
+        headers=_auth(token, idem="d8-round-sale"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    assert await _member_points(db_session, member_id) == 1
+    line_id = sale["lines"][0]["id"]
+
+    for i in range(3):
+        r = await client.post(
+            "/api/v1/returns",
+            json={
+                "sale_id": sale["id"],
+                "reason": "逐件退",
+                "lines": [{"sale_line_id": line_id, "qty": 1}],
+            },
+            headers=_auth(token, idem=f"d8-round-ret-{i}"),
+        )
+        assert r.status_code == 201, r.text
+    db_session.expire_all()
+    assert await _member_points(db_session, member_id) == 0  # 差額法：第三次退才沖到 1

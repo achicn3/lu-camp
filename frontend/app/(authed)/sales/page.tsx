@@ -180,6 +180,14 @@ function ReturnDialog({
           寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。
         </p>
         {detail.isLoading && <p>載入明細中…</p>}
+        {detail.isError && (
+          <p role="alert" className="form-error">
+            讀取銷售明細失敗。{" "}
+            <button type="button" onClick={() => void detail.refetch()}>
+              重試
+            </button>
+          </p>
+        )}
         {detail.isSuccess && !cashOnly && (
           <p role="alert" className="form-error">
             此單以購物金或混合方式付款，目前系統僅支援純現金銷售退貨。
