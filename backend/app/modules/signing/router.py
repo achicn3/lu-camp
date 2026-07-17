@@ -74,9 +74,15 @@ def _to_read(
 
 
 def _to_kiosk_read(task: SignatureTask, agreement: AgreementVersion | None) -> KioskTaskRead:
+    # base 已含 agreement_title/agreement_body 欄位（SignatureTaskRead 於簽署證據調閱新增，
+    # 預設 None）；kiosk 版要用 agreement 真值覆蓋，故先自 base dump 排除同名鍵再顯式傳入，
+    # 否則 KioskTaskRead(**base, agreement_title=…) 撞「multiple values」。
     base = _to_read(task, agreement)
+    base_data = base.model_dump()
+    base_data.pop("agreement_title", None)
+    base_data.pop("agreement_body", None)
     return KioskTaskRead(
-        **base.model_dump(),
+        **base_data,
         agreement_title=agreement.title if agreement is not None else None,
         agreement_body=agreement.body if agreement is not None else None,
     )
