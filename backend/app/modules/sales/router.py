@@ -266,7 +266,7 @@ async def void_sale(sale_id: int, session: SessionDep, user: ManagerDep) -> Sale
     if sale is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到銷售單")
     try:
-        voided = await svc.void_sale(sale, user.id)
+        voided = await svc.void_sale(sale, user.id, linepay_client=_linepay_client())
     except (SaleAlreadyVoid, SaleHasReturns) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

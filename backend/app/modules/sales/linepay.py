@@ -37,6 +37,7 @@ _CURRENCY = "TWD"
 _HTTP_TIMEOUT_SECONDS = 20.0
 _PAY_PATH = "/v4/payments/oneTimeKeys/pay"
 RETURN_CODE_SUCCESS = "0000"
+RETURN_CODE_ALREADY_REFUNDED = "1165"  # refund：平台已退款（重試冪等，視為成功）
 _CHECK_STATUS_COMPLETE = "COMPLETE"
 
 
@@ -160,6 +161,16 @@ def parse_check_result(resp: dict[str, object]) -> LinePayResult:
     )
 
 
+def parse_refund_result(resp: dict[str, object]) -> LinePayResult:
+    """refund 回應解析。0000＝成功（info.refundTransactionId，非 transactionId）、
+    1165＝已退款（冪等成功）；不要求 transactionId（退款回應無此欄）。"""
+    code = str(resp.get("returnCode") or "")
+    message = str(resp.get("returnMessage") or "")
+    return LinePayResult(
+        return_code=code, return_message=message, transaction_id=None, status=None, raw=resp
+    )
+
+
 class LinePayTransport(Protocol):
     """傳輸替身介面：送已簽章的 HTTP 請求、回 JSON dict（測試以錄放替身實作）。"""
 
@@ -262,4 +273,4 @@ class LinePayClient:
         resp = await self._transport.send(
             "POST", f"{self._base_url}{path}", self._headers(path, body), body
         )
-        return parse_pay_result(resp)
+        return parse_refund_result(resp)

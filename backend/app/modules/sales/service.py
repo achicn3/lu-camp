@@ -32,7 +32,11 @@ from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
-from app.modules.sales.linepay import LinePayClient, linepay_order_id
+from app.modules.sales.linepay import (
+    RETURN_CODE_ALREADY_REFUNDED,
+    LinePayClient,
+    linepay_order_id,
+)
 from app.modules.sales.models import LinePayTransaction, Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.models import StoreSettings
@@ -782,6 +786,37 @@ class SalesService:
             )
         )
 
+    async def _refund_line_pay_for_sale(
+        self, store_id: int, sale_id: int, client: LinePayClient | None
+    ) -> None:
+        """作廢時反轉 LINE Pay 收款（呼叫 refund；docs/30 §5）。
+
+        非 LINE Pay 單或已退款（本地 REFUNDED）→ 冪等 no-op。以 orderId 退全額（amount−refunded）；
+        平台 0000 或 1165（已退款）皆視為成功、標 REFUNDED、refunded_amount=amount。其餘 returnCode
+        → LinePayChargeFailed；傳輸錯誤沿 LinePayTransportError——皆 fail-closed 使整筆作廢回滾，
+        不留「已作廢卻未退款」的單。以 FOR UPDATE 鎖交易列與並發作廢/退款序列化。
+        """
+        txn = await self._repo.get_linepay_by_sale_id(store_id, sale_id, for_update=True)
+        if txn is None or txn.status == LinePayStatus.REFUNDED:
+            return
+        remaining = txn.amount - txn.refunded_amount
+        if remaining <= 0:
+            txn.status = LinePayStatus.REFUNDED
+            await self._session.flush()
+            return
+        if client is None:
+            raise LinePayChargeFailed(
+                "LINE Pay 尚未設定（缺 Channel 憑證），無法退款作廢；請設定後重試"
+            )
+        result = await client.refund(order_id=txn.order_id, refund_amount=remaining)
+        if not (result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED):
+            raise LinePayChargeFailed(
+                f"LINE Pay 退款失敗（returnCode={result.return_code}），作廢取消，請稍後重試"
+            )
+        txn.refunded_amount = txn.amount
+        txn.status = LinePayStatus.REFUNDED
+        await self._session.flush()
+
     async def find_idempotent_replay(
         self,
         store_id: int,
@@ -1064,7 +1099,9 @@ class SalesService:
         return await self._repo.member_purchase_count(store_id, contact_id, date_from, date_to)
 
     # ── 作廢 ──
-    async def void_sale(self, sale: Sale, actor_user_id: int) -> Sale:
+    async def void_sale(
+        self, sale: Sale, actor_user_id: int, *, linepay_client: LinePayClient | None = None
+    ) -> Sale:
         """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/退現。
 
         若原銷售已開發票（invoice_status=ISSUED），此 VOID 為「作廢發票流程」的接縫——實際
@@ -1110,6 +1147,10 @@ class SalesService:
         await self._storecredit.reverse_for_sale_void(
             sale.store_id, sale.id, created_by=actor_user_id
         )
+        # LINE Pay 退款反轉（§5，invariant #5）：非現金外部收款，作廢＝呼叫 refund 反向沖回客人。
+        # 非 LINE Pay 單 → no-op。退款失敗/傳輸錯誤 → fail-closed（拋出、整筆作廢回滾），不得留下
+        # 已作廢卻未退款的單；已退款（本地 REFUNDED 或平台 1165）→ 冪等 no-op。
+        await self._refund_line_pay_for_sale(sale.store_id, sale.id, linepay_client)
         # 電子發票中止（§6）：把該銷售的待開立發票標 VOID，使其待送佇列列被 drop_pending 拒絕，
         # 不會把已作廢銷售的發票拋上平台。已核可（ISSUED）發票的作廢須另送 F0501/F0701 平台訊息
         # ——該路徑待收尾階段依 作廢 vs 註銷 規則接線。無發票（einvoice 關閉時建的單）→ no-op。

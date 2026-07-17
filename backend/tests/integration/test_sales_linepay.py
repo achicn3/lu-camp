@@ -16,7 +16,7 @@ from app.modules.cashdrawer.models import CashMovement
 from app.modules.inventory.service import InventoryService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
-from app.modules.sales.models import LinePayTransaction, SaleTender
+from app.modules.sales.models import LinePayTransaction, Sale, SaleTender
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
@@ -24,8 +24,10 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
     Grade,
+    LinePayStatus,
     OwnershipType,
     PaymentMethod,
+    SaleInvoiceStatus,
     SaleLineType,
     TenderType,
     UserRole,
@@ -266,6 +268,111 @@ async def test_linepay_requires_idempotency_key(db_session: AsyncSession) -> Non
             tenders=_tender("100"),
             idempotency_key=None,
             linepay_client=_client(transport),
+        )
+
+
+_REFUND_SUCCESS: dict[str, object] = {
+    "returnCode": "0000",
+    "returnMessage": "Success.",
+    "info": {"refundTransactionId": 2026071802368895211},
+}
+_REFUND_ALREADY: dict[str, object] = {
+    "returnCode": "1165",
+    "returnMessage": "The transaction has already been refunded.",
+}
+_REFUND_REJECT: dict[str, object] = {"returnCode": "9000", "returnMessage": "refund error"}
+
+
+class RefundTransport(LinePayTransport):
+    """作廢退款用替身：check→未完成、pay→成功、refund→可設定成功/已退款/失敗。"""
+
+    def __init__(self, *, refund_resp: dict[str, object]) -> None:
+        self.refund_resp = refund_resp
+        self.refund_calls = 0
+
+    async def send(
+        self, method: str, url: str, headers: dict[str, str], body: str | None
+    ) -> dict[str, object]:
+        if url.endswith("/check"):
+            return _CHECK_NOT_FOUND
+        if url.endswith("/oneTimeKeys/pay"):
+            return _PAY_SUCCESS
+        if url.endswith("/refund"):
+            self.refund_calls += 1
+            return self.refund_resp
+        raise AssertionError(url)
+
+
+async def _make_linepay_sale(
+    db_session: AsyncSession,
+    transport: LinePayTransport,
+    *,
+    store_id: int,
+    clerk_id: int,
+    code: str,
+) -> Sale:
+    await _seed_item(db_session, store_id, code=code, price="1000")
+    return await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=_line(code),
+        tenders=_tender("1000"),
+        idempotency_key=f"key-{code}",
+        linepay_client=_client(transport),
+    )
+
+
+@pytest.mark.asyncio
+async def test_void_linepay_sale_refunds_and_marks_refunded(db_session: AsyncSession) -> None:
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    sale = await _make_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id, code="V1"
+    )
+    voided = await SalesService(db_session).void_sale(
+        sale, clerk_id, linepay_client=_client(transport)
+    )
+    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    assert transport.refund_calls == 1
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None
+    assert txn.status == LinePayStatus.REFUNDED
+    assert txn.refunded_amount == Decimal("1000")
+
+
+@pytest.mark.asyncio
+async def test_void_linepay_already_refunded_on_platform_is_idempotent(
+    db_session: AsyncSession,
+) -> None:
+    # 平台回 1165（已退款）→ 視為成功、標 REFUNDED（不因重試而卡住作廢）。
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_ALREADY)
+    sale = await _make_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id, code="V2"
+    )
+    voided = await SalesService(db_session).void_sale(
+        sale, clerk_id, linepay_client=_client(transport)
+    )
+    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None and txn.status == LinePayStatus.REFUNDED
+
+
+@pytest.mark.asyncio
+async def test_void_linepay_refund_failure_fails_closed(db_session: AsyncSession) -> None:
+    # 退款被拒 → LinePayChargeFailed（作廢整筆回滾，不留已作廢卻未退款的單）。
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_REJECT)
+    sale = await _make_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id, code="V3"
+    )
+    with pytest.raises(LinePayChargeFailed):
+        await SalesService(db_session).void_sale(
+            sale, clerk_id, linepay_client=_client(transport)
         )
 
 
