@@ -46,13 +46,23 @@ export function validatePlan(
     storeCreditMax?: number;
     /** 購物金低消門檻（非餐飲消費未達則完全不可用購物金；0＝不限；來自 /sales/quote）。 */
     storeCreditMinSpend?: number;
+    /** 購物車是否有品項：區分「空車初始狀態」與「非空但折後總額為 0」（Codex 波次三 P2）。 */
+    cartHasItems?: boolean;
   },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
   const needsDrawer = plan.cash > 0;
   if (total <= 0) {
-    // 空購物車是初始狀態、非錯誤：不回錯誤字串（避免右側紅色 alert 誤導）；結帳鈕仍由
-    // !ok 停用，購物車區另有中性引導文案。
+    // 非空購物車卻折後總額為 0（如 $1 商品套 99% 活動折扣、後端捨入為 0）：不可靜默停用，
+    // 給店員可行動的說明。真空車（無品項）才是中性初始狀態、不回錯誤（結帳鈕仍由 !ok 停用）。
+    if (opts.cartHasItems) {
+      return {
+        ok: false,
+        error: "折後總額為 0，無法結帳（請確認活動折扣或商品價格）",
+        needsMember,
+        needsDrawer,
+      };
+    }
     return { ok: false, error: null, needsMember, needsDrawer };
   }
   if (plan.mode === "MIXED") {

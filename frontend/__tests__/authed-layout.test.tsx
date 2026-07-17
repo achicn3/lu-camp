@@ -91,7 +91,10 @@ describe("(authed) layout", () => {
     renderLayout(<p>受保護內容</p>, qc);
     await screen.findByText("受保護內容");
     await userEvent.click(screen.getByRole("button", { name: "登出" }));
-    expect(qc.getQueryCache().getAll()).toHaveLength(0);
+    // 前一身分的授權/資料須清空（auth-me 為常駐 observer、登出後 disabled 且只會重取當前身分，
+    // 不算陳舊資料，故不以總長度 0 斷言）。
+    expect(qc.getQueryData(["premium-rate-history"])).toBeUndefined();
+    expect(qc.getQueryData(["reports", "access"])).toBeUndefined();
     expect(replaceMock).toHaveBeenCalledWith("/login");
   });
 });

@@ -171,3 +171,29 @@ describe("tender 純邏輯", () => {
     expect(changeDue(1800, 1850)).toBe(-50);
   });
 });
+
+describe("空車 vs 折後零元（Codex 波次三 P2）", () => {
+  it("真空車（無品項）total<=0 → 中性、不回錯誤", () => {
+    const plan = resolvePlan("CASH", 0, 0);
+    const v = validatePlan(plan, 0, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: true,
+      cartHasItems: false,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.error).toBeNull();
+  });
+
+  it("非空車折後總額 0（如 $1 套 99% 折）→ 可行動錯誤、不靜默", () => {
+    const plan = resolvePlan("CASH", 0, 0);
+    const v = validatePlan(plan, 0, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: true,
+      cartHasItems: true,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.error).toMatch(/折後總額為 0/);
+  });
+});

@@ -325,6 +325,7 @@ function TenderPanel({
   drawerOpen,
   storeCreditMax,
   storeCreditMinSpend,
+  cartHasItems,
   mode,
   setMode,
   cashInput,
@@ -338,6 +339,7 @@ function TenderPanel({
   drawerOpen: boolean | null;
   storeCreditMax: number;
   storeCreditMinSpend: number;
+  cartHasItems: boolean;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -352,6 +354,7 @@ function TenderPanel({
     drawerOpen,
     storeCreditMax,
     storeCreditMinSpend,
+    cartHasItems,
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
@@ -814,6 +817,7 @@ export default function PosPage() {
     drawerOpen,
     storeCreditMax,
     storeCreditMinSpend,
+    cartHasItems: lines.length > 0,
   });
 
   // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
@@ -1249,6 +1253,7 @@ export default function PosPage() {
           />
 
           <TenderPanel
+            cartHasItems={lines.length > 0}
             total={total}
             hasMember={member !== null}
             memberBalance={memberBalance}

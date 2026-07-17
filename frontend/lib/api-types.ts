@@ -82,6 +82,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Me
+         * @description 目前登入者（role 取自 DB 現值）——前端導覽依此收斂，不信任 token 的 role claim。
+         */
+        get: operations["getCurrentUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/brands": {
         parameters: {
             query?: never;
@@ -2744,6 +2764,21 @@ export interface components {
             source_note?: string | null;
         };
         /**
+         * CurrentUserResponse
+         * @description 目前登入者（role/store_id 取自 DB 現值，非 token claim）——供前端導覽依權限收斂。
+         *
+         *     永不過期 token 下，前端不可信 JWT 的 role claim（升/降權後未重登會過時）；此端點
+         *     每次以 DB 覆核回傳當前角色（D-4）。
+         */
+        CurrentUserResponse: {
+            /** Id */
+            id: number;
+            /** Role */
+            role: string;
+            /** Store Id */
+            store_id: number;
+        };
+        /**
          * DailyCashReport
          * @description 每日現金對帳報表（docs/19 §2.2）。expected 與關帳 expected_amount 同源。
          */
@@ -4989,6 +5024,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentUserResponse"];
                 };
             };
         };

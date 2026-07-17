@@ -15,8 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.core.deps import CurrentUser, get_current_user
 from app.core.security import encode_access_token
-from app.modules.user.schemas import LoginRequest, TokenResponse
+from app.modules.user.schemas import CurrentUserResponse, LoginRequest, TokenResponse
 from app.modules.user.service import UserService
 from app.modules.user.throttle import LoginThrottle
 
@@ -68,3 +69,9 @@ async def login(
     throttle.record_success(payload.username, ip)
     token = encode_access_token(user_id=user.id, role=user.role.value, store_id=user.store_id)
     return TokenResponse(access_token=token)
+
+
+@router.get("/me", response_model=CurrentUserResponse, operation_id="getCurrentUser")
+async def get_me(user: Annotated[CurrentUser, Depends(get_current_user)]) -> CurrentUserResponse:
+    """目前登入者（role 取自 DB 現值）——前端導覽依此收斂，不信任 token 的 role claim。"""
+    return CurrentUserResponse(id=user.id, role=user.role, store_id=user.store_id)

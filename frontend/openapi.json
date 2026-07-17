@@ -2332,6 +2332,30 @@
         "title": "ContactUpdate",
         "type": "object"
       },
+      "CurrentUserResponse": {
+        "description": "目前登入者（role/store_id 取自 DB 現值，非 token claim）——供前端導覽依權限收斂。\n\n永不過期 token 下，前端不可信 JWT 的 role claim（升/降權後未重登會過時）；此端點\n每次以 DB 覆核回傳當前角色（D-4）。",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "store_id"
+        ],
+        "title": "CurrentUserResponse",
+        "type": "object"
+      },
       "DailyCashReport": {
         "description": "每日現金對帳報表（docs/19 §2.2）。expected 與關帳 expected_amount 同源。",
         "properties": {
@@ -8202,6 +8226,33 @@
           }
         },
         "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "description": "目前登入者（role 取自 DB 現值）——前端導覽依此收斂，不信任 token 的 role claim。",
+        "operationId": "getCurrentUser",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Me",
         "tags": [
           "auth"
         ]
