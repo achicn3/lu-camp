@@ -66,6 +66,10 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   }, [router, queryClient]);
 
   // 導覽依「DB 現值角色」收斂（共用 hook：poll＋錯誤重試；Codex 波次三第二輪）。
+  // 已知限制（店主裁示 2026-07-17「接受現狀＋文件化」）：導覽/首頁卡片/menu gate/badge 皆
+  // 依此更新，但**已掛載的管理頁（/reports、/campaigns、/settings）於使用者盯著頁面時被
+  // 降權**，其畫面內容會續留到下次導航/重抓——不主動重導或清快取。理由：後端每請求驗權
+  // （D-4），降權者任何動作都 403、無法有特權操作成功；「盯管理頁時被降權」在單店單機極罕見。
   const { isManager } = useCurrentRole();
 
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
@@ -90,9 +94,8 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
         </nav>
         <div className="app-header-right">
           {session !== null && (
-            <span className="session-badge">
-              {session.role === "MANAGER" ? "管理者" : "店員"}
-            </span>
+            // 身分徽章用 DB 現值角色（與導覽同源），不用 stale JWT claim（Codex 波次三第四輪 P2）
+            <span className="session-badge">{isManager ? "管理者" : "店員"}</span>
           )}
           <button
             type="button"
