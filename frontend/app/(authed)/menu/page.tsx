@@ -2,12 +2,12 @@
 // /menu 餐飲菜單管理頁（MANAGER 專用）：品項清單（含停售）＋ 建立 ＋ 改名改價/上下架/封存。
 // 純呈現：金額為整數元字串，走 OpenAPI 生成 client（禁手刻型別）。餐飲不扣庫存、不折活動。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { useCurrentRole } from "@/lib/useCurrentRole";
 
 type MenuItemRead = components["schemas"]["MenuItemRead"];
 
@@ -229,7 +229,8 @@ function MenuItemRow({
 
 export default function MenuPage() {
   const queryClient = useQueryClient();
-  const isManager = useMemo(() => decodeSession()?.role === "MANAGER", []);
+  // DB 現值角色（升權未重登也生效；與導覽同源，Codex 波次三第二輪）
+  const { isManager } = useCurrentRole();
 
   const listQuery = useQuery({
     queryKey: ["menu-items", "manage"],

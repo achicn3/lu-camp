@@ -1,13 +1,13 @@
 "use client";
 // 受保護區殼層：無 token 導回 /login；監聽 401 廣播；頂欄導覽＋身分/登出。
 // 前端隱藏不等於安全——後端對每個請求仍驗權（docs/10 §4）。
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 
-import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
+import { useCurrentRole } from "@/lib/useCurrentRole";
 import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
 
 // managerOnly：管理專屬頁（後端亦限 MANAGER）——CLERK 導覽收斂，不顯示無權入口
@@ -65,17 +65,8 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [router, queryClient]);
 
-  // 導覽依權限收斂用「DB 現值角色」而非 token claim（永不過期 token 下升/降權未重登會過時；
-  // Codex 波次三 P2）。/auth/me 每次以 DB 覆核；載入中先回退 token claim 避免閃爍。
-  const me = useQuery({
-    queryKey: ["auth-me"],
-    queryFn: async () => {
-      const { data } = await api.GET("/api/v1/auth/me");
-      return data ?? null;
-    },
-    enabled: token !== null,
-    staleTime: 30_000,
-  });
+  // 導覽依「DB 現值角色」收斂（共用 hook：poll＋錯誤重試；Codex 波次三第二輪）。
+  const { isManager } = useCurrentRole();
 
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
@@ -85,10 +76,7 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <header className="app-header">
         <nav className="app-nav">
-          {NAV_ITEMS.filter(
-            // DB 現值角色優先；未載入時回退 token claim（僅影響短暫首幀）
-            (item) => !item.managerOnly || (me.data?.role ?? session.role) === "MANAGER",
-          ).map((item) =>
+          {NAV_ITEMS.filter((item) => !item.managerOnly || isManager).map((item) =>
             item.ready ? (
               <Link key={item.href} href={item.href} className="nav-link">
                 {item.label}
