@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { computeRefund, isReturnable, validateReturnPlan } from "@/features/returns/plan";
+import {
+  computeRefund,
+  isReturnable,
+  remainingQty,
+  validateReturnPlan,
+} from "@/features/returns/plan";
 import type { components } from "@/lib/api-types";
 
 type SaleLine = components["schemas"]["SaleLineRead"];
@@ -36,11 +41,21 @@ describe("returns plan", () => {
     expect(computeRefund(lines, {})).toBe(0);
   });
 
-  it("防呆：原因必填、至少一項、不可超量、餐飲擋下", () => {
+  it("可退餘量＝購買數−已退數", () => {
+    expect(remainingQty(line({ qty: 3 }))).toBe(3);
+    expect(remainingQty(line({ qty: 3, returned_qty: 2 }))).toBe(1);
+    expect(remainingQty(line({ qty: 3, returned_qty: 3 }))).toBe(0);
+  });
+
+  it("防呆：原因必填、至少一項、不可超可退餘量、餐飲擋下", () => {
     const l = line({ id: 1 });
     expect(validateReturnPlan([l], { 1: 1 }, " ")).toContain("原因");
     expect(validateReturnPlan([l], {}, "壞了")).toContain("至少");
-    expect(validateReturnPlan([l], { 1: 4 }, "壞了")).toContain("不可超過");
+    expect(validateReturnPlan([l], { 1: 4 }, "壞了")).toContain("可退餘量");
+    // 已退 2、購買 3 → 只能再退 1，退 2 被擋
+    const partial = line({ id: 3, qty: 3, returned_qty: 2 });
+    expect(validateReturnPlan([partial], { 3: 2 }, "壞了")).toContain("可退餘量 1");
+    expect(validateReturnPlan([partial], { 3: 1 }, "壞了")).toBeNull();
     const menu = line({ id: 2, line_type: "MENU", description: "拿鐵" });
     expect(validateReturnPlan([menu], { 2: 1 }, "壞了")).toContain("餐飲");
     expect(validateReturnPlan([l], { 1: 2 }, "壞了")).toBeNull();

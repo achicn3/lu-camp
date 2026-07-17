@@ -4127,6 +4127,11 @@ export interface components {
             original_unit_price?: string | null;
             /** Qty */
             qty: number;
+            /**
+             * Returned Qty
+             * @default 0
+             */
+            returned_qty: number;
             /** Serialized Item Id */
             serialized_item_id: number | null;
             /** Unit Price */

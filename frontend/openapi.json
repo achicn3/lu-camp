@@ -5950,6 +5950,11 @@
             "title": "Qty",
             "type": "integer"
           },
+          "returned_qty": {
+            "default": 0,
+            "title": "Returned Qty",
+            "type": "integer"
+          },
           "serialized_item_id": {
             "anyOf": [
               {

@@ -818,6 +818,10 @@ class SalesService:
         買斷毛利＋商品收入由自有/寄售商品行推導（sales 經 inventory 成本，repo 唯讀 join）；
         寄售抽成經 consignment service 依未作廢 sale_id 取（§2）。m = (買斷毛利＋抽成) ÷ 收入。
         """
+        # 已知限制（裁示 2026-07-16「其餘文件化」）：此處**不套**退貨扣減。period_margin
+        # 僅供 SC-5b 溢價建議引擎（分析用、非帳務），D-8 退貨扣減已在 margin_breakdown
+        # （R2/R5/R6/C4 主帳務口徑）落實；影響量在模擬中為全期營收 0.05%。若日後要一致，
+        # 於此比照 margin_breakdown 減 ReturnsService.margin_adjustments 的買斷毛利/收入分量。
         buyout_margin, revenue = await self._repo.goods_margin_and_revenue(
             store_id, date_from, date_to
         )

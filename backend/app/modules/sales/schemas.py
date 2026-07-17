@@ -217,6 +217,8 @@ class SaleLineRead(BaseModel):
     # 門市活動折扣留痕（docs/21）：供明細聯/收據顯示原價與折讓。
     original_unit_price: NTDAmountOpt = None
     discount_amount: NTDAmount = Decimal(0)
+    # 已退貨數（退貨頁限額用：可退餘量＝qty−returned_qty；僅 get_sale 端點回填，預設 0）
+    returned_qty: int = 0
 
 
 class SaleTenderRead(BaseModel):
@@ -252,10 +254,19 @@ class SaleRead(BaseModel):
 
     @classmethod
     def build(
-        cls, sale: Sale, lines: list[SaleLine], tenders: list[SaleTender] | None = None
+        cls,
+        sale: Sale,
+        lines: list[SaleLine],
+        tenders: list[SaleTender] | None = None,
+        returned_by_line: dict[int, int] | None = None,
     ) -> "SaleRead":
         data = cls.model_validate(sale)
-        line_reads = [SaleLineRead.model_validate(line) for line in lines]
+        line_reads = [
+            SaleLineRead.model_validate(line).model_copy(
+                update={"returned_qty": (returned_by_line or {}).get(line.id, 0)}
+            )
+            for line in lines
+        ]
         total_discount = sum((line.discount_amount for line in line_reads), Decimal(0))
         return data.model_copy(
             update={

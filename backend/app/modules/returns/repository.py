@@ -95,7 +95,7 @@ class ReturnsRepository:
         c_ser_rev = c_bulk_rev = cat_rev = nocost_rev = Decimal(0)
 
         base = (
-            select(SaleLine, ReturnLine.qty)
+            select(SaleLine, ReturnLine.qty, CustomerReturn.created_at, ReturnLine.id)
             .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
             .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
             .join(Sale, Sale.id == SaleLine.sale_id)
@@ -106,7 +106,35 @@ class ReturnsRepository:
                 Sale.invoice_status != SaleInvoiceStatus.VOID,
             )
         )
-        rows = (await self._session.execute(base)).all()
+        rows = [(r[0], r[1]) for r in (await self._session.execute(base)).all()]
+        # 散裝 COGS 反轉須用「差額法」逐行累積（Codex 第二輪 P2）：對每件成本捨入的散裝，
+        # 三次退 1 件 ≠ 一次退 3 件。先算每個 sale_line 在**本期之前**的累積退貨量，
+        # 反轉額＝round(cost×已退含本期/total) − round(cost×已退不含本期/total)。
+        bulk_line_ids = [
+            r[0].id
+            for r in rows
+            if r[0].line_type == SaleLineType.BULK_LOT and r[0].bulk_lot_id
+        ]
+        prior_returned: dict[int, int] = {}
+        if bulk_line_ids:
+            prior_rows = (
+                await self._session.execute(
+                    select(ReturnLine.sale_line_id, func.coalesce(func.sum(ReturnLine.qty), 0))
+                    .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
+                    .where(
+                        CustomerReturn.store_id == store_id,
+                        CustomerReturn.created_at < date_from,
+                        ReturnLine.sale_line_id.in_(bulk_line_ids),
+                    )
+                    .group_by(ReturnLine.sale_line_id)
+                )
+            ).all()
+            prior_returned = {int(lid): int(q) for lid, q in prior_rows}
+        # 本期各散裝 sale_line 的退貨總量（同期多次退貨合併，才能對整段套差額）
+        period_returned: dict[int, int] = {}
+        for line, rqty in rows:
+            if line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id:
+                period_returned[line.id] = period_returned.get(line.id, 0) + rqty
         ser_ids = [
             r[0].serialized_item_id
             for r in rows
@@ -133,6 +161,7 @@ class ReturnsRepository:
                 )
             ).all()
         }
+        cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
         for line, rqty in rows:
             refund = line.unit_price * rqty
             if line.line_type == SaleLineType.CATALOG:
@@ -143,9 +172,14 @@ class ReturnsRepository:
                     c_bulk_rev += refund
                 else:
                     o_bulk_rev += refund
-                    if lot is not None and lot.total_qty:
-                        o_bulk_cogs += round_ntd(
-                            lot.acquisition_cost * Decimal(rqty) / Decimal(lot.total_qty)
+                    if lot is not None and lot.total_qty and line.id not in cogs_done:
+                        cogs_done.add(line.id)
+                        prior = prior_returned.get(line.id, 0)
+                        cum = prior + period_returned.get(line.id, 0)
+                        cost, tq = lot.acquisition_cost, Decimal(lot.total_qty)
+                        # 本期 COGS 反轉＝round(含本期累積) − round(本期前累積)
+                        o_bulk_cogs += round_ntd(cost * Decimal(cum) / tq) - round_ntd(
+                            cost * Decimal(prior) / tq
                         )
             elif line.line_type == SaleLineType.SERIALIZED:
                 item = items.get(line.serialized_item_id or 0)

@@ -217,3 +217,55 @@ async def test_margin_breakdown_subtracts_returns_in_window(
     assert full_again.gross_turnover == Decimal("0")
 
     _ = item
+
+
+async def test_bulk_return_cogs_reversal_is_cumulative(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """散裝差額法：批成本 10/3 件，賣 3 件 COGS=10；三次各退 1 件，累計反轉 COGS=10（非 3×3=9）。"""
+    from app.modules.inventory.service import InventoryService
+    from app.shared.enums import BulkAcquisitionBasis
+
+    token, store_id, _, _ = await _seed(db_session)
+    lot = await InventoryService(db_session).create_bulk_lot(
+        store_id,
+        lot_code="RET-D8-BULK",
+        name="散裝營釘",
+        grade=Grade.E,
+        acquisition_cost=Decimal("10"),
+        acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal("100"),
+        total_qty=3,
+    )
+    await db_session.commit()
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [{"line_type": "BULK_LOT", "bulk_lot_id": lot.id, "qty": 3}]},
+        headers=_auth(token, idem="d8-bulk-sale"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    line_id = sale["lines"][0]["id"]
+
+    svc = SalesService(db_session)
+    t0 = datetime.now(UTC) - timedelta(days=1)
+    t1 = datetime.now(UTC) + timedelta(days=1)
+    assert (await svc.margin_breakdown(store_id, t0, t1)).bulk_cogs == Decimal("10")
+
+    # 三次各退 1 件
+    for i in range(3):
+        r = await client.post(
+            "/api/v1/returns",
+            json={
+                "sale_id": sale["id"],
+                "reason": "逐件退",
+                "lines": [{"sale_line_id": line_id, "qty": 1}],
+            },
+            headers=_auth(token, idem=f"d8-bulk-ret-{i}"),
+        )
+        assert r.status_code == 201, r.text
+    db_session.expire_all()
+
+    # 全退後：bulk_cogs 淨額 = 10 − 10 = 0（差額法逐次反轉 3+4+3=10，非 3+3+3=9）
+    after = await svc.margin_breakdown(store_id, t0, t1)
+    assert after.bulk_cogs == Decimal("0"), f"cogs={after.bulk_cogs}（差額法應為 0）"

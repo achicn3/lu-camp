@@ -77,6 +77,13 @@ class ReturnsService:
         """期間退貨的毛利扣減（D-8(1)；供 sales.margin_breakdown 同源扣除，read-only）。"""
         return await self._repo.margin_adjustments(store_id, date_from, date_to)
 
+    async def returned_qty_for_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
+        """該銷售各明細已退貨累積量（退貨頁算可退餘量用，read-only）。"""
+        sale_lines = await self._sales.list_lines(sale_id)
+        return await self._repo.returned_qty_by_sale_line_ids(
+            store_id, [line.id for line in sale_lines]
+        )
+
     async def has_returns_for_sale(self, store_id: int, sale_id: int) -> bool:
         """該銷售是否已有退貨（供 sales.void_sale 前置檢查：已退貨者不可作廢）。"""
         return await self._repo.has_returns_for_sale(store_id, sale_id)

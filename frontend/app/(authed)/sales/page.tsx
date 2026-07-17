@@ -11,7 +11,12 @@ import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
-import { computeRefund, isReturnable, validateReturnPlan } from "@/features/returns/plan";
+import {
+  computeRefund,
+  isReturnable,
+  remainingQty,
+  validateReturnPlan,
+} from "@/features/returns/plan";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
 
@@ -121,6 +126,13 @@ function ReturnDialog({
   const [qtys, setQtys] = useState<Record<number, number>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // 冪等鍵綁定「一次退貨嘗試」：回應遺失後從錯誤重試，必須沿用同鍵才觸發後端 replay、
+  // 不重複退現/回補/沖點（Codex P1）。改動退貨計畫（qtys/reason）才換新鍵。
+  // 冪等鍵由「退貨計畫指紋」衍生：同計畫（含重試）→同鍵→後端 replay，不重複退款/沖點；
+  // 改計畫→新鍵→新退貨（沿用舊鍵改內容會撞後端 IdempotencyKeyConflict）。以 useMemo
+  // 衍生避免 effect 內同步 setState。
+  const planFingerprint = `${JSON.stringify(qtys)}|${reason}`;
+  const idemKey = useMemo(() => newIdempotencyKey(), [planFingerprint]);
   const detail = useQuery({
     queryKey: ["sale-detail", sale.id],
     queryFn: async () => {
@@ -132,15 +144,18 @@ function ReturnDialog({
     },
   });
   const lines = detail.data?.lines ?? [];
-  const returnable = lines.filter(isReturnable);
+  // 只列還有可退餘量的行（全退的不再出現，避免可選卻被後端 409）
+  const returnable = lines.filter((l) => isReturnable(l) && remainingQty(l) > 0);
   const refund = computeRefund(lines, qtys);
+  // 後端 v1 僅支援純現金銷售退貨（購物金/混合付款會 409）→ 前端先擋、給明確原因（Codex P2）
+  const cashOnly = detail.data?.payment_method === "CASH";
 
   const submit = useMutation({
     mutationFn: async () => {
       const invalid = validateReturnPlan(lines, qtys, reason);
       if (invalid) throw new Error(invalid);
       const { data, error: apiError } = await api.POST("/api/v1/returns", {
-        params: { header: { "Idempotency-Key": newIdempotencyKey() } },
+        params: { header: { "Idempotency-Key": idemKey } },
         body: {
           sale_id: sale.id,
           reason: reason.trim(),
@@ -165,44 +180,59 @@ function ReturnDialog({
           寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。
         </p>
         {detail.isLoading && <p>載入明細中…</p>}
-        {returnable.length > 0 && (
+        {detail.isSuccess && !cashOnly && (
+          <p role="alert" className="form-error">
+            此單以購物金或混合方式付款，目前系統僅支援純現金銷售退貨。
+            請改以作廢處理，或聯繫管理者。
+          </p>
+        )}
+        {cashOnly && returnable.length > 0 && (
           <table className="data-table">
             <thead>
               <tr>
                 <th>品項</th>
                 <th>單價</th>
-                <th>購買數</th>
+                <th>可退餘量</th>
                 <th>退貨數</th>
               </tr>
             </thead>
             <tbody>
-              {returnable.map((line) => (
-                <tr key={line.id}>
-                  <td>{line.description}</td>
-                  <td>${formatNtd(parseNtd(line.unit_price) ?? 0)}</td>
-                  <td>{line.qty}</td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={line.qty}
-                      value={qtys[line.id] ?? 0}
-                      aria-label={`${line.description} 退貨數量`}
-                      style={{ width: 72 }}
-                      onChange={(e) =>
-                        setQtys((prev) => ({
-                          ...prev,
-                          [line.id]: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                        }))
-                      }
-                    />
-                  </td>
-                </tr>
-              ))}
+              {returnable.map((line) => {
+                const remaining = remainingQty(line);
+                return (
+                  <tr key={line.id}>
+                    <td>{line.description}</td>
+                    <td>${formatNtd(parseNtd(line.unit_price) ?? 0)}</td>
+                    <td>
+                      {remaining}
+                      {line.returned_qty ? `（原 ${line.qty}、已退 ${line.returned_qty}）` : ""}
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min={0}
+                        max={remaining}
+                        value={qtys[line.id] ?? 0}
+                        aria-label={`${line.description} 退貨數量`}
+                        style={{ width: 72 }}
+                        onChange={(e) =>
+                          setQtys((prev) => ({
+                            ...prev,
+                            [line.id]: Math.max(
+                              0,
+                              Math.min(remaining, Math.floor(Number(e.target.value) || 0)),
+                            ),
+                          }))
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
-        {detail.isSuccess && returnable.length === 0 && (
+        {detail.isSuccess && cashOnly && returnable.length === 0 && (
           <p className="hint">此單沒有可退貨的品項（餐飲不支援退貨）。</p>
         )}
         <label style={{ display: "block", marginTop: 12 }}>
@@ -228,7 +258,7 @@ function ReturnDialog({
           <button
             type="button"
             className="btn-danger"
-            disabled={submit.isPending || refund <= 0}
+            disabled={submit.isPending || refund <= 0 || !cashOnly}
             onClick={() => {
               setError(null);
               submit.mutate();

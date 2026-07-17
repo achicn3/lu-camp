@@ -16,6 +16,11 @@ export function isReturnable(line: SaleLine): boolean {
   return RETURNABLE_TYPES.has(line.line_type);
 }
 
+/** 可退餘量＝購買數 − 已退數（部分退貨後單仍 COMPLETED，可再退剩餘；後端為最終防線）。 */
+export function remainingQty(line: SaleLine): number {
+  return Math.max(0, line.qty - (line.returned_qty ?? 0));
+}
+
 /** 預估退款額 = Σ 折後單價 × 退貨數（與後端 refund_amount 同式）。 */
 export function computeRefund(lines: SaleLine[], qtys: Record<number, number>): number {
   let total = 0;
@@ -39,7 +44,10 @@ export function validateReturnPlan(
     if (qty === 0) continue;
     if (!isReturnable(line)) return `「${line.description}」為餐飲品項，不支援退貨`;
     if (qty < 0 || !Number.isInteger(qty)) return "退貨數量必須為正整數";
-    if (qty > line.qty) return `「${line.description}」退貨數量不可超過購買數 ${line.qty}`;
+    const remaining = remainingQty(line);
+    if (qty > remaining) {
+      return `「${line.description}」退貨數量不可超過可退餘量 ${remaining}`;
+    }
     any = true;
   }
   return any ? null : "請至少選擇一項退貨數量";

@@ -385,6 +385,11 @@ class ReportsService:
         """經營洞察報表（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。唯讀。
 
         序號品與散裝售出列一起納入排行（散裝也有品牌/類型/入庫/成本；Codex P2）。
+
+        已知限制（D-8、裁示 2026-07-16「其餘文件化」）：品牌/類型排行以 *_sold_rows
+        （售出明細）為基礎，**不 net 退貨**——同期退貨的品項仍計入銷量/營收，同期退貨再售
+        會重複計。屬分析用洞察（非帳務），主帳務退貨扣減已在 margin_breakdown 落實；影響量
+        在模擬中為全期營收 0.05%。若日後要一致，需在 sold_rows 減去期內退貨明細。
         """
         ser = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
         bulk = await self._sales.bulk_sold_rows(store_id, date_from, date_to)

@@ -232,7 +232,11 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到銷售單")
     lines = await svc.get_lines(sale.id)
     tenders = await svc.get_tenders(sale.id)
-    return SaleRead.build(sale, lines, tenders)
+    # 退貨頁需要每行已退量算可退餘量（跨模組經 returns service，§2）
+    from app.modules.returns.service import ReturnsService
+
+    returned = await ReturnsService(session).returned_qty_for_sale(user.store_id, sale.id)
+    return SaleRead.build(sale, lines, tenders, returned_by_line=returned)
 
 
 @router.post("/{sale_id}/void", response_model=SaleRead, operation_id="voidSale")
