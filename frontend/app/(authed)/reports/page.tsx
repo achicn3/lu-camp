@@ -12,6 +12,7 @@ import {
   computeChartScaling,
   defaultDateRange,
   exclusiveEnd,
+  formatRate,
   isoDate,
   startOfDay,
   triggerDownload,
@@ -305,7 +306,7 @@ function DashboardPanel() {
           <dd>
             <MoneyText value={report.gross_margin} />
             {report.gross_margin_rate && (
-              <span className="rpt-rate"> ({report.gross_margin_rate})</span>
+              <span className="rpt-rate"> ({formatRate(report.gross_margin_rate)})</span>
             )}
           </dd>
         </div>
@@ -647,7 +648,7 @@ function TrendsPanel() {
                     <td><MoneyText value={row.secondhand_revenue} /></td>
                     <td><MoneyText value={row.food_revenue} /></td>
                     <td><MoneyText value={row.gross_margin} /></td>
-                    <td>{row.gross_margin_rate ?? "N/A"}</td>
+                    <td>{formatRate(row.gross_margin_rate)}</td>
                     <td><MoneyText value={row.gross_turnover} /></td>
                     <td className="money">{row.transaction_count}</td>
                   </tr>
@@ -859,7 +860,7 @@ function SalesMarginPanel() {
               <dd>
                 <MoneyText value={report.gross_margin} />
                 {report.gross_margin_rate && (
-                  <span className="rpt-rate"> ({report.gross_margin_rate})</span>
+                  <span className="rpt-rate"> ({formatRate(report.gross_margin_rate)})</span>
                 )}
               </dd>
             </div>
@@ -1219,7 +1220,7 @@ function CampaignPerformancePanel() {
                   <MoneyText value={row.gross_margin} />
                 </td>
                 <td>
-                  {row.gross_margin_rate === null ? "N/A" : row.gross_margin_rate}
+                  {formatRate(row.gross_margin_rate)}
                 </td>
                 <td className="money">{row.transaction_count}</td>
               </tr>

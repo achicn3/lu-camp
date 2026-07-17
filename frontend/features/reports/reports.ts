@@ -32,6 +32,17 @@ export function defaultDateRange(now?: Date): { from: string; to: string } {
 }
 
 /** Format a Date to YYYY-MM-DD. */
+/**
+ * 毛利率顯示：後端回小數字串（如 "0.5807"）→ 百分比一位小數（"58.1%"）。
+ * null/undefined/空 → "N/A"。店員看的是百分比，不是原始小數。
+ */
+export function formatRate(rate: string | number | null | undefined): string {
+  if (rate === null || rate === undefined || rate === "") return "N/A";
+  const n = Number(rate);
+  if (Number.isNaN(n)) return "N/A";
+  return `${(n * 100).toFixed(1)}%`;
+}
+
 export function isoDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");

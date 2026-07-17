@@ -180,6 +180,13 @@ body {
 .app-nav {
   display: flex;
   gap: var(--sp-2);
+  /* 15 個項目：不折行、可水平捲動，避免文字被擠成直排（「POS 結/帳」）與頁面水平溢出。
+     nav 佔剩餘空間並可內部捲動，右側控制固定不被推出（單店單機不做完整 drawer）。 */
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .nav-link {
@@ -190,6 +197,7 @@ body {
   min-height: var(--tap-min);
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -206,6 +214,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+  flex-shrink: 0;
 }
 
 .session-badge {

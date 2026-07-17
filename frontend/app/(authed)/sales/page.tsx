@@ -132,6 +132,9 @@ function ReturnDialog({
   // 改計畫→新鍵→新退貨（沿用舊鍵改內容會撞後端 IdempotencyKeyConflict）。以 useMemo
   // 衍生避免 effect 內同步 setState。
   const planFingerprint = `${JSON.stringify(qtys)}|${reason}`;
+  // 刻意以 planFingerprint 為依賴重新產生新鍵（callback 不用它，故 rule 誤判為多餘）：
+  // 計畫變＝新鍵、計畫不變（重試）＝同鍵觸發後端 replay。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const idemKey = useMemo(() => newIdempotencyKey(), [planFingerprint]);
   const detail = useQuery({
     queryKey: ["sale-detail", sale.id],

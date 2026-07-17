@@ -9,7 +9,9 @@ import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
 
-const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
+// managerOnly：管理專屬頁（後端亦限 MANAGER）——CLERK 導覽收斂，不顯示無權入口
+// （前端隱藏非安全邊界，後端每請求仍驗權；此處只為店員介面不顯示點不進去的入口）。
+const NAV_ITEMS: { href: string; label: string; ready: boolean; managerOnly?: boolean }[] = [
   { href: "/", label: "首頁", ready: true },
   { href: "/pos", label: "POS 結帳", ready: true },
   { href: "/sales", label: "交易紀錄", ready: true },
@@ -21,10 +23,10 @@ const NAV_ITEMS: { href: string; label: string; ready: boolean }[] = [
   { href: "/consignment", label: "寄售付款", ready: true },
   { href: "/purchasing", label: "採購補貨", ready: true },
   { href: "/stocktake", label: "盤點", ready: true },
-  { href: "/campaigns", label: "門市活動", ready: true },
-  { href: "/menu", label: "餐飲菜單", ready: true },
-  { href: "/reports", label: "報表", ready: true },
-  { href: "/settings", label: "設定", ready: true },
+  { href: "/campaigns", label: "門市活動", ready: true, managerOnly: true },
+  { href: "/menu", label: "餐飲菜單", ready: true, managerOnly: true },
+  { href: "/reports", label: "報表", ready: true, managerOnly: true },
+  { href: "/settings", label: "設定", ready: true, managerOnly: true },
 ];
 
 const emptySubscribe = () => () => {};
@@ -70,7 +72,9 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <header className="app-header">
         <nav className="app-nav">
-          {NAV_ITEMS.map((item) =>
+          {NAV_ITEMS.filter(
+            (item) => !item.managerOnly || session.role === "MANAGER",
+          ).map((item) =>
             item.ready ? (
               <Link key={item.href} href={item.href} className="nav-link">
                 {item.label}

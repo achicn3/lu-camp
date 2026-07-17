@@ -51,7 +51,9 @@ export function validatePlan(
   const needsMember = plan.storeCredit > 0;
   const needsDrawer = plan.cash > 0;
   if (total <= 0) {
-    return { ok: false, error: "購物車是空的", needsMember, needsDrawer };
+    // 空購物車是初始狀態、非錯誤：不回錯誤字串（避免右側紅色 alert 誤導）；結帳鈕仍由
+    // !ok 停用，購物車區另有中性引導文案。
+    return { ok: false, error: null, needsMember, needsDrawer };
   }
   if (plan.mode === "MIXED") {
     if (plan.cash <= 0 || plan.storeCredit <= 0) {

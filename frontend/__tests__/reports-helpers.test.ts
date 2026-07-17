@@ -110,3 +110,19 @@ describe("computeChartScaling", () => {
     expect(result.max).toBeGreaterThanOrEqual(100);
   });
 });
+
+import { formatRate } from "@/features/reports/reports";
+
+describe("formatRate", () => {
+  it("小數字串→百分比一位小數", () => {
+    expect(formatRate("0.5807")).toBe("58.1%");
+    expect(formatRate("0")).toBe("0.0%");
+    expect(formatRate(0.5)).toBe("50.0%");
+  });
+  it("null/空/非數字→N/A", () => {
+    expect(formatRate(null)).toBe("N/A");
+    expect(formatRate(undefined)).toBe("N/A");
+    expect(formatRate("")).toBe("N/A");
+    expect(formatRate("abc")).toBe("N/A");
+  });
+});
