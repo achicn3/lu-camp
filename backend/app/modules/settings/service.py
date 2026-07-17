@@ -56,6 +56,10 @@ def _new_settings(store_id: int) -> StoreSettings:
         monthly_fixed_cash_outflow=Decimal(DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW),
         store_credit_min_spend=Decimal(DEFAULT_STORE_CREDIT_MIN_SPEND),
         store_credit_engine_params=dict(DEFAULT_STORE_CREDIT_ENGINE_PARAMS),
+        # 行動支付（docs/30）：暫態預設（mapped_column default 只在 flush 生效、不套暫態物件）。
+        linepay_enabled=False,
+        linepay_fee_pct=Decimal(0),
+        taiwanpay_fee_pct=Decimal(0),
     )
 
 

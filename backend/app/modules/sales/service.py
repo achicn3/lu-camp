@@ -21,7 +21,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import discounted_price, split_tax_inclusive
+from app.core.money import discounted_price, round_ntd, split_tax_inclusive
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
@@ -34,6 +34,7 @@ from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
+from app.modules.settings.models import StoreSettings
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
@@ -566,7 +567,9 @@ class SalesService:
 
         # 收款副作用（§3.2）：現金 tender → 錢櫃 SALE_IN（現金部分，非全額）；
         # 購物金 tender → 帳本 DEBIT（買方）。發票/稅/點數不受 tender 組成影響。
-        await self._apply_tenders(store_id, sale, plan, clerk_user_id, buyer_contact_id)
+        await self._apply_tenders(
+            store_id, sale, plan, clerk_user_id, buyer_contact_id, settings
+        )
 
         # 簽署餘額快照的鎖定比對（Codex K5 第六/十輪）：置於 _apply_tenders **之後**——現金已
         # 先落地（cash_session 行鎖持有）、DEBIT 已依全域 cash→credit 鎖序鎖住帳戶列，此處重鎖
@@ -640,14 +643,21 @@ class SalesService:
         plan: list[TenderInput],
         clerk_user_id: int,
         buyer_contact_id: int | None,
+        settings: StoreSettings,
     ) -> None:
-        """落地收款：現金部分入錢櫃 SALE_IN、購物金部分扣帳本 DEBIT，並記 sale_tenders。
+        """落地收款：現金入錢櫃 SALE_IN、購物金扣帳本 DEBIT、行動支付僅記 tender（非現金、不進
+        抽屜，docs/30），並記 sale_tenders（含手續費快照）。
 
-        固定 CASH 先於 STORE_CREDIT 落地：建立 cash_session 與 store_credit_account 的**全域唯一
-        鎖序**（與收購作廢的 cash→credit 一致），避免「購物金-先的混合銷售」與並行 SPLIT 作廢在同一
+        固定 CASH 先於其他落地：建立 cash_session 與 store_credit_account 的**全域唯一鎖序**
+        （與收購作廢的 cash→credit 一致），避免「購物金-先的混合銷售」與並行 SPLIT 作廢在同一
         contact 形成 AB-BA 死結（Codex F6.5 高風險）。各 tender 金額已固定、改順序不影響金額/紀錄。
+
+        手續費（docs/30 裁示：獨立支出行）：LINE_PAY/TAIWAN_PAY 依 settings 費率於當下快照
+        `fee = round_ntd(amount × fee_pct)`，記於 sale_tenders.fee_amount（店家成本，不減 amount）。
+        LINE Pay 的 API 授權（fail-closed）由 P2 於此加入；本階段 TAIWAN_PAY 免 API。
         """
         for tender in sorted(plan, key=lambda t: 0 if t.tender_type == TenderType.CASH else 1):
+            fee = Decimal(0)
             if tender.tender_type == TenderType.CASH:
                 await self._cash.record_movement(
                     store_id,
@@ -657,7 +667,7 @@ class SalesService:
                     ref_type="sale",
                     ref_id=sale.id,
                 )
-            else:  # STORE_CREDIT：扣買方購物金（餘額不足 → InsufficientStoreCredit）
+            elif tender.tender_type == TenderType.STORE_CREDIT:
                 assert buyer_contact_id is not None  # 上方已於購物金付款時強制買方存在
                 await self._storecredit.debit(
                     store_id,
@@ -667,12 +677,19 @@ class SalesService:
                     source_id=sale.id,
                     created_by=clerk_user_id,
                 )
+            elif tender.tender_type == TenderType.TAIWAN_PAY:
+                # 非現金、不進抽屜、無外部 API（店員於台灣Pay App 收款）；僅記手續費快照。
+                fee = Decimal(round_ntd(tender.amount * settings.taiwanpay_fee_pct))
+            elif tender.tender_type == TenderType.LINE_PAY:
+                # P2 實作：呼叫 Offline v4 pay（fail-closed）。本階段拒絕，避免留下未串接的收款。
+                raise InvalidSaleTender("LINE Pay 收款尚未啟用（P2 實作中）")
             await self._repo.add_tender(
                 SaleTender(
                     store_id=store_id,
                     sale_id=sale.id,
                     tender_type=tender.tender_type,
                     amount=tender.amount,
+                    fee_amount=fee,
                 )
             )
 

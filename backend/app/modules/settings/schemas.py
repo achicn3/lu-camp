@@ -40,6 +40,9 @@ class SettingsRead(BaseModel):
     monthly_fixed_cash_outflow: NTDAmount
     store_credit_min_spend: NTDAmount
     store_credit_engine_params: dict[str, Any]
+    linepay_enabled: bool
+    linepay_fee_pct: RateOut
+    taiwanpay_fee_pct: RateOut
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -74,6 +77,10 @@ class SettingsUpdateRequest(BaseModel):
     store_credit_engine_params: dict[str, Any] | None = None
     # 溢價率變更事由（選填；寫入 premium_rate_history 留痕）。
     premium_change_reason: Annotated[str, Field(max_length=200)] | None = None
+    # 行動支付（docs/30）：LINE Pay 啟用開關＋手續費率（小數 0–1，同 tax_rate；上界 <1）。
+    linepay_enabled: bool | None = None
+    linepay_fee_pct: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
+    taiwanpay_fee_pct: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
 
     @field_validator("monthly_fixed_cash_outflow", "store_credit_min_spend")
     @classmethod
@@ -88,6 +95,14 @@ class SettingsUpdateRequest(BaseModel):
         # DB 為 Numeric(5,4)：限四位小數，避免 API/留痕記 5dp 而 DB 落 4dp 不一致（Codex P2）。
         if value is not None and value != value.quantize(Decimal("0.0001")):
             raise ValueError("溢價率最多四位小數")
+        return value
+
+    @field_validator("linepay_fee_pct", "taiwanpay_fee_pct")
+    @classmethod
+    def _fee_scale(cls, value: Decimal | None) -> Decimal | None:
+        # DB Numeric(5,4)：手續費率限四位小數。
+        if value is not None and value != value.quantize(Decimal("0.0001")):
+            raise ValueError("手續費率最多四位小數")
         return value
 
 

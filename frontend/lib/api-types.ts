@@ -3744,7 +3744,7 @@ export interface components {
          *     單一 tender 時為該 tender 型別、多 tender 為 MIXED；既有報表/收據相容。
          * @enum {string}
          */
-        PaymentMethod: "CASH" | "STORE_CREDIT" | "MIXED";
+        PaymentMethod: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY" | "MIXED";
         /**
          * PayoutMethod
          * @description 收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。
@@ -4308,6 +4308,11 @@ export interface components {
         SaleTenderRead: {
             /** Amount */
             amount: string;
+            /**
+             * Fee Amount
+             * @default 0
+             */
+            fee_amount: string;
             /** Id */
             id: number;
             tender_type: components["schemas"]["TenderType"];
@@ -4470,6 +4475,10 @@ export interface components {
             default_margin_pct: number;
             /** Einvoice Enabled */
             einvoice_enabled: boolean;
+            /** Linepay Enabled */
+            linepay_enabled: boolean;
+            /** Linepay Fee Pct */
+            linepay_fee_pct: string;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow: string;
             /** Premium Rate */
@@ -4490,6 +4499,8 @@ export interface components {
             store_credit_min_spend: string;
             /** Store Id */
             store_id: number;
+            /** Taiwanpay Fee Pct */
+            taiwanpay_fee_pct: string;
             /** Tax Rate */
             tax_rate: string;
         };
@@ -4509,6 +4520,10 @@ export interface components {
             default_margin_pct?: number | null;
             /** Einvoice Enabled */
             einvoice_enabled?: boolean | null;
+            /** Linepay Enabled */
+            linepay_enabled?: boolean | null;
+            /** Linepay Fee Pct */
+            linepay_fee_pct?: number | string | null;
             /** Monthly Fixed Cash Outflow */
             monthly_fixed_cash_outflow?: number | string | null;
             /** Premium Change Reason */
@@ -4529,6 +4544,8 @@ export interface components {
             } | null;
             /** Store Credit Min Spend */
             store_credit_min_spend?: number | string | null;
+            /** Taiwanpay Fee Pct */
+            taiwanpay_fee_pct?: number | string | null;
             /** Tax Rate */
             tax_rate?: number | string | null;
         };
@@ -4780,12 +4797,14 @@ export interface components {
         };
         /**
          * TenderType
-         * @description 銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。
+         * @description 銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6；docs/30）。
          *
-         *     CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。
+         *     CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）；
+         *     LINE_PAY / TAIWAN_PAY 行動支付（**非現金、不進抽屜**，比照 STORE_CREDIT；店家扣手續費，
+         *     fee 記於 sale_tenders.fee_amount 為店家成本）。
          * @enum {string}
          */
-        TenderType: "CASH" | "STORE_CREDIT";
+        TenderType: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY";
         /**
          * TokenResponse
          * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。

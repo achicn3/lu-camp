@@ -4914,6 +4914,8 @@
         "enum": [
           "CASH",
           "STORE_CREDIT",
+          "LINE_PAY",
+          "TAIWAN_PAY",
           "MIXED"
         ],
         "title": "PaymentMethod",
@@ -6327,6 +6329,11 @@
             "title": "Amount",
             "type": "string"
           },
+          "fee_amount": {
+            "default": "0",
+            "title": "Fee Amount",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -6815,6 +6822,14 @@
             "title": "Einvoice Enabled",
             "type": "boolean"
           },
+          "linepay_enabled": {
+            "title": "Linepay Enabled",
+            "type": "boolean"
+          },
+          "linepay_fee_pct": {
+            "title": "Linepay Fee Pct",
+            "type": "string"
+          },
           "monthly_fixed_cash_outflow": {
             "title": "Monthly Fixed Cash Outflow",
             "type": "string"
@@ -6852,6 +6867,10 @@
             "title": "Store Id",
             "type": "integer"
           },
+          "taiwanpay_fee_pct": {
+            "title": "Taiwanpay Fee Pct",
+            "type": "string"
+          },
           "tax_rate": {
             "title": "Tax Rate",
             "type": "string"
@@ -6871,7 +6890,10 @@
           "premium_rate_max",
           "monthly_fixed_cash_outflow",
           "store_credit_min_spend",
-          "store_credit_engine_params"
+          "store_credit_engine_params",
+          "linepay_enabled",
+          "linepay_fee_pct",
+          "taiwanpay_fee_pct"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -6926,6 +6948,34 @@
               }
             ],
             "title": "Einvoice Enabled"
+          },
+          "linepay_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linepay Enabled"
+          },
+          "linepay_fee_pct": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linepay Fee Pct"
           },
           "monthly_fixed_cash_outflow": {
             "anyOf": [
@@ -7057,6 +7107,23 @@
               }
             ],
             "title": "Store Credit Min Spend"
+          },
+          "taiwanpay_fee_pct": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taiwanpay Fee Pct"
           },
           "tax_rate": {
             "anyOf": [
@@ -7810,10 +7877,12 @@
         "type": "object"
       },
       "TenderType": {
-        "description": "銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。\n\nCASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。",
+        "description": "銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6；docs/30）。\n\nCASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）；\nLINE_PAY / TAIWAN_PAY 行動支付（**非現金、不進抽屜**，比照 STORE_CREDIT；店家扣手續費，\nfee 記於 sale_tenders.fee_amount 為店家成本）。",
         "enum": [
           "CASH",
-          "STORE_CREDIT"
+          "STORE_CREDIT",
+          "LINE_PAY",
+          "TAIWAN_PAY"
         ],
         "title": "TenderType",
         "type": "string"

@@ -79,6 +79,17 @@ class StoreSettings(Base, TimestampMixin):
     store_credit_min_spend: Mapped[Decimal] = mapped_column(
         Numeric(12, 0), server_default=text("0"), nullable=False
     )
+    # 行動支付（docs/30）：LINE Pay 啟用開關＋各方式手續費率（小數，0.02=2%，同 tax_rate 慣例）。
+    # 手續費為店家成本、記 sale_tenders.fee_amount；台灣Pay 免 API 無 enabled 開關（恆可選）。
+    linepay_enabled: Mapped[bool] = mapped_column(
+        default=False, server_default=text("false"), nullable=False
+    )
+    linepay_fee_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), default=Decimal(0), server_default=text("0"), nullable=False
+    )
+    taiwanpay_fee_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 4), default=Decimal(0), server_default=text("0"), nullable=False
+    )
     # 建議值引擎可調參數（docs/16 §1.5/§6；SC-5b 引擎使用）。server_default 與 defaults 一致。
     store_credit_engine_params: Mapped[dict[str, Any]] = mapped_column(
         JSONB,

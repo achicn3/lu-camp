@@ -174,17 +174,28 @@ class PaymentMethod(StrEnum):
 
     CASH = "CASH"
     STORE_CREDIT = "STORE_CREDIT"
+    LINE_PAY = "LINE_PAY"
+    TAIWAN_PAY = "TAIWAN_PAY"
     MIXED = "MIXED"
 
 
 class TenderType(StrEnum):
-    """銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6）。
+    """銷售收款明細的單筆付款型別（sale_tenders.tender_type，docs/16 §1.6；docs/30）。
 
-    CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）。
+    CASH 現金（走錢櫃 SALE_IN）；STORE_CREDIT 購物金（走帳本 DEBIT，不碰現金）；
+    LINE_PAY / TAIWAN_PAY 行動支付（**非現金、不進抽屜**，比照 STORE_CREDIT；店家扣手續費，
+    fee 記於 sale_tenders.fee_amount 為店家成本）。
     """
 
     CASH = "CASH"
     STORE_CREDIT = "STORE_CREDIT"
+    LINE_PAY = "LINE_PAY"
+    TAIWAN_PAY = "TAIWAN_PAY"
+
+    @property
+    def is_cash(self) -> bool:
+        """是否走實體現金抽屜（關帳應有現金只認 CASH；其餘皆非現金、另列）。"""
+        return self is TenderType.CASH
 
 
 class SaleInvoiceStatus(StrEnum):

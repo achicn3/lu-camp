@@ -973,3 +973,105 @@ async def test_same_key_different_tenders_conflicts(
         headers=_auth(token, "samekey"),
     )
     assert second.status_code == 409, second.text
+
+
+async def _set_taiwanpay_fee(session: AsyncSession, store_id: int, fee: str) -> None:
+    from app.modules.settings.schemas import SettingsUpdateRequest
+    from app.modules.settings.service import StoreSettingsService
+
+    mgr_id = int(
+        await session.scalar(
+            select(User.id).where(User.store_id == store_id, User.role == "MANAGER")
+        )
+        or 0
+    )
+    await StoreSettingsService(session).update_settings(
+        store_id, actor_user_id=mgr_id, patch=SettingsUpdateRequest(taiwanpay_fee_pct=Decimal(fee))
+    )
+    await session.commit()
+
+
+async def test_taiwanpay_tender_non_cash_with_fee(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """台灣Pay：非現金（不入錢櫃 SALE_IN）、記手續費快照 round_ntd(amount×pct)、Σtender=total。"""
+    token, _mgr, store_id, _ = await _seed(db_session)  # 已開帳
+    await _set_taiwanpay_fee(db_session, store_id, "0.03")  # 3%
+    cat = await _seed_catalog(db_session, store_id, price="500", qty=10)
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_catalog_line(cat, 2)],  # total 1000
+            "tenders": [{"tender_type": "TAIWAN_PAY", "amount": "1000"}],
+        },
+        headers=_auth(token, "twp1"),
+    )
+    assert resp.status_code == 201, resp.text
+    sale = resp.json()
+    assert sale["payment_method"] == "TAIWAN_PAY"
+    tender = sale["tenders"][0]
+    assert tender["tender_type"] == "TAIWAN_PAY"
+    assert tender["amount"] == "1000"
+    assert tender["fee_amount"] == "30"  # round_ntd(1000×0.03)
+    # 非現金：不建 SALE_IN 現金異動
+    cash_in = await db_session.scalar(
+        select(func.count(CashMovement.id)).where(
+            CashMovement.session_id.isnot(None),
+            CashMovement.type == CashMovementType.SALE_IN,
+        )
+    )
+    assert cash_in == 0
+
+
+async def test_mixed_cash_and_taiwanpay(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """混合現金＋台灣Pay：現金部分入抽屜、台灣Pay 非現金；Σ=total、payment_method=MIXED。"""
+    token, _mgr, store_id, _ = await _seed(db_session)
+    await _set_taiwanpay_fee(db_session, store_id, "0.02")
+    cat = await _seed_catalog(db_session, store_id, price="500", qty=10)
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_catalog_line(cat, 2)],  # total 1000
+            "tenders": [
+                {"tender_type": "CASH", "amount": "400"},
+                {"tender_type": "TAIWAN_PAY", "amount": "600"},
+            ],
+        },
+        headers=_auth(token, "mixtwp"),
+    )
+    assert resp.status_code == 201, resp.text
+    sale = resp.json()
+    assert sale["payment_method"] == "MIXED"
+    by_type = {t["tender_type"]: t for t in sale["tenders"]}
+    assert by_type["CASH"]["amount"] == "400" and by_type["CASH"]["fee_amount"] == "0"
+    assert by_type["TAIWAN_PAY"]["amount"] == "600"
+    assert by_type["TAIWAN_PAY"]["fee_amount"] == "12"  # round_ntd(600×0.02)
+    # 抽屜只進現金部分 400（非全額 1000）
+    cash_in = await db_session.scalar(
+        select(func.coalesce(func.sum(CashMovement.amount), 0)).where(
+            CashMovement.type == CashMovementType.SALE_IN
+        )
+    )
+    assert cash_in == Decimal("400")
+
+
+async def test_linepay_tender_rejected_until_p2(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """LINE Pay 收款 P1 尚未啟用 → 422 拒絕、整筆不成立（fail-closed，不留無付款單）。"""
+    token, _mgr, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_catalog_line(cat, 1)],
+            "tenders": [{"tender_type": "LINE_PAY", "amount": "100"}],
+        },
+        headers=_auth(token, "lp1"),
+    )
+    assert resp.status_code == 422, resp.text
+    # 銷售未建立
+    n = await db_session.scalar(select(func.count()).select_from(SaleTender))
+    assert n == 0

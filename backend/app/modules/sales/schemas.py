@@ -229,6 +229,7 @@ class SaleTenderRead(BaseModel):
     id: int
     tender_type: TenderType
     amount: NTDAmount
+    fee_amount: NTDAmount = Decimal(0)  # 支付手續費（店家成本，docs/30）
 
 
 class SaleRead(BaseModel):

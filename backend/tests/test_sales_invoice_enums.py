@@ -26,8 +26,15 @@ def test_sale_line_type_values() -> None:
 
 
 def test_payment_method_values() -> None:
-    # SC-3（docs/16 §1.6）：payment_method 摘要欄擴充 STORE_CREDIT / MIXED。
-    assert {s.value for s in PaymentMethod} == {"CASH", "STORE_CREDIT", "MIXED"}
+    # SC-3（docs/16 §1.6）：payment_method 摘要欄擴充 STORE_CREDIT / MIXED；
+    # docs/30 行動支付擴充 LINE_PAY / TAIWAN_PAY。
+    assert {s.value for s in PaymentMethod} == {
+        "CASH",
+        "STORE_CREDIT",
+        "LINE_PAY",
+        "TAIWAN_PAY",
+        "MIXED",
+    }
 
 
 def test_sale_invoice_status_values() -> None:

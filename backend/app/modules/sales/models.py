@@ -140,6 +140,11 @@ class SaleTender(Base, TimestampMixin):
     sale_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
     tender_type: Mapped[TenderType] = mapped_column(_enum_col(TenderType))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 支付手續費（店家成本，docs/30）：行動支付（LINE Pay/台灣Pay）於結帳當下依 settings 費率
+    # 快照 round_ntd(amount×pct/100)；現金/購物金為 0。不減 amount（客人付全額），另列為支出。
+    fee_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 0), default=Decimal(0), server_default=text("0")
+    )
 
 
 # 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：
