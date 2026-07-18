@@ -62,7 +62,10 @@ def upgrade() -> None:
         sa.Column("trigger", sa.String(20), nullable=False),
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column(
-            "started_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "started_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("db_name", sa.String(63), nullable=False),
@@ -73,10 +76,16 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("actor_user_id", sa.Integer(), nullable=True),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["store_id"], ["stores.id"]),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"]),
@@ -101,17 +110,26 @@ def upgrade() -> None:
         sa.Column("source_r2_key", sa.String(300), nullable=False),
         sa.Column("restore_db_name", sa.String(63), nullable=False),
         sa.Column(
-            "started_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "started_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("verifications", postgresql.JSONB(), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
         sa.Column("actor_user_id", sa.Integer(), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["store_id"], ["stores.id"]),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"]),
