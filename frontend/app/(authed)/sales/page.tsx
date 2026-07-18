@@ -10,7 +10,10 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
-import { newIdempotencyKey } from "@/lib/uuid";
+import {
+  clearPersistedIdemKey,
+  getOrCreatePersistedIdemKey,
+} from "@/lib/idempotency";
 import {
   computeRefund,
   isReturnable,
@@ -150,16 +153,14 @@ function ReturnDialog({
   const [qtys, setQtys] = useState<Record<number, number>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  // 冪等鍵綁定「一次退貨嘗試」：回應遺失後從錯誤重試，必須沿用同鍵才觸發後端 replay、
-  // 不重複退現/回補/沖點（Codex P1）。改動退貨計畫（qtys/reason）才換新鍵。
-  // 冪等鍵由「退貨計畫指紋」衍生：同計畫（含重試）→同鍵→後端 replay，不重複退款/沖點；
-  // 改計畫→新鍵→新退貨（沿用舊鍵改內容會撞後端 IdempotencyKeyConflict）。以 useMemo
-  // 衍生避免 effect 內同步 setState。
-  const planFingerprint = `${JSON.stringify(qtys)}|${reason}`;
-  // 刻意以 planFingerprint 為依賴重新產生新鍵（callback 不用它，故 rule 誤判為多餘）：
-  // 計畫變＝新鍵、計畫不變（重試）＝同鍵觸發後端 replay。
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const idemKey = useMemo(() => newIdempotencyKey(), [planFingerprint]);
+  // 冪等鍵綁定「一次退貨嘗試」：回應遺失後從錯誤重試，必須沿用同鍵才觸發後端 replay、不重複
+  // 退款/回補/沖點（Codex P1）。**持久化跨對話框重掛/重整（Codex 第二輪 #3）**：LINE Pay 退款
+  // 於本地 commit 前呼叫平台，若之後失敗/崩潰，關開對話框或重整會換出新鍵而繞過 durable 退款
+  // 日誌重複退款。故以「該銷售 + 退貨計畫指紋」為界持久化鍵：同計畫（含重掛/重試）恆同鍵→後端
+  // replay 或 durable 日誌 SUCCEEDED 跳過，不重退；改計畫→新鍵→新退貨。鍵於送出時取（見 mutationFn）。
+  const idemScope = `return-${sale.id}`;
+  const planFingerprintOf = (q: Record<number, number>, r: string): string =>
+    `${JSON.stringify(q)}|${r.trim()}`;
   const detail = useQuery({
     queryKey: ["sale-detail", sale.id],
     queryFn: async () => {
@@ -184,6 +185,11 @@ function ReturnDialog({
     mutationFn: async () => {
       const invalid = validateReturnPlan(lines, qtys, reason);
       if (invalid) throw new Error(invalid);
+      // 持久化冪等鍵（Codex 第二輪 #3）：同銷售同退貨計畫恆得同鍵，跨對話框重掛/重整存活。
+      const idemKey = getOrCreatePersistedIdemKey(
+        idemScope,
+        planFingerprintOf(qtys, reason),
+      );
       const { data, error: apiError } = await api.POST("/api/v1/returns", {
         params: { header: { "Idempotency-Key": idemKey } },
         body: {
@@ -197,7 +203,10 @@ function ReturnDialog({
       if (!data) throw new Error(extractDetail(apiError) ?? "退貨失敗");
       return data;
     },
-    onSuccess: (data) => onReturned(parseNtd(data.refund_amount) ?? 0),
+    onSuccess: (data) => {
+      clearPersistedIdemKey(idemScope); // 退貨成立 → 清鍵，下次換新鍵
+      onReturned(parseNtd(data.refund_amount) ?? 0);
+    },
     onError: (e: Error) => setError(e.message),
   });
 

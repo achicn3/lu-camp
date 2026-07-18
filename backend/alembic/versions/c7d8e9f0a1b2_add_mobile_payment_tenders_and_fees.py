@@ -1,4 +1,4 @@
-"""行動支付：TenderType/PaymentMethod 擴充 LINE_PAY/TAIWAN_PAY + sale_tenders.fee_amount + settings 費率
+"""行動支付：enum 擴充 LINE_PAY/TAIWAN_PAY + sale_tenders.fee_amount + settings 費率
 
 新增非現金付款方式（docs/30）：
 - sale_tenders.tender_type / sales.payment_method 的 CHECK 擴充 LINE_PAY、TAIWAN_PAY

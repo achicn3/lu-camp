@@ -1,3 +1,5 @@
+import { newIdempotencyKey } from "@/lib/uuid";
+
 // 收購/結帳等帶 Idempotency-Key 的請求：回應遺失/失敗時是否可安全「丟棄」凍結的冪等鍵。
 //
 // 只有在**確定後端未提交任何東西**時才可丟棄鍵、讓下次送出換新鍵：
@@ -126,6 +128,63 @@ export function clearPendingReceive(poId: number): void {
   memoryReceive.delete(poId);
   try {
     globalThis.localStorage?.removeItem(receiveStorageKey(poId));
+  } catch {
+    // 清除失敗不阻斷流程（記憶體後備已清）。
+  }
+}
+
+// ── 依 scope 持久化「內容指紋 → 冪等鍵」（LINE Pay 結帳/退貨；Codex 第二輪 #2/#3）─────
+// 結帳/退貨的冪等鍵只存 React ref/useMemo 會在頁面重整、元件重掛（如關開對話框）時遺失。若外部
+// 收款/退款已成立、但本地 commit 前崩潰/回應遺失，換新鍵便換出新 orderId → 可能對客人重複扣款/
+// 退款。故送出前先以 scope（結帳＝購物車、退貨＝該銷售）持久化「內容指紋→鍵」：**同指紋恆得同鍵**
+// （重掛/重整/重掃同內容後沿用同鍵 → 後端冪等重放，或以同 orderId check-first / durable 退款日誌
+// 復原，不重扣/不重退）；指紋變（不同購物車/退貨計畫）→ 換新鍵。成功後 clear。localStorage＋記憶體後備。
+interface PersistedIdem {
+  fingerprint: string;
+  key: string;
+}
+
+const SCOPED_IDEM_PREFIX = "lu-camp.pending-idem";
+const memoryScopedIdem = new Map<string, PersistedIdem>();
+
+function scopedIdemStorageKey(scope: string): string {
+  return `${SCOPED_IDEM_PREFIX}.${scope}`;
+}
+
+function loadScopedIdem(scope: string): PersistedIdem | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(scopedIdemStorageKey(scope));
+    if (stored != null) {
+      const parsed = JSON.parse(stored) as PersistedIdem;
+      if (parsed && typeof parsed.key === "string" && typeof parsed.fingerprint === "string") {
+        return parsed;
+      }
+    }
+  } catch {
+    // 讀取/解析失敗：退回記憶體後備。
+  }
+  return memoryScopedIdem.get(scope) ?? null;
+}
+
+/** 取（或首次建立並持久化）該 scope 目前指紋對應的冪等鍵；同指紋恆回同鍵，跨重掛/重整存活。 */
+export function getOrCreatePersistedIdemKey(scope: string, fingerprint: string): string {
+  const existing = loadScopedIdem(scope);
+  if (existing != null && existing.fingerprint === fingerprint) return existing.key;
+  const entry: PersistedIdem = { fingerprint, key: newIdempotencyKey() };
+  memoryScopedIdem.set(scope, entry);
+  try {
+    globalThis.localStorage?.setItem(scopedIdemStorageKey(scope), JSON.stringify(entry));
+  } catch {
+    // 配額/隱私政策：僅記憶體後備（本 session 仍防重複，重整不保證）。
+  }
+  return entry.key;
+}
+
+/** 成功（或確定未提交的 4xx）後清除，讓下一筆結帳/退貨換新鍵。 */
+export function clearPersistedIdemKey(scope: string): void {
+  memoryScopedIdem.delete(scope);
+  try {
+    globalThis.localStorage?.removeItem(scopedIdemStorageKey(scope));
   } catch {
     // 清除失敗不阻斷流程（記憶體後備已清）。
   }

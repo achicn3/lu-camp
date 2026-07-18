@@ -3,7 +3,7 @@
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useRef, useState } from "react";
+import { type ChangeEvent, type FormEvent, useState } from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
@@ -28,7 +28,10 @@ import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
-import { newIdempotencyKey } from "@/lib/uuid";
+import {
+  clearPersistedIdemKey,
+  getOrCreatePersistedIdemKey,
+} from "@/lib/idempotency";
 
 type SaleRead = components["schemas"]["SaleRead"];
 type InvoiceRead = components["schemas"]["InvoiceRead"];
@@ -725,11 +728,6 @@ export default function PosPage() {
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
-  // 冪等鍵：以送出內容簽章決定是否換鍵（見 checkout）；放 ref 不觸發 render。
-  const idemRef = useRef<{ sig: string; key: string }>({
-    sig: "",
-    key: newIdempotencyKey(),
-  });
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
@@ -1050,17 +1048,20 @@ export default function PosPage() {
           body.tenders?.map((t) => ({ ...t, line_pay_one_time_key: null })) ?? null,
       };
       const sig = JSON.stringify(sigBody);
-      if (sig !== idemRef.current.sig) {
-        idemRef.current = { sig, key: newIdempotencyKey() };
-      }
+      // 冪等鍵**持久化**（Codex 第二輪 #2）：以購物車指紋（不含一次性付款碼）為界存 localStorage，
+      // 跨頁面重整/重掛存活——LINE Pay 若已扣款但本地 commit 前崩潰/回應遺失，重整後重掃同購物車
+      // 沿用同鍵 → 同 orderId → 後端 check-first 復原、不重複扣款。成功後清（見 onSuccess）。
+      const idemKey = getOrCreatePersistedIdemKey("pos-checkout", sig);
       const { data, error } = await api.POST("/api/v1/sales", {
-        params: { header: { "Idempotency-Key": idemRef.current.key } },
+        params: { header: { "Idempotency-Key": idemKey } },
         body,
       });
       if (!data) throw new Error(extractDetail(error) ?? "結帳失敗");
       return { sale: data, sig: printSig };
     },
     onSuccess: ({ sale, sig }) => {
+      // 結帳成立 → 清除持久化冪等鍵（Codex 第二輪 #2），下一筆換新鍵。
+      clearPersistedIdemKey("pos-checkout");
       setCompleted(sale);
       setCompletedCampaign(campaignNote);
       // 簽署證據快照＝mutationFn 於送出當下擷取的不可變值（非 callback 時的活狀態）。
@@ -1122,7 +1123,8 @@ export default function PosPage() {
     setCompletedInvoice(null);
     issueInvoice.reset();
     printProof.reset();
-    idemRef.current = { sig: "", key: newIdempotencyKey() };
+    // 開新一筆：清除任何殘留的持久化結帳冪等鍵（Codex 第二輪 #2）。
+    clearPersistedIdemKey("pos-checkout");
     checkout.reset();
   }
 

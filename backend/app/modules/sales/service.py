@@ -842,11 +842,11 @@ class SalesService:
             raise LinePayChargeFailed(
                 "LINE Pay 尚未設定（缺 Channel 憑證），無法退款作廢；請設定後重試"
             )
-        # 作廢全額退款走 durable 日誌防重退（Codex finding #1）；作廢一單一次 → key=void:{id}。
+        # 作廢全額退款走 durable 日誌防重退（Codex finding #1）；作廢一單一次；key 綁店別隔離。
         await self._durable_line_pay_refund(
             store_id=store_id,
             order_id=txn.order_id,
-            refund_key=f"void:{sale_id}",
+            refund_key=f"s{store_id}:void:{sale_id}",
             amount=remaining,
             client=client,
         )
@@ -919,10 +919,23 @@ class SalesService:
         async with sm() as ledger:
             existing = await ledger.scalar(
                 select(LinePayRefundAttempt).where(
-                    LinePayRefundAttempt.refund_key == refund_key
+                    LinePayRefundAttempt.store_id == store_id,
+                    LinePayRefundAttempt.refund_key == refund_key,
                 )
             )
             if existing is not None:
+                # 內容綁定（Codex 第二輪 finding #1）：同 refund_key 既有紀錄的 (store, order, 額)
+                # 必須與本次完全相符才可重用——否則是跨店同鍵碰撞或內容變更，重用會把別筆退款誤記成
+                # 完成而不實際退款。不符即拒（不靜默重用錯列）。
+                if (
+                    existing.store_id != store_id
+                    or existing.order_id != order_id
+                    or existing.amount != amount
+                ):
+                    raise LinePayRefundAmbiguous(
+                        "LINE Pay 退款對帳鍵與既有紀錄的店別/訂單/金額不符，拒絕重用；"
+                        "請至 LINE Pay 後台確認後人工處理"
+                    )
                 if existing.status == LinePayRefundStatus.SUCCEEDED:
                     return  # 前次已退款成功 → 跳過不重退（防重退核心）
                 if existing.status == LinePayRefundStatus.PENDING:

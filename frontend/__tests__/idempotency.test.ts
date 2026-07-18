@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   canDiscardIdempotencyKey,
   clearPendingAcqIdemKey,
+  clearPersistedIdemKey,
+  getOrCreatePersistedIdemKey,
   loadPendingAcqIdemKey,
   pendingAcqIdemKeyServerSnapshot,
   pendingAcqIdemKeySnapshot,
@@ -93,5 +95,44 @@ describe("待確認收購冪等鍵 localStorage 持久化（跨重掛存活，�
     savePendingAcqIdemKey("idem-after-unsub");
     expect(notified).toBe(2); // 取消訂閱後不再通知
     clearPendingAcqIdemKey();
+  });
+});
+
+describe("getOrCreatePersistedIdemKey（結帳/退貨冪等鍵跨重掛存活；Codex 第二輪 #2/#3）", () => {
+  beforeEach(() => {
+    clearPersistedIdemKey("pos-checkout");
+    clearPersistedIdemKey("return-1");
+  });
+
+  it("同 scope 同指紋 → 恆回同鍵（重掛/重整/重掃後沿用，不重扣/不重退）", () => {
+    const a = getOrCreatePersistedIdemKey("pos-checkout", "cart-A");
+    const b = getOrCreatePersistedIdemKey("pos-checkout", "cart-A");
+    expect(a).toBe(b);
+  });
+
+  it("指紋變（不同購物車/退貨計畫）→ 換新鍵", () => {
+    const a = getOrCreatePersistedIdemKey("pos-checkout", "cart-A");
+    const b = getOrCreatePersistedIdemKey("pos-checkout", "cart-B");
+    expect(a).not.toBe(b);
+  });
+
+  it("跨 scope 不互相干擾（結帳 vs 各銷售退貨）", () => {
+    const checkout = getOrCreatePersistedIdemKey("pos-checkout", "same-fp");
+    const ret = getOrCreatePersistedIdemKey("return-1", "same-fp");
+    expect(checkout).not.toBe(ret);
+  });
+
+  it("clear 後同指紋改鑄新鍵（成立後下一筆換新鍵）", () => {
+    const a = getOrCreatePersistedIdemKey("return-1", "plan-X");
+    clearPersistedIdemKey("return-1");
+    const b = getOrCreatePersistedIdemKey("return-1", "plan-X");
+    expect(a).not.toBe(b);
+  });
+
+  it("持久化至 localStorage（模擬重整後仍取得同鍵）", () => {
+    const key = getOrCreatePersistedIdemKey("pos-checkout", "cart-persist");
+    const raw = globalThis.localStorage.getItem("lu-camp.pending-idem.pos-checkout");
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw as string).key).toBe(key);
   });
 });

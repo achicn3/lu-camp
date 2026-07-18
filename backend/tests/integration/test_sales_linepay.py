@@ -590,6 +590,26 @@ async def test_durable_refund_skips_when_already_succeeded(db_session: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_durable_refund_rejects_content_mismatch(db_session: AsyncSession) -> None:
+    # Codex 第二輪 #1：同 refund_key 但金額（或店/訂單）不符 → 拒絕重用（不把別筆退款誤記成完成）。
+    store_id, _clerk = await _seed(db_session)
+    svc = SalesService(db_session)
+    key = f"test-mismatch-{uuid4()}"
+    await svc._durable_line_pay_refund(
+        store_id=store_id, order_id="LP-z", refund_key=key, amount=Decimal("100"),
+        client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
+    )
+    # 同 key、不同金額 → ambiguous（拒重用既有 SUCCEEDED 列）
+    bad = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    with pytest.raises(LinePayRefundAmbiguous):
+        await svc._durable_line_pay_refund(
+            store_id=store_id, order_id="LP-z", refund_key=key, amount=Decimal("200"),
+            client=_client(bad),
+        )
+    assert bad.refund_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_durable_refund_pending_then_ambiguous(db_session: AsyncSession) -> None:
     # Codex finding #1：呼叫平台後傳輸錯誤（結果未定）→ 保留 PENDING；重試見 PENDING → ambiguous。
     store_id, _clerk = await _seed(db_session)
