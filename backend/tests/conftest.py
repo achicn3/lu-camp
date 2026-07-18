@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool
 import app.core.audit  # 註冊模型到 Base.metadata
 import app.core.db as app_db
 import app.modules.acquisition.models  # 註冊模型到 Base.metadata
+import app.modules.backup.models  # 註冊模型到 Base.metadata
 import app.modules.campaigns.models  # 註冊模型到 Base.metadata
 import app.modules.cashdrawer.models  # 註冊模型到 Base.metadata
 import app.modules.consignment.models  # 註冊模型到 Base.metadata

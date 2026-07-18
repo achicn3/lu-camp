@@ -428,3 +428,18 @@ class LinePayRefundAmbiguous(DomainError):
     不得盲目重試（可能已退款→重退造成超退，docs/30 §5 finding #1）：fail-closed，請店員至
     LINE Pay 後台確認該筆退款後再處理。
     """
+
+
+class BackupError(DomainError):
+    """備份執行失敗（dump/驗證/加密/上傳/修剪任一步）。訊息不含 R2 憑證/金鑰/PII。
+
+    如實記 backup_runs.last_error（假備份是最大風險——失敗絕不記成功）。
+    """
+
+
+class BackupAlreadyRunning(DomainError):
+    """已有一筆備份進行中（單一在跑守衛）：tick 與手動撞在一起，另一個跳過/回既有 RUNNING。"""
+
+
+class RestoreError(DomainError):
+    """還原執行失敗（下載/解密/pg_restore/四驗任一步）。正式庫未被碰，throwaway 庫可棄。"""

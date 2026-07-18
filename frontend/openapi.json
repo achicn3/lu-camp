@@ -6926,6 +6926,22 @@
             "title": "Allow Clerk Manage Categories",
             "type": "boolean"
           },
+          "backup_enabled": {
+            "title": "Backup Enabled",
+            "type": "boolean"
+          },
+          "backup_interval_hours": {
+            "title": "Backup Interval Hours",
+            "type": "integer"
+          },
+          "backup_offpeak_hour": {
+            "title": "Backup Offpeak Hour",
+            "type": "integer"
+          },
+          "backup_retention": {
+            "title": "Backup Retention",
+            "type": "integer"
+          },
           "default_commission_pct": {
             "title": "Default Commission Pct",
             "type": "integer"
@@ -7009,7 +7025,11 @@
           "store_credit_engine_params",
           "linepay_enabled",
           "linepay_fee_pct",
-          "taiwanpay_fee_pct"
+          "taiwanpay_fee_pct",
+          "backup_enabled",
+          "backup_interval_hours",
+          "backup_retention",
+          "backup_offpeak_hour"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -7027,6 +7047,56 @@
               }
             ],
             "title": "Allow Clerk Manage Categories"
+          },
+          "backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Enabled"
+          },
+          "backup_interval_hours": {
+            "anyOf": [
+              {
+                "maximum": 8760.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Interval Hours"
+          },
+          "backup_offpeak_hour": {
+            "anyOf": [
+              {
+                "maximum": 23.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Offpeak Hour"
+          },
+          "backup_retention": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Retention"
           },
           "default_commission_pct": {
             "anyOf": [

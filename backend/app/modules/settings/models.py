@@ -96,6 +96,19 @@ class StoreSettings(Base, TimestampMixin):
         nullable=False,
         server_default=text(f"'{json.dumps(DEFAULT_STORE_CREDIT_ENGINE_PARAMS)}'::jsonb"),
     )
+    # 備份系統（docs/31）：啟用開關＋間隔（時）＋保留份數＋離峰時點（0–23，過此鐘點才算到期）。
+    backup_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    backup_interval_hours: Mapped[int] = mapped_column(
+        Integer, default=24, server_default=text("24"), nullable=False
+    )
+    backup_retention: Mapped[int] = mapped_column(
+        Integer, default=30, server_default=text("30"), nullable=False
+    )
+    backup_offpeak_hour: Mapped[int] = mapped_column(
+        Integer, default=4, server_default=text("4"), nullable=False
+    )
 
 
 class PremiumRateHistory(Base):

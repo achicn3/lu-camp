@@ -4569,6 +4569,14 @@ export interface components {
         SettingsRead: {
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories: boolean;
+            /** Backup Enabled */
+            backup_enabled: boolean;
+            /** Backup Interval Hours */
+            backup_interval_hours: number;
+            /** Backup Offpeak Hour */
+            backup_offpeak_hour: number;
+            /** Backup Retention */
+            backup_retention: number;
             /** Default Commission Pct */
             default_commission_pct: number;
             /** Default Margin Pct */
@@ -4614,6 +4622,14 @@ export interface components {
         SettingsUpdateRequest: {
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories?: boolean | null;
+            /** Backup Enabled */
+            backup_enabled?: boolean | null;
+            /** Backup Interval Hours */
+            backup_interval_hours?: number | null;
+            /** Backup Offpeak Hour */
+            backup_offpeak_hour?: number | null;
+            /** Backup Retention */
+            backup_retention?: number | null;
             /** Default Commission Pct */
             default_commission_pct?: number | null;
             /** Default Margin Pct */

@@ -1,0 +1,56 @@
+"""backup/restore 狀態表的資料存取（唯一直接碰 backup_runs/restore_runs 的層）。"""
+
+from datetime import datetime
+
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.backup.models import BackupRun, RestoreRun
+from app.shared.enums import BackupStatus
+
+
+class BackupRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_running(self, store_id: int) -> BackupRun | None:
+        """該店進行中（RUNNING）的備份（單一在跑守衛用）。"""
+        result: BackupRun | None = await self._session.scalar(
+            select(BackupRun).where(
+                BackupRun.store_id == store_id,
+                BackupRun.status == BackupStatus.RUNNING,
+            )
+        )
+        return result
+
+    async def add_run(self, run: BackupRun) -> BackupRun:
+        self._session.add(run)
+        await self._session.flush()
+        return run
+
+    async def list_runs(self, store_id: int, *, limit: int = 30) -> list[BackupRun]:
+        stmt = (
+            select(BackupRun)
+            .where(BackupRun.store_id == store_id)
+            .order_by(desc(BackupRun.id))
+            .limit(limit)
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)
+
+    async def last_success_at(self, store_id: int) -> datetime | None:
+        """最近一次成功備份的完成時間（健康度/到期判斷用）。"""
+        return await self._session.scalar(
+            select(BackupRun.finished_at)
+            .where(
+                BackupRun.store_id == store_id,
+                BackupRun.status == BackupStatus.SUCCEEDED,
+            )
+            .order_by(desc(BackupRun.finished_at))
+            .limit(1)
+        )
+
+    async def add_restore(self, run: RestoreRun) -> RestoreRun:
+        self._session.add(run)
+        await self._session.flush()
+        return run

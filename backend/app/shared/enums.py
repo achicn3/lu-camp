@@ -370,3 +370,34 @@ class SignatureTaskStatus(StrEnum):
     PENDING = "PENDING"
     SIGNED = "SIGNED"
     CANCELLED = "CANCELLED"
+
+
+class BackupTrigger(StrEnum):
+    """備份觸發來源（backup_runs.trigger，docs/31）。SCHEDULED＝到期 tick；MANUAL＝店長手動。"""
+
+    SCHEDULED = "SCHEDULED"
+    MANUAL = "MANUAL"
+
+
+class BackupStatus(StrEnum):
+    """備份執行狀態（backup_runs.status，docs/31）。
+
+    RUNNING：進行中（同店至多一列，單一在跑守衛）；SUCCEEDED：dump→驗證→加密→上傳→修剪全過；
+    FAILED：任一步失敗（如實記 last_error，不得記成功——假備份是最大風險）。
+    """
+
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class RestoreStatus(StrEnum):
+    """還原執行狀態（restore_runs.status，docs/31）。
+
+    RUNNING：下載→解密→還原到全新庫→四驗 進行中；VERIFIED：四驗全過（可切換，切換為受控腳本）；
+    FAILED：任一步/驗證不過（正式庫未被碰、throwaway 庫可棄）。
+    """
+
+    RUNNING = "RUNNING"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"

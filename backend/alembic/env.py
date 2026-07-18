@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.core.audit  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.acquisition.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.backup.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.campaigns.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.cashdrawer.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.consignment.models  # 註冊模型到 metadata（autogenerate 用）
