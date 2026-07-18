@@ -477,16 +477,20 @@ body {
   text-align: left;
 }
 .pos-tender-modes {
-  display: flex;
+  /* 多種付款方式（現金/購物金/台灣Pay/LINE Pay/混合）：以自適應網格排列，空間不足時整顆換行
+     到下一列，而非把每顆壓窄導致文字換行/擠壓。每顆至少 6.5rem，容得下「LINE Pay」＋選鈕。 */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
   gap: var(--sp-2);
 }
 .pos-tender-mode {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: var(--sp-1);
   min-height: var(--tap-min);
+  padding: 0 var(--sp-2);
+  white-space: nowrap; /* 標籤不換行（台灣Pay/LINE Pay 保持單行） */
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;

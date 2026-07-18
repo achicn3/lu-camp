@@ -19,7 +19,7 @@ const ok = (n, p, d = "") => {
   console.log(`${p ? "✅" : "❌"} ${n}${d ? `：${d}` : ""}`);
 };
 
-async function api(path, { method = "GET", token, body, headers = {}, expect = [200] } = {}) {
+async function api(path, { method = "GET", token, body, headers = {} } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
