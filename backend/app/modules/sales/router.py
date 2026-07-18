@@ -16,6 +16,8 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.sales.linepay import LinePayClient, linepay_client_from_config
 from app.modules.sales.schemas import (
+    LinePayRefundAttemptRead,
+    LinePayRefundResolveRequest,
     SaleCreateRequest,
     SaleQuoteLineRead,
     SaleQuoteRequest,
@@ -300,3 +302,40 @@ async def print_sale_detail(sale_id: int, session: SessionDep, user: CurrentUser
     tenders = await svc.get_tenders(sale.id)
     await session.commit()
     return SaleRead.build(sale, lines, tenders)
+
+
+@router.get(
+    "/linepay-refunds/pending",
+    response_model=list[LinePayRefundAttemptRead],
+    operation_id="listPendingLinePayRefunds",
+)
+async def list_pending_linepay_refunds(
+    session: SessionDep, user: ManagerDep
+) -> list[LinePayRefundAttemptRead]:
+    """未定 LINE Pay 退款（退款對帳頁；docs/30 finding #3）：店長確認/解決卡住的退款。"""
+    attempts = await SalesService(session).list_pending_linepay_refunds(user.store_id)
+    return [LinePayRefundAttemptRead.model_validate(a) for a in attempts]
+
+
+@router.post(
+    "/linepay-refunds/{attempt_id}/resolve",
+    response_model=LinePayRefundAttemptRead,
+    operation_id="resolveLinePayRefund",
+)
+async def resolve_linepay_refund(
+    attempt_id: int,
+    payload: LinePayRefundResolveRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> LinePayRefundAttemptRead:
+    """人工解決未定退款（docs/30 finding #3）：SUCCEEDED＝已於後台確認退款、FAILED＝確認未退款。"""
+    svc = SalesService(session)
+    try:
+        attempt = await svc.resolve_linepay_refund(
+            user.store_id, attempt_id, resolution=payload.resolution, actor_user_id=user.id
+        )
+    except DomainError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
+    await session.commit()
+    return LinePayRefundAttemptRead.model_validate(attempt)

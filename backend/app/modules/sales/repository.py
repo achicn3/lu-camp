@@ -14,8 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
-from app.modules.sales.models import LinePayTransaction, Sale, SaleLine, SaleTender
-from app.shared.enums import OwnershipType, SaleInvoiceStatus, SaleLineType, TenderType
+from app.modules.sales.models import (
+    LinePayRefundAttempt,
+    LinePayTransaction,
+    Sale,
+    SaleLine,
+    SaleTender,
+)
+from app.shared.enums import (
+    LinePayRefundStatus,
+    OwnershipType,
+    SaleInvoiceStatus,
+    SaleLineType,
+    TenderType,
+)
 
 # 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
 _SoldRowDB = tuple[
@@ -97,6 +109,33 @@ class SalesRepository:
         if for_update:
             stmt = stmt.with_for_update()
         result: LinePayTransaction | None = await self._session.scalar(stmt)
+        return result
+
+    async def list_pending_refund_attempts(
+        self, store_id: int
+    ) -> list[LinePayRefundAttempt]:
+        """列出結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁：人工確認/解決）。"""
+        stmt = (
+            select(LinePayRefundAttempt)
+            .where(
+                LinePayRefundAttempt.store_id == store_id,
+                LinePayRefundAttempt.status == LinePayRefundStatus.PENDING,
+            )
+            .order_by(LinePayRefundAttempt.id)
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)
+
+    async def get_refund_attempt(
+        self, store_id: int, attempt_id: int, *, for_update: bool = False
+    ) -> LinePayRefundAttempt | None:
+        stmt = select(LinePayRefundAttempt).where(
+            LinePayRefundAttempt.store_id == store_id,
+            LinePayRefundAttempt.id == attempt_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: LinePayRefundAttempt | None = await self._session.scalar(stmt)
         return result
 
     async def get_linepay_by_sale_id(

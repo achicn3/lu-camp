@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit import write_audit_log
@@ -71,6 +71,7 @@ from app.shared.exceptions import (
     EmptySale,
     IdempotencyKeyConflict,
     InvalidSaleTender,
+    InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
     ManualRefundRequired,
@@ -833,6 +834,9 @@ class SalesService:
         txn = await self._repo.get_linepay_by_sale_id(store_id, sale_id, for_update=True)
         if txn is None or txn.status == LinePayStatus.REFUNDED:
             return
+        refund_key = f"s{store_id}:void:{sale_id}"
+        # 依 durable 日誌（依 order 累計）校準已退額（Codex 第三輪 #2）；未定 PENDING → 擋。
+        await self._reconcile_refunds_from_ledger(store_id, txn, refund_key)
         remaining = txn.amount - txn.refunded_amount
         if remaining <= 0:
             txn.status = LinePayStatus.REFUNDED
@@ -846,13 +850,11 @@ class SalesService:
         await self._durable_line_pay_refund(
             store_id=store_id,
             order_id=txn.order_id,
-            refund_key=f"s{store_id}:void:{sale_id}",
+            refund_key=refund_key,
             amount=remaining,
             client=client,
         )
-        txn.refunded_amount = txn.amount
-        txn.status = LinePayStatus.REFUNDED
-        await self._session.flush()
+        await self._apply_ledger_truth(store_id, txn)
 
     async def refund_line_pay_amount(
         self,
@@ -865,19 +867,24 @@ class SalesService:
     ) -> bool:
         """對 LINE Pay 銷售退某金額（退貨部分退款；docs/30 §5）。跨模組經 service（§2）。
 
-        累加 refunded_amount（不超過原收款；CHECK 亦守護），全退才轉 REFUNDED、未全退保持 COMPLETE
-        （以 refunded_amount 為部分退款真相）。回傳是否為 LINE Pay 單：True＝已呼叫 refund 反轉；
-        False＝非 LINE Pay 單（呼叫端另走現金退款）。退款超原收款/未設定/平台拒/傳輸錯 →
-        LinePayChargeFailed/LinePayTransportError（退貨整筆回滾，fail-closed，不留已退貨卻未退款）。
-        refund_key（退貨＝`return:{冪等鍵}`）綁 durable 對帳日誌防重退（Codex finding #1）。
+        退款總額真相以 durable 日誌（依 order 累計 SUCCEEDED）為準、非以 refund_key 逐筆加總；即使
+        用了**不同的** refund_key（前次退貨崩潰回滾、店員改計畫重試），已成立退款仍計入，換鍵無法對
+        同 order 超退（Codex #1/#2）。全退→REFUNDED、未全退→COMPLETE。回傳是否 LINE Pay 單。
+        退款超原收款/未設定/平台拒/傳輸錯/有未定 PENDING → LinePayChargeFailed/TransportError/
+        RefundAmbiguous（退貨整筆回滾，fail-closed）。
         """
         txn = await self._repo.get_linepay_by_sale_id(store_id, sale_id, for_update=True)
         if txn is None:
             return False
-        new_refunded = txn.refunded_amount + amount
-        if new_refunded > txn.amount:
+        # 校準已退額（補回已成立但回滾者）並取本 refund_key 是否已成立；未定 PENDING → 擋。
+        _succeeded_total, this_key_done = await self._reconcile_refunds_from_ledger(
+            store_id, txn, refund_key
+        )
+        if not this_key_done and txn.refunded_amount + amount > txn.amount:
+            # 換鍵超退（本 key 尚未成立，且加上本額會超過原收款）→ 拒（可能前次已退，需人工對帳）。
             raise LinePayChargeFailed(
-                f"LINE Pay 退款額超過原收款（原 {txn.amount}、已退 {txn.refunded_amount}）"
+                f"LINE Pay 退款額超過原收款（原 {txn.amount}、已退 {txn.refunded_amount}）；"
+                "此退貨可能已退款，請至 LINE Pay 後台確認後人工處理"
             )
         if client is None:
             raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法退款")
@@ -888,12 +895,141 @@ class SalesService:
             amount=amount,
             client=client,
         )
-        txn.refunded_amount = new_refunded
+        await self._apply_ledger_truth(store_id, txn)
+        return True
+
+    async def _ledger_succeeded_total(self, store_id: int, order_id: str) -> Decimal:
+        """該 (store, order) 全部 SUCCEEDED 退款累計（durable 真相）。"""
+        from app.core.db import get_sessionmaker
+
+        sm = self._refund_ledger_sm or get_sessionmaker()
+        async with sm() as ledger:
+            total = await ledger.scalar(
+                select(func.coalesce(func.sum(LinePayRefundAttempt.amount), 0)).where(
+                    LinePayRefundAttempt.store_id == store_id,
+                    LinePayRefundAttempt.order_id == order_id,
+                    LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED,
+                )
+            )
+        return Decimal(total or 0)
+
+    async def _reconcile_refunds_from_ledger(
+        self, store_id: int, txn: LinePayTransaction, refund_key: str
+    ) -> tuple[Decimal, bool]:
+        """校準 refunded_amount（依 order 累計日誌），回 (SUCCEEDED 累計, 本 key 是否已成立)。
+
+        退款真相以 append-only 日誌為準（跨主交易回滾存活）：查該 (store,order) SUCCEEDED 累計，
+        大於本地 refunded_amount → 補回（prior 退款已成立但本地回滾）。任一 PENDING（含本 key、
+        結果未定）→ LinePayRefundAmbiguous（fail-closed，需退款對帳頁解決）。this_key_done 供呼叫端
+        判別「同 key 重試（已退、勿再加額）」vs「新退款」。
+        """
+        from app.core.db import get_sessionmaker
+
+        sm = self._refund_ledger_sm or get_sessionmaker()
+        async with sm() as ledger:
+            has_pending = (
+                await ledger.scalar(
+                    select(func.count())
+                    .select_from(LinePayRefundAttempt)
+                    .where(
+                        LinePayRefundAttempt.store_id == store_id,
+                        LinePayRefundAttempt.order_id == txn.order_id,
+                        LinePayRefundAttempt.status == LinePayRefundStatus.PENDING,
+                    )
+                )
+            ) or 0
+            succeeded_total = Decimal(
+                (
+                    await ledger.scalar(
+                        select(func.coalesce(func.sum(LinePayRefundAttempt.amount), 0)).where(
+                            LinePayRefundAttempt.store_id == store_id,
+                            LinePayRefundAttempt.order_id == txn.order_id,
+                            LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED,
+                        )
+                    )
+                )
+                or 0
+            )
+            this_key_done = (
+                await ledger.scalar(
+                    select(func.count())
+                    .select_from(LinePayRefundAttempt)
+                    .where(
+                        LinePayRefundAttempt.store_id == store_id,
+                        LinePayRefundAttempt.refund_key == refund_key,
+                        LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED,
+                    )
+                )
+            ) or 0
+        if has_pending:
+            raise LinePayRefundAmbiguous(
+                "此 LINE Pay 訂單有結果未定的退款（可能已退款）：請至退款對帳頁確認/解決後再處理，"
+                "勿直接重試以免超退"
+            )
+        if succeeded_total > txn.refunded_amount:
+            # 補回「已成立但本地回滾」的退款額（不超過原收款；append-only 日誌不會超額）。
+            txn.refunded_amount = min(succeeded_total, txn.amount)
+            txn.status = (
+                LinePayStatus.REFUNDED
+                if txn.refunded_amount == txn.amount
+                else LinePayStatus.COMPLETE
+            )
+            await self._session.flush()
+        return succeeded_total, bool(this_key_done)
+
+    async def _apply_ledger_truth(self, store_id: int, txn: LinePayTransaction) -> None:
+        """退款成立後以 durable 日誌 SUCCEEDED 累計設 refunded_amount（真相；不逐筆加額防重複）。"""
+        total = await self._ledger_succeeded_total(store_id, txn.order_id)
+        txn.refunded_amount = min(total, txn.amount)
         txn.status = (
-            LinePayStatus.REFUNDED if new_refunded == txn.amount else LinePayStatus.COMPLETE
+            LinePayStatus.REFUNDED
+            if txn.refunded_amount == txn.amount
+            else LinePayStatus.COMPLETE
         )
         await self._session.flush()
-        return True
+
+    async def list_pending_linepay_refunds(
+        self, store_id: int
+    ) -> list[LinePayRefundAttempt]:
+        """結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁；Codex 第三輪 #3）。"""
+        return await self._repo.list_pending_refund_attempts(store_id)
+
+    async def resolve_linepay_refund(
+        self,
+        store_id: int,
+        attempt_id: int,
+        *,
+        resolution: LinePayRefundStatus,
+        actor_user_id: int,
+    ) -> LinePayRefundAttempt:
+        """人工解決一筆未定退款（Codex 第三輪 #3）：店長於 LINE Pay 後台確認後，把 PENDING 轉
+
+        SUCCEEDED（已退款——後續退貨/作廢的依 order 累計對帳會據此補回 refunded_amount、不再重退）或
+        FAILED（未退款——可安全重試）。僅 PENDING 可解；解決寫 audit_log（誰/何時/前後值）。
+        """
+        if resolution not in (LinePayRefundStatus.SUCCEEDED, LinePayRefundStatus.FAILED):
+            raise InvalidSaleTender("退款解決結果只能為 SUCCEEDED（已退款）或 FAILED（未退款）")
+        attempt = await self._repo.get_refund_attempt(store_id, attempt_id, for_update=True)
+        if attempt is None:
+            raise SaleItemNotFound(f"找不到退款對帳紀錄 {attempt_id}")
+        if attempt.status != LinePayRefundStatus.PENDING:
+            raise InvalidStateTransition(
+                f"退款對帳紀錄 {attempt_id} 非未定狀態（{attempt.status.value}），不可再解決"
+            )
+        before = attempt.status.value
+        attempt.status = resolution
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="RESOLVE_LINEPAY_REFUND",
+            entity_type="linepay_refund_attempt",
+            entity_id=str(attempt_id),
+            before={"status": before},
+            after={"status": resolution.value, "order_id": attempt.order_id},
+        )
+        return attempt
 
     async def _durable_line_pay_refund(
         self,

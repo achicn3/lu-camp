@@ -323,6 +323,95 @@ function ReturnDialog({
   );
 }
 
+// LINE Pay 退款對帳（docs/30 finding #3）：結果未定（PENDING）的退款——店長於 LINE Pay 後台確認
+// 實際是否退款後，於此標記已退款（SUCCEEDED）或未退款可重試（FAILED），解除卡住的退貨/作廢。
+function LinePayReconcilePanel() {
+  const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const pending = useQuery({
+    queryKey: ["linepay-refunds", "pending"],
+    queryFn: async () => {
+      const { data, error: apiError } = await api.GET(
+        "/api/v1/sales/linepay-refunds/pending",
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取未決退款失敗");
+      return data;
+    },
+  });
+  const resolve = useMutation({
+    mutationFn: async (args: { id: number; resolution: "SUCCEEDED" | "FAILED" }) => {
+      const { data, error: apiError } = await api.POST(
+        "/api/v1/sales/linepay-refunds/{attempt_id}/resolve",
+        {
+          params: { path: { attempt_id: args.id } },
+          body: { resolution: args.resolution },
+        },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "解決失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ["linepay-refunds", "pending"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const items = Array.isArray(pending.data) ? pending.data : [];
+  if (items.length === 0) return null; // 無未決退款（或讀取中/失敗）→ 不顯示
+  return (
+    <div className="card" style={{ borderColor: "var(--danger, #b00)", marginBottom: "1rem" }}>
+      <h2>LINE Pay 退款對帳（需處理）</h2>
+      <p className="hint">
+        以下退款結果未定（呼叫 LINE Pay 後崩潰或回應遺失）。請先至 LINE Pay
+        後台確認該筆是否已退款，再於此標記——標記前該筆退貨/作廢會被擋下以免超退。
+      </p>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>訂單號</th>
+            <th>金額</th>
+            <th>時間</th>
+            <th>處理</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((a) => (
+            <tr key={a.id}>
+              <td>{a.order_id}</td>
+              <td>${formatNtd(parseNtd(a.amount) ?? 0)}</td>
+              <td>{new Date(a.created_at).toLocaleString("zh-TW")}</td>
+              <td>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={resolve.isPending}
+                  onClick={() => resolve.mutate({ id: a.id, resolution: "SUCCEEDED" })}
+                >
+                  確認已退款
+                </button>{" "}
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={resolve.isPending}
+                  onClick={() => resolve.mutate({ id: a.id, resolution: "FAILED" })}
+                >
+                  確認未退款（可重試）
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function SalesPage() {
   const isManager = useIsManager();
   const queryClient = useQueryClient();
@@ -373,6 +462,7 @@ export default function SalesPage() {
       </p>
       {voidedNote !== null && <p className="form-success">{voidedNote}</p>}
       {ackNote !== null && <p className="hint">{ackNote}</p>}
+      {isManager && <LinePayReconcilePanel />}
       {sales.isError && (
         <p role="alert" className="form-error">
           {(sales.error as Error).message}

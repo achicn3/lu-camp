@@ -1042,10 +1042,19 @@ export default function PosPage() {
       // **LINE Pay 例外（docs/30 P3）**：一次性付款碼**不納入**冪等簽章——重掃換碼但購物車不變時，
       // 冪等鍵須保持穩定，後端 orderId（由冪等鍵導出）才能 check-first 防重複扣款（回應遺失後
       // 重掃不會產生新 orderId 而重扣）。故簽章時抹去各 tender 的 line_pay_one_time_key。
+      // 指紋對「行/收款順序」不敏感（Codex 第三輪 #1）：重掃同一籃商品但掃描順序不同，須得同
+      // 指紋→同鍵→同 orderId，check-first 才能復原、不因換序而重複扣款。故 lines/tenders 各自
+      // 正規化排序後才序列化。
+      const canonLines = (body.lines ?? [])
+        .map((l) => JSON.stringify(l))
+        .sort();
+      const canonTenders = (body.tenders ?? [])
+        .map((t) => JSON.stringify({ ...t, line_pay_one_time_key: null }))
+        .sort();
       const sigBody = {
         ...body,
-        tenders:
-          body.tenders?.map((t) => ({ ...t, line_pay_one_time_key: null })) ?? null,
+        lines: canonLines,
+        tenders: canonTenders,
       };
       const sig = JSON.stringify(sigBody);
       // 冪等鍵**持久化**（Codex 第二輪 #2）：以購物車指紋（不含一次性付款碼）為界存 localStorage，

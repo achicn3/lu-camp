@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.shared.enums import (
+    LinePayRefundStatus,
     PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
@@ -310,3 +311,28 @@ class SaleSummaryRead(BaseModel):
     payment_method: PaymentMethod
     # 買方會員（docs/23 K5b）：有買方的單才能推「交易紀錄簽收」至手持裝置。
     buyer_contact_id: int | None
+
+
+class LinePayRefundAttemptRead(BaseModel):
+    """未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_id: str
+    amount: NTDAmount
+    status: LinePayRefundStatus
+    created_at: datetime
+
+
+class LinePayRefundResolveRequest(BaseModel):
+    """人工解決未定退款：SUCCEEDED＝已於 LINE Pay 後台確認退款、FAILED＝確認未退款可重試。"""
+
+    resolution: LinePayRefundStatus
+
+    @field_validator("resolution")
+    @classmethod
+    def _only_terminal(cls, value: LinePayRefundStatus) -> LinePayRefundStatus:
+        if value not in (LinePayRefundStatus.SUCCEEDED, LinePayRefundStatus.FAILED):
+            raise ValueError("resolution 只能為 SUCCEEDED（已退款）或 FAILED（未退款）")
+        return value

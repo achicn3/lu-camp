@@ -1457,6 +1457,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sales/linepay-refunds/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pending Linepay Refunds
+         * @description 未定 LINE Pay 退款（退款對帳頁；docs/30 finding #3）：店長確認/解決卡住的退款。
+         */
+        get: operations["listPendingLinePayRefunds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/linepay-refunds/{attempt_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Linepay Refund
+         * @description 人工解決未定退款（docs/30 finding #3）：SUCCEEDED＝已於後台確認退款、FAILED＝確認未退款。
+         */
+        post: operations["resolveLinePayRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sales/quote": {
         parameters: {
             query?: never;
@@ -3489,6 +3529,42 @@ export interface components {
             /** Total Outstanding */
             total_outstanding: string;
         };
+        /**
+         * LinePayRefundAttemptRead
+         * @description 未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。
+         */
+        LinePayRefundAttemptRead: {
+            /** Amount */
+            amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Order Id */
+            order_id: string;
+            status: components["schemas"]["LinePayRefundStatus"];
+        };
+        /**
+         * LinePayRefundResolveRequest
+         * @description 人工解決未定退款：SUCCEEDED＝已於 LINE Pay 後台確認退款、FAILED＝確認未退款可重試。
+         */
+        LinePayRefundResolveRequest: {
+            resolution: components["schemas"]["LinePayRefundStatus"];
+        };
+        /**
+         * LinePayRefundStatus
+         * @description LINE Pay 退款嘗試的持久化狀態（linepay_refund_attempts；docs/30 finding #1）。
+         *
+         *     PENDING：已寫入、即將/正在呼叫平台 refund——若崩潰/回應遺失，重試見此即知「結果未定」，
+         *       不得盲目重退（fail-closed，須人工對帳）。SUCCEEDED：平台已退款（0000/1165）——重試見此
+         *       即跳過、不重退。FAILED：平台明確拒退——可安全重試。此表為 append-only 對帳日誌、無外鍵，
+         *       以獨立交易提交，故能跨主交易回滾存活（唯一防重退依據）。
+         * @enum {string}
+         */
+        LinePayRefundStatus: "PENDING" | "SUCCEEDED" | "FAILED";
         /**
          * LoginRequest
          * @description 登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。
@@ -7712,6 +7788,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listPendingLinePayRefunds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinePayRefundAttemptRead"][];
+                };
+            };
+        };
+    };
+    resolveLinePayRefund: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinePayRefundResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinePayRefundAttemptRead"];
                 };
             };
             /** @description Validation Error */

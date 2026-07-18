@@ -26,6 +26,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
     Grade,
+    LinePayRefundStatus,
     LinePayStatus,
     OwnershipType,
     PaymentMethod,
@@ -36,6 +37,7 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     InvalidSaleTender,
+    InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
     LinePayTransportError,
@@ -587,6 +589,90 @@ async def test_durable_refund_skips_when_already_succeeded(db_session: AsyncSess
         client=_client(transport),
     )
     assert transport.refund_calls == 1  # 第二次跳過、不重退
+
+
+@pytest.mark.asyncio
+async def test_refund_different_key_cannot_over_refund(db_session: AsyncSession) -> None:
+    # Codex 第三輪 #2：退款已 durable SUCCEEDED 但本地回滾，換**不同 refund_key** 重試同 order →
+    # 依 order 累計校準補回已退額 → 超退拒（不因換鍵繞過而重複退款）。
+    store_id, clerk_id = await _seed(db_session)
+    sale = await _make_linepay_sale(
+        db_session, RefundTransport(refund_resp=_REFUND_SUCCESS),
+        store_id=store_id, clerk_id=clerk_id, code="OR",
+    )
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None
+    svc = SalesService(db_session)
+    # 模擬：某退款已 durable 成立（ledger SUCCEEDED），但本地 refunded_amount 回滾為 0
+    await svc._durable_line_pay_refund(
+        store_id=store_id, order_id=txn.order_id,
+        refund_key=f"s{store_id}:return:OLD-{uuid4()}", amount=Decimal("1000"),
+        client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
+    )
+    assert txn.refunded_amount == Decimal("0")  # 本地未更新（模擬回滾）
+    bad = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    with pytest.raises(LinePayChargeFailed):
+        await svc.refund_line_pay_amount(
+            store_id, sale.id, Decimal("1000"), _client(bad),
+            refund_key=f"s{store_id}:return:NEW-{uuid4()}",
+        )
+    assert bad.refund_calls == 0  # 換鍵超退：未再呼叫平台
+
+
+@pytest.mark.asyncio
+async def test_refund_same_key_retry_no_double_count(db_session: AsyncSession) -> None:
+    # Codex 第三輪 #2：同 refund_key 重試（前次已成立、本地回滾）→ 不重呼平台、不重複計額。
+    store_id, clerk_id = await _seed(db_session)
+    sale = await _make_linepay_sale(
+        db_session, RefundTransport(refund_resp=_REFUND_SUCCESS),
+        store_id=store_id, clerk_id=clerk_id, code="SK",
+    )
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None
+    svc = SalesService(db_session)
+    key = f"s{store_id}:return:{uuid4()}"
+    await svc._durable_line_pay_refund(
+        store_id=store_id, order_id=txn.order_id, refund_key=key, amount=Decimal("1000"),
+        client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
+    )
+    retry = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    result = await svc.refund_line_pay_amount(
+        store_id, sale.id, Decimal("1000"), _client(retry), refund_key=key
+    )
+    assert result is True
+    assert retry.refund_calls == 0  # 已成立 → 跳過、不重退
+    assert txn.refunded_amount == Decimal("1000")
+    assert txn.status == LinePayStatus.REFUNDED
+
+
+@pytest.mark.asyncio
+async def test_resolve_pending_refund_unblocks(db_session: AsyncSession) -> None:
+    # Codex 第三輪 #3：卡住的 PENDING 退款可由店長於退款對帳頁解決（SUCCEEDED/FAILED），不永久卡死。
+    store_id, clerk_id = await _seed(db_session)
+    svc = SalesService(db_session)
+    key = f"s{store_id}:return:{uuid4()}"
+    with pytest.raises(LinePayTransportError):
+        await svc._durable_line_pay_refund(
+            store_id=store_id, order_id="LP-r", refund_key=key, amount=Decimal("100"),
+            client=_client(RefundTransport(refund_error=LinePayTransportError("網路逾時"))),
+        )
+    pending = await svc.list_pending_linepay_refunds(store_id)
+    attempt = next(a for a in pending if a.refund_key == key)
+    resolved = await svc.resolve_linepay_refund(
+        store_id, attempt.id, resolution=LinePayRefundStatus.SUCCEEDED, actor_user_id=clerk_id
+    )
+    assert resolved.status == LinePayRefundStatus.SUCCEEDED
+    # 解決後不再是 PENDING（後續退貨/作廢的依 order 對帳會據此補回，不再擋 ambiguous）
+    assert all(a.refund_key != key for a in await svc.list_pending_linepay_refunds(store_id))
+    # 非 PENDING 不可再解決
+    with pytest.raises(InvalidStateTransition):
+        await svc.resolve_linepay_refund(
+            store_id, attempt.id, resolution=LinePayRefundStatus.FAILED, actor_user_id=clerk_id
+        )
 
 
 @pytest.mark.asyncio

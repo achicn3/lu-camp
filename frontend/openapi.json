@@ -4238,6 +4238,63 @@
         "title": "LiabilityReport",
         "type": "object"
       },
+      "LinePayRefundAttemptRead": {
+        "description": "未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LinePayRefundStatus"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "amount",
+          "status",
+          "created_at"
+        ],
+        "title": "LinePayRefundAttemptRead",
+        "type": "object"
+      },
+      "LinePayRefundResolveRequest": {
+        "description": "人工解決未定退款：SUCCEEDED＝已於 LINE Pay 後台確認退款、FAILED＝確認未退款可重試。",
+        "properties": {
+          "resolution": {
+            "$ref": "#/components/schemas/LinePayRefundStatus"
+          }
+        },
+        "required": [
+          "resolution"
+        ],
+        "title": "LinePayRefundResolveRequest",
+        "type": "object"
+      },
+      "LinePayRefundStatus": {
+        "description": "LINE Pay 退款嘗試的持久化狀態（linepay_refund_attempts；docs/30 finding #1）。\n\nPENDING：已寫入、即將/正在呼叫平台 refund——若崩潰/回應遺失，重試見此即知「結果未定」，\n  不得盲目重退（fail-closed，須人工對帳）。SUCCEEDED：平台已退款（0000/1165）——重試見此\n  即跳過、不重退。FAILED：平台明確拒退——可安全重試。此表為 append-only 對帳日誌、無外鍵，\n  以獨立交易提交，故能跨主交易回滾存活（唯一防重退依據）。",
+        "enum": [
+          "PENDING",
+          "SUCCEEDED",
+          "FAILED"
+        ],
+        "title": "LinePayRefundStatus",
+        "type": "string"
+      },
       "LoginRequest": {
         "description": "登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。",
         "properties": {
@@ -13279,6 +13336,95 @@
           }
         ],
         "summary": "Create Sale",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/sales/linepay-refunds/pending": {
+      "get": {
+        "description": "未定 LINE Pay 退款（退款對帳頁；docs/30 finding #3）：店長確認/解決卡住的退款。",
+        "operationId": "listPendingLinePayRefunds",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LinePayRefundAttemptRead"
+                  },
+                  "title": "Response Listpendinglinepayrefunds",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Pending Linepay Refunds",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/sales/linepay-refunds/{attempt_id}/resolve": {
+      "post": {
+        "description": "人工解決未定退款（docs/30 finding #3）：SUCCEEDED＝已於後台確認退款、FAILED＝確認未退款。",
+        "operationId": "resolveLinePayRefund",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinePayRefundResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinePayRefundAttemptRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Linepay Refund",
         "tags": [
           "sales"
         ]

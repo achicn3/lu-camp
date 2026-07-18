@@ -79,6 +79,7 @@ describe("/sales 交易紀錄頁", () => {
   it("店長：列表渲染、作廢走二次確認、成功後刷新顯示已作廢", async () => {
     let voided = false;
     stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
       if (url.includes("/api/v1/sales/7/void") && method === "POST") {
         voided = true;
         return json(sale(7, { invoice_status: "VOID" }));
@@ -113,6 +114,7 @@ describe("/sales 交易紀錄頁", () => {
 
   it("店長：作廢被後端拒（409）→ 對話框顯示錯誤、不誤報成功", async () => {
     stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
       if (url.includes("/void") && method === "POST") {
         return json({ detail: "sale 7 已有退貨，不可作廢" }, 409);
       }
@@ -135,6 +137,7 @@ describe("/sales 交易紀錄頁", () => {
 
   it("店員：看得到列表、沒有作廢鈕", async () => {
     stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
       if (url.includes("/api/v1/sales") && method === "GET") {
         return json([sale(7)]);
       }
@@ -147,6 +150,7 @@ describe("/sales 交易紀錄頁", () => {
 
   it("已退貨的單：無作廢鈕（請走退貨流程）", async () => {
     stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
       if (url.includes("/api/v1/sales") && method === "GET") {
         return json([sale(8, { status: "RETURNED" })]);
       }
