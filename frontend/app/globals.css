@@ -180,13 +180,58 @@ body {
 .app-nav {
   display: flex;
   gap: var(--sp-2);
-  /* 15 個項目：不折行、可水平捲動，避免文字被擠成直排（「POS 結/帳」）與頁面水平溢出。
-     nav 佔剩餘空間並可內部捲動，右側控制固定不被推出（單店單機不做完整 drawer）。 */
+  /* 分兩層：頂欄只放最常用（PRIMARY，6 項）＋「更多」鈕；其餘收側邊選單，故不再擠成一團。
+     仍保 nowrap＋可捲動作為窄螢幕後備，右側控制固定不被推出。 */
   flex: 1;
   min-width: 0;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+/* 「更多」開啟側邊選單的鈕：外觀近 nav-link，但加細框暗示可開選單。 */
+.nav-more-btn {
+  background: none;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.nav-more-btn:hover {
+  background: var(--bg);
+}
+
+/* 側邊選單：右側滑入面板＋半透明背幕（點背幕/Esc/選項即關）。 */
+.nav-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+}
+.nav-drawer {
+  background: var(--surface);
+  width: min(280px, 80vw);
+  height: 100%;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-3);
+  gap: var(--sp-1);
+  overflow-y: auto;
+}
+.nav-drawer .nav-link {
+  width: 100%;
+}
+.nav-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-2);
 }
 
 .nav-link {

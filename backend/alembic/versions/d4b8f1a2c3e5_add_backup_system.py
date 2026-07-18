@@ -51,7 +51,7 @@ def upgrade() -> None:
     op.add_column(
         "settings",
         sa.Column(
-            "backup_offpeak_hour", sa.Integer(), nullable=False, server_default=sa.text("4")
+            "backup_offpeak_hour", sa.Integer(), nullable=False, server_default=sa.text("21")
         ),
     )
 

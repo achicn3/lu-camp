@@ -107,7 +107,7 @@ class StoreSettings(Base, TimestampMixin):
         Integer, default=30, server_default=text("30"), nullable=False
     )
     backup_offpeak_hour: Mapped[int] = mapped_column(
-        Integer, default=4, server_default=text("4"), nullable=False
+        Integer, default=21, server_default=text("21"), nullable=False
     )
 
 

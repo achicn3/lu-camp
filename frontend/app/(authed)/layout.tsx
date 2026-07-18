@@ -4,7 +4,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { useCurrentRole } from "@/lib/useCurrentRole";
@@ -12,15 +12,22 @@ import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
 
 // managerOnly：管理專屬頁（後端亦限 MANAGER）——CLERK 導覽收斂，不顯示無權入口
 // （前端隱藏非安全邊界，後端每請求仍驗權；此處只為店員介面不顯示點不進去的入口）。
-const NAV_ITEMS: { href: string; label: string; ready: boolean; managerOnly?: boolean }[] = [
+type NavItem = { href: string; label: string; ready: boolean; managerOnly?: boolean };
+
+// 導覽分兩層（避免頂欄過多項目擠成一團）：PRIMARY＝每日最常用、常駐頂欄；
+// MORE＝其餘功能，收進「更多」側邊選單（點漢堡開啟）。
+const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "首頁", ready: true },
   { href: "/pos", label: "POS 結帳", ready: true },
   { href: "/sales", label: "交易紀錄", ready: true },
-  { href: "/signing", label: "簽署紀錄", ready: true },
   { href: "/cash", label: "現金對帳", ready: true },
   { href: "/contacts", label: "會員/賣方", ready: true },
-  { href: "/inventory", label: "庫存", ready: true },
   { href: "/acquisition", label: "收購", ready: true },
+];
+
+const MORE_NAV: NavItem[] = [
+  { href: "/signing", label: "簽署紀錄", ready: true },
+  { href: "/inventory", label: "庫存", ready: true },
   { href: "/consignment", label: "寄售付款", ready: true },
   { href: "/purchasing", label: "採購補貨", ready: true },
   { href: "/stocktake", label: "盤點", ready: true },
@@ -35,6 +42,7 @@ const emptySubscribe = () => () => {};
 export default function AuthedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const [moreOpen, setMoreOpen] = useState(false);
   // token 為外部 store（記憶體＋localStorage）；SSR 快照為 null → 客戶端水合後同步。
   const token = useSyncExternalStore(subscribeToken, getToken, () => null);
   // 水合完成偵測（伺服器快照 false / 客戶端 true；無 setState-in-effect）：
@@ -65,6 +73,16 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [router, queryClient]);
 
+  useEffect(() => {
+    // 側邊選單開啟時，Esc 關閉（無障礙）。
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
+
   // 導覽依「DB 現值角色」收斂（共用 hook：poll＋錯誤重試；Codex 波次三第二輪）。
   // 已知限制（店主裁示 2026-07-17「接受現狀＋文件化」）：導覽/首頁卡片/menu gate/badge 皆
   // 依此更新，但**已掛載的管理頁（/reports、/campaigns、/settings）於使用者盯著頁面時被
@@ -76,20 +94,35 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   const session = decodeSession();
   if (!hydrated || token === null || session === null) return null;
 
+  const visible = (items: NavItem[]) =>
+    items.filter((item) => !item.managerOnly || isManager);
+  const renderLink = (item: NavItem, onClick?: () => void) =>
+    item.ready ? (
+      <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
+        {item.label}
+      </Link>
+    ) : (
+      <span key={item.href} className="nav-link nav-link-disabled" title="開發中">
+        {item.label}
+      </span>
+    );
+  const moreItems = visible(MORE_NAV);
+
   return (
     <div className="app-shell">
       <header className="app-header">
-        <nav className="app-nav">
-          {NAV_ITEMS.filter((item) => !item.managerOnly || isManager).map((item) =>
-            item.ready ? (
-              <Link key={item.href} href={item.href} className="nav-link">
-                {item.label}
-              </Link>
-            ) : (
-              <span key={item.href} className="nav-link nav-link-disabled" title="開發中">
-                {item.label}
-              </span>
-            ),
+        <nav className="app-nav" aria-label="主要導覽">
+          {visible(PRIMARY_NAV).map((item) => renderLink(item))}
+          {moreItems.length > 0 && (
+            <button
+              type="button"
+              className="nav-link nav-more-btn"
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen(true)}
+            >
+              ☰ 更多
+            </button>
           )}
         </nav>
         <div className="app-header-right">
@@ -111,6 +144,32 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </header>
+      {moreOpen && (
+        <div
+          className="nav-drawer-backdrop"
+          onClick={() => setMoreOpen(false)}
+          role="presentation"
+        >
+          <nav
+            className="nav-drawer"
+            aria-label="更多功能"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="nav-drawer-head">
+              <span>更多功能</span>
+              <button
+                type="button"
+                className="btn-ghost"
+                aria-label="關閉選單"
+                onClick={() => setMoreOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            {moreItems.map((item) => renderLink(item, () => setMoreOpen(false)))}
+          </nav>
+        </div>
+      )}
       <main className="app-main">{children}</main>
     </div>
   );
