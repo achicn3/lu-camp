@@ -823,6 +823,39 @@ class SalesService:
         txn.status = LinePayStatus.REFUNDED
         await self._session.flush()
 
+    async def refund_line_pay_amount(
+        self, store_id: int, sale_id: int, amount: Decimal, client: LinePayClient | None
+    ) -> bool:
+        """對 LINE Pay 銷售退某金額（退貨部分退款；docs/30 §5）。跨模組經 service（§2）。
+
+        累加 refunded_amount（不超過原收款；CHECK 亦守護），全退才轉 REFUNDED、未全退保持 COMPLETE
+        （以 refunded_amount 為部分退款真相）。回傳是否為 LINE Pay 單：True＝已呼叫 refund 反轉；
+        False＝非 LINE Pay 單（呼叫端另走現金退款）。退款超原收款/未設定/平台拒/傳輸錯 →
+        LinePayChargeFailed/LinePayTransportError（退貨整筆回滾，fail-closed，不留已退貨卻未退款）。
+        平台 1165（已退款）視為冪等成功（退貨 idempotency_key 保證每次退貨只呼叫一次）。
+        """
+        txn = await self._repo.get_linepay_by_sale_id(store_id, sale_id, for_update=True)
+        if txn is None:
+            return False
+        new_refunded = txn.refunded_amount + amount
+        if new_refunded > txn.amount:
+            raise LinePayChargeFailed(
+                f"LINE Pay 退款額超過原收款（原 {txn.amount}、已退 {txn.refunded_amount}）"
+            )
+        if client is None:
+            raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法退款")
+        result = await client.refund(order_id=txn.order_id, refund_amount=amount)
+        if not (result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED):
+            raise LinePayChargeFailed(
+                f"LINE Pay 退款失敗（returnCode={result.return_code}），退貨取消，請稍後重試"
+            )
+        txn.refunded_amount = new_refunded
+        txn.status = (
+            LinePayStatus.REFUNDED if new_refunded == txn.amount else LinePayStatus.COMPLETE
+        )
+        await self._session.flush()
+        return True
+
     async def find_idempotent_replay(
         self,
         store_id: int,

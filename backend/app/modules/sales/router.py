@@ -12,10 +12,9 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings as get_app_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
-from app.modules.sales.linepay import HttpxLinePayTransport, LinePayClient
+from app.modules.sales.linepay import LinePayClient, linepay_client_from_config
 from app.modules.sales.schemas import (
     SaleCreateRequest,
     SaleQuoteLineRead,
@@ -92,17 +91,8 @@ def _http_status_for(exc: DomainError) -> int:
 
 
 def _linepay_client() -> LinePayClient | None:
-    """依 config 建 LINE Pay 客戶端（憑證來自環境變數、不入 repo）。未設定 → None，
-    由 create_sale 對帶 LINE_PAY tender 的結帳 fail-closed 拒絕（不留無付款單）。"""
-    cfg = get_app_settings()
-    if not cfg.linepay_channel_id.strip() or not cfg.linepay_channel_secret.strip():
-        return None
-    return LinePayClient(
-        channel_id=cfg.linepay_channel_id,
-        channel_secret=cfg.linepay_channel_secret,
-        base_url=cfg.linepay_api_base,
-        transport=HttpxLinePayTransport(),
-    )
+    """依 config 建 LINE Pay 客戶端（共用工廠；未設定 → None，create_sale/void fail-closed）。"""
+    return linepay_client_from_config()
 
 
 @router.post(

@@ -150,8 +150,11 @@ function ReturnDialog({
   // 只列還有可退餘量的行（全退的不再出現，避免可選卻被後端 409）
   const returnable = lines.filter((l) => isReturnable(l) && remainingQty(l) > 0);
   const refund = computeRefund(lines, qtys);
-  // 後端 v1 僅支援純現金銷售退貨（購物金/混合付款會 409）→ 前端先擋、給明確原因（Codex P2）
-  const cashOnly = detail.data?.payment_method === "CASH";
+  // 後端退貨支援純現金與純 LINE Pay（docs/30 §5：LINE Pay 走 refund API、可部分退）；購物金/
+  // 台灣Pay/混合尚未支援（會 409）→ 前端先擋、給明確原因（Codex P2）。
+  const paymentMethod = detail.data?.payment_method;
+  const refundSupported = paymentMethod === "CASH" || paymentMethod === "LINE_PAY";
+  const isLinePay = paymentMethod === "LINE_PAY";
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -179,8 +182,9 @@ function ReturnDialog({
       <div className="card pos-dialog" style={{ maxWidth: 560 }}>
         <h2>退貨 #{sale.id}</h2>
         <p className="hint">
-          選擇退貨品項與數量：現金退還（自錢櫃取出，關帳對帳核對）、庫存回補、
-          寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。
+          {isLinePay
+            ? "選擇退貨品項與數量：LINE Pay 退款自動退回客人（可部分退）、庫存回補、寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。"
+            : "選擇退貨品項與數量：現金退還（自錢櫃取出，關帳對帳核對）、庫存回補、寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。"}
         </p>
         {detail.isLoading && <p>載入明細中…</p>}
         {detail.isError && (
@@ -191,13 +195,13 @@ function ReturnDialog({
             </button>
           </p>
         )}
-        {detail.isSuccess && !cashOnly && (
+        {detail.isSuccess && !refundSupported && (
           <p role="alert" className="form-error">
-            此單以購物金或混合方式付款，目前系統僅支援純現金銷售退貨。
+            此單以購物金／台灣Pay／混合方式付款，目前退貨僅支援純現金與純 LINE Pay。
             請改以作廢處理，或聯繫管理者。
           </p>
         )}
-        {cashOnly && returnable.length > 0 && (
+        {refundSupported && returnable.length > 0 && (
           <table className="data-table">
             <thead>
               <tr>
@@ -243,7 +247,7 @@ function ReturnDialog({
             </tbody>
           </table>
         )}
-        {detail.isSuccess && cashOnly && returnable.length === 0 && (
+        {detail.isSuccess && refundSupported && returnable.length === 0 && (
           <p className="hint">此單沒有可退貨的品項（餐飲不支援退貨）。</p>
         )}
         <label style={{ display: "block", marginTop: 12 }}>
@@ -269,7 +273,7 @@ function ReturnDialog({
           <button
             type="button"
             className="btn-danger"
-            disabled={submit.isPending || refund <= 0 || !cashOnly}
+            disabled={submit.isPending || refund <= 0 || !refundSupported}
             onClick={() => {
               setError(null);
               submit.mutate();

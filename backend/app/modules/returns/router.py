@@ -10,9 +10,11 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
 from app.modules.returns.schemas import ReturnCreateRequest, ReturnRead
 from app.modules.returns.service import ReturnLineInput, ReturnsService
+from app.modules.sales.linepay import linepay_client_from_config
 from app.shared.exceptions import (
     DomainError,
     IdempotencyKeyConflict,
+    LinePayChargeFailed,
     NoOpenCashSession,
     ReturnConflict,
     ReturnLineInvalid,
@@ -32,6 +34,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     ReturnConflict: status.HTTP_409_CONFLICT,
     NoOpenCashSession: status.HTTP_409_CONFLICT,
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
+    # LINE Pay 退款失敗/未設定（fail-closed，退貨整筆不成立）→ 402 Payment Required。
+    LinePayChargeFailed: status.HTTP_402_PAYMENT_REQUIRED,
 }
 
 
@@ -65,6 +69,7 @@ async def create_return(
             reason=payload.reason,
             actor_user_id=user.id,
             idempotency_key=idempotency_key,
+            linepay_client=linepay_client_from_config(),
         )
     except IntegrityError as exc:
         await session.rollback()

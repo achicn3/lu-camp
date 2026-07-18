@@ -16,8 +16,10 @@ from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.models import CustomerReturn, ReturnLine
 from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
+from app.modules.sales.linepay import LinePayClient
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
+from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import (
     CashMovementType,
@@ -119,6 +121,7 @@ class ReturnsService:
         reason: str,
         actor_user_id: int,
         idempotency_key: str,
+        linepay_client: LinePayClient | None = None,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
@@ -173,7 +176,7 @@ class ReturnsService:
             refund_amount += line_refund
             selected.append((line, qty, line_refund))
 
-        self._ensure_cash_refund_supported(
+        refund_channel = self._refund_channel(
             sale.payment_method, await self._sales.list_tenders(sale.id)
         )
 
@@ -209,14 +212,22 @@ class ReturnsService:
                     store_id, sale.id, line.serialized_item_id, actor_user_id=actor_user_id
                 )
 
-        await self._cash.record_movement(
-            store_id,
-            CashMovementType.SALE_REFUND_OUT,
-            refund_amount,
-            actor_user_id=actor_user_id,
-            ref_type="return",
-            ref_id=customer_return.id,
-        )
+        # 退款反轉（docs/30 §5）：純現金→錢櫃 SALE_REFUND_OUT（需開帳）；純 LINE Pay→呼叫 refund
+        # API 部分退款（累加 refunded_amount、非現金不進抽屜、不需開帳）。fail-closed：LINE Pay 退款
+        # 失敗整筆退貨回滾（不留已退貨卻未退款）。
+        if refund_channel == TenderType.LINE_PAY:
+            await SalesService(self._session).refund_line_pay_amount(
+                store_id, sale.id, refund_amount, linepay_client
+            )
+        else:
+            await self._cash.record_movement(
+                store_id,
+                CashMovementType.SALE_REFUND_OUT,
+                refund_amount,
+                actor_user_id=actor_user_id,
+                ref_type="return",
+                ref_id=customer_return.id,
+            )
 
         returned_after = dict(previous)
         for sale_line_id, qty in requested.items():
@@ -356,15 +367,23 @@ class ReturnsService:
         return requested
 
     @staticmethod
-    def _ensure_cash_refund_supported(
+    def _refund_channel(
         payment_method: PaymentMethod, tenders: list[SaleTender]
-    ) -> None:
-        if not tenders and payment_method == PaymentMethod.CASH:
-            return
+    ) -> TenderType:
+        """決定退款管道（docs/30 §5）：純現金→CASH（走錢櫃 SALE_REFUND_OUT）；
+        純 LINE Pay→LINE_PAY（呼叫 refund API、可部分退）。混合/其他方式尚未支援 → 拒。"""
         if not tenders:
-            raise ReturnConflict("目前僅支援純現金銷售退貨")
-        if any(t.tender_type != TenderType.CASH for t in tenders):
-            raise ReturnConflict("目前僅支援純現金銷售退貨")
+            if payment_method == PaymentMethod.CASH:
+                return TenderType.CASH
+            raise ReturnConflict("目前僅支援純現金或純 LINE Pay 銷售退貨")
+        types = {t.tender_type for t in tenders}
+        if types == {TenderType.CASH}:
+            return TenderType.CASH
+        if types == {TenderType.LINE_PAY}:
+            return TenderType.LINE_PAY
+        raise ReturnConflict(
+            "目前僅支援純現金或純 LINE Pay 銷售退貨（混合/購物金/台灣Pay 尚未支援）"
+        )
 
     @staticmethod
     def _validate_supported_line(line: SaleLine) -> None:

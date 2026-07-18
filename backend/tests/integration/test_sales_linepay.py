@@ -399,6 +399,131 @@ async def test_void_linepay_refund_failure_fails_closed(db_session: AsyncSession
         )
 
 
+async def _make_2line_linepay_sale(
+    db_session: AsyncSession, transport: LinePayTransport, *, store_id: int, clerk_id: int
+) -> Sale:
+    """建 2 行 LINE Pay 銷售（S-A 600 + S-B 400 = 1000），供部分/全額退貨測試。"""
+    await _seed_item(db_session, store_id, code="RA", price="600")
+    await _seed_item(db_session, store_id, code="RB", price="400")
+    return await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RA"),
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RB"),
+        ],
+        tenders=[
+            TenderInput(
+                tender_type=TenderType.LINE_PAY,
+                amount=Decimal("1000"),
+                line_pay_one_time_key="OTK-2line",
+            )
+        ],
+        idempotency_key="key-2line",
+        linepay_client=_client(transport),
+    )
+
+
+async def _line_id(db_session: AsyncSession, sale_id: int, item_code: str) -> int:
+    from app.modules.inventory.models import SerializedItem
+    from app.modules.sales.models import SaleLine
+
+    row = await db_session.scalar(
+        select(SaleLine)
+        .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
+        .where(SaleLine.sale_id == sale_id, SerializedItem.item_code == item_code)
+    )
+    assert row is not None
+    return row.id
+
+
+@pytest.mark.asyncio
+async def test_return_linepay_partial_refunds_line_amount(db_session: AsyncSession) -> None:
+    # docs/30 §5 裁示：退貨可只退部分——退一行 → refund 該行金額、累加 refunded_amount，
+    # 未全退保持 COMPLETE。
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    sale = await _make_2line_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id
+    )
+    ra_line = await _line_id(db_session, sale.id, "RA")  # 600
+
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(ra_line, 1)],
+        reason="客人退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="ret-partial-1",
+        linepay_client=_client(transport),
+    )
+    assert transport.refund_calls == 1
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None
+    assert txn.refunded_amount == Decimal("600")  # 只退 RA 行
+    assert txn.status == LinePayStatus.COMPLETE  # 未全退 → 保持 COMPLETE
+    # 非現金退款：不記現金退出流水
+    refund_moves = await db_session.scalar(
+        select(func.count()).select_from(CashMovement).where(CashMovement.store_id == store_id)
+    )
+    assert refund_moves == 0
+
+
+@pytest.mark.asyncio
+async def test_return_linepay_full_marks_refunded(db_session: AsyncSession) -> None:
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    sale = await _make_2line_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id
+    )
+    ra = await _line_id(db_session, sale.id, "RA")
+    rb = await _line_id(db_session, sale.id, "RB")
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(ra, 1), ReturnLineInput(rb, 1)],
+        reason="全退",
+        actor_user_id=clerk_id,
+        idempotency_key="ret-full-1",
+        linepay_client=_client(transport),
+    )
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None
+    assert txn.refunded_amount == Decimal("1000") and txn.status == LinePayStatus.REFUNDED
+
+
+@pytest.mark.asyncio
+async def test_return_linepay_refund_failure_fails_closed(db_session: AsyncSession) -> None:
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+
+    store_id, clerk_id = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    sale = await _make_2line_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id
+    )
+    ra = await _line_id(db_session, sale.id, "RA")
+    # 退款被拒 → LinePayChargeFailed（退貨整筆回滾，不留已退貨卻未退款）
+    reject = RefundTransport(refund_resp=_REFUND_REJECT)
+    with pytest.raises(LinePayChargeFailed):
+        await ReturnsService(db_session).create_return(
+            store_id,
+            sale_id=sale.id,
+            lines=[ReturnLineInput(ra, 1)],
+            reason="退款失敗測試",
+            actor_user_id=clerk_id,
+            idempotency_key="ret-fail-1",
+            linepay_client=_client(reject),
+        )
+
+
 @pytest.mark.asyncio
 async def test_linepay_requires_one_time_key(db_session: AsyncSession) -> None:
     store_id, clerk_id = await _seed(db_session)

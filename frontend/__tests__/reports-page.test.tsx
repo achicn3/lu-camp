@@ -139,6 +139,12 @@ const SALES_MARGIN_DATA = {
   cash_received: "450000",
   store_credit_redeemed: "50000",
   transaction_count: 200,
+  payment_fee_total: "1500",
+  net_margin: "168500",
+  payment_methods: [
+    { method: "CASH", received: "450000", fee: "0" },
+    { method: "LINE_PAY", received: "50000", fee: "1500" },
+  ],
   generated_at: "2026-06-21T18:00:00Z",
 };
 
@@ -675,6 +681,14 @@ describe("ReportsPage", () => {
     expect(screen.getByText("312,000")).toBeTruthy(); // secondhand_revenue
     // transaction_count
     expect(screen.getByText("200")).toBeTruthy();
+    // 支付手續費（docs/30 §7）：淨毛利、手續費合計、收款方式分列（含 LINE Pay 列）
+    expect(screen.getByText("淨毛利（扣支付手續費）")).toBeTruthy();
+    expect(screen.getByText("168,500")).toBeTruthy(); // net_margin
+    expect(screen.getByText("支付手續費合計（店家成本）")).toBeTruthy();
+    expect(screen.getByText("收款方式分列")).toBeTruthy();
+    expect(screen.getByText("LINE Pay")).toBeTruthy();
+    // 1,500 出現兩次（手續費合計列＋LINE Pay 手續費欄）
+    expect(screen.getAllByText("1,500").length).toBe(2);
   });
 
   it("inventory value tab shows owned/consignment/catalog sections", async () => {

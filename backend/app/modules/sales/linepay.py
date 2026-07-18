@@ -274,3 +274,19 @@ class LinePayClient:
             "POST", f"{self._base_url}{path}", self._headers(path, body), body
         )
         return parse_refund_result(resp)
+
+
+def linepay_client_from_config() -> LinePayClient | None:
+    """依 config 建 LINE Pay 客戶端（憑證來自環境變數、不入 repo）。未設定 → None，
+    由呼叫端對帶 LINE_PAY 的結帳/退款 fail-closed 拒絕（不留無付款/未退款單）。共用工廠。"""
+    from app.core.config import get_settings
+
+    cfg = get_settings()
+    if not cfg.linepay_channel_id.strip() or not cfg.linepay_channel_secret.strip():
+        return None
+    return LinePayClient(
+        channel_id=cfg.linepay_channel_id,
+        channel_secret=cfg.linepay_channel_secret,
+        base_url=cfg.linepay_api_base,
+        transport=HttpxLinePayTransport(),
+    )
