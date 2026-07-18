@@ -105,6 +105,17 @@ function ErrorBlock({ message }: { message: string }) {
   );
 }
 
+/** 收款方式代碼 → 中文（docs/30）。未知代碼原樣顯示。 */
+function paymentMethodLabel(method: string): string {
+  const map: Record<string, string> = {
+    CASH: "現金",
+    STORE_CREDIT: "購物金",
+    LINE_PAY: "LINE Pay",
+    TAIWAN_PAY: "台灣Pay",
+  };
+  return map[method] ?? method;
+}
+
 // -- Download helper --
 
 async function downloadReport(url: string, filename: string): Promise<void> {
@@ -864,6 +875,10 @@ function SalesMarginPanel() {
                 )}
               </dd>
             </div>
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>淨毛利（扣支付手續費）</dt>
+              <dd><MoneyText value={report.net_margin} /></dd>
+            </div>
           </dl>
 
           <div className="inv-table-wrap">
@@ -908,12 +923,40 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.store_credit_redeemed} /></td>
                 </tr>
                 <tr>
+                  <td>支付手續費合計（店家成本）</td>
+                  <td><MoneyText value={report.payment_fee_total} /></td>
+                </tr>
+                <tr>
                   <td>交易筆數</td>
                   <td className="money">{report.transaction_count}</td>
                 </tr>
               </tbody>
             </table>
           </div>
+
+          {report.payment_methods.length > 0 && (
+            <div className="inv-table-wrap">
+              <h3 className="rpt-subtitle">收款方式分列</h3>
+              <table className="inv-table">
+                <thead>
+                  <tr>
+                    <th>收款方式</th>
+                    <th>收款額</th>
+                    <th>手續費</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.payment_methods.map((m) => (
+                    <tr key={m.method}>
+                      <td>{paymentMethodLabel(m.method)}</td>
+                      <td><MoneyText value={m.received} /></td>
+                      <td><MoneyText value={m.fee} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <DownloadButtons onDownload={handleDownload} />
         </>
