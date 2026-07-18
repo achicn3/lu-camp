@@ -3746,6 +3746,18 @@ export interface components {
          */
         PaymentMethod: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY" | "MIXED";
         /**
+         * PaymentMethodTotal
+         * @description 單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。
+         */
+        PaymentMethodTotal: {
+            /** Fee */
+            fee: string;
+            /** Method */
+            method: string;
+            /** Received */
+            received: string;
+        };
+        /**
          * PayoutMethod
          * @description 收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。
          * @enum {string}
@@ -4365,8 +4377,14 @@ export interface components {
             gross_margin_rate: string | null;
             /** Gross Turnover */
             gross_turnover: string;
+            /** Net Margin */
+            net_margin: string;
             /** Owned Cogs */
             owned_cogs: string;
+            /** Payment Fee Total */
+            payment_fee_total: string;
+            /** Payment Methods */
+            payment_methods: components["schemas"]["PaymentMethodTotal"][];
             /** Recognized Revenue */
             recognized_revenue: string;
             /** Secondhand Revenue */

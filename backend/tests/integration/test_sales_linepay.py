@@ -6,6 +6,7 @@
 以真 LinePayClient 包一個「腳本化傳輸替身」測——經過真實簽章/序列化，只替換網路 I/O。
 """
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -172,6 +173,28 @@ async def test_linepay_success_non_cash_with_fee_and_txn(db_session: AsyncSessio
         select(func.count()).select_from(CashMovement).where(CashMovement.store_id == store_id)
     )
     assert cash_count == 0
+
+
+@pytest.mark.asyncio
+async def test_margin_report_payment_fee_and_net_margin(db_session: AsyncSession) -> None:
+    # docs/30 §7 決策 1：手續費獨立支出行——認列營收/gross 不含，net_margin = gross − 手續費。
+    store_id, clerk_id = await _seed(db_session)
+    transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_SUCCESS)
+    # 自有序號品：成交 1000、成本 100 → gross_margin = 900；LINE Pay fee = 1000×2% = 20。
+    sale = await _make_linepay_sale(
+        db_session, transport, store_id=store_id, clerk_id=clerk_id, code="M1"
+    )
+    now = datetime.now(UTC)
+    bd = await SalesService(db_session).margin_breakdown(
+        store_id, now - timedelta(days=1), now + timedelta(days=1)
+    )
+    assert bd.gross_margin == Decimal("900")
+    assert bd.payment_fee_total == Decimal("20")
+    assert bd.net_margin == Decimal("880")  # gross − 手續費（獨立支出行）
+    # 依 tender 分列：LINE_PAY 收款 1000、手續費 20
+    lp = [m for m in bd.payment_methods if m[0] == "LINE_PAY"]
+    assert lp == [("LINE_PAY", Decimal("1000"), Decimal("20"))]
+    assert sale.payment_method == PaymentMethod.LINE_PAY
 
 
 @pytest.mark.asyncio

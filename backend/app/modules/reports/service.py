@@ -41,6 +41,7 @@ from app.modules.reports.schemas import (
     InventoryValueReport,
     LiabilityReport,
     MemberBalanceRow,
+    PaymentMethodTotal,
     ReconciliationReport,
     SalesMarginReport,
     TrendRow,
@@ -308,6 +309,12 @@ class ReportsService:
             cash_received=bd.cash_received,
             store_credit_redeemed=bd.store_credit_redeemed,
             transaction_count=bd.transaction_count,
+            payment_fee_total=bd.payment_fee_total,
+            net_margin=bd.net_margin,
+            payment_methods=[
+                PaymentMethodTotal(method=m, received=received, fee=fee)
+                for m, received, fee in bd.payment_methods
+            ],
         )
 
     @staticmethod

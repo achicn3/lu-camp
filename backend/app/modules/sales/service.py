@@ -105,6 +105,12 @@ class MarginBreakdown:
     # （＝recognized_revenue − food_revenue，含二手買斷/寄售抽成/數量品）。
     food_revenue: Decimal
     secondhand_revenue: Decimal
+    # 支付手續費（docs/30 §7 決策 1）：手續費為店家成本、獨立支出行——認列營收/gross_margin 不含，
+    # 另提供 net_margin = gross_margin − payment_fee_total。payment_methods 依 tender 分列各方式
+    # (方法, 收款額, 手續費)。已作廢單的手續費不計（tender 查詢排除 VOID）。
+    payment_fee_total: Decimal
+    net_margin: Decimal
+    payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
 
 
 @dataclass(frozen=True)
@@ -1048,6 +1054,9 @@ class SalesService:
             transaction_count=comp.transaction_count,
             food_revenue=comp.menu_revenue,
             secondhand_revenue=recognized_revenue - comp.menu_revenue,
+            payment_fee_total=comp.payment_fee_total,
+            net_margin=gross_margin - comp.payment_fee_total,
+            payment_methods=comp.payment_methods,
         )
 
     async def serialized_sold_rows(

@@ -4921,6 +4921,30 @@
         "title": "PaymentMethod",
         "type": "string"
       },
+      "PaymentMethodTotal": {
+        "description": "單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。",
+        "properties": {
+          "fee": {
+            "title": "Fee",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "received": {
+            "title": "Received",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "received",
+          "fee"
+        ],
+        "title": "PaymentMethodTotal",
+        "type": "object"
+      },
       "PayoutMethod": {
         "description": "收購撥款方式（docs/16 §1.7）。CONSIGNMENT 不撥款、恆為 CASH 預設值。",
         "enum": [
@@ -6442,9 +6466,24 @@
             "title": "Gross Turnover",
             "type": "string"
           },
+          "net_margin": {
+            "title": "Net Margin",
+            "type": "string"
+          },
           "owned_cogs": {
             "title": "Owned Cogs",
             "type": "string"
+          },
+          "payment_fee_total": {
+            "title": "Payment Fee Total",
+            "type": "string"
+          },
+          "payment_methods": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentMethodTotal"
+            },
+            "title": "Payment Methods",
+            "type": "array"
           },
           "recognized_revenue": {
             "title": "Recognized Revenue",
@@ -6488,7 +6527,10 @@
           "secondhand_revenue",
           "cash_received",
           "store_credit_redeemed",
-          "transaction_count"
+          "transaction_count",
+          "payment_fee_total",
+          "net_margin",
+          "payment_methods"
         ],
         "title": "SalesMarginReport",
         "type": "object"

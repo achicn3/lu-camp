@@ -51,6 +51,10 @@ class SalesMarginComponents:
     cash_received: Decimal
     store_credit_redeemed: Decimal
     transaction_count: int
+    # 支付手續費（docs/30 §7 決策 1）：各方式收款額＋手續費（店家成本），依 tender 分列。
+    # payment_fee_total＝所有方式手續費合計；payment_methods＝(方法, 收款額, 手續費) 逐列。
+    payment_fee_total: Decimal
+    payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
 
 
 class SalesRepository:
@@ -492,24 +496,38 @@ class SalesRepository:
             ).scalar_one()
         )
 
-        tender_rows = await self._session.execute(
-            select(SaleTender.tender_type, func.coalesce(func.sum(SaleTender.amount), 0))
-            .join(Sale, SaleTender.sale_id == Sale.id)
-            .where(
-                Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
-                Sale.created_at >= date_from,
-                Sale.created_at < date_to,
+        tender_rows = list(
+            await self._session.execute(
+                select(
+                    SaleTender.tender_type,
+                    func.coalesce(func.sum(SaleTender.amount), 0),
+                    func.coalesce(func.sum(SaleTender.fee_amount), 0),
+                )
+                .join(Sale, SaleTender.sale_id == Sale.id)
+                .where(
+                    Sale.store_id == store_id,
+                    Sale.invoice_status != SaleInvoiceStatus.VOID,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                )
+                .group_by(SaleTender.tender_type)
             )
-            .group_by(SaleTender.tender_type)
         )
         cash_received = Decimal(0)
         store_credit_redeemed = Decimal(0)
-        for tender_type, amount in tender_rows:
+        payment_fee_total = Decimal(0)
+        # 依 tender 型別列舉順序穩定輸出各方式（收款額, 手續費），供報表分列。
+        by_type: dict[TenderType, tuple[Decimal, Decimal]] = {}
+        for tender_type, amount, fee in tender_rows:
+            by_type[tender_type] = (Decimal(amount), Decimal(fee))
+            payment_fee_total += Decimal(fee)
             if tender_type == TenderType.CASH:
                 cash_received = Decimal(amount)
             elif tender_type == TenderType.STORE_CREDIT:
                 store_credit_redeemed = Decimal(amount)
+        payment_methods = tuple(
+            (t.value, by_type[t][0], by_type[t][1]) for t in TenderType if t in by_type
+        )
 
         transaction_count = int(
             (
@@ -538,6 +556,8 @@ class SalesRepository:
             cash_received=cash_received,
             store_credit_redeemed=store_credit_redeemed,
             transaction_count=transaction_count,
+            payment_fee_total=payment_fee_total,
+            payment_methods=payment_methods,
         )
 
     async def excess_spend_components(

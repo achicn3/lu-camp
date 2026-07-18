@@ -112,6 +112,14 @@ class DailyCashReport(BaseModel):
     total_store_credit_redeemed_display_only: NTDAmount
 
 
+class PaymentMethodTotal(BaseModel):
+    """單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。"""
+
+    method: str  # TenderType 值（CASH/STORE_CREDIT/LINE_PAY/TAIWAN_PAY）
+    received: NTDAmount  # 該方式收款額合計
+    fee: NTDAmount  # 該方式手續費合計（現金/購物金為 0）
+
+
 class SalesMarginReport(BaseModel):
     """銷售 / 毛利報表（docs/19 §2.3）。未作廢銷售；買斷認成本、寄售只認抽成、catalog 成本 N/A。"""
 
@@ -133,6 +141,11 @@ class SalesMarginReport(BaseModel):
     cash_received: NTDAmount
     store_credit_redeemed: NTDAmount
     transaction_count: int
+    # 支付手續費（docs/30 §7 決策 1）：手續費為店家成本、獨立支出行；gross_margin 不含（認列營收
+    # 不變），另提供 net_margin = gross_margin − payment_fee_total。payment_methods 依 tender 分列。
+    payment_fee_total: NTDAmount
+    net_margin: NTDAmount
+    payment_methods: list[PaymentMethodTotal]
 
 
 class DailySummaryReport(BaseModel):
