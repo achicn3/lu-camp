@@ -129,3 +129,103 @@ async def test_run_backup_writes_audit(db_session: AsyncSession) -> None:
         select(func.count()).select_from(AuditLog).where(AuditLog.action == "BACKUP_RUN")
     )
     assert n == 1
+
+
+# --- 排程 tick（docs/31 §3）：run_due_backups 到期驅動、記於主店名下 -----------------
+
+
+@pytest.mark.asyncio
+async def test_run_due_backups_triggers_when_due(db_session: AsyncSession) -> None:
+    # 從未成功過 → 到期 → 觸發一次 SCHEDULED 備份,記於主店（最小 store_id）名下。
+    from app.modules.backup.scheduler import run_due_backups
+
+    store_id = await _store(db_session)
+    backend = FakeBackend()
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is True
+    assert backend.create_calls == 1
+    run = await db_session.scalar(select(BackupRun).where(BackupRun.store_id == store_id))
+    assert run is not None
+    assert run.status == BackupStatus.SUCCEEDED
+    assert run.trigger == BackupTrigger.SCHEDULED
+    assert run.actor_user_id is None  # 排程無操作者
+
+
+@pytest.mark.asyncio
+async def test_run_due_backups_skips_when_not_due(db_session: AsyncSession) -> None:
+    # 剛成功過（10 分鐘前）→ 未到期 → 不觸發。
+    from app.modules.backup.scheduler import run_due_backups
+
+    store_id = await _store(db_session)
+    recent = datetime.now(UTC) - timedelta(minutes=10)
+    db_session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.SCHEDULED,
+            status=BackupStatus.SUCCEEDED,
+            db_name="lucamp",
+            finished_at=recent,
+        )
+    )
+    await db_session.flush()
+    backend = FakeBackend()
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is False
+    assert backend.create_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_run_due_backups_skips_when_disabled(db_session: AsyncSession) -> None:
+    # backup_enabled=false → 到期判斷永遠 False → tick 不備份（手動仍可）。
+    from app.modules.backup.scheduler import run_due_backups
+    from app.modules.settings.service import _new_settings
+
+    store_id = await _store(db_session)
+    settings = _new_settings(store_id)  # 持久化一列並停用備份（get_effective_settings 才會讀到）
+    settings.backup_enabled = False
+    db_session.add(settings)
+    await db_session.flush()
+    backend = FakeBackend()
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is False
+    assert backend.create_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_run_due_backups_no_store_noop(db_session: AsyncSession) -> None:
+    # 尚無任何店（極早期）→ 無主店 → 安全跳過,不炸。
+    from app.modules.backup.scheduler import run_due_backups
+
+    backend = FakeBackend()
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is False
+    assert backend.create_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_run_due_backups_respects_single_run_guard(db_session: AsyncSession) -> None:
+    # 已有 RUNNING（另一次進行中）→ tick 跳過,不重複觸發。
+    from app.modules.backup.scheduler import run_due_backups
+
+    store_id = await _store(db_session)
+    db_session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.MANUAL,
+            status=BackupStatus.RUNNING,
+            db_name="lucamp",
+        )
+    )
+    await db_session.flush()
+    backend = FakeBackend()
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is False
+    assert backend.create_calls == 0
+
+
+def test_build_backup_backend_none_when_unconfigured() -> None:
+    # R2/口令未設定（測試環境 .env 無 R2_* / BACKUP_PASSPHRASE）→ 回 None（tick 不備份,不炸）。
+    from app.modules.backup.scheduler import build_backup_backend, db_name_from_url
+
+    assert build_backup_backend() is None
+    assert db_name_from_url("postgresql+asyncpg://u:p@h:1/lucamp") == "lucamp"

@@ -5,7 +5,11 @@ OpenAPI 合約管線（docs/11）有實際內容可匯出。後續模組依
 docs/05-project-structure.md 掛載於此。
 """
 
-from collections.abc import Awaitable, Callable
+import asyncio
+import contextlib
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +18,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
+from app.modules.backup.scheduler import scheduler_loop
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.consignment.router import router as consignment_router
@@ -43,15 +48,35 @@ API_PREFIX = "/api/v1"
 KIOSK_MAX_BODY_BYTES = 1_000_000
 
 
+logger = logging.getLogger(__name__)
+
+
 class HealthResponse(BaseModel):
     """`/health` 回應。"""
 
     status: str
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """啟動時起備份排程背景 tick（docs/31 §3）,關閉時優雅停止。
+
+    tick 為到期驅動、與請求脈絡無關;主開關 backup_scheduler_enabled=false 時直接返回。
+    """
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(scheduler_loop(stop_event), name="backup-scheduler")
+    try:
+        yield
+    finally:
+        stop_event.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app() -> FastAPI:
     """建立並設定 FastAPI 應用程式。"""
-    app = FastAPI(title="lu-camp API", version="0.1.0")
+    app = FastAPI(title="lu-camp API", version="0.1.0", lifespan=_lifespan)
     # CORS：允許來源由設定提供（CORS_ORIGINS，逗號分隔）。認證走 Bearer 標頭
     # （非 cookie），不需 allow_credentials。
     app.add_middleware(
