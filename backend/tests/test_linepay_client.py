@@ -30,14 +30,16 @@ CHANNEL = "2010746859"
 
 
 def test_order_id_stable_and_bounded() -> None:
-    a = linepay_order_id(store_id=1, idempotency_key="pos-abc-123")
-    b = linepay_order_id(store_id=1, idempotency_key="pos-abc-123")
-    c = linepay_order_id(store_id=1, idempotency_key="pos-abc-999")
-    assert a == b  # 同鍵恆同號（重試不重扣的關鍵）
+    a = linepay_order_id(store_id=1, idempotency_key="pos-abc-123", amount=Decimal("100"))
+    b = linepay_order_id(store_id=1, idempotency_key="pos-abc-123", amount=Decimal("100"))
+    c = linepay_order_id(store_id=1, idempotency_key="pos-abc-999", amount=Decimal("100"))
+    assert a == b  # 同鍵同額恆同號（重試不重扣的關鍵）
     assert a != c
     assert a.startswith("LP-1-") and len(a) <= 40
     # 不同店同鍵也不同號（多分店隔離）
-    assert linepay_order_id(store_id=2, idempotency_key="pos-abc-123") != a
+    assert linepay_order_id(store_id=2, idempotency_key="pos-abc-123", amount=Decimal("100")) != a
+    # 同鍵**不同金額**必得不同 orderId（Codex finding #2：杜絕以同鍵重送不同額誤重用）
+    assert linepay_order_id(store_id=1, idempotency_key="pos-abc-123", amount=Decimal("200")) != a
 
 
 def test_sign_auth_matches_independent_hmac() -> None:

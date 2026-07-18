@@ -8,6 +8,7 @@
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
@@ -33,7 +34,13 @@ from app.shared.enums import (
     TenderType,
     UserRole,
 )
-from app.shared.exceptions import InvalidSaleTender, LinePayChargeFailed, LinePayTransportError
+from app.shared.exceptions import (
+    InvalidSaleTender,
+    LinePayChargeFailed,
+    LinePayRefundAmbiguous,
+    LinePayTransportError,
+    ManualRefundRequired,
+)
 
 _CHECK_NOT_FOUND: dict[str, object] = {
     "returnCode": "1150",
@@ -307,10 +314,16 @@ _REFUND_REJECT: dict[str, object] = {"returnCode": "9000", "returnMessage": "ref
 
 
 class RefundTransport(LinePayTransport):
-    """作廢退款用替身：check→未完成、pay→成功、refund→可設定成功/已退款/失敗。"""
+    """作廢退款用替身：check→未完成、pay→成功、refund→可設定成功/已退款/失敗或拋傳輸錯誤。"""
 
-    def __init__(self, *, refund_resp: dict[str, object]) -> None:
+    def __init__(
+        self,
+        *,
+        refund_resp: dict[str, object] | None = None,
+        refund_error: Exception | None = None,
+    ) -> None:
         self.refund_resp = refund_resp
+        self.refund_error = refund_error
         self.refund_calls = 0
 
     async def send(
@@ -322,6 +335,9 @@ class RefundTransport(LinePayTransport):
             return _PAY_SUCCESS
         if url.endswith("/refund"):
             self.refund_calls += 1
+            if self.refund_error is not None:
+                raise self.refund_error
+            assert self.refund_resp is not None
             return self.refund_resp
         raise AssertionError(url)
 
@@ -522,6 +538,99 @@ async def test_return_linepay_refund_failure_fails_closed(db_session: AsyncSessi
             idempotency_key="ret-fail-1",
             linepay_client=_client(reject),
         )
+
+
+_CHECK_COMPLETE_WRONG_AMOUNT: dict[str, object] = {
+    "returnCode": "0000",
+    "returnMessage": "Success.",
+    "info": {
+        "transactionId": 2026071802368895010,
+        "status": "COMPLETE",
+        "payInfo": [{"method": "BALANCE", "amount": 500}],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_charge_check_first_rejects_amount_mismatch(db_session: AsyncSession) -> None:
+    # Codex finding #2：check-first 回 COMPLETE 但平台金額（500）≠本次（1000）→ 拒絕重用。
+    store_id, clerk_id = await _seed(db_session)
+    await _seed_item(db_session, store_id, code="AM", price="1000")
+    transport = ScriptedTransport(
+        check_resp=_CHECK_COMPLETE_WRONG_AMOUNT, pay_resp=_PAY_SUCCESS
+    )
+    with pytest.raises(LinePayChargeFailed):
+        await SalesService(db_session).create_sale(
+            store_id,
+            clerk_id,
+            lines=_line("AM"),
+            tenders=_tender("1000"),
+            idempotency_key="am-key",
+            linepay_client=_client(transport),
+        )
+    assert transport.pay_calls == 0  # 金額不符即拒、不改呼 pay
+
+
+@pytest.mark.asyncio
+async def test_durable_refund_skips_when_already_succeeded(db_session: AsyncSession) -> None:
+    # Codex finding #1：同 refund_key 第二次呼叫見 durable SUCCEEDED → 不重呼平台（防重退）。
+    store_id, _clerk = await _seed(db_session)
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    svc = SalesService(db_session)
+    key = f"test-succ-{uuid4()}"
+    await svc._durable_line_pay_refund(
+        store_id=store_id, order_id="LP-x", refund_key=key, amount=Decimal("100"),
+        client=_client(transport),
+    )
+    await svc._durable_line_pay_refund(
+        store_id=store_id, order_id="LP-x", refund_key=key, amount=Decimal("100"),
+        client=_client(transport),
+    )
+    assert transport.refund_calls == 1  # 第二次跳過、不重退
+
+
+@pytest.mark.asyncio
+async def test_durable_refund_pending_then_ambiguous(db_session: AsyncSession) -> None:
+    # Codex finding #1：呼叫平台後傳輸錯誤（結果未定）→ 保留 PENDING；重試見 PENDING → ambiguous。
+    store_id, _clerk = await _seed(db_session)
+    svc = SalesService(db_session)
+    key = f"test-amb-{uuid4()}"
+    err = RefundTransport(refund_error=LinePayTransportError("網路逾時"))
+    with pytest.raises(LinePayTransportError):
+        await svc._durable_line_pay_refund(
+            store_id=store_id, order_id="LP-y", refund_key=key, amount=Decimal("100"),
+            client=_client(err),
+        )
+    assert err.refund_calls == 1
+    retry = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    with pytest.raises(LinePayRefundAmbiguous):
+        await svc._durable_line_pay_refund(
+            store_id=store_id, order_id="LP-y", refund_key=key, amount=Decimal("100"),
+            client=_client(retry),
+        )
+    assert retry.refund_calls == 0  # 結果未定 → 不盲目重退
+
+
+@pytest.mark.asyncio
+async def test_void_taiwanpay_requires_manual_refund_ack(db_session: AsyncSession) -> None:
+    # Codex finding #3：台灣Pay 無 API 退款；作廢須店員手動退款確認，否則擋（不靜默作廢仍扣款）。
+    store_id, clerk_id = await _seed(db_session)
+    await _seed_item(db_session, store_id, code="TW", price="500")
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=_line("TW"),
+        tenders=[TenderInput(tender_type=TenderType.TAIWAN_PAY, amount=Decimal("500"))],
+        idempotency_key="tw-key",
+    )
+    assert sale.payment_method == PaymentMethod.TAIWAN_PAY
+    with pytest.raises(ManualRefundRequired):
+        await SalesService(db_session).void_sale(sale, clerk_id)
+    # 帶手動退款確認 → 放行
+    voided = await SalesService(db_session).void_sale(
+        sale, clerk_id, manual_refund_ack=True
+    )
+    assert voided.invoice_status == SaleInvoiceStatus.VOID
 
 
 @pytest.mark.asyncio

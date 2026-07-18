@@ -412,3 +412,19 @@ class LinePayChargeFailed(DomainError):
 
     fail-closed：整筆銷售不成立、回滾（不得留下無付款的已完成單）。店員改用其他方式或重掃。
     """
+
+
+class ManualRefundRequired(DomainError):
+    """作廢/退貨含無 API 退款管道的收款（台灣Pay：店員於其 App 手動退款）。
+
+    不得靜默完成作廢而讓客人仍被扣款（docs/30 §5）：須由店員先於台灣Pay App 退款、再帶
+    manual_refund_ack=True 確認，系統才反轉。避免「已作廢卻未退款」。
+    """
+
+
+class LinePayRefundAmbiguous(DomainError):
+    """LINE Pay 退款上次結果未定（durable 記錄為 PENDING：呼叫後崩潰/回應遺失）。
+
+    不得盲目重試（可能已退款→重退造成超退，docs/30 §5 finding #1）：fail-closed，請店員至
+    LINE Pay 後台確認該筆退款後再處理。
+    """

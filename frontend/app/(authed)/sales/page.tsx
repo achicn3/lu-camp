@@ -62,10 +62,17 @@ function VoidConfirmDialog({
   onVoided: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 台灣Pay 無 API 退款（docs/30 finding #3）：作廢須店員先於台灣Pay App 手動退款、勾選確認，
+  // 後端才反轉——否則客人已作廢卻仍被扣款。LINE Pay 由後端自動退、現金自錢櫃取出，皆不需此確認。
+  const isTaiwanPay = sale.payment_method === "TAIWAN_PAY";
+  const [manualRefundAck, setManualRefundAck] = useState(false);
   const voidSale = useMutation({
     mutationFn: async () => {
       const { data, error: apiError } = await api.POST("/api/v1/sales/{sale_id}/void", {
-        params: { path: { sale_id: sale.id } },
+        params: {
+          path: { sale_id: sale.id },
+          query: isTaiwanPay ? { manual_refund_ack: manualRefundAck } : {},
+        },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "作廢失敗");
       return data;
@@ -90,7 +97,24 @@ function VoidConfirmDialog({
           總額 <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
           ，作廢後庫存回補、點數與購物金沖回、寄售結算反轉，且無法復原。
         </p>
-        <p className="hint">現金退還請直接自錢櫃取出，關帳對帳會核對差異。</p>
+        {isTaiwanPay ? (
+          <>
+            <p className="hint">
+              此單以台灣Pay 收款（無 API）：請先於台灣Pay App 手動退款給客人，再勾選下方確認。
+            </p>
+            <label className="field field-toggle">
+              <input
+                type="checkbox"
+                name="manual_refund_ack"
+                checked={manualRefundAck}
+                onChange={(e) => setManualRefundAck(e.target.checked)}
+              />
+              <span className="field-label">我已於台灣Pay App 完成退款給客人</span>
+            </label>
+          </>
+        ) : (
+          <p className="hint">現金退還請直接自錢櫃取出，關帳對帳會核對差異。</p>
+        )}
         {error !== null && (
           <p role="alert" className="form-error">
             {error}
@@ -101,7 +125,7 @@ function VoidConfirmDialog({
             type="button"
             className="btn-danger"
             onClick={() => voidSale.mutate()}
-            disabled={voidSale.isPending}
+            disabled={voidSale.isPending || (isTaiwanPay && !manualRefundAck)}
           >
             {voidSale.isPending ? "作廢中…" : "確認作廢"}
           </button>

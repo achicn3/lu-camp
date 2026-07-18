@@ -36,6 +36,8 @@ from app.shared.exceptions import (
     InvalidSaleTender,
     InvalidStateTransition,
     LinePayChargeFailed,
+    LinePayRefundAmbiguous,
+    ManualRefundRequired,
     MemberPointsAdjustFailed,
     MenuItemNotFound,
     MenuItemUnavailable,
@@ -70,6 +72,9 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     EInvoiceSettingsChanged: status.HTTP_409_CONFLICT,
     # LINE Pay 拒付/未設定/未啟用（fail-closed，整筆不成立）→ 402 Payment Required。
     LinePayChargeFailed: status.HTTP_402_PAYMENT_REQUIRED,
+    # 台灣Pay 作廢須先手動退款確認；LINE Pay 退款上次結果未定須人工對帳 → 409（前置未滿足）。
+    ManualRefundRequired: status.HTTP_409_CONFLICT,
+    LinePayRefundAmbiguous: status.HTTP_409_CONFLICT,
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemUnavailable: status.HTTP_409_CONFLICT,
@@ -250,13 +255,23 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
 
 
 @router.post("/{sale_id}/void", response_model=SaleRead, operation_id="voidSale")
-async def void_sale(sale_id: int, session: SessionDep, user: ManagerDep) -> SaleRead:
+async def void_sale(
+    sale_id: int,
+    session: SessionDep,
+    user: ManagerDep,
+    manual_refund_ack: Annotated[bool, Query()] = False,
+) -> SaleRead:
     svc = SalesService(session)
     sale = await svc.get_sale(user.store_id, sale_id)
     if sale is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到銷售單")
     try:
-        voided = await svc.void_sale(sale, user.id, linepay_client=_linepay_client())
+        voided = await svc.void_sale(
+            sale,
+            user.id,
+            linepay_client=_linepay_client(),
+            manual_refund_ack=manual_refund_ack,
+        )
     except (SaleAlreadyVoid, SaleHasReturns) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

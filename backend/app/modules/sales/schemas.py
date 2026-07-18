@@ -306,5 +306,7 @@ class SaleSummaryRead(BaseModel):
     invoice_status: SaleInvoiceStatus
     status: SaleStatus
     created_at: datetime
+    # 收款方式摘要（docs/30）：作廢/退貨 UI 據此提示台灣Pay 需手動退款、LINE Pay 自動退。
+    payment_method: PaymentMethod
     # 買方會員（docs/23 K5b）：有買方的單才能推「交易紀錄簽收」至手持裝置。
     buyer_contact_id: int | None

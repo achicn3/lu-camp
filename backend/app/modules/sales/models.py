@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base, TimestampMixin
 from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import (
+    LinePayRefundStatus,
     LinePayStatus,
     PaymentMethod,
     SaleInvoiceStatus,
@@ -185,6 +186,30 @@ class LinePayTransaction(Base, TimestampMixin):
         Numeric(12, 0), default=Decimal(0), server_default=text("0")
     )
     raw_response: Mapped[dict[str, object]] = mapped_column(JSONB)
+
+
+class LinePayRefundAttempt(Base, TimestampMixin):
+    """LINE Pay 退款嘗試的持久化對帳日誌（docs/30 finding #1：防重退）。
+
+    **append-only、無外鍵**：以**獨立交易**提交，故能在主交易（退貨/作廢）回滾後仍存活——
+    這是「呼叫平台 refund 後崩潰/回應遺失」時唯一能防重退的依據。refund_key 唯一：退貨＝
+    `return:{冪等鍵}`、作廢＝`void:{sale_id}`（各只退一次）。重試前查此表：SUCCEEDED→跳過不重退；
+    PENDING→結果未定 fail-closed 需人工對帳；FAILED→可安全重試。store_id/order_id 僅記錄（無 FK）。
+    """
+
+    __tablename__ = "linepay_refund_attempts"
+    __table_args__ = (
+        UniqueConstraint("refund_key", name="uq_linepay_refund_attempts_key"),
+        CheckConstraint("amount > 0", name="ck_linepay_refund_attempts_amount_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(index=True)  # 記錄用，無 FK（獨立交易不依賴父列已提交）
+    refund_key: Mapped[str] = mapped_column(String(120))
+    order_id: Mapped[str] = mapped_column(String(64))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    status: Mapped[LinePayRefundStatus] = mapped_column(_enum_col(LinePayRefundStatus))
+    return_code: Mapped[str | None] = mapped_column(String(8))
 
 
 # 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：

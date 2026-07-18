@@ -216,8 +216,14 @@ class ReturnsService:
         # API 部分退款（累加 refunded_amount、非現金不進抽屜、不需開帳）。fail-closed：LINE Pay 退款
         # 失敗整筆退貨回滾（不留已退貨卻未退款）。
         if refund_channel == TenderType.LINE_PAY:
+            # refund_key 綁本次退貨的冪等鍵 → durable 對帳日誌防重退（Codex finding #1）：
+            # 呼叫平台 refund 後崩潰/回應遺失時，重試據此判定「已退/未定」，不盲目重退。
             await SalesService(self._session).refund_line_pay_amount(
-                store_id, sale.id, refund_amount, linepay_client
+                store_id,
+                sale.id,
+                refund_amount,
+                linepay_client,
+                refund_key=f"return:{idempotency_key}",
             )
         else:
             await self._cash.record_movement(

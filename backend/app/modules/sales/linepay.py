@@ -41,14 +41,15 @@ RETURN_CODE_ALREADY_REFUNDED = "1165"  # refund：平台已退款（重試冪等
 _CHECK_STATUS_COMPLETE = "COMPLETE"
 
 
-def linepay_order_id(*, store_id: int, idempotency_key: str) -> str:
-    """OrderId（唯一、確定性、長度受限）：由 (store, 冪等鍵) 導出。
+def linepay_order_id(*, store_id: int, idempotency_key: str, amount: Decimal) -> str:
+    """OrderId（唯一、確定性、長度受限）：由 (store, 冪等鍵, 金額) 導出。
 
-    以**冪等鍵**（非 sale.id）導出——rollback/retry 後 sale.id 會變、冪等鍵不變，
-    同一次結帳恆得同 orderId，重試先 check(orderId) 即可避免重複扣款。以 SHA-256 摘要
-    截斷確保長度與字元安全（冪等鍵可能含任意字元/過長）。
+    以**冪等鍵**（非 sale.id）導出——rollback/retry 後 sale.id 會變、冪等鍵不變，同一次結帳恆得
+    同 orderId，重試先 check(orderId) 即可避免重複扣款。**金額納入摘要**（Codex adversarial
+    finding #2）：同鍵但不同金額必得不同 orderId，杜絕「回應遺失後以同鍵重送不同金額」把前次
+    NT$1000 收款誤當成本次 NT$2000 之付款重用。以 SHA-256 摘要截斷確保長度與字元安全。
     """
-    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()[:32]
+    digest = hashlib.sha256(f"{idempotency_key}:{int(amount)}".encode()).hexdigest()[:32]
     return f"LP-{store_id}-{digest}"
 
 
@@ -113,6 +114,7 @@ class LinePayResult:
     transaction_id: str | None
     status: str | None  # check 的 info.status（COMPLETE/FAIL/CANCEL/AUTH_READY）；pay 無
     raw: dict[str, object]  # 原始回應（對帳存證，落 linepay_transactions.raw_response）
+    amount: Decimal | None = None  # check 的 Σ info.payInfo[].amount（供 check-first 金額比對）
 
     @property
     def is_success(self) -> bool:
@@ -154,10 +156,24 @@ def parse_check_result(resp: dict[str, object]) -> LinePayResult:
     info = resp.get("info")
     tx = _transaction_id_str(info)
     status = None
-    if isinstance(info, dict) and info.get("status") is not None:
-        status = str(info.get("status"))
+    amount: Decimal | None = None
+    if isinstance(info, dict):
+        if info.get("status") is not None:
+            status = str(info.get("status"))
+        pay_info = info.get("payInfo")
+        if isinstance(pay_info, list):
+            total = Decimal(0)
+            for entry in pay_info:
+                if isinstance(entry, dict) and entry.get("amount") is not None:
+                    total += Decimal(str(entry["amount"]))
+            amount = total
     return LinePayResult(
-        return_code=code, return_message=message, transaction_id=tx, status=status, raw=resp
+        return_code=code,
+        return_message=message,
+        transaction_id=tx,
+        status=status,
+        raw=resp,
+        amount=amount,
     )
 
 

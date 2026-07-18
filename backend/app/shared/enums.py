@@ -277,6 +277,20 @@ class LinePayStatus(StrEnum):
     VOIDED = "VOIDED"
 
 
+class LinePayRefundStatus(StrEnum):
+    """LINE Pay 退款嘗試的持久化狀態（linepay_refund_attempts；docs/30 finding #1）。
+
+    PENDING：已寫入、即將/正在呼叫平台 refund——若崩潰/回應遺失，重試見此即知「結果未定」，
+      不得盲目重退（fail-closed，須人工對帳）。SUCCEEDED：平台已退款（0000/1165）——重試見此
+      即跳過、不重退。FAILED：平台明確拒退——可安全重試。此表為 append-only 對帳日誌、無外鍵，
+      以獨立交易提交，故能跨主交易回滾存活（唯一防重退依據）。
+    """
+
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
 class EInvoiceMessageType(StrEnum):
     """MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。
 

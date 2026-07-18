@@ -4303,6 +4303,7 @@ export interface components {
             /** Id */
             id: number;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
+            payment_method: components["schemas"]["PaymentMethod"];
             status: components["schemas"]["SaleStatus"];
             /** Store Id */
             store_id: number;
@@ -7821,7 +7822,9 @@ export interface operations {
     };
     voidSale: {
         parameters: {
-            query?: never;
+            query?: {
+                manual_refund_ack?: boolean;
+            };
             header?: never;
             path: {
                 sale_id: number;

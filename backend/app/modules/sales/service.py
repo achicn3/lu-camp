@@ -18,7 +18,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit import write_audit_log
 from app.core.money import discounted_price, round_ntd, split_tax_inclusive
@@ -37,7 +38,13 @@ from app.modules.sales.linepay import (
     LinePayClient,
     linepay_order_id,
 )
-from app.modules.sales.models import LinePayTransaction, Sale, SaleLine, SaleTender
+from app.modules.sales.models import (
+    LinePayRefundAttempt,
+    LinePayTransaction,
+    Sale,
+    SaleLine,
+    SaleTender,
+)
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.models import StoreSettings
 from app.modules.settings.service import StoreSettingsService
@@ -47,6 +54,7 @@ from app.shared.enums import (
     CashMovementType,
     InvoiceType,
     ItemKind,
+    LinePayRefundStatus,
     LinePayStatus,
     OwnershipType,
     PaymentMethod,
@@ -64,6 +72,8 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InvalidSaleTender,
     LinePayChargeFailed,
+    LinePayRefundAmbiguous,
+    ManualRefundRequired,
     MenuItemNotFound,
     MenuItemUnavailable,
     NoOpenCashSession,
@@ -241,7 +251,12 @@ def _cart_fingerprint(
 
 
 class SalesService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        refund_ledger_sessionmaker: "async_sessionmaker[AsyncSession] | None" = None,
+    ) -> None:
         self._session = session
         self._repo = SalesRepository(session)
         self._inventory = InventoryService(session)
@@ -254,6 +269,10 @@ class SalesService:
         self._campaigns = CampaignService(session)
         self._menu = MenuService(session)
         self._einvoice = EInvoiceService(session)
+        # 退款對帳日誌用的**獨立** sessionmaker（docs/30 finding #1）：其提交獨立於主交易，
+        # 故能在退貨/作廢回滾後存活，是唯一能防「呼叫平台 refund 後崩潰」重退的依據。預設用
+        # 全域 sessionmaker（正式獨立連線）；測試可注入綁測試連線者以隨測試回滾。
+        self._refund_ledger_sm = refund_ledger_sessionmaker
 
     @staticmethod
     def _normalize_tenders(tenders: list[TenderInput] | None) -> list[TenderInput] | None:
@@ -760,11 +779,20 @@ class SalesService:
         成立後記 linepay_transactions(COMPLETE)。order_id 唯一約束天然擋同單重扣。
         """
         assert tender.line_pay_one_time_key is not None  # create_sale 前置守衛已強制
-        order_id = linepay_order_id(store_id=store_id, idempotency_key=idempotency_key)
+        # orderId 綁金額（Codex finding #2）：同鍵不同金額必得不同 orderId，不會誤重用他額收款。
+        order_id = linepay_order_id(
+            store_id=store_id, idempotency_key=idempotency_key, amount=tender.amount
+        )
 
-        # check-first：平台已請款完成 → 重用（防重複扣款）。
+        # check-first：平台已請款完成 → 重用（防重複扣款）。金額防呆（Codex finding #2）：orderId
+        # 已綁金額，此處再比對平台回報的 payInfo 金額，任何不符即拒（不把他額收款當本次付款）。
         checked = await client.check(order_id=order_id)
         if checked.is_complete and checked.transaction_id is not None:
+            if checked.amount is not None and checked.amount != tender.amount:
+                raise LinePayChargeFailed(
+                    f"LINE Pay 已存在同單號但金額不符的收款（平台 {checked.amount}、"
+                    f"本次 {tender.amount}），拒絕重用；請人工至 LINE Pay 後台確認"
+                )
             result = checked
         else:
             result = await client.pay(
@@ -814,17 +842,26 @@ class SalesService:
             raise LinePayChargeFailed(
                 "LINE Pay 尚未設定（缺 Channel 憑證），無法退款作廢；請設定後重試"
             )
-        result = await client.refund(order_id=txn.order_id, refund_amount=remaining)
-        if not (result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED):
-            raise LinePayChargeFailed(
-                f"LINE Pay 退款失敗（returnCode={result.return_code}），作廢取消，請稍後重試"
-            )
+        # 作廢全額退款走 durable 日誌防重退（Codex finding #1）；作廢一單一次 → key=void:{id}。
+        await self._durable_line_pay_refund(
+            store_id=store_id,
+            order_id=txn.order_id,
+            refund_key=f"void:{sale_id}",
+            amount=remaining,
+            client=client,
+        )
         txn.refunded_amount = txn.amount
         txn.status = LinePayStatus.REFUNDED
         await self._session.flush()
 
     async def refund_line_pay_amount(
-        self, store_id: int, sale_id: int, amount: Decimal, client: LinePayClient | None
+        self,
+        store_id: int,
+        sale_id: int,
+        amount: Decimal,
+        client: LinePayClient | None,
+        *,
+        refund_key: str,
     ) -> bool:
         """對 LINE Pay 銷售退某金額（退貨部分退款；docs/30 §5）。跨模組經 service（§2）。
 
@@ -832,7 +869,7 @@ class SalesService:
         （以 refunded_amount 為部分退款真相）。回傳是否為 LINE Pay 單：True＝已呼叫 refund 反轉；
         False＝非 LINE Pay 單（呼叫端另走現金退款）。退款超原收款/未設定/平台拒/傳輸錯 →
         LinePayChargeFailed/LinePayTransportError（退貨整筆回滾，fail-closed，不留已退貨卻未退款）。
-        平台 1165（已退款）視為冪等成功（退貨 idempotency_key 保證每次退貨只呼叫一次）。
+        refund_key（退貨＝`return:{冪等鍵}`）綁 durable 對帳日誌防重退（Codex finding #1）。
         """
         txn = await self._repo.get_linepay_by_sale_id(store_id, sale_id, for_update=True)
         if txn is None:
@@ -844,17 +881,100 @@ class SalesService:
             )
         if client is None:
             raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法退款")
-        result = await client.refund(order_id=txn.order_id, refund_amount=amount)
-        if not (result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED):
-            raise LinePayChargeFailed(
-                f"LINE Pay 退款失敗（returnCode={result.return_code}），退貨取消，請稍後重試"
-            )
+        await self._durable_line_pay_refund(
+            store_id=store_id,
+            order_id=txn.order_id,
+            refund_key=refund_key,
+            amount=amount,
+            client=client,
+        )
         txn.refunded_amount = new_refunded
         txn.status = (
             LinePayStatus.REFUNDED if new_refunded == txn.amount else LinePayStatus.COMPLETE
         )
         await self._session.flush()
         return True
+
+    async def _durable_line_pay_refund(
+        self,
+        *,
+        store_id: int,
+        order_id: str,
+        refund_key: str,
+        amount: Decimal,
+        client: LinePayClient,
+    ) -> None:
+        """向平台送退款，以**獨立交易**的 append-only 日誌防重退（Codex adversarial finding #1）。
+
+        三段：①查既有嘗試——SUCCEEDED→前次已退、直接返回不重退；PENDING→上次結果未定→
+        LinePayRefundAmbiguous（fail-closed，人工對帳）；FAILED/無→續。②獨立提交 PENDING（其提交
+        獨立於主交易，故主交易回滾後仍存活，是崩潰後判定 ambiguous 的依據）。③呼叫平台→獨立提交
+        SUCCEEDED（0000/1165）或 FAILED。傳輸錯誤（結果未定）→保留 PENDING 並上拋，下次重試即
+        ambiguous。非成功→標 FAILED 並拋 LinePayChargeFailed（可日後重試）。
+        """
+        from app.core.db import get_sessionmaker
+
+        sm = self._refund_ledger_sm or get_sessionmaker()
+
+        async with sm() as ledger:
+            existing = await ledger.scalar(
+                select(LinePayRefundAttempt).where(
+                    LinePayRefundAttempt.refund_key == refund_key
+                )
+            )
+            if existing is not None:
+                if existing.status == LinePayRefundStatus.SUCCEEDED:
+                    return  # 前次已退款成功 → 跳過不重退（防重退核心）
+                if existing.status == LinePayRefundStatus.PENDING:
+                    raise LinePayRefundAmbiguous(
+                        "此筆 LINE Pay 退款上次結果未定（可能已退款）：請至 LINE Pay 後台確認"
+                        "後再處理，勿直接重試以免超退"
+                    )
+                # FAILED → 可安全重試（往下）
+
+        # Phase 1：獨立提交 PENDING（崩潰後重試據此判定 ambiguous）
+        async with sm() as ledger:
+            row = await ledger.scalar(
+                select(LinePayRefundAttempt)
+                .where(LinePayRefundAttempt.refund_key == refund_key)
+                .with_for_update()
+            )
+            if row is None:
+                ledger.add(
+                    LinePayRefundAttempt(
+                        store_id=store_id,
+                        refund_key=refund_key,
+                        order_id=order_id,
+                        amount=amount,
+                        status=LinePayRefundStatus.PENDING,
+                    )
+                )
+            else:
+                row.status = LinePayRefundStatus.PENDING
+                row.return_code = None
+            await ledger.commit()
+
+        # Phase 2：呼叫平台（傳輸錯誤 → 保留 PENDING 並上拋，下次重試即 ambiguous）
+        result = await client.refund(order_id=order_id, refund_amount=amount)
+        succeeded = result.is_success or result.return_code == RETURN_CODE_ALREADY_REFUNDED
+
+        # Phase 3：獨立提交終態
+        async with sm() as ledger:
+            row = await ledger.scalar(
+                select(LinePayRefundAttempt)
+                .where(LinePayRefundAttempt.refund_key == refund_key)
+                .with_for_update()
+            )
+            if row is not None:
+                row.status = (
+                    LinePayRefundStatus.SUCCEEDED if succeeded else LinePayRefundStatus.FAILED
+                )
+                row.return_code = result.return_code
+                await ledger.commit()
+        if not succeeded:
+            raise LinePayChargeFailed(
+                f"LINE Pay 退款失敗（returnCode={result.return_code}），請稍後重試"
+            )
 
     async def find_idempotent_replay(
         self,
@@ -1142,7 +1262,12 @@ class SalesService:
 
     # ── 作廢 ──
     async def void_sale(
-        self, sale: Sale, actor_user_id: int, *, linepay_client: LinePayClient | None = None
+        self,
+        sale: Sale,
+        actor_user_id: int,
+        *,
+        linepay_client: LinePayClient | None = None,
+        manual_refund_ack: bool = False,
     ) -> Sale:
         """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/退現。
 
@@ -1165,6 +1290,18 @@ class SalesService:
 
         if await ReturnsService(self._session).has_returns_for_sale(sale.store_id, sale.id):
             raise SaleHasReturns(f"sale {sale.id} 已有退貨，不可作廢；請以退貨流程處理剩餘部分")
+        # 台灣Pay 無 API 退款（店員於其 App 手動退）：作廢不得靜默完成而讓客人仍被扣款（Codex
+        # adversarial finding #3）。含 TAIWAN_PAY tender 者，須店員先手動退款、帶 manual_refund_ack
+        # 確認才反轉。純 LINE Pay 由下方 refund API 自動退、無需此確認；現金於錢櫃取出（既有口徑）。
+        tenders = await self._repo.list_tenders(sale.id)
+        if (
+            any(t.tender_type == TenderType.TAIWAN_PAY for t in tenders)
+            and not manual_refund_ack
+        ):
+            raise ManualRefundRequired(
+                "此單含台灣Pay 收款（無 API 退款）：作廢前請先於台灣Pay App 手動退款給客人，"
+                "並勾選確認後再作廢，以免客人已作廢卻仍被扣款"
+            )
         before = sale.invoice_status.value
         sale.invoice_status = SaleInvoiceStatus.VOID
         await self._session.flush()
