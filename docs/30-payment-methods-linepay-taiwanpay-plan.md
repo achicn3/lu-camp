@@ -107,6 +107,21 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
 6. **冪等**：orderId 綁銷售冪等鍵；pay 重試以同 orderId，check 先查避免重複扣款
    （網路遺失回應時 poll check 收斂，不重扣）。
 
+### 4.1 支付復原：已做 vs 明列殘餘（Codex 四輪對抗審後，2026-07-18）
+
+已做（防重扣/重退核心）：
+- 收款 check-first（同 orderId、orderId 綁金額）＋前端冪等鍵持久化（localStorage＋記憶體後備、
+  跨重整/重掛；購物車指紋前後端皆**排序正規化**、順序無關）。
+- 退款 **durable append-only 日誌**（獨立交易提交、跨主交易回滾存活）＋**依 (store,order) 累計 SUCCEEDED
+  對帳**（換鍵無法超退）；退款身分**由伺服器端內容＋退貨前累計已退量導出**（換前端鍵/換機/PENDING 標
+  SUCCEEDED 後重做皆同鍵、不重退）；PENDING 可由店長於「LINE Pay 退款對帳」頁人工解決（SUCCEEDED/FAILED，寫 audit）。
+
+**明列殘餘（裁示：單店單機不建，2026-07-18）**：**外部收款成功後、本地交易 commit 前失敗**造成的
+「孤兒收款」（客人已扣款但無銷售）——Codex 第四輪 #2。完整解＝**server-side durable payment-intent
+（capture 前先 commit intent、再對 intent finalize 銷售）＋孤兒補償退款**。裁示**不建**：單店單機
+（本地 Postgres commit 幾乎不會失敗；常見的「回應遺失」已由同鍵 check-first 復原；無「另一台收銀機」）
+下此複合事件機率極低，不值得為一台收銀機建銀行級支付 intent 層。若日後多收銀機/多店高頻，再回頭建。
+
 ---
 
 ## 5. 結帳流程（POS）

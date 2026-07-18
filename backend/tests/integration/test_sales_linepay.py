@@ -649,6 +649,30 @@ async def test_refund_same_key_retry_no_double_count(db_session: AsyncSession) -
     assert txn.status == LinePayStatus.REFUNDED
 
 
+def test_cart_fingerprint_line_order_insensitive() -> None:
+    # Codex 第四輪 #3：同一籃商品以不同掃描順序，後端冪等指紋須相同（與前端排序語意一致），
+    # 回應遺失後同鍵重送才會冪等重放、不誤回 409。
+    from app.modules.sales.service import _cart_fingerprint
+
+    a = SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="A")
+    b = SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="B")
+    assert _cart_fingerprint([a, b], None, None, None) == _cart_fingerprint(
+        [b, a], None, None, None
+    )
+
+
+def test_refund_identity_content_and_prior_state() -> None:
+    # Codex 第四輪 #1：退款身分綁內容＋退貨前累計已退量——同內容同前態恆同（換前端鍵重試不重退）；
+    # 前態不同（合法分批退同行別）則不同；行順序無關。
+    from app.modules.returns.service import _refund_identity
+
+    assert _refund_identity(5, {1: 2}, "r", {}) == _refund_identity(5, {1: 2}, "r", {})
+    assert _refund_identity(5, {1: 2}, "r", {}) != _refund_identity(5, {1: 2}, "r", {1: 2})
+    assert _refund_identity(5, {1: 2, 2: 1}, "r", {}) == _refund_identity(
+        5, {2: 1, 1: 2}, "r", {}
+    )
+
+
 @pytest.mark.asyncio
 async def test_resolve_pending_refund_unblocks(db_session: AsyncSession) -> None:
     # Codex 第三輪 #3：卡住的 PENDING 退款可由店長於退款對帳頁解決（SUCCEEDED/FAILED），不永久卡死。

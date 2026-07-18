@@ -226,17 +226,22 @@ def _cart_fingerprint(
             }
         ),
         "buyer_contact_id": buyer_contact_id,
-        "lines": [
-            {
-                "line_type": line.line_type.value,
-                "item_code": line.item_code,
-                "catalog_product_id": line.catalog_product_id,
-                "bulk_lot_id": line.bulk_lot_id,
-                "menu_item_id": line.menu_item_id,
-                "qty": line.qty,
-            }
-            for line in lines
-        ],
+        # 明細對「掃描順序」正規化排序（Codex 第四輪 #3）：與前端持久化冪等鍵的排序語意一致——
+        # 同一籃商品以不同順序重掃，指紋須相同，回應遺失後同鍵重送才會冪等重放原單、不誤回 409。
+        "lines": sorted(
+            (
+                {
+                    "line_type": line.line_type.value,
+                    "item_code": line.item_code,
+                    "catalog_product_id": line.catalog_product_id,
+                    "bulk_lot_id": line.bulk_lot_id,
+                    "menu_item_id": line.menu_item_id,
+                    "qty": line.qty,
+                }
+                for line in lines
+            ),
+            key=lambda d: json.dumps(d, sort_keys=True, ensure_ascii=False),
+        ),
         # 收款組成納入指紋，但對 tender_type 正規化排序（順序不影響語意：每型別至多一筆）。
         "tenders": (
             None

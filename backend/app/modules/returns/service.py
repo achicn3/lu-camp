@@ -59,6 +59,28 @@ def _return_fingerprint(sale_id: int, requested: dict[int, int], reason: str) ->
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _refund_identity(
+    sale_id: int, requested: dict[int, int], reason: str, previous: dict[int, int]
+) -> str:
+    """LINE Pay 退款的伺服器端穩定身分（Codex 第四輪 #1）：sale + 本次退貨行/原因 + **退貨前累計
+    已退量**。同一筆退貨的任何重試恆得同值（前端鍵無關）→ durable 日誌認得、不重退；分批退同行別因
+    退貨前累計已退量遞增而得不同值 → 各自退。截 32 字元供 refund_key。"""
+    canonical = {
+        "sale_id": sale_id,
+        "reason": reason,
+        "lines": sorted(
+            ({"sale_line_id": k, "qty": v} for k, v in requested.items()),
+            key=lambda d: d["sale_line_id"],
+        ),
+        "prior_returned": sorted(
+            ({"sale_line_id": k, "qty": v} for k, v in previous.items()),
+            key=lambda d: d["sale_line_id"],
+        ),
+    }
+    payload = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+
+
 class ReturnsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -216,15 +238,17 @@ class ReturnsService:
         # API 部分退款（累加 refunded_amount、非現金不進抽屜、不需開帳）。fail-closed：LINE Pay 退款
         # 失敗整筆退貨回滾（不留已退貨卻未退款）。
         if refund_channel == TenderType.LINE_PAY:
-            # refund_key = 店別 + 本次退貨冪等鍵 → durable 對帳日誌防重退（Codex 兩輪 finding #1）：
-            # 綁店別隔離跨店同鍵碰撞；冪等鍵由前端**持久化跨 dialog remount**（Codex 第二輪 #3），
-            # 故同一次退貨重試恆得同 key，崩潰/回應遺失後據此判定「已退/未定」，不盲目重退。
+            # refund_key **由伺服器端內容導出**（Codex 第四輪 #1），非用前端冪等鍵：綁 (店, 銷售,
+            # 本次退貨行/原因, 退貨前累計已退量)。同一筆退貨的任何重試（即使換前端鍵——localStorage
+            # 遺失/換收銀機/PENDING 被人工標 SUCCEEDED 後重做）恆得同 refund_key → durable 日誌認得
+            # 已退、不重退；兩筆行別相同的合法分批退貨，退貨前累計已退量不同 → 不同 key → 各自退。
+            refund_identity = _refund_identity(sale.id, requested, clean_reason, previous)
             await SalesService(self._session).refund_line_pay_amount(
                 store_id,
                 sale.id,
                 refund_amount,
                 linepay_client,
-                refund_key=f"s{store_id}:return:{idempotency_key}",
+                refund_key=f"s{store_id}:return:{refund_identity}",
             )
         else:
             await self._cash.record_movement(
