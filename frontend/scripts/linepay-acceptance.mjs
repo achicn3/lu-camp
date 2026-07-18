@@ -2,7 +2,6 @@
 // → 驗 payment_method/手續費/非現金不進抽屜 → 作廢觸發真退款。全程對真沙盒＋真 backend＋真 DB。
 // 執行：node scripts/linepay-acceptance.mjs（需 backend:8000 已帶 LINEPAY_* env、DB=lucamp_e2e）。
 import { execSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 
 import jsQR from "jsqr";
 import { chromium } from "playwright";

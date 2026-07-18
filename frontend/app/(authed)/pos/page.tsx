@@ -327,6 +327,10 @@ function TenderPanel({
   storeCreditMinSpend,
   cartHasItems,
   taiwanpayFeePct,
+  linepayEnabled,
+  linepayFeePct,
+  linePayKey,
+  setLinePayKey,
   mode,
   setMode,
   cashInput,
@@ -343,6 +347,13 @@ function TenderPanel({
   cartHasItems: boolean;
   /** 台灣Pay 手續費率（小數，如 0.02=2%；docs/30）。僅供顯示店家負擔，不向客人收取。 */
   taiwanpayFeePct: number;
+  /** LINE Pay 是否啟用（docs/30）：未啟用時不顯示 LINE Pay 收款選項。 */
+  linepayEnabled: boolean;
+  /** LINE Pay 手續費率（小數）。僅供顯示店家負擔。 */
+  linepayFeePct: number;
+  /** LINE Pay 掃到的客人一次性付款碼（oneTimeKey）。 */
+  linePayKey: string;
+  setLinePayKey: (v: string) => void;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
   cashInput: string;
@@ -358,13 +369,22 @@ function TenderPanel({
     storeCreditMax,
     storeCreditMinSpend,
     cartHasItems,
+    linePayKey,
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
   return (
     <div className="pos-tender">
       <div className="pos-tender-modes" role="radiogroup" aria-label="收款方式">
-        {(["CASH", "STORE_CREDIT", "TAIWAN_PAY", "MIXED"] as const).map((m) => (
+        {(
+          [
+            "CASH",
+            "STORE_CREDIT",
+            "TAIWAN_PAY",
+            ...(linepayEnabled ? (["LINE_PAY"] as const) : []),
+            "MIXED",
+          ] as const
+        ).map((m) => (
           <label
             key={m}
             className={`pos-tender-mode ${mode === m ? "is-active" : ""}`}
@@ -381,7 +401,9 @@ function TenderPanel({
                 ? "購物金"
                 : m === "TAIWAN_PAY"
                   ? "台灣Pay"
-                  : "混合"}
+                  : m === "LINE_PAY"
+                    ? "LINE Pay"
+                    : "混合"}
           </label>
         ))}
       </div>
@@ -419,6 +441,33 @@ function TenderPanel({
             </>
           )}
         </p>
+      )}
+      {plan.linePay > 0 && (
+        <>
+          <label className="field">
+            <span className="field-label">
+              掃描客人 LINE Pay 付款條碼（我的條碼）
+            </span>
+            <input
+              name="linepay_one_time_key"
+              value={linePayKey}
+              onChange={(e) => setLinePayKey(e.target.value)}
+              placeholder="以掃描槍讀取，或手動輸入付款碼數字"
+              autoComplete="off"
+            />
+          </label>
+          <p className="hint">
+            LINE Pay 收款 <Money value={plan.linePay} />
+            {linepayFeePct > 0 && (
+              <>
+                {" "}
+                · 本筆手續費{" "}
+                <Money value={Math.round(plan.linePay * linepayFeePct)} />
+                （店家負擔，不向客人收取）
+              </>
+            )}
+          </p>
+        </>
       )}
       {plan.cash > 0 && (
         <label className="field">
@@ -667,6 +716,8 @@ export default function PosPage() {
   const [mode, setMode] = useState<TenderMode>("CASH");
   const [cashInput, setCashInput] = useState("");
   const [receivedInput, setReceivedInput] = useState("");
+  // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
+  const [linePayKey, setLinePayKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
   // 開錢櫃失敗提示（docs/10 §5：交易已成立，代理離線只提示、不可擋流程）。
@@ -840,6 +891,7 @@ export default function PosPage() {
     storeCreditMax,
     storeCreditMinSpend,
     cartHasItems: lines.length > 0,
+    linePayKey,
   });
 
   // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
@@ -959,7 +1011,7 @@ export default function PosPage() {
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
-        tenders: toTenders(plan) ?? null,
+        tenders: toTenders(plan, { linePayKey }) ?? null,
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
         // 發票資訊（docs/24）：任一欄有值才帶；後端驗互斥與格式並入冪等指紋。
@@ -989,7 +1041,15 @@ export default function PosPage() {
           : null;
       // 冪等鍵綁定送出內容（Codex F3 P2）：同 payload 的網路重試沿用同鍵（後端冪等回原單）；
       // 改了購物車/會員/收款再送則換新鍵，不會被「同鍵不同內容」的 409 卡死。
-      const sig = JSON.stringify(body);
+      // **LINE Pay 例外（docs/30 P3）**：一次性付款碼**不納入**冪等簽章——重掃換碼但購物車不變時，
+      // 冪等鍵須保持穩定，後端 orderId（由冪等鍵導出）才能 check-first 防重複扣款（回應遺失後
+      // 重掃不會產生新 orderId 而重扣）。故簽章時抹去各 tender 的 line_pay_one_time_key。
+      const sigBody = {
+        ...body,
+        tenders:
+          body.tenders?.map((t) => ({ ...t, line_pay_one_time_key: null })) ?? null,
+      };
+      const sig = JSON.stringify(sigBody);
       if (sig !== idemRef.current.sig) {
         idemRef.current = { sig, key: newIdempotencyKey() };
       }
@@ -1022,6 +1082,12 @@ export default function PosPage() {
         openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
       }
     },
+    onError: (err: Error) => {
+      setNotice(err.message);
+      // LINE Pay 結帳失敗：一次性付款碼已作廢（單次使用/已過期）→ 清空，提示店員重新掃碼。
+      // 冪等鍵已排除付款碼、保持穩定，重掃不會產生新 orderId 重複扣款（見上 sigBody）。
+      if (plan.linePay > 0) setLinePayKey("");
+    },
   });
 
   function addToCart(line: CartLine) {
@@ -1040,6 +1106,7 @@ export default function PosPage() {
     setMode("CASH");
     setCashInput("");
     setReceivedInput("");
+    setLinePayKey(""); // 一次性付款碼用畢清空、不重用（下一單重新掃）
     setNotice(null);
     setCompleted(null);
     setCompletedCampaign(null);
@@ -1287,6 +1354,10 @@ export default function PosPage() {
             storeCreditMax={storeCreditMax}
             storeCreditMinSpend={storeCreditMinSpend}
             taiwanpayFeePct={Number(settings.data?.taiwanpay_fee_pct ?? 0)}
+            linepayEnabled={settings.data?.linepay_enabled === true}
+            linepayFeePct={Number(settings.data?.linepay_fee_pct ?? 0)}
+            linePayKey={linePayKey}
+            setLinePayKey={setLinePayKey}
             mode={mode}
             setMode={setMode}
             cashInput={cashInput}

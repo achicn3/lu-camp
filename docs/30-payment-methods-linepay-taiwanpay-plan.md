@@ -97,6 +97,13 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
 5. **退款/作廢對稱**：銷售作廢或退貨含 LINE_PAY → 呼叫 refund API，成功才反轉；
    linepay_transactions 記 refunded_amount，不可超額退。台灣Pay 退款＝店員於 App 手動退、
    系統記錄反轉（無 API）。
+   - **P2d 已做**：作廢（void）＝**全額** refund（amount−refunded），標 REFUNDED。
+   - **⚠️ 部分退款（裁示 2026-07-18，P4/returns 待做）**：退貨可只退**部分**（退某幾行），不必整筆
+     作廢。設計：returns v1 目前純現金，擴充非現金後，`create_return` 對 LINE_PAY 單以該次退貨的
+     `refund_amount` 呼叫 `client.refund(order_id, 該次金額)`，**累加** `refunded_amount`；
+     linepay client/`refunded_amount∈[0,amount]` CHECK 已支援累退。狀態：未全退保持 COMPLETE
+     （或新增 PARTIALLY_REFUNDED 供報表分辨），全退才 REFUNDED。多次部分退以累計不超過 amount 守護；
+     每次 refund 冪等（平台 1165＝已退視為成功）。orderId 單一、累退，不需逐次新 order。
 6. **冪等**：orderId 綁銷售冪等鍵；pay 重試以同 orderId，check 先查避免重複扣款
    （網路遺失回應時 poll check 收斂，不重扣）。
 

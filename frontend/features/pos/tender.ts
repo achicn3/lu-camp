@@ -2,7 +2,12 @@
 // 後端規則：Σ tenders = total；購物金扣買方餘額（不足 409）；純購物金不需開帳。
 import type { components } from "@/lib/api-types";
 
-export type TenderMode = "CASH" | "STORE_CREDIT" | "TAIWAN_PAY" | "MIXED";
+export type TenderMode =
+  | "CASH"
+  | "STORE_CREDIT"
+  | "TAIWAN_PAY"
+  | "LINE_PAY"
+  | "MIXED";
 
 export interface TenderPlan {
   mode: TenderMode;
@@ -12,6 +17,8 @@ export interface TenderPlan {
   storeCredit: number;
   /** 台灣Pay 部分（docs/30）：TAIWAN_PAY 時 = total；其餘 0。非現金、不進抽屜、不需會員。 */
   taiwanPay: number;
+  /** LINE Pay 部分（docs/30）：LINE_PAY 時 = total；其餘 0。非現金、需掃客人一次性付款碼。 */
+  linePay: number;
 }
 
 export interface TenderValidation {
@@ -31,13 +38,15 @@ export function resolvePlan(
   cashInput: number,
 ): TenderPlan {
   if (mode === "CASH")
-    return { mode, cash: total, storeCredit: 0, taiwanPay: 0 };
+    return { mode, cash: total, storeCredit: 0, taiwanPay: 0, linePay: 0 };
   if (mode === "STORE_CREDIT")
-    return { mode, cash: 0, storeCredit: total, taiwanPay: 0 };
+    return { mode, cash: 0, storeCredit: total, taiwanPay: 0, linePay: 0 };
   if (mode === "TAIWAN_PAY")
-    return { mode, cash: 0, storeCredit: 0, taiwanPay: total };
+    return { mode, cash: 0, storeCredit: 0, taiwanPay: total, linePay: 0 };
+  if (mode === "LINE_PAY")
+    return { mode, cash: 0, storeCredit: 0, taiwanPay: 0, linePay: total };
   const cash = clampInt(cashInput);
-  return { mode, cash, storeCredit: total - cash, taiwanPay: 0 };
+  return { mode, cash, storeCredit: total - cash, taiwanPay: 0, linePay: 0 };
 }
 
 export function validatePlan(
@@ -54,6 +63,8 @@ export function validatePlan(
     storeCreditMinSpend?: number;
     /** 購物車是否有品項：區分「空車初始狀態」與「非空但折後總額為 0」（Codex 波次三 P2）。 */
     cartHasItems?: boolean;
+    /** LINE Pay 掃到的客人一次性付款碼（docs/30）：LINE_PAY 付款時必填，空則擋。 */
+    linePayKey?: string;
   },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
@@ -81,10 +92,19 @@ export function validatePlan(
       };
     }
   }
-  if (plan.cash + plan.storeCredit + plan.taiwanPay !== total) {
+  if (plan.cash + plan.storeCredit + plan.taiwanPay + plan.linePay !== total) {
     return {
       ok: false,
       error: "收款金額必須等於應付總額",
+      needsMember,
+      needsDrawer,
+    };
+  }
+  // LINE Pay 需先掃到客人的一次性付款碼才能結帳（避免送出才被後端 422/402）。
+  if (plan.linePay > 0 && !(opts.linePayKey && opts.linePayKey.trim())) {
+    return {
+      ok: false,
+      error: "請先掃描客人的 LINE Pay 付款條碼",
       needsMember,
       needsDrawer,
     };
@@ -156,9 +176,11 @@ export function validatePlan(
   return { ok: true, error: null, needsMember, needsDrawer };
 }
 
-/** 轉成 POST /sales 的 tenders payload；省略（純現金且未指定）時回 undefined 走後端預設。 */
+/** 轉成 POST /sales 的 tenders payload；省略（純現金且未指定）時回 undefined 走後端預設。
+ * LINE Pay 需帶掃到的一次性付款碼（oneTimeKey），由 opts.linePayKey 傳入。 */
 export function toTenders(
   plan: TenderPlan,
+  opts: { linePayKey?: string } = {},
 ): components["schemas"]["SaleTenderRequest"][] | undefined {
   const tenders: components["schemas"]["SaleTenderRequest"][] = [];
   if (plan.cash > 0)
@@ -170,6 +192,12 @@ export function toTenders(
     });
   if (plan.taiwanPay > 0)
     tenders.push({ tender_type: "TAIWAN_PAY", amount: String(plan.taiwanPay) });
+  if (plan.linePay > 0)
+    tenders.push({
+      tender_type: "LINE_PAY",
+      amount: String(plan.linePay),
+      line_pay_one_time_key: opts.linePayKey?.trim() ?? null,
+    });
   return tenders.length > 0 ? tenders : undefined;
 }
 

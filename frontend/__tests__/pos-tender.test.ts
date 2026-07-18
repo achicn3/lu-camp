@@ -17,6 +17,7 @@ describe("tender 純邏輯", () => {
       cash: 1850,
       storeCredit: 0,
       taiwanPay: 0,
+      linePay: 0,
     });
     const v = validatePlan(plan, 1850, {
       hasMember: false,
@@ -80,6 +81,7 @@ describe("tender 純邏輯", () => {
       cash: 0,
       storeCredit: 0,
       taiwanPay: 680,
+      linePay: 0,
     });
     // 非現金：drawerOpen=false（未開帳）也放行；不需會員。
     const v = validatePlan(plan, 680, {
@@ -90,6 +92,35 @@ describe("tender 純邏輯", () => {
     expect(v.ok).toBe(true);
     expect(v.needsDrawer).toBe(false);
     expect(v.needsMember).toBe(false);
+  });
+
+  it("LINE_PAY：全額 LINE Pay、非現金、需先掃付款碼才放行", () => {
+    const plan = resolvePlan("LINE_PAY", 900, 0);
+    expect(plan).toEqual({
+      mode: "LINE_PAY",
+      cash: 0,
+      storeCredit: 0,
+      taiwanPay: 0,
+      linePay: 900,
+    });
+    // 未掃碼 → 擋
+    const noKey = validatePlan(plan, 900, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: false,
+    });
+    expect(noKey.ok).toBe(false);
+    expect(noKey.error).toMatch(/掃描客人的 LINE Pay/);
+    // 掃到碼 → 放行（非現金、不需開帳/會員）
+    const withKey = validatePlan(plan, 900, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: false,
+      linePayKey: "OTK-123",
+    });
+    expect(withKey.ok).toBe(true);
+    expect(withKey.needsDrawer).toBe(false);
+    expect(withKey.needsMember).toBe(false);
   });
 
   it("購物金餘額未載入（null）時不放行", () => {
@@ -110,6 +141,7 @@ describe("tender 純邏輯", () => {
       cash: 300,
       storeCredit: 200,
       taiwanPay: 0,
+      linePay: 0,
     });
     expect(
       validatePlan(plan, 500, { hasMember: true, memberBalance: 500, ...OPEN })
@@ -195,6 +227,16 @@ describe("tender 純邏輯", () => {
     ]);
     expect(toTenders(resolvePlan("TAIWAN_PAY", 680, 0))).toEqual([
       { tender_type: "TAIWAN_PAY", amount: "680" },
+    ]);
+    // LINE Pay 帶掃到的一次性付款碼
+    expect(
+      toTenders(resolvePlan("LINE_PAY", 900, 0), { linePayKey: " OTK-123 " }),
+    ).toEqual([
+      {
+        tender_type: "LINE_PAY",
+        amount: "900",
+        line_pay_one_time_key: "OTK-123",
+      },
     ]);
   });
 
