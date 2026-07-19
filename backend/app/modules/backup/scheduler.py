@@ -40,7 +40,7 @@ def build_backup_backend() -> BackupBackend | None:
     """由 config 建真後端;R2/AES 口令未設定（空字串）→ 回 None（tick 不備份,改由健康度頁告警,
     非靜默失敗）。db_user 由 DATABASE_URL 取。憑證/口令來自 .env.r2,不入 DB/log。"""
     cfg = get_settings()
-    if not cfg.backup_passphrase.strip() or not cfg.r2_access_key_id.strip():
+    if not cfg.r2_backup_passphrase.strip() or not cfg.r2_access_key_id.strip():
         return None
     url = make_url(cfg.database_url)
     try:
@@ -49,7 +49,7 @@ def build_backup_backend() -> BackupBackend | None:
             db_container=cfg.backup_db_container,
             db_user=url.username or "postgres",
             local_dir=cfg.backup_local_dir,
-            passphrase=cfg.backup_passphrase,
+            passphrase=cfg.r2_backup_passphrase,
             r2_endpoint=cfg.r2_endpoint,
             r2_access_key_id=cfg.r2_access_key_id,
             r2_secret_access_key=cfg.r2_secret_access_key,
