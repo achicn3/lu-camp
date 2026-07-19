@@ -14,6 +14,10 @@ from app.core.audit import write_audit_log
 from app.core.config import get_settings as get_app_settings
 from app.modules.settings.defaults import (
     DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
+    DEFAULT_BACKUP_ENABLED,
+    DEFAULT_BACKUP_INTERVAL_HOURS,
+    DEFAULT_BACKUP_OFFPEAK_HOUR,
+    DEFAULT_BACKUP_RETENTION,
     DEFAULT_COMMISSION_PCT,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
@@ -60,6 +64,11 @@ def _new_settings(store_id: int) -> StoreSettings:
         linepay_enabled=False,
         linepay_fee_pct=Decimal(0),
         taiwanpay_fee_pct=Decimal(0),
+        # 備份系統（docs/31）：暫態預設同上理。
+        backup_enabled=DEFAULT_BACKUP_ENABLED,
+        backup_interval_hours=DEFAULT_BACKUP_INTERVAL_HOURS,
+        backup_retention=DEFAULT_BACKUP_RETENTION,
+        backup_offpeak_hour=DEFAULT_BACKUP_OFFPEAK_HOUR,
     )
 
 

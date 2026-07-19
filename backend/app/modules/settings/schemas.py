@@ -43,6 +43,11 @@ class SettingsRead(BaseModel):
     linepay_enabled: bool
     linepay_fee_pct: RateOut
     taiwanpay_fee_pct: RateOut
+    # 備份系統（docs/31）
+    backup_enabled: bool
+    backup_interval_hours: int
+    backup_retention: int
+    backup_offpeak_hour: int
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -81,6 +86,11 @@ class SettingsUpdateRequest(BaseModel):
     linepay_enabled: bool | None = None
     linepay_fee_pct: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
     taiwanpay_fee_pct: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
+    # 備份系統（docs/31）：間隔≥1 時、保留≥1 份、離峰時點 0–23。
+    backup_enabled: bool | None = None
+    backup_interval_hours: Annotated[int, Field(ge=1, le=8760)] | None = None
+    backup_retention: Annotated[int, Field(ge=1, le=365)] | None = None
+    backup_offpeak_hour: Annotated[int, Field(ge=0, le=23)] | None = None
 
     @field_validator("monthly_fixed_cash_outflow", "store_credit_min_spend")
     @classmethod

@@ -116,3 +116,48 @@ cat restore.dump | "$DOCKER" exec -i lu-camp-db-1 sh -c 'cat > /tmp/r.dump'
 | 簽名 PNG sha256 抽驗 20 筆 | ✓ 20/20 一致 |
 
 R2 物件：`backups/lucamp_sim_pristine_20260716.dump.enc`（保留作異地副本）。
+
+---
+
+## 4. 系統化（docs/31 B4）：程式化還原 + 卡控 + 逐功能演練 + 受控切換
+
+docs/28 §1–§3 的**手動** runbook 已由系統實作（分支 `feat/backup-system`）：
+
+- **還原後端 / 四驗**：`app/modules/backup/restore.py`（`SubprocessR2RestoreBackend`＝下載→解密→
+  建 throwaway 全新庫→pg_restore；`SqlRestoreVerifier`＝四驗：alembic head 相符／關鍵表可查／
+  簽名 BYTEA 抽驗／起後端 SELECT 1）。**絕不就地覆蓋正式庫**。
+- **卡控入口**：`POST /api/v1/backup/restore`（MANAGER＋知情勾選＋打字確認＝該備份「檔名」）→
+  背景還原到 `lucamp_restore_<時戳>`＋四驗，`restore_runs` 留痕（VERIFIED/FAILED＋四驗 JSONB）。
+  儀表板 `/backup` 有還原卡（選備份→確認對話框→輪詢狀態→顯示四驗結果）。
+- **受控切換**：四驗 VERIFIED 後，正式切換由**停機腳本** `scripts/switch-to-restore.sh
+  <lucamp_restore_...>` 執行（改名 live→`lucamp_old_<時戳>` 保留可回退、restore→live）。App 不自動
+  切換（PG 不許改名有連線的庫；單機中途失敗兩頭落空）。
+
+- **舊版本備份也救得回（migrate-forward）**：四驗的 alembic 檢查接受「head 或 head 的**祖先版本**」；
+  若還原庫版本較舊，會把 **throwaway 庫升級到 head**（`ALEMBIC_TARGET_URL` 只指向 `lucamp_restore_*`，
+  **絕不動正式庫**）後再驗，故部署過新 migration 後仍能還原較早的備份（Codex 對抗審第二輪 #2）。
+  VERIFIED 的還原庫已在 head，切換後無需再手動 migrate。實測：還原 `lucamp_sim`（`a2b3c4d5e6f7`）
+  →自動升級 4 版到 `d4b8f1a2c3e5`→四驗全過，且來源庫版本不變（升級只落在 throwaway）。
+
+### 4.1 逐功能還原演練（`app/scripts/restore_drill.py`，使用者指示 2026-07-19）
+
+`uv run python -m app.scripts.restore_drill lucamp_sim`（需 source `.env`＋`.env.r2`）：備份→還原到
+throwaway 庫→**逐功能比對 before（來源）vs after（還原）**，每個功能都須一致。
+
+**2026-07-19 對 lucamp_sim（180 天模擬）實跑：23/23 全部一致 ✅ PASS**：
+
+| 功能 | before = after |
+|---|---|
+| 交易 筆數 / 銷售額合計 / 明細 / 收款 | 5313 / 11,615,725 / 12011 / 5386 |
+| 現金 班別 / 異動 | 201 / 6132 |
+| 會員 筆數 / **PII 密文 md5** / **盲索引 md5** | 2264 / `6cf4f0a5…` / `514bd2d2…` |
+| 庫存 序號品 / 散裝餘量 | 1520 / 0 |
+| 簽署 任務 / **簽名 BYTEA md5** | 735 / `5d60be4e…` |
+| 購物金 帳本 / 淨額合計 | 239 / 709,627 |
+| 盤點 單 / 明細 | 8 / 240 |
+| 寄售 結算 / 採購 單 / 收貨 | 259 / 94 / 116 |
+| 發票 筆數 / 折讓 | 0 / 0 |
+| 稽核 筆數 | 1586 |
+
+密文/盲索引/簽名影像的 md5 完全一致 → 不只筆數對，**內容值（含加密 PII、BYTEA 簽名）逐位元組無損**。
+throwaway 庫用畢即刪，正式資料全程未動。

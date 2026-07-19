@@ -51,6 +51,24 @@ class Settings(BaseSettings):
     linepay_channel_id: str = ""
     linepay_channel_secret: str = ""
     linepay_api_base: str = "https://sandbox-api-pay.line.me"
+    # 備份系統（docs/31）：R2 憑證與 AES 口令走 .env.r2、不入 repo/DB；空字串＝未設定，
+    # 未設定時排程 tick 不會嘗試備份（改由健康度頁告警），手動觸發則回錯。
+    # 部署時以 `set -a; source .env.r2; set +a` 注入下列 R2_* 與 BACKUP_PASSPHRASE。
+    r2_endpoint: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = "pos"
+    # 與 .env.r2 命名一致（R2_BACKUP_PASSPHRASE）：AES 加密口令,不入 repo/DB。
+    r2_backup_passphrase: str = ""
+    # 備份執行的本機參數（docs/28 流程：docker exec 進 postgres 容器跑 pg_dump）。
+    backup_docker_bin: str = "docker"
+    backup_db_container: str = "lu-camp-db-1"
+    backup_local_dir: str = "/home/test/lu-camp-backups"
+    # 排程 tick：行程內背景任務的主開關與喚醒間隔（秒）。到期判斷另看 settings.backup_*。
+    backup_scheduler_enabled: bool = True
+    backup_tick_seconds: int = 900
+    # 離峰鐘點以「本地時區」判定（店家輸入 21 指當地 21:00）。伺服器用 UTC 跑,故比對前先轉此區。
+    backup_timezone: str = "Asia/Taipei"
 
     @field_validator("pii_enc_key")
     @classmethod

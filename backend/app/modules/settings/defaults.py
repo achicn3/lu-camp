@@ -32,3 +32,9 @@ DEFAULT_STORE_CREDIT_ENGINE_PARAMS: dict[str, object] = {
     "cold_start_min_days": 30,
     "yoy_halfwidth_days": 15,
 }
+
+# 備份系統（docs/31）：啟用、間隔（時）、保留份數、離峰時點（0–23）。
+DEFAULT_BACKUP_ENABLED = True
+DEFAULT_BACKUP_INTERVAL_HOURS = 24
+DEFAULT_BACKUP_RETENTION = 30
+DEFAULT_BACKUP_OFFPEAK_HOUR = 21  # 晚上 9 點（打烊後離峰）；過此鐘點才算到期，機器開著就晚上跑

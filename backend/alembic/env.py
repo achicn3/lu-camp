@@ -3,11 +3,12 @@ from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, make_url
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 import app.core.audit  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.acquisition.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.backup.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.campaigns.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.cashdrawer.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.consignment.models  # 註冊模型到 metadata（autogenerate 用）
@@ -28,9 +29,24 @@ from app.core.db import Base
 # Alembic Config 物件，提供存取 .ini 內設定。
 config = context.config
 
+def _restore_target(url: str | None) -> str | None:
+    """僅接受 throwaway 還原庫（lucamp_restore_*）作為升級目標;其餘一律 None（回退正式庫）。"""
+    if not url:
+        return None
+    try:
+        db = make_url(url).database
+    except Exception:
+        return None
+    return url if db and db.startswith("lucamp_restore_") else None
+
+
 # 連線字串一律來自應用設定（讀根目錄 .env），不寫死於 alembic.ini。
 # 僅設定字串，不在 import 時建立連線；實際連線發生在 run_migrations_online()。
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# 例外：還原演練把舊版本備份的 throwaway 庫「升級到 head」時，呼叫端會**先在傳入的 Config**
+# 設好 sqlalchemy.url 指向該 throwaway 庫（per-call、非 process 全域，杜絕誤打正式庫）
+# 這裡只有在該預設 url 確實指向 lucamp_restore_* 時才沿用;否則一律用正式 DATABASE_URL。
+_preset = _restore_target(config.get_main_option("sqlalchemy.url"))
+config.set_main_option("sqlalchemy.url", _preset or get_settings().database_url)
 
 # 設定 Python logging。
 if config.config_file_name is not None:

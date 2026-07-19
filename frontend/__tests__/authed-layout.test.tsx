@@ -45,6 +45,23 @@ describe("(authed) layout", () => {
     expect(replaceMock).not.toHaveBeenCalled();
   });
 
+  it("導覽分層：常用在頂欄、其餘收「更多」側邊選單（開/關）", async () => {
+    setToken(makeToken("MANAGER"));
+    renderLayout(<p>受保護內容</p>);
+    await screen.findByText("受保護內容");
+    // 常用項目常駐頂欄
+    expect(screen.getByText("POS 結帳")).toBeDefined();
+    expect(screen.getByText("交易紀錄")).toBeDefined();
+    // 次要項目收在選單，未開啟前不在畫面
+    expect(screen.queryByText("庫存")).toBeNull();
+    // 點「更多」開啟側邊選單 → 次要項目出現
+    await userEvent.click(screen.getByRole("button", { name: /更多/ }));
+    expect(screen.getByText("庫存")).toBeDefined();
+    // 關閉 → 次要項目收回
+    await userEvent.click(screen.getByRole("button", { name: "關閉選單" }));
+    await waitFor(() => expect(screen.queryByText("庫存")).toBeNull());
+  });
+
   it("token 只在 localStorage（重新整理情境）：仍渲染內容、不誤導去登入", async () => {
     window.localStorage.setItem("lu-camp.access-token", makeToken("CLERK"));
     renderLayout(<p>受保護內容</p>);

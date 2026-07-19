@@ -1,0 +1,122 @@
+/* /backup 儀表板專屬樣式（健康度徽章、金鑰保管提醒橫幅、狀態色）。通用元件沿用 globals。 */
+
+.backup-key-warning {
+  border: 1px solid #d97706;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 12px 16px;
+  line-height: 1.6;
+}
+
+.backup-key-warning strong {
+  color: #b45309;
+}
+
+.backup-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.backup-health-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.backup-health-item .label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.backup-health-item .value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.backup-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.backup-status--succeeded {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.backup-status--running {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.backup-status--failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.backup-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.backup-error-cell {
+  color: #991b1b;
+  font-size: 0.8rem;
+}
+
+.backup-confirm {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 12px;
+  background: #fef2f2;
+}
+
+.field-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.backup-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.backup-verify-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: #4b5563;
+}
+
+.backup-verify-ok {
+  color: #166534;
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .backup-confirm {
+    background: #450a0a;
+    border-color: #dc2626;
+  }
+  .backup-verify-list {
+    color: #9ca3af;
+  }
+  .backup-key-warning {
+    background: #422006;
+    border-color: #b45309;
+    color: #fcd34d;
+  }
+  .backup-health-item {
+    border-color: #374151;
+  }
+}

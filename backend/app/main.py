@@ -5,7 +5,11 @@ OpenAPI 合約管線（docs/11）有實際內容可匯出。後續模組依
 docs/05-project-structure.md 掛載於此。
 """
 
-from collections.abc import Awaitable, Callable
+import asyncio
+import contextlib
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +18,12 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
+from app.modules.backup.router import router as backup_router
+from app.modules.backup.scheduler import (
+    reconcile_orphaned_jobs_on_startup,
+    scheduler_loop,
+    sweep_container_plaintext_on_startup,
+)
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.consignment.router import router as consignment_router
@@ -43,15 +53,40 @@ API_PREFIX = "/api/v1"
 KIOSK_MAX_BODY_BYTES = 1_000_000
 
 
+logger = logging.getLogger(__name__)
+
+
 class HealthResponse(BaseModel):
     """`/health` 回應。"""
 
     status: str
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """啟動時起備份排程背景 tick（docs/31 §3）,關閉時優雅停止。
+
+    tick 為到期驅動、與請求脈絡無關;主開關 backup_scheduler_enabled=false 時直接返回。
+    """
+    # 開機先回收上次行程遺留的 RUNNING 備份/還原（崩潰/部署孤兒）→ FAILED，避免 UI 永遠輪詢。
+    with contextlib.suppress(Exception):  # 回收失敗不擋啟動（DB 未就緒等）
+        await reconcile_orphaned_jobs_on_startup()
+    # 掃除容器內殘留的整庫明文 dump（崩潰/中斷留下的 PII 不長期滯留）。
+    await sweep_container_plaintext_on_startup()
+    stop_event = asyncio.Event()
+    task = asyncio.create_task(scheduler_loop(stop_event), name="backup-scheduler")
+    try:
+        yield
+    finally:
+        stop_event.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app() -> FastAPI:
     """建立並設定 FastAPI 應用程式。"""
-    app = FastAPI(title="lu-camp API", version="0.1.0")
+    app = FastAPI(title="lu-camp API", version="0.1.0", lifespan=_lifespan)
     # CORS：允許來源由設定提供（CORS_ORIGINS，逗號分隔）。認證走 Bearer 標頭
     # （非 cookie），不需 allow_credentials。
     app.add_middleware(
@@ -124,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(campaigns_router, prefix=API_PREFIX)
     app.include_router(einvoice_router, prefix=API_PREFIX)
     app.include_router(einvoice_invoices_router, prefix=API_PREFIX)
+    app.include_router(backup_router, prefix=API_PREFIX)
     return app
 
 
