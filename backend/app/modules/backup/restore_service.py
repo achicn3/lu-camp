@@ -19,7 +19,7 @@ from app.modules.backup.restore import (
     results_to_json,
 )
 from app.shared.enums import RestoreStatus
-from app.shared.exceptions import RestoreError
+from app.shared.exceptions import RestoreAlreadyRunning, RestoreError
 
 logger = logging.getLogger(__name__)
 _ERR_MAX = 2000
@@ -50,7 +50,13 @@ class RestoreService:
     async def start_restore(
         self, store_id: int, *, source_r2_key: str, actor_user_id: int, restore_db_name: str
     ) -> RestoreRun:
-        """插一列 RUNNING（尚未做外部程序）。端點可在此後 commit 並立即回 RUNNING 供前端輪詢。"""
+        """插一列 RUNNING（尚未做外部程序）。端點可在此後 commit 並立即回 RUNNING 供前端輪詢。
+
+        單一在跑守衛：已有 RUNNING 還原 → RestoreAlreadyRunning（每次還原都 clone 整庫,併發會塞爆
+        磁碟；連點/多分頁一律擋。並發終極防線＝restore_runs 部分唯一索引，Codex 第四輪 #4）。
+        """
+        if await self._repo.get_running_restore(store_id) is not None:
+            raise RestoreAlreadyRunning("已有一筆還原進行中,請稍候")
         return await self._repo.add_restore(
             RestoreRun(
                 store_id=store_id,
@@ -82,7 +88,11 @@ class RestoreService:
             return await self._fail(run, str(exc), drop=True)
         except Exception as exc:  # 任何外部程序例外一律如實記 FAILED
             return await self._fail(run, f"還原未預期錯誤：{exc.__class__.__name__}", drop=True)
-        results = await self._verifier.verify(target_db=run.restore_db_name)
+        # 帶入備份當時 manifest（key-table 筆數）比對:擋「空/半殘還原被誤判 VERIFIED」（Codex #3）。
+        manifest = source.manifest if isinstance(source.manifest, dict) else None
+        results = await self._verifier.verify(
+            target_db=run.restore_db_name, expected_manifest=manifest
+        )
         run.verifications = results_to_json(results)
         if all(r.ok for r in results):
             run.status = RestoreStatus.VERIFIED
@@ -135,6 +145,17 @@ class RestoreService:
 
     async def get_restore(self, store_id: int, restore_id: int) -> RestoreRun | None:
         return await self._repo.get_restore(store_id, restore_id)
+
+    async def terminalize_failed(self, store_id: int, restore_id: int, message: str) -> bool:
+        """worker 未預期失敗後把仍 RUNNING 的還原轉 FAILED＋drop 其庫（呼叫端另 commit）。
+
+        沒有這步,verify/commit/清理拋例外會讓該列永遠 RUNNING、UI 空轉、庫佔著（Codex 第四輪 #5）。
+        """
+        run = await self._repo.get_restore(store_id, restore_id)
+        if run is None or run.status is not RestoreStatus.RUNNING:
+            return False
+        await self._fail(run, message, drop=True)
+        return True
 
     async def _fail(self, run: RestoreRun, message: str, *, drop: bool = False) -> RestoreRun:
         run.status = RestoreStatus.FAILED

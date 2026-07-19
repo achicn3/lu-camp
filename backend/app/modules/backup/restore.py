@@ -10,7 +10,6 @@ RestoreError（訊息不含祕密）。
 
 import asyncio
 import contextlib
-import hashlib
 import os
 import re
 import subprocess
@@ -29,7 +28,7 @@ from app.modules.backup.backend import _sha256_and_size
 from app.shared.exceptions import RestoreError
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
-_SUBPROC_TIMEOUT = 1800  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
+_SUBPROC_TIMEOUT = 600  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
 # 序列化 migrate-forward：alembic 的 in-process context 非執行緒安全,同一行程一次只跑一個升級。
 _MIGRATE_LOCK = asyncio.Lock()
 # throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
@@ -75,9 +74,11 @@ class RestoreBackend(Protocol):
 
 
 class RestoreVerifier(Protocol):
-    """對還原後的 throwaway 庫做四驗,回結果清單。"""
+    """對還原後的 throwaway 庫做四驗,回結果清單。expected_manifest＝備份時的 key-table 筆數。"""
 
-    async def verify(self, *, target_db: str) -> list[VerificationResult]: ...
+    async def verify(
+        self, *, target_db: str, expected_manifest: dict[str, int] | None = None
+    ) -> list[VerificationResult]: ...
 
 
 def alembic_head() -> str:
@@ -252,7 +253,9 @@ class SqlRestoreVerifier:
     def _target_url(self, target_db: str) -> str:
         return make_url(self._base).set(database=target_db).render_as_string(hide_password=False)
 
-    async def verify(self, *, target_db: str) -> list[VerificationResult]:
+    async def verify(
+        self, *, target_db: str, expected_manifest: dict[str, int] | None = None
+    ) -> list[VerificationResult]:
         _validate_db_name(target_db)
         # 先處理 alembic：舊版本備份(head 的祖先)先把 throwaway 庫升級到 head（獨立引擎），
         # 之後的資料檢查才落在「升級後」的 schema 上（Codex #2）。
@@ -261,7 +264,7 @@ class SqlRestoreVerifier:
         results: list[VerificationResult] = [alembic_result]
         try:
             async with engine.connect() as conn:
-                results.append(await self._check_tables(conn))
+                results.append(await self._check_tables(conn, expected_manifest))
                 results.append(await self._check_signatures(conn))
                 results.append(await self._check_usable(conn))
         except Exception as exc:  # 連不上還原庫本身即整體失敗
@@ -311,19 +314,34 @@ class SqlRestoreVerifier:
             "alembic_head", ver2 == head, f"restored={ver} → 升級到 {ver2}（head={head}）"
         )
 
-    async def _check_tables(self, conn: object) -> VerificationResult:
+    async def _check_tables(
+        self, conn: object, expected_manifest: dict[str, int] | None
+    ) -> VerificationResult:
+        """關鍵表可查＋與備份時 manifest 比對:備份當時有資料(>0)但還原後為 0 → 判定空/半殘還原失敗
+        （Codex #3：不再把「count 查得到含 0 筆」都當通過）。無 manifest(舊備份)則只驗可查。"""
         counts: dict[str, int] = {}
         ok = True
+        empties: list[str] = []
         for tbl in _KEY_TABLES:
             try:
-                counts[tbl] = await conn.scalar(text(f"SELECT count(*) FROM {tbl}"))  # type: ignore[attr-defined]
+                counts[tbl] = int(
+                    await conn.scalar(text(f"SELECT count(*) FROM {tbl}"))  # type: ignore[attr-defined]
+                )
             except Exception:
                 ok = False
                 counts[tbl] = -1  # -1＝該表查詢失敗（schema 缺損）
+                continue
+            if expected_manifest and expected_manifest.get(tbl, 0) > 0 and counts[tbl] == 0:
+                ok = False  # 備份時有資料、還原後卻空 → 資料掉了
+                empties.append(tbl)
         detail = ", ".join(f"{k}={v}" for k, v in counts.items())
+        if empties:
+            detail = f"空表(備份時有資料):{','.join(empties)}｜{detail}"
         return VerificationResult("table_counts", ok, detail)
 
     async def _check_signatures(self, conn: object) -> VerificationResult:
+        """簽名 BYTEA 抽驗:確認確實是可解析的 PNG（檔頭魔術位元組），而非只看 sha256 長度(恆真)。"""
+        png_magic = b"\x89PNG\r\n\x1a\n"
         try:
             rows = (
                 await conn.execute(  # type: ignore[attr-defined]
@@ -334,10 +352,12 @@ class SqlRestoreVerifier:
                 )
             ).all()
             for (img,) in rows:
-                if len(hashlib.sha256(img).hexdigest()) != 64:
-                    return VerificationResult("signature_bytea", False, "sha256 異常")
+                if not (isinstance(img, bytes | memoryview) and bytes(img[:8]) == png_magic):
+                    return VerificationResult(
+                        "signature_bytea", False, "簽名非合法 PNG（檔頭不符）"
+                    )
             return VerificationResult(
-                "signature_bytea", True, f"抽驗 {len(rows)} 筆簽名 BYTEA sha256 可讀"
+                "signature_bytea", True, f"抽驗 {len(rows)} 筆簽名 PNG 檔頭合法"
             )
         except Exception as exc:
             return VerificationResult("signature_bytea", False, f"{exc.__class__.__name__}")

@@ -19,7 +19,7 @@ from app.modules.backup.restore_service import RestoreService, default_restore_d
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import RestoreStatus, UserRole
-from app.shared.exceptions import RestoreError
+from app.shared.exceptions import RestoreAlreadyRunning, RestoreError
 
 
 class FakeRestoreBackend(RestoreBackend):
@@ -44,8 +44,11 @@ class FakeVerifier(RestoreVerifier):
         self.results = results
         self.called = False
 
-    async def verify(self, *, target_db: str) -> list[VerificationResult]:
+    async def verify(
+        self, *, target_db: str, expected_manifest: dict[str, int] | None = None
+    ) -> list[VerificationResult]:
         self.called = True
+        self.manifest_seen = expected_manifest
         return self.results
 
 
@@ -213,6 +216,59 @@ async def test_reap_old_restores_drops_failed_and_old_verified(db_session: Async
     assert set(backend.dropped) == {"lucamp_restore_a", "lucamp_restore_b"}
     assert r_new_ok.restore_db_name == "lucamp_restore_c"  # 保留供切換
     assert r_old_ok.id < r_new_ok.id
+
+
+@pytest.mark.asyncio
+async def test_restore_single_flight_guard(db_session: AsyncSession) -> None:
+    # Codex 第四輪 #4：已有 RUNNING 還原 → 再觸發被守衛擋（RestoreAlreadyRunning）。
+    store_id, user_id = await _store_and_user(db_session)
+    await _seed_source_backup(db_session, store_id)
+    db_session.add(
+        RestoreRun(
+            store_id=store_id, status=RestoreStatus.RUNNING, source_r2_key="backups/x.dump.enc",
+            restore_db_name="lucamp_restore_a", actor_user_id=user_id,
+        )
+    )
+    await db_session.flush()
+    with pytest.raises(RestoreAlreadyRunning):
+        await RestoreService(db_session, FakeRestoreBackend(), FakeVerifier(_all_ok())).run_restore(
+            store_id, source_r2_key="backups/x.dump.enc", actor_user_id=user_id,
+            restore_db_name="lucamp_restore_b",
+        )
+
+
+@pytest.mark.asyncio
+async def test_terminalize_failed_marks_failed_and_drops(db_session: AsyncSession) -> None:
+    # Codex 第四輪 #5：worker 未預期失敗後把 RUNNING 還原轉 FAILED＋drop 其庫。
+    store_id, user_id = await _store_and_user(db_session)
+    r = RestoreRun(
+        store_id=store_id, status=RestoreStatus.RUNNING, source_r2_key="backups/x.dump.enc",
+        restore_db_name="lucamp_restore_z", actor_user_id=user_id,
+    )
+    db_session.add(r)
+    await db_session.flush()
+    backend = FakeRestoreBackend()
+    ok = await RestoreService(db_session, backend, FakeVerifier(_all_ok())).terminalize_failed(
+        store_id, r.id, "worker 中斷"
+    )
+    assert ok is True
+    await db_session.refresh(r)
+    assert r.status == RestoreStatus.FAILED and r.finished_at is not None
+    assert "lucamp_restore_z" in backend.dropped
+
+
+@pytest.mark.asyncio
+async def test_verifier_manifest_detects_empty_restore() -> None:
+    # Codex #3：manifest 說某表有資料、還原後卻空 → table_counts 失敗（擋空/半殘還原）。
+    base = get_settings().database_url
+    target_db = make_url(base).database
+    assert target_db is not None
+    results = await SqlRestoreVerifier(base_url=base).verify(
+        target_db=target_db, expected_manifest={"sales": 5}  # 測試庫 sales 已 commit 資料為 0
+    )
+    by_name = {r.name: r for r in results}
+    assert by_name["table_counts"].ok is False
+    assert "空表" in by_name["table_counts"].detail
 
 
 def test_default_restore_db_name_shape() -> None:

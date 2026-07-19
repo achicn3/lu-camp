@@ -21,7 +21,8 @@ from app.shared.exceptions import BackupError
 logger = logging.getLogger(__name__)
 
 # 單一外部子程序上限（秒）：掛住的 docker/pg_dump/openssl 逾時即失敗,不讓工作永久 RUNNING。
-_SUBPROC_TIMEOUT = 1800
+# 10 分足以應付單店規模（實際數秒）;定得比 stale-reaper 門檻低很多,避免 reaper 誤殺還在跑的工作。
+_SUBPROC_TIMEOUT = 600
 
 
 @dataclass(frozen=True)
@@ -35,11 +36,16 @@ class BackupArtifact:
 
 
 class BackupBackend(Protocol):
-    """備份後端介面。create_and_upload 做完整流程或 raise BackupError;prune 修剪保留份數。"""
+    """備份後端介面。create_and_upload 做完整流程或 raise BackupError;prune 修剪保留份數。
+
+    prune 採**目錄感知**:只保留 keep_keys（呼叫端由已 commit 的 SUCCEEDED backup_runs 算出的 r2_key
+    集合）,其餘同前綴物件（含未編目的孤兒）一律刪除——不會因「按前綴數量」而刪掉有編目可還原的備份，
+    也順手清掉上傳成功但 commit 失敗留下的孤兒（Codex 第四輪 #2）。
+    """
 
     async def create_and_upload(self, *, db_name: str, stamp: str) -> BackupArtifact: ...
 
-    async def prune(self, *, db_name: str, keep: int) -> None: ...
+    async def prune(self, *, db_name: str, keep_keys: set[str]) -> None: ...
 
 
 def _sha256_and_size(path: Path) -> tuple[str, int]:
@@ -124,6 +130,7 @@ class SubprocessR2Backend:
         d, c, u = self._docker, self._container, self._user
         # 唯一容器暫存名(避免並發互踩;且下方 finally 一定清掉,不留整庫明文於容器)
         container_dump = f"/tmp/lucamp_backup_{db_name}_{stamp}.dump"
+        succeeded = False
         try:
             # 1) 容器內 dump(custom format,含 BYTEA 簽名)
             self._run(
@@ -151,10 +158,15 @@ class SubprocessR2Backend:
             # 5) 上傳 R2
             key = f"backups/{enc_local.name}"
             self._upload(enc_local, key)
+            succeeded = True
             return BackupArtifact(file_name=enc_local.name, r2_key=key, sha256=sha, size_bytes=size)
         finally:
-            # 明文絕不留存:任何出口(含中途失敗)都刪 host 明文與容器暫存(加密檔另由 prune 管理)
+            # 明文絕不留存:任何出口都刪 host 明文與容器暫存。**失敗時也刪加密檔**(enc_local):不然
+            # 成功但上傳失敗會留一份完整加密 dump,且失敗不 prune、排程每 tick 重試 → R2 斷線會堆到
+            # 磁碟爆掉(Codex 第四輪 #1)。成功時才保留 enc_local(供 prune 管理本地保留份數)。
             dump_local.unlink(missing_ok=True)
+            if not succeeded:
+                enc_local.unlink(missing_ok=True)
             self._rm_container_file(container_dump)
 
     def _client(self) -> object:
@@ -177,37 +189,39 @@ class SubprocessR2Backend:
     async def create_and_upload(self, *, db_name: str, stamp: str) -> BackupArtifact:
         return await asyncio.to_thread(self._do, db_name, stamp)
 
-    def _prune(self, db_name: str, keep: int) -> None:
+    def _prune(self, db_name: str, keep_keys: set[str]) -> None:
         # 本地與遠端修剪**各自獨立**：任一失敗不阻擋另一,且各自記 log（否則缺 DeleteObject 權時
         # 遠端一直失敗會連本地清理都跳過→磁碟無限成長而備份仍顯綠，Codex 第三輪 #5）。
-        remote_err = self._prune_remote(db_name, keep)
-        local_err = self._prune_local(db_name, keep)
+        remote_err = self._prune_remote(db_name, keep_keys)
+        local_err = self._prune_local(db_name, keep_keys)
         if remote_err or local_err:  # 修剪失敗不翻覆已成功的備份,但**必須可見**（記 log）
             logger.warning(
                 "backup prune degraded db=%s remote_err=%s local_err=%s",
                 db_name, remote_err, local_err,
             )
 
-    def _prune_remote(self, db_name: str, keep: int) -> str | None:
+    def _prune_remote(self, db_name: str, keep_keys: set[str]) -> str | None:
         prefix = f"backups/{db_name}_"
         try:
             client = self._client()
             resp = client.list_objects_v2(Bucket=self._bucket, Prefix=prefix)  # type: ignore[attr-defined]
-            keys = sorted(o["Key"] for o in resp.get("Contents", []))
-            for old in keys[:-keep] if keep > 0 else keys:
-                client.delete_object(Bucket=self._bucket, Key=old)  # type: ignore[attr-defined]
+            for obj in resp.get("Contents", []):
+                key = obj["Key"]
+                if key not in keep_keys:  # 只留已編目的 SUCCEEDED key,其餘(含孤兒)刪
+                    client.delete_object(Bucket=self._bucket, Key=key)  # type: ignore[attr-defined]
         except Exception as exc:
             return exc.__class__.__name__
         return None
 
-    def _prune_local(self, db_name: str, keep: int) -> str | None:
+    def _prune_local(self, db_name: str, keep_keys: set[str]) -> str | None:
+        keep_names = {k.rsplit("/", 1)[-1] for k in keep_keys}
         try:
-            local = sorted(self._dir.glob(f"{db_name}_*.dump.enc"))
-            for old_path in local[:-keep] if keep > 0 else local:
-                old_path.unlink(missing_ok=True)
+            for path in self._dir.glob(f"{db_name}_*.dump.enc"):
+                if path.name not in keep_names:
+                    path.unlink(missing_ok=True)
         except Exception as exc:
             return exc.__class__.__name__
         return None
 
-    async def prune(self, *, db_name: str, keep: int) -> None:
-        await asyncio.to_thread(self._prune, db_name, keep)
+    async def prune(self, *, db_name: str, keep_keys: set[str]) -> None:
+        await asyncio.to_thread(self._prune, db_name, keep_keys)

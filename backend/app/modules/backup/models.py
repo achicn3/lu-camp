@@ -60,12 +60,23 @@ class BackupRun(Base, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(Text)
     # 手動觸發者（null＝排程 tick）。
     actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # 備份當下的 key-table 筆數快照（還原後比對,擋空/半殘還原被誤判 VERIFIED；Codex R4 #3）。
+    manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class RestoreRun(Base, TimestampMixin):
     """一次還原執行（docs/31 §6）：下載→解密→還原到全新庫→四驗。VERIFIED 才可切換（受控腳本）。"""
 
     __tablename__ = "restore_runs"
+    __table_args__ = (
+        # 還原單一在跑守衛：同店至多一列 RUNNING（每次還原都 clone 整庫,防併發塞爆磁碟）。
+        Index(
+            "uq_restore_runs_one_running",
+            "store_id",
+            unique=True,
+            postgresql_where=("status = 'RUNNING'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)

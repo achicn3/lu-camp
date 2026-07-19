@@ -208,6 +208,20 @@ async def _run_restore(restore_id: int, store_id: int) -> None:
         except Exception:
             await session.rollback()
             logger.exception("restore execution failed restore_id=%s", restore_id)
+            await _terminalize_restore_failed(restore_id, store_id, backend)
+
+
+async def _terminalize_restore_failed(
+    restore_id: int, store_id: int, backend: RestoreBackend
+) -> None:
+    """worker 未預期失敗 → 用新 session 把還原轉 FAILED＋drop 庫,不讓它永遠 RUNNING（Codex #5）。"""
+    try:
+        async with get_sessionmaker()() as session:
+            svc = RestoreService(session, backend, build_restore_verifier())
+            if await svc.terminalize_failed(store_id, restore_id, "還原工作未預期中斷,標記為失敗"):
+                await session.commit()
+    except Exception:
+        logger.exception("failed to terminalize restore restore_id=%s", restore_id)
 
 
 def launch_restore(restore_id: int, store_id: int) -> None:

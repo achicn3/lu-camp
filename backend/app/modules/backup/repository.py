@@ -6,7 +6,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.backup.models import BackupRun, RestoreRun
-from app.shared.enums import BackupStatus
+from app.shared.enums import BackupStatus, RestoreStatus
 
 
 class BackupRepository:
@@ -34,6 +34,25 @@ class BackupRepository:
             select(BackupRun).where(BackupRun.id == run_id, BackupRun.store_id == store_id)
         )
         return result
+
+    async def newest_succeeded_r2_keys(self, db_name: str, *, limit: int) -> set[str]:
+        """該 db_name 最新 N 筆 SUCCEEDED 備份的 r2_key 集合（目錄感知修剪的保留清單）。
+
+        整庫備份為全域(所有分店共用一個 dump 命名空間),故**跨店**取最新 N 筆已 commit 的 SUCCEEDED。
+        """
+        if limit <= 0:
+            return set()
+        rows = await self._session.scalars(
+            select(BackupRun.r2_key)
+            .where(
+                BackupRun.status == BackupStatus.SUCCEEDED,
+                BackupRun.db_name == db_name,
+                BackupRun.r2_key.is_not(None),
+            )
+            .order_by(desc(BackupRun.finished_at))
+            .limit(limit)
+        )
+        return {k for k in rows if k is not None}
 
     async def get_succeeded_by_r2_key(self, store_id: int, r2_key: str) -> BackupRun | None:
         """依 r2_key 找該店一筆 SUCCEEDED 備份（還原來源綁定用:只能還原目錄內的已知good備份）。"""
@@ -77,6 +96,16 @@ class BackupRepository:
         result: RestoreRun | None = await self._session.scalar(
             select(RestoreRun).where(
                 RestoreRun.id == restore_id, RestoreRun.store_id == store_id
+            )
+        )
+        return result
+
+    async def get_running_restore(self, store_id: int) -> RestoreRun | None:
+        """該店進行中（RUNNING）的還原（單一在跑守衛用）。"""
+        result: RestoreRun | None = await self._session.scalar(
+            select(RestoreRun).where(
+                RestoreRun.store_id == store_id,
+                RestoreRun.status == RestoreStatus.RUNNING,
             )
         )
         return result

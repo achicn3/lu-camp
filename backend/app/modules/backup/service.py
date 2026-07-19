@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -15,6 +15,7 @@ from app.core.config import get_settings as get_app_settings
 from app.modules.backup.backend import BackupBackend
 from app.modules.backup.models import BackupRun
 from app.modules.backup.repository import BackupRepository
+from app.modules.backup.restore import _KEY_TABLES
 from app.modules.settings.models import StoreSettings
 from app.modules.store.models import Store
 from app.shared.enums import BackupStatus, BackupTrigger
@@ -23,7 +24,9 @@ from app.shared.exceptions import BackupAlreadyRunning
 _ERR_MAX = 2000  # last_error 上限（避免超長堆疊塞爆欄位）
 # 超過此時長仍 RUNNING 視為中斷（行程死亡/斷電/OOM）→ 記 FAILED,避免單一在跑守衛永久卡住、
 # 再也無法備份（本身即「假備份/卡死」風險的一種）。正常備份數秒~數十秒完成。
-_STALE_RUNNING = timedelta(minutes=30)
+# 門檻**遠高於**整條管線最大時間（各子程序上限 600s×數步＋上傳）,確保 reaper 絕不誤殺還在跑的工作
+# （Codex 第四輪 #6）。單店真實備份是秒級,故 RUNNING 逾 2 小時必為死亡工作。
+_STALE_RUNNING = timedelta(hours=2)
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,7 @@ class BackupService:
         run.r2_key = artifact.r2_key
         run.sha256 = artifact.sha256
         run.size_bytes = artifact.size_bytes
+        run.manifest = await self._capture_manifest()  # 供還原後比對(擋空/半殘還原，Codex #3)
         run.finished_at = datetime.now(UTC)
         await self._session.flush()
         # 注意：**修剪不在此做**。修剪是不可逆刪除,必須等這筆 SUCCEEDED 中繼資料「已 commit」後才跑
@@ -146,7 +150,9 @@ class BackupService:
         後才執行,避免刪掉尚未持久化其替代品的復原點。
         """
         keep = await self._retention()
-        await self._backend.prune(db_name=db_name, keep=keep)
+        # 目錄感知:只保留最新 N 筆「已 commit 的 SUCCEEDED」r2_key,其餘（含孤兒）刪（Codex #2）。
+        keep_keys = await self._repo.newest_succeeded_r2_keys(db_name, limit=keep)
+        await self._backend.prune(db_name=db_name, keep_keys=keep_keys)
 
     async def run_backup(
         self,
@@ -193,6 +199,18 @@ class BackupService:
 
     async def last_success_at(self, store_id: int) -> datetime | None:
         return await self._repo.last_success_at(store_id)
+
+    async def _capture_manifest(self) -> dict[str, int]:
+        """備份當下擷取 key-table 筆數（連 self 的正式庫 session）。還原後與此比對,擋空/半殘還原
+        （Codex 第四輪 #3）。備份跑於離峰、無寫入,計數與 dump 內容一致;查詢失敗的表略過。"""
+        counts: dict[str, int] = {}
+        for tbl in _KEY_TABLES:
+            try:
+                n = await self._session.scalar(text(f"SELECT count(*) FROM {tbl}"))
+                counts[tbl] = int(n or 0)
+            except Exception:
+                continue
+        return counts
 
     async def _reap_stale_running(self, store_id: int) -> None:
         """逾時仍 RUNNING（行程中斷/斷電）→ 記 FAILED,釋放單一在跑守衛。正常備份數秒~數十秒。"""

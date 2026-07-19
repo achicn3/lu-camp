@@ -443,3 +443,7 @@ class BackupAlreadyRunning(DomainError):
 
 class RestoreError(DomainError):
     """還原執行失敗（下載/解密/pg_restore/四驗任一步）。正式庫未被碰，throwaway 庫可棄。"""
+
+
+class RestoreAlreadyRunning(DomainError):
+    """已有一筆還原進行中（單一在跑守衛）：每次還原都 clone 整庫，併發塞爆磁碟，故拒絕回 409。"""

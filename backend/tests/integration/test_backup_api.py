@@ -32,7 +32,7 @@ class _FakeBackend(BackupBackend):
             size_bytes=1,
         )
 
-    async def prune(self, *, db_name: str, keep: int) -> None:
+    async def prune(self, *, db_name: str, keep_keys: set[str]) -> None:
         return None
 
 
@@ -329,3 +329,35 @@ async def test_restore_accepts_and_inserts_running(
     assert body["source_r2_key"] == "backups/lucamp_x.dump.enc"
     assert body["restore_db_name"].startswith("lucamp_restore_")
     assert launched == [(body["id"], store_id)]
+
+
+@pytest.mark.asyncio
+async def test_restore_409_when_already_running(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Codex 第四輪 #4：已有 RUNNING 還原 → 再觸發回 409（不啟第二個整庫 clone）。
+    import app.modules.backup.router as router_mod
+
+    monkeypatch.setattr(router_mod, "build_restore_backend", lambda: _FakeRestoreBackend())
+    monkeypatch.setattr(router_mod, "launch_restore", lambda restore_id, store_id: None)
+    token, store_id = await _seed_user(db_session, UserRole.MANAGER)
+    await _seed_backup(db_session, store_id)
+    uid = await db_session.scalar(select(User.id).where(User.store_id == store_id))
+    db_session.add(
+        RestoreRun(
+            store_id=store_id, status=RestoreStatus.RUNNING,
+            source_r2_key="backups/lucamp_x.dump.enc", restore_db_name="lucamp_restore_pre",
+            actor_user_id=uid,
+        )
+    )
+    await db_session.flush()
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/lucamp_x.dump.enc",
+            "confirm_text": "lucamp_x.dump.enc",
+            "acknowledge": True,
+        },
+    )
+    assert resp.status_code == 409

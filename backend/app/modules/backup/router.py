@@ -32,7 +32,7 @@ from app.modules.backup.schemas import (
 )
 from app.modules.backup.service import BackupService
 from app.shared.enums import BackupTrigger, UserRole
-from app.shared.exceptions import BackupAlreadyRunning
+from app.shared.exceptions import BackupAlreadyRunning, RestoreAlreadyRunning
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 
@@ -136,12 +136,16 @@ async def trigger_restore(
             detail="還原未設定（R2 憑證/AES 口令未提供,見 .env.r2）",
         )
     svc = RestoreService(session, backend, _noop_restore_verifier())
-    run = await svc.start_restore(
-        user.store_id,
-        source_r2_key=payload.source_r2_key,
-        actor_user_id=user.id,
-        restore_db_name=default_restore_db_name(),
-    )
+    try:
+        run = await svc.start_restore(
+            user.store_id,
+            source_r2_key=payload.source_r2_key,
+            actor_user_id=user.id,
+            restore_db_name=default_restore_db_name(),
+        )
+    except RestoreAlreadyRunning as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     launch_restore(run.id, user.store_id)  # 背景執行還原＋四驗;前端輪詢
     return RestoreRunRead.model_validate(run)
@@ -153,7 +157,7 @@ class _NoopBackend(BackupBackend):
     async def create_and_upload(self, *, db_name: str, stamp: str) -> BackupArtifact:
         raise RuntimeError("read-only backup endpoint must not run backup")
 
-    async def prune(self, *, db_name: str, keep: int) -> None:
+    async def prune(self, *, db_name: str, keep_keys: set[str]) -> None:
         raise RuntimeError("read-only backup endpoint must not prune")
 
 
@@ -174,7 +178,9 @@ class _NoopRestoreBackend:
 
 
 class _NoopRestoreVerifier:
-    async def verify(self, *, target_db: str) -> list[VerificationResult]:
+    async def verify(
+        self, *, target_db: str, expected_manifest: dict[str, int] | None = None
+    ) -> list[VerificationResult]:
         raise RuntimeError("read-only restore endpoint must not verify")
 
 

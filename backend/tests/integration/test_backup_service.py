@@ -21,7 +21,7 @@ class FakeBackend(BackupBackend):
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.create_calls = 0
-        self.prune_calls: list[int] = []
+        self.prune_calls: list[set[str]] = []
 
     async def create_and_upload(self, *, db_name: str, stamp: str) -> BackupArtifact:
         self.create_calls += 1
@@ -34,8 +34,8 @@ class FakeBackend(BackupBackend):
             size_bytes=12345,
         )
 
-    async def prune(self, *, db_name: str, keep: int) -> None:
-        self.prune_calls.append(keep)
+    async def prune(self, *, db_name: str, keep_keys: set[str]) -> None:
+        self.prune_calls.append(keep_keys)
 
 
 async def _store(session: AsyncSession) -> int:
@@ -63,12 +63,42 @@ async def test_run_backup_success_records_succeeded_no_prune_inline(
 
 
 @pytest.mark.asyncio
-async def test_prune_old_uses_primary_retention(db_session: AsyncSession) -> None:
-    # 修剪為獨立步驟（commit 後呼叫），保留份數取主店設定（預設 30）。
-    await _store(db_session)  # 需有主店供 _retention 讀設定
+async def test_backup_captures_manifest(db_session: AsyncSession) -> None:
+    # Codex 第四輪 #3：成功備份記錄 key-table 筆數 manifest（供還原後比對）。
+    store_id = await _store(db_session)
+    run = await BackupService(db_session, FakeBackend()).run_backup(
+        store_id, db_name="lucamp", trigger=BackupTrigger.MANUAL, actor_user_id=None
+    )
+    assert isinstance(run.manifest, dict)
+    assert "sales" in run.manifest and "contacts" in run.manifest
+
+
+@pytest.mark.asyncio
+async def test_prune_old_keeps_committed_succeeded_keys(db_session: AsyncSession) -> None:
+    # Codex 第四輪 #2：目錄感知修剪——保留「已 commit 的 SUCCEEDED r2_key」集合（非按前綴數量）。
+    store_id = await _store(db_session)  # 主店供 _retention 讀設定（預設保留 30）
+    keys = set()
+    for i in range(3):
+        db_session.add(
+            BackupRun(
+                store_id=store_id, trigger=BackupTrigger.SCHEDULED, status=BackupStatus.SUCCEEDED,
+                db_name="lucamp", file_name=f"lucamp_{i}.dump.enc",
+                r2_key=f"backups/lucamp_{i}.dump.enc", sha256="a" * 64, size_bytes=1,
+            )
+        )
+        keys.add(f"backups/lucamp_{i}.dump.enc")
+    # 不同 db_name 的 SUCCEEDED 不應納入（命名空間隔離）
+    db_session.add(
+        BackupRun(
+            store_id=store_id, trigger=BackupTrigger.SCHEDULED, status=BackupStatus.SUCCEEDED,
+            db_name="otherdb", file_name="otherdb_0.dump.enc",
+            r2_key="backups/otherdb_0.dump.enc", sha256="a" * 64, size_bytes=1,
+        )
+    )
+    await db_session.flush()
     backend = FakeBackend()
     await BackupService(db_session, backend).prune_old("lucamp")
-    assert backend.prune_calls == [30]
+    assert backend.prune_calls == [keys]  # 只保留 lucamp 的 3 個已編目 key
 
 
 @pytest.mark.asyncio
@@ -336,14 +366,14 @@ async def test_start_then_execute_two_phase(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_stale_running_reaped_then_new_backup(db_session: AsyncSession) -> None:
-    # 逾時 RUNNING（40 分鐘前、疑似行程中斷）→ start_run 先回收為 FAILED,再開新的一次。
+    # 逾時 RUNNING（3 小時前、遠超 2h 門檻、疑似行程中斷）→ start_run 先回收為 FAILED,再開新的一次。
     store_id = await _store(db_session)
     stale = BackupRun(
         store_id=store_id,
         trigger=BackupTrigger.SCHEDULED,
         status=BackupStatus.RUNNING,
         db_name="lucamp",
-        started_at=datetime.now(UTC) - timedelta(minutes=40),
+        started_at=datetime.now(UTC) - timedelta(hours=3),
     )
     db_session.add(stale)
     await db_session.flush()
