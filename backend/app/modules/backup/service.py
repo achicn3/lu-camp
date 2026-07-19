@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
+from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, select
@@ -132,15 +133,20 @@ class BackupService:
         run.size_bytes = artifact.size_bytes
         run.finished_at = datetime.now(UTC)
         await self._session.flush()
-        # 修剪保留份數（best-effort;失敗只記 last_error 提示,不改備份成功狀態）。
-        try:
-            keep = await self._retention()
-            await self._backend.prune(db_name=run.db_name, keep=keep)
-        except Exception as exc:  # 修剪不得翻覆已成功的備份
-            run.last_error = f"備份成功,但修剪舊檔失敗:{str(exc)[:200]}"
-            await self._session.flush()
+        # 注意：**修剪不在此做**。修剪是不可逆刪除,必須等這筆 SUCCEEDED 中繼資料「已 commit」後才跑
+        # （呼叫端 commit 後呼叫 prune_old）;否則 prune 後若 commit 失敗,舊物件已刪、新的卻回滾,
+        # retention=1 時會刪掉最後一份可用備份、只剩還原 API 拒用的孤兒（Codex 對抗審 #1）。
         await self._audit(run.store_id, run, run.actor_user_id, ok=True)
         return run
+
+    async def prune_old(self, db_name: str) -> None:
+        """修剪保留份數（**commit 之後**才呼叫;best-effort,失敗只記 log 不影響已持久化的備份）。
+
+        整庫備份為全域→保留份數取主店設定（見 _retention）。刪除不可逆,故務必在 SUCCEEDED 已 commit
+        後才執行,避免刪掉尚未持久化其替代品的復原點。
+        """
+        keep = await self._retention()
+        await self._backend.prune(db_name=db_name, keep=keep)
 
     async def run_backup(
         self,
@@ -234,4 +240,6 @@ class BackupService:
 
 
 def _stamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    # 時戳＋短 UUID：即使同秒觸發（多店/重試）也不會產生同名 dump/R2 key,杜絕覆蓋碰撞（Codex #3）。
+    # 排序仍由前綴時戳主導,故保留份數修剪的「留最新」語意不受影響。
+    return f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"

@@ -133,6 +133,12 @@ docs/28 §1–§3 的**手動** runbook 已由系統實作（分支 `feat/backup
   <lucamp_restore_...>` 執行（改名 live→`lucamp_old_<時戳>` 保留可回退、restore→live）。App 不自動
   切換（PG 不許改名有連線的庫；單機中途失敗兩頭落空）。
 
+- **舊版本備份也救得回（migrate-forward）**：四驗的 alembic 檢查接受「head 或 head 的**祖先版本**」；
+  若還原庫版本較舊，會把 **throwaway 庫升級到 head**（`ALEMBIC_TARGET_URL` 只指向 `lucamp_restore_*`，
+  **絕不動正式庫**）後再驗，故部署過新 migration 後仍能還原較早的備份（Codex 對抗審第二輪 #2）。
+  VERIFIED 的還原庫已在 head，切換後無需再手動 migrate。實測：還原 `lucamp_sim`（`a2b3c4d5e6f7`）
+  →自動升級 4 版到 `d4b8f1a2c3e5`→四驗全過，且來源庫版本不變（升級只落在 throwaway）。
+
 ### 4.1 逐功能還原演練（`app/scripts/restore_drill.py`，使用者指示 2026-07-19）
 
 `uv run python -m app.scripts.restore_drill lucamp_sim`（需 source `.env`＋`.env.r2`）：備份→還原到

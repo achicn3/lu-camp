@@ -83,6 +83,11 @@
   觸發店而異——否則次要店的 retention＋手動備份會刪掉全域復原點(Codex 對抗審 #5)。多店上線時,
   備份政策/擁有權應正式建為全域管理員專屬。離峰鐘點以 `backup_timezone`(預設 Asia/Taipei)當地時區
   判定,非伺服器 UTC(Codex #6)。
+- **檔名含短 UUID**(`{db}_{時戳}_{uuid8}.dump.enc`):即使同秒觸發也不會覆蓋同名 dump/R2 key,
+  杜絕碰撞(Codex 對抗審第二輪 #3)。**全域併發序列化**(跨店同時備份)留待多店上線再做(DB advisory
+  lock/單例約束);單店單機由 per-store 單飛守衛已足。
+- **修剪順序**:SUCCEEDED 中繼資料**先 commit,再修剪**(修剪為不可逆刪除,放獨立 best-effort 步驟);
+  否則 prune 後若 commit 失敗會刪掉尚未持久化其替代品的復原點(Codex 對抗審第二輪 #1)。
 
 ---
 

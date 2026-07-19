@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
 
+from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
@@ -74,11 +75,28 @@ class RestoreVerifier(Protocol):
 
 
 def alembic_head() -> str:
-    """本程式碼庫期望的 alembic head（還原庫須與之相符,schema 才相容）。"""
+    """本程式碼庫期望的 alembic head（還原庫須與之相符或可升級到此,schema 才相容）。"""
     head = ScriptDirectory.from_config(Config(str(_ALEMBIC_INI))).get_current_head()
     if head is None:
         raise RestoreError("無法取得 alembic head")
     return head
+
+
+def _is_ancestor(rev: str, head: str) -> bool:
+    """rev 是否為 head 的祖先版本（含 head 本身）——即這份舊備份可循 migration 升級到 head。"""
+    script = ScriptDirectory.from_config(Config(str(_ALEMBIC_INI)))
+    return any(r.revision == rev for r in script.iterate_revisions(head, "base"))
+
+
+def _upgrade_to_head(target_async_url: str) -> None:
+    """把指定（throwaway 還原）庫升級到 alembic head。以 ALEMBIC_TARGET_URL 指定目標,env.py 據此
+    連線;finally 一定清除,避免污染後續正式 alembic 操作。同步呼叫,由 asyncio.to_thread 包起。"""
+    cfg = Config(str(_ALEMBIC_INI))
+    os.environ["ALEMBIC_TARGET_URL"] = target_async_url
+    try:
+        command.upgrade(cfg, "head")
+    finally:
+        os.environ.pop("ALEMBIC_TARGET_URL", None)
 
 
 def _validate_db_name(target_db: str) -> None:
@@ -218,11 +236,13 @@ class SqlRestoreVerifier:
 
     async def verify(self, *, target_db: str) -> list[VerificationResult]:
         _validate_db_name(target_db)
+        # 先處理 alembic：舊版本備份(head 的祖先)先把 throwaway 庫升級到 head（獨立引擎），
+        # 之後的資料檢查才落在「升級後」的 schema 上（Codex #2）。
+        alembic_result = await self._ensure_head(target_db)
         engine = create_async_engine(self._target_url(target_db))
-        results: list[VerificationResult] = []
+        results: list[VerificationResult] = [alembic_result]
         try:
             async with engine.connect() as conn:
-                results.append(await self._check_alembic(conn))
                 results.append(await self._check_tables(conn))
                 results.append(await self._check_signatures(conn))
                 results.append(await self._check_usable(conn))
@@ -232,15 +252,45 @@ class SqlRestoreVerifier:
             await engine.dispose()
         return results
 
-    async def _check_alembic(self, conn: object) -> VerificationResult:
+    async def _read_version(self, target_db: str) -> str | None:
+        engine = create_async_engine(self._target_url(target_db))
         try:
-            ver = await conn.scalar(text("SELECT version_num FROM alembic_version"))  # type: ignore[attr-defined]
-            head = alembic_head()
+            async with engine.connect() as conn:
+                ver: str | None = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+                return ver
+        except Exception:
+            return None
+        finally:
+            await engine.dispose()
+
+    async def _ensure_head(self, target_db: str) -> VerificationResult:
+        """alembic 版本檢查（含升級）：head→通過；head 的祖先→把 throwaway 升級到 head 再確認；
+        其餘（未知/更新/無表）→失敗。升級只對 throwaway 還原庫執行,絕不動正式庫（Codex #2）。"""
+        head = alembic_head()
+        ver = await self._read_version(target_db)
+        if ver is None:
+            return VerificationResult("alembic_head", False, "無 alembic_version 表")
+        if ver == head:
+            return VerificationResult("alembic_head", True, f"restored={ver} == head {head}")
+        if not _is_ancestor(ver, head):
             return VerificationResult(
-                "alembic_head", ver == head, f"restored={ver} expected_head={head}"
+                "alembic_head", False, f"restored={ver} 非 head({head})亦非其祖先——不相容"
             )
+        # 防呆：只升級 throwaway 還原庫,永不對非 lucamp_restore_ 庫自動升級
+        if not target_db.startswith("lucamp_restore_"):
+            return VerificationResult(
+                "alembic_head", False, f"restored={ver} 為舊版本但目標非還原庫,不自動升級"
+            )
+        try:
+            await asyncio.to_thread(_upgrade_to_head, self._target_url(target_db))
         except Exception as exc:
-            return VerificationResult("alembic_head", False, f"{exc.__class__.__name__}")
+            return VerificationResult(
+                "alembic_head", False, f"升級到 head 失敗:{exc.__class__.__name__}"
+            )
+        ver2 = await self._read_version(target_db)
+        return VerificationResult(
+            "alembic_head", ver2 == head, f"restored={ver} → 升級到 {ver2}（head={head}）"
+        )
 
     async def _check_tables(self, conn: object) -> VerificationResult:
         counts: dict[str, int] = {}

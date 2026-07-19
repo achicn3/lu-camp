@@ -109,11 +109,14 @@ async def _tick_once(
         try:
             triggered = await run_due_backups(session, backend, db_name=db_name)
             await session.commit()
-            return triggered
         except Exception:  # 背景任務永不因單次失敗中止;下次 tick 再試
             await session.rollback()
             logger.exception("backup scheduler tick failed")
             return False
+        if triggered:  # SUCCEEDED 已 commit → 才做不可逆的修剪（Codex #1）
+            with contextlib.suppress(Exception):
+                await BackupService(session, backend).prune_old(db_name)
+        return triggered
 
 
 async def _run_manual_backup(run_id: int, store_id: int) -> None:
@@ -132,11 +135,17 @@ async def _run_manual_backup(run_id: int, store_id: int) -> None:
             run = await svc.get_run(store_id, run_id)
             if run is None or run.status is not BackupStatus.RUNNING:
                 return  # 已被別處處理（例如逾時回收）
-            await svc.execute_run(run)
+            result = await svc.execute_run(run)
+            db_name = result.db_name
+            succeeded = result.status is BackupStatus.SUCCEEDED
             await session.commit()
         except Exception:  # execute_run 內部已把 dump 失敗記 FAILED;此處防 commit/session 例外
             await session.rollback()
             logger.exception("manual backup execution failed run_id=%s", run_id)
+            return
+        if succeeded:  # SUCCEEDED 已 commit → 才做不可逆的修剪（Codex #1）
+            with contextlib.suppress(Exception):
+                await BackupService(session, backend).prune_old(db_name)
 
 
 def launch_manual_backup(run_id: int, store_id: int) -> None:

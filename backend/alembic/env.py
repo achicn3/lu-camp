@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -31,7 +32,10 @@ config = context.config
 
 # 連線字串一律來自應用設定（讀根目錄 .env），不寫死於 alembic.ini。
 # 僅設定字串，不在 import 時建立連線；實際連線發生在 run_migrations_online()。
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# 例外：還原演練把舊版本備份的 throwaway 庫「升級到 head」時，會以 ALEMBIC_TARGET_URL 指定
+# 目標庫（僅限 lucamp_restore_* throwaway 庫）——絕不覆寫正式庫。空值時仍用正式 DATABASE_URL。
+_target_url = os.environ.get("ALEMBIC_TARGET_URL", "").strip()
+config.set_main_option("sqlalchemy.url", _target_url or get_settings().database_url)
 
 # 設定 Python logging。
 if config.config_file_name is not None:

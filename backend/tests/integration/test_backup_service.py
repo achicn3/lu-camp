@@ -46,7 +46,10 @@ async def _store(session: AsyncSession) -> int:
 
 
 @pytest.mark.asyncio
-async def test_run_backup_success_records_succeeded_and_prunes(db_session: AsyncSession) -> None:
+async def test_run_backup_success_records_succeeded_no_prune_inline(
+    db_session: AsyncSession,
+) -> None:
+    # Codex #1：run_backup 只記 SUCCEEDED，**不在此修剪**（修剪是不可逆刪除,須 commit 後另行）。
     store_id = await _store(db_session)
     backend = FakeBackend()
     run = await BackupService(db_session, backend).run_backup(
@@ -56,7 +59,16 @@ async def test_run_backup_success_records_succeeded_and_prunes(db_session: Async
     assert run.r2_key and run.sha256 == "a" * 64 and run.size_bytes == 12345
     assert run.finished_at is not None
     assert backend.create_calls == 1
-    assert backend.prune_calls == [30]  # 預設保留 30 份
+    assert backend.prune_calls == []  # 修剪不在 run_backup 內做（commit 後才 prune_old）
+
+
+@pytest.mark.asyncio
+async def test_prune_old_uses_primary_retention(db_session: AsyncSession) -> None:
+    # 修剪為獨立步驟（commit 後呼叫），保留份數取主店設定（預設 30）。
+    await _store(db_session)  # 需有主店供 _retention 讀設定
+    backend = FakeBackend()
+    await BackupService(db_session, backend).prune_old("lucamp")
+    assert backend.prune_calls == [30]
 
 
 @pytest.mark.asyncio

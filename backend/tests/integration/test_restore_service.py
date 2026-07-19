@@ -198,9 +198,19 @@ async def test_sql_verifier_runs_four_checks_against_real_db() -> None:
     assert target_db is not None
     results = await SqlRestoreVerifier(base_url=base).verify(target_db=target_db)
     by_name = {r.name: r for r in results}
-    # alembic_head：共用測試庫的 alembic_version 受他分支污染且 conftest 用 create_all，
-    # 故此處只驗「檢查有跑且確實比對本分支 head」；相符與否的正確性由真還原演練（B4 驗收）佐證。
-    assert "expected_head=" in by_name["alembic_head"].detail
+    # alembic_head：測試庫非 lucamp_restore_ 且版本受他分支污染 → 不自動升級,只驗有跑並回報版本。
+    # 升級到 head 的正確性由真還原演練佐證,且防呆保證非還原庫絕不被自動升級（Codex #2）。
+    assert "restored=" in by_name["alembic_head"].detail
     assert by_name["table_counts"].ok is True, by_name["table_counts"].detail
     assert by_name["backend_usable"].ok is True
     assert by_name["signature_bytea"].ok is True  # 0 筆亦視為通過（無損壞）
+
+
+def test_is_ancestor_recognizes_head_and_parent() -> None:
+    # Codex #2：head 的直系祖先應被視為「可升級到 head 的舊版本」；亂數版本不是。
+    from app.modules.backup.restore import _is_ancestor, alembic_head
+
+    head = alembic_head()
+    assert _is_ancestor(head, head) is True  # head 本身
+    assert _is_ancestor("e2a9c4b7f1d3", head) is True  # 前一版（backup migration 的 down_revision）
+    assert _is_ancestor("not_a_real_revision", head) is False
