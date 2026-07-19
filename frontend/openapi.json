@@ -562,6 +562,207 @@
         "title": "AgingBuckets",
         "type": "object"
       },
+      "BackupHealthRead": {
+        "description": "備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。",
+        "properties": {
+          "due_now": {
+            "title": "Due Now",
+            "type": "boolean"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "interval_hours": {
+            "title": "Interval Hours",
+            "type": "integer"
+          },
+          "last_success_age_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success Age Hours"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "offpeak_hour": {
+            "title": "Offpeak Hour",
+            "type": "integer"
+          },
+          "retention": {
+            "title": "Retention",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "interval_hours",
+          "retention",
+          "offpeak_hour",
+          "last_success_at",
+          "last_success_age_hours",
+          "due_now",
+          "running"
+        ],
+        "title": "BackupHealthRead",
+        "type": "object"
+      },
+      "BackupRunRead": {
+        "description": "一次備份執行的輸出（清單用）。",
+        "properties": {
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "db_name": {
+            "title": "Db Name",
+            "type": "string"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "r2_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R2 Key"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BackupStatus"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/BackupTrigger"
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "status",
+          "started_at",
+          "finished_at",
+          "db_name",
+          "file_name",
+          "r2_key",
+          "size_bytes",
+          "sha256",
+          "last_error",
+          "actor_user_id"
+        ],
+        "title": "BackupRunRead",
+        "type": "object"
+      },
+      "BackupStatus": {
+        "description": "備份執行狀態（backup_runs.status，docs/31）。\n\nRUNNING：進行中（同店至多一列，單一在跑守衛）；SUCCEEDED：dump→驗證→加密→上傳→修剪全過；\nFAILED：任一步失敗（如實記 last_error，不得記成功——假備份是最大風險）。",
+        "enum": [
+          "RUNNING",
+          "SUCCEEDED",
+          "FAILED"
+        ],
+        "title": "BackupStatus",
+        "type": "string"
+      },
+      "BackupTrigger": {
+        "description": "備份觸發來源（backup_runs.trigger，docs/31）。SCHEDULED＝到期 tick；MANUAL＝店長手動。",
+        "enum": [
+          "SCHEDULED",
+          "MANUAL"
+        ],
+        "title": "BackupTrigger",
+        "type": "string"
+      },
       "BrandCreate": {
         "description": "品牌建立（查無即建；同名 get_or_create 冪等）。",
         "properties": {
@@ -8510,6 +8711,111 @@
         "summary": "Get Me",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/backup/health": {
+      "get": {
+        "operationId": "getBackupHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupHealthRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Backup Health",
+        "tags": [
+          "backup"
+        ]
+      }
+    },
+    "/api/v1/backup/runs": {
+      "get": {
+        "operationId": "listBackupRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackupRunRead"
+                  },
+                  "title": "Response Listbackupruns",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Backup Runs",
+        "tags": [
+          "backup"
+        ]
+      },
+      "post": {
+        "description": "立即備份（手動）：插 RUNNING＋commit 後回應,背景續跑實際 dump。R2 未設定 → 503。",
+        "operationId": "triggerBackup",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Backup",
+        "tags": [
+          "backup"
         ]
       }
     },

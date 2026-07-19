@@ -28,6 +28,13 @@ class BackupRepository:
         await self._session.flush()
         return run
 
+    async def get_run(self, store_id: int, run_id: int) -> BackupRun | None:
+        """單筆備份（限本店;手動觸發後輪詢狀態用）。"""
+        result: BackupRun | None = await self._session.scalar(
+            select(BackupRun).where(BackupRun.id == run_id, BackupRun.store_id == store_id)
+        )
+        return result
+
     async def list_runs(self, store_id: int, *, limit: int = 30) -> list[BackupRun]:
         stmt = (
             select(BackupRun)

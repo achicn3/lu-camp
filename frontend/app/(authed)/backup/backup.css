@@ -1,0 +1,81 @@
+/* /backup 儀表板專屬樣式（健康度徽章、金鑰保管提醒橫幅、狀態色）。通用元件沿用 globals。 */
+
+.backup-key-warning {
+  border: 1px solid #d97706;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 12px 16px;
+  line-height: 1.6;
+}
+
+.backup-key-warning strong {
+  color: #b45309;
+}
+
+.backup-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.backup-health-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.backup-health-item .label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.backup-health-item .value {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.backup-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.backup-status--succeeded {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.backup-status--running {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.backup-status--failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.backup-sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.backup-error-cell {
+  color: #991b1b;
+  font-size: 0.8rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .backup-key-warning {
+    background: #422006;
+    border-color: #b45309;
+    color: #fcd34d;
+  }
+  .backup-health-item {
+    border-color: #374151;
+  }
+}

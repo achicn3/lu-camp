@@ -29,6 +29,8 @@ class BackupRunRead(BaseModel):
 class BackupHealthRead(BaseModel):
     """備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     enabled: bool
     interval_hours: int
     retention: int

@@ -22,10 +22,13 @@ from app.modules.backup.backend import BackupBackend, SubprocessR2Backend
 from app.modules.backup.service import BackupService, is_backup_due
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
-from app.shared.enums import BackupTrigger
+from app.shared.enums import BackupStatus, BackupTrigger
 from app.shared.exceptions import BackupAlreadyRunning, BackupError
 
 logger = logging.getLogger(__name__)
+
+# 保留背景任務參照,避免被 GC 提前回收（asyncio 只持弱參照）。
+_background_tasks: set[asyncio.Task[None]] = set()
 
 
 def db_name_from_url(database_url: str) -> str:
@@ -103,6 +106,38 @@ async def _tick_once(
             await session.rollback()
             logger.exception("backup scheduler tick failed")
             return False
+
+
+async def _run_manual_backup(run_id: int, store_id: int) -> None:
+    """對已建的 RUNNING 列（手動觸發）於背景做外部程序並記終態,用自有 session＋commit。
+
+    端點已 commit RUNNING 並立即回應;此處續跑實際 dump（可能數十秒),前端輪詢 /backup/runs 取狀態。
+    """
+    backend = build_backup_backend()
+    if backend is None:  # 理論上端點已擋（未設定→503）;防禦性再確認
+        logger.error("manual backup launched but R2 not configured, run_id=%s", run_id)
+        return
+    factory = get_sessionmaker()
+    async with factory() as session:
+        try:
+            svc = BackupService(session, backend)
+            run = await svc.get_run(store_id, run_id)
+            if run is None or run.status is not BackupStatus.RUNNING:
+                return  # 已被別處處理（例如逾時回收）
+            await svc.execute_run(run)
+            await session.commit()
+        except Exception:  # execute_run 內部已把 dump 失敗記 FAILED;此處防 commit/session 例外
+            await session.rollback()
+            logger.exception("manual backup execution failed run_id=%s", run_id)
+
+
+def launch_manual_backup(run_id: int, store_id: int) -> None:
+    """啟動背景手動備份任務並保留參照（fire-and-forget,失敗記 log 不影響請求）。"""
+    task = asyncio.create_task(
+        _run_manual_backup(run_id, store_id), name=f"manual-backup-{run_id}"
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def scheduler_loop(stop_event: asyncio.Event) -> None:

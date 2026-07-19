@@ -102,6 +102,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backup/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Backup Health */
+        get: operations["getBackupHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backup Runs */
+        get: operations["listBackupRuns"];
+        put?: never;
+        /**
+         * Trigger Backup
+         * @description 立即備份（手動）：插 RUNNING＋commit 後回應,背景續跑實際 dump。R2 未設定 → 503。
+         */
+        post: operations["triggerBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/brands": {
         parameters: {
             query?: never;
@@ -2109,6 +2147,74 @@ export interface components {
             /** Lt 30D */
             lt_30d: string;
         };
+        /**
+         * BackupHealthRead
+         * @description 備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。
+         */
+        BackupHealthRead: {
+            /** Due Now */
+            due_now: boolean;
+            /** Enabled */
+            enabled: boolean;
+            /** Interval Hours */
+            interval_hours: number;
+            /** Last Success Age Hours */
+            last_success_age_hours: number | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Offpeak Hour */
+            offpeak_hour: number;
+            /** Retention */
+            retention: number;
+            /** Running */
+            running: boolean;
+        };
+        /**
+         * BackupRunRead
+         * @description 一次備份執行的輸出（清單用）。
+         */
+        BackupRunRead: {
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /** Db Name */
+            db_name: string;
+            /** File Name */
+            file_name: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Last Error */
+            last_error: string | null;
+            /** R2 Key */
+            r2_key: string | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            status: components["schemas"]["BackupStatus"];
+            trigger: components["schemas"]["BackupTrigger"];
+        };
+        /**
+         * BackupStatus
+         * @description 備份執行狀態（backup_runs.status，docs/31）。
+         *
+         *     RUNNING：進行中（同店至多一列，單一在跑守衛）；SUCCEEDED：dump→驗證→加密→上傳→修剪全過；
+         *     FAILED：任一步失敗（如實記 last_error，不得記成功——假備份是最大風險）。
+         * @enum {string}
+         */
+        BackupStatus: "RUNNING" | "SUCCEEDED" | "FAILED";
+        /**
+         * BackupTrigger
+         * @description 備份觸發來源（backup_runs.trigger，docs/31）。SCHEDULED＝到期 tick；MANUAL＝店長手動。
+         * @enum {string}
+         */
+        BackupTrigger: "SCHEDULED" | "MANUAL";
         /**
          * BrandCreate
          * @description 品牌建立（查無即建；同名 get_or_create 冪等）。
@@ -5179,6 +5285,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurrentUserResponse"];
+                };
+            };
+        };
+    };
+    getBackupHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupHealthRead"];
+                };
+            };
+        };
+    };
+    listBackupRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    triggerBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"];
                 };
             };
         };

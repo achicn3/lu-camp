@@ -229,3 +229,80 @@ def test_build_backup_backend_none_when_unconfigured() -> None:
 
     assert build_backup_backend() is None
     assert db_name_from_url("postgresql+asyncpg://u:p@h:1/lucamp") == "lucamp"
+
+
+# --- 手動兩階段（start_run→execute_run）＋逾時回收＋健康度（docs/31 §4/§5）--------------
+
+
+@pytest.mark.asyncio
+async def test_start_then_execute_two_phase(db_session: AsyncSession) -> None:
+    store_id = await _store(db_session)
+    svc = BackupService(db_session, FakeBackend())
+    run = await svc.start_run(
+        store_id, db_name="lucamp", trigger=BackupTrigger.MANUAL, actor_user_id=None
+    )
+    assert run.status == BackupStatus.RUNNING and run.finished_at is None
+    done = await svc.execute_run(run)
+    assert done.status == BackupStatus.SUCCEEDED
+    assert done.r2_key and done.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_stale_running_reaped_then_new_backup(db_session: AsyncSession) -> None:
+    # 逾時 RUNNING（40 分鐘前、疑似行程中斷）→ start_run 先回收為 FAILED,再開新的一次。
+    store_id = await _store(db_session)
+    stale = BackupRun(
+        store_id=store_id,
+        trigger=BackupTrigger.SCHEDULED,
+        status=BackupStatus.RUNNING,
+        db_name="lucamp",
+        started_at=datetime.now(UTC) - timedelta(minutes=40),
+    )
+    db_session.add(stale)
+    await db_session.flush()
+    run = await BackupService(db_session, FakeBackend()).run_backup(
+        store_id, db_name="lucamp", trigger=BackupTrigger.MANUAL, actor_user_id=None
+    )
+    assert run.status == BackupStatus.SUCCEEDED  # 新備份成功
+    await db_session.refresh(stale)
+    assert stale.status == BackupStatus.FAILED  # 舊的逾時列被回收
+    assert stale.last_error and "逾時" in stale.last_error
+
+
+@pytest.mark.asyncio
+async def test_recent_running_not_reaped(db_session: AsyncSession) -> None:
+    # 剛開始（5 分鐘前）的 RUNNING 不算逾時 → 守衛仍擋（BackupAlreadyRunning）。
+    store_id = await _store(db_session)
+    db_session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.MANUAL,
+            status=BackupStatus.RUNNING,
+            db_name="lucamp",
+            started_at=datetime.now(UTC) - timedelta(minutes=5),
+        )
+    )
+    await db_session.flush()
+    with pytest.raises(BackupAlreadyRunning):
+        await BackupService(db_session, FakeBackend()).run_backup(
+            store_id, db_name="lucamp", trigger=BackupTrigger.MANUAL, actor_user_id=None
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_health(db_session: AsyncSession) -> None:
+    store_id = await _store(db_session)
+    svc = BackupService(db_session, FakeBackend())
+    # 從未成功 → 到期、無上次時間
+    h0 = await svc.get_health(store_id)
+    assert h0.enabled is True and h0.due_now is True
+    assert h0.last_success_at is None and h0.last_success_age_hours is None
+    assert h0.running is False
+    # 成功一次後 → 有上次時間、age≈0、未到期
+    await svc.run_backup(
+        store_id, db_name="lucamp", trigger=BackupTrigger.MANUAL, actor_user_id=None
+    )
+    h1 = await svc.get_health(store_id)
+    assert h1.last_success_at is not None
+    assert h1.last_success_age_hours is not None and h1.last_success_age_hours < 1
+    assert h1.due_now is False

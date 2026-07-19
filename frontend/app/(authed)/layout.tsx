@@ -35,6 +35,7 @@ const MORE_NAV: NavItem[] = [
   { href: "/menu", label: "餐飲菜單", ready: true, managerOnly: true },
   { href: "/reports", label: "報表", ready: true, managerOnly: true },
   { href: "/settings", label: "設定", ready: true, managerOnly: true },
+  { href: "/backup", label: "備份", ready: true, managerOnly: true },
 ];
 
 const emptySubscribe = () => () => {};

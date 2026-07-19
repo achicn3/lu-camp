@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
+from app.modules.backup.router import router as backup_router
 from app.modules.backup.scheduler import scheduler_loop
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
@@ -149,6 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(campaigns_router, prefix=API_PREFIX)
     app.include_router(einvoice_router, prefix=API_PREFIX)
     app.include_router(einvoice_invoices_router, prefix=API_PREFIX)
+    app.include_router(backup_router, prefix=API_PREFIX)
     return app
 
 
