@@ -4,6 +4,7 @@
 R2/口令未設定 → 手動觸發回 503（不靜默假成功）。設定（間隔/保留/離峰/啟用）沿用既有 /settings。
 """
 
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,12 +14,21 @@ from app.core.config import get_settings as get_app_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.backup.backend import BackupArtifact, BackupBackend
+from app.modules.backup.restore import RestoreBackend, RestoreVerifier, VerificationResult
+from app.modules.backup.restore_service import RestoreService, default_restore_db_name
 from app.modules.backup.scheduler import (
     build_backup_backend,
+    build_restore_backend,
     db_name_from_url,
     launch_manual_backup,
+    launch_restore,
 )
-from app.modules.backup.schemas import BackupHealthRead, BackupRunRead
+from app.modules.backup.schemas import (
+    BackupHealthRead,
+    BackupRunRead,
+    RestoreRunRead,
+    RestoreTriggerRequest,
+)
 from app.modules.backup.service import BackupService
 from app.shared.enums import BackupTrigger, UserRole
 from app.shared.exceptions import BackupAlreadyRunning
@@ -72,6 +82,61 @@ async def trigger_backup(session: SessionDep, user: ManagerDep) -> BackupRunRead
     return BackupRunRead.model_validate(run)
 
 
+@router.get(
+    "/restores", response_model=list[RestoreRunRead], operation_id="listRestoreRuns"
+)
+async def list_restore_runs(
+    session: SessionDep,
+    user: ManagerDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+) -> list[RestoreRunRead]:
+    svc = RestoreService(session, _noop_restore_backend(), _noop_restore_verifier())
+    runs = await svc.list_restores(user.store_id, limit=limit)
+    return [RestoreRunRead.model_validate(r) for r in runs]
+
+
+@router.post(
+    "/restore",
+    response_model=RestoreRunRead,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="triggerRestore",
+)
+async def trigger_restore(
+    payload: RestoreTriggerRequest, session: SessionDep, user: ManagerDep
+) -> RestoreRunRead:
+    """觸發還原到 throwaway 庫＋四驗（高危,強卡控）。正式庫不受影響;VERIFIED 後切換另跑受控腳本。
+
+    卡控：①MANAGER（require_role）②知情勾選 acknowledge ③打字確認 confirm_text＝該備份「檔名」。
+    """
+    if not payload.acknowledge:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="請先勾選知情同意（還原到獨立驗證庫、不影響現行資料）",
+        )
+    expected = os.path.basename(payload.source_r2_key)
+    if payload.confirm_text.strip() != expected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"確認字串不符：請輸入該備份檔名「{expected}」",
+        )
+    backend = build_restore_backend()
+    if backend is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="還原未設定（R2 憑證/AES 口令未提供,見 .env.r2）",
+        )
+    svc = RestoreService(session, backend, _noop_restore_verifier())
+    run = await svc.start_restore(
+        user.store_id,
+        source_r2_key=payload.source_r2_key,
+        actor_user_id=user.id,
+        restore_db_name=default_restore_db_name(),
+    )
+    await session.commit()
+    launch_restore(run.id, user.store_id)  # 背景執行還原＋四驗;前端輪詢
+    return RestoreRunRead.model_validate(run)
+
+
 class _NoopBackend(BackupBackend):
     """讀取端（健康度/清單）不需真後端;給 BackupService 一個不會被呼叫的占位替身。"""
 
@@ -84,3 +149,23 @@ class _NoopBackend(BackupBackend):
 
 def _noop_backend() -> BackupBackend:
     return _NoopBackend()
+
+
+class _NoopRestoreBackend:
+    """讀取端（清單）不需真後端;不會被呼叫的占位替身。"""
+
+    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
+        raise RuntimeError("read-only restore endpoint must not restore")
+
+
+class _NoopRestoreVerifier:
+    async def verify(self, *, target_db: str) -> list[VerificationResult]:
+        raise RuntimeError("read-only restore endpoint must not verify")
+
+
+def _noop_restore_backend() -> RestoreBackend:
+    return _NoopRestoreBackend()
+
+
+def _noop_restore_verifier() -> RestoreVerifier:
+    return _NoopRestoreVerifier()

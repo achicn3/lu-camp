@@ -65,6 +65,32 @@ try {
   await page.screenshot({ path: `${SHOTS}/backup-trigger-unconfigured.png`, fullPage: true });
   console.log("  shot: backup-trigger-unconfigured.png");
 
+  // --- restore card: gated confirm (type filename + acknowledge), then honest 503 (no R2 in dev) ---
+  // (A SUCCEEDED backup_run is seeded into the e2e DB so the source dropdown populates.)
+  assert(/還原（災難復原）/.test(afterTrigger), "restore card renders");
+  const restoreSelect = page.locator("select");
+  if ((await restoreSelect.count()) > 0 && (await restoreSelect.locator("option").count()) > 1) {
+    await restoreSelect.selectOption({ index: 1 });
+    await page.click('button:has-text("還原此備份到驗證庫")');
+    await page.waitForTimeout(300);
+    const confirmBtn = page.locator('button:has-text("確認還原到驗證庫")');
+    assert(await confirmBtn.isDisabled(), "confirm disabled before typing filename + acknowledging");
+    // fill the exact filename (from the option label) and check acknowledge
+    const optLabel = await restoreSelect.locator("option").nth(1).innerText();
+    const fname = optLabel.split("（")[0].trim();
+    await page.fill('.backup-confirm input[type="text"]', fname);
+    await page.check('input[aria-label="知情同意"]');
+    assert(!(await confirmBtn.isDisabled()), "confirm enabled after filename + acknowledge");
+    await confirmBtn.click();
+    await page.waitForTimeout(1200);
+    const afterRestore = await page.innerText("body");
+    assert(/未設定|R2/.test(afterRestore), "restore honestly reports 未設定 (503), no fake restore");
+    await page.screenshot({ path: `${SHOTS}/backup-restore-gated.png`, fullPage: true });
+    console.log("  shot: backup-restore-gated.png");
+  } else {
+    console.log("  (no seeded backup source; restore confirm flow skipped)");
+  }
+
   // --- CLERK blocked (fresh context, server-driven gate on MANAGER-only health) ---
   if (CLERK) {
     const clerkCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } });

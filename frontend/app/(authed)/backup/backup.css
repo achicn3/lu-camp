@@ -69,7 +69,48 @@
   font-size: 0.8rem;
 }
 
+.backup-confirm {
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 12px;
+  background: #fef2f2;
+}
+
+.field-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.backup-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.backup-verify-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: #4b5563;
+}
+
+.backup-verify-ok {
+  color: #166534;
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
 @media (prefers-color-scheme: dark) {
+  .backup-confirm {
+    background: #450a0a;
+    border-color: #dc2626;
+  }
+  .backup-verify-list {
+    color: #9ca3af;
+  }
   .backup-key-warning {
     background: #422006;
     border-color: #b45309;

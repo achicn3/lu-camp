@@ -119,6 +119,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backup/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Restore
+         * @description 觸發還原到 throwaway 庫＋四驗（高危,強卡控）。正式庫不受影響;VERIFIED 後切換另跑受控腳本。
+         *
+         *     卡控：①MANAGER（require_role）②知情勾選 acknowledge ③打字確認 confirm_text＝該備份「檔名」。
+         */
+        post: operations["triggerRestore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/restores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Restore Runs */
+        get: operations["listRestoreRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backup/runs": {
         parameters: {
             query?: never;
@@ -4210,6 +4249,55 @@ export interface components {
             /** Store Id */
             store_id: number;
         };
+        /**
+         * RestoreRunRead
+         * @description 一次還原執行的輸出（docs/31 §6）：四驗結果供 UI 呈現;VERIFIED 才代表救得回。
+         */
+        RestoreRunRead: {
+            /** Actor User Id */
+            actor_user_id: number;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Last Error */
+            last_error: string | null;
+            /** Restore Db Name */
+            restore_db_name: string;
+            /** Source R2 Key */
+            source_r2_key: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            status: components["schemas"]["RestoreStatus"];
+            /** Verifications */
+            verifications: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * RestoreStatus
+         * @description 還原執行狀態（restore_runs.status，docs/31）。
+         *
+         *     RUNNING：下載→解密→還原到全新庫→四驗 進行中；VERIFIED：四驗全過（可切換，切換為受控腳本）；
+         *     FAILED：任一步/驗證不過（正式庫未被碰、throwaway 庫可棄）。
+         * @enum {string}
+         */
+        RestoreStatus: "RUNNING" | "VERIFIED" | "FAILED";
+        /**
+         * RestoreTriggerRequest
+         * @description 觸發還原（高危,強卡控）：需 MANAGER＋打字確認（confirm_text＝該備份檔名）＋知情勾選。
+         */
+        RestoreTriggerRequest: {
+            /** Acknowledge */
+            acknowledge: boolean;
+            /** Confirm Text */
+            confirm_text: string;
+            /** Source R2 Key */
+            source_r2_key: string;
+        };
         /** ReturnCreateRequest */
         ReturnCreateRequest: {
             /** Lines */
@@ -5305,6 +5393,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupHealthRead"];
+                };
+            };
+        };
+    };
+    triggerRestore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreTriggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listRestoreRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

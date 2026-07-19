@@ -61,3 +61,21 @@ class BackupRepository:
         self._session.add(run)
         await self._session.flush()
         return run
+
+    async def get_restore(self, store_id: int, restore_id: int) -> RestoreRun | None:
+        result: RestoreRun | None = await self._session.scalar(
+            select(RestoreRun).where(
+                RestoreRun.id == restore_id, RestoreRun.store_id == store_id
+            )
+        )
+        return result
+
+    async def list_restores(self, store_id: int, *, limit: int = 30) -> list[RestoreRun]:
+        stmt = (
+            select(RestoreRun)
+            .where(RestoreRun.store_id == store_id)
+            .order_by(desc(RestoreRun.id))
+            .limit(limit)
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)

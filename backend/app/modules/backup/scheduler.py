@@ -19,11 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.modules.backup.backend import BackupBackend, SubprocessR2Backend
+from app.modules.backup.restore import (
+    RestoreBackend,
+    RestoreVerifier,
+    SqlRestoreVerifier,
+    SubprocessR2RestoreBackend,
+)
+from app.modules.backup.restore_service import RestoreService
 from app.modules.backup.service import BackupService, is_backup_due
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
-from app.shared.enums import BackupStatus, BackupTrigger
-from app.shared.exceptions import BackupAlreadyRunning, BackupError
+from app.shared.enums import BackupStatus, BackupTrigger, RestoreStatus
+from app.shared.exceptions import BackupAlreadyRunning, BackupError, RestoreError
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +143,60 @@ def launch_manual_backup(run_id: int, store_id: int) -> None:
     task = asyncio.create_task(
         _run_manual_backup(run_id, store_id), name=f"manual-backup-{run_id}"
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def build_restore_backend() -> RestoreBackend | None:
+    """由 config 建真還原後端;R2/口令未設定 → 回 None（端點回 503）。"""
+    cfg = get_settings()
+    if not cfg.r2_backup_passphrase.strip() or not cfg.r2_access_key_id.strip():
+        return None
+    url = make_url(cfg.database_url)
+    try:
+        return SubprocessR2RestoreBackend(
+            docker_bin=cfg.backup_docker_bin,
+            db_container=cfg.backup_db_container,
+            db_user=url.username or "postgres",
+            local_dir=cfg.backup_local_dir,
+            passphrase=cfg.r2_backup_passphrase,
+            r2_endpoint=cfg.r2_endpoint,
+            r2_access_key_id=cfg.r2_access_key_id,
+            r2_secret_access_key=cfg.r2_secret_access_key,
+            r2_bucket=cfg.r2_bucket,
+        )
+    except RestoreError:
+        return None
+
+
+def build_restore_verifier() -> RestoreVerifier:
+    """四驗器：連還原後的 throwaway 庫（base_url＝正式 DATABASE_URL,只換 db 名）。"""
+    return SqlRestoreVerifier(base_url=get_settings().database_url)
+
+
+async def _run_restore(restore_id: int, store_id: int) -> None:
+    """背景執行還原到 throwaway 庫＋四驗並記終態（自有 session＋commit）。正式庫全程未被觸碰。"""
+    backend = build_restore_backend()
+    if backend is None:
+        logger.error("restore launched but R2 not configured, restore_id=%s", restore_id)
+        return
+    factory = get_sessionmaker()
+    async with factory() as session:
+        try:
+            svc = RestoreService(session, backend, build_restore_verifier())
+            run = await svc.get_restore(store_id, restore_id)
+            if run is None or run.status is not RestoreStatus.RUNNING:
+                return
+            await svc.execute_restore(run)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            logger.exception("restore execution failed restore_id=%s", restore_id)
+
+
+def launch_restore(restore_id: int, store_id: int) -> None:
+    """啟動背景還原任務並保留參照（fire-and-forget）。"""
+    task = asyncio.create_task(_run_restore(restore_id, store_id), name=f"restore-{restore_id}")
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 

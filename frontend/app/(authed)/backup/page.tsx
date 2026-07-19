@@ -1,7 +1,7 @@
 "use client";
-// /backup 備份儀表板（docs/31 §5，MANAGER）：健康度、設定（間隔/保留/離峰/啟用）、
-// 備份清單、手動觸發（背景執行＋輪詢）。還原（B4）另行。權限以 MANAGER-only 的
-// /backup/health 之 401/403 把關。
+// /backup 備份儀表板（docs/31 §5/§6，MANAGER）：健康度、設定（間隔/保留/離峰/啟用）、
+// 備份清單、手動觸發（背景執行＋輪詢）、卡控還原（還原到驗證庫＋四驗，切換另跑受控腳本）。
+// 權限以 MANAGER-only 的 /backup/health 之 401/403 把關。
 import "./backup.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,6 +12,7 @@ import type { components } from "@/lib/api-types";
 
 type BackupHealthRead = components["schemas"]["BackupHealthRead"];
 type BackupRunRead = components["schemas"]["BackupRunRead"];
+type RestoreRunRead = components["schemas"]["RestoreRunRead"];
 
 /** MANAGER-only 端點回 401/403 → 標記無權限（與一般讀取失敗區分）。 */
 class ForbiddenError extends Error {}
@@ -273,6 +274,199 @@ function RunsCard({ runs }: { runs: BackupRunRead[] }) {
   );
 }
 
+function RestoreStatusBadge({ status }: { status: RestoreRunRead["status"] }) {
+  const cls =
+    status === "VERIFIED"
+      ? "backup-status--succeeded"
+      : status === "RUNNING"
+        ? "backup-status--running"
+        : "backup-status--failed";
+  const label = status === "VERIFIED" ? "四驗通過" : status === "RUNNING" ? "還原中" : "失敗";
+  return <span className={`backup-status ${cls}`}>{label}</span>;
+}
+
+function VerificationList({ v }: { v: RestoreRunRead["verifications"] }) {
+  if (!v || !Array.isArray(v.checks)) return null;
+  return (
+    <ul className="backup-verify-list">
+      {(v.checks as { name: string; ok: boolean; detail: string }[]).map((c) => (
+        <li key={c.name}>
+          <span>{c.ok ? "✅" : "❌"}</span> <strong>{c.name}</strong>：{c.detail}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RestoreCard({
+  backups,
+  restores,
+  onTriggered,
+}: {
+  backups: BackupRunRead[];
+  restores: RestoreRunRead[];
+  onTriggered: () => void;
+}) {
+  // 可還原來源＝成功且有 r2_key 的備份。
+  const sources = backups.filter((b) => b.status === "SUCCEEDED" && b.r2_key);
+  const [selected, setSelected] = useState<string>("");
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [ack, setAck] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const chosen = sources.find((b) => b.r2_key === selected) ?? null;
+  const fileName = chosen?.file_name ?? "";
+
+  const restore = useMutation({
+    mutationFn: async () => {
+      const { data, error: apiError, response } = await api.POST("/api/v1/backup/restore", {
+        body: { source_r2_key: selected, confirm_text: typed.trim(), acknowledge: ack },
+      });
+      if (response.status === 503) {
+        throw new Error(extractDetail(apiError) ?? "還原尚未設定（R2 憑證未提供）");
+      }
+      if (response.status === 400) {
+        throw new Error(extractDetail(apiError) ?? "確認未通過");
+      }
+      if (!data) throw new Error(extractDetail(apiError) ?? "觸發還原失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setConfirming(false);
+      setTyped("");
+      setAck(false);
+      setError(null);
+      onTriggered();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <div className="card">
+      <h2>還原（災難復原）</h2>
+      <p className="hint">
+        還原一律倒進**獨立的驗證庫**（<code>lucamp_restore_&lt;時戳&gt;</code>）並自動四驗，
+        <strong>不影響現行營運資料</strong>。四驗通過後，正式切換需由店家停機執行受控腳本
+        <code>scripts/switch-to-restore.sh</code>（App 不會自動切換，避免中途失敗兩頭落空）。
+      </p>
+      {sources.length === 0 ? (
+        <p className="hint">尚無可還原的備份（需先有一次成功備份）。</p>
+      ) : (
+        <div className="field">
+          <span className="field-label">選擇要還原的備份</span>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+            <option value="">— 請選擇 —</option>
+            {sources.map((b) => (
+              <option key={b.id} value={b.r2_key ?? ""}>
+                {b.file_name}（{formatDateTime(b.started_at)}，{formatSize(b.size_bytes)}）
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ marginTop: 8 }}
+            disabled={!selected}
+            onClick={() => {
+              setConfirming(true);
+              setError(null);
+            }}
+          >
+            還原此備份到驗證庫…
+          </button>
+        </div>
+      )}
+
+      {confirming && chosen && (
+        <div className="backup-confirm">
+          <p className="form-error">
+            ⚠️ 高風險操作。將把「{fileName}」還原到獨立驗證庫並四驗。請輸入檔名並勾選確認。
+          </p>
+          <label className="field">
+            <span className="field-label">輸入備份檔名以確認：{fileName}</span>
+            <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} />
+          </label>
+          <label className="field-inline">
+            <input
+              type="checkbox"
+              aria-label="知情同意"
+              checked={ack}
+              onChange={(e) => setAck(e.target.checked)}
+            />
+            <span>
+              我了解此還原倒進獨立驗證庫、不影響現行資料，正式切換需另跑受控停機腳本。
+            </span>
+          </label>
+          <div className="backup-confirm-actions">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={restore.isPending || typed.trim() !== fileName || !ack}
+              onClick={() => restore.mutate()}
+            >
+              {restore.isPending ? "觸發中…" : "確認還原到驗證庫"}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setConfirming(false);
+                setTyped("");
+                setAck(false);
+              }}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="form-error" style={{ marginTop: 8 }}>
+          {error}
+        </p>
+      )}
+
+      {restores.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 16 }}>還原紀錄</h3>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>時間</th>
+                <th>來源</th>
+                <th>驗證庫</th>
+                <th>狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              {restores.map((r) => (
+                <tr key={r.id}>
+                  <td>{formatDateTime(r.started_at)}</td>
+                  <td className="backup-sha">{r.source_r2_key.replace("backups/", "")}</td>
+                  <td className="backup-sha">{r.restore_db_name}</td>
+                  <td>
+                    <RestoreStatusBadge status={r.status} />
+                    {r.status === "VERIFIED" && (
+                      <div className="backup-verify-ok">
+                        四驗通過，可切換（停機跑 switch-to-restore.sh {r.restore_db_name}）。
+                      </div>
+                    )}
+                    {r.status === "FAILED" && r.last_error && (
+                      <div className="backup-error-cell">{r.last_error}</div>
+                    )}
+                    <VerificationList v={r.verifications} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function BackupPage() {
   const queryClient = useQueryClient();
 
@@ -301,9 +495,22 @@ export default function BackupPage() {
       query.state.data?.some((r) => r.status === "RUNNING") ? 3000 : false,
   });
 
+  const restoresQuery = useQuery({
+    queryKey: ["backup-restores"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/backup/restores");
+      if (!data) throw new Error(extractDetail(error) ?? "讀取還原紀錄失敗");
+      return data;
+    },
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.some((r) => r.status === "RUNNING") ? 3000 : false,
+  });
+
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: ["backup-health"] });
     void queryClient.invalidateQueries({ queryKey: ["backup-runs"] });
+    void queryClient.invalidateQueries({ queryKey: ["backup-restores"] });
   }
 
   if (healthQuery.isPending) return <p>載入中...</p>;
@@ -330,6 +537,11 @@ export default function BackupPage() {
         <HealthCard health={healthQuery.data} onTriggered={refresh} />
         <BackupSettingsCard health={healthQuery.data} onSaved={refresh} />
         <RunsCard runs={runsQuery.data ?? []} />
+        <RestoreCard
+          backups={runsQuery.data ?? []}
+          restores={restoresQuery.data ?? []}
+          onTriggered={refresh}
+        />
       </div>
     </section>
   );

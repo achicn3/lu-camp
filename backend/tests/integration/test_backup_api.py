@@ -9,16 +9,18 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.backup.backend import BackupArtifact, BackupBackend
-from app.modules.backup.models import BackupRun
+from app.modules.backup.models import BackupRun, RestoreRun
+from app.modules.backup.restore import RestoreBackend
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import BackupStatus, BackupTrigger, UserRole
+from app.shared.enums import BackupStatus, BackupTrigger, RestoreStatus, UserRole
 
 
 class _FakeBackend(BackupBackend):
@@ -164,3 +166,122 @@ async def test_trigger_conflict_when_running(
     await db_session.flush()
     resp = await client.post("/api/v1/backup/runs", headers=_auth(token))
     assert resp.status_code == 409
+
+
+# --- 還原（docs/31 §6）：清單＋強卡控觸發 ------------------------------------------
+
+
+class _FakeRestoreBackend(RestoreBackend):
+    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_list_restores(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    token, store_id = await _seed_user(db_session, UserRole.MANAGER)
+    # actor_user_id 需存在的 user；_seed_user 已建一個 MANAGER（id 取自該 store 的 user）
+    from app.modules.user.models import User as U
+
+    uid = await db_session.scalar(select(U.id).where(U.store_id == store_id))
+    db_session.add(
+        RestoreRun(
+            store_id=store_id,
+            status=RestoreStatus.VERIFIED,
+            source_r2_key="backups/lucamp_x.dump.enc",
+            restore_db_name="lucamp_restore_x",
+            actor_user_id=uid,
+            verifications={"all_ok": True, "checks": []},
+        )
+    )
+    await db_session.flush()
+    resp = await client.get("/api/v1/backup/restores", headers=_auth(token))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body) == 1
+    assert body[0]["status"] == "VERIFIED"
+    assert body[0]["restore_db_name"] == "lucamp_restore_x"
+
+
+@pytest.mark.asyncio
+async def test_restore_requires_acknowledge(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _ = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/lucamp_x.dump.enc",
+            "confirm_text": "lucamp_x.dump.enc",
+            "acknowledge": False,
+        },
+    )
+    assert resp.status_code == 400
+    assert "知情" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_restore_confirm_text_must_match_filename(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _ = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/lucamp_x.dump.enc",
+            "confirm_text": "亂打",
+            "acknowledge": True,
+        },
+    )
+    assert resp.status_code == 400
+    assert "lucamp_x.dump.enc" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_restore_503_when_unconfigured(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # 卡控全過但 R2 未設定 → 503（測試環境無 R2）。
+    token, _ = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/lucamp_x.dump.enc",
+            "confirm_text": "lucamp_x.dump.enc",
+            "acknowledge": True,
+        },
+    )
+    assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_restore_accepts_and_inserts_running(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.modules.backup.router as router_mod
+
+    launched: list[tuple[int, int]] = []
+
+    def _fake_launch(restore_id: int, store_id: int) -> None:
+        launched.append((restore_id, store_id))
+
+    monkeypatch.setattr(router_mod, "build_restore_backend", lambda: _FakeRestoreBackend())
+    monkeypatch.setattr(router_mod, "launch_restore", _fake_launch)
+    token, store_id = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/lucamp_x.dump.enc",
+            "confirm_text": "lucamp_x.dump.enc",
+            "acknowledge": True,
+        },
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "RUNNING"
+    assert body["source_r2_key"] == "backups/lucamp_x.dump.enc"
+    assert body["restore_db_name"].startswith("lucamp_restore_")
+    assert launched == [(body["id"], store_id)]

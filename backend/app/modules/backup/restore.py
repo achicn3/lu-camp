@@ -1,0 +1,244 @@
+"""還原後端與四驗（docs/31 §6）：把「下載→解密→建全新庫→pg_restore」與「四項驗證」包成可注入介面。
+
+**絕不就地覆蓋正式庫**：一律還原到 throwaway 庫（`lucamp_restore_<stamp>`）並驗證;切換（repoint+
+重啟）另由受控腳本做（app 不能一邊連正式庫一邊把自己換掉,單機中途失敗兩頭落空）。
+
+四驗（docs/31 §6）：①alembic current=head ②關鍵表可查/筆數 ③簽名 BYTEA 抽驗 sha256 可讀
+④起後端可用（SELECT 1）。任一不過 → 該次還原記 FAILED,不顯示綠燈。外部程序失敗一律 raise
+RestoreError（訊息不含祕密）。
+"""
+
+import asyncio
+import hashlib
+import re
+import subprocess
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Protocol
+
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.shared.exceptions import RestoreError
+
+_ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
+# throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
+_SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+# 關鍵表：涵蓋交易/現金/會員PII/庫存/簽署/購物金/稽核/租戶/使用者/設定——schema 完整性抽驗。
+_KEY_TABLES = (
+    "sales",
+    "contacts",
+    "signature_tasks",
+    "serialized_items",
+    "cash_sessions",
+    "store_credit_ledger",
+    "audit_log",
+    "stores",
+    "users",
+    "settings",
+)
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """單項驗證結果（落 restore_runs.verifications JSONB;供 UI 呈現）。"""
+
+    name: str
+    ok: bool
+    detail: str
+
+
+class RestoreBackend(Protocol):
+    """還原後端：下載→解密→建全新庫→pg_restore（做完或 raise RestoreError）。"""
+
+    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None: ...
+
+
+class RestoreVerifier(Protocol):
+    """對還原後的 throwaway 庫做四驗,回結果清單。"""
+
+    async def verify(self, *, target_db: str) -> list[VerificationResult]: ...
+
+
+def alembic_head() -> str:
+    """本程式碼庫期望的 alembic head（還原庫須與之相符,schema 才相容）。"""
+    head = ScriptDirectory.from_config(Config(str(_ALEMBIC_INI))).get_current_head()
+    if head is None:
+        raise RestoreError("無法取得 alembic head")
+    return head
+
+
+def _validate_db_name(target_db: str) -> None:
+    if not _SAFE_DB_NAME.match(target_db):
+        raise RestoreError("還原庫名不合法（僅允許小寫英數底線、≤63）")
+
+
+class SubprocessR2RestoreBackend:
+    """真還原後端：boto3 下載 → openssl 解密 → docker 建庫 → pg_restore。憑證/口令建構子注入。"""
+
+    def __init__(
+        self,
+        *,
+        docker_bin: str,
+        db_container: str,
+        db_user: str,
+        local_dir: str,
+        passphrase: str,
+        r2_endpoint: str,
+        r2_access_key_id: str,
+        r2_secret_access_key: str,
+        r2_bucket: str,
+    ) -> None:
+        if not passphrase.strip() or not r2_access_key_id.strip() or not r2_bucket.strip():
+            raise RestoreError("還原憑證未設定（R2/AES 口令）——請確認 .env.r2")
+        self._docker = docker_bin
+        self._container = db_container
+        self._user = db_user
+        self._dir = Path(local_dir)
+        self._passphrase = passphrase
+        self._endpoint = r2_endpoint
+        self._akid = r2_access_key_id
+        self._secret = r2_secret_access_key
+        self._bucket = r2_bucket
+
+    def _run(self, args: list[str], *, stdin_from: Path | None = None) -> None:
+        try:
+            if stdin_from is not None:
+                with stdin_from.open("rb") as inp:
+                    subprocess.run(args, stdin=inp, capture_output=True, check=True)
+            else:
+                subprocess.run(args, capture_output=True, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RestoreError(f"還原子程序失敗（{args[0]} rc={exc.returncode}）") from exc
+        except OSError as exc:
+            raise RestoreError(f"還原子程序無法執行：{exc.__class__.__name__}") from exc
+
+    def _client(self) -> object:
+        import boto3  # type: ignore[import-untyped]
+
+        return boto3.client(
+            "s3",
+            endpoint_url=self._endpoint,
+            aws_access_key_id=self._akid,
+            aws_secret_access_key=self._secret,
+            region_name="auto",
+        )
+
+    def _do(self, r2_key: str, target_db: str) -> None:
+        _validate_db_name(target_db)
+        self._dir.mkdir(parents=True, exist_ok=True)
+        enc_local = self._dir / f"{target_db}.dump.enc"
+        dump_local = self._dir / f"{target_db}.dump"
+        d, c, u = self._docker, self._container, self._user
+        # 1) 下載
+        try:
+            self._client().download_file(self._bucket, r2_key, str(enc_local))  # type: ignore[attr-defined]
+        except Exception as exc:
+            raise RestoreError(f"R2 下載失敗：{exc.__class__.__name__}") from exc
+        if not enc_local.is_file() or enc_local.stat().st_size == 0:
+            raise RestoreError("下載檔為空")
+        # 2) 解密（AES-256-CBC + PBKDF2 20 萬次）
+        self._run([
+            "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
+            "-in", str(enc_local), "-out", str(dump_local), "-pass", f"pass:{self._passphrase}",
+        ])
+        if not dump_local.is_file() or dump_local.stat().st_size == 0:
+            raise RestoreError("解密結果為空（口令錯誤或檔案損毀）")
+        # 3) 複製進容器
+        self._run([d, "cp", str(dump_local), f"{c}:/tmp/{target_db}.dump"])
+        # 4) 建全新庫（若殘留同名先移除;絕不碰正式庫）
+        self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
+                   "-c", f'DROP DATABASE IF EXISTS "{target_db}"',
+                   "-c", f'CREATE DATABASE "{target_db}"'])
+        # 5) pg_restore 進 throwaway 庫
+        self._run([d, "exec", c, "pg_restore", "-U", u, "-d", target_db, "--no-owner",
+                   f"/tmp/{target_db}.dump"])
+        # 清理本機明文/密文與容器暫存（不留可讀資料落地）
+        dump_local.unlink(missing_ok=True)
+        enc_local.unlink(missing_ok=True)
+        self._run([d, "exec", c, "rm", "-f", f"/tmp/{target_db}.dump"])
+
+    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
+        await asyncio.to_thread(self._do, r2_key, target_db)
+
+
+class SqlRestoreVerifier:
+    """真四驗：連到還原後的 throwaway 庫跑四項檢查。base_url＝正式 async URL,只換 database 名。"""
+
+    def __init__(self, *, base_url: str) -> None:
+        self._base = base_url
+
+    def _target_url(self, target_db: str) -> str:
+        return make_url(self._base).set(database=target_db).render_as_string(hide_password=False)
+
+    async def verify(self, *, target_db: str) -> list[VerificationResult]:
+        _validate_db_name(target_db)
+        engine = create_async_engine(self._target_url(target_db))
+        results: list[VerificationResult] = []
+        try:
+            async with engine.connect() as conn:
+                results.append(await self._check_alembic(conn))
+                results.append(await self._check_tables(conn))
+                results.append(await self._check_signatures(conn))
+                results.append(await self._check_usable(conn))
+        except Exception as exc:  # 連不上還原庫本身即整體失敗
+            results.append(VerificationResult("connect", False, f"{exc.__class__.__name__}"))
+        finally:
+            await engine.dispose()
+        return results
+
+    async def _check_alembic(self, conn: object) -> VerificationResult:
+        try:
+            ver = await conn.scalar(text("SELECT version_num FROM alembic_version"))  # type: ignore[attr-defined]
+            head = alembic_head()
+            return VerificationResult(
+                "alembic_head", ver == head, f"restored={ver} expected_head={head}"
+            )
+        except Exception as exc:
+            return VerificationResult("alembic_head", False, f"{exc.__class__.__name__}")
+
+    async def _check_tables(self, conn: object) -> VerificationResult:
+        counts: dict[str, int] = {}
+        ok = True
+        for tbl in _KEY_TABLES:
+            try:
+                counts[tbl] = await conn.scalar(text(f"SELECT count(*) FROM {tbl}"))  # type: ignore[attr-defined]
+            except Exception:
+                ok = False
+                counts[tbl] = -1  # -1＝該表查詢失敗（schema 缺損）
+        detail = ", ".join(f"{k}={v}" for k, v in counts.items())
+        return VerificationResult("table_counts", ok, detail)
+
+    async def _check_signatures(self, conn: object) -> VerificationResult:
+        try:
+            rows = (
+                await conn.execute(  # type: ignore[attr-defined]
+                    text(
+                        "SELECT signature_image FROM signature_tasks "
+                        "WHERE signature_image IS NOT NULL LIMIT 5"
+                    )
+                )
+            ).all()
+            for (img,) in rows:
+                if len(hashlib.sha256(img).hexdigest()) != 64:
+                    return VerificationResult("signature_bytea", False, "sha256 異常")
+            return VerificationResult(
+                "signature_bytea", True, f"抽驗 {len(rows)} 筆簽名 BYTEA sha256 可讀"
+            )
+        except Exception as exc:
+            return VerificationResult("signature_bytea", False, f"{exc.__class__.__name__}")
+
+    async def _check_usable(self, conn: object) -> VerificationResult:
+        try:
+            one = await conn.scalar(text("SELECT 1"))  # type: ignore[attr-defined]
+            return VerificationResult("backend_usable", one == 1, "SELECT 1 ok")
+        except Exception as exc:
+            return VerificationResult("backend_usable", False, f"{exc.__class__.__name__}")
+
+
+def results_to_json(results: list[VerificationResult]) -> dict[str, object]:
+    """四驗結果轉 JSONB 可存形狀（含整體 all_ok）。"""
+    return {"all_ok": all(r.ok for r in results), "checks": [asdict(r) for r in results]}

@@ -5852,6 +5852,121 @@
         "title": "ReconciliationReport",
         "type": "object"
       },
+      "RestoreRunRead": {
+        "description": "一次還原執行的輸出（docs/31 §6）：四驗結果供 UI 呈現;VERIFIED 才代表救得回。",
+        "properties": {
+          "actor_user_id": {
+            "title": "Actor User Id",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "restore_db_name": {
+            "title": "Restore Db Name",
+            "type": "string"
+          },
+          "source_r2_key": {
+            "title": "Source R2 Key",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RestoreStatus"
+          },
+          "verifications": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verifications"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "source_r2_key",
+          "restore_db_name",
+          "started_at",
+          "finished_at",
+          "verifications",
+          "last_error",
+          "actor_user_id"
+        ],
+        "title": "RestoreRunRead",
+        "type": "object"
+      },
+      "RestoreStatus": {
+        "description": "還原執行狀態（restore_runs.status，docs/31）。\n\nRUNNING：下載→解密→還原到全新庫→四驗 進行中；VERIFIED：四驗全過（可切換，切換為受控腳本）；\nFAILED：任一步/驗證不過（正式庫未被碰、throwaway 庫可棄）。",
+        "enum": [
+          "RUNNING",
+          "VERIFIED",
+          "FAILED"
+        ],
+        "title": "RestoreStatus",
+        "type": "string"
+      },
+      "RestoreTriggerRequest": {
+        "description": "觸發還原（高危,強卡控）：需 MANAGER＋打字確認（confirm_text＝該備份檔名）＋知情勾選。",
+        "properties": {
+          "acknowledge": {
+            "title": "Acknowledge",
+            "type": "boolean"
+          },
+          "confirm_text": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Confirm Text",
+            "type": "string"
+          },
+          "source_r2_key": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Source R2 Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_r2_key",
+          "confirm_text",
+          "acknowledge"
+        ],
+        "title": "RestoreTriggerRequest",
+        "type": "object"
+      },
       "ReturnCreateRequest": {
         "properties": {
           "lines": {
@@ -8735,6 +8850,107 @@
           }
         ],
         "summary": "Get Backup Health",
+        "tags": [
+          "backup"
+        ]
+      }
+    },
+    "/api/v1/backup/restore": {
+      "post": {
+        "description": "觸發還原到 throwaway 庫＋四驗（高危,強卡控）。正式庫不受影響;VERIFIED 後切換另跑受控腳本。\n\n卡控：①MANAGER（require_role）②知情勾選 acknowledge ③打字確認 confirm_text＝該備份「檔名」。",
+        "operationId": "triggerRestore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreTriggerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreRunRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Restore",
+        "tags": [
+          "backup"
+        ]
+      }
+    },
+    "/api/v1/backup/restores": {
+      "get": {
+        "operationId": "listRestoreRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RestoreRunRead"
+                  },
+                  "title": "Response Listrestoreruns",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Restore Runs",
         "tags": [
           "backup"
         ]
