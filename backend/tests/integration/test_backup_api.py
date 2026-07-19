@@ -177,6 +177,9 @@ class _FakeRestoreBackend(RestoreBackend):
     ) -> None:
         return None
 
+    async def drop_database(self, *, target_db: str) -> None:
+        return None
+
 
 async def _seed_backup(
     session: AsyncSession, store_id: int, r2_key: str = "backups/lucamp_x.dump.enc"

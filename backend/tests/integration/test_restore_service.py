@@ -7,6 +7,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.modules.backup.models import RestoreRun
 from app.modules.backup.restore import (
     RestoreBackend,
     RestoreVerifier,
@@ -25,6 +26,7 @@ class FakeRestoreBackend(RestoreBackend):
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.calls: list[tuple[str, str, str, int]] = []
+        self.dropped: list[str] = []
 
     async def fetch_and_restore(
         self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
@@ -32,6 +34,9 @@ class FakeRestoreBackend(RestoreBackend):
         self.calls.append((r2_key, target_db, expected_sha256, expected_size))
         if self.fail:
             raise RestoreError("R2 下載失敗（測試）")
+
+    async def drop_database(self, *, target_db: str) -> None:
+        self.dropped.append(target_db)
 
 
 class FakeVerifier(RestoreVerifier):
@@ -121,6 +126,7 @@ async def test_restore_rejected_when_source_not_in_catalog(db_session: AsyncSess
     assert run.status == RestoreStatus.FAILED
     assert run.last_error and "來源" in run.last_error
     assert backend.calls == []
+    assert backend.dropped == []  # 沒建庫→不需丟
 
 
 @pytest.mark.asyncio
@@ -129,7 +135,8 @@ async def test_restore_failed_when_backend_errors(db_session: AsyncSession) -> N
     store_id, user_id = await _store_and_user(db_session)
     await _seed_source_backup(db_session, store_id)
     verifier = FakeVerifier(_all_ok())
-    run = await RestoreService(db_session, FakeRestoreBackend(fail=True), verifier).run_restore(
+    backend = FakeRestoreBackend(fail=True)
+    run = await RestoreService(db_session, backend, verifier).run_restore(
         store_id,
         source_r2_key="backups/x.dump.enc",
         actor_user_id=user_id,
@@ -139,6 +146,7 @@ async def test_restore_failed_when_backend_errors(db_session: AsyncSession) -> N
     assert run.last_error and "下載" in run.last_error
     assert run.verifications is None
     assert verifier.called is False
+    assert "lucamp_restore_test" in backend.dropped  # 失敗→丟棄 throwaway（Codex #4）
 
 
 @pytest.mark.asyncio
@@ -148,7 +156,8 @@ async def test_restore_failed_when_a_check_fails(db_session: AsyncSession) -> No
     await _seed_source_backup(db_session, store_id)
     results = _all_ok()
     results[1] = VerificationResult("table_counts", False, "sales 查詢失敗")
-    run = await RestoreService(db_session, FakeRestoreBackend(), FakeVerifier(results)).run_restore(
+    backend = FakeRestoreBackend()
+    run = await RestoreService(db_session, backend, FakeVerifier(results)).run_restore(
         store_id,
         source_r2_key="backups/x.dump.enc",
         actor_user_id=user_id,
@@ -157,6 +166,7 @@ async def test_restore_failed_when_a_check_fails(db_session: AsyncSession) -> No
     assert run.status == RestoreStatus.FAILED
     assert run.last_error and "table_counts" in run.last_error
     assert run.verifications is not None and run.verifications["all_ok"] is False
+    assert "lucamp_restore_test" in backend.dropped  # 四驗不過→丟棄 throwaway（Codex #4）
 
 
 @pytest.mark.asyncio
@@ -175,6 +185,34 @@ async def test_restore_writes_audit(db_session: AsyncSession) -> None:
         select(func.count()).select_from(AuditLog).where(AuditLog.action == "RESTORE_RUN")
     )
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_reap_old_restores_drops_failed_and_old_verified(db_session: AsyncSession) -> None:
+    # Codex 第三輪 #4：回收舊 throwaway 庫——丟 FAILED 與較舊 VERIFIED,留最新 VERIFIED＋當前這次。
+    store_id, user_id = await _store_and_user(db_session)
+
+    def _mk(status: RestoreStatus, db: str) -> RestoreRun:
+        r = RestoreRun(
+            store_id=store_id, status=status, source_r2_key="backups/x.dump.enc",
+            restore_db_name=db, actor_user_id=user_id,
+        )
+        db_session.add(r)
+        return r
+
+    r_old_ok = _mk(RestoreStatus.VERIFIED, "lucamp_restore_a")
+    _mk(RestoreStatus.FAILED, "lucamp_restore_b")
+    r_new_ok = _mk(RestoreStatus.VERIFIED, "lucamp_restore_c")
+    r_current = _mk(RestoreStatus.RUNNING, "lucamp_restore_d")
+    await db_session.flush()
+    backend = FakeRestoreBackend()
+    await RestoreService(db_session, backend, FakeVerifier(_all_ok())).reap_old_restores(
+        store_id, keep_run_id=r_current.id
+    )
+    # 丟：最舊 VERIFIED(a) + FAILED(b)；留：最新 VERIFIED(c) + 當前 RUNNING(d)
+    assert set(backend.dropped) == {"lucamp_restore_a", "lucamp_restore_b"}
+    assert r_new_ok.restore_db_name == "lucamp_restore_c"  # 保留供切換
+    assert r_old_ok.id < r_new_ok.id
 
 
 def test_default_restore_db_name_shape() -> None:

@@ -30,9 +30,10 @@ DB_USER="${POSTGRES_USER:-lucamp}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OLD_DB="${LIVE_DB}_old_${STAMP}"
 
-# 還原庫名嚴格樣式（只接受 restore 演練產生的名字；擋 postgres/live 等任意庫名，Codex #3）
-if ! [[ "$RESTORE_DB" =~ ^lucamp_restore_[0-9]{8}_[0-9]{6}$ ]]; then
-  echo "錯誤：只接受 lucamp_restore_YYYYMMDD_HHMMSS 樣式的還原庫名：$RESTORE_DB" >&2
+# 還原庫名嚴格樣式（只接受 restore 演練產生的名字；擋 postgres/live 等任意庫名）
+# 名字含短 UUID 後綴（防同秒碰撞，Codex 第三輪 #2）。
+if ! [[ "$RESTORE_DB" =~ ^lucamp_restore_[0-9]{8}_[0-9]{6}_[0-9a-f]{8}$ ]]; then
+  echo "錯誤：只接受 lucamp_restore_YYYYMMDD_HHMMSS_<uuid8> 樣式的還原庫名：$RESTORE_DB" >&2
   exit 2
 fi
 if [[ "$RESTORE_DB" == "$LIVE_DB" || "$LIVE_DB" == "postgres" ]]; then

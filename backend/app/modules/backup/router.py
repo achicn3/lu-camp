@@ -169,6 +169,9 @@ class _NoopRestoreBackend:
     ) -> None:
         raise RuntimeError("read-only restore endpoint must not restore")
 
+    async def drop_database(self, *, target_db: str) -> None:
+        raise RuntimeError("read-only restore endpoint must not drop databases")
+
 
 class _NoopRestoreVerifier:
     async def verify(self, *, target_db: str) -> list[VerificationResult]:

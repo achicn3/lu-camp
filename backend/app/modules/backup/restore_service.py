@@ -4,7 +4,9 @@
 兩階段（start_restore/execute_restore）供端點「立即回 RUNNING＋背景執行」。還原屬高危,一律 audit。
 """
 
+import logging
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,7 @@ from app.modules.backup.restore import (
 from app.shared.enums import RestoreStatus
 from app.shared.exceptions import RestoreError
 
+logger = logging.getLogger(__name__)
 _ERR_MAX = 2000
 
 
@@ -27,9 +30,12 @@ def _stamp() -> str:
 
 
 def default_restore_db_name(now: datetime | None = None) -> str:
-    """throwaway 還原庫名：lucamp_restore_<時戳>（不與正式庫同名,絕不就地覆蓋）。"""
+    """throwaway 還原庫名：lucamp_restore_<時戳>_<uuid8>。
+
+    加短 UUID：同秒觸發的兩次還原也拿到唯一庫名 → 目標庫與所有暫存路徑（host/容器）皆唯一,不會
+    互相覆蓋或競爭 DROP/CREATE/pg_restore（Codex 第三輪 #2）。不與正式庫同名,絕不就地覆蓋。"""
     ts = (now or datetime.now(UTC)).strftime("%Y%m%d_%H%M%S")
-    return f"lucamp_restore_{ts}"
+    return f"lucamp_restore_{ts}_{uuid4().hex[:8]}"
 
 
 class RestoreService:
@@ -73,21 +79,44 @@ class RestoreService:
                 expected_size=source.size_bytes,
             )
         except RestoreError as exc:
-            return await self._fail(run, str(exc))
+            return await self._fail(run, str(exc), drop=True)
         except Exception as exc:  # 任何外部程序例外一律如實記 FAILED
-            return await self._fail(run, f"還原未預期錯誤：{exc.__class__.__name__}")
+            return await self._fail(run, f"還原未預期錯誤：{exc.__class__.__name__}", drop=True)
         results = await self._verifier.verify(target_db=run.restore_db_name)
         run.verifications = results_to_json(results)
         if all(r.ok for r in results):
             run.status = RestoreStatus.VERIFIED
         else:
-            run.status = RestoreStatus.FAILED
             failed = [r.name for r in results if not r.ok]
-            run.last_error = f"四驗未全過：{', '.join(failed)}"[:_ERR_MAX]
+            return await self._fail(run, f"四驗未全過：{', '.join(failed)}", drop=True)
         run.finished_at = datetime.now(UTC)
         await self._session.flush()
         await self._audit(run)
         return run
+
+    async def _drop_throwaway(self, target_db: str) -> None:
+        """丟棄 throwaway 還原庫（best-effort;失敗只記 log,不影響狀態）。"""
+        try:
+            await self._backend.drop_database(target_db=target_db)
+        except Exception:
+            logger.warning("failed to drop throwaway restore db %s", target_db, exc_info=True)
+
+    async def reap_old_restores(self, store_id: int, *, keep_run_id: int) -> None:
+        """回收舊 throwaway 還原庫（Codex #4）：丟棄 FAILED 者與較舊的 VERIFIED,只留**最新一份
+        VERIFIED**（供切換）＋當前這次;避免重試/演練累積整庫塞爆磁碟。進行中(RUNNING)者不動。"""
+        runs = await self._repo.list_restores(store_id, limit=200)
+        verified = sorted(
+            (r for r in runs if r.status == RestoreStatus.VERIFIED and r.id != keep_run_id),
+            key=lambda r: r.id,
+            reverse=True,
+        )
+        keep_verified = verified[0].id if verified else None
+        for r in runs:
+            if r.id == keep_run_id or r.status == RestoreStatus.RUNNING:
+                continue
+            if r.status == RestoreStatus.VERIFIED and r.id == keep_verified:
+                continue  # 保留最新一份 VERIFIED 供切換
+            await self._drop_throwaway(r.restore_db_name)
 
     async def run_restore(
         self, store_id: int, *, source_r2_key: str, actor_user_id: int, restore_db_name: str
@@ -107,10 +136,12 @@ class RestoreService:
     async def get_restore(self, store_id: int, restore_id: int) -> RestoreRun | None:
         return await self._repo.get_restore(store_id, restore_id)
 
-    async def _fail(self, run: RestoreRun, message: str) -> RestoreRun:
+    async def _fail(self, run: RestoreRun, message: str, *, drop: bool = False) -> RestoreRun:
         run.status = RestoreStatus.FAILED
         run.last_error = message[:_ERR_MAX]
         run.finished_at = datetime.now(UTC)
+        if drop:  # 部分/未驗證的 throwaway 庫無用又佔磁碟 → 立即丟棄（Codex 第三輪 #4）
+            await self._drop_throwaway(run.restore_db_name)
         await self._session.flush()
         await self._audit(run)
         return run

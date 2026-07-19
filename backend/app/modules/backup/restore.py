@@ -30,6 +30,8 @@ from app.shared.exceptions import RestoreError
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
 _SUBPROC_TIMEOUT = 1800  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
+# 序列化 migrate-forward：alembic 的 in-process context 非執行緒安全,同一行程一次只跑一個升級。
+_MIGRATE_LOCK = asyncio.Lock()
 # throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
 _SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 # 關鍵表：涵蓋交易/現金/會員PII/庫存/簽署/購物金/稽核/租戶/使用者/設定——schema 完整性抽驗。
@@ -67,6 +69,10 @@ class RestoreBackend(Protocol):
         self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
     ) -> None: ...
 
+    async def drop_database(self, *, target_db: str) -> None:
+        """丟棄一個 throwaway 還原庫（清理 FAILED/過舊者,避免累積塞爆磁碟）。"""
+        ...
+
 
 class RestoreVerifier(Protocol):
     """對還原後的 throwaway 庫做四驗,回結果清單。"""
@@ -89,14 +95,14 @@ def _is_ancestor(rev: str, head: str) -> bool:
 
 
 def _upgrade_to_head(target_async_url: str) -> None:
-    """把指定（throwaway 還原）庫升級到 alembic head。以 ALEMBIC_TARGET_URL 指定目標,env.py 據此
-    連線;finally 一定清除,避免污染後續正式 alembic 操作。同步呼叫,由 asyncio.to_thread 包起。"""
+    """把指定（throwaway 還原）庫升級到 alembic head。目標 URL **走 per-call Config**（非全域
+    os.environ,避免併發互踩;env.py 另有 lucamp_restore_ 白名單防呆,杜絕誤打正式庫）。同步呼叫,由
+    asyncio.to_thread 包起,並由 _MIGRATE_LOCK 序列化（alembic in-process context 非執行緒安全）。"""
+    if not (make_url(target_async_url).database or "").startswith("lucamp_restore_"):
+        raise RestoreError("migrate-forward 目標非 throwaway 還原庫,拒絕")
     cfg = Config(str(_ALEMBIC_INI))
-    os.environ["ALEMBIC_TARGET_URL"] = target_async_url
-    try:
-        command.upgrade(cfg, "head")
-    finally:
-        os.environ.pop("ALEMBIC_TARGET_URL", None)
+    cfg.set_main_option("sqlalchemy.url", target_async_url)
+    command.upgrade(cfg, "head")
 
 
 def _validate_db_name(target_db: str) -> None:
@@ -224,6 +230,18 @@ class SubprocessR2RestoreBackend:
     ) -> None:
         await asyncio.to_thread(self._do, r2_key, target_db, expected_sha256, expected_size)
 
+    def _drop(self, target_db: str) -> None:
+        _validate_db_name(target_db)
+        if not target_db.startswith("lucamp_restore_"):  # 防呆:只丟 throwaway 還原庫
+            raise RestoreError("drop_database 目標非 throwaway 還原庫,拒絕")
+        d, c, u = self._docker, self._container, self._user
+        # WITH (FORCE) 踢掉殘餘連線後刪（PG13+）;僅丟還原庫,絕不動正式庫
+        self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
+                   "-c", f'DROP DATABASE IF EXISTS "{target_db}" WITH (FORCE)'])
+
+    async def drop_database(self, *, target_db: str) -> None:
+        await asyncio.to_thread(self._drop, target_db)
+
 
 class SqlRestoreVerifier:
     """真四驗：連到還原後的 throwaway 庫跑四項檢查。base_url＝正式 async URL,只換 database 名。"""
@@ -282,7 +300,8 @@ class SqlRestoreVerifier:
                 "alembic_head", False, f"restored={ver} 為舊版本但目標非還原庫,不自動升級"
             )
         try:
-            await asyncio.to_thread(_upgrade_to_head, self._target_url(target_db))
+            async with _MIGRATE_LOCK:  # 序列化,避免併發 alembic in-process 互踩
+                await asyncio.to_thread(_upgrade_to_head, self._target_url(target_db))
         except Exception as exc:
             return VerificationResult(
                 "alembic_head", False, f"升級到 head 失敗:{exc.__class__.__name__}"

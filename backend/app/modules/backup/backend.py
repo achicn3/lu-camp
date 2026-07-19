@@ -9,6 +9,7 @@
 import asyncio
 import contextlib
 import hashlib
+import logging
 import os
 import subprocess
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Protocol
 
 from app.shared.exceptions import BackupError
+
+logger = logging.getLogger(__name__)
 
 # 單一外部子程序上限（秒）：掛住的 docker/pg_dump/openssl 逾時即失敗,不讓工作永久 RUNNING。
 _SUBPROC_TIMEOUT = 1800
@@ -175,6 +178,17 @@ class SubprocessR2Backend:
         return await asyncio.to_thread(self._do, db_name, stamp)
 
     def _prune(self, db_name: str, keep: int) -> None:
+        # 本地與遠端修剪**各自獨立**：任一失敗不阻擋另一,且各自記 log（否則缺 DeleteObject 權時
+        # 遠端一直失敗會連本地清理都跳過→磁碟無限成長而備份仍顯綠，Codex 第三輪 #5）。
+        remote_err = self._prune_remote(db_name, keep)
+        local_err = self._prune_local(db_name, keep)
+        if remote_err or local_err:  # 修剪失敗不翻覆已成功的備份,但**必須可見**（記 log）
+            logger.warning(
+                "backup prune degraded db=%s remote_err=%s local_err=%s",
+                db_name, remote_err, local_err,
+            )
+
+    def _prune_remote(self, db_name: str, keep: int) -> str | None:
         prefix = f"backups/{db_name}_"
         try:
             client = self._client()
@@ -183,11 +197,17 @@ class SubprocessR2Backend:
             for old in keys[:-keep] if keep > 0 else keys:
                 client.delete_object(Bucket=self._bucket, Key=old)  # type: ignore[attr-defined]
         except Exception as exc:
-            raise BackupError(f"R2 修剪失敗:{exc.__class__.__name__}") from exc
-        # 本地同步修剪(刪最舊,只留 keep 份加密檔)
-        local = sorted(self._dir.glob(f"{db_name}_*.dump.enc"))
-        for old_path in local[:-keep] if keep > 0 else local:
-            old_path.unlink(missing_ok=True)
+            return exc.__class__.__name__
+        return None
+
+    def _prune_local(self, db_name: str, keep: int) -> str | None:
+        try:
+            local = sorted(self._dir.glob(f"{db_name}_*.dump.enc"))
+            for old_path in local[:-keep] if keep > 0 else local:
+                old_path.unlink(missing_ok=True)
+        except Exception as exc:
+            return exc.__class__.__name__
+        return None
 
     async def prune(self, *, db_name: str, keep: int) -> None:
         await asyncio.to_thread(self._prune, db_name, keep)

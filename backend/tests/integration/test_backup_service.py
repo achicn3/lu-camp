@@ -225,6 +225,20 @@ async def test_run_due_backups_triggers_when_due(db_session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
+async def test_run_due_backups_failed_returns_false_no_prune(db_session: AsyncSession) -> None:
+    # Codex #1：備份 FAILED 時 run_due_backups 須回 False（否則 _tick_once 會誤觸不可逆修剪）。
+    from app.modules.backup.scheduler import run_due_backups
+
+    store_id = await _store(db_session)
+    backend = FakeBackend(fail=True)
+    triggered = await run_due_backups(db_session, backend, db_name="lucamp")
+    assert triggered is False  # 有嘗試但失敗 → 不算成功 → 不修剪
+    run = await db_session.scalar(select(BackupRun).where(BackupRun.store_id == store_id))
+    assert run is not None and run.status == BackupStatus.FAILED
+    assert backend.prune_calls == []
+
+
+@pytest.mark.asyncio
 async def test_run_due_backups_skips_when_not_due(db_session: AsyncSession) -> None:
     # 剛成功過（10 分鐘前）→ 未到期 → 不觸發。
     from app.modules.backup.scheduler import run_due_backups

@@ -93,12 +93,13 @@ async def run_due_backups(
     if not is_backup_due(now=now, last_success=last, settings=settings, tz=backup_tz()):
         return False
     try:
-        await BackupService(session, backend).run_backup(
+        run = await BackupService(session, backend).run_backup(
             store_id, db_name=db_name, trigger=BackupTrigger.SCHEDULED, actor_user_id=None
         )
     except BackupAlreadyRunning:
         return False
-    return True
+    # 回傳「這次確實成功」而非只是「有嘗試」:否則 FAILED 也會觸發不可逆的修剪（Codex 第三輪 #1）。
+    return run.status is BackupStatus.SUCCEEDED
 
 
 async def _tick_once(
@@ -114,8 +115,10 @@ async def _tick_once(
             logger.exception("backup scheduler tick failed")
             return False
         if triggered:  # SUCCEEDED 已 commit → 才做不可逆的修剪（Codex #1）
-            with contextlib.suppress(Exception):
+            try:
                 await BackupService(session, backend).prune_old(db_name)
+            except Exception:
+                logger.warning("backup prune after scheduled backup failed", exc_info=True)
         return triggered
 
 
@@ -144,8 +147,10 @@ async def _run_manual_backup(run_id: int, store_id: int) -> None:
             logger.exception("manual backup execution failed run_id=%s", run_id)
             return
         if succeeded:  # SUCCEEDED 已 commit → 才做不可逆的修剪（Codex #1）
-            with contextlib.suppress(Exception):
+            try:
                 await BackupService(session, backend).prune_old(db_name)
+            except Exception:
+                logger.warning("backup prune after manual backup failed", exc_info=True)
 
 
 def launch_manual_backup(run_id: int, store_id: int) -> None:
@@ -197,6 +202,7 @@ async def _run_restore(restore_id: int, store_id: int) -> None:
             run = await svc.get_restore(store_id, restore_id)
             if run is None or run.status is not RestoreStatus.RUNNING:
                 return
+            await svc.reap_old_restores(store_id, keep_run_id=restore_id)  # 先回收舊 throwaway 庫
             await svc.execute_restore(run)
             await session.commit()
         except Exception:
