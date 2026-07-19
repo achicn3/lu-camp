@@ -12,13 +12,14 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.modules.backup.backend import BackupBackend, SubprocessR2Backend
+from app.modules.backup.models import BackupRun, RestoreRun
 from app.modules.backup.restore import (
     RestoreBackend,
     RestoreVerifier,
@@ -26,7 +27,7 @@ from app.modules.backup.restore import (
     SubprocessR2RestoreBackend,
 )
 from app.modules.backup.restore_service import RestoreService
-from app.modules.backup.service import BackupService, is_backup_due
+from app.modules.backup.service import BackupService, backup_tz, is_backup_due
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.shared.enums import BackupStatus, BackupTrigger, RestoreStatus
@@ -89,7 +90,7 @@ async def run_due_backups(
         return False
     settings = await StoreSettingsService(session).get_effective_settings(store_id)
     last = await BackupService(session, backend).last_success_at(store_id)
-    if not is_backup_due(now=now, last_success=last, settings=settings):
+    if not is_backup_due(now=now, last_success=last, settings=settings, tz=backup_tz()):
         return False
     try:
         await BackupService(session, backend).run_backup(
@@ -199,6 +200,48 @@ def launch_restore(restore_id: int, store_id: int) -> None:
     task = asyncio.create_task(_run_restore(restore_id, store_id), name=f"restore-{restore_id}")
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
+
+
+async def reconcile_orphaned_jobs(session: AsyncSession) -> tuple[int, int]:
+    """把上次行程遺留的 RUNNING 備份/還原標記 FAILED（Codex #4）。呼叫端負責 commit。
+
+    背景備份/還原是行程內任務;崩潰或部署會讓 RUNNING 列孤兒化、UI 永遠輪詢。開機無任何進行中
+    工作,故把所有 RUNNING 視為中斷 → FAILED，讓使用者可重試、UI 停止空轉。回傳 (備份數, 還原數)。
+    """
+    now = datetime.now(UTC)
+    b = await session.execute(
+        update(BackupRun)
+        .where(BackupRun.status == BackupStatus.RUNNING)
+        .values(
+            status=BackupStatus.FAILED,
+            finished_at=now,
+            last_error="重啟時偵測到中斷的備份,標記為失敗",
+        )
+    )
+    r = await session.execute(
+        update(RestoreRun)
+        .where(RestoreRun.status == RestoreStatus.RUNNING)
+        .values(
+            status=RestoreStatus.FAILED,
+            finished_at=now,
+            last_error="重啟時偵測到中斷的還原,標記為失敗",
+        )
+    )
+    await session.flush()
+    nb = int(getattr(b, "rowcount", 0) or 0)
+    nr = int(getattr(r, "rowcount", 0) or 0)
+    if nb or nr:
+        logger.info("reconciled orphaned jobs on startup: backups=%s restores=%s", nb, nr)
+    return nb, nr
+
+
+async def reconcile_orphaned_jobs_on_startup() -> tuple[int, int]:
+    """啟動 hook：自有 session＋commit 跑一次孤兒回收。"""
+    factory = get_sessionmaker()
+    async with factory() as session:
+        result = await reconcile_orphaned_jobs(session)
+        await session.commit()
+        return result
 
 
 async def scheduler_loop(stop_event: asyncio.Event) -> None:

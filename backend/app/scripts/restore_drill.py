@@ -114,7 +114,12 @@ async def main() -> int:
 
     target = default_restore_db_name()
     print(f"[3/4] 還原到 throwaway 庫 {target} …")
-    await restore_backend.fetch_and_restore(r2_key=artifact.r2_key, target_db=target)
+    await restore_backend.fetch_and_restore(
+        r2_key=artifact.r2_key,
+        target_db=target,
+        expected_sha256=artifact.sha256,
+        expected_size=artifact.size_bytes,
+    )
     after = await _snapshot(target)
 
     print("[4/4] 逐功能比對 before（來源）vs after（還原）：\n")

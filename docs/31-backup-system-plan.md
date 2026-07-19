@@ -79,6 +79,10 @@
 - 外部呼叫(docker/openssl/boto3)以**可注入替身介面**包起來(比照 amego/linepay 的 Transport),
   單元測試以假替身驗流程與狀態機,不真的 dump/上傳。
 - 寫 `audit_log`(BACKUP_RUN)。R2 成本紀律:排程每日至多 1 次(到期條件天然節流);手動由店長負責。
+- **整庫備份為全域**(一次 dump 含所有分店):保留份數修剪一律取**主店(最小 store_id)**設定,不因
+  觸發店而異——否則次要店的 retention＋手動備份會刪掉全域復原點(Codex 對抗審 #5)。多店上線時,
+  備份政策/擁有權應正式建為全域管理員專屬。離峰鐘點以 `backup_timezone`(預設 Asia/Taipei)當地時區
+  判定,非伺服器 UTC(Codex #6)。
 
 ---
 

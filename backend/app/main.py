@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.modules.acquisition.router import router as acquisition_router
 from app.modules.backup.router import router as backup_router
-from app.modules.backup.scheduler import scheduler_loop
+from app.modules.backup.scheduler import reconcile_orphaned_jobs_on_startup, scheduler_loop
 from app.modules.campaigns.router import router as campaigns_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.consignment.router import router as consignment_router
@@ -64,6 +64,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tick 為到期驅動、與請求脈絡無關;主開關 backup_scheduler_enabled=false 時直接返回。
     """
+    # 開機先回收上次行程遺留的 RUNNING 備份/還原（崩潰/部署孤兒）→ FAILED，避免 UI 永遠輪詢。
+    with contextlib.suppress(Exception):  # 回收失敗不擋啟動（DB 未就緒等）
+        await reconcile_orphaned_jobs_on_startup()
     stop_event = asyncio.Event()
     task = asyncio.create_task(scheduler_loop(stop_event), name="backup-scheduler")
     try:

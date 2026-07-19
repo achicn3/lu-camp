@@ -3,15 +3,19 @@
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.config import get_settings as get_app_settings
 from app.modules.backup.backend import BackupBackend
 from app.modules.backup.models import BackupRun
 from app.modules.backup.repository import BackupRepository
 from app.modules.settings.models import StoreSettings
+from app.modules.store.models import Store
 from app.shared.enums import BackupStatus, BackupTrigger
 from app.shared.exceptions import BackupAlreadyRunning
 
@@ -40,13 +44,23 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
+def backup_tz() -> tzinfo:
+    """離峰鐘點比對用的本地時區（config.backup_timezone,預設 Asia/Taipei）。無效字串→UTC。"""
+    try:
+        return ZoneInfo(get_app_settings().backup_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return UTC
+
+
 def is_backup_due(
-    *, now: datetime, last_success: datetime | None, settings: StoreSettings
+    *, now: datetime, last_success: datetime | None, settings: StoreSettings, tz: tzinfo
 ) -> bool:
     """到期判斷（docs/31 §3）：與 session/登入/開關機無關,只看「距上次成功多久」＋離峰時點。
 
     未啟用→永不到期(手動仍可)。從未成功過→立即到期(首次備份)。否則:距上次成功 ≥ 間隔,
-    **且**已過今日離峰鐘點(now.hour ≥ offpeak),或已落後超過 1.5×間隔則強制補(避免離峰窗一直錯過)。
+    **且**已過今日離峰鐘點,或已落後超過 1.5×間隔則強制補(避免離峰窗一直錯過)。
+    離峰鐘點以「本地時區 tz」判定:伺服器跑 UTC,故先把 now 轉 tz 再比 wall-clock hour
+    （否則店家輸入 21 會在 UTC 21:00＝台灣 05:00 才跑,誤在營業時間補跑）。
     """
     if not settings.backup_enabled:
         return False
@@ -56,8 +70,8 @@ def is_backup_due(
     elapsed = now - last_success
     if elapsed < interval:
         return False
-    # 到期了:優先落在離峰(過了離峰鐘點才跑);但落後太久(>1.5×間隔)則不再等離峰、直接補。
-    if now.hour >= settings.backup_offpeak_hour:
+    # 到期了:優先落在離峰(過了當地離峰鐘點才跑);但落後太久(>1.5×間隔)則不再等離峰、直接補。
+    if now.astimezone(tz).hour >= settings.backup_offpeak_hour:
         return True
     return elapsed >= interval * 1.5
 
@@ -120,7 +134,7 @@ class BackupService:
         await self._session.flush()
         # 修剪保留份數（best-effort;失敗只記 last_error 提示,不改備份成功狀態）。
         try:
-            keep = await self._retention(run.store_id)
+            keep = await self._retention()
             await self._backend.prune(db_name=run.db_name, keep=keep)
         except Exception as exc:  # 修剪不得翻覆已成功的備份
             run.last_error = f"備份成功,但修剪舊檔失敗:{str(exc)[:200]}"
@@ -161,7 +175,7 @@ class BackupService:
             offpeak_hour=settings.backup_offpeak_hour,
             last_success_at=last,
             last_success_age_hours=age_hours,
-            due_now=is_backup_due(now=now, last_success=last, settings=settings),
+            due_now=is_backup_due(now=now, last_success=last, settings=settings, tz=backup_tz()),
             running=running,
         )
 
@@ -187,10 +201,14 @@ class BackupService:
         await self._session.flush()
         await self._audit(store_id, running, running.actor_user_id, ok=False)
 
-    async def _retention(self, store_id: int) -> int:
+    async def _retention(self) -> int:
+        """整庫備份為全域（一次 dump 含所有分店）→ 保留份數一律取**主店（最小 store_id）**設定,
+        不因觸發店而異;否則次要店的 retention＋手動備份會刪掉全域復原點（Codex #5）。"""
         from app.modules.settings.service import StoreSettingsService
 
-        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        primary = await self._session.scalar(select(func.min(Store.id)))
+        sid = int(primary) if primary is not None else 1
+        settings = await StoreSettingsService(self._session).get_effective_settings(sid)
         return settings.backup_retention
 
     async def _audit(

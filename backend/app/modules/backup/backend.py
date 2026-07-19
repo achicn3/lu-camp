@@ -7,13 +7,18 @@
 """
 
 import asyncio
+import contextlib
 import hashlib
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from app.shared.exceptions import BackupError
+
+# 單一外部子程序上限（秒）：掛住的 docker/pg_dump/openssl 逾時即失敗,不讓工作永久 RUNNING。
+_SUBPROC_TIMEOUT = 1800
 
 
 @dataclass(frozen=True)
@@ -75,45 +80,79 @@ class SubprocessR2Backend:
         self._secret = r2_secret_access_key
         self._bucket = r2_bucket
 
-    def _run(self, args: list[str], *, stdout_to: Path | None = None) -> None:
-        """跑一個子程序;非 0 → BackupError(訊息不含憑證)。"""
+    def _run(
+        self, args: list[str], *, stdout_to: Path | None = None, env: dict[str, str] | None = None
+    ) -> None:
+        """跑一個子程序;非 0 → BackupError(訊息不含憑證)。env 用於把口令走環境變數、不進 argv。"""
+        run_env = {**os.environ, **env} if env else None
         try:
             if stdout_to is not None:
                 with stdout_to.open("wb") as out:
-                    subprocess.run(args, stdout=out, stderr=subprocess.PIPE, check=True)
+                    subprocess.run(
+                        args, stdout=out, stderr=subprocess.PIPE, check=True, env=run_env,
+                        timeout=_SUBPROC_TIMEOUT,
+                    )
             else:
-                subprocess.run(args, capture_output=True, check=True)
+                subprocess.run(
+                    args, capture_output=True, check=True, env=run_env, timeout=_SUBPROC_TIMEOUT
+                )
+        except subprocess.TimeoutExpired as exc:  # 掛住的 docker/openssl → 失敗,不永久 RUNNING
+            raise BackupError(f"備份子程序逾時({args[0]})") from exc
         except subprocess.CalledProcessError as exc:
             raise BackupError(f"備份子程序失敗({args[0]} rc={exc.returncode})") from exc
         except OSError as exc:
             raise BackupError(f"備份子程序無法執行:{exc.__class__.__name__}") from exc
 
+    def _rm_container_file(self, path: str) -> None:
+        """best-effort 刪容器內明文(finally 用;不掩蓋原始錯誤、不 raise)。"""
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [self._docker, "exec", self._container, "rm", "-f", path],
+                capture_output=True,
+                check=False,
+            )
+
     def _do(self, db_name: str, stamp: str) -> BackupArtifact:
         self._dir.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(self._dir, 0o700)  # 目錄含明文/密文,限本使用者
         dump_local = self._dir / f"{db_name}_{stamp}.dump"
         enc_local = self._dir / f"{db_name}_{stamp}.dump.enc"
         d, c, u = self._docker, self._container, self._user
-        # 1) 容器內 dump(custom format,含 BYTEA 簽名)
-        self._run(
-            [d, "exec", c, "pg_dump", "-U", u, "-Fc", "-d", db_name, "-f", "/tmp/backup.dump"]
-        )
-        # 2) 驗 dump 可讀(空/壞檔在此擋下)
-        self._run([d, "exec", c, "pg_restore", "--list", "/tmp/backup.dump"])
-        # 3) 複製出容器
-        self._run([d, "exec", c, "cat", "/tmp/backup.dump"], stdout_to=dump_local)
-        if not dump_local.is_file() or dump_local.stat().st_size == 0:
-            raise BackupError("dump 檔為空,拒絕記成功")
-        # 4) 加密(AES-256-CBC + PBKDF2 20 萬次)
-        self._run([
-            "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt",
-            "-in", str(dump_local), "-out", str(enc_local), "-pass", f"pass:{self._passphrase}",
-        ])
-        dump_local.unlink(missing_ok=True)  # 明文 dump 用畢即刪(只留加密檔)
-        sha, size = _sha256_and_size(enc_local)
-        # 5) 上傳 R2
-        key = f"backups/{enc_local.name}"
-        self._upload(enc_local, key)
-        return BackupArtifact(file_name=enc_local.name, r2_key=key, sha256=sha, size_bytes=size)
+        # 唯一容器暫存名(避免並發互踩;且下方 finally 一定清掉,不留整庫明文於容器)
+        container_dump = f"/tmp/lucamp_backup_{db_name}_{stamp}.dump"
+        try:
+            # 1) 容器內 dump(custom format,含 BYTEA 簽名)
+            self._run(
+                [d, "exec", c, "pg_dump", "-U", u, "-Fc", "-d", db_name, "-f", container_dump]
+            )
+            # 2) 驗 dump 可讀(空/壞檔在此擋下)
+            self._run([d, "exec", c, "pg_restore", "--list", container_dump])
+            # 3) 複製出容器(host 明文,權限 0600)
+            self._run([d, "exec", c, "cat", container_dump], stdout_to=dump_local)
+            if not dump_local.is_file() or dump_local.stat().st_size == 0:
+                raise BackupError("dump 檔為空,拒絕記成功")
+            with contextlib.suppress(OSError):
+                os.chmod(dump_local, 0o600)
+            # 4) 加密(AES-256-CBC + PBKDF2 20 萬次);口令走 env:不進 argv/ps
+            self._run(
+                [
+                    "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt",
+                    "-in", str(dump_local), "-out", str(enc_local), "-pass", "env:LU_BACKUP_PASS",
+                ],
+                env={"LU_BACKUP_PASS": self._passphrase},
+            )
+            with contextlib.suppress(OSError):
+                os.chmod(enc_local, 0o600)
+            sha, size = _sha256_and_size(enc_local)
+            # 5) 上傳 R2
+            key = f"backups/{enc_local.name}"
+            self._upload(enc_local, key)
+            return BackupArtifact(file_name=enc_local.name, r2_key=key, sha256=sha, size_bytes=size)
+        finally:
+            # 明文絕不留存:任何出口(含中途失敗)都刪 host 明文與容器暫存(加密檔另由 prune 管理)
+            dump_local.unlink(missing_ok=True)
+            self._rm_container_file(container_dump)
 
     def _client(self) -> object:
         import boto3  # type: ignore[import-untyped]  # 函式內 import:boto3 較重,僅備份路徑需要

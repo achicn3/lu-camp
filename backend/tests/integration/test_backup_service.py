@@ -100,21 +100,44 @@ def test_is_backup_due() -> None:
     s.backup_interval_hours = 24
     s.backup_offpeak_hour = 4
     now = datetime(2026, 7, 18, 5, 0, tzinfo=UTC)  # 05:00,已過離峰 04:00
+
+    def due(now_: datetime, ls: datetime | None) -> bool:
+        return is_backup_due(now=now_, last_success=ls, settings=s, tz=UTC)
+
     # 未啟用 → 永不到期
     s.backup_enabled = False
-    assert is_backup_due(now=now, last_success=None, settings=s) is False
+    assert due(now, None) is False
     s.backup_enabled = True
     # 從未成功過 → 立即到期(首次)
-    assert is_backup_due(now=now, last_success=None, settings=s) is True
+    assert due(now, None) is True
     # 距上次 <24h → 未到期
-    assert is_backup_due(now=now, last_success=now - timedelta(hours=10), settings=s) is False
+    assert due(now, now - timedelta(hours=10)) is False
     # 距上次 ≥24h 且已過離峰 → 到期
-    assert is_backup_due(now=now, last_success=now - timedelta(hours=25), settings=s) is True
+    assert due(now, now - timedelta(hours=25)) is True
     # 到期但未過離峰(03:00 < 04:00)且落後未達 1.5×間隔 → 先不跑(等離峰)
     early = datetime(2026, 7, 18, 3, 0, tzinfo=UTC)
-    assert is_backup_due(now=early, last_success=early - timedelta(hours=25), settings=s) is False
+    assert due(early, early - timedelta(hours=25)) is False
     # 到期、未過離峰、但落後 >1.5×間隔(36h) → 強制補(不再等離峰)
-    assert is_backup_due(now=early, last_success=early - timedelta(hours=40), settings=s) is True
+    assert due(early, early - timedelta(hours=40)) is True
+
+
+def test_is_backup_due_uses_local_timezone() -> None:
+    # Codex #6：離峰以「當地時區」判定,不可拿 UTC 的 hour 直接比。offpeak=21（台灣打烊後）。
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo("Asia/Taipei")  # UTC+8
+    s = _new_settings(1)
+    s.backup_enabled = True
+    s.backup_interval_hours = 24
+    s.backup_offpeak_hour = 21
+    last = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)  # 已到期,但兩情境都 <1.5×間隔(36h)
+    # 13:00 UTC = 21:00 台灣（elapsed 25h）→ 已過當地離峰 → 到期
+    at_2100_local = datetime(2026, 7, 18, 13, 0, tzinfo=UTC)
+    assert is_backup_due(now=at_2100_local, last_success=last, settings=s, tz=tz) is True
+    # 21:00 UTC = 隔日 05:00 台灣（當地 hour 5 < 21，elapsed 33h < 36h）→ 不跑
+    #（舊 bug 會誤用 UTC hour 21 ≥ 21 而在台灣清晨 05:00 觸發）
+    at_0500_local = datetime(2026, 7, 18, 21, 0, tzinfo=UTC)
+    assert is_backup_due(now=at_0500_local, last_success=last, settings=s, tz=tz) is False
 
 
 @pytest.mark.asyncio
@@ -129,6 +152,44 @@ async def test_run_backup_writes_audit(db_session: AsyncSession) -> None:
         select(func.count()).select_from(AuditLog).where(AuditLog.action == "BACKUP_RUN")
     )
     assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_reconcile_orphaned_jobs_marks_running_failed(db_session: AsyncSession) -> None:
+    # Codex #4：重啟時把上次遺留的 RUNNING 備份/還原標記 FAILED（不讓 UI 永遠輪詢）。
+    from app.modules.backup.models import RestoreRun
+    from app.modules.backup.scheduler import reconcile_orphaned_jobs
+    from app.modules.user.models import User
+    from app.shared.enums import RestoreStatus, UserRole
+
+    store_id = await _store(db_session)
+    user = User(store_id=store_id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.MANUAL,
+            status=BackupStatus.RUNNING,
+            db_name="lucamp",
+        )
+    )
+    db_session.add(
+        RestoreRun(
+            store_id=store_id,
+            status=RestoreStatus.RUNNING,
+            source_r2_key="backups/x.dump.enc",
+            restore_db_name="lucamp_restore_x",
+            actor_user_id=user.id,
+        )
+    )
+    await db_session.flush()
+    nb, nr = await reconcile_orphaned_jobs(db_session)
+    assert nb == 1 and nr == 1
+    b = await db_session.scalar(select(BackupRun).where(BackupRun.store_id == store_id))
+    r = await db_session.scalar(select(RestoreRun).where(RestoreRun.store_id == store_id))
+    assert b is not None and b.status == BackupStatus.FAILED and b.finished_at is not None
+    assert r is not None and r.status == RestoreStatus.FAILED and r.finished_at is not None
 
 
 # --- 排程 tick（docs/31 §3）：run_due_backups 到期驅動、記於主店名下 -----------------

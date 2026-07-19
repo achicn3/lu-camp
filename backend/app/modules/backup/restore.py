@@ -9,7 +9,9 @@ RestoreError（訊息不含祕密）。
 """
 
 import asyncio
+import contextlib
 import hashlib
+import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -22,9 +24,11 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.modules.backup.backend import _sha256_and_size
 from app.shared.exceptions import RestoreError
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
+_SUBPROC_TIMEOUT = 1800  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
 # throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
 _SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 # 關鍵表：涵蓋交易/現金/會員PII/庫存/簽署/購物金/稽核/租戶/使用者/設定——schema 完整性抽驗。
@@ -52,9 +56,15 @@ class VerificationResult:
 
 
 class RestoreBackend(Protocol):
-    """還原後端：下載→解密→建全新庫→pg_restore（做完或 raise RestoreError）。"""
+    """還原後端：下載→驗完整性→解密→建全新庫→pg_restore（做完或 raise RestoreError）。
 
-    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None: ...
+    expected_sha256/expected_size 來自來源 SUCCEEDED BackupRun：下載後先比對,不符即拒還原
+    （擋損毀檔／錯快照／他環境物件）。
+    """
+
+    async def fetch_and_restore(
+        self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
+    ) -> None: ...
 
 
 class RestoreVerifier(Protocol):
@@ -104,17 +114,35 @@ class SubprocessR2RestoreBackend:
         self._secret = r2_secret_access_key
         self._bucket = r2_bucket
 
-    def _run(self, args: list[str], *, stdin_from: Path | None = None) -> None:
+    def _run(
+        self, args: list[str], *, stdin_from: Path | None = None, env: dict[str, str] | None = None
+    ) -> None:
+        run_env = {**os.environ, **env} if env else None
         try:
             if stdin_from is not None:
                 with stdin_from.open("rb") as inp:
-                    subprocess.run(args, stdin=inp, capture_output=True, check=True)
+                    subprocess.run(
+                        args, stdin=inp, capture_output=True, check=True, env=run_env,
+                        timeout=_SUBPROC_TIMEOUT,
+                    )
             else:
-                subprocess.run(args, capture_output=True, check=True)
+                subprocess.run(
+                    args, capture_output=True, check=True, env=run_env, timeout=_SUBPROC_TIMEOUT
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise RestoreError(f"還原子程序逾時（{args[0]}）") from exc
         except subprocess.CalledProcessError as exc:
             raise RestoreError(f"還原子程序失敗（{args[0]} rc={exc.returncode}）") from exc
         except OSError as exc:
             raise RestoreError(f"還原子程序無法執行：{exc.__class__.__name__}") from exc
+
+    def _rm_container_file(self, path: str) -> None:
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                [self._docker, "exec", self._container, "rm", "-f", path],
+                capture_output=True,
+                check=False,
+            )
 
     def _client(self) -> object:
         import boto3  # type: ignore[import-untyped]
@@ -127,42 +155,56 @@ class SubprocessR2RestoreBackend:
             region_name="auto",
         )
 
-    def _do(self, r2_key: str, target_db: str) -> None:
+    def _do(self, r2_key: str, target_db: str, expected_sha256: str, expected_size: int) -> None:
         _validate_db_name(target_db)
         self._dir.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(self._dir, 0o700)
         enc_local = self._dir / f"{target_db}.dump.enc"
         dump_local = self._dir / f"{target_db}.dump"
         d, c, u = self._docker, self._container, self._user
-        # 1) 下載
+        container_dump = f"/tmp/lucamp_restore_{target_db}.dump"
         try:
-            self._client().download_file(self._bucket, r2_key, str(enc_local))  # type: ignore[attr-defined]
-        except Exception as exc:
-            raise RestoreError(f"R2 下載失敗：{exc.__class__.__name__}") from exc
-        if not enc_local.is_file() or enc_local.stat().st_size == 0:
-            raise RestoreError("下載檔為空")
-        # 2) 解密（AES-256-CBC + PBKDF2 20 萬次）
-        self._run([
-            "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
-            "-in", str(enc_local), "-out", str(dump_local), "-pass", f"pass:{self._passphrase}",
-        ])
-        if not dump_local.is_file() or dump_local.stat().st_size == 0:
-            raise RestoreError("解密結果為空（口令錯誤或檔案損毀）")
-        # 3) 複製進容器
-        self._run([d, "cp", str(dump_local), f"{c}:/tmp/{target_db}.dump"])
-        # 4) 建全新庫（若殘留同名先移除;絕不碰正式庫）
-        self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
-                   "-c", f'DROP DATABASE IF EXISTS "{target_db}"',
-                   "-c", f'CREATE DATABASE "{target_db}"'])
-        # 5) pg_restore 進 throwaway 庫
-        self._run([d, "exec", c, "pg_restore", "-U", u, "-d", target_db, "--no-owner",
-                   f"/tmp/{target_db}.dump"])
-        # 清理本機明文/密文與容器暫存（不留可讀資料落地）
-        dump_local.unlink(missing_ok=True)
-        enc_local.unlink(missing_ok=True)
-        self._run([d, "exec", c, "rm", "-f", f"/tmp/{target_db}.dump"])
+            # 1) 下載
+            try:
+                self._client().download_file(self._bucket, r2_key, str(enc_local))  # type: ignore[attr-defined]
+            except Exception as exc:
+                raise RestoreError(f"R2 下載失敗：{exc.__class__.__name__}") from exc
+            if not enc_local.is_file() or enc_local.stat().st_size == 0:
+                raise RestoreError("下載檔為空")
+            # 1b) 完整性驗證（解密前）：與來源備份 sha256/大小比對,不符即拒（擋損毀/錯快照/他物件）
+            sha, size = _sha256_and_size(enc_local)
+            if size != expected_size or sha != expected_sha256:
+                raise RestoreError("下載檔完整性不符（sha256/大小與備份紀錄不符）——拒絕還原")
+            # 2) 解密（AES-256-CBC + PBKDF2 20 萬次）;口令走 env、不進 argv
+            self._run(
+                [
+                    "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
+                    "-in", str(enc_local), "-out", str(dump_local), "-pass", "env:LU_BACKUP_PASS",
+                ],
+                env={"LU_BACKUP_PASS": self._passphrase},
+            )
+            if not dump_local.is_file() or dump_local.stat().st_size == 0:
+                raise RestoreError("解密結果為空（口令錯誤或檔案損毀）")
+            # 3) 複製進容器（唯一名）
+            self._run([d, "cp", str(dump_local), f"{c}:{container_dump}"])
+            # 4) 建全新庫（若殘留同名先移除;絕不碰正式庫）
+            self._run([d, "exec", c, "psql", "-U", u, "-d", "postgres",
+                       "-c", f'DROP DATABASE IF EXISTS "{target_db}"',
+                       "-c", f'CREATE DATABASE "{target_db}"'])
+            # 5) pg_restore 進 throwaway 庫
+            self._run([d, "exec", c, "pg_restore", "-U", u, "-d", target_db, "--no-owner",
+                       container_dump])
+        finally:
+            # 明文/密文/容器暫存各出口都清（不留可讀資料落地）
+            dump_local.unlink(missing_ok=True)
+            enc_local.unlink(missing_ok=True)
+            self._rm_container_file(container_dump)
 
-    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
-        await asyncio.to_thread(self._do, r2_key, target_db)
+    async def fetch_and_restore(
+        self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
+    ) -> None:
+        await asyncio.to_thread(self._do, r2_key, target_db, expected_sha256, expected_size)
 
 
 class SqlRestoreVerifier:

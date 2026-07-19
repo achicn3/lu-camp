@@ -35,6 +35,17 @@ class BackupRepository:
         )
         return result
 
+    async def get_succeeded_by_r2_key(self, store_id: int, r2_key: str) -> BackupRun | None:
+        """依 r2_key 找該店一筆 SUCCEEDED 備份（還原來源綁定用:只能還原目錄內的已知good備份）。"""
+        result: BackupRun | None = await self._session.scalar(
+            select(BackupRun).where(
+                BackupRun.store_id == store_id,
+                BackupRun.r2_key == r2_key,
+                BackupRun.status == BackupStatus.SUCCEEDED,
+            )
+        )
+        return result
+
     async def list_runs(self, store_id: int, *, limit: int = 30) -> list[BackupRun]:
         stmt = (
             select(BackupRun)

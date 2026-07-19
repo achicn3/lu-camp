@@ -24,10 +24,12 @@ from app.shared.exceptions import RestoreError
 class FakeRestoreBackend(RestoreBackend):
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, str, int]] = []
 
-    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
-        self.calls.append((r2_key, target_db))
+    async def fetch_and_restore(
+        self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
+    ) -> None:
+        self.calls.append((r2_key, target_db, expected_sha256, expected_size))
         if self.fail:
             raise RestoreError("R2 下載失敗（測試）")
 
@@ -61,9 +63,33 @@ async def _store_and_user(session: AsyncSession) -> tuple[int, int]:
     return store.id, user.id
 
 
+async def _seed_source_backup(
+    session: AsyncSession, store_id: int, *, r2_key: str = "backups/x.dump.enc"
+) -> str:
+    """插一筆 SUCCEEDED 備份作為還原來源（還原綁定目錄:只能還原已成功的備份）。"""
+    from app.modules.backup.models import BackupRun
+    from app.shared.enums import BackupStatus, BackupTrigger
+
+    session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.SCHEDULED,
+            status=BackupStatus.SUCCEEDED,
+            db_name="lucamp",
+            file_name=r2_key.split("/")[-1],
+            r2_key=r2_key,
+            sha256="a" * 64,
+            size_bytes=123,
+        )
+    )
+    await session.flush()
+    return r2_key
+
+
 @pytest.mark.asyncio
 async def test_restore_verified_when_all_checks_ok(db_session: AsyncSession) -> None:
     store_id, user_id = await _store_and_user(db_session)
+    await _seed_source_backup(db_session, store_id)
     backend = FakeRestoreBackend()
     verifier = FakeVerifier(_all_ok())
     run = await RestoreService(db_session, backend, verifier).run_restore(
@@ -76,14 +102,32 @@ async def test_restore_verified_when_all_checks_ok(db_session: AsyncSession) -> 
     assert run.finished_at is not None
     assert run.verifications is not None and run.verifications["all_ok"] is True
     assert len(run.verifications["checks"]) == 4
-    assert backend.calls == [("backups/x.dump.enc", "lucamp_restore_test")]
+    # 完整性資訊（sha256/大小）由來源 SUCCEEDED 備份帶入 backend
+    assert backend.calls == [("backups/x.dump.enc", "lucamp_restore_test", "a" * 64, 123)]
     assert verifier.called is True
+
+
+@pytest.mark.asyncio
+async def test_restore_rejected_when_source_not_in_catalog(db_session: AsyncSession) -> None:
+    # 未在備份目錄的任意 r2_key → 直接 FAILED,連還原後端都不呼叫（Codex #2）。
+    store_id, user_id = await _store_and_user(db_session)
+    backend = FakeRestoreBackend()
+    run = await RestoreService(db_session, backend, FakeVerifier(_all_ok())).run_restore(
+        store_id,
+        source_r2_key="backups/foreign.dump.enc",
+        actor_user_id=user_id,
+        restore_db_name="lucamp_restore_test",
+    )
+    assert run.status == RestoreStatus.FAILED
+    assert run.last_error and "來源" in run.last_error
+    assert backend.calls == []
 
 
 @pytest.mark.asyncio
 async def test_restore_failed_when_backend_errors(db_session: AsyncSession) -> None:
     # 下載/還原失敗 → FAILED，四驗不執行（不把未還原的記成 VERIFIED）。
     store_id, user_id = await _store_and_user(db_session)
+    await _seed_source_backup(db_session, store_id)
     verifier = FakeVerifier(_all_ok())
     run = await RestoreService(db_session, FakeRestoreBackend(fail=True), verifier).run_restore(
         store_id,
@@ -101,6 +145,7 @@ async def test_restore_failed_when_backend_errors(db_session: AsyncSession) -> N
 async def test_restore_failed_when_a_check_fails(db_session: AsyncSession) -> None:
     # 還原成功但四驗有一項不過 → FAILED，仍記下四驗結果供診斷。
     store_id, user_id = await _store_and_user(db_session)
+    await _seed_source_backup(db_session, store_id)
     results = _all_ok()
     results[1] = VerificationResult("table_counts", False, "sales 查詢失敗")
     run = await RestoreService(db_session, FakeRestoreBackend(), FakeVerifier(results)).run_restore(
@@ -119,6 +164,7 @@ async def test_restore_writes_audit(db_session: AsyncSession) -> None:
     from app.core.audit import AuditLog
 
     store_id, user_id = await _store_and_user(db_session)
+    await _seed_source_backup(db_session, store_id)
     await RestoreService(db_session, FakeRestoreBackend(), FakeVerifier(_all_ok())).run_restore(
         store_id,
         source_r2_key="backups/x.dump.enc",

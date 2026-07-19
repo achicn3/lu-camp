@@ -172,8 +172,29 @@ async def test_trigger_conflict_when_running(
 
 
 class _FakeRestoreBackend(RestoreBackend):
-    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
+    async def fetch_and_restore(
+        self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
+    ) -> None:
         return None
+
+
+async def _seed_backup(
+    session: AsyncSession, store_id: int, r2_key: str = "backups/lucamp_x.dump.enc"
+) -> None:
+    """插一筆 SUCCEEDED 備份作為還原來源（還原綁定目錄）。"""
+    session.add(
+        BackupRun(
+            store_id=store_id,
+            trigger=BackupTrigger.SCHEDULED,
+            status=BackupStatus.SUCCEEDED,
+            db_name="lucamp",
+            file_name=r2_key.split("/")[-1],
+            r2_key=r2_key,
+            sha256="a" * 64,
+            size_bytes=123,
+        )
+    )
+    await session.flush()
 
 
 @pytest.mark.asyncio
@@ -242,8 +263,9 @@ async def test_restore_confirm_text_must_match_filename(
 async def test_restore_503_when_unconfigured(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    # 卡控全過但 R2 未設定 → 503（測試環境無 R2）。
-    token, _ = await _seed_user(db_session, UserRole.MANAGER)
+    # 卡控全過＋來源在目錄，但 R2 未設定 → 503（測試環境無 R2）。
+    token, store_id = await _seed_user(db_session, UserRole.MANAGER)
+    await _seed_backup(db_session, store_id)
     resp = await client.post(
         "/api/v1/backup/restore",
         headers=_auth(token),
@@ -254,6 +276,24 @@ async def test_restore_503_when_unconfigured(
         },
     )
     assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_restore_404_when_source_not_in_catalog(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # 卡控全過但 source_r2_key 不是本店已成功備份 → 404（擋任意/他環境物件，Codex #2）。
+    token, _ = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.post(
+        "/api/v1/backup/restore",
+        headers=_auth(token),
+        json={
+            "source_r2_key": "backups/foreign.dump.enc",
+            "confirm_text": "foreign.dump.enc",
+            "acknowledge": True,
+        },
+    )
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -270,6 +310,7 @@ async def test_restore_accepts_and_inserts_running(
     monkeypatch.setattr(router_mod, "build_restore_backend", lambda: _FakeRestoreBackend())
     monkeypatch.setattr(router_mod, "launch_restore", _fake_launch)
     token, store_id = await _seed_user(db_session, UserRole.MANAGER)
+    await _seed_backup(db_session, store_id)
     resp = await client.post(
         "/api/v1/backup/restore",
         headers=_auth(token),

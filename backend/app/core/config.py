@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # 排程 tick：行程內背景任務的主開關與喚醒間隔（秒）。到期判斷另看 settings.backup_*。
     backup_scheduler_enabled: bool = True
     backup_tick_seconds: int = 900
+    # 離峰鐘點以「本地時區」判定（店家輸入 21 指當地 21:00）。伺服器用 UTC 跑,故比對前先轉此區。
+    backup_timezone: str = "Asia/Taipei"
 
     @field_validator("pii_enc_key")
     @classmethod

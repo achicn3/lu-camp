@@ -59,11 +59,18 @@ class RestoreService:
         """對一列 RUNNING 做「還原到全新庫＋四驗」並記終態（run 須綁在本 session）。
 
         還原或四驗任一失敗 → FAILED＋last_error（不把未驗證的記成 VERIFIED）。全過 → VERIFIED。
-        兩種終態都寫 audit_log。正式庫全程未被觸碰。
+        兩種終態都寫 audit_log。正式庫全程未被觸碰。來源必須是目錄內的 SUCCEEDED 備份,並在下載後
+        以其 sha256/大小驗完整性（擋錯快照/損毀/他物件）。
         """
+        source = await self._repo.get_succeeded_by_r2_key(run.store_id, run.source_r2_key)
+        if source is None or source.sha256 is None or source.size_bytes is None:
+            return await self._fail(run, "來源不在備份目錄或缺完整性資訊——拒絕還原")
         try:
             await self._backend.fetch_and_restore(
-                r2_key=run.source_r2_key, target_db=run.restore_db_name
+                r2_key=run.source_r2_key,
+                target_db=run.restore_db_name,
+                expected_sha256=source.sha256,
+                expected_size=source.size_bytes,
             )
         except RestoreError as exc:
             return await self._fail(run, str(exc))

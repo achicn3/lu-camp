@@ -14,6 +14,7 @@ from app.core.config import get_settings as get_app_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
 from app.modules.backup.backend import BackupArtifact, BackupBackend
+from app.modules.backup.repository import BackupRepository
 from app.modules.backup.restore import RestoreBackend, RestoreVerifier, VerificationResult
 from app.modules.backup.restore_service import RestoreService, default_restore_db_name
 from app.modules.backup.scheduler import (
@@ -119,6 +120,15 @@ async def trigger_restore(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"確認字串不符：請輸入該備份檔名「{expected}」",
         )
+    # 綁定到目錄：只能還原本店「已成功」的備份（擋任意/他環境 r2_key）。
+    source = await BackupRepository(session).get_succeeded_by_r2_key(
+        user.store_id, payload.source_r2_key
+    )
+    if source is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="找不到對應的已成功備份（只能還原本店備份紀錄中的檔案）",
+        )
     backend = build_restore_backend()
     if backend is None:
         raise HTTPException(
@@ -154,7 +164,9 @@ def _noop_backend() -> BackupBackend:
 class _NoopRestoreBackend:
     """讀取端（清單）不需真後端;不會被呼叫的占位替身。"""
 
-    async def fetch_and_restore(self, *, r2_key: str, target_db: str) -> None:
+    async def fetch_and_restore(
+        self, *, r2_key: str, target_db: str, expected_sha256: str, expected_size: int
+    ) -> None:
         raise RuntimeError("read-only restore endpoint must not restore")
 
 
