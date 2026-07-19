@@ -135,6 +135,29 @@ describe("/backup", () => {
     expect(screen.getByText(/alembic_head/)).toBeDefined();
   });
 
+  it("還原選單只列最新 retention 份（不列已被修剪刪除的舊備份）", async () => {
+    loginAs("MANAGER");
+    const manyRuns = [3, 2, 1].map((id) => ({
+      ...RUNS[0],
+      id,
+      file_name: `lucamp_${id}.dump.enc`,
+      r2_key: `backups/lucamp_${id}.dump.enc`,
+    }));
+    stubFetch((url) => {
+      if (url.includes("/backup/health")) return json({ ...HEALTH, retention: 2 });
+      if (url.includes("/backup/restores")) return json([]);
+      if (url.includes("/backup/runs")) return json(manyRuns);
+      return null;
+    });
+    renderPage();
+    await screen.findByText("還原（災難復原）");
+    // retention=2 → 選單只有 2 個備份選項（＋「請選擇」佔位）＝3 個 option；最舊的 lucamp_1 不列
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(3);
+    expect(screen.queryByText(/lucamp_1\.dump\.enc/)).toBeNull();
+    expect(screen.getByText(/lucamp_3\.dump\.enc/)).toBeDefined();
+  });
+
   it("非 MANAGER（health 403）：顯示需管理者權限、不渲染設定表單", async () => {
     loginAs("CLERK");
     stubFetch((url) => {

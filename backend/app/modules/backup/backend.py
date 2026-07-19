@@ -113,13 +113,17 @@ class SubprocessR2Backend:
             raise BackupError(f"備份子程序無法執行:{exc.__class__.__name__}") from exc
 
     def _rm_container_file(self, path: str) -> None:
-        """best-effort 刪容器內明文(finally 用;不掩蓋原始錯誤、不 raise)。"""
-        with contextlib.suppress(Exception):
-            subprocess.run(
+        """刪容器內明文(finally 用;不 raise,但失敗**必記 log**——這是整庫明文的唯一清理,靜默失敗
+        會讓 PII dump 無限期留在容器,Codex 第五輪 #4）。有 timeout,避免掛住。"""
+        try:
+            r = subprocess.run(
                 [self._docker, "exec", self._container, "rm", "-f", path],
-                capture_output=True,
-                check=False,
+                capture_output=True, timeout=60, check=False,
             )
+            if r.returncode != 0:
+                logger.warning("container cleanup failed rc=%s path=%s", r.returncode, path)
+        except Exception:
+            logger.warning("container plaintext cleanup errored path=%s", path, exc_info=True)
 
     def _do(self, db_name: str, stamp: str) -> BackupArtifact:
         self._dir.mkdir(parents=True, exist_ok=True)

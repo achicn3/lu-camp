@@ -10,6 +10,7 @@ RestoreError（訊息不含祕密）。
 
 import asyncio
 import contextlib
+import logging
 import os
 import re
 import subprocess
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.modules.backup.backend import _sha256_and_size
 from app.shared.exceptions import RestoreError
 
+logger = logging.getLogger(__name__)
 _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
 _SUBPROC_TIMEOUT = 600  # 掛住的 docker/openssl/pg_restore 逾時即失敗,不讓還原永久 RUNNING
 # 序列化 migrate-forward：alembic 的 in-process context 非執行緒安全,同一行程一次只跑一個升級。
@@ -162,12 +164,16 @@ class SubprocessR2RestoreBackend:
             raise RestoreError(f"還原子程序無法執行：{exc.__class__.__name__}") from exc
 
     def _rm_container_file(self, path: str) -> None:
-        with contextlib.suppress(Exception):
-            subprocess.run(
+        """刪容器內明文(finally 用;不 raise,但失敗必記 log——靜默失敗會留整庫明文,Codex #4）。"""
+        try:
+            r = subprocess.run(
                 [self._docker, "exec", self._container, "rm", "-f", path],
-                capture_output=True,
-                check=False,
+                capture_output=True, timeout=60, check=False,
             )
+            if r.returncode != 0:
+                logger.warning("container cleanup failed rc=%s path=%s", r.returncode, path)
+        except Exception:
+            logger.warning("container plaintext cleanup errored path=%s", path, exc_info=True)
 
     def _client(self) -> object:
         import boto3  # type: ignore[import-untyped]

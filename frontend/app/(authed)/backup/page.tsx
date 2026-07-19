@@ -301,14 +301,20 @@ function VerificationList({ v }: { v: RestoreRunRead["verifications"] }) {
 function RestoreCard({
   backups,
   restores,
+  retention,
   onTriggered,
 }: {
   backups: BackupRunRead[];
   restores: RestoreRunRead[];
+  retention: number;
   onTriggered: () => void;
 }) {
-  // 可還原來源＝成功且有 r2_key 的備份。
-  const sources = backups.filter((b) => b.status === "SUCCEEDED" && b.r2_key);
+  // 可還原來源＝成功且有 r2_key 的備份，且**只列最新 retention 份**（＝修剪保留的那些）。
+  // 更舊的雖仍有 SUCCEEDED 列，其 R2 物件已被保留份數修剪刪除，列出會讓人選到不存在的復原點
+  // （選了要等還原啟動才失敗）。只列保留中的份數＝fail-closed（Codex 第五輪 #3）。
+  const sources = backups
+    .filter((b) => b.status === "SUCCEEDED" && b.r2_key)
+    .slice(0, Math.max(retention, 0));
   const [selected, setSelected] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
@@ -540,6 +546,7 @@ export default function BackupPage() {
         <RestoreCard
           backups={runsQuery.data ?? []}
           restores={restoresQuery.data ?? []}
+          retention={healthQuery.data.retention}
           onTriggered={refresh}
         />
       </div>
