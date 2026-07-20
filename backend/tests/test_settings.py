@@ -15,7 +15,7 @@ from app.modules.settings.defaults import (
     DEFAULT_TAX_RATE,
 )
 from app.modules.settings.models import StoreSettings
-from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.schemas import SettingsRead, SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -49,6 +49,18 @@ async def test_get_effective_returns_defaults_without_persisting(db_session: Asy
     assert s.allow_clerk_manage_categories is DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES
     # 未持久化：DB 尚無該店 settings 列。
     assert await svc.get_persisted(store_id) is None
+
+
+async def test_settings_read_serializes_ntd_without_scientific_notation(
+    db_session: AsyncSession,
+) -> None:
+    store_id = await _seed_store(db_session)
+    settings = await StoreSettingsService(db_session).get_effective_settings(store_id)
+    settings.monthly_fixed_cash_outflow = Decimal("1E+5")
+
+    payload = SettingsRead.from_model(settings).model_dump(mode="json")
+
+    assert payload["monthly_fixed_cash_outflow"] == "100000"
 
 
 async def test_update_creates_row_and_applies_patch(db_session: AsyncSession) -> None:

@@ -605,6 +605,11 @@ describe("/purchasing", () => {
     // 編輯山林供應商 → 改名 → PATCH
     const rows = screen.getAllByRole("row");
     const active = rows.find((r) => within(r).queryByText("山林供應商"));
+    const inactiveRow = rows.find((r) => within(r).queryByText("已停用商"));
+    const deactivateButton = within(active as HTMLElement).getByRole("button", { name: "停用" });
+    const activateButton = within(inactiveRow as HTMLElement).getByRole("button", { name: "啟用" });
+    expect(deactivateButton.classList.contains("pur-supplier-state-btn")).toBe(true);
+    expect(activateButton.classList.contains("pur-supplier-state-btn")).toBe(true);
     await user.click(within(active as HTMLElement).getByRole("button", { name: "編輯" }));
     const nameInput = await screen.findByLabelText("編輯供應商名稱");
     await user.clear(nameInput);

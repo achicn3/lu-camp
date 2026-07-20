@@ -247,10 +247,24 @@ try {
 
   // K5b：交易紀錄頁推「交易紀錄簽收」→ 手持端 TRANSACTION_ACK → 簽名留存
   await page.goto(`${BASE}/sales`, { waitUntil: "networkidle" });
+  const viewSignature = page.locator('button[aria-label^="查看銷售"][aria-label$="簽名"]');
+  ok("交易紀錄顯示一鍵查看簽名", (await viewSignature.count()) > 0);
+  await viewSignature.first().click();
+  const evidence = page.locator('[role="dialog"][aria-label="簽署證據"]');
+  await evidence.waitFor({ timeout: 8000 });
+  const signatureImage = evidence.locator('img[alt$="簽名影像"]');
+  await signatureImage.waitFor({ timeout: 8000 });
+  ok(
+    "交易紀錄直接開啟簽名影像",
+    (await signatureImage.evaluate((image) => image.naturalWidth)) > 0,
+  );
+  await page.screenshot({ path: join(SHOTS, "04-signature-direct.png"), fullPage: true });
+  await evidence.getByRole("button", { name: "關閉" }).click();
+
   await page.click('button[aria-label^="推送銷售"]');
   await page.waitForSelector("text=交易紀錄簽收至手持裝置", { timeout: 8000 });
   ok("交易紀錄推送簽收", true);
-  await page.screenshot({ path: join(SHOTS, "04-ack-pushed.png"), fullPage: true });
+  await page.screenshot({ path: join(SHOTS, "05-ack-pushed.png"), fullPage: true });
   const ack = (await apiJson("GET", "/api/v1/kiosk/tasks/current", kiosk)).data;
   ok("手持端收到簽收任務", ack?.kind === "TRANSACTION_ACK", `kind=${ack?.kind}`);
   const ackSign = await apiJson("POST", `/api/v1/kiosk/tasks/${ack.id}/sign`, kiosk, {

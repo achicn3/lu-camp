@@ -3,6 +3,7 @@
 併發開帳見 tests/integration/test_cashdrawer_concurrency.py。
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog
+from app.modules.cashdrawer.schemas import CashSessionRead
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -40,6 +42,24 @@ async def test_open_session(db_session: AsyncSession) -> None:
     assert cs.status == CashSessionStatus.OPEN
     current = await svc.get_current_session(store_id)
     assert current is not None and current.id == cs.id
+
+
+def test_cash_session_read_serializes_amount_without_scientific_notation() -> None:
+    payload = CashSessionRead(
+        id=1,
+        store_id=1,
+        status=CashSessionStatus.OPEN,
+        opening_float=Decimal("1E+3"),
+        opened_by=1,
+        opened_at=datetime.now(UTC),
+        closed_by=None,
+        closed_at=None,
+        counted_amount=None,
+        expected_amount=None,
+        variance=None,
+    )
+
+    assert payload.model_dump(mode="json")["opening_float"] == "1000"
 
 
 async def test_open_twice_rejected(db_session: AsyncSession) -> None:

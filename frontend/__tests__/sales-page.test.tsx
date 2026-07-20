@@ -148,6 +148,55 @@ describe("/sales 交易紀錄頁", () => {
     expect(screen.queryByLabelText("作廢銷售 7")).toBeNull();
   });
 
+  it("有綁定簽署的交易可一鍵開啟簽名，未綁定者不顯示入口", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/api/v1/signing/tasks/41/signature") && method === "GET") {
+        return new Response(new Blob(["png"], { type: "image/png" }));
+      }
+      if (url.includes("/api/v1/signing/tasks/41") && method === "GET") {
+        return json({
+          id: 41,
+          store_id: 1,
+          kind: "STORE_CREDIT_USE",
+          status: "SIGNED",
+          contact_id: 9,
+          content: { debit: "300", balance_after: "700" },
+          agreement_version: null,
+          chosen_payout: null,
+          has_signature: true,
+          signed_at: "2026-07-02T03:29:00Z",
+          cancelled_at: null,
+          ref_type: null,
+          ref_id: null,
+          created_at: "2026-07-02T03:28:00Z",
+          bound_acquisition_id: null,
+          bound_sale_id: 7,
+          agreement_title: null,
+          agreement_body: null,
+          signer_name: "林測試",
+        });
+      }
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([
+          sale(7, { signature_task_id: 41 }),
+          sale(8, { signature_task_id: null }),
+        ]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("CLERK");
+
+    await waitFor(() => expect(screen.getByText("#7")).toBeTruthy());
+    expect(screen.queryByLabelText("查看銷售 8 簽名")).toBeNull();
+    await user.click(screen.getByLabelText("查看銷售 7 簽名"));
+
+    const dialog = await screen.findByRole("dialog", { name: "簽署證據" });
+    expect(within(dialog).getByText(/購物金扣抵確認 #41/)).toBeTruthy();
+    expect(within(dialog).getByText(/簽署人：林測試/)).toBeTruthy();
+  });
+
   it("已退貨的單：無作廢鈕（請走退貨流程）", async () => {
     stubFetch((url, method) => {
       if (url.includes("/linepay-refunds/pending")) return json([]);

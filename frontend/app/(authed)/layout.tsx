@@ -113,18 +113,19 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <header className="app-header">
         <nav className="app-nav" aria-label="主要導覽">
-          {visible(PRIMARY_NAV).map((item) => renderLink(item))}
           {moreItems.length > 0 && (
             <button
               type="button"
-              className="nav-link nav-more-btn"
+              className="nav-link nav-menu-btn"
+              aria-label="開啟系統選單"
               aria-haspopup="menu"
               aria-expanded={moreOpen}
               onClick={() => setMoreOpen(true)}
             >
-              ☰ 更多
+              <span aria-hidden="true">☰</span> 選單
             </button>
           )}
+          {visible(PRIMARY_NAV).map((item) => renderLink(item))}
         </nav>
         <div className="app-header-right">
           {session !== null && (
@@ -153,11 +154,11 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
         >
           <nav
             className="nav-drawer"
-            aria-label="更多功能"
+            aria-label="系統選單"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="nav-drawer-head">
-              <span>更多功能</span>
+              <span>系統選單</span>
               <button
                 type="button"
                 className="btn-ghost"

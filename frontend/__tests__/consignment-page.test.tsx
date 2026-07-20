@@ -133,6 +133,9 @@ describe("/consignment", () => {
     expect(screen.getByText("CON-001")).toBeTruthy();
     expect(screen.getAllByText("1,800").length).toBeGreaterThan(0);
     expect((screen.getByRole("button", { name: "付款" }) as HTMLButtonElement).disabled).toBe(false);
+    const searchButton = screen.getByRole("button", { name: "查找" });
+    expect(searchButton.classList.contains("btn-secondary")).toBe(true);
+    expect(searchButton.classList.contains("settle-search-submit")).toBe(true);
   });
 
   it("disables payout when no cash session is open", async () => {

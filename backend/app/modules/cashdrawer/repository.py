@@ -60,7 +60,11 @@ class CashDrawerRepository:
         return movement
 
     async def list_movements(self, session_id: int) -> list[CashMovement]:
-        stmt = select(CashMovement).where(CashMovement.session_id == session_id)
+        stmt = (
+            select(CashMovement)
+            .where(CashMovement.session_id == session_id)
+            .order_by(CashMovement.created_at.desc(), CashMovement.id.desc())
+        )
         result = await self._session.scalars(stmt)
         return list(result)
 

@@ -54,6 +54,10 @@ class CashDrawerService:
     async def get_session(self, store_id: int, session_id: int) -> CashSession | None:
         return await self._repo.get_session(store_id, session_id)
 
+    async def list_session_movements(self, session: CashSession) -> list[CashMovement]:
+        """列出單一已驗證門市班別的現金異動，最新一筆在前。"""
+        return await self._repo.list_movements(session.id)
+
     async def open_session(
         self, store_id: int, opened_by: int, opening_float: Decimal
     ) -> CashSession:

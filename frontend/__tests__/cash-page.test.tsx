@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // /cash 現金對帳頁測試：開帳/結帳對帳/手動調整角色顯示/金額驗證。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -109,8 +109,22 @@ describe("/cash", () => {
     const input = await screen.findByLabelText("開帳零用金");
     await userEvent.type(input, "12.5");
     await userEvent.click(screen.getByRole("button", { name: "開帳" }));
-    expect(await screen.findByText("請輸入整數金額")).toBeDefined();
+    expect(await screen.findByText(/請輸入整數金額/)).toBeDefined();
     expect(calls).toHaveLength(0);
+  });
+
+  it("開帳零用金輸入框不接受科學記號字元", async () => {
+    loginAs("CLERK");
+    stubFetch((url) =>
+      url.includes("/cash-sessions/current") ? json(null) : null,
+    );
+    renderPage();
+
+    const input = await screen.findByLabelText("開帳零用金");
+    await userEvent.type(input, "1e3");
+
+    expect(input).toHaveProperty("value", "13");
+    expect(screen.getByText(/不可使用科學記號/)).toBeDefined();
   });
 
   it("開帳中：結帳輸入實點金額 → 顯示應有/實點/差異", async () => {
@@ -173,6 +187,7 @@ describe("/cash", () => {
         bodies.push(String(init.body));
         return json({ id: 1, session_id: 9, store_id: 1, type: "MANUAL_ADJUST" }, 201);
       }
+      if (url.includes("/movements")) return json([]);
       return null;
     });
     renderPage();
@@ -185,6 +200,62 @@ describe("/cash", () => {
     expect(parsed.type).toBe("MANUAL_ADJUST");
     expect(parsed.amount).toBe("-200");
     expect(parsed.note).toBe("找錯錢回沖");
+  });
+
+  it("開帳中顯示手動調整清單，包含正負金額與事由", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
+      if (url.includes("/movements")) {
+        return json([
+          {
+            id: 12,
+            store_id: 1,
+            session_id: 9,
+            type: "MANUAL_ADJUST",
+            amount: "300",
+            note: "補充找零金",
+            ref_type: "manual",
+            ref_id: null,
+            created_at: "2026-06-12T10:30:00Z",
+          },
+          {
+            id: 11,
+            store_id: 1,
+            session_id: 9,
+            type: "MANUAL_ADJUST",
+            amount: "-50",
+            note: "更正找零差額",
+            ref_type: "manual",
+            ref_id: null,
+            created_at: "2026-06-12T10:00:00Z",
+          },
+          {
+            id: 10,
+            store_id: 1,
+            session_id: 9,
+            type: "SALE_IN",
+            amount: "1000",
+            note: null,
+            ref_type: "sale",
+            ref_id: 88,
+            created_at: "2026-06-12T09:30:00Z",
+          },
+        ]);
+      }
+      return null;
+    });
+
+    renderPage();
+
+    const heading = await screen.findByRole("heading", { name: "本班調整紀錄" });
+    const history = heading.closest("section");
+    expect(history).not.toBeNull();
+    expect(await within(history as HTMLElement).findByText("+300")).toBeDefined();
+    expect(within(history as HTMLElement).getByText("補充找零金")).toBeDefined();
+    expect(within(history as HTMLElement).getByText("-50")).toBeDefined();
+    expect(within(history as HTMLElement).getByText("更正找零差額")).toBeDefined();
+    expect(within(history as HTMLElement).queryByText("1,000")).toBeNull();
   });
 
   it("CLERK 看不到手動調整（前端隱藏；後端仍驗權）", async () => {

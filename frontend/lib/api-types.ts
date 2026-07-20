@@ -421,7 +421,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Cash Movements
+         * @description 列出本店指定現金班別的異動，最新一筆在前。
+         */
+        get: operations["listCashMovements"];
         put?: never;
         /**
          * Record Cash Movement
@@ -4574,6 +4578,8 @@ export interface components {
             id: number;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
             payment_method: components["schemas"]["PaymentMethod"];
+            /** Signature Task Id */
+            signature_task_id: number | null;
             status: components["schemas"]["SaleStatus"];
             /** Store Id */
             store_id: number;
@@ -5973,6 +5979,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCashMovements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashMovementRead"][];
                 };
             };
             /** @description Validation Error */

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.shared.enums import CashMovementType, CashSessionStatus
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: format(d, "f"), return_type=str)]
 
 
 def _whole(value: Decimal, *, allow_negative: bool) -> Decimal:
@@ -28,6 +28,14 @@ class CashSessionOpenRequest(BaseModel):
     """開帳：期初零用金。"""
 
     opening_float: NTDAmount
+
+    @field_validator("opening_float", mode="before")
+    @classmethod
+    def _reject_scientific_notation(cls, value: object) -> object:
+        """現金開帳只接受一般整數格式，不讓 JSON float 或指數字串繞過。"""
+        if isinstance(value, float) or "e" in str(value).lower():
+            raise ValueError("開帳金額不得使用科學記號")
+        return value
 
     @field_validator("opening_float")
     @classmethod

@@ -575,9 +575,13 @@ export default function SettingsPage() {
     retry: false, // gate 查詢：權限/錯誤即時決斷，不重試（403 立即顯示提示）
   });
 
-  function refresh() {
+  function refreshSettings() {
     void queryClient.invalidateQueries({ queryKey: ["settings"] });
     void queryClient.invalidateQueries({ queryKey: ["premium-suggestion"] });
+  }
+
+  function refreshPremiumSettings() {
+    refreshSettings();
     void queryClient.invalidateQueries({ queryKey: ["premium-rate-history"] });
   }
 
@@ -606,13 +610,13 @@ export default function SettingsPage() {
     <section>
       <h1 className="page-title">設定</h1>
       <div className="card-stack">
-        <GeneralSettingsCard settings={settings} onSaved={refresh} />
-        <MobilePaymentCard settings={settings} onSaved={refresh} />
+        <GeneralSettingsCard settings={settings} onSaved={refreshSettings} />
+        <MobilePaymentCard settings={settings} onSaved={refreshSettings} />
         <PremiumRateCard
           settings={settings}
           suggestion={suggestionQuery.data ?? null}
           suggestionError={suggestionQuery.isError}
-          onSaved={refresh}
+          onSaved={refreshPremiumSettings}
         />
         {/* 歷史載入失敗（非權限，權限已於上方 gate 處理）時明確顯示錯誤，不可呈現為空白稽核紀錄 */}
         {historyQuery.isError ? (

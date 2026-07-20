@@ -291,6 +291,40 @@ describe("/settings", () => {
     expect(parsed).not.toHaveProperty("premium_rate");
   });
 
+  it("月固定現金支出儲存後保留成功提示，重新抓取後顯示新金額", async () => {
+    loginAs("MANAGER");
+    let currentSettings = SETTINGS;
+    let historyCalls = 0;
+    stubFetch((url, init) => {
+      if (url.includes("/settings/premium-rate/history")) {
+        historyCalls += 1;
+        return json(HISTORY);
+      }
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      if (url.includes("/settings") && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as { monthly_fixed_cash_outflow: number };
+        currentSettings = {
+          ...SETTINGS,
+          monthly_fixed_cash_outflow: String(body.monthly_fixed_cash_outflow),
+        };
+        return json(currentSettings);
+      }
+      if (url.includes("/settings")) return json(currentSettings);
+      return null;
+    });
+    renderPage();
+
+    const outflow = await screen.findByLabelText("月固定現金支出");
+    await userEvent.clear(outflow);
+    await userEvent.type(outflow, "60000");
+    await userEvent.click(screen.getByRole("button", { name: "儲存一般設定" }));
+
+    await waitFor(() => expect(currentSettings.monthly_fixed_cash_outflow).toBe("60000"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(historyCalls).toBe(1);
+    expect(screen.getByText("設定已儲存")).toBeDefined();
+  });
+
   it("寄售抽成允許 100（後端契約 le=100，不被前端誤擋）", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];

@@ -59,6 +59,25 @@ async def get_current_cash_session(
     return CashSessionRead.from_model(cs) if cs is not None else None
 
 
+@router.get(
+    "/{session_id}/movements",
+    response_model=list[CashMovementRead],
+    operation_id="listCashMovements",
+)
+async def list_cash_movements(
+    session_id: int,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> list[CashMovementRead]:
+    """列出本店指定現金班別的異動，最新一筆在前。"""
+    svc = CashDrawerService(session)
+    cash_session = await svc.get_session(user.store_id, session_id)
+    if cash_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到現金班別")
+    movements = await svc.list_session_movements(cash_session)
+    return [CashMovementRead.from_model(movement) for movement in movements]
+
+
 @router.post(
     "/{session_id}/movements",
     response_model=CashMovementRead,

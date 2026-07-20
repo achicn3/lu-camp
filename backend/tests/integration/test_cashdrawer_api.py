@@ -81,6 +81,14 @@ async def test_open_current_movement_close_flow(
     assert adj.json()["amount"] == "-50"
     assert adj.json()["note"] == "找錯錢回沖"  # 事由須持久化（Codex P2）
 
+    movements = await client.get(
+        f"/api/v1/cash-sessions/{session_id}/movements", headers=_auth(token)
+    )
+    assert movements.status_code == 200
+    assert [
+        (movement["type"], movement["amount"], movement["note"]) for movement in movements.json()
+    ] == [("MANUAL_ADJUST", "-50", "找錯錢回沖")]
+
     closed = await client.post(
         f"/api/v1/cash-sessions/{session_id}/close",
         json={"counted_amount": "900"},
@@ -248,6 +256,23 @@ async def test_negative_opening_float_returns_422(
         "/api/v1/cash-sessions/open", json={"opening_float": "-1"}, headers=_auth(token)
     )
     assert resp.status_code == 422
+
+
+async def test_scientific_notation_opening_float_returns_422(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """開帳金額必須使用一般整數格式，字串或 JSON 數字的科學記號都不可繞過。"""
+    token = await _seed_token(db_session)
+
+    string_notation = await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": "1e3"}, headers=_auth(token)
+    )
+    numeric_notation = await client.post(
+        "/api/v1/cash-sessions/open", json={"opening_float": 1e3}, headers=_auth(token)
+    )
+
+    assert string_notation.status_code == 422
+    assert numeric_notation.status_code == 422
 
 
 async def test_reclose_returns_409(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

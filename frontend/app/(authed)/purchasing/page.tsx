@@ -1263,7 +1263,7 @@ function SupplierManager() {
                         {s.is_active ? (
                           <button
                             type="button"
-                            className="btn-ghost pur-cancel-btn"
+                            className="btn-ghost pur-supplier-state-btn pur-supplier-state-btn--deactivate"
                             disabled={setActive.isPending}
                             onClick={() => setActive.mutate({ id: s.id, active: false })}
                           >
@@ -1272,7 +1272,7 @@ function SupplierManager() {
                         ) : (
                           <button
                             type="button"
-                            className="btn-secondary"
+                            className="btn-ghost pur-supplier-state-btn pur-supplier-state-btn--activate"
                             disabled={setActive.isPending}
                             onClick={() => setActive.mutate({ id: s.id, active: true })}
                           >

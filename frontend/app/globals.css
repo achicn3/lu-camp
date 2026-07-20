@@ -29,6 +29,7 @@
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
+  --sp-5: 20px;
   --sp-6: 24px;
   --sp-8: 32px;
 
@@ -36,6 +37,7 @@
   --radius: 10px;
   --shadow: 0 1px 2px rgba(35, 41, 31, 0.06), 0 4px 16px rgba(35, 41, 31, 0.06);
   --tap-min: 44px;
+  --app-header-height: 56px;
 }
 
 * {
@@ -170,11 +172,14 @@ body {
 .app-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 40;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 var(--sp-4);
-  min-height: 56px;
+  min-height: var(--app-header-height);
 }
 
 .app-nav {
@@ -189,32 +194,51 @@ body {
   scrollbar-width: thin;
 }
 
-/* 「更多」開啟側邊選單的鈕：外觀近 nav-link，但加細框暗示可開選單。 */
-.nav-more-btn {
-  background: none;
+/* 系統選單固定在左上：header 與按鈕雙重 sticky，橫向捲動常用連結時仍留在原位。 */
+.nav-menu-btn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex-shrink: 0;
+  gap: var(--sp-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   cursor: pointer;
   font: inherit;
-  color: var(--ink);
+  font-weight: 600;
+  color: var(--accent);
+  box-shadow: 8px 0 10px -8px rgba(35, 41, 31, 0.28);
 }
-.nav-more-btn:hover {
+.nav-menu-btn:hover {
   background: var(--bg);
+  border-color: var(--accent);
+}
+.nav-menu-btn > span {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 18px;
+  line-height: 1;
 }
 
-/* 側邊選單：右側滑入面板＋半透明背幕（點背幕/Esc/選項即關）。 */
+/* 側邊選單：由觸發鈕所在的左側展開＋半透明背幕（點背幕/Esc/選項即關）。 */
 .nav-drawer-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   z-index: 50;
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 .nav-drawer {
   background: var(--surface);
   width: min(280px, 80vw);
   height: 100%;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  border-right: 1px solid var(--border);
+  box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   padding: var(--sp-3);
@@ -232,6 +256,11 @@ body {
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--sp-2);
+}
+.nav-drawer-head > span {
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
 }
 
 .nav-link {
@@ -395,6 +424,117 @@ body {
   vertical-align: middle;
 }
 
+/* 現金手動調整以「班別帳頁」呈現：時間、事由、金額同列，方便關帳前逐筆核對。 */
+.cash-adjustments {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cash-adjustments-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--green-soft, #e7efe6);
+}
+
+.cash-adjustments-head h2 {
+  margin-bottom: var(--sp-1);
+}
+
+.cash-adjustments-count {
+  flex: 0 0 auto;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.cash-adjustments-state {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--ink-soft);
+}
+
+.cash-adjustment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cash-adjustment-row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: 58px;
+  padding: var(--sp-2) var(--sp-4);
+  border-left: 4px solid var(--accent);
+  border-bottom: 1px solid var(--border);
+}
+
+.cash-adjustment-row:last-child {
+  border-bottom: 0;
+}
+
+.cash-adjustment-row time {
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.cash-adjustment-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cash-adjustment-amount {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cash-adjustment-amount--in {
+  color: var(--success);
+}
+
+.cash-adjustment-amount--out {
+  color: var(--danger);
+}
+
+@media (max-width: 560px) {
+  .cash-adjustments-head {
+    align-items: center;
+  }
+
+  .cash-adjustment-row {
+    grid-template-columns: 1fr auto;
+    gap: var(--sp-1) var(--sp-3);
+    padding-block: var(--sp-3);
+  }
+
+  .cash-adjustment-row time {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .cash-adjustment-note {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .cash-adjustment-amount {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
 .module-card-link {
   text-decoration: none;
   color: inherit;
@@ -407,19 +547,15 @@ body {
 /* ── POS 結帳（/pos，docs/10 §5）── */
 .pos-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(620px, 1fr) minmax(320px, 360px);
   gap: var(--sp-6);
   align-items: start;
-}
-@media (max-width: 900px) {
-  .pos-grid {
-    grid-template-columns: 1fr;
-  }
 }
 .pos-left {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  min-width: 0;
 }
 .pos-scan input {
   font-size: var(--text-lg);
@@ -451,11 +587,23 @@ body {
 }
 .pos-cart {
   width: 100%;
+  min-width: 600px;
   border-collapse: collapse;
   background: var(--surface);
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
+}
+.pos-cart-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: var(--radius);
+  overscroll-behavior-inline: contain;
+}
+.pos-cart-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .pos-cart th,
 .pos-cart td {
@@ -483,8 +631,19 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  min-width: 0;
   position: sticky;
-  top: var(--sp-4);
+  top: calc(var(--app-header-height) + var(--sp-4));
+}
+@media (max-width: 1080px) {
+  .pos-grid {
+    grid-template-columns: 1fr;
+  }
+  .pos-right {
+    position: static;
+    max-width: none;
+    width: 100%;
+  }
 }
 .pos-total {
   display: flex;
@@ -701,6 +860,11 @@ body {
   font-size: var(--text-md);
   background: var(--surface);
 }
+.member-allsearch .btn-secondary {
+  flex: 0 0 auto;
+  min-width: 80px;
+  white-space: nowrap;
+}
 .member-table-wrap {
   overflow-x: auto;
 }
@@ -783,8 +947,29 @@ body {
 .member-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-4);
   margin-bottom: var(--sp-2);
+}
+.member-head .page-title {
+  margin: 0;
+}
+.member-back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  padding: 0 var(--sp-4);
+  text-decoration: none;
+}
+.member-back-link > span {
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.member-back-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .member-head-roles {
   font-size: var(--text-sm);
@@ -940,15 +1125,16 @@ body {
   gap: var(--sp-2);
 }
 .settle-search {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--sp-2);
+  width: min(100%, 520px);
   margin: var(--sp-3) 0;
 }
 .settle-search-input {
-  flex: 1 1 220px;
-  max-width: 320px;
+  width: 100%;
+  min-width: 0;
   min-height: var(--tap-min);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -960,8 +1146,19 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.settle-search .btn-primary {
-  padding: 0 var(--sp-5);
+.settle-search-submit {
+  min-width: 88px;
+  padding: 0 var(--sp-4);
+  white-space: nowrap;
+}
+.settle-search-clear {
+  grid-column: 1 / -1;
+  justify-self: start;
+  max-width: 100%;
+  min-height: 36px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 .settle-card {
   max-width: none;
@@ -1022,6 +1219,38 @@ body {
 }
 .settle-confirm dd {
   margin: 0;
+}
+
+/* 簽署紀錄篩選：沿用全站表單高度、圓角與森林綠焦點狀態。 */
+.signing-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0;
+}
+.signing-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: min(180px, 100%);
+}
+.signing-filter > span {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.signing-filter-select {
+  min-height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-3);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.signing-filter-select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 @media (max-width: 720px) {
   .settle-head {
@@ -1670,7 +1899,7 @@ body {
   grid-column: 2;
   grid-row: 1;
   position: sticky;
-  top: var(--sp-4);
+  top: calc(var(--app-header-height) + var(--sp-4));
 }
 @media (max-width: 900px) {
   .pur-workbench {
@@ -1779,6 +2008,23 @@ body {
 }
 .pur-cancel-btn {
   color: var(--danger);
+}
+.pur-supplier-state-btn {
+  min-width: 72px;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  border-color: currentColor;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.pur-supplier-state-btn--activate {
+  color: var(--accent);
+}
+.pur-supplier-state-btn--deactivate {
+  color: var(--danger);
+}
+.pur-supplier-state-btn:hover:not(:disabled) {
+  background: var(--bg);
 }
 /* 分批收貨對話框：明細表較寬，且各欄不換行。 */
 .pur-receive-dialog {

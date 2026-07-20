@@ -8,10 +8,16 @@ from pydantic import BaseModel, PlainSerializer
 
 from app.shared.enums import CampaignStatus
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+
+def format_ntd(value: Decimal) -> str:
+    """輸出一般十進位金額，避免 Decimal 的科學記號流入畫面或匯出檔。"""
+    return format(value, "f")
+
+
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[
     Decimal | None,
-    PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None),
+    PlainSerializer(lambda d: None if d is None else format_ntd(d), return_type=str | None),
 ]
 
 

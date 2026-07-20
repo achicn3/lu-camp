@@ -16,7 +16,7 @@ RateOut = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
 RateOutOpt = Annotated[
     Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
 ]
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: format(d, "f"), return_type=str)]
 # 溢價率政策硬界線：與 SC-1 帳本 DB 經濟守衛（premium_rate_applied ∈ [0, 0.20]）一致。
 _RATE_HARD_MAX = Decimal("0.2000")
 

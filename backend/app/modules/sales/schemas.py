@@ -39,8 +39,10 @@ class SaleLineCreateRequest(BaseModel):
         if self.line_type == SaleLineType.SERIALIZED:
             if self.item_code is None:
                 raise ValueError("SERIALIZED 明細必須帶 item_code")
-            if self.catalog_product_id is not None or self.bulk_lot_id is not None or (
-                self.menu_item_id is not None
+            if (
+                self.catalog_product_id is not None
+                or self.bulk_lot_id is not None
+                or (self.menu_item_id is not None)
             ):
                 raise ValueError("SERIALIZED 明細只能帶 item_code")
             if self.qty != 1:
@@ -48,22 +50,28 @@ class SaleLineCreateRequest(BaseModel):
         elif self.line_type == SaleLineType.CATALOG:
             if self.catalog_product_id is None:
                 raise ValueError("CATALOG 明細必須帶 catalog_product_id")
-            if self.item_code is not None or self.bulk_lot_id is not None or (
-                self.menu_item_id is not None
+            if (
+                self.item_code is not None
+                or self.bulk_lot_id is not None
+                or (self.menu_item_id is not None)
             ):
                 raise ValueError("CATALOG 明細只能帶 catalog_product_id")
         elif self.line_type == SaleLineType.MENU:
             if self.menu_item_id is None:
                 raise ValueError("MENU 明細必須帶 menu_item_id")
-            if self.item_code is not None or self.catalog_product_id is not None or (
-                self.bulk_lot_id is not None
+            if (
+                self.item_code is not None
+                or self.catalog_product_id is not None
+                or (self.bulk_lot_id is not None)
             ):
                 raise ValueError("MENU 明細只能帶 menu_item_id")
         else:  # BULK_LOT
             if self.bulk_lot_id is None:
                 raise ValueError("BULK_LOT 明細必須帶 bulk_lot_id")
-            if self.item_code is not None or self.catalog_product_id is not None or (
-                self.menu_item_id is not None
+            if (
+                self.item_code is not None
+                or self.catalog_product_id is not None
+                or (self.menu_item_id is not None)
             ):
                 raise ValueError("BULK_LOT 明細只能帶 bulk_lot_id")
         return self
@@ -127,9 +135,7 @@ class SaleInvoiceInfoRequest(BaseModel):
 
     @model_validator(mode="after")
     def _mutually_exclusive(self) -> "SaleInvoiceInfoRequest":
-        chosen = [
-            v for v in (self.buyer_tax_id, self.mobile_carrier, self.npoban) if v is not None
-        ]
+        chosen = [v for v in (self.buyer_tax_id, self.mobile_carrier, self.npoban) if v is not None]
         if len(chosen) > 1:
             raise ValueError("統編、載具、捐贈碼至多擇一")
         if self.buyer_name is not None and self.buyer_tax_id is None:
@@ -311,6 +317,8 @@ class SaleSummaryRead(BaseModel):
     payment_method: PaymentMethod
     # 買方會員（docs/23 K5b）：有買方的單才能推「交易紀錄簽收」至手持裝置。
     buyer_contact_id: int | None
+    # 購物金扣抵簽署（docs/23 K5）：交易列表據此提供一鍵調閱簽名。
+    signature_task_id: int | None
 
 
 class LinePayRefundAttemptRead(BaseModel):

@@ -673,8 +673,9 @@ export default function MemberDetailPage() {
   return (
     <section>
       <div className="member-head">
-        <Link href="/contacts" className="btn-ghost">
-          ← 返回
+        <Link href="/contacts" className="btn-secondary member-back-link">
+          <span aria-hidden="true">←</span>
+          返回會員列表
         </Link>
         <h1 className="page-title">
           {header.data ? header.data.contact.name : "會員"}{" "}

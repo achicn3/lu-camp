@@ -1,7 +1,7 @@
 // LINE Pay POS UI（docs/30 P3）瀏覽器煙霧：啟用 LINE Pay → POS 選 LINE Pay 收款 → 掃碼欄
 // 填入真 oneTimeKey → 結帳（真沙盒真收費）→ 完成頁顯示 LINE Pay → 收尾作廢（真退款）。
 // 執行：node scripts/linepay-pos-smoke.mjs（需 backend:8000 帶 LINEPAY_* env、frontend:3000）。
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,11 @@ import { uniquePhone, validNationalId } from "./_national-id.mjs";
 const BASE = "http://localhost:3000";
 const API = "http://localhost:8000";
 const SANDBOX = "https://sandbox-web-pay.line.me/web/sandbox/payment/oneTimeKey?countryCode=TW";
-const SHOTS = join(homedir(), "tmp", "codex-test", "linepay-pos-smoke");
+const SHOTS =
+  process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "codex-test", "linepay-pos-smoke");
+const DOCKER =
+  process.env.DOCKER_BIN ?? "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe";
+const DB = process.env.SMOKE_DB ?? "lucamp_e2e";
 mkdirSync(SHOTS, { recursive: true });
 
 const results = [];
@@ -40,9 +44,11 @@ async function api(path, { method = "GET", token, body, headers = {}, expect = [
   return data;
 }
 const psql = (sql) =>
-  execSync(`docker exec lu-camp-db-1 psql -U lucamp -d lucamp_e2e -tAc "${sql}"`, {
-    encoding: "utf8",
-  }).trim();
+  execFileSync(
+    DOCKER,
+    ["exec", "lu-camp-db-1", "psql", "-U", "lucamp", "-d", DB, "-tAc", sql],
+    { encoding: "utf8" },
+  ).trim();
 
 async function decodeKey(page) {
   await page.goto(SANDBOX, { waitUntil: "networkidle", timeout: 30000 });
@@ -130,11 +136,20 @@ try {
   ok("啟用後 POS 出現 LINE Pay 收款選項", (await lineRadio.count()) === 1);
   await lineRadio.click();
 
-  // 掃碼欄出現 + 手續費提示（折後 540 ×1.5% = 8）
+  // 掃碼欄出現 + 手續費提示。活動可能改變售價，故以畫面實際報價計算預期手續費。
   await page.waitForSelector('input[name="linepay_one_time_key"]');
   ok("LINE Pay 掃碼輸入欄出現", true);
+  const quotedTotalText = await page.locator(".pos-total strong").textContent();
+  const quotedTotal = Number((quotedTotalText ?? "").replace(/[^\d-]/g, ""));
+  const expectedFee = Math.round(quotedTotal * 0.015);
   const feeHint = await page.locator(".pos-tender .hint", { hasText: "LINE Pay 收款" }).textContent();
-  ok("手續費提示（店家負擔）", (feeHint?.includes("店家負擔") && feeHint?.includes("8")) ?? false, feeHint ?? "");
+  ok(
+    "手續費提示（店家負擔）",
+    Number.isInteger(quotedTotal) &&
+      quotedTotal > 0 &&
+      ((feeHint?.includes("店家負擔") && feeHint?.includes(String(expectedFee))) ?? false),
+    `報價 ${quotedTotalText ?? "—"}，預期手續費 ${expectedFee}；${feeHint ?? ""}`,
+  );
 
   // 未填碼 → 結帳鍵停用
   ok("未掃碼時結帳鍵停用", await page.locator('button:has-text("結帳")').isDisabled());
@@ -145,7 +160,11 @@ try {
   const checkoutBtn = page.locator('button:has-text("結帳")');
   ok("掃碼後結帳鍵啟用", !(await checkoutBtn.isDisabled()));
   await checkoutBtn.click();
-  await page.waitForSelector("text=已完成", { timeout: 20000 });
+  await page.waitForSelector("text=LINE Pay 收款成功", { timeout: 20000 });
+  ok(
+    "完成畫面明確顯示 LINE Pay 收款成功",
+    await page.locator("text=LINE Pay 收款成功").first().isVisible(),
+  );
   const method = page.locator(".pos-complete .stat-list dd").filter({ hasText: /^LINE Pay$/ });
   ok("結帳完成，收款方式＝LINE Pay（真沙盒 0000）", await method.isVisible());
   await page.screenshot({ path: `${SHOTS}/02-linepay-complete.png` });

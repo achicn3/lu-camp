@@ -552,7 +552,8 @@ function PrintDialog({
       <div className="card pos-dialog">
         <h2>列印商品明細？</h2>
         <p className="hint">
-          完成結帳。可現在列印商品明細聯，或日後在交易紀錄補印。
+          {sale.payment_method === "LINE_PAY" ? "LINE Pay 收款成功。" : "完成結帳。"}
+          可現在列印商品明細聯，或日後在交易紀錄補印。
         </p>
         {error !== null && (
           <p role="alert" className="form-error">
@@ -1144,7 +1145,8 @@ export default function PosPage() {
         <h1 className="page-title">POS 結帳</h1>
         <div className="card pos-complete">
           <h2>
-            已完成 <span className="badge-open">#{completed.id}</span>
+            {completed.payment_method === "LINE_PAY" ? "LINE Pay 收款成功" : "已完成"}{" "}
+            <span className="badge-open">#{completed.id}</span>
           </h2>
           <dl className="stat-list">
             <div className="stat">
@@ -1248,88 +1250,95 @@ export default function PosPage() {
               掃描或輸入商品條碼，或點下方餐飲菜單開始結帳。
             </p>
           ) : (
-            <table className="pos-cart">
-              <thead>
-                <tr>
-                  <th>品項</th>
-                  <th>單價</th>
-                  <th>數量</th>
-                  <th>小計</th>
-                  <th aria-label="操作" />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, i) => {
-                  // 逐行折後：試算就緒時用 quote 同序行的折後單價/小計；有折扣則加顯原價刪除線。
-                  const ql = quotedLines?.[i];
-                  const discounted =
-                    ql != null &&
-                    ql.discount_amount !== "0" &&
-                    ql.original_unit_price != null;
-                  const unitVal = ql
-                    ? (parseNtd(ql.unit_price) ?? line.unitPrice)
-                    : line.unitPrice;
-                  const subtotalVal = ql
-                    ? (parseNtd(ql.line_total) ?? lineTotal(line))
-                    : lineTotal(line);
-                  const originalUnit =
-                    discounted && ql?.original_unit_price != null
-                      ? (parseNtd(ql.original_unit_price) ?? line.unitPrice)
-                      : null;
-                  return (
-                    <tr key={line.key}>
-                      <td>{line.description}</td>
-                      <td>
-                        {originalUnit !== null ? (
-                          <span className="pos-price-discounted">
-                            <s className="pos-price-original">
-                              <Money value={originalUnit} />
-                            </s>{" "}
+            <div
+              className="pos-cart-scroll"
+              role="region"
+              aria-label="購物車明細"
+              tabIndex={0}
+            >
+              <table className="pos-cart">
+                <thead>
+                  <tr>
+                    <th>品項</th>
+                    <th>單價</th>
+                    <th>數量</th>
+                    <th>小計</th>
+                    <th aria-label="操作" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((line, i) => {
+                    // 逐行折後：試算就緒時用 quote 同序行的折後單價/小計；有折扣則加顯原價刪除線。
+                    const ql = quotedLines?.[i];
+                    const discounted =
+                      ql != null &&
+                      ql.discount_amount !== "0" &&
+                      ql.original_unit_price != null;
+                    const unitVal = ql
+                      ? (parseNtd(ql.unit_price) ?? line.unitPrice)
+                      : line.unitPrice;
+                    const subtotalVal = ql
+                      ? (parseNtd(ql.line_total) ?? lineTotal(line))
+                      : lineTotal(line);
+                    const originalUnit =
+                      discounted && ql?.original_unit_price != null
+                        ? (parseNtd(ql.original_unit_price) ?? line.unitPrice)
+                        : null;
+                    return (
+                      <tr key={line.key}>
+                        <td>{line.description}</td>
+                        <td>
+                          {originalUnit !== null ? (
+                            <span className="pos-price-discounted">
+                              <s className="pos-price-original">
+                                <Money value={originalUnit} />
+                              </s>{" "}
+                              <Money value={unitVal} />
+                            </span>
+                          ) : (
                             <Money value={unitVal} />
-                          </span>
-                        ) : (
-                          <Money value={unitVal} />
-                        )}
-                      </td>
-                      <td>
-                        {line.lineType === "SERIALIZED" ? (
-                          1
-                        ) : (
-                          <input
-                            className="pos-qty"
-                            inputMode="numeric"
-                            value={line.qty}
-                            aria-label={`${line.description} 數量`}
-                            onChange={(e) =>
-                              setLines(
-                                setQty(
-                                  lines,
-                                  line.key,
-                                  parseNtd(e.target.value) ?? 1,
-                                ),
-                              )
-                            }
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <Money value={subtotalVal} />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          aria-label={`移除 ${line.description}`}
-                          onClick={() => setLines(removeLine(lines, line.key))}
-                        >
-                          移除
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          )}
+                        </td>
+                        <td>
+                          {line.lineType === "SERIALIZED" ? (
+                            1
+                          ) : (
+                            <input
+                              className="pos-qty"
+                              inputMode="numeric"
+                              value={line.qty}
+                              aria-label={`${line.description} 數量`}
+                              onChange={(e) =>
+                                setLines(
+                                  setQty(
+                                    lines,
+                                    line.key,
+                                    parseNtd(e.target.value) ?? 1,
+                                  ),
+                                )
+                              }
+                            />
+                          )}
+                        </td>
+                        <td>
+                          <Money value={subtotalVal} />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            aria-label={`移除 ${line.description}`}
+                            onClick={() => setLines(removeLine(lines, line.key))}
+                          >
+                            移除
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
           <MenuPanel onAdd={addToCart} />
         </div>

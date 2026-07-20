@@ -2,7 +2,12 @@
 // /cash 現金對帳（docs/10 §5）：開帳（零用金）→ 開帳中（資訊＋MANAGER 手動調整）→
 // 結帳（實點 vs 應有＋差異）。異動清單待後端 GET 端點（docs/04 缺口，已回報）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import {
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useState,
+} from "react";
 
 import { parseAmountInput } from "@/features/cash/money-input";
 import { api } from "@/lib/api";
@@ -11,6 +16,7 @@ import { decodeSession } from "@/lib/auth";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type CashSession = components["schemas"]["CashSessionRead"];
+type CashMovement = components["schemas"]["CashMovementRead"];
 
 function MoneyText({ value }: { value: string | null | undefined }) {
   if (value === null || value === undefined) return <span className="money">—</span>;
@@ -18,8 +24,34 @@ function MoneyText({ value }: { value: string | null | undefined }) {
   return <span className="money">{parsed === null ? value : formatNtd(parsed)}</span>;
 }
 
+function blockNonDigitKey(
+  event: KeyboardEvent<HTMLInputElement>,
+  onRejected: () => void,
+) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key.length === 1 && !/^\d$/.test(event.key)) {
+    event.preventDefault();
+    onRejected();
+  }
+}
+
+function blockNonDigitPaste(
+  event: ClipboardEvent<HTMLInputElement>,
+  onRejected: () => void,
+) {
+  if (!/^\d+$/.test(event.clipboardData.getData("text"))) {
+    event.preventDefault();
+    onRejected();
+  }
+}
+
 function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
   const [error, setError] = useState<string | null>(null);
+  const [formatRejected, setFormatRejected] = useState(false);
+  const rejectOpeningFormat = () => {
+    setFormatRejected(true);
+    setError("請輸入整數金額，不可使用科學記號");
+  };
   const mutation = useMutation({
     mutationFn: async (openingFloat: number) => {
       const { data, error: apiError } = await api.POST("/api/v1/cash-sessions/open", {
@@ -35,6 +67,10 @@ function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    if (formatRejected) {
+      setError("請輸入整數金額，不可使用科學記號");
+      return;
+    }
     const raw = String(new FormData(event.currentTarget).get("opening_float"));
     const amount = parseAmountInput(raw, { allowZero: true });
     if (amount === null) {
@@ -49,7 +85,21 @@ function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
       <h2>開帳</h2>
       <label className="field">
         <span className="field-label">開帳零用金</span>
-        <input name="opening_float" inputMode="numeric" required />
+        <input
+          name="opening_float"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          onChange={(event) => {
+            if (event.currentTarget.value === "") {
+              setFormatRejected(false);
+              setError(null);
+            }
+          }}
+          onKeyDown={(event) => blockNonDigitKey(event, rejectOpeningFormat)}
+          onPaste={(event) => blockNonDigitPaste(event, rejectOpeningFormat)}
+          required
+        />
       </label>
       {error !== null && (
         <p role="alert" className="form-error">
@@ -126,6 +176,76 @@ function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => vo
         送出調整
       </button>
     </form>
+  );
+}
+
+function AdjustmentHistory({ sessionId }: { sessionId: number }) {
+  const movements = useQuery({
+    queryKey: ["cash-session", sessionId, "movements"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/cash-sessions/{session_id}/movements", {
+        params: { path: { session_id: sessionId } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取調整紀錄失敗");
+      return data;
+    },
+  });
+  const adjustments = (movements.data ?? []).filter(
+    (movement): movement is CashMovement => movement.type === "MANUAL_ADJUST",
+  );
+
+  return (
+    <section className="card cash-adjustments" aria-labelledby="cash-adjustments-title">
+      <div className="cash-adjustments-head">
+        <div>
+          <h2 id="cash-adjustments-title">本班調整紀錄</h2>
+          <p className="hint">最新一筆在前，金額與事由會保留供對帳查核。</p>
+        </div>
+        {!movements.isPending && !movements.isError && (
+          <span className="cash-adjustments-count" aria-label={`${adjustments.length} 筆調整`}>
+            {adjustments.length} 筆
+          </span>
+        )}
+      </div>
+      {movements.isPending ? (
+        <p className="cash-adjustments-state">讀取調整紀錄中…</p>
+      ) : movements.isError ? (
+        <p role="alert" className="form-error cash-adjustments-state">
+          {movements.error.message}
+        </p>
+      ) : adjustments.length === 0 ? (
+        <p className="cash-adjustments-state">
+          本班尚無手動調整；若有補入或取出現金，會在這裡顯示金額與事由。
+        </p>
+      ) : (
+        <ol className="cash-adjustment-list">
+          {adjustments.map((movement) => {
+            const amount = parseNtd(movement.amount);
+            const isIncrease = amount !== null && amount > 0;
+            const displayedAmount = amount === null ? movement.amount : formatNtd(amount);
+            return (
+              <li className="cash-adjustment-row" key={movement.id}>
+                <time dateTime={movement.created_at}>
+                  {new Date(movement.created_at).toLocaleTimeString("zh-TW", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </time>
+                <span className="cash-adjustment-note">{movement.note ?? "未填事由"}</span>
+                <strong
+                  className={`cash-adjustment-amount ${
+                    isIncrease ? "cash-adjustment-amount--in" : "cash-adjustment-amount--out"
+                  }`}
+                >
+                  {isIncrease ? "+" : ""}
+                  {displayedAmount}
+                </strong>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -290,6 +410,7 @@ export default function CashPage() {
             </dl>
           </div>
           {session?.role === "MANAGER" && <AdjustCard sessionId={open.id} onDone={refresh} />}
+          <AdjustmentHistory sessionId={open.id} />
           <CloseCard
             sessionId={open.id}
             onClosed={(closed) => {

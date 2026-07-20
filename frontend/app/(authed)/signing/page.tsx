@@ -2,22 +2,19 @@
 // /signing 簽署紀錄（docs/29 波次一）：店長/店員調閱簽署證據——任務清單（狀態/類型過濾）
 // →內容快照＋手寫簽名影像＋綁定單據。裁示（2026-07-16）：調閱不寫稽核、隨時想調就調。
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   SIGNING_KIND_LABELS,
   SIGNING_PAYOUT_LABELS,
   SIGNING_STATUS_LABELS,
-  contentRows,
-  refLabel,
 } from "@/features/signing/labels";
+import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
-import { getToken } from "@/lib/token";
 
 type SignatureTask = components["schemas"]["SignatureTaskRead"];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const PAGE_SIZE = 20;
 
 function timeLabel(iso: string | null | undefined): string {
@@ -30,153 +27,6 @@ function timeLabel(iso: string | null | undefined): string {
     minute: "2-digit",
     hour12: false,
   });
-}
-
-/** 簽名影像需帶 Bearer token 取回（img src 無法帶標頭）→ blob URL，卸載時釋放。
- *  以 (taskId, url|error) 配對存放並於回傳時比對，避免 effect 內同步 setState 與跨任務殘影；
- *  失敗必須成為可見錯誤態，不可永遠「載入中」（Codex P2）。 */
-function useSignatureImage(
-  taskId: number | null,
-  hasSignature: boolean,
-  retryKey: number,
-): { url: string | null; error: string | null } {
-  const [img, setImg] = useState<{ id: number; url?: string; error?: string } | null>(null);
-  useEffect(() => {
-    if (taskId == null || !hasSignature) return;
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = getToken();
-        const res = await fetch(`${API_BASE}/api/v1/signing/tasks/${taskId}/signature`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          setImg({ id: taskId, error: `影像載入失敗（HTTP ${res.status}）` });
-          return;
-        }
-        const blob = await res.blob();
-        if (cancelled) return; // 已卸載：不建 object URL（否則清理已跑過、URL 洩漏，Codex P3）
-        objectUrl = URL.createObjectURL(blob);
-        setImg({ id: taskId, url: objectUrl });
-      } catch {
-        if (!cancelled) setImg({ id: taskId, error: "影像載入失敗（連線錯誤）" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [taskId, hasSignature, retryKey]);
-  if (img === null || img.id !== taskId) return { url: null, error: null };
-  return { url: img.url ?? null, error: img.error ?? null };
-}
-
-function TaskDetailDialog({ task, onClose }: { task: SignatureTask; onClose: () => void }) {
-  const [retryKey, setRetryKey] = useState(0);
-  // 清單列缺反向綁定（避免 N+1）→ 開啟時取單筆 detail 回填 bound_*（Codex P1）
-  const detail = useQuery({
-    queryKey: ["signing-task-detail", task.id],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/signing/tasks/{task_id}", {
-        params: { path: { task_id: task.id } },
-      });
-      if (!data) throw new Error(String(error ?? "載入失敗"));
-      return data;
-    },
-  });
-  // 一律以 detail 的**當前實態**渲染（清單快照可能已過期：待簽→已簽/作廢；Codex 第二輪 P2）
-  const full = detail.data ?? task;
-  const { url: imageUrl, error: imageError } = useSignatureImage(
-    full.id,
-    full.has_signature,
-    retryKey,
-  );
-  const rows = contentRows(full.content as Record<string, unknown>);
-  const ref = refLabel(
-    full.kind,
-    full.ref_type ?? null,
-    full.ref_id ?? null,
-    full.bound_acquisition_id ?? null,
-    full.bound_sale_id ?? null,
-  );
-  return (
-    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="簽署證據">
-      <div
-        className="card pos-dialog"
-        style={{ maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }}
-      >
-        <h2>
-          {SIGNING_KIND_LABELS[full.kind] ?? full.kind} #{full.id}
-        </h2>
-        <p>
-          {full.signer_name ? `簽署人：${full.signer_name}｜` : ""}
-          狀態：{SIGNING_STATUS_LABELS[full.status] ?? full.status}
-          {full.signed_at ? `｜簽署於 ${timeLabel(full.signed_at)}` : ""}
-          {full.chosen_payout
-            ? `｜撥款 ${SIGNING_PAYOUT_LABELS[full.chosen_payout] ?? full.chosen_payout}`
-            : ""}
-        </p>
-        {ref ? <p>綁定單據：{ref}</p> : null}
-        {full.agreement_version != null ? <p>切結書版本：v{full.agreement_version}</p> : null}
-        {full.agreement_body ? (
-          <details>
-            <summary>切結書全文{full.agreement_title ? `：${full.agreement_title}` : ""}（客人簽署的條款）</summary>
-            <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.85em", marginTop: 8 }}>
-              {full.agreement_body}
-            </pre>
-          </details>
-        ) : null}
-        <h3>簽署當下內容快照</h3>
-        <table className="data-table">
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label}>
-                <th scope="row">{r.label}</th>
-                <td>{r.value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <h3>手寫簽名</h3>
-        {detail.isError ? (
-          <p role="alert">
-            證據明細載入失敗（綁定單據/最新狀態可能不完整）。{" "}
-            <button type="button" onClick={() => void detail.refetch()}>
-              重試
-            </button>
-          </p>
-        ) : null}
-        {full.has_signature ? (
-          imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- blob URL 無法用 next/image
-            <img
-              src={imageUrl}
-              alt={`任務 ${full.id} 簽名影像`}
-              style={{ maxWidth: "100%", border: "1px solid var(--border, #ccc)", background: "#fff" }}
-            />
-          ) : imageError ? (
-            <p role="alert">
-              {imageError}{" "}
-              <button type="button" onClick={() => setRetryKey((k) => k + 1)}>
-                重試
-              </button>
-            </p>
-          ) : (
-            <p>簽名影像載入中…</p>
-          )
-        ) : (
-          <p>此任務無簽名（未完成簽署）。</p>
-        )}
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose}>
-            關閉
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function SigningPage() {
@@ -208,10 +58,12 @@ export default function SigningPage() {
     <section>
       <h1>簽署紀錄</h1>
       <p>調閱客人簽署證據：切結書、購物金扣抵確認、交易簽收（內容快照＋手寫簽名）。</p>
-      <div className="filter-row" style={{ display: "flex", gap: 12, margin: "12px 0" }}>
-        <label>
-          狀態{" "}
+      <div className="signing-filters" aria-label="簽署紀錄篩選">
+        <label className="signing-filter">
+          <span>狀態</span>
           <select
+            className="signing-filter-select"
+            aria-label="狀態"
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value);
@@ -226,9 +78,11 @@ export default function SigningPage() {
             ))}
           </select>
         </label>
-        <label>
-          類型{" "}
+        <label className="signing-filter">
+          <span>類型</span>
           <select
+            className="signing-filter-select"
+            aria-label="類型"
             value={kindFilter}
             onChange={(e) => {
               setKindFilter(e.target.value);
@@ -290,7 +144,13 @@ export default function SigningPage() {
           下一頁
         </button>
       </div>
-      {selected ? <TaskDetailDialog task={selected} onClose={() => setSelected(null)} /> : null}
+      {selected ? (
+        <SignatureEvidenceDialog
+          taskId={selected.id}
+          initialTask={selected}
+          onClose={() => setSelected(null)}
+        />
+      ) : null}
     </section>
   );
 }

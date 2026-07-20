@@ -225,13 +225,13 @@ export default function ConsignmentPage() {
           value={phoneInput}
           onChange={(e) => setPhoneInput(e.target.value)}
         />
-        <button type="submit" className="btn-primary">
+        <button type="submit" className="btn-secondary settle-search-submit">
           查找
         </button>
         {phone && (
           <button
             type="button"
-            className="btn-ghost"
+            className="btn-ghost settle-search-clear"
             onClick={() => {
               setPhoneInput("");
               setPhone("");

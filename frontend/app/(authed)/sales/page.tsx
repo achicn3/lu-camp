@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
+import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -418,6 +419,7 @@ export default function SalesPage() {
   const [voidTarget, setVoidTarget] = useState<SaleSummary | null>(null);
   const [voidedNote, setVoidedNote] = useState<string | null>(null);
   const [returnTarget, setReturnTarget] = useState<SaleSummary | null>(null);
+  const [signatureTaskId, setSignatureTaskId] = useState<number | null>(null);
   // 交易紀錄簽收（docs/23 K5b）：推 TRANSACTION_ACK 至手持裝置，客人核對後簽名留存（不擋流程）。
   const [ackNote, setAckNote] = useState<string | null>(null);
   const pushAck = useMutation({
@@ -524,6 +526,16 @@ export default function SalesPage() {
                         推送簽收
                       </button>
                     )}
+                    {sale.signature_task_id != null && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`查看銷售 ${sale.id} 簽名`}
+                        onClick={() => setSignatureTaskId(sale.signature_task_id)}
+                      >
+                        查看簽名
+                      </button>
+                    )}
                   </td>
                   {isManager && (
                     <td>
@@ -569,6 +581,12 @@ export default function SalesPage() {
             setVoidTarget(null);
             void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
           }}
+        />
+      )}
+      {signatureTaskId !== null && (
+        <SignatureEvidenceDialog
+          taskId={signatureTaskId}
+          onClose={() => setSignatureTaskId(null)}
         />
       )}
     </section>

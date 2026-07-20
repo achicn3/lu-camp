@@ -19,6 +19,31 @@ function assert(cond, msg) {
   console.log("  ok: " + msg);
 }
 
+async function assertStickyPanelClearsHeader(page, path, selector, label) {
+  await page.setViewportSize({ width: 1280, height: 700 });
+  await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" });
+  await page.locator(selector).waitFor();
+  // 空白 E2E DB 的頁面內容可能不夠長；模擬實際有大量交易／採購資料時的捲動高度。
+  await page.evaluate((panelSelector) => {
+    const main = document.querySelector(".app-main");
+    if (main instanceof HTMLElement) main.style.minHeight = "1800px";
+    const panel = document.querySelector(panelSelector);
+    if (panel?.parentElement instanceof HTMLElement) panel.parentElement.style.minHeight = "1600px";
+    window.scrollTo(0, 600);
+  }, selector);
+  await page.waitForTimeout(200);
+  const geometry = await page.evaluate((panelSelector) => {
+    const header = document.querySelector(".app-header")?.getBoundingClientRect();
+    const panel = document.querySelector(panelSelector)?.getBoundingClientRect();
+    return header && panel ? { headerBottom: header.bottom, panelTop: panel.top } : null;
+  }, selector);
+  assert(
+    geometry !== null && geometry.panelTop >= geometry.headerBottom + 8,
+    `${label} sticky panel stays below the fixed header` +
+      (geometry ? ` (panel=${geometry.panelTop}, header=${geometry.headerBottom})` : ""),
+  );
+}
+
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
 const page = await ctx.newPage();
@@ -35,12 +60,19 @@ try {
   await page.waitForURL((u) => !u.pathname.endsWith("/login"), { timeout: 15000 });
   console.log("logged in, at", page.url());
 
-  // --- nav: /backup lives in the 更多 side menu (managerOnly) ---
-  await page.click('button:has-text("更多")');
+  // --- nav: /backup lives in the left-side system menu (managerOnly) ---
+  const menuButton = page.locator('button[aria-label="開啟系統選單"]');
+  const menuBox = await menuButton.boundingBox();
+  assert(menuBox !== null && menuBox.x <= 24 && menuBox.y <= 12, "system menu stays at top-left");
+  await menuButton.click();
   await page.waitForTimeout(400);
+  const drawerBox = await page.locator('nav[aria-label="系統選單"]').boundingBox();
+  assert(drawerBox !== null && drawerBox.x === 0, "system menu opens from the left edge");
   const drawerText = await page.innerText("body");
-  assert(/備份/.test(drawerText), "備份 entry appears in 更多 side menu");
-  await page.click('nav[aria-label="更多功能"] a:has-text("備份")');
+  assert(/備份/.test(drawerText), "備份 entry appears in system menu");
+  await page.screenshot({ path: `${SHOTS}/system-menu-left.png`, fullPage: true });
+  console.log("  shot: system-menu-left.png");
+  await page.click('nav[aria-label="系統選單"] a:has-text("備份")');
   await page.waitForURL((u) => u.pathname.endsWith("/backup"), { timeout: 10000 });
   await page.waitForTimeout(1200);
 
@@ -90,6 +122,83 @@ try {
   } else {
     console.log("  (no seeded backup source; restore confirm flow skipped)");
   }
+
+  // --- fixed header must not cover existing sticky work panels ---
+  await assertStickyPanelClearsHeader(page, "/pos", ".pos-right", "POS");
+  await assertStickyPanelClearsHeader(
+    page,
+    "/purchasing",
+    ".pur-workbench-rail",
+    "purchasing",
+  );
+
+  // --- desktop POS: 1024px laptop viewport must not squeeze the cart into the checkout rail ---
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  const desktopPosGeometry = await page.evaluate(() => {
+    const grid = document.querySelector(".pos-grid")?.getBoundingClientRect();
+    const left = document.querySelector(".pos-left")?.getBoundingClientRect();
+    const right = document.querySelector(".pos-right")?.getBoundingClientRect();
+    return grid && left && right
+      ? {
+          gridWidth: grid.width,
+          leftBottom: left.bottom,
+          rightTop: right.top,
+          rightWidth: right.width,
+          viewportWidth: document.documentElement.clientWidth,
+          contentWidth: document.documentElement.scrollWidth,
+        }
+      : null;
+  });
+  assert(
+    desktopPosGeometry !== null &&
+      desktopPosGeometry.rightTop >= desktopPosGeometry.leftBottom + 16,
+    "POS checkout rail stacks below the cart at 1024px desktop width",
+  );
+  assert(
+    desktopPosGeometry !== null &&
+      Math.abs(desktopPosGeometry.rightWidth - desktopPosGeometry.gridWidth) < 1,
+    "stacked POS checkout rail uses the full desktop content width",
+  );
+  assert(
+    desktopPosGeometry !== null &&
+      desktopPosGeometry.contentWidth === desktopPosGeometry.viewportWidth,
+    "POS has no horizontal overflow at 1024px desktop width",
+  );
+  await page.screenshot({ path: `${SHOTS}/pos-desktop-1024.png`, fullPage: true });
+  console.log("  shot: pos-desktop-1024.png");
+
+  // --- narrow POS: scan input and checkout card must stay inside the viewport ---
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  const posWidth = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth,
+  }));
+  assert(
+    posWidth.content === posWidth.viewport,
+    `POS has no horizontal overflow at 320px (${posWidth.content}/${posWidth.viewport})`,
+  );
+  await page.screenshot({ path: `${SHOTS}/pos-320.png`, fullPage: true });
+  console.log("  shot: pos-320.png");
+
+  // --- mobile: the same menu control remains fixed at the top-left ---
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const mobileMenuBox = await page.locator('button[aria-label="開啟系統選單"]').boundingBox();
+  assert(
+    mobileMenuBox !== null && mobileMenuBox.x <= 24 && mobileMenuBox.y <= 12,
+    "system menu stays at top-left on mobile",
+  );
+  await page.evaluate(() => window.scrollTo(0, 900));
+  await page.waitForTimeout(200);
+  const scrolledMenuBox = await page.locator('button[aria-label="開啟系統選單"]').boundingBox();
+  assert(
+    scrolledMenuBox !== null && scrolledMenuBox.x <= 24 && scrolledMenuBox.y <= 12,
+    "system menu remains fixed after scrolling",
+  );
+  await page.screenshot({ path: `${SHOTS}/system-menu-mobile.png` });
+  console.log("  shot: system-menu-mobile.png");
 
   // --- CLERK blocked (fresh context, server-driven gate on MANAGER-only health) ---
   if (CLERK) {

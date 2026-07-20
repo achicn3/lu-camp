@@ -197,6 +197,9 @@ describe("/pos 結帳頁", () => {
     await waitFor(() =>
       expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(),
     );
+    expect(
+      screen.getByRole("region", { name: "購物車明細" }),
+    ).toBeTruthy();
     // 應付總額顯示 1,800
     expect(screen.getAllByText(/1,800/).length).toBeGreaterThan(0);
 
@@ -220,6 +223,63 @@ describe("/pos 結帳頁", () => {
     );
     // 現金結帳 → 已踢開錢櫃一次
     await waitFor(() => expect(drawerCalls).toBe(1));
+  });
+
+  it("LINE Pay 結帳成功：完成卡片與列印對話框明確顯示已收款", async () => {
+    const linePaySettings = {
+      ...SETTINGS,
+      linepay_enabled: true,
+      linepay_fee_pct: "0.03",
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(linePaySettings);
+      if (url.includes("/cash-sessions/current")) return json(null);
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        return json(
+          {
+            id: 17,
+            store_id: 1,
+            total: "1800",
+            payment_method: "LINE_PAY",
+            invoice_status: "NOT_ISSUED",
+            lines: [],
+            tenders: [{ tender_type: "LINE_PAY", amount: "1800", fee_amount: "54" }],
+          },
+          201,
+        );
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    await user.click(screen.getByText("LINE Pay"));
+    await user.type(
+      screen.getByLabelText("掃描客人 LINE Pay 付款條碼（我的條碼）"),
+      "1234567890",
+    );
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+
+    expect(
+      await screen.findByRole("heading", { name: /LINE Pay 收款成功/ }),
+    ).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "列印商品明細" });
+    expect(within(dialog).getByText(/LINE Pay 收款成功/)).toBeTruthy();
   });
 
   it("活動生效：總額顯示折後、結帳送折後收款、明細送印帶折扣與活動（docs/21 C2b）", async () => {

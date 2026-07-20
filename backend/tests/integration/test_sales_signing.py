@@ -207,6 +207,10 @@ async def test_store_credit_sale_binds_signed_task(
     sale_id = resp.json()["id"]
     sale = await db_session.scalar(select(Sale).where(Sale.id == sale_id))
     assert sale is not None and sale.signature_task_id == task_id
+    listed = await client.get("/api/v1/sales", headers=_auth(token))
+    assert listed.status_code == 200, listed.text
+    listed_sale = next(row for row in listed.json() if row["id"] == sale_id)
+    assert listed_sale["signature_task_id"] == task_id
     balance = await StoreCreditService(db_session).get_balance(store_id, member_id)
     assert balance == Decimal("700")
 
@@ -889,9 +893,7 @@ async def test_abandoned_signed_task_can_be_cancelled_then_unusable(
     task_id = await _signed_use_task(db_session, store_id, member_id, clerk_id, debit="300")
 
     # 已簽未綁 → 可作廢
-    cancel = await client.post(
-        f"/api/v1/signing/tasks/{task_id}/cancel", headers=_auth(token)
-    )
+    cancel = await client.post(f"/api/v1/signing/tasks/{task_id}/cancel", headers=_auth(token))
     assert cancel.status_code == 200, cancel.text
     assert cancel.json()["status"] == "CANCELLED"
     # 作廢後不可綁結帳
@@ -910,9 +912,7 @@ async def test_abandoned_signed_task_can_be_cancelled_then_unusable(
         headers=_auth(token),
     )
     assert ok_sale.status_code == 201, ok_sale.text
-    cancel2 = await client.post(
-        f"/api/v1/signing/tasks/{task2}/cancel", headers=_auth(token)
-    )
+    cancel2 = await client.post(f"/api/v1/signing/tasks/{task2}/cancel", headers=_auth(token))
     assert cancel2.status_code == 409, cancel2.text
 
 
@@ -930,8 +930,9 @@ async def test_signed_task_binding_ttl_expires(
     # 逾時未用 → 綁定 422
     stale = await _signed_use_task(db_session, store_id, member_id, clerk_id, debit="300")
     await db_session.execute(
-        sql_text("UPDATE signature_tasks SET signed_at = now() - interval '16 minutes'"
-                 " WHERE id = :tid"),
+        sql_text(
+            "UPDATE signature_tasks SET signed_at = now() - interval '16 minutes' WHERE id = :tid"
+        ),
         {"tid": stale},
     )
     await db_session.commit()
@@ -949,8 +950,9 @@ async def test_signed_task_binding_ttl_expires(
     assert first.status_code == 201, first.text
     sale_id = first.json()["id"]
     await db_session.execute(
-        sql_text("UPDATE signature_tasks SET signed_at = now() - interval '2 hours'"
-                 " WHERE id = :tid"),
+        sql_text(
+            "UPDATE signature_tasks SET signed_at = now() - interval '2 hours' WHERE id = :tid"
+        ),
         {"tid": fresh},
     )
     await db_session.commit()

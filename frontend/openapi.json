@@ -6688,6 +6688,17 @@
           "payment_method": {
             "$ref": "#/components/schemas/PaymentMethod"
           },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          },
           "status": {
             "$ref": "#/components/schemas/SaleStatus"
           },
@@ -6718,7 +6729,8 @@
           "status",
           "created_at",
           "payment_method",
-          "buyer_contact_id"
+          "buyer_contact_id",
+          "signature_task_id"
         ],
         "title": "SaleSummaryRead",
         "type": "object"
@@ -9854,6 +9866,56 @@
       }
     },
     "/api/v1/cash-sessions/{session_id}/movements": {
+      "get": {
+        "description": "列出本店指定現金班別的異動，最新一筆在前。",
+        "operationId": "listCashMovements",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CashMovementRead"
+                  },
+                  "title": "Response Listcashmovements",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Cash Movements",
+        "tags": [
+          "cashdrawer"
+        ]
+      },
       "post": {
         "description": "手動現金調整（限 MANAGER；docs/10 §4）。\n\n端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為\n系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。\n事由必填並隨 audit_log 留痕（CLAUDE.md §5）。",
         "operationId": "recordCashMovement",
