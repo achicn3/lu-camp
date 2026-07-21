@@ -1,4 +1,4 @@
-// 交易紀錄/作廢 + 開錢櫃煙霧：API 備妥有庫存數量品 → /pos 掃 SKU 現金結帳（此時應踢開錢櫃，
+// 交易紀錄/作廢 + 開錢櫃煙霧：API 備妥有庫存一般商品 → /pos 掃 SKU 現金結帳（此時應踢開錢櫃，
 // 由 agent access log 佐證）→ /sales 找到該筆 → 店長作廢（二次確認）→ 列表顯示已作廢。
 // 執行：node scripts/sales-void-smoke.mjs（backend:8000 + frontend:3000 + agent:8001 已起，docs/20）
 import { randomUUID } from "node:crypto";
@@ -46,7 +46,7 @@ async function apiJson(
 
 let browser;
 try {
-  // ── API fixture：登入、開帳、上架＋進貨一件數量品 ──
+  // ── API fixture：登入、開帳、上架＋進貨一件一般商品 ──
   const login = await apiJson("/api/v1/auth/login", {
     method: "POST",
     body: { username: USERNAME, password: PASSWORD },

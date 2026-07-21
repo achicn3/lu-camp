@@ -122,7 +122,7 @@ async def _catalog(session: AsyncSession, store_id: int, *, price: str, qty: int
     p = CatalogProduct(
         store_id=store_id,
         sku=f"CDC-{_SEQ}",
-        name="數量品",
+        name="一般商品",
         unit_price=Decimal(price),
         quantity_on_hand=qty,
     )

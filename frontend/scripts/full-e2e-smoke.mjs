@@ -394,7 +394,7 @@ try {
   ok("11) 寄售付款完成（現金出帳）", true);
   await shot(page, "consign-paid");
 
-  // 11b) 採購補貨：新增供應商 → ★上架數量型商品 → 建採購單 → 收貨入庫（廠商商品上架全流程）
+  // 11b) 採購補貨：新增供應商 → ★上架一般商品 → 建採購單 → 收貨入庫（廠商商品上架全流程）
   await nav("採購補貨", "/purchasing");
   await page.waitForSelector("h1:has-text('採購 / 補貨')");
   // (a) 供應商
@@ -405,7 +405,7 @@ try {
   await page.click('.pur-supplier-form button:has-text("新增供應商")');
   await page.waitForSelector(`.pur-supplier-list table tbody tr:has-text("${supplierName}")`);
   ok("11b) 新增供應商", true, supplierName);
-  // (b) 上架數量型商品（初始庫存 0）
+  // (b) 上架一般商品（初始庫存 0）
   await page.click('.settle-tabs button:has-text("採購單")');
   // 建立/上架/低庫存收進 <details class="pur-tools"> 摺疊區（0b67e1a 改版）：先展開。
   await page.locator(".pur-tools > summary").click();
@@ -417,7 +417,7 @@ try {
   await page.locator('.pur-catalog-form input[aria-label="低庫存提醒點"]').fill("12");
   await page.click('.pur-catalog-form button:has-text("上架商品")');
   await page.waitForSelector(".pur-catalog-form .form-success", { timeout: 8000 });
-  ok("11b) ★上架數量型商品（廠商採購商品建檔，初始庫存 0）", true, gasName);
+  ok("11b) ★上架一般商品（廠商採購商品建檔，初始庫存 0）", true, gasName);
   await shot(page, "purchasing-catalog-created");
   // (c) 建採購單（選供應商、搜尋剛上架商品、設量與進貨價）
   // 供應商改為查無即建 combobox（1a2d0c1）：填名 → 點既有選項。
@@ -426,7 +426,7 @@ try {
     .locator(".pur-create .combo-option", { hasText: supplierName })
     .first()
     .click();
-  await page.fill('input[aria-label="搜尋數量品"]', gasName.slice(0, 5));
+  await page.fill('input[aria-label="搜尋一般商品"]', gasName.slice(0, 5));
   await page.waitForSelector(`.pur-search-results li button:has-text("${gasName}")`, { timeout: 8000 });
   await page.click(`.pur-search-results li button:has-text("${gasName}")`);
   await page.waitForSelector(".pur-lines tbody tr");

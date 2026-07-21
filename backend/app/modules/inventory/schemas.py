@@ -81,7 +81,7 @@ class CategoryTargetUpdate(BaseModel):
 
 
 class PriceUpdateRequest(BaseModel):
-    """改售價（manager；含稅整數元 > 0；序號品=標價、數量品/散裝=單價）。"""
+    """改售價（manager；含稅整數元 > 0；序號品=標價、一般商品/散裝=單價）。"""
 
     unit_price: NTDAmount
 
@@ -183,7 +183,7 @@ class SerializedItemDetailRead(BaseModel):
 
 
 class CatalogPurchaseRead(BaseModel):
-    """數量品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。"""
+    """一般商品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。"""
 
     po_id: int
     supplier_id: int
@@ -197,7 +197,7 @@ class CatalogPurchaseRead(BaseModel):
 
 
 class CatalogProductDetailRead(BaseModel):
-    """數量品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。"""
+    """一般商品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。"""
 
     id: int
     sku: str
@@ -231,20 +231,29 @@ class BulkLotDetailRead(BaseModel):
 
 
 class CatalogProductCreateRequest(BaseModel):
-    """新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
+    """新增一般商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
 
-    初始庫存固定 0（補庫存一律走採購收貨，留痕）；reorder_point 為低庫存提醒點。
+    SKU 可留白由系統產生；初始庫存固定 0（補庫存一律走採購收貨，留痕）；
+    reorder_point 為低庫存提醒點。
     """
 
-    sku: str = Field(min_length=1, max_length=64)
+    sku: str | None = Field(default=None, max_length=64)
     name: str = Field(min_length=1, max_length=150)
     unit_price: NTDAmount
     reorder_point: int = Field(default=0, ge=0)
     brand_id: int | None = None
 
-    @field_validator("sku", "name")
+    @field_validator("sku", mode="before")
     @classmethod
-    def _strip(cls, value: str) -> str:
+    def _strip_optional_sku(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("不可為空白")
@@ -261,7 +270,7 @@ class CatalogProductCreateRequest(BaseModel):
 
 
 class CatalogProductRead(BaseModel):
-    """數量型商品輸出（POS 選件/庫存列表）。
+    """一般商品輸出（POS 選件/庫存列表）。
 
     incoming_qty＝在途待到貨量（未收完的採購單累計待收：Σ(訂購−已收)，狀態 ORDERED/PARTIAL）；
     供低庫存提醒判斷是否已有補貨在路上、避免重複採購。清單以外的情境預設 0。

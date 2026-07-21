@@ -126,7 +126,7 @@
 | 交易紀錄(sales) | 逐單金額/明細/收款/發票狀態;抽數筆逐欄比對 |
 | 現金對帳(cash_session/movement) | 班別開/關帳、各現金異動、應有現金公式結果 |
 | 會員/賣方(contacts) | 姓名/電話/角色/點數;**PII 密文可用還原後金鑰解出明文**(金鑰同組才行→印證兩組金鑰缺一即廢) |
-| 庫存(serialized/bulk/catalog) | 序號品狀態、散裝 remaining、數量品現量 |
+| 庫存(serialized/bulk/catalog) | 序號品狀態、散裝 remaining、一般商品現量 |
 | 簽署紀錄(signing_tasks) | 任務狀態、內容;**簽名 PNG(BYTEA)sha256 逐筆一致**(影像無損) |
 | 購物金/點數(store_credit_ledger) | 帳本每筆分錄、各會員餘額 |
 | 盤點(stocktake) | 盤點單、差異、調整 |

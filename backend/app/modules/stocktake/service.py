@@ -1,6 +1,6 @@
 """stocktake 業務邏輯：建盤點單（快照 system_qty）→ 確認（依實點即時校正現量）。
 
-第一版只盤數量型商品（catalog_products）。確認時透過 inventory service 以 FOR UPDATE 重讀
+第一版只盤一般商品（catalog_products）。確認時透過 inventory service 以 FOR UPDATE 重讀
 現量計差額並寫 ADJUST(STOCKTAKE) 帳，避免清掉盤點期間的銷售。確認僅一次（狀態守衛）。
 """
 
@@ -26,7 +26,7 @@ class StocktakeService:
         self._inventory = InventoryService(session)
 
     async def create_stocktake(self, store_id: int, *, actor_user_id: int) -> Stocktake:
-        """建立盤點單：為店內每個數量型商品快照當前 system_qty（DRAFT、counted 未填）。"""
+        """建立盤點單：為店內每個一般商品快照當前 system_qty（DRAFT、counted 未填）。"""
         products = await self._inventory.list_catalog(store_id, limit=_SNAPSHOT_CAP, offset=0)
         stocktake = await self._repo.add_stocktake(
             Stocktake(store_id=store_id, created_by=actor_user_id)

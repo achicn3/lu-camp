@@ -1,4 +1,4 @@
-// 盤點瀏覽器煙霧測試（Phase 5 /stocktake）：登入 → 建立盤點單（快照數量品現量）→
+// 盤點瀏覽器煙霧測試（Phase 5 /stocktake）：登入 → 建立盤點單（快照一般商品現量）→
 // 逐項輸入實點數、即時差異（counted − system）與彙總 → 確認盤點調整（二次確認）→ 已確認 →
 // 重開為唯讀並顯示最終差異。
 // 需 backend + frontend 已起、已 seed（dev-manager + seed_dev_purchasing）。
@@ -38,7 +38,7 @@ try {
   await page.waitForSelector("h1:has-text('盤點')");
   ok("盤點頁載入", true);
 
-  // 3) 建立盤點單 → 明細顯示數量品列（系統現量 + 實點數輸入）
+  // 3) 建立盤點單 → 明細顯示一般商品列（系統現量 + 實點數輸入）
   await page.click('button:has-text("建立盤點單")');
   await page.waitForSelector(".st-detail .st-lines tbody tr");
   const lineCount = await page.locator(".st-detail .st-lines tbody tr").count();

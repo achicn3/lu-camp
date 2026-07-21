@@ -134,7 +134,7 @@ BRAND_GEAR: dict[str, list[tuple[str, int]]] = {
     "Quechua": [("快開帳 2 秒帳", 3200), ("保溫瓶 0.8L", 600)],
 }
 
-# ── 數量型商品（消耗品；高週轉，撐起銷售筆數） ──────────────────
+# ── 一般商品（消耗品；高週轉，撐起銷售筆數） ──────────────────
 CATALOG_ITEMS: list[tuple[str, str, int]] = [
     ("GAS-HI-230", "高山瓦斯罐 230g", 150),
     ("GAS-HI-450", "高山瓦斯罐 450g", 260),
@@ -318,7 +318,7 @@ async def _seed() -> None:
                 session.add(ProductModel(store_id=store_id, brand_id=brand_ids[bname], name=gname))
         await session.commit()
 
-        # 數量型商品
+        # 一般商品
         catalog_ids: list[int] = []
         for sku, name, price in CATALOG_ITEMS:
             p = CatalogProduct(
@@ -711,7 +711,7 @@ async def _seed() -> None:
             f"seed_large 完成：會員={n_members}、寄售人={N_CONSIGNORS}、"
             f"序號品={N_OWNED_ITEMS + N_CONSIGNMENT_ITEMS}"
             f"（自有{N_OWNED_ITEMS}/寄售{N_CONSIGNMENT_ITEMS}）、"
-            f"散裝批={N_BULK_LOTS}、數量型={len(catalog_ids)}、菜單={len(menu_ids)}、"
+            f"散裝批={N_BULK_LOTS}、一般商品={len(catalog_ids)}、菜單={len(menu_ids)}、"
             f"供應商={len(SUPPLIERS)}、採購單={n_po}（收貨{n_recv}）、"
             f"購物金撥入={N_CREDITED_MEMBERS}、"
             f"銷售={n_sales}（作廢{n_void}、含購物金折抵{n_sc_pay}）、"

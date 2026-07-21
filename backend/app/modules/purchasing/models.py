@@ -1,6 +1,6 @@
 """purchasing 模型：供應商、採購單、採購明細與收貨紀錄。
 
-只處理店內補貨用的數量型商品（catalog_products），不處理應付帳款。
+只處理店內補貨用的一般商品（catalog_products），不處理應付帳款。
 支援**分批收貨**：每明細記已收數量（received_qty），一張採購單可多次收貨（多筆 goods_receipts）。
 金額一律 NUMERIC(scale 0) → Decimal（NT$ 整數元）。
 """

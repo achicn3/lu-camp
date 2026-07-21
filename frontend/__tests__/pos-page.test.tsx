@@ -494,7 +494,7 @@ describe("/pos 結帳頁", () => {
     );
   });
 
-  it("掃數量品 SKU 加入購物車（序號/散裝 404 後 fallback）", async () => {
+  it("掃一般商品 SKU 加入購物車（序號/散裝 404 後 fallback）", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
@@ -523,11 +523,11 @@ describe("/pos 結帳頁", () => {
     await waitFor(() =>
       expect(screen.getByText("高山瓦斯罐 230g")).toBeTruthy(),
     );
-    // 數量品可調量（非序號品才有 qty 輸入框）。
+    // 一般商品可調量（非序號品才有 qty 輸入框）。
     expect(screen.getByLabelText("高山瓦斯罐 230g 數量")).toBeTruthy();
   });
 
-  it("掃無庫存的數量品 SKU 顯示阻擋", async () => {
+  it("掃無庫存的一般商品 SKU 顯示阻擋", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))

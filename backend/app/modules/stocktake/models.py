@@ -1,6 +1,6 @@
 """stocktake 模型：盤點單與盤點明細。
 
-第一版只盤數量型商品（catalog_products）：建單時為每個 catalog 商品快照 system_qty；確認時
+第一版只盤一般商品（catalog_products）：建單時為每個 catalog 商品快照 system_qty；確認時
 依實點數即時校正現量並寫 ADJUST(STOCKTAKE) 帳。序號品/散裝品的盤點為後續切片。
 """
 

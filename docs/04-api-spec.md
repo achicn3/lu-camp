@@ -34,7 +34,7 @@ GET    /api/v1/contacts/{id}/purchases     # 會員消費紀錄
 ## Inventory
 ```
 GET    /api/v1/catalog-products?q=&low_stock=
-POST   /api/v1/catalog-products
+POST   /api/v1/catalog-products                    # 店員/管理者建一般商品；SKU 留白由系統產生，留白時必帶 Idempotency-Key
 PATCH  /api/v1/catalog-products/{id}        # 改價留痕
 
 GET    /api/v1/serialized-items?status=&ownership=&q=

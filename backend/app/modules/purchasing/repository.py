@@ -117,7 +117,7 @@ class PurchasingRepository:
     async def incoming_qty_by_catalog(
         self, store_id: int, catalog_ids: list[int]
     ) -> dict[int, int]:
-        """各數量品的在途待到貨量：Σ(qty − received_qty)，僅計 ORDERED/PARTIAL 採購單。"""
+        """各一般商品的在途待到貨量：Σ(qty − received_qty)，僅計 ORDERED/PARTIAL 採購單。"""
         if not catalog_ids:
             return {}
         stmt = (
@@ -151,7 +151,7 @@ class PurchasingRepository:
     async def lines_for_catalog(
         self, store_id: int, catalog_product_id: int
     ) -> list[tuple[PurchaseOrderLine, PurchaseOrder]]:
-        """某數量品的所有採購明細＋採購單（庫存明細「進貨歷史」用，新到舊）。
+        """某一般商品的所有採購明細＋採購單（庫存明細「進貨歷史」用，新到舊）。
         供應商名取自採購單快照 supplier_name（改名不改寫歷史），故不再 join Supplier。"""
         stmt = (
             select(PurchaseOrderLine, PurchaseOrder)

@@ -253,7 +253,7 @@ class InventoryValueReport(BaseModel):
     consignment_serialized_count: int
     consignment_bulk_remaining_qty: int
     consignment_inventory_gross: NTDAmount
-    # 數量型商品（成本未建模 → cost N/A）
+    # 一般商品（成本未建模 → cost N/A）
     catalog_total_qty: int
     catalog_retail_value: NTDAmount
     catalog_cost_value: NTDAmountOpt  # 恆 null（成本未建模）

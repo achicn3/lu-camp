@@ -13,7 +13,7 @@ export interface Badge {
   tone: BadgeTone;
 }
 
-/** 數量品低庫存：現有量 ≤ 再訂購點（reorder_point）。 */
+/** 一般商品低庫存：現有量 ≤ 再訂購點（reorder_point）。 */
 export function isLowStock(quantityOnHand: number, reorderPoint: number): boolean {
   return quantityOnHand <= reorderPoint;
 }

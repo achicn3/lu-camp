@@ -63,7 +63,7 @@ function Money({ value }: { value: number }) {
 
 // ── 掃碼加入購物車 ──
 // 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）；掃描到完整碼即自動加入。
-// 數量型商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 數量品 一格通吃。
+// 一般商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 一般商品 一格通吃。
 const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
 
 function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
@@ -71,7 +71,7 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: async (code: string): Promise<CartLine> => {
-      // 先試序號品，再試散裝堆，最後試數量品 SKU（一格掃碼通吃，docs/10 §3）。
+      // 先試序號品，再試散裝堆，最後試一般商品 SKU（一格掃碼通吃，docs/10 §3）。
       const serialized = await api.GET(
         "/api/v1/serialized-items/by-code/{item_code}",
         {
@@ -123,7 +123,7 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
             `查詢失敗（HTTP ${bulk.response.status}）`,
         );
       }
-      // 最後試數量型商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
+      // 最後試一般商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
       const catalog = await api.GET("/api/v1/catalog-products/by-sku/{sku}", {
         params: { path: { sku: code } },
       });

@@ -250,7 +250,7 @@ class InventoryRepository:
         return int(await self._session.scalar(stmt) or 0)
 
     async def count_catalog_in_stock(self, store_id: int) -> int:
-        """有現量（>0）的數量品種類數（洞察摘要）。"""
+        """有現量（>0）的一般商品種類數（洞察摘要）。"""
         stmt = select(func.count()).select_from(CatalogProduct).where(
             CatalogProduct.store_id == store_id, CatalogProduct.quantity_on_hand > 0
         )
@@ -327,7 +327,7 @@ class InventoryRepository:
         return list((await self._session.scalars(stmt)).all())
 
     async def catalog_for_valuation(self, store_id: int) -> list[CatalogProduct]:
-        """有庫存的數量型商品（quantity_on_hand>0，全部；庫存價值報表用，成本未建模）。"""
+        """有庫存的一般商品（quantity_on_hand>0，全部；庫存價值報表用，成本未建模）。"""
         stmt = (
             select(CatalogProduct)
             .where(
@@ -475,7 +475,7 @@ class InventoryRepository:
         )
         return int(await self._session.scalar(stmt) or 0)
 
-    # ── 數量型商品 ──
+    # ── 一般商品 ──
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         stmt = select(CatalogProduct).where(
             CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id
@@ -490,13 +490,23 @@ class InventoryRepository:
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
+    async def get_catalog_by_create_idempotency_key(
+        self, store_id: int, idempotency_key: str
+    ) -> CatalogProduct | None:
+        stmt = select(CatalogProduct).where(
+            CatalogProduct.store_id == store_id,
+            CatalogProduct.create_idempotency_key == idempotency_key,
+        )
+        result: CatalogProduct | None = await self._session.scalar(stmt)
+        return result
+
     async def add_catalog(self, product: CatalogProduct) -> CatalogProduct:
         self._session.add(product)
         await self._session.flush()
         return product
 
     async def get_catalog_for_update(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
-        """取數量型商品並上行鎖（FOR UPDATE）+ 刷新；盤點確認時即時重讀現量、原子校正用。"""
+        """取一般商品並上行鎖（FOR UPDATE）+ 刷新；盤點確認時即時重讀現量、原子校正用。"""
         stmt = (
             select(CatalogProduct)
             .where(CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id)
@@ -583,7 +593,7 @@ class InventoryRepository:
     async def movements_for_catalog(
         self, store_id: int, catalog_product_id: int
     ) -> list[StockMovement]:
-        """某數量品的庫存異動帳（時間升冪；明細頁歷史用，§4 店別範圍）。"""
+        """某一般商品的庫存異動帳（時間升冪；明細頁歷史用，§4 店別範圍）。"""
         stmt = (
             select(StockMovement)
             .where(

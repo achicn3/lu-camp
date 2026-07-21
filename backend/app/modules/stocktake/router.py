@@ -46,7 +46,7 @@ def _map_domain_error(exc: DomainError) -> HTTPException:
     operation_id="createStocktake",
 )
 async def create_stocktake(session: SessionDep, user: CurrentUserDep) -> StocktakeRead:
-    """建立盤點單並快照店內所有數量型商品的 system_qty。"""
+    """建立盤點單並快照店內所有一般商品的 system_qty。"""
     stocktake = await StocktakeService(session).create_stocktake(
         user.store_id, actor_user_id=user.id
     )

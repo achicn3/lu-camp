@@ -141,7 +141,7 @@ async def _add_catalog(session: AsyncSession, store_id: int, *, price: str, qty:
         CatalogProduct(
             store_id=store_id,
             sku=f"IVC-{_SEQ}",
-            name="數量品",
+            name="一般商品",
             unit_price=Decimal(price),
             quantity_on_hand=qty,
         )

@@ -454,8 +454,9 @@ export interface paths {
         put?: never;
         /**
          * Create Catalog Product
-         * @description 新增數量型商品（上架，限 MANAGER）：廠商採購商品先建檔（初始庫存 0），
-         *     之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。
+         * @description 新增一般商品（上架，店員與管理者皆可）：廠商採購商品先建檔（初始庫存 0），
+         *     之後即可建採購單→收貨補庫存。SKU 可留白由系統產生；留白時必帶 Idempotency-Key，
+         *     同 key 重送回原商品；同店 SKU 或同 key 不同內容回 409。
          */
         post: operations["createCatalogProduct"];
         delete?: never;
@@ -473,7 +474,7 @@ export interface paths {
         };
         /**
          * Get Catalog By Sku
-         * @description POS 掃碼查數量品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
+         * @description POS 掃碼查一般商品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
          *
          *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
          */
@@ -495,7 +496,7 @@ export interface paths {
         };
         /**
          * Get Catalog Detail
-         * @description 數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。
+         * @description 一般商品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。
          */
         get: operations["getCatalogProductDetail"];
         put?: never;
@@ -521,7 +522,7 @@ export interface paths {
         head?: never;
         /**
          * Update Catalog Price
-         * @description 改數量品售價（限管理者；寫稽核）。找不到→404。
+         * @description 改一般商品售價（限管理者；寫稽核）。找不到→404。
          */
         patch: operations["updateCatalogPrice"];
         trace?: never;
@@ -1847,7 +1848,7 @@ export interface paths {
         put?: never;
         /**
          * Create Stocktake
-         * @description 建立盤點單並快照店內所有數量型商品的 system_qty。
+         * @description 建立盤點單並快照店內所有一般商品的 system_qty。
          */
         post: operations["createStocktake"];
         delete?: never;
@@ -2601,9 +2602,10 @@ export interface components {
         CashSessionStatus: "OPEN" | "CLOSED";
         /**
          * CatalogProductCreateRequest
-         * @description 新增數量型商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
+         * @description 新增一般商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
          *
-         *     初始庫存固定 0（補庫存一律走採購收貨，留痕）；reorder_point 為低庫存提醒點。
+         *     SKU 可留白由系統產生；初始庫存固定 0（補庫存一律走採購收貨，留痕）；
+         *     reorder_point 為低庫存提醒點。
          */
         CatalogProductCreateRequest: {
             /** Brand Id */
@@ -2616,13 +2618,13 @@ export interface components {
              */
             reorder_point: number;
             /** Sku */
-            sku: string;
+            sku?: string | null;
             /** Unit Price */
             unit_price: number | string;
         };
         /**
          * CatalogProductDetailRead
-         * @description 數量品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。
+         * @description 一般商品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。
          */
         CatalogProductDetailRead: {
             /** Brand Id */
@@ -2646,7 +2648,7 @@ export interface components {
         };
         /**
          * CatalogProductRead
-         * @description 數量型商品輸出（POS 選件/庫存列表）。
+         * @description 一般商品輸出（POS 選件/庫存列表）。
          *
          *     incoming_qty＝在途待到貨量（未收完的採購單累計待收：Σ(訂購−已收)，狀態 ORDERED/PARTIAL）；
          *     供低庫存提醒判斷是否已有補貨在路上、避免重複採購。清單以外的情境預設 0。
@@ -2676,7 +2678,7 @@ export interface components {
         };
         /**
          * CatalogPurchaseRead
-         * @description 數量品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。
+         * @description 一般商品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。
          */
         CatalogPurchaseRead: {
             /**
@@ -4043,7 +4045,7 @@ export interface components {
         };
         /**
          * PriceUpdateRequest
-         * @description 改售價（manager；含稅整數元 > 0；序號品=標價、數量品/散裝=單價）。
+         * @description 改售價（manager；含稅整數元 > 0；序號品=標價、一般商品/散裝=單價）。
          */
         PriceUpdateRequest: {
             /** Unit Price */
@@ -6095,7 +6097,9 @@ export interface operations {
     createCatalogProduct: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

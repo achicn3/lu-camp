@@ -1,12 +1,12 @@
 "use client";
-// /inventory 庫存瀏覽（docs/10 §/inventory）：序號品 / 數量品 / 散裝批 三分頁，唯讀清單＋篩選＋
+// /inventory 庫存瀏覽（docs/10 §/inventory）：序號品 / 一般商品 / 散裝批 三分頁，唯讀清單＋篩選＋
 // 搜尋＋分頁，全部走 OpenAPI 生成型別 client（docs/11，禁手刻型別）。
 //
 // 補印標籤：每列一顆「補印標籤」（IN_STOCK 序號品 / ON_SALE 散裝批），直接複用 hardware-agent
 // 的 /print/label——清單列本就帶齊 條碼/品名/售價，免再查 by-code、免改後端。
 // 待後端端點（F5b，需核准後補）：改價留痕、上下架、商品照片。本版不放假按鈕（沿 cash 頁慣例）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, type ReactNode, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   type Badge,
@@ -22,7 +22,16 @@ import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import {
+  canDiscardIdempotencyKey,
+  clearPendingCatalogCreate,
+  pendingCatalogCreateServerSnapshot,
+  pendingCatalogCreateSnapshot,
+  savePendingCatalogCreate,
+  subscribePendingCatalogCreate,
+} from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
 
 // 「詳細」含收購成本/毛利/進貨單價等敏感資訊（管理者限定，後端 detail 端點亦限 MANAGER）。
 function useIsManager(): boolean {
@@ -77,7 +86,7 @@ const BULK_STATUSES: BulkStatus[] = ["ON_SALE", "SOLD_OUT", "WRITTEN_OFF"];
 const TABS: { key: Tab; label: string }[] = [
   { key: "serialized", label: "序號品" },
   { key: "aging", label: "久滯庫存" },
-  { key: "catalog", label: "數量品" },
+  { key: "catalog", label: "一般商品" },
   { key: "bulk", label: "散裝批" },
 ];
 
@@ -226,7 +235,7 @@ function SearchBar({
   );
 }
 
-// 改售價（管理者限定；後端寫稽核）。序號品改標價、數量品/散裝改單價。
+// 改售價（管理者限定；後端寫稽核）。序號品改標價、一般商品/散裝改單價。
 function ChangePriceButton({
   kind,
   id,
@@ -477,7 +486,7 @@ function HistoryList({ history }: { history: { at: string; event: string; note?:
   );
 }
 
-// 數量品「詳細」（#2 經銷商）：售價/現量＋經銷商進貨歷史＋異動歷史。
+// 一般商品「詳細」（#2 經銷商）：售價/現量＋經銷商進貨歷史＋異動歷史。
 function CatalogDetailModal({ productId, onClose }: { productId: number; onClose: () => void }) {
   const detail = useQuery({
     queryKey: ["catalog-detail", productId],
@@ -491,10 +500,10 @@ function CatalogDetailModal({ productId, onClose }: { productId: number; onClose
   });
   const d = detail.data;
   return (
-    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="數量品明細">
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="一般商品明細">
       <div className="card pos-dialog inv-detail">
         <div className="inv-detail-head">
-          <h2>數量品明細</h2>
+          <h2>一般商品明細</h2>
           <button type="button" className="btn-ghost" onClick={onClose}>
             關閉
           </button>
@@ -796,10 +805,16 @@ function SerializedPanel() {
   );
 }
 
-// 上架數量型商品（廠商採購商品先在此建檔、初始庫存 0，之後於 /採購補貨 建採購單→收貨補庫存）。
-// 原置於採購頁，惟其本質為主檔建檔——與此處檢視/改價同屬數量品維護，故移來一起管理。
+// 上架一般商品（廠商採購商品先在此建檔、初始庫存 0，之後於 /採購補貨 建採購單→收貨補庫存）。
+// SKU 可留白由系統產生；此處與採購頁的首次採購建立流程共用同一 API。
 function CreateCatalogProduct() {
   const queryClient = useQueryClient();
+  const catalogCreateStoreId = decodeSession()?.storeId ?? 0;
+  const pendingCatalogCreate = useSyncExternalStore(
+    subscribePendingCatalogCreate,
+    () => pendingCatalogCreateSnapshot(catalogCreateStoreId),
+    pendingCatalogCreateServerSnapshot,
+  );
   const [sku, setSku] = useState("");
   const [name, setName] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
@@ -809,17 +824,41 @@ function CreateCatalogProduct() {
 
   const create = useMutation({
     mutationFn: async () => {
-      const price = parseNtd(unitPrice);
-      if (sku.trim() === "" || name.trim() === "") throw new Error("SKU 與品名必填");
-      if (price === null || price <= 0) throw new Error("售價請輸入正整數");
-      const reorder = parseNtd(reorderPoint) ?? 0;
-      const { data, error } = await api.POST("/api/v1/catalog-products", {
-        body: { sku: sku.trim(), name: name.trim(), unit_price: price, reorder_point: reorder },
+      if (catalogCreateStoreId === 0) throw new Error("無法取得目前店別，請重新登入");
+      let pending = pendingCatalogCreate;
+      if (pending === null) {
+        const price = parseNtd(unitPrice);
+        if (name.trim() === "") throw new Error("品名必填");
+        if (price === null || price <= 0) throw new Error("售價請輸入正整數");
+        const reorder = parseNtd(reorderPoint) ?? 0;
+        pending = {
+          key: newIdempotencyKey(),
+          body: {
+            sku: sku.trim() || null,
+            name: name.trim(),
+            unit_price: price,
+            reorder_point: reorder,
+          },
+        };
+        savePendingCatalogCreate(catalogCreateStoreId, pending);
+      }
+      const { data, error, response } = await api.POST("/api/v1/catalog-products", {
+        params: { header: { "Idempotency-Key": pending.key } },
+        body: pending.body,
       });
-      if (!data) throw new Error(extractDetail(error) ?? "上架失敗");
+      if (!data) {
+        if (
+          canDiscardIdempotencyKey(response.status) ||
+          (response.status === 409 && pending.body.sku !== null)
+        ) {
+          clearPendingCatalogCreate(catalogCreateStoreId);
+        }
+        throw new Error(extractDetail(error) ?? "上架失敗");
+      }
       return data;
     },
     onSuccess: (data) => {
+      clearPendingCatalogCreate(catalogCreateStoreId);
       setOkMsg(`已上架「${data.name}」（SKU ${data.sku}），初始庫存 0，可於採購補貨頁建採購單補貨。`);
       setSku("");
       setName("");
@@ -837,7 +876,7 @@ function CreateCatalogProduct() {
 
   return (
     <details className="inv-catalog-create">
-      <summary>＋ 上架數量型商品</summary>
+      <summary>＋ 上架一般商品</summary>
       <form
         className="inv-catalog-create-form"
         onSubmit={(e) => {
@@ -846,21 +885,36 @@ function CreateCatalogProduct() {
         }}
       >
         <p className="hint">廠商採購商品先在此建檔（初始庫存 0），之後於採購補貨頁建採購單→收貨補庫存。</p>
+        {pendingCatalogCreate !== null && (
+          <p className="hint">上一筆商品建立結果尚未確認，已還原原送出內容，請重試確認。</p>
+        )}
         <div className="inv-catalog-create-grid">
           <label className="field">
-            <span>SKU *</span>
-            <input aria-label="SKU" value={sku} onChange={(e) => setSku(e.target.value)} />
+            <span>SKU（選填）</span>
+            <input
+              aria-label="SKU"
+              placeholder="留白由系統產生"
+              value={pendingCatalogCreate?.body.sku ?? sku}
+              disabled={pendingCatalogCreate !== null || create.isPending}
+              onChange={(e) => setSku(e.target.value)}
+            />
           </label>
           <label className="field">
             <span>品名 *</span>
-            <input aria-label="品名" value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              aria-label="品名"
+              value={pendingCatalogCreate?.body.name ?? name}
+              disabled={pendingCatalogCreate !== null || create.isPending}
+              onChange={(e) => setName(e.target.value)}
+            />
           </label>
           <label className="field">
             <span>售價（含稅整數元）*</span>
             <input
               aria-label="售價"
               inputMode="numeric"
-              value={unitPrice}
+              value={pendingCatalogCreate?.body.unit_price ?? unitPrice}
+              disabled={pendingCatalogCreate !== null || create.isPending}
               onChange={(e) => setUnitPrice(e.target.value)}
             />
           </label>
@@ -869,7 +923,8 @@ function CreateCatalogProduct() {
             <input
               aria-label="低庫存提醒點"
               inputMode="numeric"
-              value={reorderPoint}
+              value={pendingCatalogCreate?.body.reorder_point ?? reorderPoint}
+              disabled={pendingCatalogCreate !== null || create.isPending}
               onChange={(e) => setReorderPoint(e.target.value)}
             />
           </label>
@@ -881,7 +936,11 @@ function CreateCatalogProduct() {
         )}
         {okMsg !== null && <p className="form-success">{okMsg}</p>}
         <button type="submit" className="btn-primary" disabled={create.isPending}>
-          {create.isPending ? "上架中…" : "上架商品"}
+          {create.isPending
+            ? "上架中…"
+            : pendingCatalogCreate !== null
+              ? "重試並確認上架結果"
+              : "上架商品"}
         </button>
       </form>
     </details>
@@ -909,7 +968,7 @@ function CatalogPanel() {
         },
       });
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取數量品失敗");
+      throw new Error(extractDetail(error) ?? "讀取一般商品失敗");
     },
   });
   const rows: CatalogProduct[] = query.data ?? [];

@@ -315,7 +315,7 @@ async def inventory_value(
         ("自有在庫成本", str(report.total_owned_cost_value)),
         ("自有在庫售價", str(report.total_owned_retail_value)),
         ("寄售在庫售價(非自有資產)", str(report.consignment_inventory_gross)),
-        ("數量品成本", "N/A"),
+        ("一般商品成本", "N/A"),
         ("庫齡<30天", str(report.owned_cost_aging.lt_30d)),
         ("庫齡30-90天", str(report.owned_cost_aging.d30_90)),
         ("庫齡90-180天", str(report.owned_cost_aging.d90_180)),
@@ -353,7 +353,7 @@ async def inventory_value(
                 "",
             ],
             [
-                "數量型商品",
+                "一般商品",
                 str(report.catalog_total_qty),
                 "N/A",
                 str(report.catalog_retail_value),

@@ -4,12 +4,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   canDiscardIdempotencyKey,
   clearPendingAcqIdemKey,
+  clearPendingCatalogCreate,
   clearPersistedIdemKey,
   getOrCreatePersistedIdemKey,
   loadPendingAcqIdemKey,
+  loadPendingCatalogCreate,
   pendingAcqIdemKeyServerSnapshot,
   pendingAcqIdemKeySnapshot,
   savePendingAcqIdemKey,
+  savePendingCatalogCreate,
   subscribePendingAcqIdemKey,
 } from "@/lib/idempotency";
 
@@ -95,6 +98,40 @@ describe("待確認收購冪等鍵 localStorage 持久化（跨重掛存活，�
     savePendingAcqIdemKey("idem-after-unsub");
     expect(notified).toBe(2); // 取消訂閱後不再通知
     clearPendingAcqIdemKey();
+  });
+});
+
+describe("待確認一般商品建檔持久化", () => {
+  const body = {
+    sku: null,
+    name: "首次採購營繩",
+    unit_price: 260,
+    reorder_point: 3,
+  };
+
+  beforeEach(() => {
+    clearPendingCatalogCreate(1);
+    clearPendingCatalogCreate(2);
+  });
+
+  it("依店別保存鍵與原始 body，重掛後可完整重放", () => {
+    savePendingCatalogCreate(1, { key: "catalog-idem-1", body });
+
+    expect(loadPendingCatalogCreate(1)).toEqual({ key: "catalog-idem-1", body });
+    expect(JSON.parse(localStorage.getItem("lu-camp.catalog-create-pending-idem.1") ?? "null")).toEqual({
+      key: "catalog-idem-1",
+      body,
+    });
+  });
+
+  it("不同店別不會誤用待確認請求，清除也只影響指定店別", () => {
+    savePendingCatalogCreate(1, { key: "catalog-idem-1", body });
+    savePendingCatalogCreate(2, { key: "catalog-idem-2", body: { ...body, name: "二店營繩" } });
+
+    clearPendingCatalogCreate(1);
+
+    expect(loadPendingCatalogCreate(1)).toBeNull();
+    expect(loadPendingCatalogCreate(2)?.key).toBe("catalog-idem-2");
   });
 });
 

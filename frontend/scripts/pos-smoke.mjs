@@ -1,6 +1,6 @@
 // POS 結帳瀏覽器煙霧測試：API 準備唯一測試資料 → 登入 → /pos →
 // 已售/售罄阻擋、序號品重複掃碼、現金/購物金/混合付款、散裝批數量調整、列印明細。
-// 另用既有 /sales API 驗證 catalog 數量型商品銷售；POS UI 掃 SKU 售數量品另見 pos-catalog-smoke.mjs。
+// 另用既有 /sales API 驗證 catalog 一般商品銷售；POS UI 掃 SKU 售一般商品另見 pos-catalog-smoke.mjs。
 // 執行：node scripts/pos-smoke.mjs
 // 需 backend:8000 + frontend:3000 已起、dev-manager 帳號可登入，且至少一筆可售 catalog SKU 已 seed。
 import { randomUUID } from "node:crypto";
@@ -237,7 +237,7 @@ async function exerciseCatalogQuantitySale(token) {
   const product = products.find((p) => p.quantity_on_hand > 0 && parseNtd(p.unit_price) > 0);
   if (!product) {
     throw new Error(
-      "找不到可售數量型商品；請先 seed 至少一筆 /catalog-products quantity_on_hand > 0",
+      "找不到可售一般商品；請先 seed 至少一筆 /catalog-products quantity_on_hand > 0",
     );
   }
   const qty = product.quantity_on_hand >= 2 ? 2 : 1;
@@ -252,7 +252,7 @@ async function exerciseCatalogQuantitySale(token) {
   );
   const line = sale.lines?.find((l) => l.line_type === "CATALOG");
   ok(
-    "數量型商品 API 結帳",
+    "一般商品 API 結帳",
     sale.total === String(total) && line?.qty === qty,
     `${product.sku} × ${qty} = ${money(total)}`,
   );

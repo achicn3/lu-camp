@@ -1,4 +1,4 @@
-"""inventory 唯讀查詢路由（T19-pre-B）：掃碼查件、序號品/數量品/散裝堆列表。
+"""inventory 唯讀查詢路由（T19-pre-B）：掃碼查件、序號品/一般商品/散裝堆列表。
 
 只做 I/O 與驗證（§2）；全部需認證、以 token 的 store_id 範圍過濾（§4）。
 寫入（建檔/改價/狀態轉移）不在此 router——由 acquisition/sales 等流程經
@@ -7,7 +7,7 @@ service 進行，庫存頁的改價/調整功能屬後續任務。
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -34,7 +34,12 @@ from app.modules.inventory.schemas import (
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus, UserRole
-from app.shared.exceptions import DuplicateCatalogProduct, InvalidStateTransition
+from app.shared.exceptions import (
+    CrossStoreReference,
+    DuplicateCatalogProduct,
+    IdempotencyKeyConflict,
+    InvalidStateTransition,
+)
 
 router = APIRouter(tags=["inventory"])
 
@@ -112,7 +117,7 @@ async def update_serialized_price(
 async def get_catalog_by_sku(
     sku: str, session: SessionDep, user: CurrentUserDep
 ) -> CatalogProductRead:
-    """POS 掃碼查數量品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
+    """POS 掃碼查一般商品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
 
     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
     """
@@ -130,12 +135,12 @@ async def get_catalog_by_sku(
 async def update_catalog_price(
     product_id: int, payload: PriceUpdateRequest, session: SessionDep, user: ManagerDep
 ) -> CatalogProductRead:
-    """改數量品售價（限管理者；寫稽核）。找不到→404。"""
+    """改一般商品售價（限管理者；寫稽核）。找不到→404。"""
     product = await InventoryService(session).update_catalog_price(
         user.store_id, product_id, unit_price=payload.unit_price, actor_user_id=user.id
     )
     if product is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此數量品")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此一般商品")
     await session.commit()
     return CatalogProductRead.model_validate(product)
 
@@ -227,10 +232,10 @@ async def list_catalog(
 async def get_catalog_detail(
     product_id: int, session: SessionDep, user: ManagerDep
 ) -> CatalogProductDetailRead:
-    """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
+    """一般商品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
     detail = await InventoryService(session).get_catalog_detail(user.store_id, product_id)
     if detail is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此數量品")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此一般商品")
     return CatalogProductDetailRead.model_validate(detail)
 
 
@@ -241,10 +246,21 @@ async def get_catalog_detail(
     operation_id="createCatalogProduct",
 )
 async def create_catalog_product(
-    payload: CatalogProductCreateRequest, session: SessionDep, user: ManagerDep
+    payload: CatalogProductCreateRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key", min_length=1, max_length=80)
+    ] = None,
 ) -> CatalogProductRead:
-    """新增數量型商品（上架，限 MANAGER）：廠商採購商品先建檔（初始庫存 0），
-    之後即可建採購單→收貨補庫存。同店 SKU 重複回 409。"""
+    """新增一般商品（上架，店員與管理者皆可）：廠商採購商品先建檔（初始庫存 0），
+    之後即可建採購單→收貨補庫存。SKU 可留白由系統產生；留白時必帶 Idempotency-Key，
+    同 key 重送回原商品；同店 SKU 或同 key 不同內容回 409。"""
+    if payload.sku is None and idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="SKU 留白時必須提供 Idempotency-Key",
+        )
     try:
         product = await InventoryService(session).create_catalog(
             user.store_id,
@@ -253,8 +269,17 @@ async def create_catalog_product(
             unit_price=payload.unit_price,
             reorder_point=payload.reorder_point,
             brand_id=payload.brand_id,
+            idempotency_key=idempotency_key,
         )
+    except CrossStoreReference as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except DuplicateCatalogProduct as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except IdempotencyKeyConflict as exc:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return CatalogProductRead.model_validate(product)

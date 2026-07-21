@@ -247,7 +247,7 @@ async def test_void_requires_manager_and_marks_void(
 async def test_void_restores_inventory(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """作廢＝此筆銷售視為未發生 → 庫存回補（數量品現量加回）；否則庫存被永久消耗。"""
+    """作廢＝此筆銷售視為未發生 → 庫存回補（一般商品現量加回）；否則庫存被永久消耗。"""
     token, store_id, _ = await _seed(db_session)
     mgr_token = await _seed_manager(db_session, store_id)
     cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
@@ -415,7 +415,7 @@ async def test_create_unexpected_error_rolls_back(
 async def test_quote_endpoint_returns_discounted_total(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """POST /sales/quote（唯讀）：生效活動下回折後總額；數量品庫存不被扣（試算不動庫存）。"""
+    """POST /sales/quote（唯讀）：生效活動下回折後總額；一般商品庫存不被扣（試算不動庫存）。"""
     from datetime import UTC, datetime, timedelta
 
     from app.modules.campaigns.service import CampaignService

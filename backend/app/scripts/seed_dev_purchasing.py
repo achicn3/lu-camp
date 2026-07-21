@@ -1,7 +1,7 @@
-"""開發/測試用數量品 seed（**非 migration、勿在正式環境執行**）。
+"""開發/測試用一般商品 seed（**非 migration、勿在正式環境執行**）。
 
-供採購/補貨頁（/purchasing）與盤點頁（/stocktake）的瀏覽器 E2E 使用：建立數筆數量型
-商品（CatalogProduct），其中部分低於補貨點以驗證「低庫存提醒」與盤點差異。
+供採購/補貨頁（/purchasing）與盤點頁（/stocktake）的瀏覽器 E2E 使用：建立數筆一般商品
+（CatalogProduct），其中部分低於補貨點以驗證「低庫存提醒」與盤點差異。
 
 前置：先跑 seed_dev_store（門市 id=1）與 seed_dev_user（dev-manager）。
 重跑安全：以固定 sku 為鍵，已存在即略過該筆。

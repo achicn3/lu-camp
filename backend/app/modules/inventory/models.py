@@ -1,4 +1,4 @@
-"""inventory 模型：品牌/型號主檔、數量型商品、序號單品、散裝批、庫存異動帳。
+"""inventory 模型：品牌/型號主檔、一般商品、序號單品、散裝批、庫存異動帳。
 
 每張表帶 store_id（多分店就緒）。金額用 NUMERIC(scale 0) → Decimal（NT$ 整數元）。
 列舉以 native_enum=False + CHECK 儲存（VARCHAR），避免 PG ENUM 型別在 downgrade 殘留。
@@ -97,7 +97,18 @@ class CategoryPricingRule(Base, TimestampMixin):
 class CatalogProduct(Base, TimestampMixin):
     __tablename__ = "catalog_products"
     # 同店 SKU 唯一（與 brands/suppliers 同慣例）：DB 後盾，防 app 層 check-then-insert 競態。
-    __table_args__ = (UniqueConstraint("store_id", "sku", name="uq_catalog_products_store_sku"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "sku", name="uq_catalog_products_store_sku"),
+        UniqueConstraint(
+            "store_id",
+            "create_idempotency_key",
+            name="uq_catalog_products_store_create_idempotency",
+        ),
+        CheckConstraint(
+            "(create_idempotency_key IS NULL) = (create_fingerprint IS NULL)",
+            name="ck_catalog_products_create_idempotency_pair",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -107,6 +118,9 @@ class CatalogProduct(Base, TimestampMixin):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     quantity_on_hand: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     reorder_point: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    # 建檔冪等：回應遺失後以同 key 重送，依原始請求指紋回放同一商品，不重複產生自動 SKU。
+    create_idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    create_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
 
 class SerializedItem(Base, TimestampMixin):

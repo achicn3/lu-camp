@@ -11,7 +11,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import PurchasingPage from "@/app/(authed)/purchasing/page";
-import { clearPendingReceive, loadPendingReceive } from "@/lib/idempotency";
+import {
+  clearPendingCatalogCreate,
+  clearPendingReceive,
+  loadPendingReceive,
+} from "@/lib/idempotency";
 import { clearToken, setToken } from "@/lib/token";
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -72,7 +76,7 @@ const ORDERED_PO = {
   receipts: [],
 };
 
-type FetchRoute = (url: string, init: RequestInit) => Response | null;
+type FetchRoute = (url: string, init: RequestInit) => Response | Promise<Response> | null;
 
 function headerVal(init?: RequestInit, name = "idempotency-key"): string | undefined {
   const h = init?.headers;
@@ -98,7 +102,7 @@ function stubFetch(route: FetchRoute) {
       const body =
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
       const headers = input instanceof Request ? input.headers : init?.headers;
-      const resp = route(url, { method, body, headers } as RequestInit);
+      const resp = await route(url, { method, body, headers } as RequestInit);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
     }),
@@ -118,6 +122,7 @@ afterEach(() => {
   clearToken();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  clearPendingCatalogCreate(1);
   clearPendingReceive(ORDERED_PO.id); // 避免收貨 pending 冪等狀態跨測試殘留
   try {
     globalThis.localStorage?.clear();
@@ -263,7 +268,7 @@ describe("/purchasing", () => {
     await user.click(supplierInput);
     await user.type(supplierInput, "山林");
     await user.click(await screen.findByRole("option", { name: "山林供應商" }));
-    await user.type(screen.getByLabelText("搜尋數量品"), "瓦斯");
+    await user.type(screen.getByLabelText("搜尋一般商品"), "瓦斯");
     await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
     await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
     await user.click(screen.getByRole("button", { name: "送出採購" }));
@@ -273,6 +278,194 @@ describe("/purchasing", () => {
     expect(parsed.supplier_id).toBe(5);
     expect(parsed.lines).toEqual([{ catalog_product_id: 42, qty: 1, unit_cost: "60" }]);
     expect(parsed.submit).toBe(true);
+  });
+
+  it("搜尋不到時可建立一般商品，SKU 留白由系統產生並直接加入採購明細", async () => {
+    loginAs("MANAGER");
+    const created = {
+      ...CATALOG,
+      id: 88,
+      sku: "AUTO-A1B2C3D4E5F6",
+      name: "首次採購營繩",
+      unit_price: "250",
+      quantity_on_hand: 0,
+      reorder_point: 0,
+    };
+    let createdBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && init.method === "POST") {
+        createdBody = init.body as string;
+        return json(created, 201);
+      }
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await user.type(screen.getByLabelText("搜尋一般商品"), "首次採購營繩");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    expect((screen.getByLabelText("一般商品名稱") as HTMLInputElement).value).toBe("首次採購營繩");
+    expect((screen.getByLabelText("一般商品 SKU") as HTMLInputElement).value).toBe("");
+    await user.type(screen.getByLabelText("一般商品售價"), "250");
+    await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
+
+    await waitFor(() => expect(createdBody).not.toBeNull());
+    expect(JSON.parse(createdBody as unknown as string)).toEqual({
+      sku: null,
+      name: "首次採購營繩",
+      unit_price: 250,
+      reorder_point: 0,
+    });
+    expect(await screen.findByLabelText("進貨單價 首次採購營繩")).toBeTruthy();
+    expect(screen.getByText("AUTO-A1B2C3D4E5F6")).toBeTruthy();
+  });
+
+  it("建立一般商品回應失敗後重試會沿用同一冪等鍵", async () => {
+    loginAs("CLERK");
+    const created = {
+      ...CATALOG,
+      id: 88,
+      sku: "AUTO-A1B2C3D4E5F6",
+      name: "重試建立營繩",
+      unit_price: "250",
+      quantity_on_hand: 0,
+      reorder_point: 0,
+    };
+    const keys: (string | undefined)[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && init.method === "POST") {
+        keys.push(headerVal(init));
+        return keys.length === 1 ? json({ detail: "暫時無法確認建立結果" }, 500) : json(created, 201);
+      }
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await user.type(screen.getByLabelText("搜尋一般商品"), "重試建立營繩");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await user.type(screen.getByLabelText("一般商品售價"), "250");
+    await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
+    expect(await screen.findByText("暫時無法確認建立結果")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "重試並確認建立結果" }));
+    expect(await screen.findByLabelText("進貨單價 重試建立營繩")).toBeTruthy();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("建立一般商品回應不明後，重掛會還原原請求並沿用冪等鍵", async () => {
+    loginAs("CLERK");
+    const created = {
+      ...CATALOG,
+      id: 89,
+      sku: "AUTO-B1C2D3E4F5A6",
+      name: "跨重掛營繩",
+      unit_price: "260",
+      quantity_on_hand: 0,
+      reorder_point: 3,
+    };
+    const calls: { key: string | undefined; body: unknown }[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && init.method === "POST") {
+        calls.push({ key: headerVal(init), body: JSON.parse(String(init.body)) });
+        return calls.length === 1
+          ? json({ detail: "暫時無法確認建立結果" }, 500)
+          : json(created, 201);
+      }
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    const firstMount = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await user.type(screen.getByLabelText("搜尋一般商品"), "跨重掛營繩");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await user.type(screen.getByLabelText("一般商品售價"), "260");
+    await user.clear(screen.getByLabelText("一般商品低庫存提醒點"));
+    await user.type(screen.getByLabelText("一般商品低庫存提醒點"), "3");
+    await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
+    expect(await screen.findByText("暫時無法確認建立結果")).toBeTruthy();
+
+    firstMount.unmount();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+
+    expect((await screen.findByLabelText("一般商品名稱") as HTMLInputElement).value).toBe(
+      "跨重掛營繩",
+    );
+    expect((screen.getByLabelText("一般商品售價") as HTMLInputElement).value).toBe("260");
+    expect(
+      (screen.getByLabelText("一般商品低庫存提醒點") as HTMLInputElement).value,
+    ).toBe("3");
+    await user.click(screen.getByRole("button", { name: "重試並確認建立結果" }));
+
+    expect(await screen.findByLabelText("進貨單價 跨重掛營繩")).toBeTruthy();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
+  });
+
+  it("建立一般商品尚未完成時不可儲存或送出採購單", async () => {
+    loginAs("CLERK");
+    let resolveProduct!: (response: Response) => void;
+    const pendingProduct = new Promise<Response>((resolve) => {
+      resolveProduct = resolve;
+    });
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/catalog-products") && init.method === "POST") return pendingProduct;
+      if (url.includes("/catalog-products")) {
+        return json(new URL(url).searchParams.get("q") === "瓦斯" ? [CATALOG] : []);
+      }
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    const supplierInput = screen.getByLabelText("供應商");
+    await user.click(supplierInput);
+    await user.type(supplierInput, "山林");
+    await user.click(await screen.findByRole("option", { name: "山林供應商" }));
+    const productSearch = screen.getByLabelText("搜尋一般商品");
+    await user.type(productSearch, "瓦斯");
+    await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
+    await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
+
+    await user.clear(productSearch);
+    await user.type(productSearch, "首次採購營繩");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await user.type(screen.getByLabelText("一般商品售價"), "250");
+    await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
+    expect((await screen.findByRole("button", { name: "建立中…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    expect((screen.getByRole("button", { name: "存草稿" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "送出採購" }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveProduct(
+      json({
+        ...CATALOG,
+        id: 88,
+        sku: "AUTO-A1B2C3D4E5F6",
+        name: "首次採購營繩",
+        unit_price: "250",
+        quantity_on_hand: 0,
+      }, 201),
+    );
+    expect(await screen.findByLabelText("進貨單價 首次採購營繩")).toBeTruthy();
   });
 
   it("建單供應商 combobox 以伺服器端搜尋（帶 q、只搜啟用中）", async () => {
@@ -327,7 +520,7 @@ describe("/purchasing", () => {
     await user.click(supplierInput);
     await user.type(supplierInput, "山林");
     await user.click(await screen.findByRole("option", { name: "山林供應商" }));
-    await user.type(screen.getByLabelText("搜尋數量品"), "瓦斯");
+    await user.type(screen.getByLabelText("搜尋一般商品"), "瓦斯");
     await user.click(await screen.findByRole("button", { name: /瓦斯罐/ }));
     await user.type(screen.getByLabelText("進貨單價 瓦斯罐"), "60");
     await user.click(screen.getByRole("button", { name: "存草稿" }));

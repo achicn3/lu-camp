@@ -30,7 +30,7 @@ graph TD
 
 ## Phase 1 — 聯絡人 + 庫存
 - `contacts`（統一主檔、角色、PII 加密與遮罩、解密查看寫稽核）。
-- `inventory`：`catalog_product`（數量）與 `serialized_item`（序號，含 ownership/grade/photos/狀態機）、`stock_movement` 帳。
+- `inventory`：`catalog_product`（一般商品，以數量管理）與 `serialized_item`（序號，含 ownership/grade/photos/狀態機）、`stock_movement` 帳。
 - **驗收**：可建會員/賣方、national_id 加密、可建/查兩型態庫存、狀態機受測。
 
 ## Phase 2 — 收購鑑價 + 現金對帳

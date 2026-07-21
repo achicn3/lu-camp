@@ -1,6 +1,6 @@
 """盤點 API 整合測試：建盤點單（快照 system_qty）→ 輸入實點 → 確認調整 catalog 數量 + ADJUST 帳。
 
-第一版只盤數量型商品（catalog_products）。確認時即時重讀現量計算差額，避免清掉盤點期間的銷售。
+第一版只盤一般商品（catalog_products）。確認時即時重讀現量計算差額，避免清掉盤點期間的銷售。
 """
 
 from collections.abc import AsyncGenerator

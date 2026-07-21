@@ -118,7 +118,7 @@ class MemberPointsAdjustFailed(DomainError):
 
 
 class IdempotencyKeyConflict(DomainError):
-    """同一 idempotency key 但購物車內容不同：拒絕，避免靜默丟掉新的結帳。"""
+    """同一 idempotency key 但請求內容不同：拒絕，避免靜默套用先前結果。"""
 
 
 class InsufficientStoreCredit(DomainError):
@@ -225,7 +225,7 @@ class SupplierInactive(DomainError):
 
 
 class DuplicateCatalogProduct(DomainError):
-    """同店 SKU 重複（數量型商品上架）。"""
+    """同店 SKU 重複（一般商品上架）。"""
 
 
 class StocktakeNotFound(DomainError):

@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import InventoryPage from "@/app/(authed)/inventory/page";
+import { clearPendingCatalogCreate } from "@/lib/idempotency";
 import { clearToken, setToken } from "@/lib/token";
 
 // 「詳細」鈕含敏感成本，限管理者；測詳細彈窗前需以 MANAGER token 登入。
@@ -173,6 +174,7 @@ function renderPage() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  clearPendingCatalogCreate(1);
   clearToken();
 });
 
@@ -190,9 +192,68 @@ describe("InventoryPage", () => {
   it("catalog tab flags low stock (qty<=reorder_point)", async () => {
     stubInventory();
     renderPage();
-    await userEvent.click(screen.getByRole("tab", { name: "數量品" }));
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     expect(await screen.findByText("SKU-9")).toBeTruthy();
     expect(screen.getByText("低庫存")).toBeTruthy(); // 2 <= 5
+  });
+
+  it("一般商品上架回應不明後，切換分頁會還原原請求與冪等鍵", async () => {
+    loginManager();
+    const calls: { key: string | null; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (url.includes("/catalog-products") && method === "POST") {
+          const request = input instanceof Request ? input : new Request(url, init);
+          calls.push({
+            key: request.headers.get("Idempotency-Key"),
+            body: JSON.parse(await request.clone().text()),
+          });
+          return calls.length === 1
+            ? json({ detail: "暫時無法確認建立結果" }, 500)
+            : json(
+                {
+                  ...CATALOG[0],
+                  id: 90,
+                  sku: "AUTO-C1D2E3F4A5B6",
+                  name: "庫存頁營繩",
+                  unit_price: "280",
+                  quantity_on_hand: 0,
+                  reorder_point: 4,
+                },
+                201,
+              );
+        }
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("tab", { name: "一般商品" }));
+    await user.click(await screen.findByText("＋ 上架一般商品"));
+    await user.type(screen.getByLabelText("品名"), "庫存頁營繩");
+    await user.type(screen.getByLabelText("售價"), "280");
+    await user.clear(screen.getByLabelText("低庫存提醒點"));
+    await user.type(screen.getByLabelText("低庫存提醒點"), "4");
+    await user.click(screen.getByRole("button", { name: "上架商品" }));
+    expect(await screen.findByText("暫時無法確認建立結果")).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "序號品" }));
+    await user.click(screen.getByRole("tab", { name: "一般商品" }));
+    await user.click(await screen.findByText("＋ 上架一般商品"));
+    expect((screen.getByLabelText("品名") as HTMLInputElement).value).toBe("庫存頁營繩");
+    expect((screen.getByLabelText("售價") as HTMLInputElement).value).toBe("280");
+    expect((screen.getByLabelText("低庫存提醒點") as HTMLInputElement).value).toBe("4");
+    await user.click(screen.getByRole("button", { name: "重試並確認上架結果" }));
+
+    expect(await screen.findByText(/SKU AUTO-C1D2E3F4A5B6/)).toBeTruthy();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
   });
 
   it("bulk tab shows sell-through percent", async () => {
@@ -264,14 +325,14 @@ describe("InventoryPage", () => {
     expect(screen.getByText("入庫（收購）")).toBeTruthy();
   });
 
-  it("數量品 詳細 modal shows supplier purchase history", async () => {
+  it("一般商品 詳細 modal shows supplier purchase history", async () => {
     stubInventory();
     loginManager();
     renderPage();
-    await userEvent.click(screen.getByRole("tab", { name: "數量品" }));
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     await screen.findByText("SKU-9");
     await userEvent.click(screen.getByRole("button", { name: "詳細" }));
-    expect(await screen.findByText("數量品明細")).toBeTruthy();
+    expect(await screen.findByText("一般商品明細")).toBeTruthy();
     expect(screen.getByText("山野貿易")).toBeTruthy();
     expect(screen.getByText("經銷商進貨歷史")).toBeTruthy();
   });

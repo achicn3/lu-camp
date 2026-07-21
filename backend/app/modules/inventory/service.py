@@ -1,8 +1,11 @@
 """inventory 業務邏輯：狀態機、ownership 驗證、散裝扣減、主檔 get-or-create、定價輔助。"""
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +43,7 @@ from app.shared.exceptions import (
     AcquisitionHasSoldItems,
     CrossStoreReference,
     DuplicateCatalogProduct,
+    IdempotencyKeyConflict,
     InsufficientStock,
     InvalidStateTransition,
     OwnershipValidationError,
@@ -71,6 +75,25 @@ def _build_history(movements: list[StockMovement]) -> list[dict[str, Any]]:
         }
         for m in movements
     ]
+
+
+def _catalog_create_fingerprint(
+    *, sku: str | None, name: str, unit_price: Decimal, reorder_point: int, brand_id: int | None
+) -> str:
+    """一般商品建檔內容的穩定指紋；同冪等鍵僅允許精確重播原始請求。"""
+    canonical = json.dumps(
+        {
+            "brand_id": brand_id,
+            "name": name,
+            "reorder_point": reorder_point,
+            "sku": sku,
+            "unit_price": str(unit_price.quantize(Decimal(1))),
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 class InventoryService:
@@ -440,7 +463,7 @@ class InventoryService:
     async def update_catalog_price(
         self, store_id: int, product_id: int, *, unit_price: Decimal, actor_user_id: int
     ) -> CatalogProduct | None:
-        """改數量品售價（寫稽核）。找不到→None。"""
+        """改一般商品售價（寫稽核）。找不到→None。"""
         product = await self._repo.get_catalog(store_id, product_id)
         if product is None:
             return None
@@ -491,7 +514,7 @@ class InventoryService:
         )
 
     async def inventory_mix(self, store_id: int) -> dict[str, int]:
-        """在庫結構件數：自有序號品 / 寄售序號品 / 販售中散裝批 / 有量數量品（洞察摘要）。"""
+        """在庫結構件數：自有序號品 / 寄售序號品 / 販售中散裝批 / 有量一般商品（洞察摘要）。"""
         owned = await self._repo.count_serialized(
             store_id, status=SerializedItemStatus.IN_STOCK, ownership_type=OwnershipType.OWNED
         )
@@ -508,7 +531,7 @@ class InventoryService:
         }
 
     async def get_catalog_detail(self, store_id: int, product_id: int) -> dict[str, Any] | None:
-        """數量品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
+        """一般商品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。"""
         product = await self._repo.get_catalog(store_id, product_id)
         if product is None:
             return None
@@ -620,26 +643,57 @@ class InventoryService:
         self,
         store_id: int,
         *,
-        sku: str,
+        sku: str | None,
         name: str,
         unit_price: Decimal,
         reorder_point: int = 0,
         brand_id: int | None = None,
+        idempotency_key: str | None = None,
     ) -> CatalogProduct:
-        """新增數量型商品（上架）：廠商採購商品先建檔（初始庫存 0），之後採購收貨補庫存。
+        """新增一般商品（上架）：廠商採購商品先建檔（初始庫存 0），之後採購收貨補庫存。
 
-        同店 SKU 唯一（重複 → DuplicateCatalogProduct）。
+        SKU 留白時產生 `AUTO-` 識別碼；同店 SKU 唯一（重複 → DuplicateCatalogProduct）。
+        帶 Idempotency-Key 時，同 key＋同內容重送回原商品；同 key＋不同內容拒絕。
         """
-        if await self._repo.get_catalog_by_sku(store_id, sku) is not None:
-            raise DuplicateCatalogProduct(f"SKU「{sku}」已存在")
+        await self._validate_item_references(store_id, brand_id=brand_id)
+        fingerprint = (
+            _catalog_create_fingerprint(
+                sku=sku,
+                name=name,
+                unit_price=unit_price,
+                reorder_point=reorder_point,
+                brand_id=brand_id,
+            )
+            if idempotency_key is not None
+            else None
+        )
+        if idempotency_key is not None:
+            replay = await self._repo.get_catalog_by_create_idempotency_key(
+                store_id, idempotency_key
+            )
+            if replay is not None:
+                if replay.create_fingerprint != fingerprint:
+                    raise IdempotencyKeyConflict("Idempotency-Key 已用於不同的一般商品建檔內容")
+                return replay
+        resolved_sku = sku
+        if resolved_sku is None:
+            while True:
+                candidate = f"AUTO-{uuid4().hex[:12].upper()}"
+                if await self._repo.get_catalog_by_sku(store_id, candidate) is None:
+                    resolved_sku = candidate
+                    break
+        elif await self._repo.get_catalog_by_sku(store_id, resolved_sku) is not None:
+            raise DuplicateCatalogProduct(f"SKU「{resolved_sku}」已存在")
         product = CatalogProduct(
             store_id=store_id,
-            sku=sku,
+            sku=resolved_sku,
             name=name,
             unit_price=unit_price,
             quantity_on_hand=0,
             reorder_point=reorder_point,
             brand_id=brand_id,
+            create_idempotency_key=idempotency_key,
+            create_fingerprint=fingerprint,
         )
         try:
             return await self._repo.add_catalog(product)
@@ -647,7 +701,17 @@ class InventoryService:
             # DB 唯一鍵後盾（uq_catalog_products_store_sku）：競態下兩請求同時通過上方檢查時兜底。
             # flush 失敗會使交易進入 aborted 狀態，先 rollback 才能乾淨回 409。
             await self._session.rollback()
-            raise DuplicateCatalogProduct(f"SKU「{sku}」已存在") from exc
+            if idempotency_key is not None:
+                replay = await self._repo.get_catalog_by_create_idempotency_key(
+                    store_id, idempotency_key
+                )
+                if replay is not None:
+                    if replay.create_fingerprint != fingerprint:
+                        raise IdempotencyKeyConflict(
+                            "Idempotency-Key 已用於不同的一般商品建檔內容"
+                        ) from exc
+                    return replay
+            raise DuplicateCatalogProduct(f"SKU「{resolved_sku}」已存在") from exc
 
     async def list_catalog(
         self,
@@ -658,7 +722,7 @@ class InventoryService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[CatalogProduct]:
-        """列數量型商品（POS 選件/庫存頁；q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
+        """列一般商品（POS 選件/庫存頁；q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
         return await self._repo.list_catalog(
             store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
         )
@@ -672,7 +736,7 @@ class InventoryService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[CatalogProduct], dict[int, int]]:
-        """列數量型商品＋各品在途待到貨量（跨模組經 purchasing service 取得，不直碰其資料表）。"""
+        """列一般商品＋各品在途待到貨量（跨模組經 purchasing service 取得，不直碰其資料表）。"""
         from app.modules.purchasing.service import PurchasingService
 
         products = await self._repo.list_catalog(
@@ -707,7 +771,7 @@ class InventoryService:
         return await self._repo.bulk_for_valuation(store_id)
 
     async def catalog_for_valuation(self, store_id: int) -> list[CatalogProduct]:
-        """有庫存數量型商品（quantity_on_hand>0；庫存價值報表唯讀用，成本未建模）。"""
+        """有庫存一般商品（quantity_on_hand>0；庫存價值報表唯讀用，成本未建模）。"""
         return await self._repo.catalog_for_valuation(store_id)
 
     async def list_serialized_by_acquisitions(
@@ -929,21 +993,21 @@ class InventoryService:
             bulk_lot_id=lot_id,
         )
 
-    # ── 數量型商品 ──
+    # ── 一般商品 ──
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         return await self._repo.get_catalog(store_id, catalog_id)
 
     async def get_catalog_by_sku(self, store_id: int, sku: str) -> CatalogProduct | None:
-        """以 SKU 取數量品（POS 掃碼售出；店範圍）。"""
+        """以 SKU 取一般商品（POS 掃碼售出；店範圍）。"""
         return await self._repo.get_catalog_by_sku(store_id, sku)
 
     async def sell_catalog_items(self, catalog_id: int, qty: int) -> None:
-        """原子扣減數量型商品庫存；不足則拒絕（不先查再改，併發安全）。"""
+        """原子扣減一般商品庫存；不足則拒絕（不先查再改，併發安全）。"""
         if qty <= 0:
             raise InsufficientStock("售出數量必須 > 0")
         ok = await self._repo.decrement_catalog(catalog_id, qty)
         if not ok:
-            raise InsufficientStock("數量型商品庫存不足，無法售出")
+            raise InsufficientStock("一般商品庫存不足，無法售出")
 
     async def restock_catalog_items(
         self,
@@ -954,12 +1018,12 @@ class InventoryService:
         ref_type: str,
         ref_id: int,
     ) -> None:
-        """數量型商品補貨入庫：加庫存並寫 PURCHASE stock_movement（同一交易）。"""
+        """一般商品補貨入庫：加庫存並寫 PURCHASE stock_movement（同一交易）。"""
         if qty <= 0:
             raise OwnershipValidationError("入庫數量必須 > 0")
         ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
         if not ok:
-            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
         await self.record_stock_in(
             store_id,
             ItemKind.CATALOG,
@@ -979,12 +1043,12 @@ class InventoryService:
         ref_type: str,
         ref_id: int,
     ) -> None:
-        """銷售退貨回補數量型商品：加回現量並寫 RETURN stock_movement（同一交易）。"""
+        """銷售退貨回補一般商品：加回現量並寫 RETURN stock_movement（同一交易）。"""
         if qty <= 0:
             raise OwnershipValidationError("退貨數量必須 > 0")
         ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
         if not ok:
-            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
         await self.record_stock_in(
             store_id,
             ItemKind.CATALOG,
@@ -998,7 +1062,7 @@ class InventoryService:
     async def adjust_catalog_to_count(
         self, store_id: int, catalog_id: int, counted_qty: int, *, ref_type: str, ref_id: int
     ) -> int:
-        """盤點調整：把數量型商品 quantity_on_hand 即時校正為實點數，寫 ADJUST(STOCKTAKE) 帳。
+        """盤點調整：把一般商品 quantity_on_hand 即時校正為實點數，寫 ADJUST(STOCKTAKE) 帳。
 
         以 FOR UPDATE 重讀現量計差額（delta = counted − current），避免清掉盤點期間的銷售；
         差額 0 不寫帳。回傳 delta（正＝盤盈、負＝盤虧）。實點數不可為負。
@@ -1007,7 +1071,7 @@ class InventoryService:
             raise OwnershipValidationError("實點數不可為負")
         product = await self._repo.get_catalog_for_update(store_id, catalog_id)
         if product is None:
-            raise CrossStoreReference(f"數量型商品 {catalog_id} 不屬於 store {store_id}")
+            raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
         delta = counted_qty - product.quantity_on_hand
         if delta != 0:
             product.quantity_on_hand = counted_qty

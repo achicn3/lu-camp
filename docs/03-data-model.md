@@ -66,8 +66,9 @@ erDiagram
 - 收購時品名 autocomplete 的來源；選既有帶入品牌/分類與價格歷史，輸入全新則順手建一筆。建議 `(store_id, brand_id, name)` 唯一。
 - **價格歷史**不另建表：依 `product_model_id` 聚合既有 `acquisition`（收購價）與 `sale_line`（售出價）取得。
 
-### catalog_product（數量型商品：飲料/新品）
-`id, store_id, sku, name, brand_id?, category_id, unit_price, quantity_on_hand, reorder_point, cost_method, supplier_id?, created_at`
+### catalog_product（一般商品：飲料/新品）
+`id, store_id, sku, name, brand_id?, category_id, unit_price, quantity_on_hand, reorder_point, cost_method, supplier_id?, create_idempotency_key?, create_fingerprint?, created_at`
+- `(store_id, create_idempotency_key)` 在非空時唯一；建檔重送以 `create_fingerprint` 驗證內容相同後回放原商品，避免 SKU 留白時重複產生商品主檔。
 
 ### serialized_item（序號化單品：二手買斷/寄售，等級 S–D）
 - `id, store_id, item_code(唯一條碼,建檔當下產生即固定、永不變), name, brand_id?, product_model_id?(型號主檔,供歷史/報表), category_id, grade(S|A|B|C|D), ownership_type(OWNED|CONSIGNMENT)`

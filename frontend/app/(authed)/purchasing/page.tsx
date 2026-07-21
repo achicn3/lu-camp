@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
@@ -32,12 +33,18 @@ import {
 } from "@/features/purchasing/purchasing";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { decodeSession } from "@/lib/auth";
 import {
   canDiscardIdempotencyKey,
+  clearPendingCatalogCreate,
   clearPendingReceive,
   loadPendingReceive,
+  pendingCatalogCreateServerSnapshot,
+  pendingCatalogCreateSnapshot,
   type PendingReceive,
+  savePendingCatalogCreate,
   savePendingReceive,
+  subscribePendingCatalogCreate,
 } from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
@@ -94,7 +101,7 @@ function nextDraftKey(): string {
 }
 
 // ── 低庫存提醒 ───────────────────────────────────────────────
-// 補貨動線的起點：常駐置頂（不再收在折疊抽屜）。每項「補貨」把該數量品直接帶入建單草稿，
+// 補貨動線的起點：常駐置頂（不再收在折疊抽屜）。每項「補貨」把該一般商品直接帶入建單草稿，
 // 並展開建立採購單面板——把「該補什麼」的訊號與「建採購單」的動作接起來。
 function LowStockCard({ onReorder }: { onReorder: (product: CatalogProduct) => void }) {
   const lowStock = useQuery({
@@ -119,7 +126,7 @@ function LowStockCard({ onReorder }: { onReorder: (product: CatalogProduct) => v
           {lowStock.error.message}
         </p>
       ) : rows.length === 0 ? (
-        <p className="empty-state">目前沒有低於補貨點的數量品。</p>
+        <p className="empty-state">目前沒有低於補貨點的一般商品。</p>
       ) : (
         <ul className="pur-lowstock-list">
           {rows.map((p) => {
@@ -216,9 +223,21 @@ function CreatePurchaseOrder({
   setLines: Dispatch<SetStateAction<DraftLine[]>>;
 }) {
   const queryClient = useQueryClient();
+  const catalogCreateStoreId = decodeSession()?.storeId ?? 0;
+  const pendingCatalogCreate = useSyncExternalStore(
+    subscribePendingCatalogCreate,
+    () => pendingCatalogCreateSnapshot(catalogCreateStoreId),
+    pendingCatalogCreateServerSnapshot,
+  );
   const [supplierId, setSupplierId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [newProductOpen, setNewProductOpen] = useState(false);
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductSku, setNewProductSku] = useState("");
+  const [newProductPrice, setNewProductPrice] = useState("");
+  const [newProductReorderPoint, setNewProductReorderPoint] = useState("0");
+  const [newProductError, setNewProductError] = useState<string | null>(null);
   // 送出成功後遞增 → 重掛供應商 combobox，連同內部文字一併清空（避免顯示舊值卻無 id）。
   const [supplierKey, setSupplierKey] = useState(0);
 
@@ -240,12 +259,13 @@ function CreatePurchaseOrder({
     );
   }
 
+  const productSearchText = pendingCatalogCreate?.body.name ?? search;
   const productSearch = useQuery({
-    queryKey: ["catalog-products", "search", search],
-    enabled: search.trim().length > 0,
+    queryKey: ["catalog-products", "search", productSearchText],
+    enabled: pendingCatalogCreate === null && productSearchText.trim().length > 0,
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/catalog-products", {
-        params: { query: { q: search.trim(), limit: 20, offset: 0 } },
+        params: { query: { q: productSearchText.trim(), limit: 20, offset: 0 } },
       });
       if (!data) throw new Error(extractDetail(error) ?? "搜尋商品失敗");
       return data;
@@ -282,6 +302,68 @@ function CreatePurchaseOrder({
     );
   }
 
+  const createProduct = useMutation({
+    mutationFn: async () => {
+      if (catalogCreateStoreId === 0) throw new Error("無法取得目前店別，請重新登入");
+      let pending = pendingCatalogCreate;
+      if (pending === null) {
+        const name = newProductName.trim();
+        const unitPrice = parseNtd(newProductPrice);
+        const reorderPoint = parseNtd(newProductReorderPoint);
+        if (name === "") throw new Error("請輸入一般商品名稱");
+        if (unitPrice === null || unitPrice <= 0) throw new Error("售價請輸入正整數");
+        if (reorderPoint === null || reorderPoint < 0)
+          throw new Error("低庫存提醒點請輸入零或正整數");
+        pending = {
+          key: newIdempotencyKey(),
+          body: {
+            sku: newProductSku.trim() || null,
+            name,
+            unit_price: unitPrice,
+            reorder_point: reorderPoint,
+          },
+        };
+        savePendingCatalogCreate(catalogCreateStoreId, pending);
+      }
+      const { data, error, response } = await api.POST("/api/v1/catalog-products", {
+        params: { header: { "Idempotency-Key": pending.key } },
+        body: pending.body,
+      });
+      if (!data) {
+        if (
+          canDiscardIdempotencyKey(response.status) ||
+          (response.status === 409 && pending.body.sku !== null)
+        ) {
+          clearPendingCatalogCreate(catalogCreateStoreId);
+        }
+        throw new Error(extractDetail(error) ?? "建立一般商品失敗");
+      }
+      return data;
+    },
+    onSuccess: (product) => {
+      clearPendingCatalogCreate(catalogCreateStoreId);
+      addProduct(product);
+      setSearch("");
+      setNewProductOpen(false);
+      setNewProductName("");
+      setNewProductSku("");
+      setNewProductPrice("");
+      setNewProductReorderPoint("0");
+      setNewProductError(null);
+      void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
+    },
+    onError: (err: Error) => setNewProductError(err.message),
+  });
+
+  function openNewProduct() {
+    setNewProductName(search.trim());
+    setNewProductSku("");
+    setNewProductPrice("");
+    setNewProductReorderPoint("0");
+    setNewProductError(null);
+    setNewProductOpen(true);
+  }
+
   const total = draftTotal(lines);
   const submittable = canSubmitPo(supplierId, lines);
 
@@ -298,24 +380,118 @@ function CreatePurchaseOrder({
       />
 
       <label className="field">
-        <span>搜尋數量品（加入明細）</span>
+        <span>搜尋一般商品（加入明細）</span>
         <input
-          aria-label="搜尋數量品"
+          aria-label="搜尋一般商品"
           placeholder="輸入品名或 SKU"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={productSearchText}
+          disabled={pendingCatalogCreate !== null || createProduct.isPending}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setNewProductOpen(false);
+          }}
         />
       </label>
-      {search.trim().length > 0 && (
-        <div className="pur-search-results">
-          {productSearch.isPending ? (
+      {productSearchText.trim().length > 0 && (
+        <div
+          className={`pur-search-results ${newProductOpen || pendingCatalogCreate !== null ? "pur-search-results--create" : ""}`}
+        >
+          {pendingCatalogCreate === null && productSearch.isPending ? (
             <p>搜尋中…</p>
-          ) : productSearch.isError ? (
+          ) : pendingCatalogCreate === null && productSearch.isError ? (
             <p role="alert" className="form-error">
               {productSearch.error.message}
             </p>
-          ) : (productSearch.data ?? []).length === 0 ? (
-            <p className="empty-state">查無相符的數量品。</p>
+          ) : pendingCatalogCreate !== null || (productSearch.data ?? []).length === 0 ? (
+            <div className="pur-product-empty">
+              <p className="empty-state">
+                {pendingCatalogCreate !== null
+                  ? "上一筆商品建立結果尚未確認，已還原原送出內容。"
+                  : "查無相符的一般商品。"}
+              </p>
+              {!newProductOpen && pendingCatalogCreate === null ? (
+                <button type="button" className="btn-secondary" onClick={openNewProduct}>
+                  ＋ 建立一般商品
+                </button>
+              ) : (
+                <form
+                  className="pur-product-create"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    createProduct.mutate();
+                  }}
+                >
+                  <div className="pur-product-create-head">
+                    <div>
+                      <h3>建立一般商品</h3>
+                      <p className="hint">SKU 可留白，由系統自動產生；建立後會直接加入本張採購單。</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={createProduct.isPending || pendingCatalogCreate !== null}
+                      onClick={() => setNewProductOpen(false)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                  <div className="pur-product-create-grid">
+                    <label className="field">
+                      <span>品名 *</span>
+                      <input
+                        autoFocus
+                        aria-label="一般商品名稱"
+                        value={pendingCatalogCreate?.body.name ?? newProductName}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductName(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>SKU（選填）</span>
+                      <input
+                        aria-label="一般商品 SKU"
+                        placeholder="留白由系統產生"
+                        value={pendingCatalogCreate?.body.sku ?? newProductSku}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductSku(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>售價（含稅整數元）*</span>
+                      <input
+                        aria-label="一般商品售價"
+                        inputMode="numeric"
+                        value={pendingCatalogCreate?.body.unit_price ?? newProductPrice}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductPrice(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>低庫存提醒點</span>
+                      <input
+                        aria-label="一般商品低庫存提醒點"
+                        inputMode="numeric"
+                        value={pendingCatalogCreate?.body.reorder_point ?? newProductReorderPoint}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductReorderPoint(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  {newProductError !== null && (
+                    <p role="alert" className="form-error">
+                      {newProductError}
+                    </p>
+                  )}
+                  <button type="submit" className="btn-secondary" disabled={createProduct.isPending}>
+                    {createProduct.isPending
+                      ? "建立中…"
+                      : pendingCatalogCreate !== null
+                        ? "重試並確認建立結果"
+                        : "建立並加入採購單"}
+                  </button>
+                </form>
+              )}
+            </div>
           ) : (
             <ul>
               {(productSearch.data ?? []).map((p) => (
@@ -374,7 +550,7 @@ function CreatePurchaseOrder({
         <button
           type="button"
           className="btn-secondary"
-          disabled={!submittable || create.isPending}
+          disabled={!submittable || create.isPending || createProduct.isPending}
           onClick={() => create.mutate(false)}
         >
           {create.isPending ? "處理中…" : "存草稿"}
@@ -382,7 +558,7 @@ function CreatePurchaseOrder({
         <button
           type="button"
           className="btn-primary"
-          disabled={!submittable || create.isPending}
+          disabled={!submittable || create.isPending || createProduct.isPending}
           onClick={() => create.mutate(true)}
         >
           {create.isPending ? "處理中…" : "送出採購"}
@@ -635,7 +811,7 @@ function PurchaseOrderList() {
     [statusKey],
   );
 
-  // 數量品名稱對照（採購單明細以 catalog_product_id 記錄；詳情頁顯示品名/SKU）。
+  // 一般商品名稱對照（採購單明細以 catalog_product_id 記錄；詳情頁顯示品名/SKU）。
   const catalog = useQuery({
     queryKey: ["catalog-products", "name-map"],
     queryFn: async () => {
@@ -1393,7 +1569,7 @@ function SupplierEditModal({
 
 // ── 採購單工作台（採購單分頁主體）───────────────────────────
 // 順著補貨動線排：低庫存提醒（起點，可一鍵帶入草稿）→ 建立採購單（主要動作，展開式面板）→
-// 採購單清單（待收貨／收貨）。上架數量型商品屬主檔建檔，已移至 /庫存「數量品」分頁。
+// 採購單清單（待收貨／收貨）。上架一般商品屬主檔建檔，已移至 /庫存「一般商品」分頁。
 function OrdersWorkbench() {
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [createOpen, setCreateOpen] = useState(false);

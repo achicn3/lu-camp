@@ -1310,7 +1310,7 @@ body {
   color: var(--ink-soft);
   font-size: var(--text-sm);
 }
-/* 上架數量型商品：以折疊 details 收起，不干擾以檢視為主的數量品清單。 */
+/* 上架一般商品：以折疊 details 收起，不干擾以檢視為主的一般商品清單。 */
 .inv-catalog-create {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2071,14 +2071,25 @@ body {
   gap: var(--sp-2);
 }
 .pur-lowstock-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-1) var(--sp-3);
   padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
 }
+.pur-lowstock-name {
+  grid-column: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pur-lowstock-list .row-sub {
+  grid-column: 1;
+  overflow-wrap: anywhere;
+}
 .pur-lowstock-qty {
-  margin-left: auto;
+  grid-column: 1;
   color: var(--warn);
   font-variant-numeric: tabular-nums;
 }
@@ -2091,7 +2102,8 @@ body {
   margin-left: 4px;
 }
 .pur-reorder-btn {
-  flex: 0 0 auto;
+  grid-column: 2;
+  grid-row: 1 / span 3;
   min-height: auto;
   padding: var(--sp-1) var(--sp-3);
   white-space: nowrap;
@@ -2108,6 +2120,47 @@ body {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.pur-search-results--create {
+  max-height: none;
+}
+.pur-product-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.pur-product-empty > .empty-state {
+  margin: 0;
+}
+.pur-product-create {
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.pur-product-create-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.pur-product-create-head h3,
+.pur-product-create-head p {
+  margin: 0;
+}
+.pur-product-create-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+@media (max-width: 680px) {
+  .pur-product-create-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .pur-qty,
 .pur-cost,

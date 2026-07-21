@@ -44,16 +44,16 @@
 每頁列出：用途、主要元素、主行動、對應 API、角色。
 
 - **/login**：帳密登入 → 取 token。API：`/auth/login`。全角色。
-- **/pos（結帳）**：掃 `item_code`（序號品）、選數量商品、或選/掃**散裝堆**（E，按該堆均一價、可一次多件）加入購物車；右側結帳區顯示小計/稅/總額、會員歸戶（選填）、發票選項。發票區支援：**掃消費者手機條碼載具**（條碼槍掃入，前端驗證 8 碼且首碼 `/`，帶入 `carrier_type=3J0002`+`carrier_id`）、自然人憑證載具、捐贈碼、B2B 統編；會員若有存常用載具則自動帶入、可覆蓋。用載具時預設 `print_mark=N`（不印證明聯、存雲端），仍印收據；可切換。若 `einvoice_enabled=false` 則整個發票區隱藏並標示「本期不開票」。主行動「收現結帳」→ 後端建 sale →（開票時）產發票 + 排上傳 → 觸發列印（依 print_mark）、開錢櫃。**結帳完成畫面顯示「列印商品明細」按鈕，店員視客人需求手動點選列印（可重複補印）**；非自動印。寄售品售出由後端自動建結算、前端提示。API：`/sales`、`/sales/{id}/print-detail`、`/serialized-items/by-code/{code}`、`/settings`。
+- **/pos（結帳）**：掃 `item_code`（序號品）、選一般商品、或選/掃**散裝堆**（E，按該堆均一價、可一次多件）加入購物車；右側結帳區顯示小計/稅/總額、會員歸戶（選填）、發票選項。發票區支援：**掃消費者手機條碼載具**（條碼槍掃入，前端驗證 8 碼且首碼 `/`，帶入 `carrier_type=3J0002`+`carrier_id`）、自然人憑證載具、捐贈碼、B2B 統編；會員若有存常用載具則自動帶入、可覆蓋。用載具時預設 `print_mark=N`（不印證明聯、存雲端），仍印收據；可切換。若 `einvoice_enabled=false` 則整個發票區隱藏並標示「本期不開票」。主行動「收現結帳」→ 後端建 sale →（開票時）產發票 + 排上傳 → 觸發列印（依 print_mark）、開錢櫃。**結帳完成畫面顯示「列印商品明細」按鈕，店員視客人需求手動點選列印（可重複補印）**；非自動印。寄售品售出由後端自動建結算、前端提示。API：`/sales`、`/sales/{id}/print-detail`、`/serialized-items/by-code/{code}`、`/settings`。
 - **/acquisition（收購鑑價入庫）**：先選/建賣方或寄售人（**姓名、身分證字號必填**；身分證號可由後端 blind index 去重比對既有賣方）→ 選類型：
   - 買斷/寄售（S–D）：逐件鑑價（**品牌選擇可當場新增**、**品名 autocomplete 既有型號**[選既有自動帶入品牌/分類與價格歷史，輸入全新則順手建型號]、分類、成色 S–D、選填拍照、定價；買斷填收購價、寄售填拋售價與抽成預設 50）。
     - **定價輔助 UI（定價計算機）**：輸入收購價後，顯示依目標毛利率算的**建議含稅售價**（`round_ntd(收購價 ÷ (1 − margin_pct/100))`，`default_margin_pct` 預設 45、margin 限 0–99）與**該型號歷史售價**參考；店員可手動覆蓋毛利率或售價任一數字。
   - **散裝（E）**：建立一「堆」——選品牌、填整堆收購成本、收購基準（秤斤/整袋）、件數（可估算）、**該堆每件均一價**、可命名（如「A堆」）。
   買斷/散裝顯示「應付現金」並提示付款（現金出帳）；完成後列印序號條碼或整堆標籤。API：`/acquisitions`、`/acquisitions/{id}/print-labels`、`/contacts`、`/contacts/lookup`、`/brands`、`/product-models`、`/product-models/{id}/pricing`。
-- **/inventory**：三個分頁——序號品（S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、數量品（庫存量、低庫存標示、改價）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。序號品與散裝堆（含商品詳情頁）皆有「**列印條碼**」按鈕，可隨時補印（識別碼固定不變、1D Code 128）。API：`/serialized-items`、`/serialized-items/{id}/print-label`、`/catalog-products`、`/bulk-lots`、`/bulk-lots/{id}/print-label`。
+- **/inventory**：三個分頁——序號品（S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、一般商品（庫存量、低庫存標示、改價；建檔時 SKU 可留白由系統產生）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。序號品與散裝堆（含商品詳情頁）皆有「**列印條碼**」按鈕，可隨時補印（識別碼固定不變、1D Code 128）。API：`/serialized-items`、`/serialized-items/{id}/print-label`、`/catalog-products`、`/bulk-lots`、`/bulk-lots/{id}/print-label`。
 - **/consignment**：待結算/應付未付清單；「付款給寄售人」（現金出帳）；退回寄售人。API：`/consignment/*`。
 - **/contacts**：會員/賣方/寄售人查詢與建檔；會員消費紀錄/點數；身分證字號預設遮罩，MANAGER 可解密查看（寫稽核）。API：`/contacts*`。
-- **/purchasing**：供應商、採購單草稿/送出/取消、分批收貨、各批進項發票與低庫存提醒。預設待收貨清單包含 `ORDERED`、`PARTIAL`。API：`/suppliers`、`/purchase-orders`、`/purchase-orders/{id}/submit|cancel|receive`、`/purchase-orders/{id}/receipts/{receipt_id}/invoice`。
+- **/purchasing**：供應商、採購單草稿/送出/取消、分批收貨、各批進項發票與低庫存提醒。店員與管理者搜尋不到一般商品時皆可使用「建立一般商品」；品名與售價必填、SKU 選填，建立成功後直接加入採購明細。商品建檔送出前依店別持久化 `Idempotency-Key`＋原始 request body，回應不明後即使重整、導覽或切換庫存分頁，也必須以原內容與原 key 重放，直到後端和解。預設待收貨清單包含 `ORDERED`、`PARTIAL`。API：`/suppliers`、`/catalog-products`、`/purchase-orders`、`/purchase-orders/{id}/submit|cancel|receive`、`/purchase-orders/{id}/receipts/{receipt_id}/invoice`。
 - **/cash（現金對帳）**：開帳（輸入零用金）、當前 session 現金異動清單、結帳（輸入實點金額 → 顯示系統應有與差異）。API：`/cash-sessions/*`。
 - **/stocktake**：建盤點單、掃描/輸入實際數、顯示差異、確認調整。API：`/stocktakes/*`。
 - **/reports（MANAGER）**：每日現金對帳、營收/成本/毛利（區分買斷成本與寄售只認抽成）、庫存價值與庫齡、寄售應付、趨勢；匯出 CSV/Excel。**新增購物金報表區（docs/16 §5）**：負債總額/各會員餘額/帳齡分桶、發出 vs 兌付 vs 淨變化（日/週/月）、負債健康比、效益指標（take rate、平均溢價率、β/α 一律標示「估計值」，α 加註「代理法」）；皆可匯出 CSV 與 Excel（檔含產生時間/區間/店別）。關帳報表維持純現金，購物金兌付當日彙總另列展示。API：`/reports/*`、`/reports/store-credit/*`。
@@ -69,7 +69,7 @@
 ### POS 結帳
 ```mermaid
 flowchart LR
-    A[掃 item_code / 選數量品] --> B[加入購物車]
+    A[掃 item_code / 選一般商品] --> B[加入購物車]
     B --> C{還要加?}
     C -->|是| A
     C -->|否| D[選會員? 發票選項?]

@@ -37,7 +37,7 @@ async function buildDraftLine(supplierName, qty) {
   await supplierCombo.click();
   await supplierCombo.fill(supplierName);
   await page.click(`.combo-option:has-text("${supplierName}")`);
-  await page.fill('input[aria-label="搜尋數量品"]', "瓦斯");
+  await page.fill('input[aria-label="搜尋一般商品"]', "瓦斯");
   await page.waitForSelector(`.pur-search-results li button:has-text("${PROD}")`);
   await page.click(`.pur-search-results li button:has-text("${PROD}")`);
   await page.waitForSelector(".pur-lines tbody tr");

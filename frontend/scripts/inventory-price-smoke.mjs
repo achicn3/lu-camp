@@ -1,5 +1,5 @@
 // 庫存改售價瀏覽器煙霧測試（限店長、寫稽核）：登入 → /inventory →
-// 序號品 / 數量品 / 散裝批三類各做一次「改價」：開窗 → 防呆（0 元擋下）→ 改成新價 → 送出 →
+// 序號品 / 一般商品 / 散裝批三類各做一次「改價」：開窗 → 防呆（0 元擋下）→ 改成新價 → 送出 →
 // 重開同列確認新價已持久（經後端 + 重載驗證），並截圖供操作手冊使用。
 // 需 backend:8000 + frontend:3000 已起、lucamp_e2e 已 seed（dev-manager + seed_dev_demo）。
 import { mkdirSync } from "node:fs";
@@ -91,9 +91,9 @@ try {
   ok("序號品：篩選在庫", true);
   await changeFirstPrice("序號品（標價）", "01-serialized");
 
-  // 4) 數量品改單價
-  await switchTab("數量品");
-  await changeFirstPrice("數量品（單價）", "02-catalog");
+  // 4) 一般商品改單價
+  await switchTab("一般商品");
+  await changeFirstPrice("一般商品（單價）", "02-catalog");
 
   // 5) 散裝批改單價
   await switchTab("散裝批");

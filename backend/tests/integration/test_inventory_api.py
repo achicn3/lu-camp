@@ -1,6 +1,6 @@
 """inventory 唯讀查詢 API 整合測試（T19-pre-B）。
 
-POS/庫存頁前置：掃碼查件（by-code）、序號品/數量品/散裝堆列表。
+POS/庫存頁前置：掃碼查件（by-code）、序號品/一般商品/散裝堆列表。
 全部需認證、以 token 的 store_id 範圍過濾（§4）；金額一律字串整數元（§6/§11）。
 """
 
@@ -189,7 +189,7 @@ async def test_list_serialized_pagination(
 
 
 async def test_get_catalog_by_sku(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
-    """POS 掃碼查數量品：以 SKU 取件（店範圍；他店/不存在一律 404）。"""
+    """POS 掃碼查一般商品：以 SKU 取件（店範圍；他店/不存在一律 404）。"""
     store_id = await _seed_store(db_session)
     other = await _seed_store(db_session, "他店")
     db_session.add(
@@ -420,7 +420,7 @@ async def test_endpoints_require_auth(client: httpx.AsyncClient, path: str) -> N
 async def test_create_catalog_product_then_listed(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """上架數量型商品（MANAGER）：建檔後初始庫存 0，且出現在清單。"""
+    """上架一般商品（MANAGER）：建檔後初始庫存 0，且出現在清單。"""
     store_id = await _seed_store(db_session)
     mgr = await _auth_manager(db_session, store_id)
     resp = await client.post(
@@ -443,6 +443,104 @@ async def test_create_catalog_product_then_listed(
     assert any(p["sku"] == "GAS-230" for p in listed.json())
 
 
+@pytest.mark.parametrize("sku", [None, "   "])
+async def test_create_catalog_product_generates_sku_when_missing(
+    client: httpx.AsyncClient, db_session: AsyncSession, sku: str | None
+) -> None:
+    """首次採購可先建一般商品；SKU 未填時由系統產生，不阻塞建檔。"""
+    store_id = await _seed_store(db_session)
+    mgr = await _auth_manager(db_session, store_id)
+    payload: dict[str, object] = {
+        "name": "首次採購營繩",
+        "unit_price": "250",
+        "reorder_point": 3,
+    }
+    if sku is not None:
+        payload["sku"] = sku
+    mgr["Idempotency-Key"] = f"catalog-auto-{sku!r}"
+
+    resp = await client.post("/api/v1/catalog-products", json=payload, headers=mgr)
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["sku"].startswith("AUTO-")
+    assert len(body["sku"]) <= 64
+    assert body["name"] == "首次採購營繩"
+    assert body["quantity_on_hand"] == 0
+
+
+async def test_create_catalog_product_without_sku_replays_same_idempotent_result(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """回應遺失後以同一冪等鍵重送，只回原商品，不得產生第二筆自動 SKU。"""
+    store_id = await _seed_store(db_session)
+    headers = {
+        **(await _auth_manager(db_session, store_id)),
+        "Idempotency-Key": "catalog-create-retry-1",
+    }
+    payload = {
+        "name": "重送仍是同一條營繩",
+        "unit_price": "250",
+        "reorder_point": 3,
+    }
+
+    first = await client.post("/api/v1/catalog-products", json=payload, headers=headers)
+    replay = await client.post("/api/v1/catalog-products", json=payload, headers=headers)
+
+    assert first.status_code == 201, first.text
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+    assert replay.json()["sku"] == first.json()["sku"]
+    products = (
+        await db_session.scalars(
+            select(CatalogProduct).where(
+                CatalogProduct.store_id == store_id,
+                CatalogProduct.name == "重送仍是同一條營繩",
+            )
+        )
+    ).all()
+    assert len(products) == 1
+
+
+async def test_create_catalog_product_reused_idempotency_key_with_changed_payload_conflicts(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    headers = {
+        **(await _auth_manager(db_session, store_id)),
+        "Idempotency-Key": "catalog-create-conflict-1",
+    }
+
+    first = await client.post(
+        "/api/v1/catalog-products",
+        json={"name": "營繩", "unit_price": "250"},
+        headers=headers,
+    )
+    conflict = await client.post(
+        "/api/v1/catalog-products",
+        json={"name": "不同商品", "unit_price": "300"},
+        headers=headers,
+    )
+
+    assert first.status_code == 201, first.text
+    assert conflict.status_code == 409, conflict.text
+
+
+async def test_create_catalog_product_without_sku_requires_idempotency_key(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    mgr = await _auth_manager(db_session, store_id)
+
+    response = await client.post(
+        "/api/v1/catalog-products",
+        json={"name": "不可無保護地自動編號", "unit_price": "250"},
+        headers=mgr,
+    )
+
+    assert response.status_code == 422, response.text
+
+
 async def test_create_catalog_product_duplicate_sku_409(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -455,16 +553,41 @@ async def test_create_catalog_product_duplicate_sku_409(
     assert dup.status_code == 409
 
 
-async def test_create_catalog_product_clerk_forbidden(
+async def test_create_catalog_product_clerk_allowed(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     store_id = await _seed_store(db_session)
     resp = await client.post(
         "/api/v1/catalog-products",
-        json={"sku": "X-1", "name": "店員不可上架", "unit_price": "100"},
+        json={"sku": "X-1", "name": "店員可上架", "unit_price": "100"},
         headers=_auth(store_id),
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["sku"] == "X-1"
+
+
+async def test_create_catalog_product_rejects_cross_store_brand_for_clerk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    other_store_id = await _seed_store(db_session, "其他門市")
+    other_brand = Brand(store_id=other_store_id, name="他店品牌")
+    db_session.add(other_brand)
+    await db_session.flush()
+
+    resp = await client.post(
+        "/api/v1/catalog-products",
+        json={
+            "sku": "CROSS-STORE-1",
+            "name": "不可引用他店品牌",
+            "unit_price": "100",
+            "brand_id": other_brand.id,
+        },
+        headers=_auth(store_id),
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "品牌" in resp.json()["detail"]
 
 
 async def test_list_serialized_filters_category_and_brand(
@@ -716,7 +839,7 @@ async def test_serialized_detail_unknown_returns_404(
 async def test_catalog_detail_shows_supplier_purchase_history(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """數量品明細：經銷商進貨歷史（供應商/數量/單價）＋異動歷史。"""
+    """一般商品明細：經銷商進貨歷史（供應商/數量/單價）＋異動歷史。"""
     store_id = await _seed_store(db_session)
     clerk_id = _STORE_CLERKS[store_id]
     supplier = Supplier(store_id=store_id, name="山野貿易")

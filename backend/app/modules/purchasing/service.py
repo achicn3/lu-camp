@@ -165,7 +165,7 @@ class PurchasingService:
             seen_products.add(line.catalog_product_id)
             if await self._inventory.get_catalog(store_id, line.catalog_product_id) is None:
                 raise CrossStoreReference(
-                    f"數量型商品 {line.catalog_product_id} 不屬於 store {store_id}"
+                    f"一般商品 {line.catalog_product_id} 不屬於 store {store_id}"
                 )
 
         # 預設建為草稿；payload.submit=True 則建立即送出（ORDERED、計入待到貨、可收貨）。
@@ -268,13 +268,13 @@ class PurchasingService:
     async def incoming_qty_by_catalog(
         self, store_id: int, catalog_ids: list[int]
     ) -> dict[int, int]:
-        """各數量品在途待到貨量（Σ 未收完採購單的 訂購−已收）；供低庫存提醒避免重複採購。"""
+        """各一般商品在途待到貨量（Σ 未收完採購單的 訂購−已收）；供低庫存提醒避免重複採購。"""
         return await self._repo.incoming_qty_by_catalog(store_id, catalog_ids)
 
     async def purchase_history_for_catalog(
         self, store_id: int, catalog_product_id: int
     ) -> list[dict[str, Any]]:
-        """某數量品的進貨歷史（供應商/數量/進貨單價/狀態/時間）；庫存明細頁唯讀用。"""
+        """某一般商品的進貨歷史（供應商/數量/進貨單價/狀態/時間）；庫存明細頁唯讀用。"""
         rows = await self._repo.lines_for_catalog(store_id, catalog_product_id)
         return [
             {

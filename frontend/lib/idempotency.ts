@@ -83,6 +83,96 @@ export function pendingAcqIdemKeyServerSnapshot(): string | null {
   return null;
 }
 
+// ── 一般商品建檔的 pending 冪等（依店別共用）───────────────────────────
+// SKU 留白時後端會自動編號；若已 commit 但回應遺失，重掛後換鍵會再建一筆 AUTO-* 商品。
+// 因此送出前依店別保存「鍵＋原始 body」，採購與庫存頁共用同一筆待確認狀態；
+// 重掛後必須以原 body 重放，成功或確定未提交的 4xx 才可清除。
+export interface CatalogCreateRequestBody {
+  sku: string | null;
+  name: string;
+  unit_price: number;
+  reorder_point: number;
+  brand_id?: number | null;
+}
+
+export interface PendingCatalogCreate {
+  key: string;
+  body: CatalogCreateRequestBody;
+}
+
+const CATALOG_CREATE_IDEM_PREFIX = "lu-camp.catalog-create-pending-idem";
+const memoryCatalogCreate = new Map<number, PendingCatalogCreate>();
+const pendingCatalogCreateListeners = new Set<() => void>();
+
+function catalogCreateStorageKey(storeId: number): string {
+  return `${CATALOG_CREATE_IDEM_PREFIX}.${storeId}`;
+}
+
+function isCatalogCreateBody(value: unknown): value is CatalogCreateRequestBody {
+  if (value === null || typeof value !== "object") return false;
+  const body = value as Record<string, unknown>;
+  return (
+    (body.sku === null || typeof body.sku === "string") &&
+    typeof body.name === "string" &&
+    typeof body.unit_price === "number" &&
+    Number.isFinite(body.unit_price) &&
+    typeof body.reorder_point === "number" &&
+    Number.isInteger(body.reorder_point)
+  );
+}
+
+export function loadPendingCatalogCreate(storeId: number): PendingCatalogCreate | null {
+  const cached = memoryCatalogCreate.get(storeId);
+  if (cached != null) return cached;
+  try {
+    const stored = globalThis.localStorage?.getItem(catalogCreateStorageKey(storeId));
+    if (stored != null) {
+      const parsed = JSON.parse(stored) as Partial<PendingCatalogCreate>;
+      if (typeof parsed.key === "string" && isCatalogCreateBody(parsed.body)) {
+        const entry = { key: parsed.key, body: parsed.body };
+        memoryCatalogCreate.set(storeId, entry);
+        return entry;
+      }
+    }
+  } catch {
+    // 讀取／解析失敗：退回記憶體後備。
+  }
+  return memoryCatalogCreate.get(storeId) ?? null;
+}
+
+export function savePendingCatalogCreate(storeId: number, entry: PendingCatalogCreate): void {
+  memoryCatalogCreate.set(storeId, entry);
+  try {
+    globalThis.localStorage?.setItem(catalogCreateStorageKey(storeId), JSON.stringify(entry));
+  } catch {
+    // 配額／隱私政策：僅記憶體後備（本 session 仍防重複）。
+  }
+  for (const listener of pendingCatalogCreateListeners) listener();
+}
+
+export function clearPendingCatalogCreate(storeId: number): void {
+  memoryCatalogCreate.delete(storeId);
+  try {
+    globalThis.localStorage?.removeItem(catalogCreateStorageKey(storeId));
+  } catch {
+    // 清除失敗不阻斷流程（記憶體後備已清）。
+  }
+  for (const listener of pendingCatalogCreateListeners) listener();
+}
+
+export function subscribePendingCatalogCreate(onChange: () => void): () => void {
+  pendingCatalogCreateListeners.add(onChange);
+  return () => pendingCatalogCreateListeners.delete(onChange);
+}
+
+export function pendingCatalogCreateSnapshot(storeId: number): PendingCatalogCreate | null {
+  return loadPendingCatalogCreate(storeId);
+}
+
+export function pendingCatalogCreateServerSnapshot(): PendingCatalogCreate | null {
+  return null;
+}
+
 // ── 分批收貨的 pending 冪等（依採購單 id 分別保存 鍵＋原始請求 body）──────────
 // 收貨鍵只存 React ref 會在重新整理後遺失：若收貨已 commit、回應途中斷線、店員重整後再送，
 // 換新鍵便會被視為新收貨事件而重複入庫（Codex 第二輪 high）。故送出前先以「採購單 id」為界

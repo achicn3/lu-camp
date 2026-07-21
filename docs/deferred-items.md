@@ -21,7 +21,7 @@
 - **(c) G3 稅務定案（找會計師，開票上線前必須）**：購物金付款目前把購物金當「支付工具」、
   發票開**全額**。若會計師把儲值金歸類為「售出時即開立」或「折抵屬折讓」，開票金額與時點
   都會變（docs/16 G3）。
-- **(d) ✅ 已解（2026-07-02，確認非刻意）**：POS 掃碼補數量品第三段 fallback（序號→散裝→SKU），
+- **(d) ✅ 已解（2026-07-02，確認非刻意）**：POS 掃碼補一般商品第三段 fallback（序號→散裝→SKU），
   後端新增 `GET /catalog-products/by-sku/{sku}`；瀏覽器煙霧 `pos-catalog-smoke.mjs` 10/10。
 - **狀態**：擋於 `EInvoiceActivationNotReady`（序列化器就緒前 einvoice_enabled 不可開啟），
   故不影響現行營運；T13 動工時以本項為 checklist。

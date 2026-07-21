@@ -90,7 +90,7 @@ frontend/
 │   ├── (auth)/login/
 │   ├── pos/                     # 結帳
 │   ├── acquisition/             # 收購鑑價入庫
-│   ├── inventory/               # 庫存(序號品/數量品)
+│   ├── inventory/               # 庫存(序號品/一般商品)
 │   ├── consignment/             # 寄售結算/應付
 │   ├── contacts/                # 會員/賣方
 │   ├── purchasing/              # 供應商/採購

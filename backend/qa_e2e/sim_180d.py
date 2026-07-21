@@ -844,7 +844,7 @@ async def _new_members(sim: Sim, n: int) -> None:
 
 
 async def _bootstrap(sim: Sim) -> None:
-    """Day 0 前置：品牌/分類/型號、數量型商品、菜單、供應商、寄售人、初始會員。"""
+    """Day 0 前置：品牌/分類/型號、一般商品、菜單、供應商、寄售人、初始會員。"""
     from app.modules.inventory.models import Brand, Category, ProductModel
 
     settings_svc = StoreSettingsService(sim.s)
@@ -886,6 +886,7 @@ async def _bootstrap(sim: Sim) -> None:
         p = await inv_svc.create_catalog(
             sim.store_id, sku=sku, name=name, unit_price=Decimal(price),
             reorder_point=_RNG.choice([20, 30, 50]),
+            idempotency_key=f"sim-bootstrap-catalog-{sku}",
         )
         sim.catalog_ids.append(p.id)
     await sim.s.commit()

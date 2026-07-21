@@ -1,4 +1,4 @@
-// POS 數量型商品掃碼售出煙霧：API 準備（上架 SKU → 採購單 → 收貨補庫存）→ 登入 → /pos
+// POS 一般商品掃碼售出煙霧：API 準備（上架 SKU → 採購單 → 收貨補庫存）→ 登入 → /pos
 // → 掃無庫存 SKU 阻擋 → 掃可售 SKU 加入購物車 → 調數量（含超量截頂）→ 現金結帳完成。
 // 執行：node scripts/pos-catalog-smoke.mjs（需 backend:8000 + frontend:3000 已起，見 docs/20）
 import { randomUUID } from "node:crypto";
@@ -83,7 +83,7 @@ async function ensureOpenCashSession(token) {
   });
 }
 
-// 上架數量品（初始庫存 0）→ 建採購單 → 收貨補庫存（依實際流程，不繞道直改 DB）。
+// 上架一般商品（初始庫存 0）→ 建採購單 → 收貨補庫存（依實際流程，不繞道直改 DB）。
 async function createStockedCatalogProduct(token, runId, { qty, unitPrice, unitCost }) {
   const product = await apiJson("/api/v1/catalog-products", {
     method: "POST",
@@ -191,13 +191,13 @@ try {
   await scanCode(page, emptyProduct.sku);
   const blocked = page.locator('[role="alert"]', { hasText: "已無庫存" });
   await blocked.waitFor({ state: "visible" });
-  ok("無庫存數量品掃碼阻擋", true, (await blocked.textContent()) ?? "");
+  ok("無庫存一般商品掃碼阻擋", true, (await blocked.textContent()) ?? "");
   await page.screenshot({ path: `${SHOTS}/01-catalog-empty-blocked.png` });
 
-  // 2) 掃可售 SKU 加入購物車（序號/散裝 404 → fallback 數量品）
+  // 2) 掃可售 SKU 加入購物車（序號/散裝 404 → fallback 一般商品）
   await scanCode(page, product.sku);
   await page.waitForSelector(`text=${product.name}`);
-  ok("掃 SKU 加入數量品", true, product.sku);
+  ok("掃 SKU 加入一般商品", true, product.sku);
   await expectTotal(page, 120, "單件總額正確");
 
   // 3) 調數量 2 → 總額 240；超量 99 → 截頂庫存 5 → 600
@@ -213,7 +213,7 @@ try {
   // 4) 現金結帳完成
   await page.click('button:has-text("結帳")');
   await page.waitForSelector("text=已完成");
-  ok("數量品現金結帳完成", true);
+  ok("一般商品現金結帳完成", true);
   await page.screenshot({ path: `${SHOTS}/03-catalog-cash-complete.png` });
 
   // 5) 後端庫存已扣（5 − 2 = 3）

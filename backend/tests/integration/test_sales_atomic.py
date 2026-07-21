@@ -2,7 +2,7 @@
 
 用獨立 session（真交易、各自 commit），在「庫存已扣、要收現」那一步注入失敗，證明
 sales / sale_lines / stock_movements / cash_movements 全部沒落地，且序號品仍 IN_STOCK、
-數量品庫存未被扣——即不會出現「庫存扣了但現金沒進」的半套。
+一般商品庫存未被扣——即不會出現「庫存扣了但現金沒進」的半套。
 """
 
 from decimal import Decimal
@@ -91,7 +91,7 @@ async def test_sale_rolls_back_entirely_when_cash_step_fails(
             assert await _count(s, SaleLine, store_id) == 0
             assert await _count(s, StockMovement, store_id) == 0
             assert await _count(s, CashMovement, store_id) == 0
-            # 序號品仍 IN_STOCK、數量品庫存未被扣（UPDATE 也回滾了）。
+            # 序號品仍 IN_STOCK、一般商品庫存未被扣（UPDATE 也回滾了）。
             ser = await s.scalar(select(SerializedItem).where(SerializedItem.store_id == store_id))
             assert ser is not None and ser.status == SerializedItemStatus.IN_STOCK
             cat_after = await s.scalar(

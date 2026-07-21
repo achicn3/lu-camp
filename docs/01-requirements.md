@@ -31,7 +31,7 @@
 **成色/等級列舉 `grade` = S/A/B/C/D/E（六級，可設定用語）**：S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、E=散裝（秤斤/整袋收）。其中 **S–D 為序號單品，E 為散裝批**。
 
 庫存追蹤型態：
-1. **數量型 SKU（`catalog_product`）**：飲料、全新商品。以數量管理，ownership 一律 `OWNED`。
+1. **一般商品 SKU（`catalog_product`）**：飲料、全新商品。以數量管理，ownership 一律 `OWNED`。
 2. **序號化單品（`serialized_item`，等級 S–D）**：每件唯一，含：
    - `ownership_type`：`OWNED`（二手買斷）/ `CONSIGNMENT`（寄售，如帳篷）
    - `grade`：S/A/B/C/D
@@ -64,8 +64,10 @@
 - 未售出處理：可「退回寄售人」（`RETURNED_TO_CONSIGNOR`，stock_movement OUT）或調整拋售價。
 - 報表：寄售在庫、應付未付清單、已實現抽成收入。
 
-### F. Purchasing / 供應商與採購（數量型商品）
+### F. Purchasing / 供應商與採購（一般商品）
 - `supplier` 主檔。
+- 店員與管理者建立採購單時若搜尋不到一般商品，可在原流程直接建檔並加入明細；品名與售價必填，SKU
+  選填，留白由系統產生。商品初始庫存為 0，仍須經採購收貨才增加庫存。
 - 採購單可存草稿、送出或在未收貨前取消；送出後支援分批收貨，狀態依序為
   `DRAFT → ORDERED → PARTIAL → RECEIVED`，`DRAFT/ORDERED → CANCELLED`。
 - 每批收貨建立一筆 `goods_receipt`，累加各明細的 `received_qty`、增加
@@ -74,7 +76,7 @@
 - 每批收貨可登錄一張進項發票；漏登可事後補登一次（供會計使用）。
 
 ### G. Sales / POS 銷售
-- 純現金結帳。掃 `item_code`（序號品）或選 `catalog_product`（數量品）加入購物車；E 級散裝則選/掃 `bulk_lot`，以該堆均一價售出（可一次多件），扣 `remaining_qty`。
+- 純現金結帳。掃 `item_code`（序號品）或選 `catalog_product`（一般商品）加入購物車；E 級散裝則選/掃 `bulk_lot`，以該堆均一價售出（可一次多件），扣 `remaining_qty`。
 - 結帳：計算金額與稅、開啟錢櫃、列印收據。
 - **商品明細聯（店員當場選擇是否列印）**：一張完整銷售明細（交易序號、日期、店家/統編、逐項品名/數量/單價/小計、折扣、總計、付款方式），供需要的客人索取。
   - **結帳付款完成後，結帳完成畫面顯示「列印商品明細」按鈕**；店員視客人需求**手動決定**是否列印（有些客人要、有些不用）。預設不自動印。
@@ -102,7 +104,7 @@
 - ⚠️ **動工閘門（強制）**：T13 實作前務必下載**當前版 Turnkey 3.9 完整使用說明書**與 **MIG 4.0/4.1** 規格，逐節讀「目錄設定／回執（ProcessResult、SummaryResult）命名與格式／錯誤碼表」，並以實際 **XSD 欄位長度與 Enum**（`InvoiceTypeEnum`、`TaxTypeEnum`、`CarrierTypeEnum`、`DonateMarkEnum` 等）實作；載具/捐贈/統編欄位與代碼一律對照當前 MIG，**不得依記憶或摘要硬寫**。閘門研究成果與欄位對照骨架見 `docs/14-einvoice-mig-mapping.md`。
 
 ### I. Returns / 退換貨（RMA）
-- 退貨參照原 `sale`：退現金（現金抽屜出帳，需有開帳中的 `cash_session`）、序號品回 `IN_STOCK`、數量品回補、散裝回補該堆 `remaining_qty`。
+- 退貨參照原 `sale`：退現金（現金抽屜出帳，需有開帳中的 `cash_session`）、序號品回 `IN_STOCK`、一般商品回補、散裝回補該堆 `remaining_qty`。
 - 若退的是已售出**寄售品** → 同步反轉其 `consignment_settlement`：未付款則 `CANCELLED`；已付款則標記為「應向寄售人收回」待處理。
 - 若原銷售已開發票 → 產生**折讓單（allowance）**經 Turnkey 上傳，不得直接刪發票。
 - 換貨視為退＋售。
@@ -122,7 +124,7 @@
   - 買斷品：成本 = `acquisition_cost`。
   - 寄售品：店家收入只認 `commission_amount`（非全額售價）。
   - 散裝（E）：每件成本 = 整堆 `acquisition_cost ÷ total_qty`；可看各堆售出進度與毛利。
-  - 數量品：成本來自採購。
+  - 一般商品：成本來自採購。
 - 庫存價值與庫齡（intake_date 起算）。
 - 寄售應付未付、已實現抽成。
 - 銷售趨勢、分類別/品項別毛利。

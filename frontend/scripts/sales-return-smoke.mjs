@@ -52,7 +52,7 @@ try {
     method: "POST", token, body: { opening_float: "5000" },
   }).catch(() => {});
 
-  // 備測資：會員＋數量品＋銷售（10×$100，會員拿 10 點）
+  // 備測資：會員＋一般商品＋銷售（10×$100，會員拿 10 點）
   const stamp = Date.now().toString().slice(-8);
   const member = await apiJson("/api/v1/contacts", {
     method: "POST", token,

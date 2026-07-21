@@ -44,10 +44,10 @@ try {
   await page.waitForSelector("text=SER-001"); // auto-wait 重抓後保留列
   ok("狀態篩選 IN_STOCK 縮小結果（SER-003 消失、SER-001 留存）", true);
 
-  // 4) 數量品分頁：低庫存 badge + 篩選
-  await page.click('button[role="tab"]:has-text("數量品")');
+  // 4) 一般商品分頁：低庫存 badge + 篩選
+  await page.click('button[role="tab"]:has-text("一般商品")');
   await page.waitForSelector("text=SKU-1");
-  ok("數量品列出", await page.locator("text=SKU-2").isVisible());
+  ok("一般商品列出", await page.locator("text=SKU-2").isVisible());
   ok("低庫存 badge（SKU-1，2≤5）", await page.locator('.inv-badge:has-text("低庫存")').isVisible());
   await page.check('.inv-check input[type="checkbox"]');
   await page.waitForSelector("text=SKU-2", { state: "detached" });

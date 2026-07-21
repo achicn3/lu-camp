@@ -388,7 +388,7 @@ class SalesRepository:
 
         買斷毛利只認自有品（序號 OWNED：售價−取得成本；散裝自有：售價−每件成本×數量）。
         商品收入＝自有序號＋寄售序號＋自有散裝的售價（寄售收入計入分母，店家收入認抽成另計）。
-        排除：數量型商品（catalog 無成本基礎）、寄售散裝（無抽成基礎）——皆於 docs/16 §5B 註明。
+        排除：一般商品（catalog 無成本基礎）、寄售散裝（無抽成基礎）——皆於 docs/16 §5B 註明。
         """
         buyout_margin = Decimal(0)
         goods_revenue = Decimal(0)

@@ -308,7 +308,7 @@ export default function StocktakePage() {
       <div className="st-head">
         <div>
           <h1 className="page-title">盤點</h1>
-          <p className="hint">建立盤點單會快照目前所有數量品的系統現量，逐項點數後確認調整。</p>
+          <p className="hint">建立盤點單會快照目前所有一般商品的系統現量，逐項點數後確認調整。</p>
         </div>
         <button
           type="button"
