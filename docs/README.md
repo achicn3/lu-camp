@@ -24,7 +24,7 @@
 
 ## 功能與整合規格
 
-- [電子發票移轉 mapping](./14-einvoice-mig-mapping.md)
+- [電子發票 Turnkey/MIG 歷史研究](./14-einvoice-mig-mapping.md)
 - [裝置 SDK 能力](./15-device-sdk-capability.md)
 - [Store credit](./16-store-credit.md)
 - [會員中心](./17-member-center.md)
@@ -43,6 +43,6 @@
 
 - [Claude Code kickoff](./09-claude-code-kickoff.md)
 - [Product spec template plan](./13-product-spec-template-plan.md)
-- [UTM Ubuntu turnkey／電子發票計畫](./18-utm-ubuntu-turnkey-einvoice-plan.md)
+- [UTM Ubuntu Turnkey／電子發票歷史方案](./18-utm-ubuntu-turnkey-einvoice-plan.md)
 
 架構決策記錄位於 [`adr/`](./adr/)，測試與評估截圖位於 [`screenshots/`](./screenshots/)。

@@ -1,8 +1,8 @@
 # 21 — 門市活動（限時促銷）系統規劃
 
-> 狀態：規劃中（Phase 6 報表完成後的新功能）。本文為全盤設計；**涉及金流與寄售人權益的政策
-> 決策需店主拍板後才動工**（見 §8 待決事項）。沿用 `CLAUDE.md`（金額 Decimal/整數元、含稅標價、
-> 總額層級推稅、多分店就緒、稽核、TDD、API 合約優先）。
+> 狀態：**v1 C1–C4 已完成並合併 `main`**（活動核心、POS 折扣、管理 UI、成效報表與匯出）。
+> §8 政策已依店主裁示落地；本文同時保留 v2 延伸方向。沿用 `CLAUDE.md`（金額 Decimal/整數元、
+> 含稅標價、總額層級推稅、多分店就緒、稽核、TDD、API 合約優先）。
 
 ## 1. 目標與範圍
 
@@ -14,7 +14,7 @@
 - 折後單價以 `round_ntd` 取整數元。
 - 單店一次至多一個「生效中」活動（避免疊加歧義；見 §3.3）。多分店就緒：`campaigns.store_id`。
 
-## 2. 現況接入點（greenfield，無既有折扣概念）
+## 2. 動工前接入點（歷史盤點）
 
 - 售價流經 `sales/service.py` 的 `_process_serialized` / `_process_catalog` / `_process_bulk`：
   目前 `unit_price`/`line_total` 直接取 `listed_price` / catalog `unit_price` / bulk `unit_price`。

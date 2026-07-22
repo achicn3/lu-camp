@@ -1,5 +1,9 @@
 # 14 — 電子發票 MIG / Turnkey 對照（G1 閘門研究成果）
 
+> **歷史研究，已由 docs/24 Amego API 路線取代，不得作為目前電子發票施工規格。**
+> 本文件只保留 2026-06 的 Turnkey/MIG 查證脈絡；下文所有「待完成／採用／動工」均是當時語意，
+> 不是目前待辦。
+>
 > 本檔為 **Phase 3 電子發票（T13）動工前置閘門 G1** 的查證成果，供 T13 實作引用。
 > ⚠️ **本檔是「對照骨架」，非完整 XSD**。T13 動工前仍須下載官方 **Turnkey 3.9 完整手冊**與 **MIG 4.0/4.1** 規格，逐節讀目錄設定、回執命名與格式、錯誤碼、各欄位**資料長度與 Enum**，依實際 XSD 實作，**不得憑本摘要硬寫**。
 > 來源：財政部電子發票整合服務平台官方 PDF（見文末）。查證日：2026-06。
@@ -66,16 +70,17 @@ Invoice
 
 > 折讓（退貨且原銷售已開票）走 **G0401**（開立折讓）/**G0501**（作廢折讓），明細允許單價/數量/金額/營業稅額為負；欄位另於 T13 依 G0401 XSD 對照。
 
-## 3. Turnkey 拋檔 / 回執流程（待 T13 依 3.9 手冊精確化）
+## 3. 歷史 Turnkey 拋檔／回執流程（未採用）
 
 - 產生的 MIG XML 投入 **Turnkey 的存證目錄 `UpCast/B2SSTORAGE/<訊息類型>/SRC/`**（MIG 4.0+ 已把 B2B/B2C 存證整併為 **B2S**；檔名無限制、需 UTF-8），Turnkey 排程自動上傳平台；對應本專案架構之「MIG XML 拋出目錄」（docs/02 高階架構圖）。**設定為 XML（`einvUserConfig.xml`），非 `turnkey.ini`**；目錄細節見 §5。
 - 回執分兩層：
   - **`ProcessResult`**：逐筆上傳處理結果與錯誤碼。
   - **`SummaryResult`**：彙總，用於偵測漏傳。
-- 若 Turnkey 在上傳前出錯，平台收不到該批 ProcessResult/SummaryResult → 需看 Turnkey 訊息 log、依錯誤碼修正後重送。對應 docs/04 之 `/einvoice/queue/{id}/retry`、`/einvoice/process-results`，狀態維護於 `einvoice_upload_queue`（`PENDING/UPLOADED/FAILED`）。
+- 若 Turnkey 在上傳前出錯，平台收不到該批 ProcessResult/SummaryResult → 當時規劃查看 Turnkey
+  訊息 log 後重送；這組 importer／`process-results` 路徑未成為目前 API。
 - **離線韌性**：產 XML 為本地檔案動作，斷網不影響開立；上傳由 Turnkey 連線恢復後處理（ADR-004）。
 
-## 4. T13 動工前仍須完成（閘門未解項）
+## 4. 當時 T13 的未解閘門（已隨路線停用）
 
 1. 下載 **Turnkey 3.9 完整使用說明書**：逐節讀目錄設定、回執檔**命名規則與檔案格式**、**錯誤碼表**。
 2. 自 MIG 4.1 PDF 取齊 **F0401 / F0501 / F0701 / G0401 / G0501** 各欄位的**資料長度、必要性、Enum**（`InvoiceTypeEnum`、`TaxTypeEnum`、`CarrierTypeEnum`、`DonateMarkEnum`、`ZeroTaxRateReasonEnum` 等）。
@@ -84,7 +89,9 @@ Invoice
 
 ## 5. Turnkey 部署環境、流程與憑證盤點（2026-06 安裝包/手冊實查）
 
-> 本節為**實際下載安裝包 `5420.zip`（內含 `EINVTurnkey_setup_3.2.1.tar.gz`）＋說明書 321.pdf（Ver 3.9）＋MIG 4.1（5380.pdf）**逐項拆解後的盤點，供「發票收尾階段」（見 docs/07）動工引用。**結論：採同機 Linux x86-64 佈署（選項 A）。**
+> 本節為**實際下載安裝包 `5420.zip`（內含 `EINVTurnkey_setup_3.2.1.tar.gz`）＋說明書 321.pdf
+> （Ver 3.9）＋MIG 4.1（5380.pdf）**逐項拆解後的歷史盤點；當時結論為同機 Linux x86-64，
+> 現已由 Amego API 取代。
 
 ### 5.1 版本相容性結論（已確認）
 
@@ -117,12 +124,12 @@ Invoice
 4. **SSL CA**（連平台 TLS）已附在 `cert/`，免申請。
 5. 客服：**02-89782365 / e-inv@hibox.hinet.net**。
 
-### 5.5 架構決定
+### 5.5 當時架構決定（未採用）
 
 - **選項 A（採用）**：Turnkey 與門市後端**同跑一台 Linux x86-64 主機**，drop 目錄 `UpCast/B2SSTORAGE/<msg>/SRC` 走**本機路徑**，後端直接寫檔、Turnkey 排程撿走，狀態回讀同機 `TURNKEY_MESSAGE_LOG`。**不需跨機器、不需網路檔案系統**，故障點最少。
 - 放棄「轉 MacBook」（Turnkey 不支援 macOS/Apple Silicon）。
 
-### 5.6 待確認項（動工前釐清）
+### 5.6 當時未解項（不再追蹤）
 
 1. **主憑證政策**：是否一定要工商憑證、能否用其他組織憑證 → **待打客服 02-89782365 確認**後再申請。
 2. **防火牆對外 IP 開通**：需向平台申請開通我方對外固定 IP（SFTP 2222＋HTTPS），且為非中國大陸 IP（`readme.txt` 明載）。

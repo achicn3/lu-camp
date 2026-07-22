@@ -1,17 +1,17 @@
 # 19 — 營運報表前置設計與高風險審查清單
 
-> 狀態：F6.5 收斂期間的低衝突規劃文件。此文件不新增 API、不要求 migration，
-> 也不改 `acquisition` / `inventory` / `cashdrawer` / `storecredit` 實作；待 F6.5 合併後再依本文件拆 feature branch。
+> 狀態：**R0–R6 與前端報表已完成並合併 `main`**。本文件現作為報表口徑、匯出規則與
+> 高風險 review checklist；「F6.5 後建議順序」保留歷史施工脈絡，不代表尚未實作。
 
 ## 1. 範圍與順序
 
-### 1.1 現在先不做
+### 1.1 當時規劃階段先不做
 
 - 不在 F6.5 合併前新增 migration、重生 OpenAPI/generated client、改 `shared/enums.py`。
 - 不在本文件階段決定購物金 flows 報表沖正語意。該缺口獨立成「購物金報表沖正一致性」task，與一般報表工作一起處理。
 - 不把報表寫入邏輯塞進 sales / inventory / consignment / cashdrawer；報表模組只讀取既有資料。
 
-### 1.2 F6.5 後建議任務順序
+### 1.2 F6.5 後施工順序（已完成）
 
 1. **R0：購物金報表沖正一致性**
    - 補齊 `/reports/store-credit/liability`、`flows` 對 REVERSAL 的一致語意。

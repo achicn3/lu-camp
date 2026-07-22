@@ -1,6 +1,7 @@
 # 17 — 會員中心（Member Center，T21）規格
 
-> 狀態：**已確認，進入實作（TDD）**。撰於 2026-06-14、同日經使用者逐項裁示定案（見 §10）。
+> 狀態：**T21 已完成並合併 `main`**（2026-07-22 狀態核對）。本規格撰於 2026-06-14、
+> 同日經使用者逐項裁示定案（見 §10）。
 > 本檔遵守 `CLAUDE.md`（最高優先）、`docs/03-data-model.md`、`docs/04-api-spec.md`、
 > `docs/11-api-contract.md`（OpenAPI 為唯一事實來源）、`docs/16-store-credit.md`（購物金）、
 > `docs/12-git-workflow.md`。**因會觸及既有 contacts / acquisition / inventory / sales /
@@ -135,11 +136,12 @@ contacts (MemberService facade, read-only aggregation)
   選購物金時實發 `= round_ntd(現金等值 × (1 + premium_rate))`，`premium_rate` 來自 settings
   （**預設 +10%**，硬夾 0–20%）。**預設業務建議**：對會員以「購物金可享溢價、現金不溢價」引導
   選購物金（二手店常見作法）；是否強制由店員當場與賣方議定，系統不強制。
-- **寄售分潤撥款**：寄售結算（`consignment_settlement`）的**實際付款屬 Phase 4**；本任務**只讀取**。
+- **寄售分潤撥款（本規格當時範圍）**：T21 當時只讀取 `consignment_settlement`；實際付款
+  後續已於 Phase 4 完成。
   **【裁示 #2，2026-06-14】不可只顯示狀態標籤**：`overview` 與 `consignments` 端點**必須加總並
   顯示「該會員目前 PENDING 應撥金額」= Σ `payout_amount` WHERE `status = PENDING`**（= 店家目前
-  尚欠該寄售方的金額），與各筆狀態（PENDING/PAID/CANCELLED）一併呈現。付款動作（現金/購物金）
-  仍留待 Phase 4 定案、T21 不實作。
+  尚欠該寄售方的金額），與各筆狀態（PENDING/PAID/CANCELLED）一併呈現。付款動作在 T21
+  階段不實作；後續 Phase 4 已完成**現金付款**流程，寄售結算未提供購物金撥款。
 
 ### 3.5 購物金到期政策
 - **沿用 G3 裁示**：`expires_at` 欄位**保留、恆 NULL = 暫定永不過期**，待會計師確認（禮券/儲值
@@ -344,7 +346,7 @@ contacts (MemberService facade, read-only aggregation)
 
 ---
 
-## 九、任務切分與交付（實作階段，待確認後執行）
+## 九、任務切分與交付（已完成；保留施工切分）
 
 > 每子項一分支（`feat/...`）、TDD、Codex 兩輪對抗式審查（涉 PII/權限者視為高風險，
 > 用 `/codex:adversarial-review`）、四道門全綠 + rebase 後 ff-only 合併、合併後刪分支、push。

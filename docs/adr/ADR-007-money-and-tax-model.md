@@ -1,7 +1,9 @@
 # ADR-007：金額與稅模型（新台幣整數元、含稅定價）
 
 - **Status**: Accepted
-- **Context**: 純現金交易、台灣 NT$ 最小單位為 1 元；零售慣例為含稅標價。需明確且一致的金額/稅規則以守護帳務不變量（拆帳、對帳、報表、定價輔助）。二手收購/寄售拆帳的稅務處理待會計師確認。
+- **Context**: 台灣 NT$ 最小單位為 1 元；POS 現已支援現金、購物金與行動支付，但所有 tender
+  仍須共用同一金額／稅模型。零售慣例為含稅標價；需以一致規則守護拆帳、對帳、報表與定價輔助。
+  二手收購／寄售及購物金的最終稅務處理仍待會計師確認。
 - **Decision**:
   - 幣別新台幣、**金額一律整數元（無角分）**；內部用 `Decimal` 計算，邊界以 **ROUND_HALF_UP quantize 到整數元**（`core/money.py` 的 `round_ntd()`）。DB 金額欄位 `NUMERIC` scale 0。
   - **標價含稅**（`unit_price`/`listed_price` 為含稅價）。稅於**發票總額層級**推算一次（不逐項算稅）：`net = round_ntd(total / (1 + tax_rate))`、`tax = total − net`，保證 `net + tax = total`。
