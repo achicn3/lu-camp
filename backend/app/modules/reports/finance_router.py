@@ -2,10 +2,10 @@
 
 所有報表唯讀、store 範圍（由 token 的 store_id 限定）；金額整數元字串。
 ?format=csv|xlsx 走 export_response，與 JSON 同源（同一 service 取數，匯出只做呈現轉換）。
-日界一律 UTC（與其餘報表的 date_trunc 一致；單店 dev 簡化，見 service.daily_cash）。
+時間瞬間維持 UTC；營業日與報表分桶固定以 Asia/Taipei 切界線。
 """
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
+from app.core.time import AwareDateTime, store_datetime_iso
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
     CampaignPerformanceReport,
@@ -46,7 +47,7 @@ async def daily_cash(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("日期", report.date.isoformat()),
         ("合計開帳零用金", format_ntd(report.total_opening_float)),
@@ -90,8 +91,8 @@ async def daily_cash(
             [
                 str(r.session_id),
                 r.status,
-                r.opened_at.isoformat(),
-                r.closed_at.isoformat() if r.closed_at else "",
+                store_datetime_iso(r.opened_at),
+                store_datetime_iso(r.closed_at) if r.closed_at else "",
                 str(r.opened_by),
                 str(r.closed_by) if r.closed_by is not None else "",
                 format_ntd(r.opening_float),
@@ -126,7 +127,7 @@ async def daily_summary(
     avg = "N/A" if report.avg_ticket is None else str(report.avg_ticket)
     net_income = "N/A" if report.estimated_net_income is None else str(report.estimated_net_income)
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("日期", report.date.isoformat()),
         ("估算淨利說明", report.estimated_net_income_note),
@@ -171,8 +172,8 @@ async def daily_summary(
 async def trends(
     session: SessionDep,
     user: ManagerDep,
-    date_from: Annotated[datetime, Query(alias="from")],
-    date_to: Annotated[datetime, Query(alias="to")],
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
     granularity: Annotated[Literal["day", "week", "month", "quarter"], Query()] = "month",
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> TrendsReport | Response:
@@ -192,11 +193,11 @@ async def trends(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("粒度", report.granularity),
-        ("起", report.date_from.isoformat()),
-        ("迄", report.date_to.isoformat()),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
     ]
     exp = TabularExport(
         sheet="財務趨勢",
@@ -241,8 +242,8 @@ async def trends(
 async def insights(
     session: SessionDep,
     user: ManagerDep,
-    date_from: Annotated[datetime, Query(alias="from")],
-    date_to: Annotated[datetime, Query(alias="to")],
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> InsightsReport | Response:
     """經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
@@ -264,10 +265,10 @@ async def insights(
 
     t, mix = report.turnover, report.revenue_mix
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("起", report.date_from.isoformat()),
-        ("迄", report.date_to.isoformat()),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
         ("在庫>90天件數", str(t.in_stock_over_90d)),
         ("平均周轉天數", _days(t.avg_turnover_days)),
         ("二手營收", str(mix.secondhand)),
@@ -310,7 +311,7 @@ async def inventory_value(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("自有在庫成本", str(report.total_owned_cost_value)),
         ("自有在庫售價", str(report.total_owned_retail_value)),
@@ -383,7 +384,7 @@ async def consignment_payables(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("狀態篩選", report.status_filter),
         ("待付合計(PENDING)", str(report.total_pending_payout)),
@@ -422,7 +423,7 @@ async def consignment_payables(
                 str(r.payout_amount),
                 r.status,
                 "是" if r.reclaim_needed else "否",
-                r.sale_created_at.isoformat(),
+                store_datetime_iso(r.sale_created_at),
             ]
             for r in report.rows
         ],
@@ -434,8 +435,8 @@ async def consignment_payables(
 async def sales_margin(
     session: SessionDep,
     user: ManagerDep,
-    date_from: Annotated[datetime, Query(alias="from")],
-    date_to: Annotated[datetime, Query(alias="to")],
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> SalesMarginReport | Response:
     """銷售 / 毛利（docs/19 §2.3）。半開區間 [from, to)；to<=from → 422。"""
@@ -450,10 +451,10 @@ async def sales_margin(
         return report
     rate = "N/A" if report.gross_margin_rate is None else str(report.gross_margin_rate)
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("起", report.date_from.isoformat()),
-        ("迄", report.date_to.isoformat()),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
     ]
     exp = TabularExport(
         sheet="銷售毛利",
@@ -494,7 +495,7 @@ async def campaign_performance(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
     ]
     exp = TabularExport(
@@ -519,8 +520,8 @@ async def campaign_performance(
                 r.name,
                 r.status.value,
                 str(r.discount_pct),
-                r.starts_at.isoformat(),
-                r.ends_at.isoformat(),
+                store_datetime_iso(r.starts_at),
+                store_datetime_iso(r.ends_at),
                 str(r.campaign_discount_total),
                 str(r.gross_turnover),
                 str(r.recognized_revenue),

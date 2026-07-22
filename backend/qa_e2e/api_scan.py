@@ -31,6 +31,9 @@ PG = os.environ.get(
 USER = os.environ.get("SIM_USER", "dev-manager")
 PASS = os.environ.get("SEED_USER_PASSWORD", "dev-test-123456")
 SLOW_MS = 1000
+REPORT_PATH = Path(
+    os.environ.get("SIM_API_REPORT_PATH", str(Path(__file__).with_name("api_scan_report.json")))
+)
 
 
 
@@ -179,7 +182,8 @@ async def main() -> None:
             "granularity": "day",
         }
         edge_cases: list[tuple[str, dict[str, Any], str, set[int]]] = [
-            ("/api/v1/reports/trends", naive, "naive-datetime(F-1 回歸)", {200}),
+            # API 時間瞬間必須帶 offset；naive 值若被接受，部署主機時區會改變查詢語意。
+            ("/api/v1/reports/trends", naive, "naive-datetime 應拒絕", {422}),
             ("/api/v1/reports/trends", reversed_range, "反向區間", {200, 400, 422}),
             # 分頁越界**必須被驗證擋下**（schema le=200/ge=1）——接受 200 等於允許驗證
             # 被拿掉而掃描仍綠（Codex 第二輪 P2）。
@@ -228,8 +232,10 @@ async def main() -> None:
         "slow_over_1s": slow,
         "results": sorted(results, key=lambda r: -r.get("ms", 0)),
     }
-    Path(__file__).with_name("api_scan_report.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(
+        REPORT_PATH.write_text,
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     print(
         f"探測 {len(results)}：2xx 運動到 {len(exercised)}、4xx 未進入 {len(not_exercised)}、"

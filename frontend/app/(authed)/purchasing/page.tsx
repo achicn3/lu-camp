@@ -34,6 +34,7 @@ import {
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import {
   canDiscardIdempotencyKey,
   clearPendingCatalogCreate,
@@ -91,7 +92,7 @@ function money(value: string): string {
 }
 
 function dt(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleString("zh-TW") : "—";
+  return formatTaipeiDateTime(value);
 }
 
 let draftKeySeq = 0;

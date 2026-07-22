@@ -3,7 +3,6 @@
 所有報表唯讀、store 範圍；數值從帳本推導。匯出檔含產生時間/區間/店別。
 """
 
-from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
+from app.core.time import AwareDateTime, store_datetime_iso
 from app.modules.reports.export import (
     CSV_MEDIA_TYPE,
     XLSX_MEDIA_TYPE,
@@ -59,7 +59,7 @@ async def liability(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("總未兌付負債", str(report.total_outstanding)),
         ("負債健康比", report.liability_health_ratio or "N/A"),
@@ -83,8 +83,8 @@ async def liability(
 async def flows(
     session: SessionDep,
     user: ManagerDep,
-    date_from: Annotated[datetime, Query(alias="from")],
-    date_to: Annotated[datetime, Query(alias="to")],
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
     granularity: Annotated[Literal["day", "week", "month"], Query()] = "day",
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> FlowsReport | Response:
@@ -103,11 +103,11 @@ async def flows(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("粒度", report.granularity),
-        ("起", report.date_from.isoformat()),
-        ("迄", report.date_to.isoformat()),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
     ]
     exp = TabularExport(
         sheet="購物金流量",
@@ -152,8 +152,8 @@ def _ratio_cell(value: object) -> str:
 async def effectiveness(
     session: SessionDep,
     user: ManagerDep,
-    date_from: Annotated[datetime, Query(alias="from")],
-    date_to: Annotated[datetime, Query(alias="to")],
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> EffectivenessReport | Response:
     """§5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。"""
@@ -181,10 +181,10 @@ async def effectiveness(
         ["兌付筆數 redemption_count", str(report.redemption_count), "直接量測"],
     ]
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("起", report.date_from.isoformat()),
-        ("迄", report.date_to.isoformat()),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
         ("α 代理法說明", report.alpha_method_note),
     ]
     exp = TabularExport(
@@ -211,7 +211,7 @@ async def reconciliation(
     if fmt == "json":
         return report
     meta = [
-        ("產生時間", report.generated_at.isoformat()),
+        ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("帳本推導總負債", str(report.ledger_total_outstanding)),
         ("快取總負債", str(report.cached_total_outstanding)),

@@ -17,6 +17,7 @@ import {
 import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 
 const PAGE_SIZE = 20;
 
@@ -31,7 +32,7 @@ function extractDetail(error: unknown): string | null {
 }
 
 function dt(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleString("zh-TW") : "—";
+  return formatTaipeiDateTime(value);
 }
 
 function VarianceCell({ value }: { value: number | null }) {

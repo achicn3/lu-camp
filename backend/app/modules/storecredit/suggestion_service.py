@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time import store_date, store_day_bounds
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.contacts.service import ContactService
 from app.modules.reports.aging import IssuedLot
@@ -44,17 +45,31 @@ from app.shared.enums import PayoutMethod
 
 
 def _window_ranges(now: datetime, yoy_halfwidth_days: int) -> dict[str, tuple[datetime, datetime]]:
-    """各回看視窗的 [from, to)（docs/16 §6.2）：昨日/近7/30/90天/去年同期±halfwidth。"""
-    yoy_center = now - timedelta(days=365)
+    """各回看視窗的台灣完整日 ``[from, to)``。
+
+    建議以「門市日」每天最多產生一次，因此所有近期視窗都截止於今天台灣時間
+    00:00，避免同一天因第一次開啟頁面的時刻不同而得到不同結果。去年同期以同月日
+    對齊；閏日於非閏年收斂到 2/28。
+    """
+    today = store_date(now)
+    completed_end, _ = store_day_bounds(today)
+    try:
+        yoy_center = today.replace(year=today.year - 1)
+    except ValueError:
+        yoy_center = date(today.year - 1, 2, 28)
+
+    def completed_days(days: int) -> tuple[datetime, datetime]:
+        start, _ = store_day_bounds(today - timedelta(days=days))
+        return start, completed_end
+
+    yoy_start, _ = store_day_bounds(yoy_center - timedelta(days=yoy_halfwidth_days))
+    _, yoy_end = store_day_bounds(yoy_center + timedelta(days=yoy_halfwidth_days))
     return {
-        "yesterday": (now - timedelta(days=1), now),
-        "d7": (now - timedelta(days=7), now),
-        "d30": (now - timedelta(days=30), now),
-        "d90": (now - timedelta(days=90), now),
-        "yoy": (
-            yoy_center - timedelta(days=yoy_halfwidth_days),
-            yoy_center + timedelta(days=yoy_halfwidth_days),
-        ),
+        "yesterday": completed_days(1),
+        "d7": completed_days(7),
+        "d30": completed_days(30),
+        "d90": completed_days(90),
+        "yoy": (yoy_start, yoy_end),
     }
 
 

@@ -2,6 +2,10 @@
 
 REST、JSON、`/api/v1` 前綴。認證用 `Authorization: Bearer <jwt>`。所有列表端點支援分頁與 `store_id` 範圍過濾（由 token 角色決定可見範圍）。金額以字串傳輸、後端轉 `Decimal`，**新台幣整數元（含稅定價）**。錯誤採一致格式 `{ "error": { "code", "message", "details" } }`。
 
+時間瞬間使用 ISO 8601 且請求必須帶 `Z`／offset（naive datetime 回 422），資料庫與 API
+維持 UTC；純日期、今日／昨日與報表日週月季分桶固定使用 `Asia/Taipei`。所有時間區間為
+`[from, to)` 半開區間。
+
 > 以下為合約骨架；實作時補齊 Pydantic schema、驗證、權限裝飾。
 
 ## Auth

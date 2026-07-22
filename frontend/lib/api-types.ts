@@ -2191,6 +2191,8 @@ export interface components {
             /** Lt 30D */
             lt_30d: string;
         };
+        /** Format: date-time */
+        AwareDateTime: string;
         /**
          * BackupHealthRead
          * @description 備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。
@@ -2386,18 +2388,10 @@ export interface components {
             applies_owned_serialized: boolean;
             /** Discount Pct */
             discount_pct: number;
-            /**
-             * Ends At
-             * Format: date-time
-             */
-            ends_at: string;
+            ends_at: components["schemas"]["AwareDateTime"];
             /** Name */
             name: string;
-            /**
-             * Starts At
-             * Format: date-time
-             */
-            starts_at: string;
+            starts_at: components["schemas"]["AwareDateTime"];
         };
         /**
          * CampaignPerformanceReport
@@ -5175,7 +5169,7 @@ export interface components {
          * @description 財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。
          *
          *     桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，
-         *     可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。
+         *     可交叉驗證（同源）。空桶補 0 列，圖表連續。日界固定為 Asia/Taipei。
          */
         TrendsReport: {
             /**
@@ -6757,8 +6751,8 @@ export interface operations {
     listMemberPurchases: {
         parameters: {
             query?: {
-                from?: string | null;
-                to?: string | null;
+                from?: components["schemas"]["AwareDateTime"] | null;
+                to?: components["schemas"]["AwareDateTime"] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -7795,8 +7789,8 @@ export interface operations {
     businessInsightsReport: {
         parameters: {
             query: {
-                from: string;
-                to: string;
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
                 format?: "json" | "csv" | "xlsx";
             };
             header?: never;
@@ -7859,8 +7853,8 @@ export interface operations {
     salesMarginReport: {
         parameters: {
             query: {
-                from: string;
-                to: string;
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
                 format?: "json" | "csv" | "xlsx";
             };
             header?: never;
@@ -7892,8 +7886,8 @@ export interface operations {
     storeCreditEffectiveness: {
         parameters: {
             query: {
-                from: string;
-                to: string;
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
                 format?: "json" | "csv" | "xlsx";
             };
             header?: never;
@@ -7925,8 +7919,8 @@ export interface operations {
     storeCreditFlows: {
         parameters: {
             query: {
-                from: string;
-                to: string;
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
                 granularity?: "day" | "week" | "month";
                 format?: "json" | "csv" | "xlsx";
             };
@@ -8021,8 +8015,8 @@ export interface operations {
     financeTrendsReport: {
         parameters: {
             query: {
-                from: string;
-                to: string;
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
                 granularity?: "day" | "week" | "month" | "quarter";
                 format?: "json" | "csv" | "xlsx";
             };
@@ -8121,8 +8115,8 @@ export interface operations {
     listSales: {
         parameters: {
             query?: {
-                from?: string | null;
-                to?: string | null;
+                from?: components["schemas"]["AwareDateTime"] | null;
+                to?: components["schemas"]["AwareDateTime"] | null;
                 limit?: number;
                 offset?: number;
             };

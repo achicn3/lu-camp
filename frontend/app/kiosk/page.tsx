@@ -7,6 +7,7 @@ import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } fro
 
 import { api } from "@/lib/api";
 import { login, readTokenRole, verifyStaffCredentials } from "@/lib/auth";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { clearToken, getToken, subscribeToken } from "@/lib/token";
 
 import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
@@ -625,6 +626,8 @@ const CONTENT_LABELS: Record<string, string> = {
   balance_before: "目前購物金餘額",
   balance_after: "折抵後剩餘",
   sale_total: "本次消費合計",
+  sale_ref: "銷售單號",
+  purchased_at: "交易時間",
 };
 
 // 客人簽的是完整 JSON 快照，故此處**窮舉渲染**所有欄位、不靜默丟棄任何鍵
@@ -679,7 +682,13 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
           {rest.map(([key, value]) => (
             <div className="kiosk-field-row" key={key}>
               <dt>{CONTENT_LABELS[key] ?? key}</dt>
-              <dd>{isAmountKey(key) ? formatAmount(value) : renderValue(value)}</dd>
+              <dd>
+                {isAmountKey(key)
+                  ? formatAmount(value)
+                  : key === "purchased_at" && typeof value === "string"
+                    ? formatTaipeiDateTime(value)
+                    : renderValue(value)}
+              </dd>
             </div>
           ))}
         </dl>

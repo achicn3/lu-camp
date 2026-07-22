@@ -41,7 +41,13 @@ frontend/lib/api.ts  ← 以 openapi-fetch 包成型別化 client（手寫一次
 - **認證**：`Authorization: Bearer <access>`；401 由 client 自動 refresh、失敗導回登入。
 - **分頁**：統一回應形狀（如 `{ items, total, page, page_size }`），後端共用 `shared/pagination.py`，前端據此處理。
 - **金額**：以字串傳輸（避免 float），**新台幣整數元**（含稅定價）；後端轉 `Decimal`、前端用 `lib/money.ts` 解析/顯示。
-- **日期時間**：ISO 8601、UTC 字串。
+- **日期時間瞬間**：ISO 8601。請求必須帶 `Z` 或明確 offset（例如 `+08:00`），缺少
+  時區的 naive datetime 一律回 422；後端正規化並以 UTC 儲存／回傳。
+- **門市日期**：純 `date`（`YYYY-MM-DD`）與「今日／昨日／日週月季分桶」固定以
+  `Asia/Taipei` 判定。日期查詢使用 `[from, to)` 半開區間，前端把台灣日期轉成
+  台灣 00:00 對應的 UTC 瞬間後送出。
+- **人讀顯示**：瀏覽器畫面與 CSV/XLSX 的日期時間固定顯示台灣時間，不使用瀏覽器、
+  OS 或 PostgreSQL session 的隱含時區。
 - **列舉**：狀態列舉（如 invoice_status、serialized_item.status）由 OpenAPI 帶出，前端直接用生成型別，不自行定義。
 
 ## 5. 本機防漂移（強制）

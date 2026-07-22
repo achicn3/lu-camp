@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -38,15 +39,19 @@ from qa_e2e.longrun_invariants import (
     check,
 )
 
-_MANIFEST = Path(__file__).with_name("sim_manifest.json")
+_MANIFEST = Path(
+    os.environ.get("SIM_MANIFEST_PATH", str(Path(__file__).with_name("sim_manifest.json")))
+)
 
 
 async def s0_manifest_binding(session: AsyncSession) -> None:
     """S0：fail-closed——DB 必須就是 manifest 描述的那份資料集。"""
-    if not _MANIFEST.exists():
+    try:
+        manifest_text = await asyncio.to_thread(_MANIFEST.read_text, encoding="utf-8")
+    except FileNotFoundError:
         check("S0 manifest 存在", False, "缺 sim_manifest.json；先跑 sim_180d")
         return
-    m = json.loads(_MANIFEST.read_text())
+    m = json.loads(manifest_text)
     check("S0 manifest 存在", True, f"seed={m['seed']} days={m['days']}")
     for tab, expected in m["counts"].items():
         actual = (await session.execute(text(f"SELECT COUNT(*) FROM {tab}"))).scalar_one()

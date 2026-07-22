@@ -1,6 +1,8 @@
 // 簽署紀錄調閱（docs/29 波次一）：類型/狀態中文標籤與內容快照的顯示列。
 // 純函式（vitest 直測）；內容快照鍵值因任務類型而異，未知鍵以通用列呈現。
 
+import { formatTaipeiDateTime } from "@/lib/datetime";
+
 export const SIGNING_KIND_LABELS: Record<string, string> = {
   ACQUISITION_AFFIDAVIT: "收購切結",
   STORE_CREDIT_USE: "購物金扣抵確認",
@@ -85,7 +87,13 @@ export function contentRows(content: Record<string, unknown>): ContentRow[] {
     // null 是「簽署當下顯示為 —」的合法值（如住址可空），不可丟棄——否則無法區分
     // 「空值」與「未投影」，證據失真（Codex 第三輪 P2）。未知巢狀值以 JSON 如實呈現。
     const text =
-      value === null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
+      key === "purchased_at" && typeof value === "string"
+        ? formatTaipeiDateTime(value)
+        : value === null
+          ? "—"
+          : typeof value === "object"
+            ? JSON.stringify(value)
+            : String(value);
     rows.push({ label: KNOWN_FIELD_LABELS[key] ?? key, value: text });
   }
   return rows;

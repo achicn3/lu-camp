@@ -1,6 +1,5 @@
 """contacts 路由：I/O 與權限，業務邏輯委派 service。"""
 
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.core.time import AwareDateTime
 from app.modules.contacts.member_schemas import (
     MemberConsignmentsRead,
     MemberOverviewRead,
@@ -230,8 +230,8 @@ async def list_member_purchases(
     contact_id: int,
     session: SessionDep,
     user: CurrentUserDep,
-    date_from: Annotated[datetime | None, Query(alias="from")] = None,
-    date_to: Annotated[datetime | None, Query(alias="to")] = None,
+    date_from: Annotated[AwareDateTime | None, Query(alias="from")] = None,
+    date_to: Annotated[AwareDateTime | None, Query(alias="to")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[MemberPurchaseRead]:

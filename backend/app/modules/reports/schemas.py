@@ -217,7 +217,7 @@ class TrendsReport(BaseModel):
     """財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。
 
     桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，
-    可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。
+    可交叉驗證（同源）。空桶補 0 列，圖表連續。日界固定為 Asia/Taipei。
     """
 
     generated_at: datetime

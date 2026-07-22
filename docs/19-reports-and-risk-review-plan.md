@@ -41,6 +41,9 @@
 - **唯讀**：所有 report service 不 commit、不寫 audit、不改來源資料。
 - **金額**：使用 `Decimal`，輸出沿用字串整數元。
 - **日期區間**：API 使用 `[from, to)` 半開區間；`to <= from` 回 422。
+- **時區**：時間瞬間以 UTC 儲存／回傳，API `from/to` 必須帶 offset；營業日與
+  day/week/month/quarter 分桶固定以 `Asia/Taipei` 切界線。CSV/XLSX 人讀時間輸出
+  `+08:00`，不得受執行主機或 PostgreSQL session 時區影響。
 - **店別範圍**：由 token 的 `store_id` 限定；不可用 query 任意指定他店。
 - **匯出一致性**：JSON、CSV、XLSX 的數字須同源，CSV/XLSX 只做呈現轉換。
 - **CSV/XLSX 安全**：沿用 `reports.export._safe_cell`，防 spreadsheet formula injection。

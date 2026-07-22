@@ -9,6 +9,7 @@ import { type FormEvent, useState } from "react";
 import { clampRate, formatPct, parsePctInput, parseRateInput } from "@/features/settings/helpers";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type SettingsRead = components["schemas"]["SettingsRead"];
@@ -525,7 +526,7 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
           <tbody>
             {history.map((h) => (
               <tr key={h.id}>
-                <td>{new Date(h.changed_at).toLocaleString("zh-TW")}</td>
+                <td>{formatTaipeiDateTime(h.changed_at)}</td>
                 <td>{formatPct(h.old_rate)}</td>
                 <td>{formatPct(h.new_rate)}</td>
                 <td>{h.suggested_rate_at_change ? formatPct(h.suggested_rate_at_change) : "N/A"}</td>

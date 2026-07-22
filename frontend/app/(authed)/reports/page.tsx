@@ -19,6 +19,7 @@ import {
 } from "@/features/reports/reports";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDate, formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { getToken } from "@/lib/token";
 
@@ -736,7 +737,7 @@ function DailyCashPanel() {
               <tr key={s.session_id}>
                 <td className="money">{s.session_id}</td>
                 <td>{s.status}</td>
-                <td>{s.opened_at}</td>
+                <td>{formatTaipeiDateTime(s.opened_at)}</td>
                 <td><MoneyText value={s.opening_float} /></td>
                 <td><MoneyText value={s.cash_sales} /></td>
                 <td><MoneyText value={s.buyout_out} /></td>
@@ -1180,7 +1181,7 @@ function ConsignmentPayablesPanel() {
                 <td><MoneyText value={row.payout_amount} /></td>
                 <td>{row.status}</td>
                 <td>{row.reclaim_needed ? "是" : "否"}</td>
-                <td>{row.sale_created_at}</td>
+                <td>{formatTaipeiDateTime(row.sale_created_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -1218,7 +1219,7 @@ function CampaignPerformancePanel() {
     void downloadReport(url, `campaign-performance.${fmt}`);
   }
 
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("zh-TW");
+  const fmtDate = (iso: string) => formatTaipeiDate(iso);
 
   return (
     <div>

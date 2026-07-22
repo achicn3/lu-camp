@@ -13,6 +13,7 @@ import { parseAmountInput } from "@/features/cash/money-input";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import { formatTaipeiDateTime, formatTaipeiTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type CashSession = components["schemas"]["CashSessionRead"];
@@ -226,10 +227,7 @@ function AdjustmentHistory({ sessionId }: { sessionId: number }) {
             return (
               <li className="cash-adjustment-row" key={movement.id}>
                 <time dateTime={movement.created_at}>
-                  {new Date(movement.created_at).toLocaleTimeString("zh-TW", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatTaipeiTime(movement.created_at)}
                 </time>
                 <span className="cash-adjustment-note">{movement.note ?? "未填事由"}</span>
                 <strong
@@ -405,7 +403,7 @@ export default function CashPage() {
               </div>
               <div className="stat">
                 <dt>開帳時間</dt>
-                <dd>{new Date(open.opened_at).toLocaleString("zh-TW")}</dd>
+                <dd>{formatTaipeiDateTime(open.opened_at)}</dd>
               </div>
             </dl>
           </div>

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.security import encode_access_token
+from app.core.time import store_bucket_bounds
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
@@ -236,7 +237,7 @@ async def test_monthly_buckets(client: httpx.AsyncClient, db_session: AsyncSessi
         cost="400",
     )
     rows = await _trends(
-        client, mgr, dfrom="2026-01-01T00:00:00Z", dto="2026-03-01T00:00:00Z", gran="month"
+        client, mgr, dfrom="2025-12-31T16:00:00Z", dto="2026-02-28T16:00:00Z", gran="month"
     )
     assert len(rows) == 2
     assert rows[0]["period"] == "2026-01-01"
@@ -284,6 +285,39 @@ async def test_day_buckets_sum_equals_period(
     assert total_turnover == Decimal(margin["gross_turnover"]) == Decimal(1300)
 
 
+async def test_day_buckets_align_to_taipei_midnight(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _clerk, store_id, clerk_id, _m = await _seed(db_session)
+    await _add_owned_sale(
+        db_session,
+        store_id,
+        clerk_id,
+        when=datetime(2026, 7, 21, 16, 30, tzinfo=UTC),
+        total="500",
+        cost="300",
+    )
+    await _add_owned_sale(
+        db_session,
+        store_id,
+        clerk_id,
+        when=datetime(2026, 7, 22, 16, 30, tzinfo=UTC),
+        total="700",
+        cost="400",
+    )
+
+    rows = await _trends(
+        client,
+        mgr,
+        dfrom="2026-07-21T16:00:00Z",
+        dto="2026-07-23T16:00:00Z",
+        gran="day",
+    )
+
+    assert [row["period"] for row in rows] == ["2026-07-22", "2026-07-23"]
+    assert [row["gross_turnover"] for row in rows] == ["500", "700"]
+
+
 async def test_quarter_buckets_cross_year(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -305,7 +339,11 @@ async def test_quarter_buckets_cross_year(
         cost="600",
     )
     rows = await _trends(
-        client, mgr, dfrom="2025-10-01T00:00:00Z", dto="2026-04-01T00:00:00Z", gran="quarter"
+        client,
+        mgr,
+        dfrom="2025-09-30T16:00:00Z",
+        dto="2026-03-31T16:00:00Z",
+        gran="quarter",
     )
     assert [r["period"] for r in rows] == ["2025-10-01", "2026-01-01"]
     assert rows[0]["gross_turnover"] == "500"
@@ -317,7 +355,7 @@ async def test_empty_buckets_are_zero_filled(
 ) -> None:
     mgr, _clerk, _store_id, _clerk_id, _m = await _seed(db_session)
     rows = await _trends(
-        client, mgr, dfrom="2026-01-01T00:00:00Z", dto="2026-04-01T00:00:00Z", gran="month"
+        client, mgr, dfrom="2025-12-31T16:00:00Z", dto="2026-03-31T16:00:00Z", gran="month"
     )
     assert [r["period"] for r in rows] == ["2026-01-01", "2026-02-01", "2026-03-01"]
     assert all(r["gross_turnover"] == "0" and r["gross_margin"] == "0" for r in rows)
@@ -341,10 +379,9 @@ async def test_cash_out_and_store_credit_in_bucket(
         source_id=1,
         created_by=clerk_id,
     )
-    now = datetime.now(UTC)
-    dfrom = datetime(now.year, now.month, 1, tzinfo=UTC).isoformat()
-    nxt_year, nxt_month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
-    dto = datetime(nxt_year, nxt_month, 1, tzinfo=UTC).isoformat()
+    dfrom_dt, dto_dt = store_bucket_bounds("month", datetime.now(UTC))
+    dfrom = dfrom_dt.isoformat()
+    dto = dto_dt.isoformat()
     rows = await _trends(client, mgr, dfrom=dfrom, dto=dto, gran="month")
     assert len(rows) == 1
     assert rows[0]["total_cash_out"] == "250"
@@ -373,14 +410,10 @@ async def test_trends_rejects_bad_range_and_granularity(
     assert badg.status_code == 422
 
 
-async def test_trends_accepts_naive_datetime_params(
+async def test_trends_rejects_naive_datetime_params(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """無時區（naive）的 from/to 不得 500：service 內部正規化為 UTC，與其餘報表端點一致。
-
-    回歸守衛：先前 _bucket_bounds 的 tz-aware cursor 與 naive date_to 相比會拋
-    TypeError(offset-naive vs offset-aware) → 500。
-    """
+    """瞬間型查詢必須帶 offset；不得依賴伺服器或資料庫時區猜測。"""
     mgr, _clerk, _store_id, _clerk_id, _m = await _seed(db_session)
     for params in (
         {"from": "2026-01-01", "to": "2026-02-01", "granularity": "day"},
@@ -389,7 +422,7 @@ async def test_trends_accepts_naive_datetime_params(
         resp = await client.get(
             "/api/v1/reports/trends", params=params, headers=_auth(mgr)
         )
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 422, resp.text
 
 
 async def test_trends_rejects_too_many_buckets(

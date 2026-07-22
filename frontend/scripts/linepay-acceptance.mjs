@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 import { PNG } from "pngjs";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { taipeiDateForScript } from "./_taipei-date.mjs";
 
 const API = "http://localhost:8000";
 const SANDBOX = "https://sandbox-web-pay.line.me/web/sandbox/payment/oneTimeKey?countryCode=TW";
@@ -160,7 +161,7 @@ try {
   ok("非現金不進抽屜（此銷售無 cash_movement）", cashMoves === "0", `count=${cashMoves}`);
 
   // 財報不 break：日結現金報表可取（LINE Pay 非現金，不灌現金收入）
-  const today = new Date().toISOString().slice(0, 10);
+  const today = taipeiDateForScript();
   const { status: dcStatus, data: dc } = await api(
     `/api/v1/reports/daily-cash?date=${today}`,
     { token, expect: [200] },

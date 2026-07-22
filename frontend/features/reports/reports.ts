@@ -2,6 +2,13 @@
 // triggerDownload: create a Blob download via anchor click.
 // defaultDateRange: compute sensible from/to ISO strings.
 
+import {
+  exclusiveEndOfTaipeiDay,
+  shiftIsoDate,
+  startOfTaipeiDay,
+  taipeiDate,
+} from "@/lib/datetime";
+
 /**
  * Trigger a browser file download from a Blob response.
  * Creates a temporary <a> element, clicks it, then revokes the object URL.
@@ -22,12 +29,10 @@ export function triggerDownload(blob: Blob, filename: string): void {
  * Both as ISO 8601 date strings (YYYY-MM-DD) for query param usage.
  */
 export function defaultDateRange(now?: Date): { from: string; to: string } {
-  const today = now ?? new Date();
-  const from = new Date(today);
-  from.setDate(from.getDate() - 30);
+  const today = taipeiDate(now);
   return {
-    from: isoDate(from),
-    to: isoDate(today),
+    from: shiftIsoDate(today, -30),
+    to: today,
   };
 }
 
@@ -44,30 +49,25 @@ export function formatRate(rate: string | number | null | undefined): string {
 }
 
 export function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return taipeiDate(d);
 }
 
 /**
- * 起始日期（YYYY-MM-DD）→ 該地當日 00:00 的 UTC 瞬時（帶時區的 ISO，結尾 Z）。
- * 後端 `created_at` 為 timezone-aware；若送 naive datetime 會被當成伺服器時區解讀，
- * 造成報表視窗邊界偏移（如 +08:00 最多差 8 小時）。以本地零時轉 UTC 瞬時即對齊使用者當日。
+ * 起始日期（YYYY-MM-DD）→ 台灣當日 00:00 的 UTC 瞬時（帶時區的 ISO，結尾 Z）。
+ * 後端 `created_at` 為 timezone-aware，缺少 offset 的 naive datetime 會回 422；固定以
+ * `Asia/Taipei` 零時轉 UTC，讓不同瀏覽器與部署主機得到完全相同的報表邊界。
  */
 export function startOfDay(isoDateStr: string): string {
-  return new Date(`${isoDateStr}T00:00:00`).toISOString();
+  return startOfTaipeiDay(isoDateStr);
 }
 
 /**
- * 結束日期（YYYY-MM-DD）→ 該地「隔日 00:00」的 UTC 瞬時，作為半開區間的排他上界。
+ * 結束日期（YYYY-MM-DD）→ 台灣「隔日 00:00」的 UTC 瞬時，作為半開區間的排他上界。
  * 後端用 `created_at < date_to`：送隔日零時讓整個結束日（含最後一刻、小數秒）都納入、
- * 又不含隔日任何資料。同樣帶時區（Z），避免 naive datetime 的時區偏移。
+ * 又不含隔日任何資料。同樣帶時區（Z），符合後端拒絕 naive datetime 的契約。
  */
 export function exclusiveEnd(isoDateStr: string): string {
-  const d = new Date(`${isoDateStr}T00:00:00`);
-  d.setDate(d.getDate() + 1);
-  return d.toISOString();
+  return exclusiveEndOfTaipeiDay(isoDateStr);
 }
 
 /** Labels for effectiveness metrics (zh-TW). */

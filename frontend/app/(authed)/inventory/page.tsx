@@ -22,6 +22,7 @@ import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import {
   canDiscardIdempotencyKey,
   clearPendingCatalogCreate,
@@ -56,7 +57,7 @@ function daysInStock(intakeDate: string): number {
 }
 
 function dt(value: string | null | undefined): string {
-  return value ? new Date(value).toLocaleString("zh-TW") : "—";
+  return formatTaipeiDateTime(value);
 }
 
 // 篩選用品牌/類型選項（單店量小，一次載入；供下拉與明細名稱對照共用）。

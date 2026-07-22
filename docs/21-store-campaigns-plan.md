@@ -39,7 +39,7 @@
 | applies_owned_bulk | bool | **預設 true**（店主裁示） |
 | applies_catalog | bool | **預設 false**（店主裁示，可開） |
 | applies_consignment | bool | **預設 false**；可動態切換是否折寄售品（開啟時一律按比例分攤，見 §8.1） |
-| starts_at / ends_at | timestamptz | 生效窗 `[starts_at, ends_at)`（UTC，與系統一致） |
+| starts_at / ends_at | timestamptz | 生效窗 `[starts_at, ends_at)`；瞬間以 UTC 儲存，管理畫面的 `datetime-local` 一律解讀為台灣時間並帶 offset 送 API |
 | status | enum | DRAFT / ACTIVE / ENDED / CANCELLED（狀態機，§3.3） |
 | created_by / created_at / updated_at | | 稽核 |
 

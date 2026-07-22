@@ -562,6 +562,10 @@
         "title": "AgingBuckets",
         "type": "object"
       },
+      "AwareDateTime": {
+        "format": "date-time",
+        "type": "string"
+      },
       "BackupHealthRead": {
         "description": "備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。",
         "properties": {
@@ -1066,9 +1070,7 @@
             "type": "integer"
           },
           "ends_at": {
-            "format": "date-time",
-            "title": "Ends At",
-            "type": "string"
+            "$ref": "#/components/schemas/AwareDateTime"
           },
           "name": {
             "maxLength": 100,
@@ -1077,9 +1079,7 @@
             "type": "string"
           },
           "starts_at": {
-            "format": "date-time",
-            "title": "Starts At",
-            "type": "string"
+            "$ref": "#/components/schemas/AwareDateTime"
           }
         },
         "required": [
@@ -8504,7 +8504,7 @@
         "type": "object"
       },
       "TrendsReport": {
-        "description": "財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。\n\n桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，\n可交叉驗證（同源）。空桶補 0 列，圖表連續。日界一律 UTC。",
+        "description": "財務趨勢時間序列（docs/19 R6）：依 granularity 分桶的 R5 同義 KPI；餵趨勢圖。\n\n桶與 [from, to) 取交集（首/末桶可為部分期間），故各桶 KPI 加總 = 全期 margin_breakdown，\n可交叉驗證（同源）。空桶補 0 列，圖表連續。日界固定為 Asia/Taipei。",
         "properties": {
           "date_from": {
             "format": "date-time",
@@ -11299,8 +11299,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date-time",
-                  "type": "string"
+                  "$ref": "#/components/schemas/AwareDateTime"
                 },
                 {
                   "type": "null"
@@ -11316,8 +11315,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date-time",
-                  "type": "string"
+                  "$ref": "#/components/schemas/AwareDateTime"
                 },
                 {
                   "type": "null"
@@ -13208,9 +13206,7 @@
             "name": "from",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "From",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13218,9 +13214,7 @@
             "name": "to",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "To",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13336,9 +13330,7 @@
             "name": "from",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "From",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13346,9 +13338,7 @@
             "name": "to",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "To",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13410,9 +13400,7 @@
             "name": "from",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "From",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13420,9 +13408,7 @@
             "name": "to",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "To",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13483,9 +13469,7 @@
             "name": "from",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "From",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13493,9 +13477,7 @@
             "name": "to",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "To",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13678,9 +13660,7 @@
             "name": "from",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "From",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13688,9 +13668,7 @@
             "name": "to",
             "required": true,
             "schema": {
-              "format": "date-time",
-              "title": "To",
-              "type": "string"
+              "$ref": "#/components/schemas/AwareDateTime"
             }
           },
           {
@@ -13875,8 +13853,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date-time",
-                  "type": "string"
+                  "$ref": "#/components/schemas/AwareDateTime"
                 },
                 {
                   "type": "null"
@@ -13892,8 +13869,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date-time",
-                  "type": "string"
+                  "$ref": "#/components/schemas/AwareDateTime"
                 },
                 {
                   "type": "null"

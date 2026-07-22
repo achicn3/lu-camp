@@ -12,6 +12,7 @@ import {
 } from "@/features/signing/labels";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { getToken } from "@/lib/token";
 
 type SignatureTask = components["schemas"]["SignatureTaskRead"];
@@ -19,15 +20,7 @@ type SignatureTask = components["schemas"]["SignatureTaskRead"];
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 function timeLabel(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("zh-TW", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatTaipeiDateTime(iso);
 }
 
 /** 簽名影像需帶 Bearer token 取回（img src 無法帶標頭）→ blob URL，卸載時釋放。 */

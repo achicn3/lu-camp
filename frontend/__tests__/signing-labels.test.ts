@@ -46,6 +46,11 @@ describe("contentRows", () => {
     expect(rows).toContainEqual({ label: "custom_key", value: "x" });
     expect(rows).toContainEqual({ label: "nested", value: '{"a":1}' });
   });
+
+  it("交易時間快照固定以台灣時間顯示", () => {
+    const rows = contentRows({ purchased_at: "2026-07-21T16:30:00Z" });
+    expect(rows).toContainEqual({ label: "交易時間", value: "2026/07/22 00:30" });
+  });
 });
 
 describe("refLabel", () => {

@@ -13,22 +13,22 @@ import {
 } from "@/features/reports/reports";
 
 describe("isoDate", () => {
-  it("formats a date as YYYY-MM-DD", () => {
-    expect(isoDate(new Date(2026, 0, 5))).toBe("2026-01-05");
-    expect(isoDate(new Date(2026, 11, 31))).toBe("2026-12-31");
+  it("formats an instant as the Taiwan YYYY-MM-DD", () => {
+    expect(isoDate(new Date("2026-01-04T16:30:00Z"))).toBe("2026-01-05");
+    expect(isoDate(new Date("2026-12-30T16:30:00Z"))).toBe("2026-12-31");
   });
 });
 
 describe("defaultDateRange", () => {
   it("returns from=30 days ago, to=today", () => {
-    const now = new Date(2026, 5, 18); // 2026-06-18
+    const now = new Date("2026-06-18T04:00:00Z");
     const range = defaultDateRange(now);
     expect(range.to).toBe("2026-06-18");
     expect(range.from).toBe("2026-05-19");
   });
 
   it("handles month boundaries", () => {
-    const now = new Date(2026, 0, 15); // 2026-01-15
+    const now = new Date("2026-01-15T04:00:00Z");
     const range = defaultDateRange(now);
     expect(range.to).toBe("2026-01-15");
     expect(range.from).toBe("2025-12-16");
@@ -45,9 +45,9 @@ describe("date bounds (timezone-aware)", () => {
     const end = new Date(exclusiveEnd("2026-06-18")).getTime();
     expect(end - start).toBe(24 * 60 * 60 * 1000);
   });
-  it("both equal the same local-midnight instant the backend expects", () => {
-    expect(startOfDay("2026-06-18")).toBe(new Date("2026-06-18T00:00:00").toISOString());
-    expect(exclusiveEnd("2026-06-18")).toBe(new Date("2026-06-19T00:00:00").toISOString());
+  it("both equal Taiwan midnight regardless of the browser timezone", () => {
+    expect(startOfDay("2026-06-18")).toBe("2026-06-17T16:00:00.000Z");
+    expect(exclusiveEnd("2026-06-18")).toBe("2026-06-18T16:00:00.000Z");
   });
 });
 

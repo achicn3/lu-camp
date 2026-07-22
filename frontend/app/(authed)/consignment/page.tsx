@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
@@ -42,8 +43,7 @@ function money(value: string): string {
 }
 
 function dt(value: string | null | undefined): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString("zh-TW");
+  return formatTaipeiDateTime(value);
 }
 
 function SettlementStatusBadge({ row }: { row: Settlement }) {

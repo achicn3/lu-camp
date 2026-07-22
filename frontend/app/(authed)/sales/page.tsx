@@ -10,6 +10,12 @@ import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDia
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import {
+  formatTaipeiDateTime,
+  formatTaipeiTime,
+  startOfTaipeiDay,
+  taipeiDate,
+} from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 import {
   clearPersistedIdemKey,
@@ -36,19 +42,13 @@ function useIsManager(): boolean {
   return useMemo(() => decodeSession()?.role === "MANAGER", []);
 }
 
-/** 今日 00:00（本地時區）→ ISO；「當日交易」以門市營業日直覺為準。 */
+/** 今日台灣 00:00 → UTC ISO；「當日交易」固定依門市營業日。 */
 function startOfTodayIso(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return startOfTaipeiDay(taipeiDate());
 }
 
 function timeLabel(iso: string): string {
-  return new Date(iso).toLocaleTimeString("zh-TW", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatTaipeiTime(iso);
 }
 
 const SALE_STATUS_LABELS: Record<string, string> = {
@@ -386,7 +386,7 @@ function LinePayReconcilePanel() {
             <tr key={a.id}>
               <td>{a.order_id}</td>
               <td>${formatNtd(parseNtd(a.amount) ?? 0)}</td>
-              <td>{new Date(a.created_at).toLocaleString("zh-TW")}</td>
+              <td>{formatTaipeiDateTime(a.created_at)}</td>
               <td>
                 <button
                   type="button"

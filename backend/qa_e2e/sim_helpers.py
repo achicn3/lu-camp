@@ -11,9 +11,11 @@ import math
 import random
 import zlib
 from dataclasses import dataclass
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 from app.core.money import round_ntd
+from app.core.time import STORE_TIME_ZONE
 
 # 身分證字母 → 兩位數字（戶役政編碼）
 _NID_LETTER: dict[str, int] = {
@@ -49,6 +51,18 @@ def daily_sales_target(day_index: int, weekday: int, rng: random.Random) -> int:
     base = rng.randint(35, 65) if weekday >= 5 else rng.randint(12, 28)
     season = 1.0 + 0.25 * math.sin(day_index / 200.0 * 2 * math.pi)
     return max(1, int(base * season))
+
+
+def simulation_day_start(now: datetime, total_days: int, day_index: int) -> datetime:
+    """回傳模擬營業日基準瞬間；固定樣本跨過台灣午夜以覆蓋日界。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("模擬基準時間必須包含時區")
+    if total_days <= 0 or not 0 <= day_index < total_days:
+        raise ValueError("模擬日索引超出範圍")
+    target_date = now.astimezone(STORE_TIME_ZONE).date() - timedelta(days=total_days - day_index)
+    # _shift_day 的新列依序加 75 秒；23:58 基準會讓前兩列落在 23:59:15 / 00:00:30。
+    wall_time = time(23, 58) if day_index % 45 == 22 else time(10)
+    return datetime.combine(target_date, wall_time, tzinfo=STORE_TIME_ZONE).astimezone(UTC)
 
 
 def suggested_price(cost: int, margin_pct: int) -> Decimal:

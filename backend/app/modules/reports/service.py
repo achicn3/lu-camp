@@ -7,12 +7,13 @@
 import calendar
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd, split_tax_inclusive
+from app.core.time import store_bucket_bounds, store_date, store_day_bounds
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -95,33 +96,6 @@ class _NormRow:
 
 
 MAX_TREND_BUCKETS = 400  # 防呆：日粒度跨年等過多桶 → 422（單店報表合理上限）
-
-
-def _bucket_bounds(granularity: str, dt: datetime) -> tuple[datetime, datetime]:
-    """回傳 dt 所屬桶的 [起, 下一桶起)（UTC、aligned）。granularity=day/week/month/quarter。"""
-    day = datetime(dt.year, dt.month, dt.day, tzinfo=UTC)
-    if granularity == "day":
-        return day, day + timedelta(days=1)
-    if granularity == "week":  # ISO 週，週一為起
-        start = day - timedelta(days=day.weekday())
-        return start, start + timedelta(days=7)
-    if granularity == "month":
-        start = datetime(dt.year, dt.month, 1, tzinfo=UTC)
-        nxt = (
-            datetime(dt.year + 1, 1, 1, tzinfo=UTC)
-            if dt.month == 12
-            else datetime(dt.year, dt.month + 1, 1, tzinfo=UTC)
-        )
-        return start, nxt
-    # quarter：季首月 = 1/4/7/10
-    q_month = ((dt.month - 1) // 3) * 3 + 1
-    start = datetime(dt.year, q_month, 1, tzinfo=UTC)
-    nxt = (
-        datetime(dt.year + 1, 1, 1, tzinfo=UTC)
-        if q_month == 10
-        else datetime(dt.year, q_month + 3, 1, tzinfo=UTC)
-    )
-    return start, nxt
 
 
 def _age_bucket(now: datetime, intake: datetime) -> str:
@@ -475,14 +449,13 @@ class ReportsService:
         return CampaignPerformanceReport(generated_at=_now(), store_id=store_id, rows=rows)
 
     async def daily_cash(self, store_id: int, report_date: date) -> DailyCashReport:
-        """每日現金對帳（docs/19 §2.2）：依 opened_at 的 UTC 日 [date, date+1) 取本店 session。
+        """每日現金對帳（docs/19 §2.2）：依 opened_at 的台灣營業日取本店 session。
 
         每 session 的 expected 與關帳同源（cashdrawer `session_breakdown`）。購物金兌付總額另計、
         只展示不進現金 expected（CLAUDE.md §6）。無 session 日回空 sessions + 全 0 合計（非 500）。
         """
         now = _now()
-        start = datetime(report_date.year, report_date.month, report_date.day, tzinfo=UTC)
-        end = start + timedelta(days=1)
+        start, end = store_day_bounds(report_date)
         sessions = await self._cash.list_sessions_in_range(store_id, start, end)
 
         rows: list[DailyCashSessionRow] = []
@@ -587,18 +560,12 @@ class ReportsService:
         """
         if granularity not in ("day", "week", "month", "quarter"):
             raise DomainError("granularity 僅支援 day/week/month/quarter")
-        # 無時區（naive）的 from/to 視為 UTC，與其餘報表端點一致；否則與 _bucket_bounds
-        # 回傳的 tz-aware cursor 相比會拋 TypeError（offset-naive vs offset-aware）。
-        if date_from.tzinfo is None:
-            date_from = date_from.replace(tzinfo=UTC)
-        if date_to.tzinfo is None:
-            date_to = date_to.replace(tzinfo=UTC)
         now = _now()
         rows: list[TrendRow] = []
-        cursor, _ = _bucket_bounds(granularity, date_from)
+        cursor, _ = store_bucket_bounds(granularity, date_from)
         count = 0
         while cursor < date_to:
-            _, nxt = _bucket_bounds(granularity, cursor)
+            _, nxt = store_bucket_bounds(granularity, cursor)
             count += 1
             if count > MAX_TREND_BUCKETS:
                 raise DomainError(
@@ -611,7 +578,7 @@ class ReportsService:
             cash_out = await self._cash.cash_out_in_range(store_id, bstart, bend)
             rows.append(
                 TrendRow(
-                    period=cursor.date(),
+                    period=store_date(cursor),
                     gross_turnover=margin.gross_turnover,
                     recognized_revenue=margin.recognized_revenue,
                     food_revenue=margin.food_revenue,
@@ -642,8 +609,7 @@ class ReportsService:
         （固定營業費用系統未逐日記錄）；月固定支出未設 → null。
         """
         now = _now()
-        start = datetime(report_date.year, report_date.month, report_date.day, tzinfo=UTC)
-        end = start + timedelta(days=1)
+        start, end = store_day_bounds(report_date)
         cash = await self.daily_cash(store_id, report_date)
         margin = await self._sales.margin_breakdown(store_id, start, end)
         settings = await self._settings.get_effective_settings(store_id)

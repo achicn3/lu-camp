@@ -6,6 +6,7 @@
 
 import calendar
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -166,6 +167,28 @@ async def test_daily_summary_cross_consistent_with_r1_r2(
     # 客單價 = 營業額 ÷ 筆數
     assert summary["transaction_count"] == 1
     assert summary["avg_ticket"] == "500"
+
+
+async def test_daily_summary_uses_taipei_business_day(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, clerk, store_id, _consignor = await _seed(db_session)
+    session = await db_session.scalar(select(CashSession).where(CashSession.store_id == store_id))
+    assert session is not None
+    session.opened_at = datetime(2026, 7, 21, 16, 30, tzinfo=UTC)
+    await _add_owned_serialized(db_session, store_id, code="OWN-TZ", cost="300", price="500")
+    await _sell_serialized(client, clerk, "OWN-TZ", key="tz-sale")
+    sale = await db_session.scalar(select(Sale).where(Sale.store_id == store_id))
+    assert sale is not None
+    sale.created_at = datetime(2026, 7, 21, 16, 40, tzinfo=UTC)  # 台灣 07-22 00:40
+    await db_session.flush()
+
+    taipei_day = await _summary(client, mgr, "2026-07-22")
+    previous_day = await _summary(client, mgr, "2026-07-21")
+
+    assert taipei_day["gross_turnover"] == "500"
+    assert taipei_day["transaction_count"] == 1
+    assert previous_day["gross_turnover"] == "0"
 
 
 async def test_daily_summary_consignment_turnover_vs_recognized(
