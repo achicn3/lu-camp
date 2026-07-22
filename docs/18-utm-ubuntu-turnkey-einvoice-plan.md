@@ -1,5 +1,8 @@
 # 18 — UTM / Ubuntu 24.04 / Turnkey / E-Invoice Integration Plan
 
+> **歷史方案，已由 docs/24 Amego API 路線取代，不得據此啟動 Turnkey 實作。**
+> 目前電子發票應用功能已完成；本文件只保留 2026-06-18 的部署研究脈絡。
+>
 > Date: 2026-06-18
 >
 > Scope: plan only. This file does not implement e-invoice. It adapts the existing project

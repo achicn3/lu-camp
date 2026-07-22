@@ -1,6 +1,6 @@
 # 30 — 付款方式擴充：LINE Pay（Offline v4）＋台灣Pay 詳細計畫
 
-> 狀態：規劃中，動工前需使用者裁示「金流口徑決策」（§7）
+> 狀態：**P1–P4 與四輪金流對抗審均已完成並合併 `main`**；§7 裁示已落地。
 > 規劃日期：2026-07-18
 > 基線：`main` @ `893c4fb`（三波修復＋P0 hotfix 全在 main）
 > 決策依據：CLAUDE.md §6 金額/§7 不變量/§8「影響資料模型的決策先問再做」
@@ -98,7 +98,7 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
    linepay_transactions 記 refunded_amount，不可超額退。台灣Pay 退款＝店員於 App 手動退、
    系統記錄反轉（無 API）。
    - **P2d 已做**：作廢（void）＝**全額** refund（amount−refunded），標 REFUNDED。
-   - **⚠️ 部分退款（裁示 2026-07-18，P4/returns 待做）**：退貨可只退**部分**（退某幾行），不必整筆
+   - **✅ 部分退款（裁示 2026-07-18，P4/returns 已完成）**：退貨可只退**部分**（退某幾行），不必整筆
      作廢。設計：returns v1 目前純現金，擴充非現金後，`create_return` 對 LINE_PAY 單以該次退貨的
      `refund_amount` 呼叫 `client.refund(order_id, 該次金額)`，**累加** `refunded_amount`；
      linepay client/`refunded_amount∈[0,amount]` CHECK 已支援累退。狀態：未全退保持 COMPLETE
@@ -183,18 +183,18 @@ API 真收費 201**（sale #264、總額 270、平台真回 0000）→ payment_m
 fee_amount=4（270×1.5%）→ DB linepay_transactions=COMPLETE＋真 19 位交易號
 `2026071802368903710` → **非現金：此銷售無 cash_movement**（不進抽屜）→ 日結現金報表可取（整合
 不 break）→ **作廢真退款 200**（平台真退）→ DB=REFUNDED＋全額退。fail-closed 由 201/200（非 402）
-反證平台端真的成功。**財報手續費獨立支出行／毛利 payment_fee_total／趨勢分列＝P4 待做**（本輪僅
-驗證既有報表不受破壞）。
+反證平台端真的成功。**財報手續費獨立支出行／毛利 `payment_fee_total`／收款方式分列與
+部分退款＝P4 已完成**；後續亦已重跑整合 smoke。
 
 **實務註（2026-07-18 已探測沙盒頁）**：oneTimeKey **只以條碼圖（base64 PNG）呈現、無純文字**，自動化取碼需**解碼條碼**（barcode reader）或由店主手動讀條碼下數字提供。
 **✅ 已解決＋已實測真收費（2026-07-18）**：以 Playwright 載入沙盒頁 → 取 `img[0]`（300×300 QR
 的 base64 PNG）→ `pngjs` 解 PNG、`jsQR` 解碼得 oneTimeKey → 立即 `pay`。真沙盒跑通：
 `pay 0000 Success`（扣 250 TWD、`info.transactionId` COMPLETE）→ `check COMPLETE` → `refund
-（orderId 路徑）0000 Success`。**機械路徑（掃碼→簽章→真收→查→退）全綠**；剩「整合面驗證」
-（財報手續費行/關帳非現金/趨勢分列/退貨作廢反轉）待 P2/P3 建好整合後補跑。
+（orderId 路徑）0000 Success`。**機械路徑（掃碼→簽章→真收→查→退）全綠**；財報手續費、
+關帳非現金、收款方式分列、退貨／作廢反轉等整合面亦已完成並重驗。
 真店面 P3 UI 以 POS 端相機/掃碼槍讀客人 My Code 得 oneTimeKey，不經此沙盒頁。
 
-## 8. 實作波次（裁示後）
+## 8. 實作波次（已完成；保留施工切分）
 
 - **P1 台灣Pay**（小、無 API）：enum＋sale_tenders.fee＋settings 費率＋POS tender＋非現金對帳
   ＋報表分列。先落地建立「非現金 tender＋手續費」骨架。

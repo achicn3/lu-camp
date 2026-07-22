@@ -47,7 +47,7 @@
 每頁列出：用途、主要元素、主行動、對應 API、角色。
 
 - **/login**：帳密登入 → 取 token。API：`/auth/login`。全角色。
-- **/pos（結帳）**：掃 `item_code`（序號品）、選一般商品、或選/掃**散裝堆**（E，按該堆均一價、可一次多件）加入購物車；右側結帳區顯示小計/稅/總額、會員歸戶（選填）、發票選項。發票區支援：**掃消費者手機條碼載具**（條碼槍掃入，前端驗證 8 碼且首碼 `/`，帶入 `carrier_type=3J0002`+`carrier_id`）、自然人憑證載具、捐贈碼、B2B 統編；會員若有存常用載具則自動帶入、可覆蓋。用載具時預設 `print_mark=N`（不印證明聯、存雲端），仍印收據；可切換。若 `einvoice_enabled=false` 則整個發票區隱藏並標示「本期不開票」。主行動「收現結帳」→ 後端建 sale →（開票時）產發票 + 排上傳 → 觸發列印（依 print_mark）、開錢櫃。**結帳完成畫面顯示「列印商品明細」按鈕，店員視客人需求手動點選列印（可重複補印）**；非自動印。寄售品售出由後端自動建結算、前端提示。API：`/sales`、`/sales/{id}/print-detail`、`/serialized-items/by-code/{code}`、`/settings`。
+- **/pos（結帳）**：掃 `item_code`（序號品）、選一般商品、或選/掃**散裝堆**（E，按該堆均一價、可一次多件）加入購物車；右側結帳區顯示小計/稅/總額、會員歸戶（選填）、發票選項。發票區支援 B2B 統編、捐贈碼與**手機條碼載具**：條碼槍掃入或手動輸入，前端驗證 8 碼且首碼 `/`，API 送 `mobile_carrier`，後端固定映射 `CarrierType=3J0002`。目前不支援自然人憑證或其他載具，也不會從會員資料自動帶入。手機條碼／捐贈不印證明聯；`print_mark` 由後端依資料判斷，不是前端可切換欄位。若 `einvoice_enabled=false` 則整個發票區隱藏並標示「本期不開票」。主行動「結帳」→ 後端建 sale →（開票時）產發票 + 排上傳 → 依發票結果觸發列印、開錢櫃。**結帳完成畫面顯示「列印商品明細」按鈕，店員視客人需求手動點選列印（可重複補印）**；非自動印。寄售品售出由後端自動建結算、前端提示。API：`/sales`、`/sales/{id}/print-detail`、`/serialized-items/by-code/{code}`、`/settings`。
 - **/acquisition（收購鑑價入庫）**：先選/建賣方或寄售人（**姓名、身分證字號必填**；身分證號可由後端 blind index 去重比對既有賣方）→ 選類型：
   - 買斷/寄售（S–D）：逐件鑑價（**品牌選擇可當場新增**、**品名 autocomplete 既有型號**[選既有自動帶入品牌/分類與價格歷史，輸入全新則順手建型號]、分類、成色 S–D、選填拍照、定價；買斷填收購價、寄售填拋售價與抽成預設 50）。
     - **定價輔助 UI（定價計算機）**：輸入收購價後，顯示依目標毛利率算的**建議含稅售價**（`round_ntd(收購價 ÷ (1 − margin_pct/100))`，`default_margin_pct` 預設 45、margin 限 0–99）與**該型號歷史售價**參考；店員可手動覆蓋毛利率或售價任一數字。
@@ -141,14 +141,21 @@ flowchart LR
 
 條碼槍 = HID 鍵盤（掃描即「打字」8 碼 + Enter）。重點是**焦點控制**，確保掃到的碼進載具欄、不被商品掃描欄誤吃。
 
-流程：店員點「讀取載具」→ 進入載具讀取模式（聚焦輸入框/小視窗）→ 顧客出示手機條碼 → 掃描（8 碼 + Enter）→ 前端即時驗格式（首碼 `/`、8 碼、合法字元）→ 帶 `carrier_type=3J0002` + `carrier_id`，顯示於結帳區。備援：可手動鍵入、可清除重掃；會員若存過常用載具則自動帶入、可覆蓋。
+流程：店員聚焦「手機載具」輸入框 → 顧客出示手機條碼 → 掃描（8 碼 + Enter）→ 前端即時
+驗格式（首碼 `/`、8 碼、合法字元）→ 以 `mobile_carrier` 送出，後端映射為
+`CarrierType=3J0002`。備援：可手動鍵入、可清除重掃。
 
-結帳：後端在**一個交易**內寫 `sale`+`invoice`（含 carrier、`print_mark=N`）、配字軌、產 MIG XML 拋 Turnkey 目錄、排上傳佇列 → 回發票號 → 前端印收據（不印證明聯）+ 開錢櫃。
+結帳：後端先在**一個交易**內寫 `sale`、invoice（含 carrier）與持久佇列；sale commit 後，POS
+呼叫 `/einvoice/sales/{sale_id}/issue` 上送 Amego。成功才回發票號與條碼資料；平台明確拒絕或
+傳輸結果未知都保留可查詢／重試的狀態，不回滾已完成銷售。載具／捐贈不印證明聯；無載具且
+未捐贈時才將 Amego 回傳內容送硬體代理列印。
 
 重點認知：
-- **Turnkey 上傳為非同步**，不卡結帳；斷網時排隊、恢復後補送（離線韌性）。
-- POS 只驗「格式」；載具是否存在由平台在上傳時驗，失敗則該筆上傳佇列轉 `FAILED`，需告警與後續處理（補開紙本/更正）。
-- 邊界：無載具（正常開立、`print_mark=Y` 印證明聯）／B2B 統編／捐贈碼／統編＋載具（依 MIG 僅手機條碼情境成立，實作對照當前規格）。
+- **Amego 開立與銷售交易解耦**：斷網不撤銷銷售；未知結果維持 `PENDING`，後續先查詢對帳，
+  只有平台明確拒絕才轉 `FAILED` 供重試。
+- POS 先驗載具格式；平台仍可能拒絕不存在／不合法的載具，畫面須保留待開清單與錯誤資訊。
+- 邊界：無載具（印證明聯）／B2B 統編／捐贈碼／手機條碼載具；詳細互斥與 payload
+  規則以 docs/24 與當前 OpenAPI 為準。
 
 ```mermaid
 sequenceDiagram
@@ -156,18 +163,21 @@ sequenceDiagram
     participant S as 店員
     participant POS as POS前端
     participant API as 後端
-    participant TK as Turnkey/平台
-    S->>POS: 點「讀取載具」(聚焦輸入框)
+    participant AM as Amego
+    S->>POS: 聚焦「手機載具」輸入框
     C->>S: 出示手機條碼
     S->>POS: 條碼槍掃描(8碼+Enter)
     POS->>POS: 驗證格式(/開頭、8碼)→顯示於結帳區
-    Note over POS: 手動輸入備援/可清除重掃/會員自動帶入
-    S->>POS: 收現結帳
-    POS->>API: POST /sales (carrier_type/id, print_mark=N)
-    API->>API: 一交易內: 寫sale+invoice、配字軌、產MIG XML、排上傳佇列
-    API-->>POS: 成功(發票號)
-    POS->>POS: 印收據(不印證明聯)+開錢櫃
-    TK-->>API: (非同步)上傳平台→回ProcessResult；失敗轉FAILED待處理
+    Note over POS: 手動輸入備援/可清除重掃
+    S->>POS: 開始結帳
+    POS->>API: POST /sales (invoice.mobile_carrier)
+    API->>API: 一交易內寫 sale+invoice+持久佇列並 commit
+    API-->>POS: 銷售成功(sale_id)
+    POS->>API: POST /einvoice/sales/{sale_id}/issue
+    API->>AM: 先查詢對帳，再依狀態開立 f0401
+    AM-->>API: 字軌/隨機碼/條碼QR 或明確錯誤
+    API-->>POS: 發票狀態與可列印內容
+    POS->>POS: 載具/捐贈不印；紙本則印證明聯
 ```
 
 ## 附錄 A — 設計 token 基線（風格一致用）

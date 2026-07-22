@@ -76,7 +76,9 @@
 - 每批收貨可登錄一張進項發票；漏登可事後補登一次（供會計使用）。
 
 ### G. Sales / POS 銷售
-- 純現金結帳。掃 `item_code`（序號品）或選 `catalog_product`（一般商品）加入購物車；E 級散裝則選/掃 `bulk_lot`，以該堆均一價售出（可一次多件），扣 `remaining_qty`。
+- 支援現金、購物金、LINE Pay、台灣Pay 與混合付款。掃 `item_code`（序號品）或選
+  `catalog_product`（一般商品）加入購物車；E 級散裝則選/掃 `bulk_lot`，以該堆均一價售出
+  （可一次多件），扣 `remaining_qty`。
 - 結帳：計算金額與稅、開啟錢櫃、列印收據。
 - **商品明細聯（店員當場選擇是否列印）**：一張完整銷售明細（交易序號、日期、店家/統編、逐項品名/數量/單價/小計、折扣、總計、付款方式），供需要的客人索取。
   - **結帳付款完成後，結帳完成畫面顯示「列印商品明細」按鈕**；店員視客人需求**手動決定**是否列印（有些客人要、有些不用）。預設不自動印。
@@ -89,24 +91,28 @@
 - 可選會員歸戶（累點、消費紀錄）；**本期僅累點與紀錄，點數折抵規則未定、不做折抵**（預留）。
 - 寫 `stock_movement`(OUT)。
 
-### H. E-Invoice / 電子發票（Turnkey 整合）
-- 目標規格：**MIG 4.0/4.1**，透過 **Turnkey Ver 3.9（現行版，2025-02）** 上傳至財政部電子發票整合服務平台。
-  - ⚠️ **訊息代碼以 MIG 4.0/4.1 為準**：自 MIG V4.0（2024-05-30）起「存證類」發票訊息整併，**原 `C0401`/`C0501`/`C0701` 已刪除**，本店（自建 Turnkey 存證）開立／作廢／註銷一律改用 **`F0401`（平台存證開立）/`F0501`（作廢）/`F0701`（註銷）**；折讓由 `B0401`/`D0401`/`B0501`/`D0501` 整併為 **`G0401`（開立折讓）/`G0501`（作廢折讓）**。詳細欄位對照見 `docs/14-einvoice-mig-mapping.md`。
-- 整合方式：系統產生 **MIG 格式 XML**，寫入 Turnkey 設定的交換/拋出目錄（如存證目錄、B2B 交換目錄、發票配號訊息目錄），由 Turnkey 上傳；並讀取 `ProcessResult`/`SummaryResult` 確認上傳結果、防止漏傳。
-- 需支援：B2C 證明聯、B2B（買方統編）、作廢（void）、折讓（allowance）、字軌配號管理。
-- **雲端載具（台灣消費者習慣，必做）**：結帳時店員可用條碼槍掃消費者的**手機條碼載具**（Code 39、8 碼、首碼 `/`、CarrierType `3J0002`），亦支援自然人憑證載具（`CQ0001`）、捐贈碼（3-7 碼數字）、會員/店家載具。
-  - 掃到後驗證格式、存入 `invoice.carrier_type/carrier_id`（載具非 PII，明文儲存），並寫入 MIG XML。
-  - 用載具時 `print_mark=N`、預設**不印證明聯**（發票存雲端），仍印一般收據；可設定。
-  - 會員可選擇把常用載具存進個人檔（`contact.default_carrier_*`，需同意），下次免掃自動帶入。
-- **離線韌性**：產生 XML 屬於本地檔案動作，斷網不影響開立；上傳由 Turnkey 在連線恢復後處理。系統維護 `einvoice_upload_queue` 與狀態（`PENDING/UPLOADED/FAILED`）。
-- **開關**：`einvoice_enabled=false` 時不產生 XML、不配號，`sale.invoice_status=NOT_ISSUED`；可日後補開。
-- 列印電子發票證明聯（透過硬體代理；用載具時依 `print_mark` 決定是否列印）。
-- ⚠️ **動工閘門（強制）**：T13 實作前務必下載**當前版 Turnkey 3.9 完整使用說明書**與 **MIG 4.0/4.1** 規格，逐節讀「目錄設定／回執（ProcessResult、SummaryResult）命名與格式／錯誤碼表」，並以實際 **XSD 欄位長度與 Enum**（`InvoiceTypeEnum`、`TaxTypeEnum`、`CarrierTypeEnum`、`DonateMarkEnum` 等）實作；載具/捐贈/統編欄位與代碼一律對照當前 MIG，**不得依記憶或摘要硬寫**。閘門研究成果與欄位對照骨架見 `docs/14-einvoice-mig-mapping.md`。
+### H. E-Invoice / 電子發票（Amego API）
+
+- 現行整合為**光貿 Amego API**（MIG 4.0 語意），由平台自動配號；原自建 Turnkey/MIG XML
+  路線已停用，docs/14、docs/18 僅保留歷史研究。完整契約見 docs/24。
+- 需支援：B2C 證明聯、B2B（買方統編）、作廢（f0501）、折讓（g0401）、查詢／對帳與重試。
+- 結帳先完整 commit `sale`、invoice 與持久佇列，再由 POS 呼叫 Amego 開立；平台成功才回填
+  字軌、隨機碼、條碼／QR 並標 `ISSUED`。明確拒絕標 `FAILED`，傳輸結果不明則保留已認領的
+  `PENDING`，下次先查詢對帳，**不可猜測失敗後直接重送**。
+- **雲端載具**：目前只支援消費者**手機條碼載具**（Code 39、8 碼、首碼 `/`、
+  CarrierType `3J0002`）；可用條碼槍掃入或手動輸入。不支援自然人憑證或其他會員／店家載具。
+  - POS 送出 `mobile_carrier`；後端驗證後存入 `invoice.carrier_type/carrier_id` 並組成 Amego payload。
+  - 有手機條碼時由後端令 `print_mark=false`，不印證明聯；此值不是前端可切換的請求欄位。
+- **外網降級**：Amego 無法連線時銷售仍成立，發票留待對帳／重試；不把未知結果標成成功或失敗。
+  系統沿用 `einvoice_upload_queue` 保存 `PENDING/UPLOADED/FAILED/CANCELLED`、交付世代與結果事件。
+- **開關**：`einvoice_enabled=false` 時不建立平台發票，`sale.invoice_status=NOT_ISSUED`；啟用前
+  必須有 `AMEGO_APP_KEY` 與合法 8 碼店家統編。
+- **列印**：無載具且未捐贈時，將 Amego 回傳的條碼／QR 內容送硬體代理列印證明聯；載具或捐贈不印。
 
 ### I. Returns / 退換貨（RMA）
 - 退貨參照原 `sale`：退現金（現金抽屜出帳，需有開帳中的 `cash_session`）、序號品回 `IN_STOCK`、一般商品回補、散裝回補該堆 `remaining_qty`。
 - 若退的是已售出**寄售品** → 同步反轉其 `consignment_settlement`：未付款則 `CANCELLED`；已付款則標記為「應向寄售人收回」待處理。
-- 若原銷售已開發票 → 產生**折讓單（allowance）**經 Turnkey 上傳，不得直接刪發票。
+- 若原銷售已開發票 → 產生**折讓單（allowance）**經 Amego g0401 上送，不得直接刪發票。
 - 換貨視為退＋售。
 
 ### J. Cash Drawer / 收銀對帳
@@ -144,7 +150,9 @@
 - **A 級（保證做到）**：每台顯示「連線/離線」與「最後回應時間」（心跳）。Wi-Fi 連線的 Brother QL-810W 尤其必須有離線偵測（網路斷線常見）。掃碼槍與錢櫃因無獨立網路狀態，連線性以其所依附之主機/印表機是否在線推定。
 - **B 級（能報就報、優雅降級）**：缺紙、上蓋開啟、印表機錯誤、錢櫃開啟狀態等細部狀態，**依各機型 SDK 實際支援度**顯示；SDK 查不到的項目顯示「此機型不支援」，**不可假裝有此能力、也不可當成故障**。
 - **架構**：機器接在 hardware-agent 那台主機；由 hardware-agent 提供「裝置狀態查詢端點」，前端**定時輪詢**顯示成面板，前端不直接碰硬體（見 02/10 的回報介面與 04 的端點）。
-- **實作前置閘門（強制，比照電子發票 MIG/Turnkey 規格之要求）**：實作 B 級前，**必須先下載 Brother QL-810W 與 EPSON TM-T82iii 的官方 Python SDK 文件**，依「SDK 實際提供哪些狀態查詢 API、回傳哪些欄位」決定每台 A/B 各能報什麼，**不得憑記憶假設機器有某功能**。此查證清單為 Phase 3 動工前置（見 07）。查證成果與每台 A/B 能力對照見 `docs/15-device-sdk-capability.md`。
+- **實作前置閘門（強制）**：實作 B 級前，**必須先下載 Brother QL-810W 與 EPSON
+  TM-T82iii 的官方協定／SDK 文件**，依實際狀態查詢能力決定每台 A/B 各能報什麼，
+  **不得憑記憶假設機器有某功能**。查證成果與每台 A/B 能力對照見 docs/15。
 - **查證後既定範圍（依 `docs/15` 裁示）**：
   - 兩家原廠**皆無第一線跨平台 Python SDK**（Brother b-PAC 僅 Windows；EPSON ePOS SDK 為 Android/iOS/JS/Java）；hardware-agent（Python/Linux）以社群庫 + 原廠協定文件實作（Brother 用 `brother_ql` 光柵協定、EPSON 用 `python-escpos` 之 ESC/POS 即時狀態）。
   - **Brother QL-810W（維持 Wi-Fi）**：**A 級照做**（連線探測 + 心跳）；**B 級（缺紙/上蓋/錯誤）標 `unsupported`**——`brother_ql` 網路後端不支援讀回狀態，且無線是此機賣點、缺紙店員肉眼可見、SNMP 複雜度不划算。
@@ -163,7 +171,8 @@
 ## 非功能性需求（NFR）
 
 - **資料一致性**：收購、銷售、寄售結算、現金異動皆須在交易（transaction）內完成；金額用 Decimal、新台幣整數元（含稅定價、ROUND_HALF_UP），禁 float。
-- **可用性**：POS 與收購在店內區網可離線於外網運作（只有 Turnkey 上傳需外網，採佇列）。
+- **可用性**：POS 的現金／購物金與收購流程在店內區網可於外網中斷時運作；Amego 開票留待
+  對帳／重試，LINE Pay 等外部即時付款則 fail closed，不得在平台結果未知時完成收款。
 - **安全**：PII 欄位加密、RBAC、稽核、密碼雜湊；金鑰不入 repo。
 - **可維護性**：模組化單體、清楚分層、型別檢查、Alembic migration。
 - **可備份**：每晚自動 `pg_dump` + 異地/雲端複製；提供還原程序文件。

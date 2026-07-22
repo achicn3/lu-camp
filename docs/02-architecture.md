@@ -2,11 +2,13 @@
 
 ## 1. 需求摘要
 
-**功能性**：收購（買斷）、寄售、二手與全新商品/飲料的庫存與銷售、純現金 POS、電子發票（Turnkey、可開關）、現金對帳、盤點、退換貨、供應商採購、財務報表、稽核。
+**功能性**：收購（買斷）、寄售、二手與全新商品/飲料的庫存與銷售、多付款方式 POS、
+電子發票（Amego、可開關）、現金對帳、盤點、退換貨、供應商採購、財務報表、稽核。
 
 **非功能性**：店內優先/外網可降級、PII 加密與稽核、Decimal 金額一致性、自動備份、多分店就緒、低維運（無 DBA）、TDD。
 
-**約束**：後端 Python+FastAPI、前端 Next.js、可本地部署、嚴格專案結構、只收現金、自建/雲端 Turnkey、叫號機外購不實作。
+**約束**：後端 Python+FastAPI、前端 Next.js、可本地部署、嚴格專案結構；現金／購物金在
+店內可運作，Amego／LINE Pay 等外部服務須 fail closed 或保留可對帳狀態；叫號機外購不實作。
 
 ## 2. 高階架構圖
 
@@ -23,14 +25,13 @@ graph TD
         subgraph Server["店內伺服器 (Docker Compose)"]
             API["FastAPI 模組化單體"]
             DB[("PostgreSQL")]
-            XMLOUT["MIG XML 拋出目錄"]
         end
     end
 
-    subgraph Ext["外網 (降級時可離線排隊)"]
-        Turnkey["Turnkey Ver 3.9 (本機或雲端 VM)"]
-        MOF["財政部電子發票整合平台"]
-        Backup["雲端備份儲存"]
+    subgraph Ext["外部服務"]
+        Amego["Amego 電子發票 API"]
+        LinePay["LINE Pay Offline API"]
+        Backup["Cloudflare R2 異地備份"]
     end
 
     FE -->|HTTP LAN| API
@@ -38,10 +39,9 @@ graph TD
     Agent --> Printer
     Scanner -.HID.-> FE
     API --> DB
-    API -->|寫 MIG XML| XMLOUT
-    XMLOUT --> Turnkey
-    Turnkey -->|上傳/回ProcessResult| MOF
-    DB -->|nightly pg_dump| Backup
+    API -->|開立/查詢/作廢/折讓| Amego
+    API -->|付款/查詢/退款| LinePay
+    API -->|pg_dump + AES| Backup
 ```
 
 ## 3. 模組分解（模組化單體）
@@ -85,16 +85,16 @@ graph LR
 | DB | PostgreSQL（容器化） | ACID、關聯查詢、欄位加密、零維運即可用 | SQLite（多終端寫入與一致性不足，不採用）、MySQL |
 | 前端 | Next.js App Router + TS | 易部署、可本地運行、生態成熟 | Vite SPA（亦可，但 Next 較完整） |
 | 硬體 | 獨立 Python 硬體代理 (ESC/POS) | 瀏覽器無法直接驅動印表機/錢櫃 | WebUSB（相容性差，不採用） |
-| 發票 | 產 MIG XML → Turnkey 目錄 | 官方標準傳輸方式、離線可排隊 | 加值中心 API（未來可加） |
+| 發票 | Amego API + 持久 outbox／對帳 | 委外配號、B2B/B2C 與證明聯資料一次整合；未知結果可追蹤 | 自建 Turnkey（已停用） |
 | 部署 | Docker Compose（店內） | 一鍵起停、易搬遷、低維運 | k8s（過度工程） |
 
 ## 5. 部署拓樸
 
 - 店內一台伺服器跑 `docker compose`：`postgres` + `backend(api)` + `frontend` + `hardware-agent`（代理也可只跑在 POS 機，視機器配置）。
   - 開發階段：`docker compose` **只起 PostgreSQL**，backend/frontend/hardware-agent 用 uv/pnpm 本機跑；上述完整服務 compose 於 **Phase 7（部署）** 才建置。
-- Turnkey 跑在另一台機器或雲端 VM；後端把 MIG XML 寫入兩者共用的交換目錄（本機資料夾或網路掛載）。
-- 每晚 `pg_dump` 自動備份至本地第二顆碟 + 雲端儲存桶。
-- 外網中斷時：POS、收購、開立發票（產 XML）照常；Turnkey 上傳排隊，連線恢復後補送。
+- 後端直接連 Amego／LINE Pay；App Key 與金流憑證只由正式環境注入，不入 repo/DB。
+- due-driven `pg_dump` 以 AES 加密後上傳 Cloudflare R2；本地儀表板顯示備份健康與還原演練狀態。
+- 外網中斷時：現金／購物金 POS 與收購照常；Amego 發票保留待對帳狀態，LINE Pay 不得假裝付款成功。
 
 ## 6. Architecture Decision Records (ADR)
 
@@ -127,17 +127,26 @@ graph LR
 - **Status**: Accepted
 - **Context**: 店員需即時掌握各機器（Brother QL-810W 標籤機、EPSON TM-T82iii 收據/發票機、掃碼槍、錢櫃）是否在線與細部狀態，避免列印才發現離線；前端不可直接驅動硬體。
 - **Decision**: 由 hardware-agent 作為硬體狀態的唯一抽象來源，暴露 `GET /devices/status`（見 04）。回報分兩級：**A 級**（連線/離線 + 最後回應時間心跳，保證做到）與 **B 級**（缺紙/上蓋/錯誤/錢櫃開啟等，依各機型官方 Python SDK 實際支援度，查不到者標記 `unsupported`、不臆造）。前端 `lib/hardware.ts` **定時輪詢**該端點顯示成唯讀面板，不直接碰硬體。
-- **Gate**: 實作 B 級前必須先取得兩台機器官方 Python SDK 文件，依實際狀態查詢能力實作（比照 ADR-004 的 MIG/Turnkey 規格前置），列為 Phase 3 動工閘門。
+- **Gate**: 實作 B 級前必須先取得兩台機器官方協定／SDK 文件，依實際狀態查詢能力實作，
+  不得推測未提供的硬體能力。
 - **Consequences**: ＋單一抽象、前端與硬體解耦、能力誠實（不假裝支援）；－各機型能力不齊，面板需處理「不支援」態與輪詢失敗（代理離線）態。
 
 ### ADR-004：電子發票以 MIG XML 拋檔 + 開關 + 離線佇列
-- **Status**: Accepted
+- **Status**: Superseded（2026-07-09，由下列 ADR-013 取代）
 - **Context**: 法規要求電子發票；草創期需可關閉；外網可能不穩。
-- **Decision**: 產生 MIG 4.0/4.1 XML 拋入 **Turnkey Ver 3.9** 目錄、讀 ProcessResult/SummaryResult 確認；`einvoice_enabled` 控制是否開立；維護上傳佇列與狀態。**銷售一律完整記錄，與是否開票解耦。**
-  - **訊息代碼（MIG 4.0/4.1 為準）**：自建 Turnkey 存證路徑用 **`F0401` 開立 / `F0501` 作廢 / `F0701` 註銷**、折讓用 **`G0401` / `G0501`**；MIG V4.0（2024-05-30）已刪除舊 `C0401`/`C0501`/`C0701` 與 `B0401`/`D0401`/`B0501`/`D0501`。欄位對照見 `docs/14-einvoice-mig-mapping.md`。
-- **Gate**: T13 動工前必須下載 Turnkey 3.9 完整手冊與 MIG 4.0/4.1 規格，依實際 XSD 欄位長度/Enum 與目錄設定實作，不得憑記憶或摘要硬寫（列為 Phase 3 閘門，見 docs/01 H、docs/07）。
-- **Alternatives**: 直接串加值中心 API（未來可加）。
-- **Consequences**: ＋符合官方流程、離線可排隊、草創彈性；－需依當前 Turnkey/MIG 版本實作細節（版本會演進，故設閘門）。
+- **Historical decision**: 原規劃自建 Turnkey/MIG XML 拋檔；研究留在 docs/14、docs/18，
+  但不得再據此施工或部署。
+
+### ADR-013：電子發票改採 Amego API + 持久對帳狀態機
+
+- **Status**: Accepted / Implemented
+- **Context**: 需要 B2B/B2C 開立、作廢、折讓與證明聯，又要避免自管字軌、Turnkey 主機與 XSD。
+- **Decision**: 使用 Amego f0401/f0501/g0401 API；銷售先落庫，平台成功才標正式狀態。
+  每次上送先持久認領 payload 與世代，重送前先查詢對帳；未知結果維持 PENDING，明確拒絕才 FAILED。
+  `einvoice_enabled` 保留，銷售一律完整記錄並與開票結果解耦。
+- **Alternatives**: 自建 Turnkey（維運／配號／XSD 成本較高）；不開電子發票（不符合營運需求）。
+- **Consequences**: ＋正式流程較小、平台回傳可直接列印；－外部 API 可用性與憑證成為部署輸入，
+  必須保留 fail-closed、冪等與人工對帳退路。詳細不變量見 docs/24。
 
 ### ADR-005：PII 欄位層級加密 + 稽核
 - **Status**: Accepted
@@ -156,7 +165,7 @@ graph LR
 | 風險 | 影響 | 緩解 |
 |------|------|------|
 | 店內伺服器故障 | 全店停擺 | 自動備份 + 還原程序；可預備一台快速復原；關鍵硬體 UPS |
-| Turnkey/MIG 版本細節變動 | 發票上傳失敗 | 實作前查當前官方說明書；用 ProcessResult/SummaryResult 偵測漏傳並告警 |
+| Amego 中斷或回應不明 | 重複開票／漏開風險 | 上送前持久認領、查詢對帳、未知結果維持 PENDING、明確拒絕才 retry |
 | PII 外洩 | 法律與信任風險 | 欄位加密、RBAC、稽核、最小揭露、金鑰隔離 |
 | 寄售拆帳/現金對帳計算錯誤 | 帳務糾紛 | 以不變量測試嚴格守護（見 CLAUDE.md §7）、Decimal、對帳報表 |
 | 模組邊界腐化 | 未來難擴張 | 強制 service 介面互動、本機品質關卡、ADR 紀律 |

@@ -2,24 +2,30 @@
 
 依相依關係由地基往上。每個 Phase 都遵守 TDD 與專案結構，完成定義含「測試通過 + 覆蓋率達標 + lint/type 全綠」。
 
+> 實作狀態（2026-07-22）：Phase 0–6 已落地；Phase 7 的完整備份／還原已完成，正式部署與
+> 觀測性仍屬下一個 readiness 階段。原「發票收尾階段」改採 Amego API 並已完成。
+> 本文件保留相依順序與驗收定義，最新實況以 `docs/current-status.md` 為準。
+
 ## 相依關係
 
 ```mermaid
 graph TD
     P0[Phase 0 地基] --> P1[Phase 1 聯絡人+庫存]
     P1 --> P2[Phase 2 收購+現金對帳]
-    P1 --> P3[Phase 3 POS+發票+硬體]
+    P1 --> P3[Phase 3 POS+硬體]
     P2 --> P3
     P3 --> P4[Phase 4 寄售結算+退換貨]
     P1 --> P5[Phase 5 採購+盤點]
     P3 --> P6[Phase 6 財務報表]
     P4 --> P6
     P5 --> P6
-    P6 --> P7[Phase 7 強化+部署]
-    P7 --> EINV[發票收尾階段 電子發票 T13/T14<br/>閘門：工商憑證+帳號核定 / Linux x86-64 主機 / G1 規格]
+    P6 --> P7[Phase 7 備份+還原]
+    P3 --> EINV[Amego 電子發票<br/>已完成]
+    P7 --> READY[正式部署+觀測性<br/>下一 readiness 階段]
 ```
 
-> **發票解耦**：電子發票（T13/T14）已從 Phase 3 抽出，集中於最末「發票收尾階段」（見文末）。`einvoice_enabled=false` 時銷售照常完整記錄（NOT_ISSUED），故其延後不阻擋 P3–P7。
+> **發票路線更新**：原 T13/T14 自建 Turnkey 路線已停用，改採 Amego API 並完成；詳見
+> `docs/24-amego-einvoice.md`。`einvoice_enabled=false` 時銷售仍照常完整記錄（NOT_ISSUED）。
 
 ## Phase 0 — 地基
 - Monorepo、docker-compose、PostgreSQL、Alembic、本機品質關卡（lint/type/test/coverage/合約漂移）。
@@ -38,13 +44,14 @@ graph TD
 - `cashdrawer`（開帳/結帳/異動、expected 計算）。
 - **驗收**：完整收購入庫；現金出帳正確；開/結帳對帳數字正確（含不變量測試）。
 
-## Phase 3 — POS 銷售 + 硬體代理（電子發票已抽出，見「發票收尾階段」）
+## Phase 3 — POS 銷售 + 硬體代理
 - **前置（foundational，序列）**：`settings` 模組（einvoice_enabled/tax_rate/default_commission_pct/default_margin_pct）、`core/money.split_tax_inclusive`、`shared/enums` 銷售/發票列舉。
 - **閘門 G2（裝置狀態 B，已完成查證）**：兩家無官方 Python SDK；**Brother QL-810W 維持 Wi-Fi、A 級做、B 級標 `unsupported`**；**EPSON TM-T82iii A+B 皆做**（缺紙三態現成、cover/error/drawer 解析 DLE EOT）。每台 A/B 能力對照見 `docs/15-device-sdk-capability.md`，遵守 ADR-010「不臆造、不當故障」。
 - `sales`（購物車、序號/數量混合、SALE_IN 現金、序號品轉 SOLD、stock OUT）。**已完成（T11/T12）。**
 - `hardware-agent`（收據、證明聯、條碼標籤、開櫃；裝置狀態 A/B 依 `docs/15`）。
-- **電子發票（`einvoice` 模組 T13/T14）已從本 Phase 抽出**，集中到文末「**發票收尾階段**」、排在所有其他 Phase/Wave 之後。理由＝**發票與系統已解耦**：`einvoice_enabled=false` 時每筆銷售仍完整寫入 `sales`（`invoice_status=NOT_ISSUED`，可日後補開，§6），前端發票區於未啟用時隱藏 → 移走發票不影響 sales / 硬體 / 前端的開發與上線。
-- **驗收**：可結帳；`einvoice_enabled` on/off 行為正確且銷售皆完整記錄；可列印/開櫃（fake + 實機）。**（不含發票 XML 上傳，留待收尾階段。）**
+- **電子發票後續成果**：Amego 開立／作廢／折讓／查詢及 POS／證明聯整合均已完成，
+  但仍維持與 sales 解耦；關閉時每筆銷售保留 `NOT_ISSUED`。
+- **驗收**：可結帳；`einvoice_enabled` on/off 行為正確且銷售皆完整記錄；可列印/開櫃（fake + 實機）。
 
 ## 購物金階段（store credit，插於硬體完成後、T19 POS 前端之前；見 `docs/16`、ADR-012）
 
@@ -63,7 +70,7 @@ graph TD
 - `consignment`（賣出觸發 settlement、付款流程、應付彙總、退回寄售人）。
 - `returns`（退現金、回補庫存、已開票產生折讓單 allowance）。
 - **驗收**：寄售拆帳與付款正確；退貨折讓流程正確（不變量測試）。
-- **發票解耦註記**：退貨折讓在 `einvoice_enabled=false` 時僅產生/記錄 allowance（不實際上傳）；折讓的 **G0401/G0501 XML 產生與上傳** 一併留待「發票收尾階段」實作，不阻擋本 Phase。
+- **發票整合成果**：退貨可建立 Amego allowance；平台成功後才進正式折讓狀態，失敗保留可重試／對帳狀態。
 
 ## Phase 5 — 採購 + 盤點
 - `purchasing`（supplier、PO、收貨入庫、低庫存提醒）。
@@ -75,32 +82,28 @@ graph TD
 - v1 拆分、購物金報表沖正一致性與匯出交叉驗證規則見 `docs/19-reports-and-risk-review-plan.md`。
 - **驗收**：報表數字與底層交易一致（用既有測資交叉驗證）。
 
-## Phase 7 — 強化與部署
-- 自動備份（pg_dump + 雲端）與還原演練文件。
-- 觀測性（結構化 log、告警：發票漏傳、對帳差異）。
-- 部署文件（店內伺服器、Turnkey 目錄掛載、硬體代理上機）。
-- `notification` 介面確認預留（仍 no-op）。
-- 安全複查（PII、金鑰、權限）。
-- **驗收**：可一鍵部署、備份可還原、e2e 全綠。
+## Phase 7 — 備份／還原已完成；部署 readiness 待續
 
-## 發票收尾階段（電子發票，延後至最後實作）
+- **已完成**：due-driven `pg_dump` 全庫備份、AES 加密、R2 上傳、retention、儀表板／健康告警、
+  guarded throwaway-DB 還原、驗證與 23/23 功能演練（docs/28、docs/31）。
+- **下一階段**：正式服務監管與 restart policy、結構化 log／rotation、聚合健康告警、店內主機／
+  網路／硬體代理上機，以及一鍵部署與完整 release rehearsal。
+- **外部輸入**：正式 Amego／LINE Pay／R2 憑證、店外備份口令保管與實際硬體網路條件。
+- **驗收**：備份已證明可還原；部署 readiness 須再達到服務可恢復、告警可觸發、release checklist 全綠。
 
-> **電子發票整包（`einvoice` 模組 T13、e-invoice API T14、Turnkey 環境搭建與憑證接線）從原 Wave 3/4 抽出**，集中於此、排在**所有其他 Phase/Wave 之後**。因發票與系統已解耦（見 Phase 3 註記），此階段延後不影響 sales / 硬體 / 前端的開發與上線。
+## 電子發票成果（Amego 路線已完成）
 
-- **前置閘門（三者齊備才動工，缺一不可）**：
-  1. **憑證/帳號**：工商憑證（MOEACA）申請完成 **＋** 平台帳號核定（含 Turnkey 申請，審核約 3 工作天）。
-  2. **主機**：Linux x86-64 主機備妥（**選項 A：與門市後端同機**；非 mac/Apple Silicon）。
-  3. **規格**：G1 完整規格與本次調查已落 repo（`docs/14`，含 §5 部署/憑證/流程盤點）。
-  - 另需釐清：主憑證政策（待打客服 02-89782365）、防火牆對外固定 IP 開通（SFTP 2222＋HTTPS、非中國大陸 IP）。
-- **工作項**：
-  - 環境：Turnkey 3.2.1 安裝（OpenJDK 17、獨立 PostgreSQL DB、目錄設定 V4.1、headless `run_cmd.sh`）。
-  - **T13 `einvoice` 模組**：MIG 4.1 XML 產生（F0401/F0501/F0701 + 折讓 G0401/G0501）、拋 `UpCast/B2SSTORAGE/<msg>/SRC`、upload queue、回讀 `TURNKEY_MESSAGE_LOG` 對帳、開關控制；依 `docs/14` 為準，動工前仍須對齊實際 XSD 欄位長度/Enum，不得憑摘要硬寫。
-  - **T14 e-invoice API**：開立/重送/查 ProcessResult/折讓 端點。
-- **驗收**：`einvoice_enabled=true` 時 XML 可產生並經 Turnkey 上傳、ProcessResult 可對帳；關閉時銷售仍完整記錄（NOT_ISSUED）。
+- 原自建 Turnkey T13/T14、MIG 拋檔與 Linux Turnkey 主機方案已由 Amego API 路線取代；
+  docs/14、docs/18 僅保留歷史研究，不是施工依據。
+- 已完成 B2B/B2C 開立、作廢、折讓、查詢對帳、重試狀態、POS 欄位與 EPSON 證明聯；
+  實作與驗證證據見 docs/24。
+- 唯一仍開的政策閘門是 G3：購物金的會計／稅務分類及開票時點須由會計師裁示。
 
-## 橫切延後項時機（D-3 / D-4，詳 `docs/deferred-items.md`）
-- **D-4（auth 強化，跨切）**：敏感操作改為重查 DB 驗證當前 `role==MANAGER` 與 `is_active`，集中於 `deps.py`/auth。**建議時機：前端（T19/T20）與真錢交易上線之前**完成，避免帶著「全憑 JWT claim」的設計進到使用者實際操作期。
-- **D-3（sale-void vs invoice-void 模型）**：**建議時機：與 Phase 4 退換貨一併評估**（是否拆 `SaleStatus.VOIDED`）。
+## 橫切延後項（詳 `docs/deferred-items.md`）
+
+- **D-4 ✅**：每次 authenticated request 重查 DB 的 current role/store/active 狀態，已完成。
+- **D-3（刻意保留）**：sale void 仍借用 `invoice_status=VOID`；是否另拆獨立取消狀態機，
+  只有在產品需要區分更多取消語意時再評估，不是目前功能 blocker。
 
 ## 預留（未來）
 - 多分店上線（雲端/同步）、通知（LINE/簡訊）、加值中心 API、會員行銷/點數進階。

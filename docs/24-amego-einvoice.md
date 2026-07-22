@@ -1,5 +1,7 @@
 # docs/24 — 光貿 Amego 電子發票串接（取代自建 Turnkey 路線）
 
+> 狀態：**Amego B2B/B2C 開立、作廢、折讓、查詢對帳、POS 與 EPSON 證明聯皆已完成並合併 `main`**。
+>
 > 裁示（2026-07-09）：電子發票直接串光貿 Amego API（B2B＋B2C 都要），取代 T13/T14 自建
 > Turnkey/MIG XSD 路線。開立後可用測試帳密登入後台查驗。POS 結帳完成若啟用發票即自動開立，
 > 無載具且不捐贈時由 EPSON 直接印出電子發票證明聯。
@@ -31,8 +33,9 @@
 - `OrderId`（唯一、≤40 字）——用本系統 `sale.id` 衍生（如 `S{store_id}-{sale_id}`）。
 - `BuyerIdentifier`：買方統編；**B2C 填 `0000000000`**。`BuyerName`：B2C 可填「消費者」；
   B2B 填公司名或統編（不可 0/00/000/0000）。選填 `BuyerAddress/TelephoneNumber/EmailAddress`、`MainRemark`。
-- 載具：`CarrierType`（手機條碼 `3J0002`、自然人憑證 `CQ0001`、光貿會員 `amego`）＋
-  `CarrierId1`（顯碼）/`CarrierId2`（隱碼）。捐贈：`NPOBAN`＝捐贈碼。
+- Amego API 可接受多種 `CarrierType`；**本系統目前只開放手機條碼 `3J0002`**，以
+  `CarrierId1`/`CarrierId2` 傳送同一手機條碼。不支援自然人憑證或光貿會員載具。
+  捐贈：`NPOBAN`＝捐贈碼。
 - `ProductItem[]`（≤9999）：`Description`（≤256）、`Quantity`、`Unit?`（≤6）、
   `UnitPrice`（**預設含稅**；未稅需 `DetailVat=0`）、`Amount`（小計）、`Remark?`、
   `TaxType`（1 應稅/2 零稅率/3 免稅）。

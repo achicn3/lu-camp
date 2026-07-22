@@ -54,7 +54,7 @@ erDiagram
 `id, store_id, username, password_hash, role(MANAGER|CLERK), is_active, created_at`
 
 ### contact（統一聯絡人）
-- `id, store_id, name, phone, national_id_enc(加密), national_id_blind_index(HMAC(national_id,金鑰),供精確去重比對), roles(set: MEMBER|SELLER|CONSIGNOR), member_points, default_carrier_type?, default_carrier_id?(會員可選擇存常用雲端載具供下次免掃,需經同意), source_note, created_at`
+- `id, store_id, name, phone, national_id_enc(加密), national_id_blind_index(HMAC(national_id,金鑰),供精確去重比對), roles(set: MEMBER|SELLER|CONSIGNOR), member_points, default_carrier_type?, default_carrier_id?(預留欄位；目前 POS 不自動帶入), source_note, created_at`
 - `national_id_enc` 僅 `MANAGER` 可解密；查看寫稽核。**不可明文/部分搜尋**；以 `national_id_blind_index` 做精確去重（HMAC 金鑰由環境/KMS 管理、不入 repo），日常查詢用姓名/電話。載具非 PII，明文即可。
 
 ### brand（品牌輕主檔）
@@ -98,7 +98,11 @@ erDiagram
 - `goods_receipt`: `id, store_id, po_id, received_at, received_by, invoice_*, idempotency_key?, request_fingerprint?`；一張採購單可有多筆收貨批次
 
 ### sale（POS 交易）
-`id, store_id, clerk_user_id, buyer_contact_id?, datetime, subtotal, tax, total, payment_method(CASH), invoice_status(ISSUED|NOT_ISSUED|VOID|ALLOWANCE), invoice_id?, status(COMPLETED|RETURNED)`
+`id, store_id, clerk_user_id, buyer_contact_id?, datetime, subtotal, tax, total, payment_method(CASH|STORE_CREDIT|LINE_PAY|TAIWAN_PAY|MIXED), invoice_status(NOT_ISSUED|PENDING_ISSUE|ISSUED|PENDING_ALLOWANCE|ALLOWANCE|VOID), status(COMPLETED|RETURNED)`
+
+### sale_tender
+`id, store_id, sale_id, tender_type(CASH|STORE_CREDIT|LINE_PAY|TAIWAN_PAY), amount, fee_amount`
+- 一筆 sale 一至多筆 tender，`Σ amount = sale.total`；每種 tender type 至多一筆。
 
 ### sale_line
 `id, sale_id, line_type(SERIALIZED|CATALOG|BULK_LOT), serialized_item_id?, catalog_product_id?, bulk_lot_id?, qty, unit_price, line_total`
@@ -110,15 +114,16 @@ erDiagram
 - 退貨反轉：未付款→`CANCELLED`；已付款→保留 `PAID` 並 `reclaim_needed=true`（應向寄售人收回）。
 
 ### invoice（電子發票）
-`id, store_id, sale_id, invoice_number(字軌), invoice_type(B2C|B2B), buyer_tax_id?, carrier_type?(載具類別,如 3J0002 手機條碼/CQ0001 自然人憑證/會員載具代碼), carrier_id?(載具號碼,手機條碼為 8 碼且首碼/), print_mark(Y|N), donation_code?(捐贈碼 3-7 數字), amount, tax, status(ISSUED|UPLOADED|VOID|ALLOWANCE), mig_version, upload_status(PENDING|UPLOADED|FAILED), uploaded_at?`
-- 載具非 PII，可明文儲存。`print_mark=N` 表示存雲端不印證明聯（用載具時預設）；`print_mark=Y` 印證明聯。
-- 規則：手機條碼載具 `carrier_type=3J0002`、`carrier_id` 為 8 碼（首碼必為 `/`）；同時有買方統編與載具時，僅手機條碼情境成立（依 MIG 規範，實作時對照當前版本）。
+`id, store_id, sale_id, invoice_no?, invoice_type(B2C|B2B), invoice_date?, invoice_time?, random_number?, buyer_tax_id?, buyer_name?, carrier_type?, carrier_id?, donate_mark, npoban?, print_mark(bool), net, tax, total, tax_rate, barcode_text?, qrcode_left?, qrcode_right?, status(PENDING|ISSUED|VOID_PENDING|VOID|ALLOWANCE)`
+- 現行銷售 API 只接受 `mobile_carrier`，後端固定映射為 `carrier_type=3J0002`；手機條碼為 8 碼且首碼 `/`。不支援自然人憑證或其他載具。
+- `buyer_tax_id`、手機條碼與 `npoban` 三者互斥。`print_mark` 由後端推導：有載具或捐贈為 false，否則為 true；前端不可直接指定。
 
 ### invoice_allowance（折讓單）
 `id, invoice_id, amount, reason, return_id?, status, created_at`
 
 ### einvoice_upload_queue
-`id, invoice_id?, allowance_id?, xml_path, action(ISSUE|VOID|ALLOWANCE), status(PENDING|UPLOADED|FAILED), attempts, last_error, created_at`
+`id, store_id, invoice_id?, allowance_id?, action(ISSUE|VOID|ALLOWANCE), message_type, status(PENDING|UPLOADED|FAILED|CANCELLED), attempts, xml_path?, xml_sha256?, amego_payload?, dropped_at?, uploaded_at?, last_error?, created_at`
+- `invoice_id`／`allowance_id` 恰有其一。Amego 送出前凍結 payload 與交付世代；未知結果保持已認領 PENDING，先查詢對帳。
 
 ### return（退換貨）
 `id, store_id, sale_id, datetime, refund_amount, reason, clerk_user_id`（明細關聯 sale_line / 回補庫存；已開票則產生 allowance）
