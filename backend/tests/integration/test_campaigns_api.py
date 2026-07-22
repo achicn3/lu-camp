@@ -106,6 +106,22 @@ async def test_create_bad_window(client: httpx.AsyncClient, db_session: AsyncSes
     assert resp.status_code == 409
 
 
+async def test_create_rejects_datetime_without_offset(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _clerk, _store = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/campaigns",
+        json=_payload(
+            starts_at="2026-07-01T00:00:00",
+            ends_at="2026-07-02T00:00:00",
+        ),
+        headers=_auth(mgr),
+    )
+
+    assert resp.status_code == 422, resp.text
+
+
 async def test_activate_and_single_active_guard(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

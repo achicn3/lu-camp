@@ -1,6 +1,7 @@
 """SC-4 購物金報表 API 整合測試（docs/16 §4/§5A）：負債/帳齡、流量、對帳、匯出、權限。"""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -13,9 +14,10 @@ from app.main import create_app
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import CatalogProduct
 from app.modules.store.models import Store
+from app.modules.storecredit.models import StoreCreditAccount, StoreCreditLedger
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
-from app.shared.enums import StoreCreditSourceType, UserRole
+from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType, UserRole
 
 
 @pytest_asyncio.fixture
@@ -192,6 +194,57 @@ async def test_flows_report(client: httpx.AsyncClient, db_session: AsyncSession)
     assert rows[0]["issued_reversed"] == "0"
     assert rows[0]["redeemed_gross"] == "200"
     assert rows[0]["redeemed_reversed"] == "0"
+
+
+async def test_flows_day_period_uses_taipei_calendar_date(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    db_session.add(
+        StoreCreditAccount(store_id=store_id, contact_id=member_id, balance=Decimal(500))
+    )
+    db_session.add(
+        StoreCreditLedger(
+            store_id=store_id,
+            contact_id=member_id,
+            entry_type=StoreCreditEntryType.CREDIT,
+            signed_amount=Decimal(500),
+            balance_after=Decimal(500),
+            cash_equivalent=Decimal(500),
+            premium_rate_applied=Decimal(0),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=1,
+            fingerprint="t" * 64,
+            created_by=mgr_id,
+            created_at=datetime(2026, 7, 21, 16, 30, tzinfo=UTC),  # 台灣 07-22 00:30
+        )
+    )
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2026-07-21T16:00:00Z",
+            "to": "2026-07-22T16:00:00Z",
+            "granularity": "day",
+        },
+        headers=_auth(mgr),
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["rows"] == [
+        {
+            "period": "2026-07-22",
+            "issued": "500",
+            "redeemed": "0",
+            "net_change": "500",
+            "issued_gross": "500",
+            "issued_reversed": "0",
+            "redeemed_gross": "0",
+            "redeemed_reversed": "0",
+            "adjustment_net": "0",
+        }
+    ]
 
 
 async def test_flows_report_nets_acquisition_rollback_reversal(

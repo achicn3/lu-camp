@@ -5,6 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from app.core.time import AwareDateTime
 from app.shared.enums import CampaignStatus
 
 
@@ -16,8 +17,8 @@ class CampaignCreateRequest(BaseModel):
 
     name: Annotated[str, Field(min_length=1, max_length=100)]
     discount_pct: Annotated[int, Field(ge=1, le=99)]
-    starts_at: datetime
-    ends_at: datetime
+    starts_at: AwareDateTime
+    ends_at: AwareDateTime
     applies_owned_serialized: bool = True
     applies_owned_bulk: bool = True
     applies_catalog: bool = False

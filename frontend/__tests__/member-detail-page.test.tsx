@@ -31,4 +31,47 @@ describe("會員資料頁", () => {
     expect(back.classList.contains("btn-secondary")).toBe(true);
     expect(back.classList.contains("member-back-link")).toBe(true);
   });
+
+  it("總覽以中文顯示寄售待付款狀態", async () => {
+    const overview = {
+      contact: {
+        id: 1,
+        store_id: 1,
+        name: "測試會員",
+        phone: "0912345678",
+        address: null,
+        roles: ["MEMBER"],
+        member_points: 0,
+        default_carrier_type: null,
+        default_carrier_id: null,
+        source_note: null,
+        national_id_masked: null,
+        has_national_id: false,
+      },
+      member_points: 0,
+      store_credit_balance: "0",
+      pending_consignment_payout: "0",
+      counts: { purchases: 0, consigned_items: 0 },
+      recent_purchases: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify(overview), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(<MemberDetailPage />, {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    expect(await screen.findByText("寄售待撥（待付款）")).toBeTruthy();
+    expect(screen.queryByText(/PENDING/)).toBeNull();
+  });
 });

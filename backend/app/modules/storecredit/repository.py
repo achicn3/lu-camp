@@ -11,6 +11,7 @@ from sqlalchemy import ColumnElement, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.time import STORE_TIME_ZONE_NAME
 from app.modules.storecredit.models import (
     StoreCreditAccount,
     StoreCreditLedger,
@@ -392,7 +393,7 @@ class StoreCreditRepository:
         date_from: datetime,
         date_to: datetime,
         granularity: str,
-    ) -> list[tuple[datetime, Decimal, Decimal, Decimal, Decimal, Decimal]]:
+    ) -> list[tuple[date, Decimal, Decimal, Decimal, Decimal, Decimal]]:
         """期間內按粒度彙總流量的毛/沖正分量：
         (period, issued_gross, issued_reversed, redeemed_gross, redeemed_reversed, adjustment_net)。
 
@@ -409,7 +410,7 @@ class StoreCreditRepository:
         granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
         """
         stmt = text(
-            "SELECT date_trunc(:gran, created_at) AS period,"
+            "SELECT date_trunc(:gran, created_at AT TIME ZONE :tz)::date AS period,"
             "  COALESCE(SUM(CASE WHEN entry_type='CREDIT'"
             "    THEN signed_amount ELSE 0 END), 0) AS issued_gross,"
             "  COALESCE(SUM(CASE WHEN entry_type='REVERSAL'"
@@ -430,6 +431,7 @@ class StoreCreditRepository:
             stmt,
             {
                 "gran": granularity,
+                "tz": STORE_TIME_ZONE_NAME,
                 "sid": store_id,
                 "dfrom": date_from,
                 "dto": date_to,

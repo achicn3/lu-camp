@@ -21,6 +21,7 @@ import {
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type Overview = components["schemas"]["MemberOverviewRead"];
@@ -44,7 +45,7 @@ function Money({ value }: { value: string | null | undefined }) {
 }
 
 function dt(value: string): string {
-  return new Date(value).toLocaleString("zh-TW");
+  return formatTaipeiDateTime(value);
 }
 
 // ── 總覽 ──
@@ -83,7 +84,7 @@ function OverviewTab({ contactId }: { contactId: number }) {
             <dd>{o.member_points} 點</dd>
           </div>
           <div className="stat">
-            <dt>寄售待撥（PENDING）</dt>
+            <dt>寄售待撥（待付款）</dt>
             <dd>
               <Money value={o.pending_consignment_payout} />
             </dd>
@@ -327,7 +328,7 @@ function ConsignmentsTab({ contactId }: { contactId: number }) {
       ) : (
         <>
           <div className="member-banner">
-            目前待撥金額（PENDING）：
+            目前待撥金額（待付款）：
             <Money value={q.data.pending_payout_total} />
           </div>
           {q.data.items.length === 0 && offset === 0 ? (

@@ -1,9 +1,11 @@
 """SC-5b 當日溢價建議端點整合測試（docs/16 §6.2）：冷啟動、lazy 計算、冪等落庫、權限。"""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +75,21 @@ async def test_clerk_can_read_for_pos_panel(
     _mgr, clerk, _store_id, _member_id, _mgr_id = await _seed(db_session)
     resp = await client.get(SUGGEST_URL, headers=_auth(clerk))
     assert resp.status_code == 200, resp.text
+
+
+async def test_today_uses_taipei_calendar_date(
+    client: httpx.AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mgr, _clerk, _store_id, _member_id, _mgr_id = await _seed(db_session)
+    monkeypatch.setattr(
+        "app.modules.storecredit.router.utc_now",
+        lambda: datetime(2026, 7, 21, 16, 30, tzinfo=UTC),  # 台灣 07-22 00:30
+    )
+
+    resp = await client.get(SUGGEST_URL, headers=_auth(mgr))
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["for_date"] == "2026-07-22"
 
 
 async def test_lazy_compute_and_idempotent_log(

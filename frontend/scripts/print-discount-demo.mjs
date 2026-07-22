@@ -7,6 +7,7 @@
 // 用法：API_BASE=http://localhost:8000 AGENT_BASE=http://localhost:8001 node scripts/print-discount-demo.mjs
 import { randomUUID } from "node:crypto";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { taipeiDateForScript } from "./_taipei-date.mjs";
 
 const API = (process.env.API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const AGENT = (process.env.AGENT_BASE ?? "http://localhost:8001").replace(/\/+$/, "");
@@ -101,7 +102,7 @@ await call(AGENT, "/print/einvoice", {
   body: {
     sale_id: sale.id,
     invoice_number: "AA12345678",
-    invoice_date: now.toISOString().slice(0, 10),
+    invoice_date: taipeiDateForScript(now),
     invoice_time: "12:00:00",
     random_code: "1234",
     sales_amount: sale.subtotal,

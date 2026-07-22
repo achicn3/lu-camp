@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "smoke:timezone": "node scripts/timezone-smoke.mjs",
     "gen:api": "openapi-typescript openapi.json -o lib/api-types.ts"
   },
   "dependencies": {

@@ -9,6 +9,7 @@ import { canVoid, errorDetail, voidBlockReason } from "@/features/acquisition/vo
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type VoidResult = components["schemas"]["AcquisitionVoidResult"];
@@ -124,12 +125,12 @@ export function VoidAcquisitionSection() {
             </div>
             <div>
               <dt>建立時間</dt>
-              <dd>{new Date(acq.created_at).toLocaleString("zh-TW")}</dd>
+              <dd>{formatTaipeiDateTime(acq.created_at)}</dd>
             </div>
             {acq.voided_at !== null && (
               <div>
                 <dt>作廢時間</dt>
-                <dd>{new Date(acq.voided_at).toLocaleString("zh-TW")}</dd>
+                <dd>{formatTaipeiDateTime(acq.voided_at)}</dd>
               </div>
             )}
           </dl>

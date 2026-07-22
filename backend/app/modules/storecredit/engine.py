@@ -20,7 +20,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 # 規則版本：演算法/權重語意改變時遞增，使落庫的歷史建議可回溯到當時規則。
-ENGINE_VERSION = "sc5b-1.0"
+ENGINE_VERSION = "sc5b-1.1"
 
 # 冷啟動固定起手值（docs/16 §6.2；§1.5 premium_rate 預設 +10%）。
 COLD_START_RATE = Decimal("0.1000")

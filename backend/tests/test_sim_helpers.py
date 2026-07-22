@@ -5,7 +5,9 @@ from __future__ import annotations
 import base64
 import random
 import zlib
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from qa_e2e.sim_helpers import (
@@ -14,6 +16,7 @@ from qa_e2e.sim_helpers import (
     make_national_id,
     make_phone,
     signature_png,
+    simulation_day_start,
     suggested_price,
 )
 
@@ -72,3 +75,22 @@ def test_build_schedule_deterministic_and_sized() -> None:
     assert sum(p.n_sales for p in s1) > 3500  # 期望 ≈4,300，寬鬆下限
     assert sum(1 for p in s1 if p.stocktake_day) == 8
     assert sum(p.n_buyout for p in s1) > 400
+
+
+def test_simulation_timeline_deterministically_crosses_taipei_midnight() -> None:
+    now = datetime(2026, 7, 22, 12, tzinfo=UTC)
+    taipei = ZoneInfo("Asia/Taipei")
+    starts = [simulation_day_start(now, 180, day) for day in range(180)]
+    boundary_days = [
+        day
+        for day, start in enumerate(starts)
+        if start.astimezone(taipei).strftime("%H:%M") == "23:58"
+    ]
+
+    assert boundary_days == [22, 67, 112, 157]
+    for day in boundary_days:
+        first_row = (starts[day] + timedelta(seconds=75)).astimezone(taipei)
+        second_row = (starts[day] + timedelta(seconds=150)).astimezone(taipei)
+        assert first_row.strftime("%H:%M:%S") == "23:59:15"
+        assert second_row.strftime("%H:%M:%S") == "00:00:30"
+        assert second_row.date() == first_row.date() + timedelta(days=1)

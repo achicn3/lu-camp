@@ -7,8 +7,12 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { uniquePhone, validNationalId } from "./_national-id.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
+const RUN = Date.now();
+const SELLER_NAME = `王賣家-${String(RUN).slice(-6)}`;
 mkdirSync(SHOTS, { recursive: true });
 const results = [];
 function ok(name, pass, detail = "") {
@@ -38,10 +42,11 @@ try {
 
   // 3) 建立賣方
   await page.click('button:has-text("建立新賣方")');
-  await page.fill('input[aria-label="姓名"]', "王賣家");
-  await page.fill('input[aria-label="身分證字號"]', "A123456789");
+  await page.fill('input[aria-label="姓名"]', SELLER_NAME);
+  await page.fill('input[aria-label="手機"]', uniquePhone(RUN));
+  await page.fill('input[aria-label="身分證字號"]', validNationalId(RUN));
   await page.click('button:has-text("建立並選取")');
-  await page.waitForSelector("text=王賣家");
+  await page.waitForSelector(`text=${SELLER_NAME}`);
   ok("建立並選取賣方", true);
 
   // 4) 鑑價列：品名、成色、品牌（建）、分類（建，seed 規則）

@@ -9,6 +9,7 @@ import { type FormEvent, useState } from "react";
 
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 
 type BackupHealthRead = components["schemas"]["BackupHealthRead"];
 type BackupRunRead = components["schemas"]["BackupRunRead"];
@@ -26,9 +27,7 @@ function extractDetail(error: unknown): string | null {
 }
 
 function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleString("zh-TW", { hour12: false });
+  return formatTaipeiDateTime(iso);
 }
 
 function formatSize(bytes: number | null | undefined): string {

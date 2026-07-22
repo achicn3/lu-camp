@@ -104,6 +104,7 @@ async function login(page) {
 const ROUTES = [
   ["/", "00-auth-dashboard", "01-dashboard"],
   ["/settings", "00-auth-dashboard", "02-settings"],
+  ["/backup", "00-auth-dashboard", "03-backup"],
   ["/acquisition", "01-acquisition", "01-acquisition"],
   ["/inventory", "02-inventory", "01-inventory-list"],
   ["/consignment", "03-consignment", "01-consignment"],
@@ -114,6 +115,8 @@ const ROUTES = [
   ["/campaigns", "08-campaigns", "01-campaigns"],
   ["/cash", "10-cash-reconcile", "01-cash"],
   ["/reports", "11-reports", "01-reports"],
+  ["/sales", "11-reports", "03-sales"],
+  ["/signing", "11-reports", "04-signing"],
   ["/contacts", "13-ui-defects", "01-contacts-list"],
 ];
 
@@ -145,6 +148,40 @@ async function sweepRoutes(page) {
       note(folder, "系統壞", `路由 ${route} 有未捕捉 JS 例外`, pe.map((e) => e.text).join(" | ").slice(0, 200));
     }
   }
+}
+
+async function sweepContactDetail(page) {
+  await page.goto(`${BASE}/contacts`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "所有會員" }).click();
+  await page.waitForTimeout(500);
+  const firstContact = page.locator("a.member-row, a.member-table-link").first();
+  if ((await firstContact.count()) === 0) {
+    note("13-ui-defects", "資訊", "會員明細略過", "目前資料庫沒有會員列");
+    return 0;
+  }
+  const href = await firstContact.getAttribute("href");
+  if (!href) {
+    note("13-ui-defects", "缺陷", "會員列缺少明細連結", "找不到 href");
+    return 0;
+  }
+  const before = jsErrors.length;
+  const resp = await page.goto(`${BASE}${href}`, { waitUntil: "networkidle", timeout: 20000 });
+  if (resp && resp.status() >= 400) {
+    note("13-ui-defects", "缺陷", `會員明細 ${href} 回 HTTP ${resp.status()}`, "非 2xx/3xx 頁面");
+  }
+  await page.waitForTimeout(700);
+  await shot(page, "13-ui-defects", "02-contact-detail");
+  scanJargon(href, await page.locator("body").innerText());
+  const pageErrors = jsErrors.slice(before).filter((e) => e.kind === "pageerror");
+  if (pageErrors.length) {
+    note(
+      "13-ui-defects",
+      "系統壞",
+      `會員明細 ${href} 有未捕捉 JS 例外`,
+      pageErrors.map((e) => e.text).join(" | ").slice(0, 200),
+    );
+  }
+  return 1;
 }
 
 // D-2：會員建檔防呆（身分證檢核 / 必填）——在 /contacts 頁試錯。
@@ -252,6 +289,7 @@ async function main() {
   await shot(page, "00-auth-dashboard", "00-login");
   await login(page);
   await sweepRoutes(page);
+  const dynamicRoutesSwept = await sweepContactDetail(page);
 
   console.log("=== Layer D 表單防呆 / 大表渲染 ===");
   await checkContactValidation(page);
@@ -276,7 +314,7 @@ async function main() {
     return true;
   });
   const summary = {
-    routes_swept: ROUTES.length,
+    routes_swept: ROUTES.length + dynamicRoutesSwept,
     pageerror_count: pageerrors.length,
     console_error_count: consoleErrors.length,
     jargon_count: jargonUnique.length,
@@ -288,7 +326,7 @@ async function main() {
   const out = join(ROOT, "ui-sweep-summary.json");
   writeFileSync(out, JSON.stringify(summary, null, 2));
   console.log(`\n=== UI 走查完成 ===`);
-  console.log(`  路由 ${ROUTES.length}、pageerror ${pageerrors.length}、console.error ${consoleErrors.length}、jargon ${jargonUnique.length}`);
+  console.log(`  路由 ${summary.routes_swept}、pageerror ${pageerrors.length}、console.error ${consoleErrors.length}、jargon ${jargonUnique.length}`);
   console.log(`  摘要：${out}`);
   if (jargonUnique.length) {
     console.log("  ⚠️ 可能的專業術語/未中文化字串：");

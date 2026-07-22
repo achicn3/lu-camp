@@ -1,6 +1,7 @@
 """sales API 整合測試（POST/GET/void/print-detail、idempotency；§11 合約形狀）。"""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -362,12 +363,53 @@ async def test_list_sales_with_date_range(
         "/api/v1/sales", json={"lines": [_catalog_line(cat, 1)]}, headers=_auth(token, idem="d")
     )
     inside = await client.get(
-        "/api/v1/sales?from=2020-01-01T00:00:00&to=2999-01-01T00:00:00", headers=_auth(token)
+        "/api/v1/sales?from=2020-01-01T00:00:00Z&to=2999-01-01T00:00:00Z",
+        headers=_auth(token),
     )
     assert inside.status_code == 200
     assert len(inside.json()) == 1
-    future = await client.get("/api/v1/sales?from=2999-01-01T00:00:00", headers=_auth(token))
+    future = await client.get("/api/v1/sales?from=2999-01-01T00:00:00Z", headers=_auth(token))
     assert future.json() == []
+
+
+async def test_list_sales_rejects_naive_datetime_params(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _, _ = await _seed(db_session)
+    resp = await client.get("/api/v1/sales?from=2026-07-22T00:00:00", headers=_auth(token))
+    assert resp.status_code == 422
+
+
+async def test_list_sales_uses_exclusive_date_to(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, clerk_id = await _seed(db_session)
+    cutoff = datetime(2026, 7, 21, 16, tzinfo=UTC)
+    before = Sale(
+        store_id=store_id,
+        clerk_user_id=clerk_id,
+        subtotal=Decimal("100"),
+        tax=Decimal("0"),
+        total=Decimal("100"),
+        created_at=cutoff.replace(microsecond=0) - timedelta(seconds=1),
+    )
+    at_cutoff = Sale(
+        store_id=store_id,
+        clerk_user_id=clerk_id,
+        subtotal=Decimal("200"),
+        tax=Decimal("0"),
+        total=Decimal("200"),
+        created_at=cutoff,
+    )
+    db_session.add_all([before, at_cutoff])
+    await db_session.flush()
+
+    resp = await client.get(
+        "/api/v1/sales?from=2026-07-21T15:59:00Z&to=2026-07-21T16:00:00Z",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    assert [row["id"] for row in resp.json()] == [before.id]
 
 
 async def test_list_sales_pagination(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

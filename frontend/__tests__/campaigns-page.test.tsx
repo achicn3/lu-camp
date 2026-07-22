@@ -165,6 +165,7 @@ describe("CampaignsPage", () => {
     loginAs("MANAGER");
     const createdCampaign = { ...CAMPAIGN_DRAFT, id: 3, name: "新活動" };
     let postCalled = false;
+    let postedBody: Record<string, unknown> | null = null;
 
     vi.stubGlobal(
       "fetch",
@@ -173,6 +174,7 @@ describe("CampaignsPage", () => {
         const req = input instanceof Request ? input : undefined;
         if (url.includes("/campaigns") && req?.method === "POST" && !url.includes("/activate") && !url.includes("/end") && !url.includes("/cancel")) {
           postCalled = true;
+          postedBody = (await req.json()) as Record<string, unknown>;
           return json(createdCampaign, 201);
         }
         if (url.includes("/campaigns") && (!req || req.method === "GET")) {
@@ -205,6 +207,10 @@ describe("CampaignsPage", () => {
 
     await waitFor(() => {
       expect(postCalled).toBe(true);
+    });
+    expect(postedBody).toMatchObject({
+      starts_at: "2026-06-19T16:00:00.000Z",
+      ends_at: "2026-06-30T15:59:00.000Z",
     });
   });
 });

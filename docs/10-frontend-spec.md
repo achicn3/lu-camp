@@ -20,6 +20,9 @@
 - **金額**：一律以字串/整數分傳輸與顯示，**禁止 float**；顯示/解析走 `lib/money.ts`。
 - **認證**：登入取 JWT（access + refresh）；`lib/auth.ts` 統一附帶 token、過期自動 refresh、401 導回登入。token 不落不安全儲存。
 - **錯誤處理**：統一解析後端 `{ error: { code, message, details } }`，以 toast/inline 呈現；表單錯誤對應欄位。
+- **時間**：所有營業日期與人讀時間固定為 `Asia/Taipei`。頁面只能使用
+  `lib/datetime.ts` 產生「今日」、報表半開區間、`datetime-local` payload 與顯示文字；
+  禁止直接依賴瀏覽器本地時區的 `getDate()`／`toLocaleString()`。
 
 ## 3. 跨頁共用行為
 

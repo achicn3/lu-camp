@@ -13,6 +13,7 @@ import {
 import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime, taipeiDateTimeLocalToUtc } from "@/lib/datetime";
 
 type CampaignRead = components["schemas"]["CampaignRead"];
 type CampaignStatus = components["schemas"]["CampaignStatus"];
@@ -56,8 +57,8 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
         body: {
           name: name.trim(),
           discount_pct: pct,
-          starts_at: new Date(startsAt).toISOString(),
-          ends_at: new Date(endsAt).toISOString(),
+          starts_at: taipeiDateTimeLocalToUtc(startsAt),
+          ends_at: taipeiDateTimeLocalToUtc(endsAt),
           applies_owned_serialized: appliesOwnedSerialized,
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
@@ -385,8 +386,8 @@ export default function CampaignsPage() {
                 <tr key={c.id}>
                   <td>{c.name}</td>
                   <td>{discountDisplay(c.discount_pct)}</td>
-                  <td>{new Date(c.starts_at).toLocaleString("zh-TW")}</td>
-                  <td>{new Date(c.ends_at).toLocaleString("zh-TW")}</td>
+                  <td>{formatTaipeiDateTime(c.starts_at)}</td>
+                  <td>{formatTaipeiDateTime(c.ends_at)}</td>
                   <td>
                     <span className={`badge badge-${c.status.toLowerCase()}`}>
                       {statusLabel(c.status)}

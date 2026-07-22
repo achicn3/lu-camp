@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
+from app.core.time import store_date
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
     AcquisitionItemIn,
@@ -81,6 +82,7 @@ from qa_e2e.sim_helpers import (
     make_national_id,
     make_phone,
     signature_png,
+    simulation_day_start,
     suggested_price,
 )
 
@@ -89,6 +91,9 @@ DAYS = int(os.environ.get("SIM_DAYS", "200"))
 SEED = int(os.environ.get("SIM_SEED", "20260716"))
 _RNG = random.Random(SEED)
 _NOW = datetime.now(UTC)
+_MANIFEST_PATH = Path(
+    os.environ.get("SIM_MANIFEST_PATH", str(Path(__file__).with_name("sim_manifest.json")))
+)
 
 # 時間回填：這些表的白名單時間欄，會被平移到模擬日（僅當日新增列，watermark 以 id 界定）。
 _SHIFT_COLS = (
@@ -241,7 +246,7 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
         )
         await sim.s.execute(
             text(f"UPDATE {tab} SET {sets} WHERE id > :wm"),
-            {"base": day_start, "day": day_start.date(), "wm": wm},
+            {"base": day_start, "day": store_date(day_start), "wm": wm},
         )
     # 一致性修正：簽名時間 ≥ 建立時間；開/關帳定錨在營業時段兩端。
     await sim.s.execute(
@@ -277,10 +282,8 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
 
 
 def _day_start(day_index: int) -> datetime:
-    """模擬日 10:00（UTC 表示；日界課題由 Phase 2 報表層檢視）。"""
-    return (_NOW - timedelta(days=DAYS - day_index)).replace(
-        hour=2, minute=0, second=0, microsecond=0
-    )  # UTC 02:00 = 台北 10:00
+    """模擬營業日基準；一般為台灣 10:00，固定樣本從 23:58 跨越午夜。"""
+    return simulation_day_start(_NOW, DAYS, day_index)
 
 
 async def _sign_affidavit(
@@ -1093,7 +1096,7 @@ async def _run_day(sim: Sim, plan: DayPlan, cols: dict[str, list[str]]) -> None:
 
     await _new_members(sim, _RNG.randint(6, 14))
     if plan.po_action:
-        await _po_step(sim, day_start.date())
+        await _po_step(sim, store_date(day_start))
     if plan.stocktake_day:
         await _stocktake(sim)
     for _ in range(plan.n_buyout):
@@ -1157,8 +1160,10 @@ async def _write_manifest(sim: Sim) -> None:
         "stats": sim.stats,
         "errors": sim.errors,
     }
-    Path(__file__).with_name("sim_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(
+        _MANIFEST_PATH.write_text,
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 

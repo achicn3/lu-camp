@@ -12,21 +12,14 @@ import {
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
+import { formatTaipeiDateTime } from "@/lib/datetime";
 
 type SignatureTask = components["schemas"]["SignatureTaskRead"];
 
 const PAGE_SIZE = 20;
 
 function timeLabel(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("zh-TW", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatTaipeiDateTime(iso);
 }
 
 export default function SigningPage() {

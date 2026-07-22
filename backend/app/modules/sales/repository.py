@@ -203,7 +203,7 @@ class SalesRepository:
         if date_from is not None:
             stmt = stmt.where(Sale.created_at >= date_from)
         if date_to is not None:
-            stmt = stmt.where(Sale.created_at <= date_to)
+            stmt = stmt.where(Sale.created_at < date_to)
         stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
         result = await self._session.scalars(stmt)
         return list(result)
@@ -255,7 +255,7 @@ class SalesRepository:
         if date_from is not None:
             stmt = stmt.where(Sale.created_at >= date_from)
         if date_to is not None:
-            stmt = stmt.where(Sale.created_at <= date_to)
+            stmt = stmt.where(Sale.created_at < date_to)
         stmt = stmt.order_by(Sale.id.desc()).limit(limit).offset(offset)
         result = await self._session.scalars(stmt)
         return list(result)

@@ -5,6 +5,7 @@ session 分列 + 當日合計；expected 與關帳同公式（含 ACQUISITION_VO
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -73,6 +74,27 @@ async def test_daily_cash_empty_day_returns_empty_not_500(
     assert body["total_expected"] == "0"
     assert body["total_cash_sales"] == "0"
     assert body["total_store_credit_redeemed_display_only"] == "0"
+
+
+async def test_daily_cash_assigns_session_to_taipei_opening_date(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _clerk, store_id, _member_id, mgr_id = await _seed(db_session)
+    session = await CashDrawerService(db_session).open_session(store_id, mgr_id, Decimal(1000))
+    session.opened_at = datetime(2026, 7, 21, 16, 30, tzinfo=UTC)  # 台灣 07-22 00:30
+    await db_session.flush()
+
+    taipei_day = await client.get(
+        "/api/v1/reports/daily-cash", params={"date": "2026-07-22"}, headers=_auth(mgr)
+    )
+    previous_day = await client.get(
+        "/api/v1/reports/daily-cash", params={"date": "2026-07-21"}, headers=_auth(mgr)
+    )
+
+    assert taipei_day.status_code == 200
+    assert [row["session_id"] for row in taipei_day.json()["sessions"]] == [session.id]
+    assert previous_day.status_code == 200
+    assert previous_day.json()["sessions"] == []
 
 
 async def test_daily_cash_expected_matches_close_formula(
@@ -210,8 +232,9 @@ async def test_daily_cash_csv_and_xlsx_export(
     mgr, _clerk, store_id, _member_id, mgr_id = await _seed(db_session)
     cash = CashDrawerService(db_session)
     session = await cash.open_session(store_id, mgr_id, Decimal(1000))
+    session.opened_at = datetime(2026, 7, 21, 16, 30, tzinfo=UTC)
     await cash.record_movement(store_id, CashMovementType.SALE_IN, Decimal(500))
-    day = _today_iso(session)
+    day = "2026-07-22"
 
     csv_resp = await client.get(
         "/api/v1/reports/daily-cash",
@@ -222,6 +245,7 @@ async def test_daily_cash_csv_and_xlsx_export(
     assert "text/csv" in csv_resp.headers["content-type"]
     text = csv_resp.content.decode("utf-8-sig")
     assert "應有現金" in text and "現金銷售" in text and "500" in text
+    assert "2026-07-22T00:30:00+08:00" in text
 
     xlsx_resp = await client.get(
         "/api/v1/reports/daily-cash",

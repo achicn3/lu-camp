@@ -4,7 +4,6 @@
 service 進行；API 只暴露查詢與 MANAGER 校正。
 """
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.core.time import store_date, utc_now
 from app.modules.storecredit.schemas import (
     PremiumSuggestionResponse,
     StoreCreditAdjustRequest,
@@ -107,9 +107,9 @@ async def premium_suggestion_today(
 
     建議值僅供面板顯示與人工確認，**永不自動生效**（POS 開帳面板/設定頁皆用此端點）。
     """
-    now = datetime.now(UTC)
+    now = utc_now()
     log = await PremiumSuggestionService(session).suggestion_today(
-        user.store_id, today=now.date(), now=now
+        user.store_id, today=store_date(now), now=now
     )
     await session.commit()
     return PremiumSuggestionResponse.model_validate(log)

@@ -8,6 +8,7 @@ COMMIT 才驗，測試不提交、不觸發）。
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -154,6 +155,37 @@ async def test_member_purchases_404_when_contact_missing(
     _, token, _, _ = await _setup(db_session)
     resp = await client.get("/api/v1/contacts/999999/purchases", headers=_auth(token))
     assert resp.status_code == 404
+
+
+async def test_member_purchases_rejects_naive_datetime_params(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token, _, member = await _setup(db_session)
+    resp = await client.get(
+        f"/api/v1/contacts/{member}/purchases?from=2026-07-22T00:00:00",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 422
+
+
+async def test_member_purchases_uses_exclusive_date_to(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, token, clerk_id, member = await _setup(db_session)
+    cutoff = datetime(2026, 7, 21, 16, tzinfo=UTC)
+    before = _sale(store_id, clerk_id, member, 100)
+    before.created_at = cutoff.replace(second=59) - timedelta(minutes=1)
+    at_cutoff = _sale(store_id, clerk_id, member, 200)
+    at_cutoff.created_at = cutoff
+    db_session.add_all([before, at_cutoff])
+    await db_session.flush()
+
+    resp = await client.get(
+        f"/api/v1/contacts/{member}/purchases?from=2026-07-21T15:59:00Z&to=2026-07-21T16:00:00Z",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200
+    assert [row["sale_id"] for row in resp.json()] == [before.id]
 
 
 # ── consignments ──
