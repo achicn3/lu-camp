@@ -24,6 +24,7 @@ import app.modules.campaigns.models  # 註冊模型到 Base.metadata
 import app.modules.cashdrawer.models  # 註冊模型到 Base.metadata
 import app.modules.consignment.models  # 註冊模型到 Base.metadata
 import app.modules.contacts.models  # 註冊模型到 Base.metadata
+import app.modules.customerdisplay.models  # 註冊模型到 Base.metadata
 import app.modules.einvoice.models  # 註冊模型到 Base.metadata
 import app.modules.inventory.models  # 註冊模型到 Base.metadata
 import app.modules.menu.models  # 註冊模型到 Base.metadata

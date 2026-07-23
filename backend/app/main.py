@@ -28,6 +28,8 @@ from app.modules.campaigns.router import router as campaigns_router
 from app.modules.cashdrawer.router import router as cashdrawer_router
 from app.modules.consignment.router import router as consignment_router
 from app.modules.contacts.router import router as contacts_router
+from app.modules.customerdisplay.router import kiosk_router as customer_display_kiosk_router
+from app.modules.customerdisplay.router import staff_router as customer_display_staff_router
 from app.modules.einvoice.router import invoices_router as einvoice_invoices_router
 from app.modules.einvoice.router import router as einvoice_router
 from app.modules.inventory.router import router as inventory_router
@@ -87,13 +89,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """建立並設定 FastAPI 應用程式。"""
     app = FastAPI(title="lu-camp API", version="0.1.0", lifespan=_lifespan)
-    # CORS：允許來源由設定提供（CORS_ORIGINS，逗號分隔）。認證走 Bearer 標頭
-    # （非 cookie），不需 allow_credentials。
+    # CORS：店務認證仍走 Bearer；KIOSK v2 使用 Path-scoped HttpOnly cookie，故明確允許
+    # credentials。allow_origins 是列舉值而非 "*"，瀏覽器不會把 cookie 放行給未知來源。
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
             origin.strip() for origin in get_settings().cors_origins.split(",") if origin.strip()
         ],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[ERROR_CODE_HEADER],
@@ -149,6 +152,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router, prefix=API_PREFIX)
     app.include_router(signing_staff_router, prefix=API_PREFIX)
     app.include_router(signing_kiosk_router, prefix=API_PREFIX)
+    app.include_router(customer_display_staff_router, prefix=API_PREFIX)
+    app.include_router(customer_display_kiosk_router, prefix=API_PREFIX)
     app.include_router(sales_router, prefix=API_PREFIX)
     app.include_router(returns_router, prefix=API_PREFIX)
     app.include_router(store_router, prefix=API_PREFIX)

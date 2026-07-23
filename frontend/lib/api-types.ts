@@ -871,6 +871,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customer-display/terminals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Terminal */
+        post: operations["registerPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/pair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pair Terminal */
+        post: operations["pairPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/einvoice/queue": {
         parameters: {
             query?: never;
@@ -1011,6 +1045,57 @@ export interface paths {
         get: operations["getInvoice"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Kiosk Device */
+        get: operations["getKioskDevice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/device-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Kiosk Device Session */
+        post: operations["createKioskDeviceSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Kiosk Heartbeat */
+        post: operations["recordKioskHeartbeat"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3600,6 +3685,60 @@ export interface components {
             /** Phone */
             phone: string | null;
         };
+        /** KioskDeviceLoginRequest */
+        KioskDeviceLoginRequest: {
+            /** Installation Id */
+            installation_id: string;
+            /** Label */
+            label: string;
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
+        /** KioskDeviceRead */
+        KioskDeviceRead: {
+            /** Device Id */
+            device_id: number;
+            /** Label */
+            label: string;
+            paired_terminal: components["schemas"]["TerminalSummary"] | null;
+            /** Pairing Code */
+            pairing_code: string | null;
+            /** Pairing Code Expires At */
+            pairing_code_expires_at: string | null;
+        };
+        /** KioskDeviceSessionRead */
+        KioskDeviceSessionRead: {
+            /** Csrf Token */
+            csrf_token: string;
+            /** Device Id */
+            device_id: number;
+            /** Label */
+            label: string;
+            paired_terminal: components["schemas"]["TerminalSummary"] | null;
+            /** Pairing Code */
+            pairing_code: string | null;
+            /** Pairing Code Expires At */
+            pairing_code_expires_at: string | null;
+        };
+        /** KioskHeartbeatRead */
+        KioskHeartbeatRead: {
+            /**
+             * Last Seen At
+             * Format: date-time
+             */
+            last_seen_at: string;
+            /** Online */
+            online: boolean;
+        };
+        /** KioskHeartbeatRequest */
+        KioskHeartbeatRequest: {
+            /** Current Session Id */
+            current_session_id?: number | null;
+            /** Displayed Revision */
+            displayed_revision: number;
+        };
         /** KioskSignRequest */
         KioskSignRequest: {
             chosen_payout?: components["schemas"]["PayoutMethod"] | null;
@@ -3607,6 +3746,13 @@ export interface components {
             idempotency_key?: string | null;
             /** Signature Image Base64 */
             signature_image_base64: string;
+        };
+        /** KioskSummary */
+        KioskSummary: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
         };
         /**
          * KioskTaskRead
@@ -5133,6 +5279,35 @@ export interface components {
          * @enum {string}
          */
         TenderType: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY";
+        /** TerminalCreateRequest */
+        TerminalCreateRequest: {
+            /** Installation Id */
+            installation_id: string;
+            /** Name */
+            name: string;
+        };
+        /** TerminalPairRequest */
+        TerminalPairRequest: {
+            /** Pairing Code */
+            pairing_code: string;
+        };
+        /** TerminalRead */
+        TerminalRead: {
+            /** Id */
+            id: number;
+            /** Installation Id */
+            installation_id: string;
+            /** Name */
+            name: string;
+            paired_kiosk: components["schemas"]["KioskSummary"] | null;
+        };
+        /** TerminalSummary */
+        TerminalSummary: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /**
          * TokenResponse
          * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。
@@ -6939,6 +7114,74 @@ export interface operations {
             };
         };
     };
+    registerPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pairPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalPairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listEInvoiceQueue: {
         parameters: {
             query?: {
@@ -7138,6 +7381,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getKioskDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskDeviceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createKioskDeviceSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KioskDeviceLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskDeviceSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordKioskHeartbeat: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KioskHeartbeatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskHeartbeatRead"];
                 };
             };
             /** @description Validation Error */
