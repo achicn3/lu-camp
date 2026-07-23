@@ -888,6 +888,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customer-display/terminals/{terminal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Terminal */
+        get: operations["getPosTerminal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customer-display/terminals/{terminal_id}/pair": {
         parameters: {
             query?: never;
@@ -899,6 +916,23 @@ export interface paths {
         put?: never;
         /** Pair Terminal */
         post: operations["pairPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/unpair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unpair Terminal */
+        post: operations["unpairPosTerminal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1096,6 +1130,23 @@ export interface paths {
         put?: never;
         /** Record Kiosk Heartbeat */
         post: operations["recordKioskHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/pairing-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Kiosk Pairing Code */
+        post: operations["createKioskPairingCode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5308,6 +5359,11 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** TerminalUnpairRequest */
+        TerminalUnpairRequest: {
+            /** Reason */
+            reason: string;
+        };
         /**
          * TokenResponse
          * @description 登入成功回應：JWT access token（payload 含 sub/role/store_id）。
@@ -7147,6 +7203,37 @@ export interface operations {
             };
         };
     };
+    getPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pairPosTerminal: {
         parameters: {
             query?: never;
@@ -7159,6 +7246,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TerminalPairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpairPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalUnpairRequest"];
             };
         };
         responses: {
@@ -7482,6 +7604,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KioskHeartbeatRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createKioskPairingCode: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskDeviceRead"];
                 };
             };
             /** @description Validation Error */

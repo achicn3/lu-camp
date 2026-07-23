@@ -8741,6 +8741,21 @@
         "title": "TerminalSummary",
         "type": "object"
       },
+      "TerminalUnpairRequest": {
+        "properties": {
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "TerminalUnpairRequest",
+        "type": "object"
+      },
       "TokenResponse": {
         "description": "登入成功回應：JWT access token（payload 含 sub/role/store_id）。",
         "properties": {
@@ -12070,6 +12085,53 @@
         ]
       }
     },
+    "/api/v1/customer-display/terminals/{terminal_id}": {
+      "get": {
+        "operationId": "getPosTerminal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Terminal",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
     "/api/v1/customer-display/terminals/{terminal_id}/pair": {
       "post": {
         "operationId": "pairPosTerminal",
@@ -12122,6 +12184,63 @@
           }
         ],
         "summary": "Pair Terminal",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
+    "/api/v1/customer-display/terminals/{terminal_id}/unpair": {
+      "post": {
+        "operationId": "unpairPosTerminal",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalUnpairRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unpair Terminal",
         "tags": [
           "customer-display"
         ]
@@ -12636,6 +12755,71 @@
           }
         },
         "summary": "Record Kiosk Heartbeat",
+        "tags": [
+          "kiosk-device"
+        ]
+      }
+    },
+    "/api/v1/kiosk/pairing-codes": {
+      "post": {
+        "operationId": "createKioskPairingCode",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskDeviceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Kiosk Pairing Code",
         "tags": [
           "kiosk-device"
         ]

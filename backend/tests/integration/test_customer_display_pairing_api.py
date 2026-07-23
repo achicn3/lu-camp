@@ -284,3 +284,90 @@ async def test_relogin_same_installation_reuses_device_and_rotates_cookie(
 
     assert second["device_id"] == first["device_id"]
     assert second_cookie is not None and second_cookie != first_cookie
+
+
+async def test_staff_can_unpair_and_kiosk_can_issue_a_fresh_code(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    seeded = await _seed(db_session, suffix="unpair")
+    kiosk = await _login_kiosk(
+        client,
+        seeded,
+        installation_id="1b563823-0f6f-442e-85ce-34acf7b178d3",
+    )
+    csrf = str(kiosk["csrf_token"])
+    terminal_response = await client.post(
+        "/api/v1/customer-display/terminals",
+        headers=_staff_auth(seeded.manager_token),
+        json={
+            "installation_id": "52cc7dd1-e8c2-4663-8e60-f456f1a75578",
+            "name": "主櫃檯",
+        },
+    )
+    terminal_id = terminal_response.json()["id"]
+    paired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/pair",
+        headers=_staff_auth(seeded.manager_token),
+        json={"pairing_code": kiosk["pairing_code"]},
+    )
+    assert paired.status_code == 200
+
+    unpaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_staff_auth(seeded.manager_token),
+        json={"reason": "更換顧客平板"},
+    )
+    assert unpaired.status_code == 200, unpaired.text
+    assert unpaired.json()["paired_kiosk"] is None
+
+    fresh = await client.post(
+        "/api/v1/kiosk/pairing-codes",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert fresh.status_code == 201, fresh.text
+    assert fresh.json()["pairing_code"] != kiosk["pairing_code"]
+    assert len(fresh.json()["pairing_code"]) == 6
+
+    repaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/pair",
+        headers=_staff_auth(seeded.manager_token),
+        json={"pairing_code": fresh.json()["pairing_code"]},
+    )
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["paired_kiosk"]["id"] == kiosk["device_id"]
+
+
+async def test_staff_can_restore_terminal_pairing_status_by_terminal_id(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    seeded = await _seed(db_session, suffix="terminal-read")
+    kiosk = await _login_kiosk(
+        client,
+        seeded,
+        installation_id="f52143e4-bbc5-4364-aa3b-57df910bc1a5",
+    )
+    terminal_response = await client.post(
+        "/api/v1/customer-display/terminals",
+        headers=_staff_auth(seeded.manager_token),
+        json={
+            "installation_id": "a08c428e-0dd8-428f-b721-a9e5268e1a9a",
+            "name": "入口櫃檯",
+        },
+    )
+    terminal_id = terminal_response.json()["id"]
+    await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/pair",
+        headers=_staff_auth(seeded.manager_token),
+        json={"pairing_code": kiosk["pairing_code"]},
+    )
+
+    restored = await client.get(
+        f"/api/v1/customer-display/terminals/{terminal_id}",
+        headers=_staff_auth(seeded.manager_token),
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["id"] == terminal_id
+    assert restored.json()["name"] == "入口櫃檯"
+    assert restored.json()["paired_kiosk"]["id"] == kiosk["device_id"]

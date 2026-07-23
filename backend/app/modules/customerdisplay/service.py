@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.modules.customerdisplay.models import (
     KioskDevice,
     KioskDeviceSession,
@@ -213,6 +214,27 @@ class CustomerDisplayService:
         )
         return device, terminal
 
+    async def issue_pairing_code(
+        self,
+        principal: DevicePrincipal,
+    ) -> tuple[KioskDevice, str, datetime]:
+        """未配對裝置重新取得短效一次性代碼；已配對時拒絕，避免誤覆蓋長期關聯。"""
+        device = await self._repo.get_device(
+            principal.store_id,
+            principal.device_id,
+            for_update=True,
+        )
+        if device is None or not device.is_active:
+            raise InvalidDeviceSession("客顯裝置不存在或已停用")
+        if await self._repo.get_active_pairing_for_device(
+            principal.store_id,
+            principal.device_id,
+            for_update=True,
+        ):
+            raise PairingConflict("客顯仍與 POS 櫃檯配對，請先由店員解除配對")
+        code, expires_at = await self._replace_pairing_code(device, datetime.now(UTC))
+        return device, code, expires_at
+
     async def heartbeat(self, principal: DevicePrincipal) -> datetime:
         now = datetime.now(UTC)
         row = await self._repo.get_device_session_by_id(
@@ -318,3 +340,47 @@ class CustomerDisplayService:
             else None
         )
         return terminal, device
+
+    async def get_terminal(
+        self,
+        store_id: int,
+        terminal_id: int,
+    ) -> tuple[PosTerminal, KioskDevice | None]:
+        terminal = await self._repo.get_terminal(store_id, terminal_id)
+        if terminal is None or not terminal.is_active:
+            raise TerminalNotFound("POS 櫃檯不存在")
+        return await self.terminal_read(store_id, terminal)
+
+    async def unpair_terminal(
+        self,
+        store_id: int,
+        terminal_id: int,
+        *,
+        reason: str,
+        actor_user_id: int,
+    ) -> PosTerminal:
+        """解除長期配對但保留歷史列與稽核；不刪裝置、不重建櫃檯。"""
+        terminal = await self._repo.get_terminal(store_id, terminal_id, for_update=True)
+        if terminal is None or not terminal.is_active:
+            raise TerminalNotFound("POS 櫃檯不存在")
+        pairing = await self._repo.get_active_pairing_for_terminal(
+            store_id,
+            terminal_id,
+            for_update=True,
+        )
+        if pairing is None:
+            raise PairingConflict("此 POS 櫃檯目前沒有配對客顯")
+        before_device_id = pairing.kiosk_device_id
+        pairing.unpaired_at = datetime.now(UTC)
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UNPAIR_CUSTOMER_DISPLAY",
+            entity_type="pos_terminal",
+            entity_id=str(terminal_id),
+            before={"kiosk_device_id": before_device_id},
+            after={"kiosk_device_id": None, "reason": reason.strip()},
+        )
+        return terminal

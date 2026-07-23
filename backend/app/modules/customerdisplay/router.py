@@ -20,6 +20,7 @@ from app.modules.customerdisplay.schemas import (
     TerminalPairRequest,
     TerminalRead,
     TerminalSummary,
+    TerminalUnpairRequest,
 )
 from app.modules.customerdisplay.service import (
     CustomerDisplayService,
@@ -183,6 +184,33 @@ async def record_kiosk_heartbeat(
     return KioskHeartbeatRead(online=True, last_seen_at=seen)
 
 
+@kiosk_router.post(
+    "/pairing-codes",
+    response_model=KioskDeviceRead,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="createKioskPairingCode",
+)
+async def create_kiosk_pairing_code(
+    session: SessionDep,
+    principal: KioskMutationDep,
+) -> KioskDeviceRead:
+    service = CustomerDisplayService(session)
+    try:
+        device, code, expires_at = await service.issue_pairing_code(principal)
+    except PairingConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = KioskDeviceRead(
+        device_id=device.id,
+        label=device.label,
+        pairing_code=code,
+        pairing_code_expires_at=expires_at,
+        paired_terminal=None,
+    )
+    await session.commit()
+    return payload
+
+
 @staff_router.post(
     "/terminals",
     response_model=TerminalRead,
@@ -205,6 +233,26 @@ async def register_terminal(
     payload = _terminal_read(terminal, device)
     await session.commit()
     return payload
+
+
+@staff_router.get(
+    "/terminals/{terminal_id}",
+    response_model=TerminalRead,
+    operation_id="getPosTerminal",
+)
+async def get_terminal(
+    terminal_id: int,
+    session: SessionDep,
+    user: StaffDep,
+) -> TerminalRead:
+    try:
+        terminal, device = await CustomerDisplayService(session).get_terminal(
+            user.store_id,
+            terminal_id,
+        )
+    except TerminalNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _terminal_read(terminal, device)
 
 
 @staff_router.post(
@@ -233,5 +281,35 @@ async def pair_terminal(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     payload = _terminal_read(terminal, device)
+    await session.commit()
+    return payload
+
+
+@staff_router.post(
+    "/terminals/{terminal_id}/unpair",
+    response_model=TerminalRead,
+    operation_id="unpairPosTerminal",
+)
+async def unpair_terminal(
+    terminal_id: int,
+    body: TerminalUnpairRequest,
+    session: SessionDep,
+    user: StaffDep,
+) -> TerminalRead:
+    service = CustomerDisplayService(session)
+    try:
+        terminal = await service.unpair_terminal(
+            user.store_id,
+            terminal_id,
+            reason=body.reason,
+            actor_user_id=user.id,
+        )
+    except TerminalNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PairingConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = _terminal_read(terminal, None)
     await session.commit()
     return payload

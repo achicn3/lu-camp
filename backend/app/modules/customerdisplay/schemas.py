@@ -64,3 +64,7 @@ class TerminalRead(BaseModel):
 
 class TerminalPairRequest(BaseModel):
     pairing_code: str = Field(pattern=r"^\d{6}$")
+
+
+class TerminalUnpairRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=200)
