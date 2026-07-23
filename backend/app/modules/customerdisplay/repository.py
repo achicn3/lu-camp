@@ -6,12 +6,14 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.customerdisplay.models import (
+    CartSession,
     KioskDevice,
     KioskDeviceSession,
     KioskPairingCode,
     PosTerminal,
     TerminalKioskPairing,
 )
+from app.shared.enums import CartSessionStatus
 
 
 class CustomerDisplayRepository:
@@ -185,4 +187,49 @@ class CustomerDisplayRepository:
         if for_update:
             stmt = stmt.with_for_update()
         result: TerminalKioskPairing | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_active_cart_for_terminal(
+        self,
+        store_id: int,
+        terminal_id: int,
+        *,
+        for_update: bool = False,
+    ) -> CartSession | None:
+        stmt = select(CartSession).where(
+            CartSession.store_id == store_id,
+            CartSession.pos_terminal_id == terminal_id,
+            CartSession.status.in_(
+                (
+                    CartSessionStatus.DRAFT,
+                    CartSessionStatus.FROZEN,
+                    CartSessionStatus.PROCESSING,
+                    CartSessionStatus.PAYMENT_UNCERTAIN,
+                )
+            ),
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: CartSession | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_active_cart_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+    ) -> CartSession | None:
+        result: CartSession | None = await self._session.scalar(
+            select(CartSession).where(
+                CartSession.store_id == store_id,
+                CartSession.kiosk_device_id == device_id,
+                CartSession.status.in_(
+                    (
+                        CartSessionStatus.DRAFT,
+                        CartSessionStatus.FROZEN,
+                        CartSessionStatus.PROCESSING,
+                        CartSessionStatus.PAYMENT_UNCERTAIN,
+                    )
+                ),
+            )
+        )
         return result

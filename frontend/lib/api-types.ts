@@ -905,6 +905,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Cart */
+        put: operations["upsertCustomerDisplayCart"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Cart */
+        post: operations["cancelCustomerDisplayCart"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Terminal Cart */
+        get: operations["getCurrentCustomerDisplayCart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customer-display/terminals/{terminal_id}/pair": {
         parameters: {
             query?: never;
@@ -1077,6 +1128,23 @@ export interface paths {
          * @description 單張發票（店別範圍）。
          */
         get: operations["getInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/cart/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Kiosk Cart */
+        get: operations["getCurrentKioskCart"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2631,6 +2699,131 @@ export interface components {
          * @enum {string}
          */
         CampaignStatus: "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED";
+        /** CartCancelRequest */
+        CartCancelRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Reason */
+            reason: string;
+        };
+        /** CartChangeRead */
+        CartChangeRead: {
+            /** From Qty */
+            from_qty?: number | null;
+            /** Item Key */
+            item_key: string;
+            /** Name */
+            name: string;
+            /** To Qty */
+            to_qty?: number | null;
+            /** Type */
+            type: string;
+        };
+        /** CartItemRead */
+        CartItemRead: {
+            /** Discount Amount */
+            discount_amount: string;
+            /** Item Key */
+            item_key: string;
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
+            /** Name */
+            name: string;
+            /** Original Unit Price */
+            original_unit_price: string | null;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /** CartLineRequest */
+        CartLineRequest: {
+            /** Bulk Lot Id */
+            bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            line_type: components["schemas"]["SaleLineType"];
+            /** Menu Item Id */
+            menu_item_id?: number | null;
+            /**
+             * Qty
+             * @default 1
+             */
+            qty: number;
+        };
+        /** CartSessionRead */
+        CartSessionRead: {
+            /** Changes */
+            changes: components["schemas"]["CartChangeRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kiosk Device Id */
+            kiosk_device_id: number;
+            /** Pos Terminal Id */
+            pos_terminal_id: number;
+            /** Revision */
+            revision: number;
+            snapshot: components["schemas"]["CartSnapshotRead"];
+            status: components["schemas"]["CartSessionStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * CartSessionStatus
+         * @description 客顯購物車持久狀態；SIGNING/SIGNED 由簽署任務衍生，不在此重複落地。
+         * @enum {string}
+         */
+        CartSessionStatus: "DRAFT" | "FROZEN" | "PROCESSING" | "PAYMENT_UNCERTAIN" | "COMPLETED" | "CANCELLED" | "EXPIRED";
+        /** CartSnapshotRead */
+        CartSnapshotRead: {
+            /** Campaign Name */
+            campaign_name: string | null;
+            /** Content Version */
+            content_version: string;
+            /** Discount Total */
+            discount_total: string;
+            /** Items */
+            items: components["schemas"]["CartItemRead"][];
+            member: components["schemas"]["MaskedMemberRead"] | null;
+            /** Tenders */
+            tenders: components["schemas"]["CartTenderRead"][];
+            /** Total */
+            total: string;
+        };
+        /** CartTenderRead */
+        CartTenderRead: {
+            /** Amount */
+            amount: string;
+            tender_type: components["schemas"]["TenderType"];
+        };
+        /** CartTenderRequest */
+        CartTenderRequest: {
+            /** Amount */
+            amount: number | string;
+            tender_type: components["schemas"]["TenderType"];
+        };
+        /** CartUpsertRequest */
+        CartUpsertRequest: {
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
+            /** Expected Revision */
+            expected_revision?: number | null;
+            /** Lines */
+            lines: components["schemas"]["CartLineRequest"][];
+            /** Tenders */
+            tenders?: components["schemas"]["CartTenderRequest"][] | null;
+        };
         /**
          * CashMovementCreateRequest
          * @description 記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。
@@ -3916,6 +4109,11 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /** MaskedMemberRead */
+        MaskedMemberRead: {
+            /** Display Name */
+            display_name: string;
         };
         /** MemberBalanceRow */
         MemberBalanceRow: {
@@ -7234,6 +7432,107 @@ export interface operations {
             };
         };
     };
+    upsertCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pairPosTerminal: {
         parameters: {
             query?: never;
@@ -7503,6 +7802,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentKioskCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"] | null;
                 };
             };
             /** @description Validation Error */

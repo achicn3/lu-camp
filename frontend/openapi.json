@@ -1288,6 +1288,425 @@
         "title": "CampaignStatus",
         "type": "string"
       },
+      "CartCancelRequest": {
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reason"
+        ],
+        "title": "CartCancelRequest",
+        "type": "object"
+      },
+      "CartChangeRead": {
+        "properties": {
+          "from_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Qty"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "to_qty": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Qty"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "item_key",
+          "name"
+        ],
+        "title": "CartChangeRead",
+        "type": "object"
+      },
+      "CartItemRead": {
+        "properties": {
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "item_key": {
+            "title": "Item Key",
+            "type": "string"
+          },
+          "line_total": {
+            "title": "Line Total",
+            "type": "string"
+          },
+          "line_type": {
+            "$ref": "#/components/schemas/SaleLineType"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "original_unit_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Unit Price"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_key",
+          "line_type",
+          "name",
+          "qty",
+          "unit_price",
+          "original_unit_price",
+          "discount_amount",
+          "line_total"
+        ],
+        "title": "CartItemRead",
+        "type": "object"
+      },
+      "CartLineRequest": {
+        "properties": {
+          "bulk_lot_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Lot Id"
+          },
+          "catalog_product_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Product Id"
+          },
+          "item_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Code"
+          },
+          "line_type": {
+            "$ref": "#/components/schemas/SaleLineType"
+          },
+          "menu_item_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Item Id"
+          },
+          "qty": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line_type"
+        ],
+        "title": "CartLineRequest",
+        "type": "object"
+      },
+      "CartSessionRead": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/CartChangeRead"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kiosk_device_id": {
+            "title": "Kiosk Device Id",
+            "type": "integer"
+          },
+          "pos_terminal_id": {
+            "title": "Pos Terminal Id",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/CartSnapshotRead"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CartSessionStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "pos_terminal_id",
+          "kiosk_device_id",
+          "snapshot",
+          "changes",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CartSessionRead",
+        "type": "object"
+      },
+      "CartSessionStatus": {
+        "description": "客顯購物車持久狀態；SIGNING/SIGNED 由簽署任務衍生，不在此重複落地。",
+        "enum": [
+          "DRAFT",
+          "FROZEN",
+          "PROCESSING",
+          "PAYMENT_UNCERTAIN",
+          "COMPLETED",
+          "CANCELLED",
+          "EXPIRED"
+        ],
+        "title": "CartSessionStatus",
+        "type": "string"
+      },
+      "CartSnapshotRead": {
+        "properties": {
+          "campaign_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Name"
+          },
+          "content_version": {
+            "title": "Content Version",
+            "type": "string"
+          },
+          "discount_total": {
+            "title": "Discount Total",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CartItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "member": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaskedMemberRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tenders": {
+            "items": {
+              "$ref": "#/components/schemas/CartTenderRead"
+            },
+            "title": "Tenders",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_version",
+          "items",
+          "total",
+          "discount_total",
+          "campaign_name",
+          "member",
+          "tenders"
+        ],
+        "title": "CartSnapshotRead",
+        "type": "object"
+      },
+      "CartTenderRead": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "tender_type",
+          "amount"
+        ],
+        "title": "CartTenderRead",
+        "type": "object"
+      },
+      "CartTenderRequest": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "tender_type",
+          "amount"
+        ],
+        "title": "CartTenderRequest",
+        "type": "object"
+      },
+      "CartUpsertRequest": {
+        "properties": {
+          "buyer_contact_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Contact Id"
+          },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Revision"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CartLineRequest"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "tenders": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CartTenderRequest"
+                },
+                "maxItems": 2,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenders"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "CartUpsertRequest",
+        "type": "object"
+      },
       "CashMovementCreateRequest": {
         "description": "記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。",
         "properties": {
@@ -4733,6 +5152,19 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "MaskedMemberRead": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "title": "MaskedMemberRead",
         "type": "object"
       },
       "MemberBalanceRow": {
@@ -12132,6 +12564,175 @@
         ]
       }
     },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart": {
+      "put": {
+        "operationId": "upsertCustomerDisplayCart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upsert Cart",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
+      "post": {
+        "operationId": "cancelCustomerDisplayCart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Cart",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/current": {
+      "get": {
+        "operationId": "getCurrentCustomerDisplayCart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CartSessionRead"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Getcurrentcustomerdisplaycart"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Current Terminal Cart",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
     "/api/v1/customer-display/terminals/{terminal_id}/pair": {
       "post": {
         "operationId": "pairPosTerminal",
@@ -12592,6 +13193,63 @@
         "summary": "Get Invoice",
         "tags": [
           "einvoice"
+        ]
+      }
+    },
+    "/api/v1/kiosk/cart/current": {
+      "get": {
+        "operationId": "getCurrentKioskCart",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CartSessionRead"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Getcurrentkioskcart"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Current Kiosk Cart",
+        "tags": [
+          "kiosk-device"
         ]
       }
     },

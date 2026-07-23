@@ -375,6 +375,18 @@ class SignatureTaskStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class CartSessionStatus(StrEnum):
+    """客顯購物車持久狀態；SIGNING/SIGNED 由簽署任務衍生，不在此重複落地。"""
+
+    DRAFT = "DRAFT"
+    FROZEN = "FROZEN"
+    PROCESSING = "PROCESSING"
+    PAYMENT_UNCERTAIN = "PAYMENT_UNCERTAIN"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+
+
 class BackupTrigger(StrEnum):
     """備份觸發來源（backup_runs.trigger，docs/31）。SCHEDULED＝到期 tick；MANUAL＝店長手動。"""
 

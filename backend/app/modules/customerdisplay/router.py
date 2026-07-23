@@ -8,8 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
-from app.modules.customerdisplay.models import KioskDevice, PosTerminal
+from app.modules.customerdisplay.models import CartSession, KioskDevice, PosTerminal
 from app.modules.customerdisplay.schemas import (
+    CartCancelRequest,
+    CartSessionRead,
+    CartSnapshotRead,
+    CartUpsertRequest,
     KioskDeviceLoginRequest,
     KioskDeviceRead,
     KioskDeviceSessionRead,
@@ -23,6 +27,8 @@ from app.modules.customerdisplay.schemas import (
     TerminalUnpairRequest,
 )
 from app.modules.customerdisplay.service import (
+    CartSessionConflict,
+    CartSessionInvalid,
     CustomerDisplayService,
     DevicePrincipal,
     InvalidCsrfToken,
@@ -31,6 +37,7 @@ from app.modules.customerdisplay.service import (
     PairingConflict,
     TerminalNotFound,
 )
+from app.shared.exceptions import DomainError
 
 KIOSK_COOKIE = "lu_camp_kiosk_session"
 KIOSK_COOKIE_PATH = "/api/v1/kiosk"
@@ -103,6 +110,20 @@ def _terminal_read(terminal: PosTerminal, device: KioskDevice | None) -> Termina
     )
 
 
+def _cart_read(cart: CartSession) -> CartSessionRead:
+    return CartSessionRead(
+        id=cart.id,
+        status=cart.status,
+        revision=cart.revision,
+        pos_terminal_id=cart.pos_terminal_id,
+        kiosk_device_id=cart.kiosk_device_id,
+        snapshot=CartSnapshotRead.model_validate(cart.snapshot),
+        changes=cart.last_changes,
+        created_at=cart.created_at,
+        updated_at=cart.updated_at,
+    )
+
+
 @kiosk_router.post(
     "/device-sessions",
     response_model=KioskDeviceSessionRead,
@@ -146,6 +167,19 @@ async def create_kiosk_device_session(
     )
     await session.commit()
     return payload
+
+
+@kiosk_router.get(
+    "/cart/current",
+    response_model=CartSessionRead | None,
+    operation_id="getCurrentKioskCart",
+)
+async def get_current_kiosk_cart(
+    session: SessionDep,
+    principal: KioskPrincipalDep,
+) -> CartSessionRead | None:
+    cart = await CustomerDisplayService(session).current_cart_for_device(principal)
+    return _cart_read(cart) if cart is not None else None
 
 
 @kiosk_router.get(
@@ -253,6 +287,91 @@ async def get_terminal(
     except TerminalNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _terminal_read(terminal, device)
+
+
+@staff_router.put(
+    "/terminals/{terminal_id}/cart",
+    response_model=CartSessionRead,
+    operation_id="upsertCustomerDisplayCart",
+)
+async def upsert_cart(
+    terminal_id: int,
+    body: CartUpsertRequest,
+    session: SessionDep,
+    user: StaffDep,
+) -> CartSessionRead:
+    try:
+        cart = await CustomerDisplayService(session).upsert_cart(
+            user.store_id,
+            terminal_id,
+            body,
+            actor_user_id=user.id,
+        )
+    except TerminalNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (PairingConflict, CartSessionConflict) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (CartSessionInvalid, DomainError) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    payload = _cart_read(cart)
+    await session.commit()
+    return payload
+
+
+@staff_router.get(
+    "/terminals/{terminal_id}/cart/current",
+    response_model=CartSessionRead | None,
+    operation_id="getCurrentCustomerDisplayCart",
+)
+async def get_current_terminal_cart(
+    terminal_id: int,
+    session: SessionDep,
+    user: StaffDep,
+) -> CartSessionRead | None:
+    try:
+        cart = await CustomerDisplayService(session).current_cart_for_terminal(
+            user.store_id,
+            terminal_id,
+        )
+    except TerminalNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _cart_read(cart) if cart is not None else None
+
+
+@staff_router.post(
+    "/terminals/{terminal_id}/cart/cancel",
+    response_model=CartSessionRead,
+    operation_id="cancelCustomerDisplayCart",
+)
+async def cancel_cart(
+    terminal_id: int,
+    body: CartCancelRequest,
+    session: SessionDep,
+    user: StaffDep,
+) -> CartSessionRead:
+    try:
+        cart = await CustomerDisplayService(session).cancel_cart(
+            user.store_id,
+            terminal_id,
+            expected_revision=body.expected_revision,
+            reason=body.reason,
+            actor_user_id=user.id,
+        )
+    except TerminalNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CartSessionConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = _cart_read(cart)
+    await session.commit()
+    return payload
 
 
 @staff_router.post(
