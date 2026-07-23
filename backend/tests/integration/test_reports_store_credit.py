@@ -326,6 +326,55 @@ async def test_flows_report_nets_sale_void_reversal(
     assert rows[0]["redeemed_reversed"] == "200"
 
 
+async def test_flows_report_nets_sale_return_refund(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """部分退貨的 REFUND 抵銷原 DEBIT，報表保留毛額與回補額供稽核。"""
+    mgr, clerk, store_id, member_id, _mgr_id = await _seed(db_session)
+    await _create_store_credit_buyout(client, clerk, member_id, key="flows-return-credit")
+    issued = await StoreCreditService(db_session).get_balance(store_id, member_id)
+    catalog_id = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    sale = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 2}],
+            "buyer_contact_id": member_id,
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+        },
+        headers=_auth_idem(clerk, "flows-sale-return"),
+    )
+    assert sale.status_code == 201, sale.text
+    sale_body = sale.json()
+    returned = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale_body["id"],
+            "reason": "流量報表部分退貨",
+            "lines": [{"sale_line_id": sale_body["lines"][0]["id"], "qty": 1}],
+        },
+        headers=_auth_idem(clerk, "flows-return"),
+    )
+    assert returned.status_code == 201, returned.text
+
+    resp = await client.get(
+        "/api/v1/reports/store-credit/flows",
+        params={
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2100-01-01T00:00:00Z",
+            "granularity": "month",
+        },
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["issued"] == str(issued)
+    assert rows[0]["redeemed"] == "100"
+    assert rows[0]["net_change"] == str(issued - Decimal(100))
+    assert rows[0]["redeemed_gross"] == "200"
+    assert rows[0]["redeemed_reversed"] == "100"
+
+
 async def test_flows_breakdown_cross_period_reconciles(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -14,13 +14,14 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
-from app.modules.returns.models import CustomerReturn, ReturnLine
+from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
 from app.modules.sales.linepay import LinePayClient
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
 from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
+from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     CashMovementType,
     InvoiceStatus,
@@ -144,11 +145,13 @@ class ReturnsService:
         actor_user_id: int,
         idempotency_key: str,
         linepay_client: LinePayClient | None = None,
+        taiwan_pay_refund_confirmed: bool = False,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
-        Phase 4B v1 支援純現金銷售的 catalog / serialized / bulk 退貨。行數量驗證以
-        既有 return_lines 聚合防重複退；sale 列以 FOR UPDATE 鎖住，避免並行重退同一張單。
+        支援現金、購物金、LINE Pay、台灣Pay及「購物金＋單一外部渠道」銷售的
+        catalog / serialized / bulk 退貨。行數量驗證以既有 return_lines 聚合防重複退；
+        sale 列以 FOR UPDATE 鎖住，避免並行重退同一張單。
 
         idempotency：同 (store_id, idempotency_key) 已有退貨 → 直接回原單、不重跑任何副作用
         （防雙擊/網路重試重複退現）。並行重送的競態由 (store_id, idempotency_key) 唯一約束在
@@ -198,9 +201,19 @@ class ReturnsService:
             refund_amount += line_refund
             selected.append((line, qty, line_refund))
 
-        refund_channel = self._refund_channel(
-            sale.payment_method, await self._sales.list_tenders(sale.id)
+        sale_tenders = await self._sales.list_tenders(sale.id)
+        previous_refund = sum(
+            (line.unit_price * previous.get(line.id, 0) for line in sale_lines), Decimal(0)
         )
+        refund_allocations = self._refund_allocations(
+            sale.payment_method,
+            sale_tenders,
+            previous_refund=previous_refund,
+            refund_amount=refund_amount,
+        )
+        if any(kind == TenderType.TAIWAN_PAY for kind, _ in refund_allocations):
+            if not taiwan_pay_refund_confirmed:
+                raise ReturnConflict("請先在台灣Pay完成退款，並確認本次退款金額")
 
         customer_return = await self._repo.add_return(
             CustomerReturn(
@@ -213,6 +226,16 @@ class ReturnsService:
                 idempotency_fingerprint=_return_fingerprint(sale.id, requested, clean_reason),
             )
         )
+
+        for tender_type, amount in refund_allocations:
+            await self._repo.add_tender(
+                ReturnTender(
+                    store_id=store_id,
+                    return_id=customer_return.id,
+                    tender_type=tender_type,
+                    amount=amount,
+                )
+            )
 
         for line, qty, line_refund in selected:
             await self._repo.add_line(
@@ -237,7 +260,41 @@ class ReturnsService:
         # 退款反轉（docs/30 §5）：純現金→錢櫃 SALE_REFUND_OUT（需開帳）；純 LINE Pay→呼叫 refund
         # API 部分退款（累加 refunded_amount、非現金不進抽屜、不需開帳）。fail-closed：LINE Pay 退款
         # 失敗整筆退貨回滾（不留已退貨卻未退款）。
-        if refund_channel == TenderType.LINE_PAY:
+        cash_refund = next(
+            (amount for kind, amount in refund_allocations if kind == TenderType.CASH), Decimal(0)
+        )
+        if cash_refund > 0:
+            # 固定 cash_session→store_credit_account 鎖序（與結帳／收購作廢一致），避免
+            # 購物金＋現金退款和同會員的其他混合金流形成 AB-BA；退款分配仍維持購物金優先。
+            await self._cash.record_movement(
+                store_id,
+                CashMovementType.SALE_REFUND_OUT,
+                cash_refund,
+                actor_user_id=actor_user_id,
+                ref_type="return",
+                ref_id=customer_return.id,
+            )
+
+        store_credit_refund = next(
+            (amount for kind, amount in refund_allocations if kind == TenderType.STORE_CREDIT),
+            Decimal(0),
+        )
+        if store_credit_refund > 0:
+            if sale.buyer_contact_id is None:
+                raise ReturnConflict("購物金退貨缺少原會員，無法回補")
+            await StoreCreditService(self._session).refund_for_sale_return(
+                store_id,
+                sale.buyer_contact_id,
+                amount=store_credit_refund,
+                return_id=customer_return.id,
+                created_by=actor_user_id,
+            )
+
+        linepay_refund = next(
+            (amount for kind, amount in refund_allocations if kind == TenderType.LINE_PAY),
+            Decimal(0),
+        )
+        if linepay_refund > 0:
             # refund_key **由伺服器端內容導出**（Codex 第四輪 #1），非用前端冪等鍵：綁 (店, 銷售,
             # 本次退貨行/原因, 退貨前累計已退量)。同一筆退貨的任何重試（即使換前端鍵——localStorage
             # 遺失/換收銀機/PENDING 被人工標 SUCCEEDED 後重做）恆得同 refund_key → durable 日誌認得
@@ -246,18 +303,9 @@ class ReturnsService:
             await SalesService(self._session).refund_line_pay_amount(
                 store_id,
                 sale.id,
-                refund_amount,
+                linepay_refund,
                 linepay_client,
                 refund_key=f"s{store_id}:return:{refund_identity}",
-            )
-        else:
-            await self._cash.record_movement(
-                store_id,
-                CashMovementType.SALE_REFUND_OUT,
-                refund_amount,
-                actor_user_id=actor_user_id,
-                ref_type="return",
-                ref_id=customer_return.id,
             )
 
         returned_after = dict(previous)
@@ -299,9 +347,7 @@ class ReturnsService:
                 if buyer is not None:
                     clawed = min(claw, int(buyer.member_points))
                     if clawed > 0:
-                        await contacts.add_member_points(
-                            store_id, sale.buyer_contact_id, -clawed
-                        )
+                        await contacts.add_member_points(store_id, sale.buyer_contact_id, -clawed)
 
         # 折讓（§7.5、不變量 5）：原銷售已「正式開票」（發票 ISSUED）→ 產 G0401 折讓單並標
         # sale.invoice_status=PENDING_ALLOWANCE；而非直接刪除發票。**比照 ISSUE/VOID：等 G0401
@@ -342,6 +388,10 @@ class ReturnsService:
             after={
                 "sale_id": sale.id,
                 "refund_amount": str(refund_amount),
+                "refund_tenders": [
+                    {"tender_type": kind.value, "amount": str(amount)}
+                    for kind, amount in refund_allocations
+                ],
                 "line_count": len(selected),
             },
         )
@@ -398,23 +448,57 @@ class ReturnsService:
         return requested
 
     @staticmethod
-    def _refund_channel(
-        payment_method: PaymentMethod, tenders: list[SaleTender]
-    ) -> TenderType:
-        """決定退款管道（docs/30 §5）：純現金→CASH（走錢櫃 SALE_REFUND_OUT）；
-        純 LINE Pay→LINE_PAY（呼叫 refund API、可部分退）。混合/其他方式尚未支援 → 拒。"""
+    def _refund_allocations(
+        payment_method: PaymentMethod,
+        tenders: list[SaleTender],
+        *,
+        previous_refund: Decimal,
+        refund_amount: Decimal,
+    ) -> list[tuple[TenderType, Decimal]]:
+        """按累計退款做差額拆帳：購物金優先，其餘僅支援單一付款。"""
         if not tenders:
             if payment_method == PaymentMethod.CASH:
-                return TenderType.CASH
-            raise ReturnConflict("目前僅支援純現金或純 LINE Pay 銷售退貨")
-        types = {t.tender_type for t in tenders}
-        if types == {TenderType.CASH}:
-            return TenderType.CASH
-        if types == {TenderType.LINE_PAY}:
-            return TenderType.LINE_PAY
-        raise ReturnConflict(
-            "目前僅支援純現金或純 LINE Pay 銷售退貨（混合/購物金/台灣Pay 尚未支援）"
-        )
+                return [(TenderType.CASH, refund_amount)]
+            raise ReturnConflict("原銷售缺少付款明細，無法判定退款去向")
+
+        amounts = {t.tender_type: Decimal(t.amount) for t in tenders}
+        supported_external = {TenderType.CASH, TenderType.LINE_PAY, TenderType.TAIWAN_PAY}
+        kinds = set(amounts)
+        external = kinds - {TenderType.STORE_CREDIT}
+        if any(kind not in supported_external for kind in external):
+            raise ReturnConflict("原銷售含不支援的退款渠道")
+
+        if TenderType.STORE_CREDIT in kinds:
+            if len(external) > 1:
+                raise ReturnConflict("購物金退款僅支援搭配單一現金／LINE Pay／台灣Pay付款")
+            priority = [TenderType.STORE_CREDIT, *external]
+        elif len(kinds) == 1 and kinds <= supported_external:
+            priority = list(kinds)
+        else:
+            raise ReturnConflict("退款僅支援單一付款或購物金搭配一種其他付款")
+
+        total_paid = sum(amounts.values(), Decimal(0))
+        if (
+            previous_refund < 0
+            or refund_amount <= 0
+            or previous_refund + refund_amount > total_paid
+        ):
+            raise ReturnConflict("累計退款金額超過原付款渠道金額")
+
+        allocations: list[tuple[TenderType, Decimal]] = []
+        priority_capacity = Decimal(0)
+        for tender_type in priority:
+            capacity = amounts[tender_type]
+            refunded_before = min(capacity, max(Decimal(0), previous_refund - priority_capacity))
+            refunded_after = min(
+                capacity,
+                max(Decimal(0), previous_refund + refund_amount - priority_capacity),
+            )
+            delta = refunded_after - refunded_before
+            if delta > 0:
+                allocations.append((tender_type, delta))
+            priority_capacity += capacity
+        return allocations
 
     @staticmethod
     def _validate_supported_line(line: SaleLine) -> None:

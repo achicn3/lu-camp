@@ -110,6 +110,7 @@ class StoreCreditLedger(Base):
         # 其餘類型必有 source_id。
         CheckConstraint("entry_type <> 'CREDIT' OR signed_amount > 0", name="ck_scl_credit_pos"),
         CheckConstraint("entry_type <> 'DEBIT' OR signed_amount < 0", name="ck_scl_debit_neg"),
+        CheckConstraint("entry_type <> 'REFUND' OR signed_amount > 0", name="ck_scl_refund_pos"),
         CheckConstraint(
             "(entry_type = 'REVERSAL') = (reversal_of_id IS NOT NULL)",
             name="ck_scl_reversal_ref",
@@ -131,6 +132,10 @@ class StoreCreditLedger(Base):
         CheckConstraint(
             "entry_type <> 'DEBIT' OR source_type = 'SALE'",
             name="ck_scl_debit_source",
+        ),
+        CheckConstraint(
+            "entry_type <> 'REFUND' OR source_type = 'SALE_RETURN'",
+            name="ck_scl_refund_source",
         ),
         CheckConstraint(
             "entry_type <> 'REVERSAL' OR source_type IN ('SALE_VOID', 'ACQUISITION_ROLLBACK')",

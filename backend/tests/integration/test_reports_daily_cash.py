@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.security import encode_access_token
+from app.core.time import store_date
 from app.main import create_app
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
@@ -58,7 +59,7 @@ def _auth(token: str) -> dict[str, str]:
 
 
 def _today_iso(session: CashSession) -> str:
-    return session.opened_at.date().isoformat()
+    return store_date(session.opened_at).isoformat()
 
 
 async def test_daily_cash_empty_day_returns_empty_not_500(

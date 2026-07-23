@@ -6,7 +6,7 @@
 
 import calendar
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import httpx
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.money import round_ntd, split_tax_inclusive
 from app.core.security import encode_access_token
+from app.core.time import store_date, store_day_bounds
 from app.main import create_app
 from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
@@ -71,7 +72,7 @@ def _auth(token: str, *, idem: str | None = None) -> dict[str, str]:
 async def _day(session: AsyncSession, store_id: int) -> str:
     cs = await session.scalar(select(CashSession).where(CashSession.store_id == store_id))
     assert cs is not None
-    return cs.opened_at.date().isoformat()
+    return store_date(cs.opened_at).isoformat()
 
 
 async def _add_owned_serialized(
@@ -137,6 +138,7 @@ async def test_daily_summary_cross_consistent_with_r1_r2(
     await _add_owned_serialized(db_session, store_id, code="OWN-1", cost="300", price="500")
     await _sell_serialized(client, clerk, "OWN-1", key="s1")
     day = await _day(db_session, store_id)
+    day_start, day_end = store_day_bounds(date.fromisoformat(day))
 
     summary = await _summary(client, mgr, day)
     cash = (
@@ -145,7 +147,7 @@ async def test_daily_summary_cross_consistent_with_r1_r2(
     margin = (
         await client.get(
             "/api/v1/reports/sales-margin",
-            params={"from": f"{day}T00:00:00Z", "to": f"{day}T23:59:59Z"},
+            params={"from": day_start.isoformat(), "to": day_end.isoformat()},
             headers=_auth(mgr),
         )
     ).json()

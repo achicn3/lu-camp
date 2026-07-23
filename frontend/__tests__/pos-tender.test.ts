@@ -47,14 +47,14 @@ describe("tender 純邏輯", () => {
     ).toMatch(/讀取開帳狀態/);
   });
 
-  it("STORE_CREDIT：全額購物金、需會員、不需開帳；餘額不足擋", () => {
+  it("STORE_CREDIT：餘額可高於商品金額；只扣應付額、需會員、不需開帳", () => {
     const plan = resolvePlan("STORE_CREDIT", 500, 0);
     expect(plan.storeCredit).toBe(500);
     // 純購物金不需開帳：drawerOpen=false 也應放行
     expect(
       validatePlan(plan, 500, {
         hasMember: true,
-        memberBalance: 500,
+        memberBalance: 1000,
         drawerOpen: false,
       }).ok,
     ).toBe(true);
@@ -88,6 +88,7 @@ describe("tender 純邏輯", () => {
       hasMember: false,
       memberBalance: null,
       drawerOpen: false,
+      taiwanPayConfirmed: true,
     });
     expect(v.ok).toBe(true);
     expect(v.needsDrawer).toBe(false);
@@ -135,7 +136,7 @@ describe("tender 純邏輯", () => {
   });
 
   it("MIXED：現金+購物金須等於 total、兩腿皆 >0", () => {
-    const plan = resolvePlan("MIXED", 500, 300);
+    const plan = resolvePlan("MIXED", 500, 200);
     expect(plan).toEqual({
       mode: "MIXED",
       cash: 300,
@@ -148,7 +149,7 @@ describe("tender 純邏輯", () => {
         .ok,
     ).toBe(true);
     // 現金部分等於 total → 購物金腿為 0 → MIXED 不允許
-    const allCash = resolvePlan("MIXED", 500, 500);
+    const allCash = resolvePlan("MIXED", 500, 0);
     expect(
       validatePlan(allCash, 500, {
         hasMember: true,
@@ -158,9 +159,80 @@ describe("tender 純邏輯", () => {
     ).toMatch(/都必須大於 0/);
   });
 
+  it("MIXED：輸入購物金後可將剩餘金額交由現金、LINE Pay 或台灣Pay", () => {
+    expect(resolvePlan("MIXED", 1000, 300, "CASH")).toEqual({
+      mode: "MIXED",
+      cash: 700,
+      storeCredit: 300,
+      taiwanPay: 0,
+      linePay: 0,
+    });
+    expect(resolvePlan("MIXED", 1000, 300, "LINE_PAY")).toEqual({
+      mode: "MIXED",
+      cash: 0,
+      storeCredit: 300,
+      taiwanPay: 0,
+      linePay: 700,
+    });
+    expect(resolvePlan("MIXED", 1000, 300, "TAIWAN_PAY")).toEqual({
+      mode: "MIXED",
+      cash: 0,
+      storeCredit: 300,
+      taiwanPay: 700,
+      linePay: 0,
+    });
+  });
+
+  it("MIXED：購物金＋行動支付需要會員但不需要開帳", () => {
+    const linePay = validatePlan(
+      resolvePlan("MIXED", 1000, 300, "LINE_PAY"),
+      1000,
+      {
+        hasMember: true,
+        memberBalance: 500,
+        drawerOpen: false,
+        linePayKey: "OTK-123",
+      },
+    );
+    expect(linePay).toEqual({
+      ok: true,
+      error: null,
+      needsMember: true,
+      needsDrawer: false,
+    });
+
+    const taiwanPay = validatePlan(
+      resolvePlan("MIXED", 1000, 300, "TAIWAN_PAY"),
+      1000,
+      {
+        hasMember: true,
+        memberBalance: 500,
+        drawerOpen: false,
+        taiwanPayConfirmed: true,
+      },
+    );
+    expect(taiwanPay).toEqual({
+      ok: true,
+      error: null,
+      needsMember: true,
+      needsDrawer: false,
+    });
+  });
+
+  it("台灣Pay尚未確認實際收款時不可完成結帳", () => {
+    const v = validatePlan(resolvePlan("TAIWAN_PAY", 680, 0), 680, {
+      hasMember: false,
+      memberBalance: null,
+      drawerOpen: false,
+      taiwanPayConfirmed: false,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.error).toMatch(/確認已於台灣Pay收到 680 元/);
+  });
+
   it("storeCreditMax：內用餐飲不可用購物金折抵（購物金 > 上限 → 擋）", () => {
     // total=380、餐飲=180 → store_credit_max=200。購物金 300 > 200 → 擋。
-    const over = resolvePlan("MIXED", 380, 80);
+    const over = resolvePlan("MIXED", 380, 300);
     const v = validatePlan(over, 380, {
       hasMember: true,
       memberBalance: 1000,
@@ -170,7 +242,7 @@ describe("tender 純邏輯", () => {
     expect(v.ok).toBe(false);
     expect(v.error).toMatch(/內用餐飲不可用購物金折抵/);
     // 購物金 200（=上限）OK。
-    const okPlan = resolvePlan("MIXED", 380, 180);
+    const okPlan = resolvePlan("MIXED", 380, 200);
     expect(
       validatePlan(okPlan, 380, {
         hasMember: true,
@@ -221,7 +293,7 @@ describe("tender 純邏輯", () => {
     expect(toTenders(resolvePlan("STORE_CREDIT", 500, 0))).toEqual([
       { tender_type: "STORE_CREDIT", amount: "500" },
     ]);
-    expect(toTenders(resolvePlan("MIXED", 500, 300))).toEqual([
+    expect(toTenders(resolvePlan("MIXED", 500, 200))).toEqual([
       { tender_type: "CASH", amount: "300" },
       { tender_type: "STORE_CREDIT", amount: "200" },
     ]);

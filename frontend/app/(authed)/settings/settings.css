@@ -61,11 +61,3 @@
 .settings-history-table th {
   font-weight: 600;
 }
-
-.field-toggle {
-  display: flex;
-  flex-direction: row-reverse;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.5rem;
-}

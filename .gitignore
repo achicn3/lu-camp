@@ -10,6 +10,9 @@
 /media/*
 !/media/.gitkeep
 
+# 瀏覽器／後台驗證截圖屬本機測試產物，統一輸出到 /home/test/tmp；避免新圖誤入 docs。
+/docs/screenshots/**
+
 # OS / 編輯器
 .DS_Store
 Thumbs.db

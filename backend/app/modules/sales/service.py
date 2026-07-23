@@ -282,7 +282,8 @@ class SalesService:
 
     @staticmethod
     def _normalize_tenders(tenders: list[TenderInput] | None) -> list[TenderInput] | None:
-        """service 邊界守衛（直呼/raw 也擋）：非空、型別不重複、金額正整數。
+        """service 邊界守衛（直呼/raw 也擋）：非空、型別不重複、金額正整數；
+        多付款只允許購物金搭配一種其他付款。
 
         省略（None）→ 維持 None，由 _resolve_tenders 預設單一 CASH 全額。
         """
@@ -299,6 +300,8 @@ class SalesService:
                 raise InvalidSaleTender("收款金額必須為整數元")
             if t.amount <= 0:
                 raise InvalidSaleTender("收款金額必須為正")
+        if len(tenders) > 1 and (len(tenders) != 2 or TenderType.STORE_CREDIT not in seen):
+            raise InvalidSaleTender("混合付款只支援購物金搭配現金、LINE Pay 或台灣Pay其中一種")
         return tenders
 
     @staticmethod
@@ -370,17 +373,13 @@ class SalesService:
         )
         signed_debit = self._signed_amount(task.content, "debit")
         if signed_debit is None or signed_debit != store_credit_amount:
-            raise SignatureContentMismatch(
-                "結帳的購物金折抵額與已簽確認不符，請重新推送簽署"
-            )
+            raise SignatureContentMismatch("結帳的購物金折抵額與已簽確認不符，請重新推送簽署")
         # 客人手持端看到並簽的**本次消費合計**也須與實際結帳總額精確相符（Codex K5 第二輪）：
         # 否則同折抵額換更大的購物車（現金補差）仍可綁定，留下描述不同交易的簽名證據。
         # 依店主裁示只綁客人看得到的（debit＋sale_total），購物車內部明細不綁。
         signed_total = self._signed_amount(task.content, "sale_total")
         if signed_total is None or signed_total != sale_total:
-            raise SignatureContentMismatch(
-                "結帳總額與已簽確認（本次消費合計）不符，請重新推送簽署"
-            )
+            raise SignatureContentMismatch("結帳總額與已簽確認（本次消費合計）不符，請重新推送簽署")
         # 客人簽的**餘額快照**（目前餘額/折抵後剩餘）也不得漂移（Codex K5 第六輪 high）：
         # 此處只做純解析（缺欄/非整數元即拒）；**與帳本的鎖定比對延後到 _apply_tenders 之後**
         # ——那時現金已先落地（cash_session 行鎖已持有）、DEBIT 已鎖帳戶列，維持全域
@@ -465,9 +464,7 @@ class SalesService:
             t.tender_type == TenderType.STORE_CREDIT for t in normalized_tenders
         )
         line_pay_tenders = [
-            t
-            for t in (normalized_tenders or [])
-            if t.tender_type == TenderType.LINE_PAY
+            t for t in (normalized_tenders or []) if t.tender_type == TenderType.LINE_PAY
         ]
         # LINE Pay 收款前置守衛（docs/30 P2；先於動庫存/收款）：
         # ①冪等鍵必填——orderId 由冪等鍵確定性導出（非 sale.id），rollback/retry 恆同號、
@@ -533,8 +530,7 @@ class SalesService:
         # 開出未開發票的單）。
         if invoice_info is not None and not settings.einvoice_enabled:
             raise EInvoiceSettingsChanged(
-                "本店未啟用電子發票，但結帳帶了發票欄位（統編/載具/捐贈）；"
-                "請確認發票設定後再結帳"
+                "本店未啟用電子發票，但結帳帶了發票欄位（統編/載具/捐贈）；請確認發票設定後再結帳"
             )
 
         sale = await self._repo.add_sale(
@@ -754,9 +750,7 @@ class SalesService:
                 fee = Decimal(round_ntd(tender.amount * settings.linepay_fee_pct))
                 assert idempotency_key is not None  # create_sale 已於前置守衛強制
                 assert linepay_client is not None
-                await self._charge_line_pay(
-                    store_id, sale, tender, idempotency_key, linepay_client
-                )
+                await self._charge_line_pay(store_id, sale, tender, idempotency_key, linepay_client)
             await self._repo.add_tender(
                 SaleTender(
                     store_id=store_id,
@@ -987,15 +981,11 @@ class SalesService:
         total = await self._ledger_succeeded_total(store_id, txn.order_id)
         txn.refunded_amount = min(total, txn.amount)
         txn.status = (
-            LinePayStatus.REFUNDED
-            if txn.refunded_amount == txn.amount
-            else LinePayStatus.COMPLETE
+            LinePayStatus.REFUNDED if txn.refunded_amount == txn.amount else LinePayStatus.COMPLETE
         )
         await self._session.flush()
 
-    async def list_pending_linepay_refunds(
-        self, store_id: int
-    ) -> list[LinePayRefundAttempt]:
+    async def list_pending_linepay_refunds(self, store_id: int) -> list[LinePayRefundAttempt]:
         """結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁；Codex 第三輪 #3）。"""
         return await self._repo.list_pending_refund_attempts(store_id)
 
@@ -1303,20 +1293,16 @@ class SalesService:
         from app.modules.returns.service import ReturnsService
 
         comp = await self._repo.margin_components(store_id, date_from, date_to)
-        adj = await ReturnsService(self._session).margin_adjustments(
-            store_id, date_from, date_to
-        )
+        adj = await ReturnsService(self._session).margin_adjustments(store_id, date_from, date_to)
         comp = replace(
             comp,
-            owned_serialized_revenue=comp.owned_serialized_revenue
-            - adj.owned_serialized_revenue,
+            owned_serialized_revenue=comp.owned_serialized_revenue - adj.owned_serialized_revenue,
             owned_serialized_cogs=comp.owned_serialized_cogs - adj.owned_serialized_cogs,
             owned_bulk_revenue=comp.owned_bulk_revenue - adj.owned_bulk_revenue,
             owned_bulk_cogs=comp.owned_bulk_cogs - adj.owned_bulk_cogs,
             consignment_serialized_revenue=comp.consignment_serialized_revenue
             - adj.consignment_serialized_revenue,
-            consignment_bulk_revenue=comp.consignment_bulk_revenue
-            - adj.consignment_bulk_revenue,
+            consignment_bulk_revenue=comp.consignment_bulk_revenue - adj.consignment_bulk_revenue,
             catalog_revenue=comp.catalog_revenue - adj.catalog_revenue,
             unknown_cost_revenue=comp.unknown_cost_revenue
             - adj.catalog_revenue
@@ -1423,11 +1409,11 @@ class SalesService:
         linepay_client: LinePayClient | None = None,
         manual_refund_ack: bool = False,
     ) -> Sale:
-        """作廢銷售：標記 invoice_status=VOID（待作廢），寫稽核；不刪除、不在此反轉庫存/退現。
+        """作廢銷售：反轉原收款與庫存、標記 invoice_status=VOID（待作廢）並寫稽核；不刪除。
 
         若原銷售已開發票（invoice_status=ISSUED），此 VOID 為「作廢發票流程」的接縫——實際
-        電子發票作廢 XML 由 T13/T14 處理。退現/折讓/庫存回補屬 Phase 4 returns（§7.5），不在此；
-        但**寄售結算反轉**於此一併處理（invariant #7：未付→CANCELLED、已付→reclaim_needed），
+        電子發票作廢 XML 由 T13/T14 處理。**寄售結算反轉**亦於此一併處理
+        （invariant #7：未付→CANCELLED、已付→reclaim_needed），
         否則作廢後該結算仍 PENDING、可被付款給寄售人造成現金漏出（Codex adversarial round-2）。
 
         併發保證：先以 FOR UPDATE 鎖 sale 列並刷新到已提交狀態，再檢查/轉移（比照 D-1）；
@@ -1448,13 +1434,31 @@ class SalesService:
         # adversarial finding #3）。含 TAIWAN_PAY tender 者，須店員先手動退款、帶 manual_refund_ack
         # 確認才反轉。純 LINE Pay 由下方 refund API 自動退、無需此確認；現金於錢櫃取出（既有口徑）。
         tenders = await self._repo.list_tenders(sale.id)
-        if (
-            any(t.tender_type == TenderType.TAIWAN_PAY for t in tenders)
-            and not manual_refund_ack
-        ):
+        if any(t.tender_type == TenderType.TAIWAN_PAY for t in tenders) and not manual_refund_ack:
             raise ManualRefundRequired(
                 "此單含台灣Pay 收款（無 API 退款）：作廢前請先於台灣Pay App 手動退款給客人，"
                 "並勾選確認後再作廢，以免客人已作廢卻仍被扣款"
+            )
+        # 寄售付款的鎖序是 settlement→cash_session；作廢也必須先鎖／反轉 settlement，
+        # 再記現金退出，避免與同時付款形成 settlement↔cash_session 的 AB-BA 死結。
+        # 後續任一步失敗都在同一 DB 交易內回滾，不會單獨留下結算狀態。
+        await self._consignment.cancel_settlements_for_sale(
+            sale.store_id, sale.id, actor_user_id=actor_user_id
+        )
+        # 現金腿先於購物金／LINE Pay 反轉：鎖定開帳班別後才呼叫不可逆的外部退款；
+        # 未開帳會先失敗，LINE Pay 拒退則整筆交易回滾、此現金流水也不成立。
+        cash_refund = sum(
+            (t.amount for t in tenders if t.tender_type == TenderType.CASH),
+            Decimal(0),
+        )
+        if cash_refund > 0:
+            await self._cash.record_movement(
+                sale.store_id,
+                CashMovementType.SALE_REFUND_OUT,
+                cash_refund,
+                actor_user_id=actor_user_id,
+                ref_type="sale_void",
+                ref_id=sale.id,
             )
         before = sale.invoice_status.value
         sale.invoice_status = SaleInvoiceStatus.VOID
@@ -1476,7 +1480,7 @@ class SalesService:
             )
         # 購物金 tender 沖回（§3.3）：DEBIT/SALE → REVERSAL/SALE_VOID（入回買方餘額）；
         # 無購物金 tender → no-op。沖正冪等：重複作廢路徑被 SaleAlreadyVoid 先擋，
-        # 即便走到也只入回一次（同來源回原沖正列）。現金 tender 退現屬 Phase 4 returns。
+        # 即便走到也只入回一次（同來源回原沖正列）。
         await self._storecredit.reverse_for_sale_void(
             sale.store_id, sale.id, created_by=actor_user_id
         )
@@ -1488,11 +1492,6 @@ class SalesService:
         # 不會把已作廢銷售的發票拋上平台。已核可（ISSUED）發票的作廢須另送 F0501/F0701 平台訊息
         # ——該路徑待收尾階段依 作廢 vs 註銷 規則接線。無發票（einvoice 關閉時建的單）→ no-op。
         await self._einvoice.void_invoice_for_sale(sale.store_id, sale.id)
-        # 寄售結算反轉（invariant #7，Phase 4）：未付→CANCELLED、已付→reclaim_needed，
-        # 否則作廢後仍可付款給寄售人造成現金漏出（Codex adversarial）。非寄售單 → no-op。
-        await self._consignment.cancel_settlements_for_sale(
-            sale.store_id, sale.id, actor_user_id=actor_user_id
-        )
         # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
         # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、一般商品現量加回（與退貨同口徑，
         # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、

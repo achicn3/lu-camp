@@ -70,6 +70,7 @@ async def create_return(
             actor_user_id=user.id,
             idempotency_key=idempotency_key,
             linepay_client=linepay_client_from_config(),
+            taiwan_pay_refund_confirmed=payload.taiwan_pay_refund_confirmed,
         )
     except IntegrityError as exc:
         await session.rollback()

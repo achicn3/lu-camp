@@ -104,10 +104,16 @@ POST   /api/v1/sales/{id}/void        # 權限+稽核; 已開票 -> 作廢發票
 ## Returns
 ```
 POST   /api/v1/returns
-       body: { sale_id, lines:[...], reason }
-       效果: 退現金(cash_movement OUT, 需開帳中 session)、序號品回 IN_STOCK / 數量回補 / 散裝回補 remaining_qty、
+       body: { sale_id, lines:[{sale_line_id, qty}], reason,
+               taiwan_pay_refund_confirmed?: bool }
+       回傳: refund_amount、refund_tenders:[{tender_type, amount}]
+       效果: 依累計退貨金額建立 return_tenders；購物金混合單採「購物金優先、再退原外部渠道」；
+             不含購物金的多外部付款組合在結帳時拒絕。購物金寫 REFUND/SALE_RETURN 帳本、
+             現金寫 cash_movement OUT（需開帳中 session），LINE Pay 只退本次分配差額、
+             台灣Pay 外部差額須確認已人工退款；
+             序號品回 IN_STOCK / 數量回補 / 散裝回補 remaining_qty、
              已售寄售品 -> 反轉 consignment_settlement(未付 CANCELLED / 已付 reclaim_needed)、
-             已開票 -> 建 invoice_allowance + 排 upload queue
+             已開票 -> 依本次商品退款全額建 invoice_allowance + 排 upload queue
 GET    /api/v1/returns/{id}
 ```
 

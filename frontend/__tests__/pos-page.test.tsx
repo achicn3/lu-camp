@@ -282,6 +282,42 @@ describe("/pos 結帳頁", () => {
     expect(within(dialog).getByText(/LINE Pay 收款成功/)).toBeTruthy();
   });
 
+  it("混合付款只顯示購物金＋其他付款，不提供現金＋LINE Pay", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) {
+        return json({ ...SETTINGS, linepay_enabled: true, linepay_fee_pct: "0.03" });
+      }
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      return null;
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+
+    expect(screen.getByText("購物金＋其他付款")).toBeTruthy();
+    expect(screen.queryByText("現金＋LINE Pay")).toBeNull();
+  });
+
+  it("購物金＋其他付款：輸入購物金並選擇剩餘款項的付款方式", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) {
+        return json({ ...SETTINGS, linepay_enabled: true });
+      }
+      if (url.includes("/cash-sessions/current")) return json(null);
+      if (url.includes("/menu-items")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText("購物金＋其他付款"));
+
+    expect(screen.getByLabelText("本次使用購物金")).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "剩餘款項付款方式" })).toBeTruthy();
+    expect(screen.getByText("現金", { selector: ".pos-mixed-method" })).toBeTruthy();
+    expect(screen.getByText("LINE Pay", { selector: ".pos-mixed-method" })).toBeTruthy();
+    expect(screen.getByText("台灣Pay", { selector: ".pos-mixed-method" })).toBeTruthy();
+  });
+
   it("活動生效：總額顯示折後、結帳送折後收款、明細送印帶折扣與活動（docs/21 C2b）", async () => {
     let saleBody = "";
     let agentBody = "";

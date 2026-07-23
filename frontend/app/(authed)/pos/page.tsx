@@ -3,7 +3,7 @@
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
@@ -16,6 +16,7 @@ import {
   toSaleLines,
 } from "@/features/pos/cart";
 import {
+  type MixedRemainderMethod,
   type TenderMode,
   changeDue,
   resolvePlan,
@@ -336,8 +337,12 @@ function TenderPanel({
   setLinePayKey,
   mode,
   setMode,
-  cashInput,
-  setCashInput,
+  storeCreditInput,
+  setStoreCreditInput,
+  mixedRemainder,
+  setMixedRemainder,
+  taiwanPayConfirmed,
+  setTaiwanPayConfirmed,
   receivedInput,
   setReceivedInput,
 }: {
@@ -359,12 +364,21 @@ function TenderPanel({
   setLinePayKey: (v: string) => void;
   mode: TenderMode;
   setMode: (m: TenderMode) => void;
-  cashInput: string;
-  setCashInput: (v: string) => void;
+  storeCreditInput: string;
+  setStoreCreditInput: (v: string) => void;
+  mixedRemainder: MixedRemainderMethod;
+  setMixedRemainder: (v: MixedRemainderMethod) => void;
+  taiwanPayConfirmed: boolean;
+  setTaiwanPayConfirmed: (v: boolean) => void;
   receivedInput: string;
   setReceivedInput: (v: string) => void;
 }) {
-  const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
+  const plan = resolvePlan(
+    mode,
+    total,
+    parseNtd(storeCreditInput) ?? 0,
+    mixedRemainder,
+  );
   const validation = validatePlan(plan, total, {
     hasMember,
     memberBalance,
@@ -373,9 +387,14 @@ function TenderPanel({
     storeCreditMinSpend,
     cartHasItems,
     linePayKey,
+    taiwanPayConfirmed,
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
+  const maxStoreCredit = Math.max(
+    0,
+    Math.min(total - 1, storeCreditMax, memberBalance ?? 0),
+  );
   return (
     <div className="pos-tender">
       <div className="pos-tender-modes" role="radiogroup" aria-label="收款方式">
@@ -406,20 +425,73 @@ function TenderPanel({
                   ? "台灣Pay"
                   : m === "LINE_PAY"
                     ? "LINE Pay"
-                    : "混合"}
+                    : "購物金＋其他付款"}
           </label>
         ))}
       </div>
 
       {mode === "MIXED" && (
-        <label className="field">
-          <span className="field-label">現金部分（其餘以購物金支付）</span>
-          <input
-            value={cashInput}
-            onChange={(e) => setCashInput(e.target.value)}
-            inputMode="numeric"
-          />
-        </label>
+        <div className="pos-mixed-panel">
+          <div className="pos-mixed-input-row">
+            <label className="field">
+              <span className="field-label">本次使用購物金</span>
+              <input
+                value={storeCreditInput}
+                onChange={(e) => setStoreCreditInput(e.target.value)}
+                inputMode="numeric"
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-ghost pos-use-max-credit"
+              disabled={maxStoreCredit <= 0}
+              onClick={() => setStoreCreditInput(String(maxStoreCredit))}
+            >
+              使用可用上限
+            </button>
+          </div>
+          <div className="pos-payment-split" aria-label="付款金額拆分">
+            <span>
+              購物金 <Money value={Math.max(0, plan.storeCredit)} />
+            </span>
+            <span>
+              剩餘應付{" "}
+              <Money
+                value={Math.max(0, plan.cash + plan.linePay + plan.taiwanPay)}
+              />
+            </span>
+          </div>
+          <div
+            className="pos-mixed-methods"
+            role="radiogroup"
+            aria-label="剩餘款項付款方式"
+          >
+            {(
+              [
+                "CASH",
+                ...(linepayEnabled ? (["LINE_PAY"] as const) : []),
+                "TAIWAN_PAY",
+              ] as const
+            ).map((method) => (
+              <label
+                key={method}
+                className={`pos-mixed-method ${mixedRemainder === method ? "is-active" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="mixed-remainder-method"
+                  checked={mixedRemainder === method}
+                  onChange={() => setMixedRemainder(method)}
+                />
+                {method === "CASH"
+                  ? "現金"
+                  : method === "LINE_PAY"
+                    ? "LINE Pay"
+                    : "台灣Pay"}
+              </label>
+            ))}
+          </div>
+        </div>
       )}
       {plan.storeCredit > 0 && (
         <p className="hint">
@@ -433,17 +505,29 @@ function TenderPanel({
         </p>
       )}
       {plan.taiwanPay > 0 && (
-        <p className="hint">
-          台灣Pay 收款 <Money value={plan.taiwanPay} />（請於台灣Pay App 完成收款）
-          {taiwanpayFeePct > 0 && (
-            <>
-              {" "}
-              · 本筆手續費{" "}
-              <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
-              （店家負擔，不向客人收取）
-            </>
-          )}
-        </p>
+        <>
+          <p className="hint">
+            台灣Pay 收款 <Money value={plan.taiwanPay} />（請於台灣Pay App 完成收款）
+            {taiwanpayFeePct > 0 && (
+              <>
+                {" "}
+                · 本筆手續費{" "}
+                <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
+                （店家負擔，不向客人收取）
+              </>
+            )}
+          </p>
+          <label className="field-toggle pos-payment-confirm">
+            <input
+              type="checkbox"
+              checked={taiwanPayConfirmed}
+              onChange={(e) => setTaiwanPayConfirmed(e.target.checked)}
+            />
+            <span>
+              已於台灣Pay收到 <Money value={plan.taiwanPay} />
+            </span>
+          </label>
+        </>
       )}
       {plan.linePay > 0 && (
         <>
@@ -718,7 +802,10 @@ export default function PosPage() {
   const [lines, setLines] = useState<CartLine[]>([]);
   const [member, setMember] = useState<ContactRead | null>(null);
   const [mode, setMode] = useState<TenderMode>("CASH");
-  const [cashInput, setCashInput] = useState("");
+  const [storeCreditInput, setStoreCreditInput] = useState("");
+  const [mixedRemainder, setMixedRemainder] =
+    useState<MixedRemainderMethod>("CASH");
+  const [taiwanPayConfirmed, setTaiwanPayConfirmed] = useState(false);
   const [receivedInput, setReceivedInput] = useState("");
   // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
   const [linePayKey, setLinePayKey] = useState("");
@@ -882,7 +969,24 @@ export default function PosPage() {
     quote.data?.store_credit_min_spend != null
       ? (parseNtd(quote.data.store_credit_min_spend) ?? 0)
       : 0;
-  const plan = resolvePlan(mode, total, parseNtd(cashInput) ?? 0);
+  const plan = resolvePlan(
+    mode,
+    total,
+    parseNtd(storeCreditInput) ?? 0,
+    mixedRemainder,
+  );
+  const previousLinePayAmount = useRef(plan.linePay);
+  const previousTaiwanPayAmount = useRef(plan.taiwanPay);
+  useEffect(() => {
+    if (previousLinePayAmount.current !== plan.linePay) setLinePayKey("");
+    previousLinePayAmount.current = plan.linePay;
+  }, [plan.linePay]);
+  useEffect(() => {
+    if (previousTaiwanPayAmount.current !== plan.taiwanPay) {
+      setTaiwanPayConfirmed(false);
+    }
+    previousTaiwanPayAmount.current = plan.taiwanPay;
+  }, [plan.taiwanPay]);
   const validation = validatePlan(plan, total, {
     hasMember: member !== null,
     memberBalance,
@@ -891,6 +995,7 @@ export default function PosPage() {
     storeCreditMinSpend,
     cartHasItems: lines.length > 0,
     linePayKey,
+    taiwanPayConfirmed,
   });
 
   // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
@@ -1115,7 +1220,9 @@ export default function PosPage() {
     setLines([]);
     setMember(null);
     setMode("CASH");
-    setCashInput("");
+    setStoreCreditInput("");
+    setMixedRemainder("CASH");
+    setTaiwanPayConfirmed(false);
     setReceivedInput("");
     setLinePayKey(""); // 一次性付款碼用畢清空、不重用（下一單重新掃）
     setNotice(null);
@@ -1380,8 +1487,12 @@ export default function PosPage() {
             setLinePayKey={setLinePayKey}
             mode={mode}
             setMode={setMode}
-            cashInput={cashInput}
-            setCashInput={setCashInput}
+            storeCreditInput={storeCreditInput}
+            setStoreCreditInput={setStoreCreditInput}
+            mixedRemainder={mixedRemainder}
+            setMixedRemainder={setMixedRemainder}
+            taiwanPayConfirmed={taiwanPayConfirmed}
+            setTaiwanPayConfirmed={setTaiwanPayConfirmed}
             receivedInput={receivedInput}
             setReceivedInput={setReceivedInput}
           />

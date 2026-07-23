@@ -15,6 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.models import CashMovement
+from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.contacts.models import Contact
 from app.modules.inventory.service import InventoryService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
@@ -23,8 +25,10 @@ from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
+from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import (
+    CashMovementType,
     Grade,
     LinePayRefundStatus,
     LinePayStatus,
@@ -384,6 +388,38 @@ async def test_void_linepay_sale_refunds_and_marks_refunded(db_session: AsyncSes
 
 
 @pytest.mark.asyncio
+async def test_void_cash_sale_records_refund_movement(
+    db_session: AsyncSession,
+) -> None:
+    """現金誤結帳作廢時，必須留下原額退出流水。"""
+    store_id, clerk_id = await _seed(db_session)
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    await _seed_item(db_session, store_id, code="VOID-CASH", price="1000")
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=_line("VOID-CASH"),
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal("1000"))],
+        idempotency_key="void-cash-sale",
+    )
+
+    voided = await SalesService(db_session).void_sale(sale, clerk_id)
+
+    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    cash_refunds = (
+        await db_session.scalars(
+            select(CashMovement).where(
+                CashMovement.store_id == store_id,
+                CashMovement.type == CashMovementType.SALE_REFUND_OUT,
+                CashMovement.ref_type == "sale_void",
+                CashMovement.ref_id == sale.id,
+            )
+        )
+    ).all()
+    assert [movement.amount for movement in cash_refunds] == [Decimal("1000")]
+
+
+@pytest.mark.asyncio
 async def test_void_linepay_already_refunded_on_platform_is_idempotent(
     db_session: AsyncSession,
 ) -> None:
@@ -412,9 +448,7 @@ async def test_void_linepay_refund_failure_fails_closed(db_session: AsyncSession
         db_session, transport, store_id=store_id, clerk_id=clerk_id, code="V3"
     )
     with pytest.raises(LinePayChargeFailed):
-        await SalesService(db_session).void_sale(
-            sale, clerk_id, linepay_client=_client(transport)
-        )
+        await SalesService(db_session).void_sale(sale, clerk_id, linepay_client=_client(transport))
 
 
 async def _make_2line_linepay_sale(
@@ -519,6 +553,85 @@ async def test_return_linepay_full_marks_refunded(db_session: AsyncSession) -> N
 
 
 @pytest.mark.asyncio
+async def test_mixed_store_credit_linepay_returns_credit_first_then_line_delta(
+    db_session: AsyncSession,
+) -> None:
+    """購物金 300＋LINE Pay 700：退 200，再退 200，只向 LINE Pay 退第二次的差額 100。"""
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+
+    store_id, clerk_id = await _seed(db_session)
+    member = Contact(store_id=store_id, name="混合 LINE 會員", roles=["MEMBER"])
+    db_session.add(member)
+    await db_session.flush()
+    credit = StoreCreditService(db_session)
+    await credit.adjust(
+        store_id,
+        member.id,
+        amount=Decimal("300"),
+        reason="混合 LINE 測試入帳",
+        created_by=clerk_id,
+        idempotency_key="mixed-line-credit-seed",
+    )
+    await _seed_item(db_session, store_id, code="ML1", price="200")
+    await _seed_item(db_session, store_id, code="ML2", price="200")
+    await _seed_item(db_session, store_id, code="ML3", price="600")
+    transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=_line("ML1") + _line("ML2") + _line("ML3"),
+        buyer_contact_id=member.id,
+        tenders=[
+            TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal("300")),
+            TenderInput(
+                tender_type=TenderType.LINE_PAY,
+                amount=Decimal("700"),
+                line_pay_one_time_key="OTK-mixed-line",
+            ),
+        ],
+        idempotency_key="mixed-line-sale",
+        linepay_client=_client(transport),
+    )
+    first_line = await _line_id(db_session, sale.id, "ML1")
+    second_line = await _line_id(db_session, sale.id, "ML2")
+    returns = ReturnsService(db_session)
+
+    first = await returns.create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(first_line, 1)],
+        reason="第一次退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="mixed-line-return-1",
+        linepay_client=_client(transport),
+    )
+    assert [(t.tender_type, t.amount) for t in first.refund_tenders] == [
+        (TenderType.STORE_CREDIT, Decimal("200"))
+    ]
+    assert transport.refund_calls == 0
+
+    second = await returns.create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(second_line, 1)],
+        reason="第二次退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="mixed-line-return-2",
+        linepay_client=_client(transport),
+    )
+    assert [(t.tender_type, t.amount) for t in second.refund_tenders] == [
+        (TenderType.STORE_CREDIT, Decimal("100")),
+        (TenderType.LINE_PAY, Decimal("100")),
+    ]
+    assert transport.refund_calls == 1
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None and txn.refunded_amount == Decimal("100")
+    assert await credit.get_balance(store_id, member.id) == Decimal("300")
+
+
+@pytest.mark.asyncio
 async def test_return_linepay_refund_failure_fails_closed(db_session: AsyncSession) -> None:
     from app.modules.returns.service import ReturnLineInput, ReturnsService
 
@@ -558,9 +671,7 @@ async def test_charge_check_first_rejects_amount_mismatch(db_session: AsyncSessi
     # Codex finding #2：check-first 回 COMPLETE 但平台金額（500）≠本次（1000）→ 拒絕重用。
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="AM", price="1000")
-    transport = ScriptedTransport(
-        check_resp=_CHECK_COMPLETE_WRONG_AMOUNT, pay_resp=_PAY_SUCCESS
-    )
+    transport = ScriptedTransport(check_resp=_CHECK_COMPLETE_WRONG_AMOUNT, pay_resp=_PAY_SUCCESS)
     with pytest.raises(LinePayChargeFailed):
         await SalesService(db_session).create_sale(
             store_id,
@@ -581,11 +692,17 @@ async def test_durable_refund_skips_when_already_succeeded(db_session: AsyncSess
     svc = SalesService(db_session)
     key = f"test-succ-{uuid4()}"
     await svc._durable_line_pay_refund(
-        store_id=store_id, order_id="LP-x", refund_key=key, amount=Decimal("100"),
+        store_id=store_id,
+        order_id="LP-x",
+        refund_key=key,
+        amount=Decimal("100"),
         client=_client(transport),
     )
     await svc._durable_line_pay_refund(
-        store_id=store_id, order_id="LP-x", refund_key=key, amount=Decimal("100"),
+        store_id=store_id,
+        order_id="LP-x",
+        refund_key=key,
+        amount=Decimal("100"),
         client=_client(transport),
     )
     assert transport.refund_calls == 1  # 第二次跳過、不重退
@@ -597,8 +714,11 @@ async def test_refund_different_key_cannot_over_refund(db_session: AsyncSession)
     # 依 order 累計校準補回已退額 → 超退拒（不因換鍵繞過而重複退款）。
     store_id, clerk_id = await _seed(db_session)
     sale = await _make_linepay_sale(
-        db_session, RefundTransport(refund_resp=_REFUND_SUCCESS),
-        store_id=store_id, clerk_id=clerk_id, code="OR",
+        db_session,
+        RefundTransport(refund_resp=_REFUND_SUCCESS),
+        store_id=store_id,
+        clerk_id=clerk_id,
+        code="OR",
     )
     txn = await db_session.scalar(
         select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
@@ -607,15 +727,20 @@ async def test_refund_different_key_cannot_over_refund(db_session: AsyncSession)
     svc = SalesService(db_session)
     # 模擬：某退款已 durable 成立（ledger SUCCEEDED），但本地 refunded_amount 回滾為 0
     await svc._durable_line_pay_refund(
-        store_id=store_id, order_id=txn.order_id,
-        refund_key=f"s{store_id}:return:OLD-{uuid4()}", amount=Decimal("1000"),
+        store_id=store_id,
+        order_id=txn.order_id,
+        refund_key=f"s{store_id}:return:OLD-{uuid4()}",
+        amount=Decimal("1000"),
         client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
     )
     assert txn.refunded_amount == Decimal("0")  # 本地未更新（模擬回滾）
     bad = RefundTransport(refund_resp=_REFUND_SUCCESS)
     with pytest.raises(LinePayChargeFailed):
         await svc.refund_line_pay_amount(
-            store_id, sale.id, Decimal("1000"), _client(bad),
+            store_id,
+            sale.id,
+            Decimal("1000"),
+            _client(bad),
             refund_key=f"s{store_id}:return:NEW-{uuid4()}",
         )
     assert bad.refund_calls == 0  # 換鍵超退：未再呼叫平台
@@ -626,8 +751,11 @@ async def test_refund_same_key_retry_no_double_count(db_session: AsyncSession) -
     # Codex 第三輪 #2：同 refund_key 重試（前次已成立、本地回滾）→ 不重呼平台、不重複計額。
     store_id, clerk_id = await _seed(db_session)
     sale = await _make_linepay_sale(
-        db_session, RefundTransport(refund_resp=_REFUND_SUCCESS),
-        store_id=store_id, clerk_id=clerk_id, code="SK",
+        db_session,
+        RefundTransport(refund_resp=_REFUND_SUCCESS),
+        store_id=store_id,
+        clerk_id=clerk_id,
+        code="SK",
     )
     txn = await db_session.scalar(
         select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
@@ -636,7 +764,10 @@ async def test_refund_same_key_retry_no_double_count(db_session: AsyncSession) -
     svc = SalesService(db_session)
     key = f"s{store_id}:return:{uuid4()}"
     await svc._durable_line_pay_refund(
-        store_id=store_id, order_id=txn.order_id, refund_key=key, amount=Decimal("1000"),
+        store_id=store_id,
+        order_id=txn.order_id,
+        refund_key=key,
+        amount=Decimal("1000"),
         client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
     )
     retry = RefundTransport(refund_resp=_REFUND_SUCCESS)
@@ -668,9 +799,7 @@ def test_refund_identity_content_and_prior_state() -> None:
 
     assert _refund_identity(5, {1: 2}, "r", {}) == _refund_identity(5, {1: 2}, "r", {})
     assert _refund_identity(5, {1: 2}, "r", {}) != _refund_identity(5, {1: 2}, "r", {1: 2})
-    assert _refund_identity(5, {1: 2, 2: 1}, "r", {}) == _refund_identity(
-        5, {2: 1, 1: 2}, "r", {}
-    )
+    assert _refund_identity(5, {1: 2, 2: 1}, "r", {}) == _refund_identity(5, {2: 1, 1: 2}, "r", {})
 
 
 @pytest.mark.asyncio
@@ -681,7 +810,10 @@ async def test_resolve_pending_refund_unblocks(db_session: AsyncSession) -> None
     key = f"s{store_id}:return:{uuid4()}"
     with pytest.raises(LinePayTransportError):
         await svc._durable_line_pay_refund(
-            store_id=store_id, order_id="LP-r", refund_key=key, amount=Decimal("100"),
+            store_id=store_id,
+            order_id="LP-r",
+            refund_key=key,
+            amount=Decimal("100"),
             client=_client(RefundTransport(refund_error=LinePayTransportError("網路逾時"))),
         )
     pending = await svc.list_pending_linepay_refunds(store_id)
@@ -706,14 +838,20 @@ async def test_durable_refund_rejects_content_mismatch(db_session: AsyncSession)
     svc = SalesService(db_session)
     key = f"test-mismatch-{uuid4()}"
     await svc._durable_line_pay_refund(
-        store_id=store_id, order_id="LP-z", refund_key=key, amount=Decimal("100"),
+        store_id=store_id,
+        order_id="LP-z",
+        refund_key=key,
+        amount=Decimal("100"),
         client=_client(RefundTransport(refund_resp=_REFUND_SUCCESS)),
     )
     # 同 key、不同金額 → ambiguous（拒重用既有 SUCCEEDED 列）
     bad = RefundTransport(refund_resp=_REFUND_SUCCESS)
     with pytest.raises(LinePayRefundAmbiguous):
         await svc._durable_line_pay_refund(
-            store_id=store_id, order_id="LP-z", refund_key=key, amount=Decimal("200"),
+            store_id=store_id,
+            order_id="LP-z",
+            refund_key=key,
+            amount=Decimal("200"),
             client=_client(bad),
         )
     assert bad.refund_calls == 0
@@ -728,14 +866,20 @@ async def test_durable_refund_pending_then_ambiguous(db_session: AsyncSession) -
     err = RefundTransport(refund_error=LinePayTransportError("網路逾時"))
     with pytest.raises(LinePayTransportError):
         await svc._durable_line_pay_refund(
-            store_id=store_id, order_id="LP-y", refund_key=key, amount=Decimal("100"),
+            store_id=store_id,
+            order_id="LP-y",
+            refund_key=key,
+            amount=Decimal("100"),
             client=_client(err),
         )
     assert err.refund_calls == 1
     retry = RefundTransport(refund_resp=_REFUND_SUCCESS)
     with pytest.raises(LinePayRefundAmbiguous):
         await svc._durable_line_pay_refund(
-            store_id=store_id, order_id="LP-y", refund_key=key, amount=Decimal("100"),
+            store_id=store_id,
+            order_id="LP-y",
+            refund_key=key,
+            amount=Decimal("100"),
             client=_client(retry),
         )
     assert retry.refund_calls == 0  # 結果未定 → 不盲目重退
@@ -757,9 +901,7 @@ async def test_void_taiwanpay_requires_manual_refund_ack(db_session: AsyncSessio
     with pytest.raises(ManualRefundRequired):
         await SalesService(db_session).void_sale(sale, clerk_id)
     # 帶手動退款確認 → 放行
-    voided = await SalesService(db_session).void_sale(
-        sale, clerk_id, manual_refund_ack=True
-    )
+    voided = await SalesService(db_session).void_sale(sale, clerk_id, manual_refund_ack=True)
     assert voided.invoice_status == SaleInvoiceStatus.VOID
 
 

@@ -237,6 +237,26 @@ async def test_tender_sum_mismatch_422(client: httpx.AsyncClient, db_session: As
     assert await db_session.scalar(select(func.count()).select_from(SaleTender)) == 0
 
 
+async def test_store_credit_tender_above_sale_total_422(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """會員餘額可大於商品金額，但本筆購物金 tender 不可超過應付總額。"""
+    token, _mgr, store_id, clerk_id = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    member_id = await _seed_member_with_credit(db_session, store_id, clerk_id, 1000)
+    resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_catalog_line(cat, 1)],  # total 100
+            "buyer_contact_id": member_id,
+            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "120"}],
+        },
+        headers=_auth(token, "credit-over-total"),
+    )
+    assert resp.status_code == 422, resp.text
+    assert await db_session.scalar(select(func.count()).select_from(SaleTender)) == 0
+
+
 async def test_store_credit_tender_without_buyer_422(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -1023,38 +1043,55 @@ async def test_taiwanpay_tender_non_cash_with_fee(
     assert cash_in == 0
 
 
-async def test_mixed_cash_and_taiwanpay(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
-    """混合現金＋台灣Pay：現金部分入抽屜、台灣Pay 非現金；Σ=total、payment_method=MIXED。"""
-    token, _mgr, store_id, _ = await _seed(db_session)
-    await _set_taiwanpay_fee(db_session, store_id, "0.02")
-    cat = await _seed_catalog(db_session, store_id, price="500", qty=10)
-    resp = await client.post(
-        "/api/v1/sales",
-        json={
-            "lines": [_catalog_line(cat, 2)],  # total 1000
-            "tenders": [
+@pytest.mark.parametrize(
+    ("idem", "tenders"),
+    [
+        (
+            "reject-cash-taiwanpay",
+            [
                 {"tender_type": "CASH", "amount": "400"},
                 {"tender_type": "TAIWAN_PAY", "amount": "600"},
             ],
-        },
-        headers=_auth(token, "mixtwp"),
+        ),
+        (
+            "reject-two-external-tenders",
+            [
+                {"tender_type": "CASH", "amount": "400"},
+                {
+                    "tender_type": "LINE_PAY",
+                    "amount": "600",
+                    "line_pay_one_time_key": "must-not-be-used",
+                },
+            ],
+        ),
+        (
+            "reject-store-credit-plus-two-others",
+            [
+                {"tender_type": "STORE_CREDIT", "amount": "200"},
+                {"tender_type": "CASH", "amount": "300"},
+                {"tender_type": "TAIWAN_PAY", "amount": "500"},
+            ],
+        ),
+    ],
+)
+async def test_mixed_external_tenders_require_store_credit(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    idem: str,
+    tenders: list[dict[str, str]],
+) -> None:
+    """多付款組合只允許購物金＋單一其他付款；外部渠道彼此不可混用。"""
+    token, _mgr, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="500", qty=10)
+    resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 2)], "tenders": tenders},
+        headers=_auth(token, idem),
     )
-    assert resp.status_code == 201, resp.text
-    sale = resp.json()
-    assert sale["payment_method"] == "MIXED"
-    by_type = {t["tender_type"]: t for t in sale["tenders"]}
-    assert by_type["CASH"]["amount"] == "400" and by_type["CASH"]["fee_amount"] == "0"
-    assert by_type["TAIWAN_PAY"]["amount"] == "600"
-    assert by_type["TAIWAN_PAY"]["fee_amount"] == "12"  # round_ntd(600×0.02)
-    # 抽屜只進現金部分 400（非全額 1000）
-    cash_in = await db_session.scalar(
-        select(func.coalesce(func.sum(CashMovement.amount), 0)).where(
-            CashMovement.type == CashMovementType.SALE_IN
-        )
-    )
-    assert cash_in == Decimal("400")
+    assert resp.status_code == 422, resp.text
+    assert "混合付款只支援購物金" in resp.json()["detail"]
+
+    assert await db_session.scalar(select(func.count()).select_from(SaleTender)) == 0
 
 
 async def test_linepay_tender_rejected_until_p2(

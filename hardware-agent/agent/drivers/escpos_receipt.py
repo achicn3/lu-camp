@@ -149,16 +149,37 @@ def _totals_block(sale: SalePayload) -> bytes:
     out += _line(f"未稅　 {sale.subtotal}")
     out += _line(f"營業稅 {sale.tax}")
     out += _line(f"總計　 {sale.total}")
-    out += _line(f"付款方式：{_payment_label(sale.payment_method)}")
+    if sale.tenders:
+        out += _line("付款明細：")
+        for tender in sale.tenders:
+            out += _line(f"  {_payment_label(tender.tender_type)} {tender.amount}")
+    else:
+        out += _line(f"付款方式：{_payment_label(sale.payment_method)}")
     return bytes(out)
 
 
 def _payment_label(method: str) -> str:
     """付款方式中文標籤（收據為客人看的，不印英文代碼）；未知值原樣印出（不靜默改寫）。"""
-    return {"CASH": "現金", "STORE_CREDIT": "購物金", "MIXED": "現金＋購物金"}.get(method, method)
+    return {
+        "CASH": "現金",
+        "STORE_CREDIT": "購物金",
+        "LINE_PAY": "LINE Pay",
+        "TAIWAN_PAY": "台灣Pay",
+        "MIXED": "混合付款",
+    }.get(method, method)
 
 
 _STORE_TZ = ZoneInfo("Asia/Taipei")  # 店面時區（單店臺灣；未來多店改由 payload/設定帶入）
+
+
+def _sale_metadata_block(sale: SalePayload) -> bytes:
+    created_at = (
+        sale.created_at.replace(tzinfo=UTC) if sale.created_at.tzinfo is None else sale.created_at
+    )
+    local_created_at = created_at.astimezone(_STORE_TZ)
+    return _line(f"交易編號 #{sale.id}") + _line(
+        f"交易時間 {local_created_at.strftime('%Y-%m-%d %H:%M')}"
+    )
 
 
 def _store_credit_signature_block(sale: SalePayload) -> bytes:
@@ -199,6 +220,8 @@ class EscposReceiptPrinter:
         out += _ENTER_CHINESE  # 整份文件以中文（Big5）模式列印，ASCII 仍如實
         out += _header_block(header)
         out += _ALIGN_CENTER + _line(title) + _ALIGN_LEFT
+        out += _sale_metadata_block(sale)
+        out += _line(_SEP)
         out += _line(_ITEM_HEADER)  # 欄位標題列：品項 / 單價 / 總價
         out += _line(_SEP)
         for line in sale.lines:
@@ -217,9 +240,7 @@ class EscposReceiptPrinter:
     def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
         self._emit_doc(sale, header, title="商品明細聯")
 
-    def print_acquisition(
-        self, receipt: AcquisitionReceiptPayload, header: StoreHeader
-    ) -> None:
+    def print_acquisition(self, receipt: AcquisitionReceiptPayload, header: StoreHeader) -> None:
         """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋客戶簽名（存證聯）。"""
         out = bytearray()
         out += _INIT

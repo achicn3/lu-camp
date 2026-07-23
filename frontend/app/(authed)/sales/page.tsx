@@ -27,8 +27,14 @@ import {
   remainingQty,
   validateReturnPlan,
 } from "@/features/returns/plan";
+import {
+  refundPlan,
+  refundTenderLabel,
+  supportsRefund,
+} from "@/features/returns/refund";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
+type ReturnTenderRead = components["schemas"]["ReturnTenderRead"];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -68,7 +74,30 @@ function VoidConfirmDialog({
   const [error, setError] = useState<string | null>(null);
   // 台灣Pay 無 API 退款（docs/30 finding #3）：作廢須店員先於台灣Pay App 手動退款、勾選確認，
   // 後端才反轉——否則客人已作廢卻仍被扣款。LINE Pay 由後端自動退、現金自錢櫃取出，皆不需此確認。
-  const isTaiwanPay = sale.payment_method === "TAIWAN_PAY";
+  const isMixed = sale.payment_method === "MIXED";
+  const detail = useQuery({
+    queryKey: ["sale-detail", sale.id, "void"],
+    enabled: isMixed,
+    queryFn: async () => {
+      const { data, error: apiError } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取付款明細失敗");
+      return data;
+    },
+  });
+  const tenderTypes = new Set(
+    detail.data?.tenders.map((tender) => tender.tender_type) ?? [],
+  );
+  const taiwanPayAmount =
+    detail.data?.tenders.find((tender) => tender.tender_type === "TAIWAN_PAY")?.amount ?? null;
+  const isTaiwanPay = sale.payment_method === "TAIWAN_PAY" || taiwanPayAmount !== null;
+  const hasStoreCredit =
+    sale.payment_method === "STORE_CREDIT" || tenderTypes.has("STORE_CREDIT");
+  const hasLinePay =
+    sale.payment_method === "LINE_PAY" || tenderTypes.has("LINE_PAY");
+  const hasCash = sale.payment_method === "CASH" || tenderTypes.has("CASH");
+  const paymentDetailPending = isMixed && detail.isLoading;
   const [manualRefundAck, setManualRefundAck] = useState(false);
   const voidSale = useMutation({
     mutationFn: async () => {
@@ -101,10 +130,16 @@ function VoidConfirmDialog({
           總額 <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
           ，作廢後庫存回補、點數與購物金沖回、寄售結算反轉，且無法復原。
         </p>
-        {isTaiwanPay ? (
+        {paymentDetailPending ? (
+          <p className="hint">載入付款明細中…</p>
+        ) : isTaiwanPay ? (
           <>
             <p className="hint">
-              此單以台灣Pay 收款（無 API）：請先於台灣Pay App 手動退款給客人，再勾選下方確認。
+              此單包含台灣Pay 收款
+              {taiwanPayAmount !== null
+                ? ` $${formatNtd(parseNtd(taiwanPayAmount) ?? 0)}`
+                : ""}
+              （無 API）：請先於台灣Pay App 手動退款給客人，再勾選下方確認。
             </p>
             <label className="field field-toggle">
               <input
@@ -116,8 +151,17 @@ function VoidConfirmDialog({
               <span className="field-label">我已於台灣Pay App 完成退款給客人</span>
             </label>
           </>
-        ) : (
-          <p className="hint">現金退還請直接自錢櫃取出，關帳對帳會核對差異。</p>
+        ) : detail.isError ? null : (
+          <p className="hint">
+            {hasStoreCredit && "購物金將回補原會員餘額。"}
+            {hasLinePay && "LINE Pay 將由系統自動原路退款。"}
+            {hasCash && "現金請直接自錢櫃退還，關帳對帳會核對差異。"}
+          </p>
+        )}
+        {detail.isError && (
+          <p role="alert" className="form-error">
+            讀取付款明細失敗，請重試後再作廢。
+          </p>
         )}
         {error !== null && (
           <p role="alert" className="form-error">
@@ -129,7 +173,12 @@ function VoidConfirmDialog({
             type="button"
             className="btn-danger"
             onClick={() => voidSale.mutate()}
-            disabled={voidSale.isPending || (isTaiwanPay && !manualRefundAck)}
+            disabled={
+              voidSale.isPending ||
+              paymentDetailPending ||
+              detail.isError ||
+              (isTaiwanPay && !manualRefundAck)
+            }
           >
             {voidSale.isPending ? "作廢中…" : "確認作廢"}
           </button>
@@ -149,11 +198,12 @@ function ReturnDialog({
 }: {
   sale: SaleSummary;
   onClose: () => void;
-  onReturned: (refund: number) => void;
+  onReturned: (refund: number, tenders: ReturnTenderRead[]) => void;
 }) {
   const [qtys, setQtys] = useState<Record<number, number>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [taiwanPayRefundConfirmed, setTaiwanPayRefundConfirmed] = useState(false);
   // 冪等鍵綁定「一次退貨嘗試」：回應遺失後從錯誤重試，必須沿用同鍵才觸發後端 replay、不重複
   // 退款/回補/沖點（Codex P1）。**持久化跨對話框重掛/重整（Codex 第二輪 #3）**：LINE Pay 退款
   // 於本地 commit 前呼叫平台，若之後失敗/崩潰，關開對話框或重整會換出新鍵而繞過 durable 退款
@@ -176,11 +226,21 @@ function ReturnDialog({
   // 只列還有可退餘量的行（全退的不再出現，避免可選卻被後端 409）
   const returnable = lines.filter((l) => isReturnable(l) && remainingQty(l) > 0);
   const refund = computeRefund(lines, qtys);
-  // 後端退貨支援純現金與純 LINE Pay（docs/30 §5：LINE Pay 走 refund API、可部分退）；購物金/
-  // 台灣Pay/混合尚未支援（會 409）→ 前端先擋、給明確原因（Codex P2）。
-  const paymentMethod = detail.data?.payment_method;
-  const refundSupported = paymentMethod === "CASH" || paymentMethod === "LINE_PAY";
-  const isLinePay = paymentMethod === "LINE_PAY";
+  const tenders = detail.data?.tenders ?? [];
+  const tenderTypes = new Set(tenders.map((tender) => tender.tender_type));
+  const refundPolicy = tenderTypes.has("STORE_CREDIT")
+    ? "退款會先回補購物金，再退回原本的現金、LINE Pay 或台灣Pay；"
+    : "退款會退回原付款方式；";
+  const previousRefund = lines.reduce(
+    (sum, line) =>
+      sum + (parseNtd(line.unit_price) ?? 0) * (line.returned_qty ?? 0),
+    0,
+  );
+  const predictedRefund = refundPlan(tenders, previousRefund, refund);
+  const refundSupported = detail.isSuccess && supportsRefund(tenders);
+  const hasTaiwanPayRefund = predictedRefund.some(
+    (leg) => leg.tender_type === "TAIWAN_PAY",
+  );
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -199,6 +259,7 @@ function ReturnDialog({
           lines: Object.entries(qtys)
             .filter(([, q]) => q > 0)
             .map(([id, q]) => ({ sale_line_id: Number(id), qty: q })),
+          taiwan_pay_refund_confirmed: taiwanPayRefundConfirmed,
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "退貨失敗");
@@ -206,7 +267,7 @@ function ReturnDialog({
     },
     onSuccess: (data) => {
       clearPersistedIdemKey(idemScope); // 退貨成立 → 清鍵，下次換新鍵
-      onReturned(parseNtd(data.refund_amount) ?? 0);
+      onReturned(parseNtd(data.refund_amount) ?? 0, data.refund_tenders);
     },
     onError: (e: Error) => setError(e.message),
   });
@@ -216,9 +277,7 @@ function ReturnDialog({
       <div className="card pos-dialog" style={{ maxWidth: 560 }}>
         <h2>退貨 #{sale.id}</h2>
         <p className="hint">
-          {isLinePay
-            ? "選擇退貨品項與數量：LINE Pay 退款自動退回客人（可部分退）、庫存回補、寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。"
-            : "選擇退貨品項與數量：現金退還（自錢櫃取出，關帳對帳核對）、庫存回補、寄售結算反轉、會員點數按退款比例沖回。餐飲品項不支援退貨。"}
+          {refundPolicy}庫存與會員點數會同步調整。餐飲品項不支援退貨。
         </p>
         {detail.isLoading && <p>載入明細中…</p>}
         {detail.isError && (
@@ -231,12 +290,26 @@ function ReturnDialog({
         )}
         {detail.isSuccess && !refundSupported && (
           <p role="alert" className="form-error">
-            此單以購物金／台灣Pay／混合方式付款，目前退貨僅支援純現金與純 LINE Pay。
-            請改以作廢處理，或聯繫管理者。
+            此單包含多種外部付款渠道，系統無法安全判定退款順序，請聯繫管理者。
           </p>
         )}
         {refundSupported && returnable.length > 0 && (
-          <table className="data-table">
+          <>
+            <div className="return-dialog-toolbar">
+              <span className="hint">可逐項調整，也可一次帶入全部可退數量。</span>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() =>
+                  setQtys(
+                    Object.fromEntries(returnable.map((line) => [line.id, remainingQty(line)])),
+                  )
+                }
+              >
+                整筆退貨
+              </button>
+            </div>
+            <table className="data-table return-lines-table">
             <thead>
               <tr>
                 <th>品項</th>
@@ -258,12 +331,12 @@ function ReturnDialog({
                     </td>
                     <td>
                       <input
+                        className="return-qty-input"
                         type="number"
                         min={0}
                         max={remaining}
                         value={qtys[line.id] ?? 0}
                         aria-label={`${line.description} 退貨數量`}
-                        style={{ width: 72 }}
                         onChange={(e) =>
                           setQtys((prev) => ({
                             ...prev,
@@ -279,7 +352,8 @@ function ReturnDialog({
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </>
         )}
         {detail.isSuccess && refundSupported && returnable.length === 0 && (
           <p className="hint">此單沒有可退貨的品項（餐飲不支援退貨）。</p>
@@ -298,6 +372,29 @@ function ReturnDialog({
         <p style={{ marginTop: 8 }}>
           預估退款 <span className="money">${formatNtd(refund)}</span>
         </p>
+        {predictedRefund.length > 0 && (
+          <div className="return-refund-preview" aria-label="預估退款去向">
+            {predictedRefund.map((leg) => (
+              <span key={leg.tender_type}>
+                {refundTenderLabel[leg.tender_type]} <b>${formatNtd(leg.amount)}</b>
+              </span>
+            ))}
+          </div>
+        )}
+        {hasTaiwanPayRefund && (
+          <label className="field field-toggle return-taiwan-confirm">
+            <input
+              type="checkbox"
+              checked={taiwanPayRefundConfirmed}
+              onChange={(event) => setTaiwanPayRefundConfirmed(event.target.checked)}
+            />
+            <span className="field-label">
+              已於台灣Pay完成退款 {formatNtd(
+                predictedRefund.find((leg) => leg.tender_type === "TAIWAN_PAY")?.amount ?? 0,
+              )} 元
+            </span>
+          </label>
+        )}
         {error !== null && (
           <p role="alert" className="form-error">
             {error}
@@ -307,7 +404,12 @@ function ReturnDialog({
           <button
             type="button"
             className="btn-danger"
-            disabled={submit.isPending || refund <= 0 || !refundSupported}
+            disabled={
+              submit.isPending ||
+              refund <= 0 ||
+              !refundSupported ||
+              (hasTaiwanPayRefund && !taiwanPayRefundConfirmed)
+            }
             onClick={() => {
               setError(null);
               submit.mutate();
@@ -565,8 +667,16 @@ export default function SalesPage() {
         <ReturnDialog
           sale={returnTarget}
           onClose={() => setReturnTarget(null)}
-          onReturned={(refund) => {
-            setVoidedNote(`銷售 #${returnTarget.id} 退貨完成，退還現金 $${formatNtd(refund)}。`);
+          onReturned={(refund, tenders) => {
+            const split = tenders
+              .map(
+                (tender) =>
+                  `${refundTenderLabel[tender.tender_type]} $${formatNtd(parseNtd(tender.amount) ?? 0)}`,
+              )
+              .join("、");
+            setVoidedNote(
+              `銷售 #${returnTarget.id} 退貨完成，共 $${formatNtd(refund)}：${split}。`,
+            );
             setReturnTarget(null);
             void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
           }}

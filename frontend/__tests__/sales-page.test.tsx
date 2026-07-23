@@ -210,4 +210,189 @@ describe("/sales 交易紀錄頁", () => {
     expect(screen.getByText("已退貨")).toBeTruthy();
     expect(screen.queryByLabelText("作廢銷售 8")).toBeNull();
   });
+
+  it("混合付款退貨：可整筆選取、顯示購物金優先拆帳並確認台灣Pay差額", async () => {
+    let returned = false;
+    stubFetch((url, method) => {
+      if (url.includes("/api/v1/returns") && method === "POST") {
+        returned = true;
+        return json({
+          id: 31,
+          store_id: 1,
+          sale_id: 7,
+          refund_amount: "200",
+          reason: "尺寸不合",
+          clerk_user_id: 1,
+          created_at: "2026-07-23T04:00:00Z",
+          lines: [],
+          refund_tenders: [
+            { id: 41, tender_type: "STORE_CREDIT", amount: "100" },
+            { id: 42, tender_type: "TAIWAN_PAY", amount: "100" },
+          ],
+        });
+      }
+      if (url.endsWith("/api/v1/sales/7") && method === "GET") {
+        return json({
+          ...sale(7, { payment_method: "MIXED", buyer_contact_id: 9 }),
+          clerk_user_id: 1,
+          awarded_points: 4,
+          signature_task_id: null,
+          lines: [
+            {
+              id: 71,
+              line_type: "CATALOG",
+              description: "瓦斯罐",
+              qty: 2,
+              returned_qty: 1,
+              unit_price: "200",
+              line_total: "400",
+            },
+          ],
+          tenders: [
+            { id: 81, tender_type: "STORE_CREDIT", amount: "300", fee_amount: "0" },
+            { id: 82, tender_type: "TAIWAN_PAY", amount: "100", fee_amount: "0" },
+          ],
+        });
+      }
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { payment_method: "MIXED", buyer_contact_id: 9 })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("CLERK");
+    await user.click(await screen.findByLabelText("退貨銷售 7"));
+    const dialog = await screen.findByRole("dialog", { name: "退貨" });
+
+    await user.click(within(dialog).getByRole("button", { name: "整筆退貨" }));
+    expect((within(dialog).getByLabelText("瓦斯罐 退貨數量") as HTMLInputElement).value).toBe(
+      "1",
+    );
+    const preview = within(dialog).getByLabelText("預估退款去向");
+    expect(preview.textContent).toMatch(/購物金.*100/);
+    expect(preview.textContent).toMatch(/台灣Pay.*100/);
+    await user.type(within(dialog).getByLabelText("退貨原因"), "尺寸不合");
+    const confirm = within(dialog).getByRole("button", { name: "確認退貨 $200" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(dialog).getByLabelText(/已於台灣Pay完成退款 100 元/));
+    await user.click(confirm);
+
+    await waitFor(() => expect(returned).toBe(true));
+    expect(await screen.findByText(/購物金.*100.*台灣Pay.*100/)).toBeTruthy();
+  });
+
+  it("舊資料若含多種外部付款，退貨應安全阻擋", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/api/v1/sales/7") && method === "GET") {
+        return json({
+          ...sale(7, { payment_method: "MIXED" }),
+          clerk_user_id: 1,
+          awarded_points: 10,
+          signature_task_id: null,
+          lines: [
+            {
+              id: 71,
+              line_type: "CATALOG",
+              description: "露營椅",
+              qty: 1,
+              returned_qty: 0,
+              unit_price: "800",
+              line_total: "800",
+            },
+            {
+              id: 72,
+              line_type: "CATALOG",
+              description: "營繩",
+              qty: 1,
+              returned_qty: 0,
+              unit_price: "200",
+              line_total: "200",
+            },
+          ],
+          tenders: [
+            { id: 81, tender_type: "CASH", amount: "300", fee_amount: "0" },
+            { id: 82, tender_type: "LINE_PAY", amount: "700", fee_amount: "0" },
+          ],
+        });
+      }
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { payment_method: "MIXED" })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("CLERK");
+    await user.click(await screen.findByLabelText("退貨銷售 7"));
+    const dialog = await screen.findByRole("dialog", { name: "退貨" });
+    expect(
+      within(dialog).getByText(
+        /此單包含多種外部付款渠道，系統無法安全判定退款順序/,
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).queryByLabelText("預估退款去向")).toBeNull();
+    expect(
+      (within(dialog).getByRole("button", { name: /確認退貨/ }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("購物金＋台灣Pay整筆作廢：仍須顯示手動退款確認", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/api/v1/sales/7") && method === "GET") {
+        return json({
+          ...sale(7, { payment_method: "MIXED", buyer_contact_id: 9 }),
+          lines: [],
+          tenders: [
+            { id: 81, tender_type: "STORE_CREDIT", amount: "300", fee_amount: "0" },
+            { id: 82, tender_type: "TAIWAN_PAY", amount: "700", fee_amount: "0" },
+          ],
+        });
+      }
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { payment_method: "MIXED", buyer_contact_id: 9 })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await user.click(await screen.findByLabelText("作廢銷售 7"));
+    const dialog = await screen.findByRole("dialog", { name: "作廢銷售確認" });
+
+    expect(await within(dialog).findByLabelText(/已於台灣Pay App 完成退款/)).toBeTruthy();
+    expect(
+      (within(dialog).getByRole("button", { name: "確認作廢" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("購物金＋LINE Pay整筆作廢：說明購物金回補與LINE Pay自動退款", async () => {
+    stubFetch((url, method) => {
+      if (url.endsWith("/api/v1/sales/7") && method === "GET") {
+        return json({
+          ...sale(7, { payment_method: "MIXED", buyer_contact_id: 9 }),
+          lines: [],
+          tenders: [
+            { id: 81, tender_type: "STORE_CREDIT", amount: "300", fee_amount: "0" },
+            { id: 82, tender_type: "LINE_PAY", amount: "700", fee_amount: "0" },
+          ],
+        });
+      }
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { payment_method: "MIXED", buyer_contact_id: 9 })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await user.click(await screen.findByLabelText("作廢銷售 7"));
+    const dialog = await screen.findByRole("dialog", { name: "作廢銷售確認" });
+
+    expect(
+      await within(dialog).findByText(/購物金將回補原會員餘額.*LINE Pay.*自動原路退款/),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/現金退還請直接自錢櫃取出/)).toBeNull();
+  });
 });

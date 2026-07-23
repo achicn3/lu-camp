@@ -316,12 +316,14 @@ class ConsignmentSettlementStatus(StrEnum):
 class StoreCreditEntryType(StrEnum):
     """購物金帳本分錄類型（docs/16 §1.1、ADR-012）。
 
-    CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；
+    CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REFUND 退貨回補（+）；
+    REVERSAL 沖正（方向與被沖正列相反）；
     ADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。
     """
 
     CREDIT = "CREDIT"
     DEBIT = "DEBIT"
+    REFUND = "REFUND"
     REVERSAL = "REVERSAL"
     ADJUSTMENT = "ADJUSTMENT"
 
@@ -331,6 +333,7 @@ class StoreCreditSourceType(StrEnum):
 
     ACQUISITION = "ACQUISITION"
     SALE = "SALE"
+    SALE_RETURN = "SALE_RETURN"
     SALE_VOID = "SALE_VOID"
     ACQUISITION_ROLLBACK = "ACQUISITION_ROLLBACK"
     MANUAL = "MANUAL"

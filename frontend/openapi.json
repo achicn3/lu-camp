@@ -5991,6 +5991,11 @@
           "sale_id": {
             "title": "Sale Id",
             "type": "integer"
+          },
+          "taiwan_pay_refund_confirmed": {
+            "default": false,
+            "title": "Taiwan Pay Refund Confirmed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -6078,6 +6083,13 @@
             "title": "Refund Amount",
             "type": "string"
           },
+          "refund_tenders": {
+            "items": {
+              "$ref": "#/components/schemas/ReturnTenderRead"
+            },
+            "title": "Refund Tenders",
+            "type": "array"
+          },
           "sale_id": {
             "title": "Sale Id",
             "type": "integer"
@@ -6095,9 +6107,32 @@
           "reason",
           "clerk_user_id",
           "created_at",
-          "lines"
+          "lines",
+          "refund_tenders"
         ],
         "title": "ReturnRead",
+        "type": "object"
+      },
+      "ReturnTenderRead": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "tender_type": {
+            "$ref": "#/components/schemas/TenderType"
+          }
+        },
+        "required": [
+          "id",
+          "tender_type",
+          "amount"
+        ],
+        "title": "ReturnTenderRead",
         "type": "object"
       },
       "SaleCreateRequest": {
@@ -8226,10 +8261,11 @@
         "type": "object"
       },
       "StoreCreditEntryType": {
-        "description": "購物金帳本分錄類型（docs/16 §1.1、ADR-012）。\n\nCREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；\nADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。",
+        "description": "購物金帳本分錄類型（docs/16 §1.1、ADR-012）。\n\nCREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REFUND 退貨回補（+）；\nREVERSAL 沖正（方向與被沖正列相反）；\nADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。",
         "enum": [
           "CREDIT",
           "DEBIT",
+          "REFUND",
           "REVERSAL",
           "ADJUSTMENT"
         ],
@@ -8241,6 +8277,7 @@
         "enum": [
           "ACQUISITION",
           "SALE",
+          "SALE_RETURN",
           "SALE_VOID",
           "ACQUISITION_ROLLBACK",
           "MANUAL"

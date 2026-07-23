@@ -14,16 +14,20 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.service import CashDrawerService
-from app.modules.einvoice.amego import AmegoClient, AmegoTransport
+from app.modules.contacts.models import Contact
+from app.modules.einvoice.amego import AmegoClient, AmegoTransport, allowance_number
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
 from app.modules.einvoice.service import EInvoiceService
+from app.modules.inventory.models import CatalogProduct
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
-from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput
-from app.modules.sales.models import Sale
+from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
+from app.modules.sales.linepay import LinePayClient, LinePayTransport
+from app.modules.sales.models import LinePayTransaction, Sale
 from app.modules.sales.service import SalesService
 from app.modules.settings.models import StoreSettings
 from app.modules.store.models import Store
+from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import (
     EInvoiceAction,
@@ -32,6 +36,7 @@ from app.shared.enums import (
     OwnershipType,
     SaleInvoiceStatus,
     SaleLineType,
+    TenderType,
     UploadStatus,
     UserRole,
 )
@@ -83,11 +88,32 @@ def _client(transport: AmegoTransport) -> AmegoClient:
 _QUERY_NOT_FOUND = {"code": 71, "msg": "查無資料"}  # 官方明載的查無碼
 
 
-
 _QUERY_INVOICE_OPEN = {"code": 0, "msg": "", "data": {"invoice_type": "C0401"}}
 _QUERY_INVOICE_VOIDED = {"code": 0, "msg": "", "data": {"invoice_type": "C0501"}}
 _QUERY_ALLOWANCE_NOT_FOUND = {"code": 71, "msg": "查無資料"}
 _QUERY_ALLOWANCE_EXISTS = {"code": 0, "msg": "", "data": {"invoice_type": "D0401"}}
+
+
+def test_allowance_number_stays_unique_within_amego_16_char_limit() -> None:
+    first = allowance_number(store_id=2_147_483_647, allowance_id=2_147_483_646)
+    second = allowance_number(store_id=2_147_483_647, allowance_id=2_147_483_647)
+    assert len(first) <= 16
+    assert len(second) <= 16
+    assert first != second
+    # 既有短編號保持原格式，已認領／已上傳資料不因版本升級換號。
+    assert allowance_number(store_id=1, allowance_id=9) == "L1-9"
+
+
+@pytest.mark.parametrize(
+    ("store_id", "allowance_id"),
+    [(0, 1), (-1, 1), (1, 0), (1, -1), (2_147_483_648, 1), (1, 2_147_483_648)],
+)
+def test_allowance_number_rejects_ids_outside_database_integer_range(
+    store_id: int, allowance_id: int
+) -> None:
+    with pytest.raises(ValueError):
+        allowance_number(store_id=store_id, allowance_id=allowance_id)
+
 
 def _issue_ok_transport() -> _ScriptedTransport:
     """開立成功的標準回放：對帳先行（查無）→ f0401 成功。"""
@@ -134,9 +160,7 @@ async def _checkout(
 
 
 async def _issue_queue_id(svc: EInvoiceService, store_id: int) -> int:
-    return next(
-        i.id for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.ISSUE
-    )
+    return next(i.id for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.ISSUE)
 
 
 async def test_send_f0401_success_issues_invoice(db_session: AsyncSession) -> None:
@@ -358,6 +382,157 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
     assert entry["TotalAmount"] == 1000
     sale = await sales.get_sale(store_id, sale_id)
     assert sale is not None and sale.invoice_status is SaleInvoiceStatus.ALLOWANCE
+
+
+class _MixedLinePayTransport(LinePayTransport):
+    def __init__(self) -> None:
+        self.refund_amounts: list[int] = []
+
+    async def send(
+        self, method: str, url: str, headers: dict[str, str], body: str | None
+    ) -> dict[str, object]:
+        import json
+
+        if url.endswith("/check"):
+            return {"returnCode": "1150", "returnMessage": "Transaction record not found."}
+        if url.endswith("/oneTimeKeys/pay"):
+            return {
+                "returnCode": "0000",
+                "returnMessage": "Success.",
+                "info": {"transactionId": 2026072300000000001, "orderId": "mixed"},
+            }
+        if url.endswith("/refund"):
+            assert body is not None
+            self.refund_amounts.append(int(json.loads(body)["refundAmount"]))
+            return {
+                "returnCode": "0000",
+                "returnMessage": "Success.",
+                "info": {"refundTransactionId": 2026072300000000002},
+            }
+        raise AssertionError(f"未預期的 LINE Pay URL：{url}")
+
+
+def _mixed_linepay_client(transport: LinePayTransport) -> LinePayClient:
+    return LinePayClient(
+        channel_id="2010746859",
+        channel_secret="secret",
+        base_url="https://sandbox-api-pay.line.me",
+        transport=transport,
+        nonce_factory=lambda: "fixed-nonce",
+    )
+
+
+async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
+    db_session: AsyncSession,
+) -> None:
+    """SC 300＋LINE 700 分兩次退 200：第二次 LINE 只退 100，但光貿 G0401 仍折讓商品 200。"""
+    store_id, clerk_id, _code = await _seed(db_session)
+    await db_session.execute(
+        update(StoreSettings).where(StoreSettings.store_id == store_id).values(linepay_enabled=True)
+    )
+    member = Contact(store_id=store_id, name="混合付款會員", roles=["MEMBER"])
+    product = CatalogProduct(
+        store_id=store_id,
+        sku="AMEGO-MIXED",
+        name="測試商品",
+        unit_price=Decimal("200"),
+        quantity_on_hand=10,
+    )
+    db_session.add_all([member, product])
+    await db_session.flush()
+    await StoreCreditService(db_session).adjust(
+        store_id,
+        member.id,
+        amount=Decimal("300"),
+        reason="光貿混合退款測試",
+        created_by=clerk_id,
+        idempotency_key="amego-mixed-credit",
+    )
+    line_transport = _MixedLinePayTransport()
+    line_client = _mixed_linepay_client(line_transport)
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[
+            SaleLineInput(
+                line_type=SaleLineType.CATALOG,
+                catalog_product_id=product.id,
+                qty=5,
+            )
+        ],
+        buyer_contact_id=member.id,
+        tenders=[
+            TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal("300")),
+            TenderInput(
+                tender_type=TenderType.LINE_PAY,
+                amount=Decimal("700"),
+                line_pay_one_time_key="OTK-amego-mixed",
+            ),
+        ],
+        idempotency_key="amego-mixed-sale",
+        linepay_client=line_client,
+    )
+    einvoice = EInvoiceService(db_session)
+    await einvoice.send_via_amego(
+        store_id,
+        await _issue_queue_id(einvoice, store_id),
+        client=_client(_issue_ok_transport()),
+    )
+    sale_lines = await SalesService(db_session).get_lines(sale.id)
+
+    for index in (1, 2):
+        await ReturnsService(db_session).create_return(
+            store_id,
+            sale_id=sale.id,
+            lines=[ReturnLineInput(sale_line_id=sale_lines[0].id, qty=1)],
+            reason=f"第 {index} 次退貨",
+            actor_user_id=clerk_id,
+            idempotency_key=f"amego-mixed-return-{index}",
+            linepay_client=line_client,
+        )
+
+    # 購物金優先：第一筆不呼叫 LINE；第二筆只呼叫外部差額 100。
+    assert line_transport.refund_amounts == [100]
+    txn = await db_session.scalar(
+        select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
+    )
+    assert txn is not None and txn.refunded_amount == Decimal("100")
+
+    allowance_items = [
+        item
+        for item in await einvoice.list_queue(store_id)
+        if item.action is EInvoiceAction.ALLOWANCE and item.status is UploadStatus.PENDING
+    ]
+    assert len(allowance_items) == 2
+    payloads: list[dict[str, object]] = []
+    for item in allowance_items:
+        transport = _ScriptedTransport(dict(_QUERY_ALLOWANCE_NOT_FOUND), {"code": 0, "msg": ""})
+        await einvoice.send_via_amego(store_id, item.id, client=_client(transport))
+        import json
+
+        payloads.append(json.loads(transport.calls[1][1]["data"])[0])
+
+    assert payloads[0]["AllowanceNumber"] != payloads[1]["AllowanceNumber"]
+    for payload in payloads:
+        allowance_no = cast("str", payload["AllowanceNumber"])
+        assert 0 < len(allowance_no) <= 16
+        assert cast("str", payload["AllowanceDate"]).isdigit()
+        assert len(cast("str", payload["AllowanceDate"])) == 8
+        assert payload["AllowanceType"] == 2
+        assert payload["BuyerIdentifier"] == "0000000000"
+        assert payload["BuyerName"] == "消費者"
+        product_item = cast("list[dict[str, object]]", payload["ProductItem"])[0]
+        assert product_item["OriginalInvoiceNumber"] == "AB00001111"
+        assert product_item["OriginalInvoiceDate"] == 20260711
+        assert product_item["OriginalDescription"] == "銷貨退回折讓"
+        assert product_item["Quantity"] == 1
+        assert product_item["UnitPrice"] == "190"
+        assert product_item["Amount"] == "190"
+        assert product_item["Tax"] == 10
+        assert product_item["TaxType"] == 1
+        assert payload["TotalAmount"] == 190
+        assert payload["TaxAmount"] == 10
+        assert int(payload["TotalAmount"]) + int(payload["TaxAmount"]) == 200
 
 
 async def test_ambiguous_response_treated_as_unknown_not_failed(

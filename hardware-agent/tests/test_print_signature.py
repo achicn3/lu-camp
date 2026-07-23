@@ -247,9 +247,7 @@ async def test_bad_signature_png_returns_422() -> None:
     """壞簽名影像（非 PNG）→ 422，不印壞證據（真驅動路徑）。"""
     buf = FakePrinter()
     app_printer = EscposReceiptPrinter(buf)
-    receipt = _acq_receipt(
-        signature_png_base64=base64.b64encode(b"garbage").decode()
-    )
+    receipt = _acq_receipt(signature_png_base64=base64.b64encode(b"garbage").decode())
     resp = await _post(
         _app_with(app_printer, _FakeClient()),
         "/print/acquisition",
@@ -337,9 +335,30 @@ def test_receipt_timestamp_in_store_timezone() -> None:
 
 def test_payment_method_printed_in_chinese() -> None:
     """付款方式印中文（收據給客人看，不印 STORE_CREDIT 代碼）。"""
-    for method, label in (("CASH", "現金"), ("STORE_CREDIT", "購物金"), ("MIXED", "現金＋購物金")):
+    for method, label in (("CASH", "現金"), ("STORE_CREDIT", "購物金"), ("MIXED", "混合付款")):
         buf = FakePrinter()
         EscposReceiptPrinter(buf).print_detail(_sale(payment_method=method), _HEADER)
         data = bytes(buf.buffer)
         assert _big5(f"付款方式：{label}") in data
         assert method.encode() not in data
+
+
+def test_sale_detail_prints_transaction_number_taipei_time_and_tender_breakdown() -> None:
+    sale = _sale(
+        id=987,
+        payment_method="MIXED",
+        created_at="2026-07-10T17:30:00Z",
+        tenders=[
+            {"tender_type": "STORE_CREDIT", "amount": "300"},
+            {"tender_type": "LINE_PAY", "amount": "700"},
+        ],
+    )
+    buf = FakePrinter()
+    EscposReceiptPrinter(buf).print_detail(sale, _HEADER)
+    data = bytes(buf.buffer)
+
+    assert _big5("交易編號 #987") in data
+    assert _big5("交易時間 2026-07-11 01:30") in data
+    assert _big5("購物金 300") in data
+    assert _big5("LINE Pay 700") in data
+    assert _big5("現金＋購物金") not in data

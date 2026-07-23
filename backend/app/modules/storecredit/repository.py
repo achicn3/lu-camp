@@ -282,7 +282,8 @@ class StoreCreditRepository:
         """期間「未被沖正」的 DEBIT 兌付列：(contact_id, 絕對金額)，供 α 代理逐筆分類。
 
         已作廢銷售的 DEBIT 留在 append-only 帳本、另有 SALE_VOID 沖正回補——那筆兌付實際
-        未發生，必須排除，否則 redemption_count / α 被灌水（Codex SC-5b P2）。
+        未發生，必須排除，否則 redemption_count / α 被灌水（Codex SC-5b P2）。退貨不回寫
+        原成交期的行為指標；即時負債 β 與流量淨額另由 REFUND 扣除。
         """
         stmt = select(StoreCreditLedger.contact_id, -StoreCreditLedger.signed_amount).where(
             StoreCreditLedger.store_id == store_id,
@@ -297,8 +298,8 @@ class StoreCreditRepository:
     async def redeemed_against_credit_by_contact(self, store_id: int) -> dict[int, Decimal]:
         """各會員對 CREDIT 的「淨沖銷額」（β 沉澱率 FIFO 的 consumed）。
 
-        = Σ|DEBIT| − Σ SALE_VOID 沖正回補 = −Σ signed(DEBIT 或 SALE_VOID REVERSAL)。
-        作廢回補的兌付淨額為 0，故 β 不會把已回補的額度誤算為已消耗（Codex SC-5b P2）。
+        = Σ|DEBIT| − Σ（SALE_VOID 沖正＋SALE_RETURN 退貨回補）。
+        作廢／退貨回補的兌付淨額為 0，故 β 不會把已回補的額度誤算為已消耗。
         人工 ADJUSTMENT 不視為對 CREDIT lot 的兌付（β 只看銷售沖銷）。
         """
         stmt = (
@@ -313,6 +314,10 @@ class StoreCreditRepository:
                     and_(
                         StoreCreditLedger.entry_type == StoreCreditEntryType.REVERSAL,
                         StoreCreditLedger.source_type == StoreCreditSourceType.SALE_VOID,
+                    ),
+                    and_(
+                        StoreCreditLedger.entry_type == StoreCreditEntryType.REFUND,
+                        StoreCreditLedger.source_type == StoreCreditSourceType.SALE_RETURN,
                     ),
                 ),
             )
@@ -400,11 +405,11 @@ class StoreCreditRepository:
         - issued_gross：CREDIT 發出毛額（>0）。
         - issued_reversed：ACQUISITION_ROLLBACK 沖正的發出額（取 -signed 轉正，>0）。
         - redeemed_gross：DEBIT 兌付毛額（取 -signed 轉正，>0）。
-        - redeemed_reversed：SALE_VOID 沖正回補的兌付額（取 signed 轉正，>0）。
+        - redeemed_reversed：SALE_VOID 沖正或 SALE_RETURN 退貨回補的兌付額（>0）。
         - adjustment_net：人工 ADJUSTMENT 的 signed 淨額（可正可負）。
         淨額由 service 推得：issued_net=gross-reversed、redeemed_net=gross-reversed、
         net_change=issued_net-redeemed_net+adjustment_net；如此 net_change 恰等於該期帳本完整
-        signed 淨變化（CREDIT+DEBIT+REVERSAL+ADJUSTMENT 全涵蓋），可與 liability 差額對上
+        signed 淨變化（CREDIT+DEBIT+REFUND+REVERSAL+ADJUSTMENT 全涵蓋），可與 liability 差額對上
         （docs/19 §3.1）。沖正落在沖正當期、毛額落發出/兌付當期（§3.3）。
 
         granularity 限 day/week/month（由 service 驗證後傳入；以參數綁定 date_trunc 單位）。
@@ -418,8 +423,9 @@ class StoreCreditRepository:
             "    THEN -signed_amount ELSE 0 END), 0) AS issued_reversed,"
             "  COALESCE(SUM(CASE WHEN entry_type='DEBIT'"
             "    THEN -signed_amount ELSE 0 END), 0) AS redeemed_gross,"
-            "  COALESCE(SUM(CASE WHEN entry_type='REVERSAL'"
-            "      AND source_type='SALE_VOID'"
+            "  COALESCE(SUM(CASE WHEN (entry_type='REVERSAL'"
+            "      AND source_type='SALE_VOID') OR (entry_type='REFUND'"
+            "      AND source_type='SALE_RETURN')"
             "    THEN signed_amount ELSE 0 END), 0) AS redeemed_reversed,"
             "  COALESCE(SUM(CASE WHEN entry_type='ADJUSTMENT'"
             "    THEN signed_amount ELSE 0 END), 0) AS adjustment_net"

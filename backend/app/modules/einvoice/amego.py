@@ -136,11 +136,42 @@ def build_f0501_data(invoice_number: str) -> list[dict[str, str]]:
 
 # 折讓單種類（doc）：114-01-01 起經雙方合意之退回/折讓，賣方應開立並依限上傳 → 恆用 2。
 _ALLOWANCE_TYPE_SELLER = 2
+_MAX_DATABASE_INTEGER_ID = 2_147_483_647
+_BASE36_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _base36(value: int) -> str:
+    """Encode a non-negative integer without padding."""
+    if value == 0:
+        return "0"
+    digits: list[str] = []
+    while value:
+        value, remainder = divmod(value, 36)
+        digits.append(_BASE36_ALPHABET[remainder])
+    return "".join(reversed(digits))
 
 
 def allowance_number(*, store_id: int, allowance_id: int) -> str:
-    """自編折讓單號（唯一、≤16 字）：由 (store, allowance) 確定性導出。"""
-    return f"L{store_id}-{allowance_id}"
+    """自編折讓單號（唯一、≤16 字）：由 (store, allowance) 確定性導出。
+
+    短 ID 保留既有可讀格式，避免已建立但尚待重送的折讓在部署後換號。超過
+    光貿 16 字限制時，將兩個 PostgreSQL signed-int ID 無碰撞地封裝後轉 base36；
+    ``LX`` 前綴與短格式的 ``L<數字>-<數字>`` 命名空間互斥。
+    """
+    if not 0 < store_id <= _MAX_DATABASE_INTEGER_ID:
+        raise ValueError("store_id 超出可編碼範圍")
+    if not 0 < allowance_id <= _MAX_DATABASE_INTEGER_ID:
+        raise ValueError("allowance_id 超出可編碼範圍")
+
+    readable = f"L{store_id}-{allowance_id}"
+    if len(readable) <= 16:
+        return readable
+
+    packed = (store_id << 32) | allowance_id
+    compact = f"LX{_base36(packed)}"
+    if len(compact) > 16:  # defensive: signed-int IDs currently fit in 15 chars
+        raise ValueError("折讓單號超過光貿 16 字限制")
+    return compact
 
 
 def build_g0401_data(
@@ -165,8 +196,7 @@ def build_g0401_data(
             "AllowanceDate": allowance_date.strftime("%Y%m%d"),
             "AllowanceType": _ALLOWANCE_TYPE_SELLER,
             "BuyerIdentifier": invoice.buyer_tax_id or _B2C_BUYER_IDENTIFIER,
-            "BuyerName": invoice.buyer_name
-            or (invoice.buyer_tax_id or _B2C_BUYER_NAME),
+            "BuyerName": invoice.buyer_name or (invoice.buyer_tax_id or _B2C_BUYER_NAME),
             "ProductItem": [
                 {
                     "OriginalInvoiceNumber": invoice.invoice_no,
@@ -267,9 +297,7 @@ def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
     if code == _QUERY_NOT_FOUND_CODE:
         return None  # 平台明確回答「查無資料」
     if code != 0:
-        raise AmegoTransportError(
-            f"invoice_query 回錯誤碼 {code}（非查無，不得據以重送；待對帳）"
-        )
+        raise AmegoTransportError(f"invoice_query 回錯誤碼 {code}（非查無，不得據以重送；待對帳）")
     data = resp.get("data")
     if not isinstance(data, dict):
         raise AmegoTransportError("invoice_query 回 code=0 但缺 data（結果不可信，待對帳）")

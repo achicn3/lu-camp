@@ -1,6 +1,7 @@
 # 30 — 付款方式擴充：LINE Pay（Offline v4）＋台灣Pay 詳細計畫
 
-> 狀態：**P1–P4 與四輪金流對抗審均已完成並合併 `main`**；§7 裁示已落地。
+> 狀態：**P1–P4、四輪金流對抗審、購物金＋其他付款的混合結帳及累計分次退貨皆已完成
+> 並合併 `main`**。
 > 規劃日期：2026-07-18
 > 基線：`main` @ `893c4fb`（三波修復＋P0 hotfix 全在 main）
 > 決策依據：CLAUDE.md §6 金額/§7 不變量/§8「影響資料模型的決策先問再做」
@@ -15,6 +16,10 @@
    為一種 tender、扣可設定的手續費。
 2. **LINE Pay**（Offline API v4，使用者裁示 2026-07-18）：**只做「店家掃描客人 QR/條碼」**
    （oneTimeKeys/pay），不做客人掃店家。真串 API。
+
+POS 混合付款只支援購物金加其中一種剩餘渠道：店員輸入本次購物金，剩餘款項可選現金、
+LINE Pay 或台灣Pay。未包含購物金的多外部渠道組合在結帳時拒絕；若舊資料出現此組合，
+退貨時也 fail-closed，不猜測退款順序。
 
 **憑證已備**（`/home/test/lu-camp/.env.linepay`，gitignore 保護、不入 repo）：
 Channel ID 2010746859、Secret、`LINEPAY_API_BASE=https://sandbox-api-pay.line.me`。
@@ -89,7 +94,7 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
    「應有現金」**（比照 STORE_CREDIT）。關帳報表**另列**每種方式收款額與手續費，不計入
    現金對帳。→ 現有 `cashdrawer expected` 公式不變（invariant #4 不倒退）。
 2. **收款守恆不變**：`Σ sale_tenders.amount == sale.total`（客人實付全額；手續費不參與此等式）。
-   混合付款可含 CASH＋LINE_PAY＋STORE_CREDIT 等。
+   目前 POS 混合付款僅為 STORE_CREDIT＋CASH／LINE_PAY／TAIWAN_PAY 三選一。
 3. **手續費＝店家成本**：`fee = round_ntd(amount × fee_pct/100)`（§6 ROUND_HALF_UP 整數元）。
    店家淨收＝amount − fee。手續費於**毛利報表**認列為成本（口徑待裁示，見 §7 決策 1）。
 4. **LINE Pay fail-closed**：pay API 非 0000 → **整筆銷售不成立、回滾**（不得留下無付款的
@@ -98,16 +103,32 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
    linepay_transactions 記 refunded_amount，不可超額退。台灣Pay 退款＝店員於 App 手動退、
    系統記錄反轉（無 API）。
    - **P2d 已做**：作廢（void）＝**全額** refund（amount−refunded），標 REFUNDED。
-   - **✅ 部分退款（裁示 2026-07-18，P4/returns 已完成）**：退貨可只退**部分**（退某幾行），不必整筆
-     作廢。設計：returns v1 目前純現金，擴充非現金後，`create_return` 對 LINE_PAY 單以該次退貨的
-     `refund_amount` 呼叫 `client.refund(order_id, 該次金額)`，**累加** `refunded_amount`；
+   - **✅ 部分退款**：退貨可退單一品項／數量，也可由 UI 一鍵帶入剩餘全部品項，不必整筆
+     作廢。`create_return` 對 LINE_PAY 只以**本次分配到 LINE Pay 的差額**呼叫
+     `client.refund(order_id, amount)`，**累加** `refunded_amount`；
      linepay client/`refunded_amount∈[0,amount]` CHECK 已支援累退。狀態：未全退保持 COMPLETE
      （或新增 PARTIALLY_REFUNDED 供報表分辨），全退才 REFUNDED。多次部分退以累計不超過 amount 守護；
      每次 refund 冪等（平台 1165＝已退視為成功）。orderId 單一、累退，不需逐次新 order。
 6. **冪等**：orderId 綁銷售冪等鍵；pay 重試以同 orderId，check 先查避免重複扣款
    （網路遺失回應時 poll check 收斂，不重扣）。
 
-### 4.1 支付復原：已做 vs 明列殘餘（Codex 四輪對抗審後，2026-07-18）
+### 4.1 購物金優先的累計退款分配
+
+設原銷售購物金總額為 `S`、本次退貨前已退商品金額為 `P`、本次退貨商品金額為 `R`：
+
+- 本次購物金回補：`min(P + R, S) - min(P, S)`。
+- 本次外部退款：`R - 本次購物金回補`，只回原本唯一的 CASH、LINE Pay 或台灣Pay。
+- 例：原單購物金 300 元＋LINE Pay 700 元。第一次退 200 元 → 購物金 200 元；第二次再退
+  200 元 → 購物金 100 元＋LINE Pay 100 元。此時 LINE Pay 原收 700 元，但商品只累退
+  400 元，故不可能退 600 元；剩餘 600 元仍對應尚未退貨的商品。
+- `return_tenders` 保存每次實際退款拆分並與退貨金額對平。台灣Pay 只有本次外部差額大於 0
+  時才要求人工退款確認；LINE Pay durable refund log 也只記本次外部差額。
+- 發票折讓與付款工具分離：G0401 仍以本次退貨商品 `R` 全額開折讓，不只折讓外部退款腿。
+
+- 退款「金額優先順序」不等於資料庫「鎖順序」：落帳固定依寄售結算 → 現金班別 →
+  購物金帳戶 → LINE Pay，避免退貨、作廢、混合結帳與寄售付款同時發生時形成反向鎖死。
+
+### 4.2 支付復原：已做 vs 明列殘餘（Codex 四輪對抗審後，2026-07-18）
 
 已做（防重扣/重退核心）：
 - 收款 check-first（同 orderId、orderId 綁金額）＋前端冪等鍵持久化（localStorage＋記憶體後備、
@@ -136,6 +157,13 @@ migration 加法、附 down；enum CHECK 擴充比照既有慣例（如 signing 
 ### 台灣Pay（無 API）
 1. 店員於台灣Pay App 收款完成 → POS 選「台灣Pay」tender、輸入/確認金額 → 建單記錄。
    （無外部呼叫；手續費由 settings 計入 fee_amount。）
+
+### 購物金＋其他付款
+
+1. 先選會員，再選「購物金＋其他付款」，輸入本次購物金金額（必須大於 0 且小於應付總額）。
+2. 剩餘款項選現金、LINE Pay 或台灣Pay；LINE Pay 必須掃一次性付款碼，台灣Pay 必須勾選
+   已收到正確剩餘金額，現金則依實收計算找零。
+3. 結帳送出兩筆 tender，完成頁與商品明細聯顯示交易編號及兩腿實際金額。
 
 ### 手續費呈現
 - 客人一律付全額 total（手續費不加價給客人）；手續費是店家與金流商之間的成本。

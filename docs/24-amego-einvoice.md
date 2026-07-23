@@ -1,12 +1,14 @@
 # docs/24 — 光貿 Amego 電子發票串接（取代自建 Turnkey 路線）
 
-> 狀態：**Amego B2B/B2C 開立、作廢、折讓、查詢對帳、POS 與 EPSON 證明聯皆已完成並合併 `main`**。
+> 狀態：**Amego B2B/B2C 開立、作廢、折讓、查詢對帳、POS、EPSON 證明聯與混合付款
+> 分次退貨的 G0401 強化皆已完成並合併 `main`**。
 >
 > 裁示（2026-07-09）：電子發票直接串光貿 Amego API（B2B＋B2C 都要），取代 T13/T14 自建
 > Turnkey/MIG XSD 路線。開立後可用測試帳密登入後台查驗。POS 結帳完成若啟用發票即自動開立，
 > 無載具且不捐贈時由 EPSON 直接印出電子發票證明聯。
 
-## 1. Amego API 規格摘要（api_doc 2026-06-10 版，MIG 4.0）
+## 1. Amego API 規格摘要（[官方 API 文件](https://invoice.amego.tw/api_doc/)，
+2026-07-23 再核對；MIG 4.0）
 
 - **API 網址**：`https://invoice-api.amego.tw`（測試/正式同一網址，以統編＋App Key 區分）。
 - **測試憑證**：測試公司統編 `12345678`；App Key 見官方 api_doc「API 必備資料」表
@@ -17,7 +19,8 @@
   - `data`＝API 參數 JSON 字串（**須 url-encode**；伺服器會先 url-decode 一次）
   - `time`＝Unix 時間戳（與伺服器誤差 ±60 秒；可用 `/json/time` 校時）
   - `sign`＝`md5(data JSON 字串 + time + App Key)`
-- **回應**：`{code, msg, ...}`；`code=0` 成功。
+- **回應**：`{code, msg, ...}`；`code=0` 表示光貿已接受該次 API 請求，**不等於財政部端已完成**。
+  非同步最終狀態須再以 query API 或後台確認；本系統本地 queue 的 `UPLOADED` 同樣只表示平台受理。
 
 ### 端點（MIG 4.0；舊 c/d 系列仍可用）
 | 功能 | 端點 |
@@ -27,7 +30,11 @@
 | 開立折讓 | `/json/g0401` |
 | 作廢折讓 | `/json/g0501` |
 | 發票查詢/清單/檔案/列印 | `/json/invoice_query|invoice_list|invoice_file|invoice_print` |
+| 折讓查詢 | `/json/allowance_query` |
 | 伺服器時間 | `/json/time` |
+
+查詢回傳的 `invoice_status`：`1` 待處理、`2` 上傳中、`3` 已上傳、`31` 處理中、
+`32` 處理完成／待確認、`91` 錯誤、`99` 完成。驗收不得把 `2` 或單純 `code=0` 當最終完成。
 
 ### f0401 開立（data 欄位）
 - `OrderId`（唯一、≤40 字）——用本系統 `sale.id` 衍生（如 `S{store_id}-{sale_id}`）。
@@ -58,7 +65,7 @@
 `data` 為**陣列**：`[{"CancelInvoiceNumber": "AB00001111"}, ...]`；回 `code/msg`。
 
 ### g0401 開立折讓（data 為陣列，每元素一張折讓）
-- `AllowanceNumber`（**自編**折讓單號，唯一、≤40 字）、`AllowanceDate`（`Ymd`）、
+- `AllowanceNumber`（**自編**折讓單號，唯一、**≤16 字**）、`AllowanceDate`（`Ymd`）、
   `AllowanceType`（1 買方開立／2 賣方折讓證明通知單；114-01-01 起賣方應開立並依限上傳→**用 2**）。
 - `BuyerIdentifier`（B2C 填 `0000000000`）、`BuyerName`、選填地址/電話/信箱。
 - `ProductItem[]`：`OriginalInvoiceNumber`、`OriginalInvoiceDate`（Ymd 數字）、
@@ -83,8 +90,8 @@
 - **列印**：無載具且未捐贈 → 用 Amego 回傳的 `barcode`/`qrcode_left`/`qrcode_right` **內容**
   餵自家 agent `print_einvoice`（附件一格式一版面、既有測試管線）；證明聯條碼/QR 內容以
   Amego 回傳為準（不再本地以 AES 產生）。有載具或捐贈 → 不印。
-- **作廢**：銷售作廢（invoice_status=ISSUED 時）→ `f0501`；**退貨開折讓**（不變量 #5）→
-  `g0401`（後續階段）。
+- **作廢／退貨**：銷售作廢（invoice_status=ISSUED 時）→ `f0501`；退貨則依**該次退貨商品
+  含稅總額**建立 `g0401`。購物金優先只決定退款渠道，不減少稅務折讓金額。
 - **OrderId 冪等**：`OrderId` 不可重複＝天然防重複開立；重試沿用同 OrderId。
 
 ## 2.1 上送狀態機的強化不變量（Codex 對抗式審查十輪的結論）
@@ -116,7 +123,22 @@
 1. **A1 客戶端＋開立（本分支）**：`einvoice/amego.py`（簽章/傳輸/錯誤碼）、結帳後開立、
    POS 發票欄位（統編/載具/捐贈碼）、證明聯自動列印、待開清單＋重試。
 2. **A2 作廢**：sales void → f0501（同交易更新 invoice_status=VOID 語意對齊）。
-3. **A3 折讓**：returns → g0401/g0501。
+3. **A3 折讓**：returns → g0401/g0501；同一原發票可有多張部分退貨折讓，每張自編號
+   由 `L{store_id}-{allowance_id}` 產生，超過 16 字時改用可逆唯一的 base36 壓縮格式。
 
 測試以測試統編/App Key 對真 Amego 測試環境打通一次（手動驗證），單元/整合測試以
 假 client（錄製回應）為主，不在 CI 內打外部服務。
+
+## 4. 真實測試環境驗證紀錄（2026-07-23）
+
+- 使用官方測試公司 `12345678`，經本系統真正的 F0401 建立發票 `ZA10018786`：本店交易
+  `S1-1`，B2C 含稅總額 400 元；付款為購物金 300 元＋台灣Pay 100 元。
+- 分兩次各退 200 元，真正的 G0401 建立 `L1-1`、`L1-2`；每張均指向原發票
+  `ZA10018786`，未稅 190 元、稅 10 元、含稅折讓 200 元。第一筆退款為購物金 200 元，
+  第二筆為購物金 100 元＋台灣Pay 100 元，稅務折讓仍各為完整 200 元。
+- 直接呼叫 `invoice_query`／`allowance_query` 持續輪詢，發票及兩張折讓皆到
+  `invoice_status=99`；再登入光貿測試後台搜尋，三筆皆顯示完成，原發票號、訂單號、稅額與
+  總額一致。後台證據留在本機測試產物目錄
+  `/home/test/tmp/lu-camp-shots/mixed-payment-amego/`，不納入 Git。
+- 此驗證特別區分「API `code=0`／本地 `UPLOADED`（已受理）」與「query `99`＋後台完成
+  （最終完成）」；先前狀態 `2` 只代表上傳中，不列為通過。

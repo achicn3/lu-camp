@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
-from app.modules.returns.models import CustomerReturn, ReturnLine
+from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.sales.models import Sale, SaleLine
 from app.shared.enums import OwnershipType, SaleInvoiceStatus, SaleLineType
 
@@ -45,6 +45,11 @@ class ReturnsRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def add_tender(self, tender: ReturnTender) -> ReturnTender:
+        self._session.add(tender)
+        await self._session.flush()
+        return tender
 
     async def has_returns_for_sale(self, store_id: int, sale_id: int) -> bool:
         """該銷售是否已有任何退貨單（供作廢前置檢查：已退貨者不可作廢）。"""
@@ -125,9 +130,7 @@ class ReturnsRepository:
         # 三次退 1 件 ≠ 一次退 3 件。先算每個 sale_line 在**本期之前**的累積退貨量，
         # 反轉額＝round(cost×已退含本期/total) − round(cost×已退不含本期/total)。
         bulk_line_ids = [
-            r[0].id
-            for r in rows
-            if r[0].line_type == SaleLineType.BULK_LOT and r[0].bulk_lot_id
+            r[0].id for r in rows if r[0].line_type == SaleLineType.BULK_LOT and r[0].bulk_lot_id
         ]
         prior_returned: dict[int, int] = {}
         if bulk_line_ids:
@@ -175,9 +178,7 @@ class ReturnsRepository:
             {
                 b.id: b
                 for b in (
-                    await self._session.scalars(
-                        select(BulkLot).where(BulkLot.id.in_(lot_ids))
-                    )
+                    await self._session.scalars(select(BulkLot).where(BulkLot.id.in_(lot_ids)))
                 ).all()
             }
             if lot_ids

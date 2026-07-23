@@ -4306,6 +4306,11 @@ export interface components {
             reason: string;
             /** Sale Id */
             sale_id: number;
+            /**
+             * Taiwan Pay Refund Confirmed
+             * @default false
+             */
+            taiwan_pay_refund_confirmed: boolean;
         };
         /** ReturnLineRead */
         ReturnLineRead: {
@@ -4342,10 +4347,20 @@ export interface components {
             reason: string;
             /** Refund Amount */
             refund_amount: string;
+            /** Refund Tenders */
+            refund_tenders: components["schemas"]["ReturnTenderRead"][];
             /** Sale Id */
             sale_id: number;
             /** Store Id */
             store_id: number;
+        };
+        /** ReturnTenderRead */
+        ReturnTenderRead: {
+            /** Amount */
+            amount: string;
+            /** Id */
+            id: number;
+            tender_type: components["schemas"]["TenderType"];
         };
         /**
          * SaleCreateRequest
@@ -5047,17 +5062,18 @@ export interface components {
          * StoreCreditEntryType
          * @description 購物金帳本分錄類型（docs/16 §1.1、ADR-012）。
          *
-         *     CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REVERSAL 沖正（方向與被沖正列相反）；
+         *     CREDIT 收購入帳（+）；DEBIT 消費扣抵（−）；REFUND 退貨回補（+）；
+         *     REVERSAL 沖正（方向與被沖正列相反）；
          *     ADJUSTMENT 人工校正（限 MANAGER、必填事由、寫稽核；可正可負）。
          * @enum {string}
          */
-        StoreCreditEntryType: "CREDIT" | "DEBIT" | "REVERSAL" | "ADJUSTMENT";
+        StoreCreditEntryType: "CREDIT" | "DEBIT" | "REFUND" | "REVERSAL" | "ADJUSTMENT";
         /**
          * StoreCreditSourceType
          * @description 購物金分錄來源（docs/16 §1.1；source_id 可追溯 acquisition / sale）。
          * @enum {string}
          */
-        StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
+        StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_RETURN" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
         /** SupplierCreate */
         SupplierCreate: {
             /** Contact */

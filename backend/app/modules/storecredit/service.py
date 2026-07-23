@@ -305,6 +305,29 @@ class StoreCreditService:
         )
         return entry
 
+    async def refund_for_sale_return(
+        self,
+        store_id: int,
+        contact_id: int,
+        *,
+        amount: Decimal,
+        return_id: int,
+        created_by: int,
+    ) -> StoreCreditLedger:
+        """退貨回補購物金（REFUND，正向），一張退貨單至多一筆且可追溯。"""
+        if amount <= 0:
+            raise StoreCreditConflict("退貨回補金額必須為正")
+        entry, _ = await self._write_entry(
+            store_id,
+            contact_id,
+            entry_type=StoreCreditEntryType.REFUND,
+            signed_amount=amount,
+            source_type=StoreCreditSourceType.SALE_RETURN,
+            source_id=return_id,
+            created_by=created_by,
+        )
+        return entry
+
     async def reverse(
         self,
         store_id: int,

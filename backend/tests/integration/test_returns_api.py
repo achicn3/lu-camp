@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -153,6 +153,9 @@ async def test_create_full_catalog_return_refunds_cash_and_restock(
     body = resp.json()
     assert body["sale_id"] == sale_id
     assert body["refund_amount"] == "240"
+    assert [(tender["tender_type"], tender["amount"]) for tender in body["refund_tenders"]] == [
+        ("CASH", "240")
+    ]
     assert body["reason"] == "顧客退貨"
     assert body["lines"] == [
         {
@@ -197,6 +200,71 @@ async def test_create_full_catalog_return_refunds_cash_and_restock(
     assert [(m.direction, m.reason, m.qty, m.catalog_product_id) for m in stock_movements] == [
         (StockDirection.IN, StockReason.RETURN, 2, catalog_id)
     ]
+
+
+async def test_db_rejects_return_tender_total_that_differs_from_return(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """繞過 service 篡改退款渠道時，deferred DB 守衛仍在交易邊界拒絕。"""
+    token, store_id, _ = await _seed(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, price="120", qty=10)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 1}]},
+        headers=_auth(token, idem="sale-return-db-tender-guard"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    returned = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "驗證資料庫守衛",
+            "lines": [{"sale_line_id": sale["lines"][0]["id"], "qty": 1}],
+        },
+        headers=_auth(token, idem="return-db-tender-guard"),
+    )
+    assert returned.status_code == 201, returned.text
+
+    await db_session.execute(
+        text("UPDATE return_tenders SET amount = 119 WHERE return_id = :return_id"),
+        {"return_id": returned.json()["id"]},
+    )
+    with pytest.raises(DBAPIError, match="退款渠道加總"):
+        await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    await db_session.rollback()
+
+
+async def test_db_rejects_deleting_a_return_audit_record(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """退貨、退款渠道與回補帳本是財務事實，繞過 service 也不得整張刪除。"""
+    token, store_id, _ = await _seed(db_session)
+    catalog_id = await _seed_catalog(db_session, store_id, price="120", qty=10)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 1}]},
+        headers=_auth(token, idem="sale-return-db-delete-guard"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    returned = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "驗證退貨不可刪除",
+            "lines": [{"sale_line_id": sale["lines"][0]["id"], "qty": 1}],
+        },
+        headers=_auth(token, idem="return-db-delete-guard"),
+    )
+    assert returned.status_code == 201, returned.text
+
+    with pytest.raises(DBAPIError, match="退貨與退款渠道為稽核事實，不可刪除"):
+        await db_session.execute(
+            text("DELETE FROM returns WHERE id = :return_id"),
+            {"return_id": returned.json()["id"]},
+        )
+    await db_session.rollback()
 
 
 async def test_return_requires_open_cash_session_and_rolls_back(
@@ -312,7 +380,7 @@ async def test_return_qty_cannot_exceed_remaining_returnable_qty(
     assert len(returns) == 1
 
 
-async def test_store_credit_sale_return_is_rejected_without_side_effects(
+async def test_store_credit_sale_return_refunds_credit_without_cash_movement(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     token, store_id, clerk_id = await _seed(db_session)
@@ -350,15 +418,272 @@ async def test_store_credit_sale_return_is_rejected_without_side_effects(
         headers=_auth(token, idem="ret-5"),
     )
 
-    assert resp.status_code == 409, resp.text
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["refund_amount"] == "100"
+    assert body["refund_tenders"] == [
+        {"id": body["refund_tenders"][0]["id"], "tender_type": "STORE_CREDIT", "amount": "100"}
+    ]
+    assert await StoreCreditService(db_session).get_balance(store_id, member.id) == Decimal("400")
     product = await db_session.get(CatalogProduct, catalog_id)
     assert product is not None
     await db_session.refresh(product)
-    assert product.quantity_on_hand == 8
+    assert product.quantity_on_hand == 9
     returns = (
         await db_session.scalars(select(CustomerReturn).where(CustomerReturn.sale_id == sale["id"]))
     ).all()
-    assert returns == []
+    assert len(returns) == 1
+    cash_refunds = (
+        await db_session.scalars(
+            select(CashMovement).where(
+                CashMovement.type == CashMovementType.SALE_REFUND_OUT,
+                CashMovement.ref_type == "return",
+                CashMovement.ref_id == body["id"],
+            )
+        )
+    ).all()
+    assert cash_refunds == []
+
+    second = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "退回剩餘商品",
+            "lines": [{"sale_line_id": sale["lines"][0]["id"], "qty": 1}],
+        },
+        headers=_auth(token, idem="ret-5-second"),
+    )
+    assert second.status_code == 201, second.text
+    assert [(t["tender_type"], t["amount"]) for t in second.json()["refund_tenders"]] == [
+        ("STORE_CREDIT", "100")
+    ]
+    # 原餘額 500 大於商品總額 200：付款後降至 300，兩次全退後精確回到 500，不會多退。
+    assert await StoreCreditService(db_session).get_balance(store_id, member.id) == Decimal("500")
+    await db_session.refresh(product)
+    assert product.quantity_on_hand == 10
+    returns = (
+        await db_session.scalars(select(CustomerReturn).where(CustomerReturn.sale_id == sale["id"]))
+    ).all()
+    assert len(returns) == 2
+
+
+async def test_mixed_return_refunds_store_credit_first_then_cash_delta(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, clerk_id = await _seed(db_session)
+    member = Contact(store_id=store_id, name="混合付款會員", roles=["MEMBER"])
+    db_session.add(member)
+    await db_session.flush()
+    credit = StoreCreditService(db_session)
+    await credit.adjust(
+        store_id,
+        member.id,
+        amount=Decimal("500"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key="return-mixed-cash-balance",
+    )
+    catalog_id = await _seed_catalog(db_session, store_id, price="200", qty=10)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "buyer_contact_id": member.id,
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 2}],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "300"},
+                {"tender_type": "CASH", "amount": "100"},
+            ],
+        },
+        headers=_auth(token, idem="sale-return-mixed-cash"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    line_id = sale["lines"][0]["id"]
+
+    first = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "第一次部分退貨",
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+        },
+        headers=_auth(token, idem="return-mixed-cash-1"),
+    )
+    assert first.status_code == 201, first.text
+    assert [(t["tender_type"], t["amount"]) for t in first.json()["refund_tenders"]] == [
+        ("STORE_CREDIT", "200")
+    ]
+    assert await credit.get_balance(store_id, member.id) == Decimal("400")
+
+    second = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "第二次部分退貨",
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+        },
+        headers=_auth(token, idem="return-mixed-cash-2"),
+    )
+    assert second.status_code == 201, second.text
+    assert [(t["tender_type"], t["amount"]) for t in second.json()["refund_tenders"]] == [
+        ("STORE_CREDIT", "100"),
+        ("CASH", "100"),
+    ]
+    assert await credit.get_balance(store_id, member.id) == Decimal("500")
+
+    cash_refunds = (
+        await db_session.scalars(
+            select(CashMovement)
+            .where(
+                CashMovement.type == CashMovementType.SALE_REFUND_OUT,
+                CashMovement.ref_type == "return",
+            )
+            .order_by(CashMovement.id)
+        )
+    ).all()
+    assert [(m.ref_id, m.amount) for m in cash_refunds] == [(second.json()["id"], Decimal("100"))]
+
+
+async def test_mixed_cash_credit_return_locks_cash_before_credit(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """退款金額仍購物金優先，但落帳必須 cash_session→account，與其他混合金流同鎖序。"""
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+
+    token, store_id, clerk_id = await _seed(db_session)
+    member = Contact(store_id=store_id, name="鎖序會員", roles=["MEMBER"])
+    db_session.add(member)
+    await db_session.flush()
+    await StoreCreditService(db_session).adjust(
+        store_id,
+        member.id,
+        amount=Decimal("500"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key="return-lock-order-balance",
+    )
+    catalog_id = await _seed_catalog(db_session, store_id, price="200", qty=2)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "buyer_contact_id": member.id,
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 1}],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "100"},
+                {"tender_type": "CASH", "amount": "100"},
+            ],
+        },
+        headers=_auth(token, idem="sale-return-lock-order"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+
+    calls: list[str] = []
+    original_cash = CashDrawerService.record_movement
+    original_credit = StoreCreditService.refund_for_sale_return
+
+    async def record_cash_first(self: CashDrawerService, *args: Any, **kwargs: Any) -> CashMovement:
+        calls.append("cash")
+        return await original_cash(self, *args, **kwargs)
+
+    async def record_credit_second(self: StoreCreditService, *args: Any, **kwargs: Any) -> Any:
+        calls.append("store_credit")
+        return await original_credit(self, *args, **kwargs)
+
+    monkeypatch.setattr(CashDrawerService, "record_movement", record_cash_first)
+    monkeypatch.setattr(StoreCreditService, "refund_for_sale_return", record_credit_second)
+
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale["id"],
+        lines=[ReturnLineInput(sale["lines"][0]["id"], 1)],
+        reason="驗證退款鎖序",
+        actor_user_id=clerk_id,
+        idempotency_key="return-lock-order",
+    )
+
+    assert calls == ["cash", "store_credit"]
+
+
+async def test_mixed_return_requires_taiwan_pay_confirmation_only_for_external_delta(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, clerk_id = await _seed(db_session)
+    member = Contact(store_id=store_id, name="混合台灣Pay會員", roles=["MEMBER"])
+    db_session.add(member)
+    await db_session.flush()
+    member_id = member.id
+    credit = StoreCreditService(db_session)
+    await credit.adjust(
+        store_id,
+        member_id,
+        amount=Decimal("300"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key="return-mixed-taiwan-balance",
+    )
+    catalog_id = await _seed_catalog(db_session, store_id, price="200", qty=10)
+    sale_resp = await client.post(
+        "/api/v1/sales",
+        json={
+            "buyer_contact_id": member_id,
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 2}],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "300"},
+                {"tender_type": "TAIWAN_PAY", "amount": "100"},
+            ],
+        },
+        headers=_auth(token, idem="sale-return-mixed-taiwan"),
+    )
+    assert sale_resp.status_code == 201, sale_resp.text
+    sale = sale_resp.json()
+    line_id = sale["lines"][0]["id"]
+
+    first = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "第一次部分退貨",
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+        },
+        headers=_auth(token, idem="return-mixed-taiwan-1"),
+    )
+    assert first.status_code == 201, first.text
+    assert [(t["tender_type"], t["amount"]) for t in first.json()["refund_tenders"]] == [
+        ("STORE_CREDIT", "200")
+    ]
+
+    not_confirmed = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "第二次部分退貨",
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+        },
+        headers=_auth(token, idem="return-mixed-taiwan-2"),
+    )
+    assert not_confirmed.status_code == 409, not_confirmed.text
+    assert "台灣Pay" in not_confirmed.json()["detail"]
+    assert await credit.get_balance(store_id, member_id) == Decimal("200")
+
+    confirmed = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale["id"],
+            "reason": "第二次部分退貨",
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+            "taiwan_pay_refund_confirmed": True,
+        },
+        headers=_auth(token, idem="return-mixed-taiwan-2"),
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    assert [(t["tender_type"], t["amount"]) for t in confirmed.json()["refund_tenders"]] == [
+        ("STORE_CREDIT", "100"),
+        ("TAIWAN_PAY", "100"),
+    ]
+    assert await credit.get_balance(store_id, member_id) == Decimal("300")
 
 
 async def test_create_serialized_consignment_return_restocks_and_cancels_settlement(

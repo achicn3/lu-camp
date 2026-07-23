@@ -39,10 +39,10 @@ class PaperStatus(StrEnum):
     EMPTY = "empty"
 
 
-
 # 簽名 PNG 上限（與後端 signing MAX_SIGNATURE_BYTES=512KB 同源）：手寫簽名綽綽有餘，
 # 於 payload 邊界即擋炸彈級 base64（解碼端另有解壓 max_length 硬限）。
 MAX_SIGNATURE_B64_CHARS = 512_000 * 4 // 3 + 8
+
 
 class SaleLinePayload(BaseModel):
     """銷售明細行（鏡射後端 `SaleLineRead` JSON）。金額為字串整數元。
@@ -58,6 +58,13 @@ class SaleLinePayload(BaseModel):
     line_total: str
     original_unit_price: str | None = None
     discount_amount: str = "0"
+
+
+class SaleTenderPayload(BaseModel):
+    """實際付款渠道快照；後端 SaleTenderRead 的列印子集。"""
+
+    tender_type: str
+    amount: str
 
 
 class SalePayload(BaseModel):
@@ -77,6 +84,7 @@ class SalePayload(BaseModel):
     invoice_status: str
     created_at: datetime
     lines: list[SaleLinePayload]
+    tenders: list[SaleTenderPayload] = Field(default_factory=list)
     # 門市活動折扣（docs/21）：total_discount 為本單折讓總額（後端算好、代理只印），
     # campaign_name 為套用的活動名；無折扣時 "0"/None。代理不做金額運算。
     total_discount: str = "0"

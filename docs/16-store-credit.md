@@ -1,6 +1,7 @@
 # 16 — 購物金（store credit）與點數規格
 
-> 狀態：**SC-1～SC-5 已完成並合併 `main`**（2026-07-22 狀態核對；ADR-012 Accepted）。
+> 狀態：**SC-1～SC-5、購物金＋行動支付混合付款與購物金優先退貨皆已完成並合併
+> `main`**（2026-07-23；ADR-012 Accepted）。
 > 帳本、收購／銷售整合、點數、報表、設定歷史與 deterministic 建議引擎皆有測試守護；
 > DB 層守衛實況見 §8。
 > 任務切分：SC-1 帳本核心 → SC-2 收購撥款 → SC-3 銷售 tender + 沖正 →（SC-4 報表 ∥ SC-5 溢價設定+建議值引擎，可與 T19 前端並行）。SC-1～3 為 T19 POS 結帳 UI 前置（已滿足）。
@@ -23,12 +24,12 @@
 | `id` | PK | |
 | `store_id` | FK `stores.id`，index | 多分店就緒（CLAUDE.md §4） |
 | `contact_id` | FK `contacts.id`，index | 帳戶主體（每店每 contact 一帳戶） |
-| `entry_type` | enum `StoreCreditEntryType` | `CREDIT`／`DEBIT`／`REVERSAL`／`ADJUSTMENT` |
+| `entry_type` | enum `StoreCreditEntryType` | `CREDIT`／`DEBIT`／`REFUND`／`REVERSAL`／`ADJUSTMENT` |
 | `signed_amount` | NUMERIC(12,0) → `Decimal` | 整數元、非零；CREDIT 為正、DEBIT 為負、REVERSAL 與被沖正列反號、ADJUSTMENT 正負皆可 |
 | `balance_after` | NUMERIC(12,0) | 該列之後的滾動餘額；恆 `>= 0` |
 | `cash_equivalent` | NUMERIC(12,0)，nullable | **CREDIT 必填**：現金等值（未加溢價） |
 | `premium_rate_applied` | NUMERIC(5,4)，nullable | **CREDIT 必填**：當下適用溢價率（如 0.1000） |
-| `source_type` | enum `StoreCreditSourceType` | `ACQUISITION`／`SALE`／`SALE_VOID`／`ACQUISITION_ROLLBACK`／`MANUAL` |
+| `source_type` | enum `StoreCreditSourceType` | `ACQUISITION`／`SALE`／`SALE_RETURN`／`SALE_VOID`／`ACQUISITION_ROLLBACK`／`MANUAL` |
 | `source_id` | int，nullable | 對應 acquisition / sale id；`MANUAL` 為 NULL |
 | `reversal_of_id` | FK self，nullable | REVERSAL 指向被沖正列 |
 | `fingerprint` | String(64) | 內容 sha256（金額/帳戶/來源），冪等比對用（D-2 模式） |
@@ -74,11 +75,22 @@
 
 ### 1.6 銷售 tender（SC-3）
 
-- 新表 `sale_tenders`：`id`、`sale_id`（FK）、`tender_type` enum（`CASH`／`STORE_CREDIT`）、`amount`（NUMERIC(12,0)，>0）。一筆 sale 一到多列；`Σ amount = sales.total`。
+- `sale_tenders`：`id`、`sale_id`（FK）、`tender_type` enum（`CASH`／`STORE_CREDIT`／
+  `LINE_PAY`／`TAIWAN_PAY`）、`amount`（NUMERIC(12,0)，>0）。一筆 sale 一到多列；
+  `Σ amount = sales.total`。
 - `PaymentMethod` 枚舉擴充：加 `STORE_CREDIT`、`MIXED`；`sales.payment_method` 保留為摘要欄（單一 tender 時為該型別、多 tender 為 `MIXED`），既有報表/收據相容。
-- 第一版 UI 僅單一付款方式；資料模型先支援拆分（現金+購物金）。
+- POS 已支援純付款及「購物金＋一種剩餘渠道」；購物金混合單由店員輸入購物金金額，
+  剩餘款選現金、LINE Pay 或台灣Pay。收據／商品明細聯逐腿列印實際金額。
 
-### 1.7 收購撥款（SC-2）
+### 1.7 退貨 tender 與購物金回補
+
+- `return_tenders`：`id`、`store_id`、`return_id`、`tender_type`、`amount`；同一退貨每種渠道
+  至多一列，`Σ amount = returns.refund_amount`。
+- 購物金退貨寫新的 `REFUND/SALE_RETURN` 正向帳本分錄，`source_id=return.id`；它不是原始
+  `DEBIT` 的整筆 `REVERSAL`，因此可正確表達同一銷售的多次部分退貨。
+- DB 延遲約束同時驗證退貨頭、退貨明細、退款渠道與購物金回補帳本的店別／會員／金額一致。
+
+### 1.8 收購撥款（SC-2）
 
 - `acquisitions` 加：`payout_method` enum（`CASH`／`STORE_CREDIT`／`SPLIT`）、`payout_cash_amount`、`payout_credit_cash_equivalent`（皆 NUMERIC(12,0)；SPLIT 時兩者皆 >0，單一方式時另一者為 0）。
 - 對既有資料 migration 預設 `CASH`（歷史皆付現）。
@@ -97,6 +109,12 @@
 - **I-10** 有帳本歷史的 contact 不可硬刪（FK RESTRICT + 服務層守衛）；去識別化不動帳本。
 - **I-11** ADJUSTMENT：限 MANAGER、`reason` 必填、寫 `audit_log`（誰/何時/對象/前後餘額）。
 - **I-12** 點數（§0）：`floor(total/100)`、購物金 tender 照計、收購不給點、void 同交易沖回。
+- **I-13** 退貨退款守恆：每筆 `Σ return_tenders.amount = returns.refund_amount = Σ return_lines
+  (qty × 原成交單價)`；購物金退款渠道必須有同店、同會員、等額的 `REFUND/SALE_RETURN` 帳本。
+- **I-14** 購物金優先退款：設原單購物金為 `S`、退貨前累退為 `P`、本次退款為 `R`，本次
+  購物金回補為 `min(P+R,S)−min(P,S)`，其餘 `R−購物金回補` 才走原本唯一外部渠道。
+- **I-15** 混合退款鎖序：退款金額仍以購物金優先，但資料庫落帳依寄售結算 → 現金班別 →
+  購物金帳戶 → LINE Pay；與混合結帳、寄售付款保持一致，避免 AB-BA 死結。
 
 ## 3. 整合點
 
@@ -110,13 +128,16 @@
 ### 3.2 銷售 tender（SC-3）
 
 - `POST /sales` 增 `tenders` 列表（省略時預設單一 CASH 全額，向後相容）；`Σ tenders = total` 否則 422。
-- 同交易內：購物金 tender → ledger `DEBIT`（餘額不足 → `InsufficientStoreCredit` → 409，整筆不成立）；現金 tender → `record_movement(SALE_IN, 現金部分)`。
+- 同交易內：購物金 tender → ledger `DEBIT`（餘額不足 → `InsufficientStoreCredit` → 409，整筆不成立）；現金 tender → `record_movement(SALE_IN, 現金部分)`；LINE Pay／台灣Pay
+  依 docs/30 處理且不進現金抽屜。
 - 發票/稅不受 tender 影響：`total`/`tax` 照常（購物金是支付工具、非折扣）；點數照 `total` 累積（§0）。
 - mixed cart（序號/數量/散裝）原子性沿用 T11/T12，tender 僅在尾端加兩個寫入點。
 
 ### 3.3 作廢/退款沖正（SC-3）
 
 - 銷售作廢（既有 `POST /sales/{id}/void`）：購物金 tender → `REVERSAL`（+，入回）、`source_type=SALE_VOID`；現金 tender 沿用既有現金處理；點數沖回。
+- 銷售退貨（`POST /returns`）：依 I-14 計算**本次**購物金回補，寫 `REFUND/SALE_RETURN`
+  並建立等額 `return_tenders`；多次部分退貨各自留痕，不將尚未退貨的購物金提前回補。
 - 收購回滾/作廢（未來 Phase 4 退貨配套；本輪先定義語意）：`REVERSAL`（−，扣回）、`source_type=ACQUISITION_ROLLBACK`；**餘額不足（已花掉）→ 預設擋下（409）、轉人工**（MANAGER 以 ADJUSTMENT 處理並留事由）。
 - REVERSAL 一律帶 `reversal_of_id`；同一來源列**只能被沖正一次**（唯一約束涵蓋）。
 
@@ -133,6 +154,7 @@
 | `/acquisitions`（擴充 payout 欄位） | POST | SC-2 | 撥款方式 CASH/STORE_CREDIT/SPLIT |
 | `/sales`（擴充 tenders） | POST | SC-3 | 多 tender；冪等沿用 Idempotency-Key |
 | `/sales/{id}/void`（擴充沖正） | POST | SC-3 | 購物金 REVERSAL + 點數沖回 |
+| `/returns`（退款拆分） | POST | SC-3/Returns | 累計購物金優先；回傳本次 `refund_tenders` |
 | `/reports/store-credit/liability` | GET | SC-4 | §5A 負債/餘額/帳齡 |
 | `/reports/store-credit/flows` | GET | SC-4 | §5A 發出 vs 兌付 vs 淨變化（granularity=`day`/`week`/`month`） |
 | `/reports/store-credit/effectiveness` | GET | SC-4 | §5B 效益指標 |
@@ -153,7 +175,7 @@
 | `total_outstanding` | 即時未兌付總負債 = Σ 各帳戶正餘額 |
 | `per_member` | 各會員餘額 + 異動歷史（同 SC-1 查詢） |
 | `aging_buckets` | 未兌付餘額按**發出時間**分桶：<30 / 30–90 / 90–180 / 180–365 / >365 天；扣抵以 FIFO 沖銷發出列（報表推導用，不入帳本） |
-| `issued` / `redeemed` / `net_change` | 期間內購物金流量淨額：`issued` = CREDIT + ACQUISITION_ROLLBACK 沖正額；`redeemed` = DEBIT（絕對值）+ SALE_VOID 沖正額（會抵銷已作廢兌付）；沖正依自身 `created_at` 歸屬發生期間，不回寫原始期間；`net_change = issued − redeemed`；granularity=`day`/`week`/`month` |
+| `issued` / `redeemed` / `net_change` | 期間內購物金流量淨額：`issued = issued_gross − ACQUISITION_ROLLBACK`；`redeemed = DEBIT 毛額 − SALE_VOID 回補 − SALE_RETURN/REFUND 回補`；各事件依自身 `created_at` 歸屬發生期間，不回寫原始期間；`net_change = issued − redeemed + adjustment_net`；granularity=`day`/`week`/`month` |
 | `liability_health_ratio` | `total_outstanding ÷ monthly_fixed_cash_outflow`（分母為 settings 手動值；=0 時顯示 N/A） |
 | `distributable_cash`（供分潤安全水位） | `現金水位 − total_outstanding`（現金水位來源於現金對帳；此欄為展示公式，現金水位輸入屬報表參數） |
 
@@ -177,10 +199,14 @@
   - 其餘 → 「既有消費移轉傾向高」。
   - `alpha_incremental = 新增傾向高之兌付金額 ÷ 全部兌付金額`。
 - **侷限（文件與 UI 都要說）**：代理假設「低頻/新會員的消費較可能由購物金誘發」，無法驗證個體反事實；季節性與商品結構變化會干擾；樣本小時波動大（期間兌付 < 30 筆時 UI 加註「樣本不足」）。僅供敏感度模型輸入，不得作為精確損益依據。
+- **退貨時間界線**：`alpha_incremental`、`redemption_count`、`excess_spend_rate` 是成交當下的
+  行為指標，退貨不回寫原成交期間；`beta_retention`、購物金流量與會計報表則採
+  `SALE_RETURN/REFUND` 淨額，反映即時負債與實際財務結果。
 
 ### 5C 既有報表整合
 
-- 關帳報表維持**純現金**；新增「本日購物金兌付彙總」獨立區塊（Σ DEBIT 當日），僅展示、不入 expected。
+- 關帳報表維持**純現金**；「本日購物金兌付彙總」採淨額（DEBIT − SALE_VOID −
+  SALE_RETURN/REFUND），僅展示、不入 expected。
 
 ## 6. 溢價率設定與每日建議值引擎（SC-5）
 

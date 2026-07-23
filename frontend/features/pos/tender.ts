@@ -9,11 +9,13 @@ export type TenderMode =
   | "LINE_PAY"
   | "MIXED";
 
+export type MixedRemainderMethod = "CASH" | "LINE_PAY" | "TAIWAN_PAY";
+
 export interface TenderPlan {
   mode: TenderMode;
-  /** 現金部分（MIXED 時為使用者輸入；CASH 時 = total；其餘 0）。 */
+  /** 現金部分（MIXED+CASH 時 = total − 購物金；CASH 時 = total；其餘 0）。 */
   cash: number;
-  /** 購物金部分（MIXED 時 = total − cash；STORE_CREDIT 時 = total；其餘 0）。 */
+  /** 購物金部分（MIXED 時為使用者輸入；STORE_CREDIT 時 = total；其餘 0）。 */
   storeCredit: number;
   /** 台灣Pay 部分（docs/30）：TAIWAN_PAY 時 = total；其餘 0。非現金、不進抽屜、不需會員。 */
   taiwanPay: number;
@@ -31,11 +33,12 @@ export interface TenderValidation {
   needsDrawer: boolean;
 }
 
-/** 依模式把 total 拆成現金/購物金兩腿（MIXED 用使用者輸入的現金部分）。 */
+/** 依模式拆分 total；MIXED 輸入購物金，其餘金額交由選定的單一付款方式。 */
 export function resolvePlan(
   mode: TenderMode,
   total: number,
-  cashInput: number,
+  storeCreditInput: number,
+  mixedRemainder: MixedRemainderMethod = "CASH",
 ): TenderPlan {
   if (mode === "CASH")
     return { mode, cash: total, storeCredit: 0, taiwanPay: 0, linePay: 0 };
@@ -45,8 +48,15 @@ export function resolvePlan(
     return { mode, cash: 0, storeCredit: 0, taiwanPay: total, linePay: 0 };
   if (mode === "LINE_PAY")
     return { mode, cash: 0, storeCredit: 0, taiwanPay: 0, linePay: total };
-  const cash = clampInt(cashInput);
-  return { mode, cash, storeCredit: total - cash, taiwanPay: 0, linePay: 0 };
+  const storeCredit = clampInt(storeCreditInput);
+  const remainder = total - storeCredit;
+  return {
+    mode,
+    cash: mixedRemainder === "CASH" ? remainder : 0,
+    storeCredit,
+    taiwanPay: mixedRemainder === "TAIWAN_PAY" ? remainder : 0,
+    linePay: mixedRemainder === "LINE_PAY" ? remainder : 0,
+  };
 }
 
 export function validatePlan(
@@ -65,6 +75,8 @@ export function validatePlan(
     cartHasItems?: boolean;
     /** LINE Pay 掃到的客人一次性付款碼（docs/30）：LINE_PAY 付款時必填，空則擋。 */
     linePayKey?: string;
+    /** 台灣Pay 無 API；店員須明確確認 App 已收到本次應收金額。 */
+    taiwanPayConfirmed?: boolean;
   },
 ): TenderValidation {
   const needsMember = plan.storeCredit > 0;
@@ -83,10 +95,15 @@ export function validatePlan(
     return { ok: false, error: null, needsMember, needsDrawer };
   }
   if (plan.mode === "MIXED") {
-    if (plan.cash <= 0 || plan.storeCredit <= 0) {
+    const remainderLegs = [plan.cash, plan.taiwanPay, plan.linePay];
+    if (
+      plan.storeCredit <= 0 ||
+      remainderLegs.filter((amount) => amount > 0).length !== 1 ||
+      remainderLegs.some((amount) => amount < 0)
+    ) {
       return {
         ok: false,
-        error: "混合付款的現金與購物金都必須大於 0",
+        error: "混合付款的購物金與剩餘付款都必須大於 0，且只能選一種剩餘付款方式",
         needsMember,
         needsDrawer,
       };
@@ -105,6 +122,14 @@ export function validatePlan(
     return {
       ok: false,
       error: "請先掃描客人的 LINE Pay 付款條碼",
+      needsMember,
+      needsDrawer,
+    };
+  }
+  if (plan.taiwanPay > 0 && opts.taiwanPayConfirmed !== true) {
+    return {
+      ok: false,
+      error: `請確認已於台灣Pay收到 ${plan.taiwanPay} 元`,
       needsMember,
       needsDrawer,
     };

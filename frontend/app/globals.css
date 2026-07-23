@@ -129,6 +129,27 @@ body {
   outline-offset: 1px;
 }
 
+/* Checkbox labels are shared by POS, returns and settings.  Keep checkbox controls at their
+   native compact size instead of inheriting the text-input minimum height from `.field input`. */
+.field-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+.field-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
 .form-error {
   color: var(--danger);
   font-size: var(--text-sm);
@@ -681,10 +702,9 @@ body {
   text-align: left;
 }
 .pos-tender-modes {
-  /* 多種付款方式（現金/購物金/台灣Pay/LINE Pay/混合）：以自適應網格排列，空間不足時整顆換行
-     到下一列，而非把每顆壓窄導致文字換行/擠壓。每顆至少 6.5rem，容得下「LINE Pay」＋選鈕。 */
+  /* 多種付款方式以自適應網格排列；8rem 可容納「購物金＋其他付款」而不擠字。 */
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
   gap: var(--sp-2);
 }
 .pos-tender-mode {
@@ -702,6 +722,129 @@ body {
 .pos-tender-mode.is-active {
   border-color: var(--accent);
   background: rgba(47, 93, 58, 0.06);
+}
+.pos-mixed-panel {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+.pos-mixed-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--sp-2);
+}
+.pos-use-max-credit {
+  min-height: var(--tap-min);
+}
+.pos-payment-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+.pos-payment-split span {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.pos-mixed-methods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+.pos-mixed-method {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pos-mixed-method.is-active {
+  border-color: var(--accent);
+  background: rgba(47, 93, 58, 0.08);
+  color: var(--accent);
+}
+.pos-payment-confirm {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.return-dialog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.return-refund-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.return-refund-preview span {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.return-taiwan-confirm {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+@media (max-width: 560px) {
+  .pos-mixed-input-row,
+  .pos-payment-split {
+    grid-template-columns: 1fr;
+  }
+  .pos-mixed-methods {
+    grid-template-columns: 1fr;
+  }
+  .return-lines-table {
+    table-layout: fixed;
+  }
+  .return-lines-table th,
+  .return-lines-table td {
+    padding-inline: var(--sp-1);
+    overflow-wrap: anywhere;
+  }
+  .return-lines-table th:nth-child(1) {
+    width: 42%;
+  }
+  .return-lines-table th:nth-child(2) {
+    width: 17%;
+  }
+  .return-lines-table th:nth-child(2),
+  .return-lines-table td:nth-child(2) {
+    white-space: nowrap;
+  }
+  .return-lines-table th:nth-child(3) {
+    width: 21%;
+  }
+  .return-lines-table th:nth-child(4) {
+    width: 20%;
+  }
+  .return-qty-input {
+    width: 100%;
+    min-width: 0;
+    padding-inline: var(--sp-1);
+  }
 }
 .pos-change {
   font-family: var(--font-mono);
