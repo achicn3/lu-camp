@@ -26,6 +26,7 @@ from app.modules.customerdisplay.schemas import (
     KioskHeartbeatRead,
     KioskHeartbeatRequest,
     KioskSummary,
+    StaffCartSessionRead,
     TerminalCreateRequest,
     TerminalPairRequest,
     TerminalRead,
@@ -145,6 +146,13 @@ def _cart_read(cart: CartSession) -> CartSessionRead:
         changes=cart.last_changes,
         created_at=cart.created_at,
         updated_at=cart.updated_at,
+    )
+
+
+def _staff_cart_read(cart: CartSession) -> StaffCartSessionRead:
+    return StaffCartSessionRead(
+        **_cart_read(cart).model_dump(),
+        buyer_contact_id=cart.buyer_contact_id,
     )
 
 
@@ -421,14 +429,14 @@ async def upsert_cart(
 
 @staff_router.get(
     "/terminals/{terminal_id}/cart/current",
-    response_model=CartSessionRead | None,
+    response_model=StaffCartSessionRead | None,
     operation_id="getCurrentCustomerDisplayCart",
 )
 async def get_current_terminal_cart(
     terminal_id: int,
     session: SessionDep,
     user: StaffDep,
-) -> CartSessionRead | None:
+) -> StaffCartSessionRead | None:
     try:
         cart = await CustomerDisplayService(session).current_cart_for_terminal(
             user.store_id,
@@ -436,7 +444,7 @@ async def get_current_terminal_cart(
         )
     except TerminalNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    return _cart_read(cart) if cart is not None else None
+    return _staff_cart_read(cart) if cart is not None else None
 
 
 @staff_router.post(

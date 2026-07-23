@@ -8620,6 +8620,75 @@
         "title": "SignatureTaskStatus",
         "type": "string"
       },
+      "StaffCartSessionRead": {
+        "description": "POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。",
+        "properties": {
+          "buyer_contact_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Contact Id"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/CartChangeRead"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kiosk_device_id": {
+            "title": "Kiosk Device Id",
+            "type": "integer"
+          },
+          "pos_terminal_id": {
+            "title": "Pos Terminal Id",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/CartSnapshotRead"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CartSessionStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "pos_terminal_id",
+          "kiosk_device_id",
+          "snapshot",
+          "changes",
+          "created_at",
+          "updated_at",
+          "buyer_contact_id"
+        ],
+        "title": "StaffCartSessionRead",
+        "type": "object"
+      },
       "StocktakeConfirmRequest": {
         "description": "確認盤點輸入：各商品實點數（未列入者不調整）。",
         "properties": {
@@ -12734,7 +12803,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/CartSessionRead"
+                      "$ref": "#/components/schemas/StaffCartSessionRead"
                     },
                     {
                       "type": "null"

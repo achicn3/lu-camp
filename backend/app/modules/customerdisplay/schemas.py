@@ -183,3 +183,9 @@ class CartSessionRead(BaseModel):
     changes: list[CartChangeRead]
     created_at: datetime
     updated_at: datetime
+
+
+class StaffCartSessionRead(CartSessionRead):
+    """POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。"""
+
+    buyer_contact_id: int | None

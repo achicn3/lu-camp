@@ -3,9 +3,20 @@
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
 // einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
+import {
+  PosCustomerDisplay,
+  restoreLines,
+} from "@/features/customer-display/PosCustomerDisplay";
 import {
   type CartLine,
   addLine,
@@ -822,6 +833,43 @@ export default function PosPage() {
   // 完成結帳時綁定的簽署快照（K6 明細聯加印折抵/剩餘＋簽名用；未綁定為 null）。
   const [completedSignature, setCompletedSignature] = useState<CompletedSignature | null>(null);
 
+  const restoreCustomerDisplayCart = useCallback(
+    async (cart: components["schemas"]["StaffCartSessionRead"]) => {
+      setLines(restoreLines(cart.snapshot.items));
+      const storeCredit = cart.snapshot.tenders.find(
+        (tender) => tender.tender_type === "STORE_CREDIT",
+      );
+      const remainder = cart.snapshot.tenders.find(
+        (tender) => tender.tender_type !== "STORE_CREDIT",
+      );
+      if (storeCredit) {
+        setStoreCreditInput(storeCredit.amount);
+        if (remainder) {
+          setMode("MIXED");
+          setMixedRemainder(remainder.tender_type as MixedRemainderMethod);
+        } else {
+          setMode("STORE_CREDIT");
+        }
+      } else if (remainder) {
+        setMode(remainder.tender_type as TenderMode);
+      }
+      setReceivedInput(
+        remainder?.tender_type === "CASH" ? remainder.amount : "",
+      );
+      setLinePayKey("");
+      setTaiwanPayConfirmed(false);
+      if (cart.buyer_contact_id !== null) {
+        const { data } = await api.GET("/api/v1/contacts/{contact_id}", {
+          params: { path: { contact_id: cart.buyer_contact_id } },
+        });
+        setMember(data ?? null);
+      } else {
+        setMember(null);
+      }
+    },
+    [],
+  );
+
   const settings = useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
@@ -974,6 +1022,15 @@ export default function PosPage() {
     total,
     parseNtd(storeCreditInput) ?? 0,
     mixedRemainder,
+  );
+  const allCustomerDisplayTenders: components["schemas"]["CartTenderRequest"][] = [
+    { tender_type: "STORE_CREDIT", amount: String(plan.storeCredit) },
+    { tender_type: "CASH", amount: String(plan.cash) },
+    { tender_type: "LINE_PAY", amount: String(plan.linePay) },
+    { tender_type: "TAIWAN_PAY", amount: String(plan.taiwanPay) },
+  ];
+  const customerDisplayTenders = allCustomerDisplayTenders.filter(
+    (tender) => Number(tender.amount) > 0,
   );
   const previousLinePayAmount = useRef(plan.linePay);
   const previousTaiwanPayAmount = useRef(plan.taiwanPay);
@@ -1343,6 +1400,13 @@ export default function PosPage() {
   return (
     <section>
       <h1 className="page-title">POS 結帳</h1>
+      <PosCustomerDisplay
+        lines={saleLines}
+        buyerContactId={member?.id ?? null}
+        tenders={customerDisplayTenders}
+        ready={quoteReady}
+        onRestore={restoreCustomerDisplayCart}
+      />
       <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">

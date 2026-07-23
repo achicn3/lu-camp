@@ -5371,6 +5371,36 @@ export interface components {
          */
         SignatureTaskStatus: "PENDING" | "SIGNED" | "CANCELLED";
         /**
+         * StaffCartSessionRead
+         * @description POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。
+         */
+        StaffCartSessionRead: {
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
+            /** Changes */
+            changes: components["schemas"]["CartChangeRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Kiosk Device Id */
+            kiosk_device_id: number;
+            /** Pos Terminal Id */
+            pos_terminal_id: number;
+            /** Revision */
+            revision: number;
+            snapshot: components["schemas"]["CartSnapshotRead"];
+            status: components["schemas"]["CartSessionStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * StocktakeConfirmRequest
          * @description 確認盤點輸入：各商品實點數（未列入者不調整）。
          */
@@ -7547,7 +7577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CartSessionRead"] | null;
+                    "application/json": components["schemas"]["StaffCartSessionRead"] | null;
                 };
             };
             /** @description Validation Error */

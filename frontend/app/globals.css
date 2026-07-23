@@ -572,6 +572,55 @@ body {
   gap: var(--sp-6);
   align-items: start;
 }
+.pos-kiosk-status {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.pos-kiosk-status.is-online {
+  border-color: rgba(46, 125, 79, 0.35);
+  background: rgba(46, 125, 79, 0.08);
+  color: var(--success);
+}
+.pos-kiosk-status.is-warning {
+  border-color: rgba(184, 134, 11, 0.4);
+  background: rgba(184, 134, 11, 0.08);
+  color: var(--warn);
+}
+.pos-kiosk-status.is-error {
+  border-color: rgba(178, 58, 46, 0.35);
+  color: var(--danger);
+}
+.pos-kiosk-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pos-kiosk-status input {
+  width: 8.5rem;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 var(--sp-2);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0.12em;
+}
+.pos-kiosk-status .btn-secondary {
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+}
 .pos-left {
   display: flex;
   flex-direction: column;
@@ -2401,6 +2450,59 @@ body {
   color: var(--ink-soft);
   margin: 0;
 }
+.kiosk-pairing {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 6vw, 72px);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(71, 105, 79, 0.16), transparent 34%),
+    var(--bg);
+}
+.kiosk-pairing-card {
+  width: min(620px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: clamp(28px, 6vw, 64px);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.kiosk-pairing-card h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(30px, 5vw, 48px);
+}
+.kiosk-pairing-card p {
+  max-width: 42ch;
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.7;
+}
+.kiosk-eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.kiosk-pairing-code {
+  display: block;
+  padding: 12px 22px;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: clamp(42px, 10vw, 76px);
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1.15;
+}
 .kiosk-standby,
 .kiosk-thanks {
   min-height: 100vh;
@@ -2658,6 +2760,179 @@ body {
 }
 .kiosk-payout-btn--active .kiosk-payout-bonus {
   color: var(--accent-ink);
+}
+
+/* 客顯購物車：明細區獨立捲動，總額永遠固定在顧客視線底部。 */
+.kiosk-cart-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  background:
+    linear-gradient(180deg, rgba(71, 105, 79, 0.08), transparent 22%),
+    var(--bg);
+}
+.kiosk-cart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  padding: clamp(22px, 4vw, 42px) clamp(22px, 5vw, 56px) var(--sp-4);
+}
+.kiosk-cart-header h1 {
+  margin: var(--sp-1) 0 0;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 44px);
+}
+.kiosk-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+.kiosk-live i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.kiosk-live.is-online i {
+  background: var(--success);
+}
+.kiosk-cart-change {
+  margin: 0 clamp(22px, 5vw, 56px) var(--sp-3);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(46, 125, 79, 0.12);
+  color: var(--success);
+}
+.kiosk-cart-change.is-removed {
+  background: rgba(178, 58, 46, 0.1);
+  color: var(--danger);
+}
+.kiosk-cart-change span {
+  font-family: var(--font-mono);
+  font-weight: 800;
+}
+.kiosk-cart-items {
+  overflow-y: auto;
+  padding: 0 clamp(22px, 5vw, 56px) var(--sp-5);
+  overscroll-behavior: contain;
+}
+.kiosk-cart-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(100px, auto);
+  align-items: center;
+  gap: clamp(14px, 3vw, 32px);
+  padding: clamp(18px, 3vw, 28px) 0;
+  border-bottom: 1px solid var(--border);
+}
+.kiosk-cart-item h2 {
+  margin: 0;
+  font-size: clamp(19px, 2.6vw, 28px);
+}
+.kiosk-cart-item p {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-soft);
+}
+.kiosk-cart-item > strong,
+.kiosk-cart-qty {
+  font-family: var(--font-mono);
+  font-size: clamp(20px, 2.8vw, 30px);
+}
+.kiosk-cart-item > strong {
+  text-align: right;
+}
+.kiosk-cart-total {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--sp-4) clamp(24px, 5vw, 64px);
+  padding: var(--sp-4) clamp(22px, 5vw, 56px) max(var(--sp-4), env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  background: #244b38;
+  color: #f8f4e8;
+  box-shadow: 0 -14px 30px rgba(24, 48, 36, 0.16);
+}
+.kiosk-cart-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-6);
+}
+.kiosk-cart-meta p {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+.kiosk-cart-meta span,
+.kiosk-cart-grand-total span {
+  color: rgba(248, 244, 232, 0.7);
+  font-size: var(--text-sm);
+}
+.kiosk-cart-discount {
+  grid-column: 1;
+  margin: 0;
+  color: #d8e7c9;
+}
+.kiosk-cart-grand-total {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.kiosk-cart-grand-total strong {
+  font-family: var(--font-mono);
+  font-size: clamp(36px, 7vw, 68px);
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .kiosk-cart-header {
+    align-items: flex-start;
+  }
+  .kiosk-live {
+    padding: 7px 9px;
+  }
+  .kiosk-cart-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .kiosk-cart-item > strong {
+    grid-column: 2;
+  }
+  .kiosk-cart-qty {
+    grid-column: 1;
+    font-size: var(--text-md);
+  }
+  .kiosk-cart-total {
+    grid-template-columns: 1fr;
+  }
+  .kiosk-cart-grand-total {
+    grid-column: 1;
+    grid-row: auto;
+    align-items: stretch;
+  }
+  .kiosk-cart-grand-total {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiosk-standby-dot {
+    animation: none;
+  }
 }
 
 .pur-invoice-fields {

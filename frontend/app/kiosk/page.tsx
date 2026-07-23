@@ -1,31 +1,63 @@
 "use client";
-// 手持簽署裝置主頁（docs/23 K3）：KIOSK 帳號登入 → 每 2 秒輪詢待簽任務 → 顯示切結書/
-// 品項金額/會員資料 → 客人選撥款（AFFIDAVIT 二選一，D7）→ 手寫簽名 → 送出。簽名綁內容快照：
-// 顯示的就是客人簽的那份（content 由店員端凍結）。送出後回待機，等下一張任務。
+// 客顯／手持簽署共用頁：裝置 cookie 登入與配對，SSE 通知後全量重讀權威購物車；
+// 使用購物金或收購任務時，沿用下方不可變內容快照與簽名流程。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/api";
-import { login, readTokenRole, verifyStaffCredentials } from "@/lib/auth";
+import { API_BASE_URL, kioskApi } from "@/lib/api";
+import type { components } from "@/lib/api-types";
+import { verifyStaffCredentials } from "@/lib/auth";
 import { formatTaipeiDateTime } from "@/lib/datetime";
-import { clearToken, getToken, subscribeToken } from "@/lib/token";
+import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
 
 import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
 
+type KioskDevice = components["schemas"]["KioskDeviceRead"];
+type KioskCart = components["schemas"]["CartSessionRead"];
 type KioskTask = NonNullable<
   Awaited<ReturnType<typeof fetchCurrentTask>>
 >;
 
 async function fetchCurrentTask() {
-  const { data, response } = await api.GET("/api/v1/kiosk/tasks/current");
+  const { data, response } = await kioskApi.GET("/api/v1/kiosk/tasks/current");
+  // 過渡資料若尚未配對到此裝置，視為無任務；不得因此退回 bearer 登入。
+  if (response.status === 401 || response.status === 403 || response.status === 404) return null;
   if (!response.ok) {
-    // 403：此裝置非 KIOSK 帳號（後端 D4 圍堵）；往上拋讓 UI 提示重登。
-    throw new Error(response.status === 403 ? "FORBIDDEN" : "FETCH_FAILED");
+    throw new Error("FETCH_FAILED");
   }
   return data ?? null;
 }
 
-const emptySubscribe = () => () => {};
+const DEVICE_INSTALLATION_KEY = "lu-camp.kiosk.installation";
+const DEVICE_CSRF_KEY = "lu-camp.kiosk.csrf";
+
+function readCsrf(): string | null {
+  return typeof window === "undefined"
+    ? null
+    : window.localStorage.getItem(DEVICE_CSRF_KEY);
+}
+
+function writeCsrf(value: string): void {
+  window.localStorage.setItem(DEVICE_CSRF_KEY, value);
+}
+
+function installationId(): string {
+  const existing = window.localStorage.getItem(DEVICE_INSTALLATION_KEY);
+  if (existing) return existing;
+  const generated = newIdempotencyKey();
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    generated,
+  )
+    ? generated
+    : `${Date.now().toString(16).padStart(8, "0").slice(-8)}-0000-4000-8000-${Math.random()
+        .toString(16)
+        .slice(2)
+        .padEnd(12, "0")
+        .slice(0, 12)}`;
+  window.localStorage.setItem(DEVICE_INSTALLATION_KEY, uuid);
+  return uuid;
+}
 
 // 交回鎖持久化（Codex K3 第六輪 high）：簽署完成的隱私鎖不可只存記憶體——瀏覽器重整/
 // 重掛會以 completed=false 重啟輪詢、把下一位任務顯示給前一位客人。改存 localStorage，
@@ -70,42 +102,49 @@ function writeEngagedTask(id: number | null): void {
   else window.localStorage.setItem(ENGAGED_KEY, String(id));
 }
 
-// LAN（http，非安全來源）下 crypto.randomUUID 可能不存在——提供退回實作，供簽名冪等鍵用。
-function newIdempotencyKey(): string {
-  const c = typeof crypto !== "undefined" ? crypto : undefined;
-  if (c && typeof c.randomUUID === "function") return c.randomUUID();
-  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
 export default function KioskPage() {
-  const token = useSyncExternalStore(subscribeToken, getToken, () => null);
-  const hydrated = useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false,
-  );
+  const [csrf, setCsrf] = useState(readCsrf);
+  const device = useQuery({
+    queryKey: ["kiosk", "device"],
+    enabled: csrf !== null,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.paired_terminal == null ? 5000 : false,
+    queryFn: async () => {
+      const { data, response } = await kioskApi.GET("/api/v1/kiosk/device");
+      if (response.status === 401) throw new Error("AUTH_REQUIRED");
+      if (!data) throw new Error("無法讀取客顯裝置狀態");
+      return data;
+    },
+  });
 
-  if (!hydrated) return null;
-  if (token === null) return <KioskLogin />;
-  // 同步（本地解碼、不需連線）攔非 KIOSK token：客人裝置上若殘留有效店務 token，
-  // 絕不掛載 console（否則該 token 仍可被導去店務殼）——直接清除並回裝置登入
-  // （Codex K3 high；後端 403 清除為次要防線）。
-  if (readTokenRole(token) !== "KIOSK") return <NonKioskGate />;
-  return <KioskConsole />;
-}
-
-// 客人裝置上出現非 KIOSK token：清 token+快取後回裝置登入（清除觸發 token 變更 → 重繪）。
-function NonKioskGate() {
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    queryClient.clear();
-    clearToken();
-  }, [queryClient]);
-  return <KioskLogin initialError="此裝置僅限 KIOSK 簽署帳號登入。" />;
+  if (csrf === null || device.isError) {
+    return (
+      <KioskLogin
+        onAuthenticated={setCsrf}
+        initialError={
+          device.error instanceof Error && device.error.message !== "AUTH_REQUIRED"
+            ? "裝置連線失敗，請重新登入。"
+            : null
+        }
+      />
+    );
+  }
+  if (!device.data) return <Standby message="正在確認裝置身分…" />;
+  if (device.data.paired_terminal === null) {
+    return <PairingScreen device={device.data} csrf={csrf} />;
+  }
+  return <KioskConsole csrf={csrf} />;
 }
 
 // ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
-function KioskLogin({ initialError = null }: { initialError?: string | null }) {
+function KioskLogin({
+  initialError = null,
+  onAuthenticated,
+}: {
+  initialError?: string | null;
+  onAuthenticated: (csrf: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(initialError);
   const [submitting, setSubmitting] = useState(false);
@@ -115,31 +154,47 @@ function KioskLogin({ initialError = null }: { initialError?: string | null }) {
     const form = new FormData(event.currentTarget);
     setSubmitting(true);
     setError(null);
-    // 進入/切換 KIOSK 是一次認證邊界轉換：清整個 QueryClient，避免此 SPA 內殘留的
-    // 店務頁快取（非 kiosk 鍵）在客人面向裝置上被看到，也不閃現前一位客人的任務
-    // 快照（Codex K3 medium；比照 (authed) 登入/登出清快取）。
     queryClient.clear();
-    const result = await login(String(form.get("username")), String(form.get("password")));
-    setSubmitting(false);
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    // 只有 KIOSK 帳號可留在此裝置：誤用店務帳號（MANAGER/CLERK）登入會把有效店務
-    // token 留在客人面向裝置上、可被導去店務殼——故非 KIOSK 一律立刻清除並提示
-    // （Codex K3 high）。
-    if (readTokenRole() !== "KIOSK") {
-      clearToken();
-      queryClient.clear();
-      setError("此帳號非簽署裝置帳號，請以本店 KIOSK 簽署帳號登入。");
+    try {
+      const { data, error: responseError, response } = await kioskApi.POST(
+        "/api/v1/kiosk/device-sessions",
+        {
+          body: {
+            username: String(form.get("username")),
+            password: String(form.get("password")),
+            installation_id: installationId(),
+            label: String(form.get("label")),
+          },
+        },
+      );
+      if (!data) {
+        const detail =
+          responseError &&
+          typeof responseError === "object" &&
+          "detail" in responseError &&
+          typeof responseError.detail === "string"
+            ? responseError.detail
+            : response.status === 429
+              ? "嘗試次數過多，請稍後再試。"
+              : "帳號或密碼錯誤。";
+        setError(detail);
+        return;
+      }
+      writeCsrf(data.csrf_token);
+      queryClient.setQueryData<KioskDevice>(["kiosk", "device"], data);
+      onAuthenticated(data.csrf_token);
+    } catch {
+      setError("無法連線到伺服器，請確認店內網路。");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
     <main className="kiosk-login">
       <form className="kiosk-login-card" onSubmit={onSubmit}>
-        <h1 className="kiosk-login-title">簽署裝置設定</h1>
-        <p className="kiosk-login-sub">請以本店簽署裝置帳號登入（一次登入、長期使用）</p>
+        <h1 className="kiosk-login-title">顧客顯示裝置設定</h1>
+        <p className="kiosk-login-sub">以本店 KIOSK 帳號啟用；登入後再與 POS 櫃檯配對。</p>
         <label className="field">
           <span className="field-label">帳號</span>
           <input name="username" autoComplete="username" required autoFocus />
@@ -147,6 +202,10 @@ function KioskLogin({ initialError = null }: { initialError?: string | null }) {
         <label className="field">
           <span className="field-label">密碼</span>
           <input name="password" type="password" autoComplete="current-password" required />
+        </label>
+        <label className="field">
+          <span className="field-label">裝置名稱</span>
+          <input name="label" defaultValue="顧客平板" maxLength={100} required />
         </label>
         {error !== null && (
           <p role="alert" className="form-error">
@@ -161,9 +220,131 @@ function KioskLogin({ initialError = null }: { initialError?: string | null }) {
   );
 }
 
-// ── 已登入主控：輪詢 → 待機/任務/交回 ────────────────────────────────────
-function KioskConsole() {
+function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) {
   const queryClient = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshCode() {
+    setError(null);
+    const { data } = await kioskApi.POST("/api/v1/kiosk/pairing-codes", {
+      headers: { "X-CSRF-Token": csrf },
+    });
+    if (data) queryClient.setQueryData(["kiosk", "device"], data);
+    else setError("無法取得新配對碼，請確認店內網路。");
+  }
+
+  return (
+    <main className="kiosk-pairing">
+      <section className="kiosk-pairing-card">
+        <p className="kiosk-eyebrow">裝置已啟用 · {device.label}</p>
+        <h1>連接您的 POS 櫃檯</h1>
+        <p>請在 POS 輸入配對碼。配對完成後，此畫面會自動切換為顧客購物車。</p>
+        {device.pairing_code ? (
+          <output className="kiosk-pairing-code" aria-label="配對碼">
+            {device.pairing_code}
+          </output>
+        ) : (
+          <button type="button" className="btn-primary" onClick={refreshCode}>
+            取得配對碼
+          </button>
+        )}
+        {error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <button type="button" className="btn-ghost" onClick={refreshCode}>
+          重新產生配對碼
+        </button>
+      </section>
+    </main>
+  );
+}
+
+// ── 已配對主控：SSE 通知 → 全量重讀購物車／任務 → 待機／簽署／完成 ────────
+function KioskConsole({ csrf }: { csrf: string }) {
+  const queryClient = useQueryClient();
+  const cart = useQuery({
+    queryKey: ["kiosk", "cart"],
+    queryFn: async () => {
+      const { data, response } = await kioskApi.GET("/api/v1/kiosk/cart/current");
+      if (!response.ok) throw new Error("無法讀取購物車");
+      return data ?? null;
+    },
+  });
+  const [streamConnected, setStreamConnected] = useState(false);
+  const wakeLock = useRef<WakeLockSentinel | null>(null);
+
+  useEffect(() => {
+    const source = new EventSource(`${API_BASE_URL}/api/v1/kiosk/events`, {
+      withCredentials: true,
+    });
+    const reload = () => {
+      setStreamConnected(true);
+      void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
+      void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+      void queryClient.invalidateQueries({ queryKey: ["kiosk", "device"] });
+    };
+    source.addEventListener("open", reload);
+    source.addEventListener("state", reload);
+    source.addEventListener("error", () => setStreamConnected(false));
+    return () => source.close();
+  }, [queryClient]);
+
+  useEffect(() => {
+    async function report() {
+      const { response } = await kioskApi.POST("/api/v1/kiosk/heartbeat", {
+        headers: { "X-CSRF-Token": csrf },
+        body: {
+          current_session_id: cart.data?.id ?? null,
+          displayed_revision: cart.data?.revision ?? 0,
+        },
+      });
+      if (response.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
+      }
+    }
+    void report();
+    const timer = window.setInterval(() => void report(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [cart.data?.id, cart.data?.revision, csrf, queryClient]);
+
+  useEffect(() => {
+    async function keepAwake() {
+      if (
+        document.visibilityState === "visible" &&
+        "wakeLock" in navigator &&
+        wakeLock.current === null
+      ) {
+        try {
+          wakeLock.current = await navigator.wakeLock.request("screen");
+          wakeLock.current.addEventListener(
+            "release",
+            () => {
+              wakeLock.current = null;
+            },
+            { once: true },
+          );
+        } catch {
+          // 非 HTTPS、節電模式或裝置政策拒絕時，仍可由 kiosk/guided-access 作業設定常亮。
+        }
+      }
+    }
+    const visible = () => {
+      if (document.visibilityState === "visible") {
+        void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
+        void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+        void keepAwake();
+      }
+    };
+    void keepAwake();
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      document.removeEventListener("visibilitychange", visible);
+      void wakeLock.current?.release();
+      wakeLock.current = null;
+    };
+  }, [queryClient]);
   // 簽署完成後暫停輪詢並停在「交回店員」畫面（Codex K3 high）：否則店員在客人尚未
   // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
   // 初值讀持久化交回鎖：重整/重掛後若上一位尚未由店員解鎖，仍停在交回畫面。
@@ -184,10 +365,9 @@ function KioskConsole() {
   const [syncedData, setSyncedData] = useState<KioskTask | null | undefined>(undefined);
   const signing = frozenTask !== null;
   const paused = completed || signing || recovering;
-  const { data, error } = useQuery({
+  const { data } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
-    refetchInterval: paused ? false : 2000,
     refetchOnWindowFocus: !paused,
     enabled: !paused,
   });
@@ -219,16 +399,6 @@ function KioskConsole() {
       setFrozenTask(null);
     }
   }
-
-  const forbidden = error instanceof Error && error.message === "FORBIDDEN";
-  // 非 KIOSK token 落在客人裝置上：立刻清 token+快取（不等點按），避免店務殼外洩
-  // （Codex K3 high）。清除後 token→null，KioskPage 會切回裝置登入畫面。
-  useEffect(() => {
-    if (forbidden) {
-      queryClient.clear();
-      clearToken();
-    }
-  }, [forbidden, queryClient]);
 
   if (recovering) {
     return (
@@ -266,7 +436,13 @@ function KioskConsole() {
   }
   // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
   const shown = frozenTask ?? data;
-  if (forbidden || !shown) return <Standby />; // forbidden 為短暫態；effect 清 token 後回登入
+  if (!shown) {
+    if (cart.isError) return <Standby message="客顯同步中斷，正在重新連線…" />;
+    if (cart.data) {
+      return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
+    }
+    return <Standby />;
+  }
   // 顯示任務與已認領不符（店員取消並改推了不同任務）→ 需店員確認才採用新任務，保護前一位客人
   // 不被自動換上他人內容（Codex K3 第十輪 high）。簽名進行中（frozenTask）不受此限。
   if (!frozenTask && engagedTaskId !== null && shown.id !== engagedTaskId) {
@@ -294,6 +470,106 @@ function KioskConsole() {
       }}
     />
   );
+}
+
+function CartScreen({
+  cart,
+  streamConnected,
+}: {
+  cart: KioskCart;
+  streamConnected: boolean;
+}) {
+  const { snapshot, changes } = cart;
+  const latestChange = changes[changes.length - 1];
+  return (
+    <main className="kiosk-cart-shell">
+      <header className="kiosk-cart-header">
+        <div>
+          <p className="kiosk-eyebrow">顧客購物明細</p>
+          <h1>請核對本次購買內容</h1>
+        </div>
+        <span className={streamConnected ? "kiosk-live is-online" : "kiosk-live"}>
+          <i aria-hidden />
+          {streamConnected ? "即時同步" : "重新連線中"}
+        </span>
+      </header>
+
+      {latestChange && (
+        <p className={`kiosk-cart-change is-${latestChange.type.toLowerCase()}`} aria-live="polite">
+          <strong>{latestChange.name}</strong>
+          {latestChange.type === "ADDED" && " 已加入"}
+          {latestChange.type === "REMOVED" && " 已移除"}
+          {latestChange.type === "QUANTITY_CHANGED" && (
+            <>
+              {" "}
+              <span>
+                {latestChange.from_qty} → {latestChange.to_qty}
+              </span>
+            </>
+          )}
+        </p>
+      )}
+
+      <section className="kiosk-cart-items" aria-label="商品明細">
+        {snapshot.items.map((item) => (
+          <article className="kiosk-cart-item" key={item.item_key}>
+            <div>
+              <h2>{item.name}</h2>
+              <p>
+                單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}
+                {item.discount_amount !== "0" && (
+                  <span> · 折扣 −${formatNtd(parseNtd(item.discount_amount) ?? 0)}</span>
+                )}
+              </p>
+            </div>
+            <span className="kiosk-cart-qty">× {item.qty}</span>
+            <strong>${formatNtd(parseNtd(item.line_total) ?? 0)}</strong>
+          </article>
+        ))}
+      </section>
+
+      <footer className="kiosk-cart-total" data-testid="kiosk-total-bar">
+        <div className="kiosk-cart-meta">
+          {snapshot.member && (
+            <p>
+              <span>會員</span>
+              <strong>{snapshot.member.display_name}</strong>
+            </p>
+          )}
+          {snapshot.tenders.length > 0 && (
+            <p>
+              <span>付款方式</span>
+              <strong>
+                {snapshot.tenders.map((tender) => tenderLabel(tender.tender_type)).join("＋")}
+              </strong>
+            </p>
+          )}
+        </div>
+        {snapshot.discount_total !== "0" && (
+          <p className="kiosk-cart-discount">
+            本次共折抵 ${formatNtd(parseNtd(snapshot.discount_total) ?? 0)}
+          </p>
+        )}
+        <div className="kiosk-cart-grand-total">
+          <span>應付總額</span>
+          <strong>${formatNtd(parseNtd(snapshot.total) ?? 0)}</strong>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+function tenderLabel(tender: components["schemas"]["TenderType"]): string {
+  switch (tender) {
+    case "STORE_CREDIT":
+      return "購物金";
+    case "LINE_PAY":
+      return "LINE Pay";
+    case "TAIWAN_PAY":
+      return "台灣 Pay";
+    default:
+      return "現金";
+  }
 }
 
 // 店員帳密解鎖畫面（Codex K3 high）：交回鎖／曖昧簽署恢復皆須現場店務員帳密授權，避免
@@ -369,12 +645,16 @@ function StaffGate({
   );
 }
 
-function Standby() {
+function Standby({
+  message = "請稍候，店員將為您加入商品。",
+}: {
+  message?: string;
+}) {
   return (
     <main className="kiosk-standby">
       <div className="kiosk-standby-inner">
         <h1 className="kiosk-standby-title">露營二手</h1>
-        <p className="kiosk-standby-sub">請稍候，店員將為您送出待確認的項目。</p>
+        <p className="kiosk-standby-sub">{message}</p>
         <div className="kiosk-standby-dot" aria-hidden />
       </div>
     </main>
@@ -452,7 +732,7 @@ function TaskScreen({
     //  - ok：成功。
     let outcome: "ok" | "definitive" | "ambiguous" = "ambiguous";
     try {
-      const { response } = await api.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
+      const { response } = await kioskApi.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
         params: { path: { task_id: task.id } },
         body: {
           signature_image_base64: frozen.image,

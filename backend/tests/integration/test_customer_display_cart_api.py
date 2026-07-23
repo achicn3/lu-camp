@@ -216,13 +216,17 @@ async def test_first_item_creates_server_priced_cart_visible_only_to_paired_kios
     kiosk_read = await client.get("/api/v1/kiosk/cart/current")
     assert kiosk_read.status_code == 200, kiosk_read.text
     assert kiosk_read.json() == cart
+    assert "buyer_contact_id" not in kiosk_read.json()
 
     staff_restore = await client.get(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart/current",
         headers=_auth(seeded.manager_token),
     )
     assert staff_restore.status_code == 200
-    assert staff_restore.json() == cart
+    assert staff_restore.json()["buyer_contact_id"] == seeded.member_id
+    assert {
+        key: value for key, value in staff_restore.json().items() if key != "buyer_contact_id"
+    } == cart
 
 
 async def test_revision_rejects_stale_overwrite_but_replays_same_lost_response(

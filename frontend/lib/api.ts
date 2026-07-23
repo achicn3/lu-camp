@@ -7,12 +7,20 @@ import createClient from "openapi-fetch";
 import type { paths } from "./api-types";
 import { UNAUTHORIZED_EVENT, clearToken, getToken } from "./token";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 // fetch 延遲到呼叫時才解析全域（而非 createClient 時抓參考）：行為相同，
 // 但測試以 stubGlobal 替換 fetch 才攔得到。
 export const api = createClient<paths>({
-  baseUrl: BASE_URL,
+  baseUrl: API_BASE_URL,
+  fetch: (request) => globalThis.fetch(request),
+});
+
+/** 客顯專用 client：只依賴 Path-scoped HttpOnly cookie，不附店務 bearer token。 */
+export const kioskApi = createClient<paths>({
+  baseUrl: API_BASE_URL,
+  credentials: "include",
   fetch: (request) => globalThis.fetch(request),
 });
 
