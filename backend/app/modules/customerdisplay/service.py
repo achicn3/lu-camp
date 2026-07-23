@@ -30,6 +30,8 @@ from app.modules.user.service import UserService
 from app.shared.enums import CartSessionStatus, SaleLineType, TenderType, UserRole
 
 PAIRING_CODE_TTL = timedelta(minutes=5)
+KIOSK_OFFLINE_AFTER = timedelta(seconds=45)
+DRAFT_CART_TTL = timedelta(minutes=30)
 
 
 class CustomerDisplayError(Exception):
@@ -360,7 +362,13 @@ class CustomerDisplayService:
         code, expires_at = await self._replace_pairing_code(device, datetime.now(UTC))
         return device, code, expires_at
 
-    async def heartbeat(self, principal: DevicePrincipal) -> datetime:
+    async def heartbeat(
+        self,
+        principal: DevicePrincipal,
+        *,
+        current_session_id: int | None,
+        displayed_revision: int,
+    ) -> datetime:
         now = datetime.now(UTC)
         row = await self._repo.get_device_session_by_id(
             principal.session_id,
@@ -375,9 +383,32 @@ class CustomerDisplayService:
         )
         if device is None:
             raise InvalidDeviceSession("客顯裝置不存在")
+        if current_session_id is None:
+            if displayed_revision != 0:
+                raise CartSessionConflict("待機回報的購物車版本必須為 0")
+        else:
+            cart = await self._repo.get_active_cart_for_device_by_id(
+                principal.store_id,
+                principal.device_id,
+                current_session_id,
+            )
+            if cart is None:
+                raise CartSessionConflict("客顯回報的購物車已結束或不屬於此裝置")
+            if displayed_revision > cart.revision:
+                raise CartSessionConflict("客顯回報的版本不存在，請重新載入最新購物車")
         row.last_seen_at = now
         device.last_seen_at = now
+        device.displayed_cart_session_id = current_session_id
+        device.displayed_revision = displayed_revision
         return now
+
+    @staticmethod
+    def kiosk_is_online(device: KioskDevice, *, now: datetime | None = None) -> bool:
+        observed_at = now or datetime.now(UTC)
+        return (
+            device.last_seen_at is not None
+            and device.last_seen_at > observed_at - KIOSK_OFFLINE_AFTER
+        )
 
     async def register_terminal(
         self,
@@ -736,3 +767,24 @@ class CustomerDisplayService:
             )
         )
         return current
+
+    async def sweep_expired_carts(self, *, now: datetime | None = None) -> int:
+        """將無操作逾 30 分鐘的 DRAFT 原子轉終態，釋放櫃檯／客顯唯一佔用。"""
+        observed_at = now or datetime.now(UTC)
+        rows = await self._repo.list_expired_draft_carts(observed_at - DRAFT_CART_TTL)
+        for cart in rows:
+            cart.status = CartSessionStatus.EXPIRED
+            cart.revision += 1
+            cart.last_changes = []
+            cart.updated_at = observed_at
+            await self._repo.add(
+                CartSessionEvent(
+                    store_id=cart.store_id,
+                    cart_session_id=cart.id,
+                    revision=cart.revision,
+                    event_type="CART_EXPIRED",
+                    payload={"reason": "DRAFT_IDLE_TTL"},
+                    actor_user_id=None,
+                )
+            )
+        return len(rows)

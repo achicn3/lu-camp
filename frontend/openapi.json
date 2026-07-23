@@ -4830,6 +4830,21 @@
       },
       "KioskSummary": {
         "properties": {
+          "current_session_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Session Id"
+          },
+          "displayed_revision": {
+            "title": "Displayed Revision",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -4837,11 +4852,31 @@
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "online": {
+            "title": "Online",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "label"
+          "label",
+          "online",
+          "last_seen_at",
+          "current_session_id",
+          "displayed_revision"
         ],
         "title": "KioskSummary",
         "type": "object"
@@ -13338,6 +13373,52 @@
           }
         },
         "summary": "Create Kiosk Device Session",
+        "tags": [
+          "kiosk-device"
+        ]
+      }
+    },
+    "/api/v1/kiosk/events": {
+      "get": {
+        "description": "只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。",
+        "operationId": "streamKioskEvents",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Kiosk Events",
         "tags": [
           "kiosk-device"
         ]

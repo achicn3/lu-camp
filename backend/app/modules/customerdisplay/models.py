@@ -66,6 +66,12 @@ class KioskDevice(Base, TimestampMixin):
             name="uq_kiosk_devices_user_installation",
         ),
         UniqueConstraint("id", "store_id", name="uq_kiosk_devices_id_store"),
+        ForeignKeyConstraint(
+            ["displayed_cart_session_id", "store_id"],
+            ["cart_sessions.id", "cart_sessions.store_id"],
+            name="fk_kiosk_devices_displayed_cart_store",
+            use_alter=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -77,6 +83,12 @@ class KioskDevice(Base, TimestampMixin):
         Boolean, default=True, server_default=text("true"), nullable=False
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    displayed_cart_session_id: Mapped[int | None] = mapped_column(index=True)
+    displayed_revision: Mapped[int] = mapped_column(
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
 
 
 class KioskDeviceSession(Base, TimestampMixin):

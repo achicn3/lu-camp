@@ -30,6 +30,7 @@ from app.modules.consignment.router import router as consignment_router
 from app.modules.contacts.router import router as contacts_router
 from app.modules.customerdisplay.router import kiosk_router as customer_display_kiosk_router
 from app.modules.customerdisplay.router import staff_router as customer_display_staff_router
+from app.modules.customerdisplay.scheduler import scheduler_loop as customer_display_scheduler_loop
 from app.modules.einvoice.router import invoices_router as einvoice_invoices_router
 from app.modules.einvoice.router import router as einvoice_router
 from app.modules.inventory.router import router as inventory_router
@@ -76,14 +77,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 掃除容器內殘留的整庫明文 dump（崩潰/中斷留下的 PII 不長期滯留）。
     await sweep_container_plaintext_on_startup()
     stop_event = asyncio.Event()
-    task = asyncio.create_task(scheduler_loop(stop_event), name="backup-scheduler")
+    tasks = (
+        asyncio.create_task(scheduler_loop(stop_event), name="backup-scheduler"),
+        asyncio.create_task(
+            customer_display_scheduler_loop(stop_event),
+            name="customer-display-scheduler",
+        ),
+    )
     try:
         yield
     finally:
         stop_event.set()
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 def create_app() -> FastAPI:

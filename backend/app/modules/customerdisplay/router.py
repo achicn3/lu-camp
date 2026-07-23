@@ -1,8 +1,14 @@
 """客顯裝置 cookie session 與店務端櫃檯配對路由。"""
 
+import asyncio
+import json
+import logging
+import math
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -37,11 +43,15 @@ from app.modules.customerdisplay.service import (
     PairingConflict,
     TerminalNotFound,
 )
+from app.modules.user.router import ThrottleDep
 from app.shared.exceptions import DomainError
 
 KIOSK_COOKIE = "lu_camp_kiosk_session"
 KIOSK_COOKIE_PATH = "/api/v1/kiosk"
 KIOSK_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
+SSE_HEARTBEAT_SECONDS = 15
+SSE_POLL_SECONDS = 1
+_security_log = logging.getLogger("app.security")
 
 staff_router = APIRouter(prefix="/customer-display", tags=["customer-display"])
 kiosk_router = APIRouter(prefix="/kiosk", tags=["kiosk-device"])
@@ -93,6 +103,11 @@ async def require_kiosk_csrf(
 KioskMutationDep = Annotated[DevicePrincipal, Depends(require_kiosk_csrf)]
 
 
+def _sse_event(event: str, data: dict[str, object], *, event_id: str) -> str:
+    payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"id: {event_id}\nevent: {event}\ndata: {payload}\n\n"
+
+
 def _terminal_summary(terminal: PosTerminal | None) -> TerminalSummary | None:
     if terminal is None:
         return None
@@ -105,7 +120,16 @@ def _terminal_read(terminal: PosTerminal, device: KioskDevice | None) -> Termina
         installation_id=terminal.installation_id,
         name=terminal.name,
         paired_kiosk=(
-            KioskSummary(id=device.id, label=device.label) if device is not None else None
+            KioskSummary(
+                id=device.id,
+                label=device.label,
+                online=CustomerDisplayService.kiosk_is_online(device),
+                last_seen_at=device.last_seen_at,
+                current_session_id=device.displayed_cart_session_id,
+                displayed_revision=device.displayed_revision,
+            )
+            if device is not None
+            else None
         ),
     )
 
@@ -135,8 +159,23 @@ async def create_kiosk_device_session(
     request: Request,
     response: Response,
     session: SessionDep,
+    throttle: ThrottleDep,
 ) -> KioskDeviceSessionRead:
     _require_trusted_origin(request)
+    ip = request.client.host if request.client is not None else "unknown"
+    retry_after = throttle.retry_after(body.username, ip)
+    if retry_after is not None:
+        _security_log.warning(
+            "kiosk login throttled username=%s ip=%s retry_after=%.0f",
+            body.username,
+            ip,
+            retry_after,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="嘗試次數過多，請稍後再試",
+            headers={"Retry-After": str(math.ceil(retry_after))},
+        )
     service = CustomerDisplayService(session)
     try:
         result = await service.create_device_session(
@@ -147,7 +186,10 @@ async def create_kiosk_device_session(
         )
     except InvalidKioskCredentials as exc:
         await session.rollback()
+        throttle.record_failure(body.username, ip)
+        _security_log.warning("kiosk login failed username=%s ip=%s", body.username, ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    throttle.record_success(body.username, ip)
     response.set_cookie(
         KIOSK_COOKIE,
         result.raw_session_token,
@@ -183,6 +225,52 @@ async def get_current_kiosk_cart(
 
 
 @kiosk_router.get(
+    "/events",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"text/event-stream": {}}}},
+    operation_id="streamKioskEvents",
+)
+async def stream_kiosk_events(
+    request: Request,
+    session: SessionDep,
+    principal: KioskPrincipalDep,
+) -> StreamingResponse:
+    """只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。"""
+    _require_trusted_origin(request)
+
+    async def events() -> AsyncIterator[str]:
+        previous: tuple[int | None, int] | None = None
+        heartbeat_elapsed = SSE_HEARTBEAT_SECONDS
+        while not await request.is_disconnected():
+            # 同一長連線持有的 identity map 不可遮蔽別筆交易剛提交的 revision。
+            session.expire_all()
+            cart = await CustomerDisplayService(session).current_cart_for_device(principal)
+            current = (cart.id, cart.revision) if cart is not None else (None, 0)
+            if current != previous:
+                yield _sse_event(
+                    "state",
+                    {"cart_session_id": current[0], "revision": current[1]},
+                    event_id=f"cart:{current[0] or 0}:{current[1]}",
+                )
+                previous = current
+            if heartbeat_elapsed >= SSE_HEARTBEAT_SECONDS:
+                yield ": heartbeat\n\n"
+                heartbeat_elapsed = 0
+            await asyncio.sleep(SSE_POLL_SECONDS)
+            heartbeat_elapsed += SSE_POLL_SECONDS
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@kiosk_router.get(
     "/device",
     response_model=KioskDeviceRead,
     operation_id="getKioskDevice",
@@ -212,8 +300,15 @@ async def record_kiosk_heartbeat(
     session: SessionDep,
     principal: KioskMutationDep,
 ) -> KioskHeartbeatRead:
-    del body
-    seen = await CustomerDisplayService(session).heartbeat(principal)
+    try:
+        seen = await CustomerDisplayService(session).heartbeat(
+            principal,
+            current_session_id=body.current_session_id,
+            displayed_revision=body.displayed_revision,
+        )
+    except CartSessionConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return KioskHeartbeatRead(online=True, last_seen_at=seen)
 

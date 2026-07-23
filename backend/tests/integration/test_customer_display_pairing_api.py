@@ -18,6 +18,8 @@ from app.core.security import encode_access_token, hash_password
 from app.main import create_app
 from app.modules.store.models import Store
 from app.modules.user.models import User
+from app.modules.user.router import get_login_throttle
+from app.modules.user.throttle import LoginThrottle
 from app.shared.enums import UserRole
 
 ORIGIN = "http://localhost:3000"
@@ -26,11 +28,13 @@ ORIGIN = "http://localhost:3000"
 @pytest_asyncio.fixture
 async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
     app = create_app()
+    throttle = LoginThrottle()
 
     async def _override() -> AsyncGenerator[AsyncSession]:
         yield db_session
 
     app.dependency_overrides[get_session] = _override
+    app.dependency_overrides[get_login_throttle] = lambda: throttle
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
@@ -156,6 +160,29 @@ async def test_kiosk_login_sets_scoped_http_only_cookie_and_returns_pairing_code
     # Cookie Path 不涵蓋一般店務 API；沒有 bearer token 時仍須 401。
     general = await client.get("/api/v1/cash-sessions/current")
     assert general.status_code == 401
+
+
+async def test_kiosk_device_login_uses_same_pre_hash_throttle_as_staff_login(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    seeded = await _seed(db_session, suffix="throttle")
+    payload = {
+        "username": seeded.kiosk_username,
+        "password": "wrong-password",
+        "installation_id": "4b842622-f24c-49d4-9df7-d281a1a93854",
+        "label": "顧客平板",
+    }
+    for _ in range(5):
+        failed = await client.post("/api/v1/kiosk/device-sessions", json=payload)
+        assert failed.status_code == 401
+
+    blocked = await client.post(
+        "/api/v1/kiosk/device-sessions",
+        json={**payload, "password": seeded.kiosk_password},
+    )
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) > 0
 
 
 async def test_kiosk_mutation_requires_trusted_origin_and_session_csrf(

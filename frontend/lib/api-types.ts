@@ -1187,6 +1187,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/kiosk/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Kiosk Events
+         * @description 只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。
+         */
+        get: operations["streamKioskEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/kiosk/heartbeat": {
         parameters: {
             query?: never;
@@ -3993,10 +4013,18 @@ export interface components {
         };
         /** KioskSummary */
         KioskSummary: {
+            /** Current Session Id */
+            current_session_id: number | null;
+            /** Displayed Revision */
+            displayed_revision: number;
             /** Id */
             id: number;
             /** Label */
             label: string;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /** Online */
+            online: boolean;
         };
         /**
          * KioskTaskRead
@@ -7897,6 +7925,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KioskDeviceSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    streamKioskEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
                 };
             };
             /** @description Validation Error */

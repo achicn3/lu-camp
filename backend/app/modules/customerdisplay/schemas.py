@@ -20,6 +20,10 @@ class KioskDeviceLoginRequest(BaseModel):
 class KioskSummary(BaseModel):
     id: int
     label: str
+    online: bool
+    last_seen_at: datetime | None
+    current_session_id: int | None
+    displayed_revision: int
 
 
 class TerminalSummary(BaseModel):

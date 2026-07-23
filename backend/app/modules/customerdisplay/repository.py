@@ -233,3 +233,40 @@ class CustomerDisplayRepository:
             )
         )
         return result
+
+    async def get_active_cart_for_device_by_id(
+        self,
+        store_id: int,
+        device_id: int,
+        cart_session_id: int,
+    ) -> CartSession | None:
+        result: CartSession | None = await self._session.scalar(
+            select(CartSession).where(
+                CartSession.id == cart_session_id,
+                CartSession.store_id == store_id,
+                CartSession.kiosk_device_id == device_id,
+                CartSession.status.in_(
+                    (
+                        CartSessionStatus.DRAFT,
+                        CartSessionStatus.FROZEN,
+                        CartSessionStatus.PROCESSING,
+                        CartSessionStatus.PAYMENT_UNCERTAIN,
+                    )
+                ),
+            )
+        )
+        return result
+
+    async def list_expired_draft_carts(
+        self,
+        cutoff: datetime,
+    ) -> list[CartSession]:
+        rows = await self._session.scalars(
+            select(CartSession)
+            .where(
+                CartSession.status == CartSessionStatus.DRAFT,
+                CartSession.last_activity_at <= cutoff,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        return list(rows)

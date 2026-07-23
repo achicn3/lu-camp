@@ -8,6 +8,7 @@
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -21,7 +22,8 @@ from app.core.db import get_session
 from app.core.security import encode_access_token, hash_password
 from app.main import create_app
 from app.modules.contacts.models import Contact
-from app.modules.customerdisplay.models import CartSessionEvent
+from app.modules.customerdisplay.models import CartSession, CartSessionEvent, KioskDevice
+from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -120,7 +122,7 @@ async def _pair(
     seeded: Seeded,
     *,
     suffix: str,
-) -> tuple[int, int]:
+) -> tuple[int, int, str]:
     kiosk_login = await client.post(
         "/api/v1/kiosk/device-sessions",
         json={
@@ -148,7 +150,7 @@ async def _pair(
         json={"pairing_code": kiosk["pairing_code"]},
     )
     assert paired.status_code == 200, paired.text
-    return terminal_id, kiosk["device_id"]
+    return terminal_id, kiosk["device_id"], str(kiosk["csrf_token"])
 
 
 def _cart_payload(
@@ -177,7 +179,7 @@ async def test_first_item_creates_server_priced_cart_visible_only_to_paired_kios
     db_session: AsyncSession,
 ) -> None:
     seeded = await _seed(db_session, "1")
-    terminal_id, kiosk_device_id = await _pair(client, seeded, suffix="1")
+    terminal_id, kiosk_device_id, _ = await _pair(client, seeded, suffix="1")
 
     response = await client.put(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart",
@@ -228,7 +230,7 @@ async def test_revision_rejects_stale_overwrite_but_replays_same_lost_response(
     db_session: AsyncSession,
 ) -> None:
     seeded = await _seed(db_session, "2")
-    terminal_id, _ = await _pair(client, seeded, suffix="2")
+    terminal_id, _, _ = await _pair(client, seeded, suffix="2")
     created = await client.put(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart",
         headers=_auth(seeded.manager_token),
@@ -278,7 +280,7 @@ async def test_cancel_draft_clears_kiosk_and_cannot_be_mutated_again(
     db_session: AsyncSession,
 ) -> None:
     seeded = await _seed(db_session, "3")
-    terminal_id, _ = await _pair(client, seeded, suffix="3")
+    terminal_id, _, _ = await _pair(client, seeded, suffix="3")
     created = await client.put(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart",
         headers=_auth(seeded.manager_token),
@@ -314,7 +316,7 @@ async def test_cart_events_are_database_enforced_append_only(
     db_session: AsyncSession,
 ) -> None:
     seeded = await _seed(db_session, "4")
-    terminal_id, _ = await _pair(client, seeded, suffix="4")
+    terminal_id, _, _ = await _pair(client, seeded, suffix="4")
     created = await client.put(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart",
         headers=_auth(seeded.manager_token),
@@ -339,3 +341,82 @@ async def test_cart_events_are_database_enforced_append_only(
                 delete(CartSessionEvent).where(CartSessionEvent.id == event_id)
             )
             await db_session.flush()
+
+
+async def test_heartbeat_records_exact_displayed_revision_for_terminal_status(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    seeded = await _seed(db_session, "5")
+    terminal_id, device_id, csrf = await _pair(client, seeded, suffix="5")
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=_cart_payload(seeded, qty=1, expected_revision=None),
+    )
+    cart = created.json()
+
+    heartbeat = await client.post(
+        "/api/v1/kiosk/heartbeat",
+        headers={"X-CSRF-Token": csrf},
+        json={"current_session_id": cart["id"], "displayed_revision": 1},
+    )
+    assert heartbeat.status_code == 200, heartbeat.text
+    device = await db_session.get(KioskDevice, device_id)
+    assert device is not None
+    assert device.displayed_cart_session_id == cart["id"]
+    assert device.displayed_revision == 1
+
+    terminal = await client.get(
+        f"/api/v1/customer-display/terminals/{terminal_id}",
+        headers=_auth(seeded.manager_token),
+    )
+    assert terminal.status_code == 200
+    kiosk = terminal.json()["paired_kiosk"]
+    assert kiosk["online"] is True
+    assert kiosk["current_session_id"] == cart["id"]
+    assert kiosk["displayed_revision"] == 1
+
+    impossible = await client.post(
+        "/api/v1/kiosk/heartbeat",
+        headers={"X-CSRF-Token": csrf},
+        json={"current_session_id": cart["id"], "displayed_revision": 99},
+    )
+    assert impossible.status_code == 409
+
+
+async def test_draft_cart_expiry_thaws_terminal_and_emits_clear_event(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    seeded = await _seed(db_session, "6")
+    terminal_id, _, _ = await _pair(client, seeded, suffix="6")
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=_cart_payload(seeded, qty=1, expected_revision=None),
+    )
+    cart_id = created.json()["id"]
+    stale_at = datetime.now(UTC) - timedelta(minutes=31)
+    await db_session.execute(
+        update(CartSession).where(CartSession.id == cart_id).values(last_activity_at=stale_at)
+    )
+    await db_session.flush()
+
+    expired = await CustomerDisplayService(db_session).sweep_expired_carts(now=datetime.now(UTC))
+    assert expired == 1
+    row = await db_session.get(CartSession, cart_id)
+    assert row is not None
+    assert row.status.value == "EXPIRED"
+    event = await db_session.scalar(
+        select(CartSessionEvent)
+        .where(CartSessionEvent.cart_session_id == cart_id)
+        .order_by(CartSessionEvent.revision.desc())
+    )
+    assert event is not None
+    assert event.event_type == "CART_EXPIRED"
+    assert event.payload["reason"] == "DRAFT_IDLE_TTL"
+
+    cleared = await client.get("/api/v1/kiosk/cart/current")
+    assert cleared.status_code == 200
+    assert cleared.json() is None
