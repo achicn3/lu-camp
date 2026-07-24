@@ -225,6 +225,130 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(drawerCalls).toBe(1));
   });
 
+  it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
+    let currentCart: Record<string, unknown> | null = null;
+    let beginBody = "";
+    let saleBody = "";
+    const snapshot = {
+      content_version: "cart-v1",
+      items: [
+        {
+          item_key: "SERIALIZED:TENT1",
+          line_type: "SERIALIZED",
+          name: "雙人帳篷(測試)",
+          qty: 1,
+          unit_price: "1800",
+          original_unit_price: null,
+          discount_amount: "0",
+          line_total: "1800",
+        },
+      ],
+      total: "1800",
+      discount_total: "0",
+      campaign_name: null,
+      member: null,
+      tenders: [{ tender_type: "CASH", amount: "1800" }],
+    };
+    const staffCart = (status: "DRAFT" | "PROCESSING", revision: number) => ({
+      id: 31,
+      status,
+      revision,
+      pos_terminal_id: 9,
+      kiosk_device_id: 8,
+      snapshot,
+      changes: [],
+      created_at: "2026-07-24T10:00:00Z",
+      updated_at: "2026-07-24T10:00:01Z",
+      buyer_contact_id: null,
+      active_signature_task_id: null,
+      payment_order_id: null,
+      payment_uncertain_at: null,
+      payment_uncertain_reason: null,
+      sale_id: null,
+    });
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST") {
+        return json(
+          {
+            id: 9,
+            installation_id: "10000000-0000-4000-8000-000000000009",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          },
+          201,
+        );
+      }
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") {
+        return json(currentCart);
+      }
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") {
+        currentCart = staffCart("DRAFT", 1);
+        return json(currentCart);
+      }
+      if (url.endsWith("/terminals/9/cart/begin-checkout") && method === "POST") {
+        beginBody = body;
+        currentCart = staffCart("PROCESSING", 2);
+        return json(currentCart);
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleBody = body;
+        return json(
+          {
+            id: 32,
+            store_id: 1,
+            total: "1800",
+            payment_method: "CASH",
+            invoice_status: "NOT_ISSUED",
+            lines: [],
+            tenders: [],
+          },
+          201,
+        );
+      }
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(
+      await screen.findByLabelText("掃描或輸入商品條碼"),
+      "TENT1{Enter}",
+    );
+    await waitFor(() => expect(screen.getByText("購物車版本 1")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+    expect(JSON.parse(beginBody)).toEqual({
+      expected_revision: 1,
+      signature_task_id: null,
+    });
+    expect(JSON.parse(saleBody).cart_revision).toBe(2);
+    expect(JSON.parse(saleBody).cart_session_id).toBe(31);
+  });
+
   it("LINE Pay 結帳成功：完成卡片與列印對話框明確顯示已收款", async () => {
     const linePaySettings = {
       ...SETTINGS,
@@ -316,6 +440,182 @@ describe("/pos 結帳頁", () => {
     expect(screen.getByText("現金", { selector: ".pos-mixed-method" })).toBeTruthy();
     expect(screen.getByText("LINE Pay", { selector: ".pos-mixed-method" })).toBeTruthy();
     expect(screen.getByText("台灣Pay", { selector: ".pos-mixed-method" })).toBeTruthy();
+  });
+
+  it("購物金簽完但未成交時仍可撤回，舊任務作廢後購物車回到可修改", async () => {
+    const member = {
+      id: 7,
+      store_id: 1,
+      name: "林測試",
+      phone: "0900000000",
+      roles: ["MEMBER"],
+      member_points: 0,
+      national_id_masked: null,
+    };
+    const snapshot = {
+      content_version: "cart-v1",
+      items: [
+        {
+          item_key: "SERIALIZED:TENT1",
+          line_type: "SERIALIZED",
+          name: TENT.name,
+          qty: 1,
+          unit_price: "1800",
+          original_unit_price: null,
+          discount_amount: "0",
+          line_total: "1800",
+        },
+      ],
+      total: "1800",
+      discount_total: "0",
+      campaign_name: null,
+      member: { display_name: "林○試" },
+      tenders: [
+        { tender_type: "STORE_CREDIT", amount: "300" },
+        { tender_type: "CASH", amount: "1500" },
+      ],
+    };
+    let revision = 1;
+    let cartStatus: "DRAFT" | "FROZEN" = "DRAFT";
+    let cartExists = false;
+    let cartBuyer: number | null = null;
+    let cancelled = false;
+    const cart = () => ({
+      id: 31,
+      status: cartStatus,
+      revision,
+      pos_terminal_id: 9,
+      kiosk_device_id: 8,
+      snapshot,
+      changes: [],
+      created_at: "2026-07-24T10:00:00Z",
+      updated_at: "2026-07-24T10:00:01Z",
+      buyer_contact_id: cartBuyer,
+      active_signature_task_id: cartStatus === "FROZEN" ? 88 : null,
+      payment_order_id: null,
+      payment_uncertain_at: null,
+      payment_uncertain_reason: null,
+      sale_id: null,
+    });
+    stubFetch((url, method, body) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.includes("/contacts/7/store-credit")) {
+        return json({ contact_id: 7, balance: "5000" });
+      }
+      if (url.includes("/api/v1/contacts") && method === "GET") {
+        return json([member]);
+      }
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (
+        url.endsWith("/api/v1/customer-display/terminals") &&
+        method === "POST"
+      ) {
+        return json(
+          {
+            id: 9,
+            installation_id: "10000000-0000-4000-8000-000000000009",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: 31,
+              displayed_revision: revision,
+            },
+          },
+          201,
+        );
+      }
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") {
+        return json(cartExists ? cart() : null);
+      }
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") {
+        const payload = JSON.parse(body) as { buyer_contact_id: number | null };
+        cartExists = true;
+        cartBuyer = payload.buyer_contact_id;
+        revision += 1;
+        return json(cart());
+      }
+      if (
+        url.endsWith("/terminals/9/cart/freeze-for-signature") &&
+        method === "POST"
+      ) {
+        cartStatus = "FROZEN";
+        revision += 1;
+        return json({
+          cart: cart(),
+          signature_task_id: 88,
+          signature_status: "PENDING",
+          expires_at: "2026-07-24T10:05:00Z",
+        });
+      }
+      if (url.endsWith("/api/v1/signing/tasks/88") && method === "GET") {
+        return json({
+          id: 88,
+          kind: "STORE_CREDIT_USE",
+          status: "SIGNED",
+          content: {
+            total: "1800",
+            store_credit_amount: "300",
+            store_credit_balance_before: "5000",
+            store_credit_balance_after: "4700",
+          },
+        });
+      }
+      if (
+        url.endsWith("/api/v1/signing/tasks/88/cancel") &&
+        method === "POST"
+      ) {
+        cancelled = true;
+        cartStatus = "DRAFT";
+        revision += 1;
+        return json({ id: 88, status: "VOIDED" });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByLabelText("掃描或輸入商品條碼"),
+      "TENT1{Enter}",
+    );
+    await user.type(screen.getByPlaceholderText("姓名或電話"), member.phone);
+    await user.click(screen.getByRole("button", { name: "查詢會員" }));
+    await user.click(await screen.findByRole("button", { name: /林測試/ }));
+    await user.click(screen.getByText("購物金＋其他付款"));
+    await user.type(screen.getByLabelText("本次使用購物金"), "300");
+
+    const push = await screen.findByRole("button", {
+      name: "送至手持裝置簽署",
+    });
+    await waitFor(() => expect(push).toHaveProperty("disabled", false));
+    await user.click(push);
+
+    expect(
+      await screen.findByText(/客人已完成簽署（折抵/),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "撤回簽署並修改" }),
+    );
+    await waitFor(() => expect(cancelled).toBe(true));
+    expect(
+      await screen.findByRole("button", { name: "送至手持裝置簽署" }),
+    ).toBeTruthy();
   });
 
   it("活動生效：總額顯示折後、結帳送折後收款、明細送印帶折扣與活動（docs/21 C2b）", async () => {

@@ -922,6 +922,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Begin Checkout */
+        post: operations["beginCustomerDisplayCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
         parameters: {
             query?: never;
@@ -950,6 +967,40 @@ export interface paths {
         get: operations["getCurrentCustomerDisplayCart"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Freeze Cart For Signature */
+        post: operations["freezeCustomerDisplayCartForSignature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Cart Payment */
+        post: operations["reconcileCustomerDisplayPayment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1250,7 +1301,7 @@ export interface paths {
         };
         /**
          * Get Current Kiosk Task
-         * @description 手持端輪詢：最新待簽任務；無任務回 null（前端顯示待機畫面）。
+         * @description 只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。
          */
         get: operations["getCurrentKioskTask"];
         put?: never;
@@ -1272,11 +1323,45 @@ export interface paths {
          * Get Kiosk Task
          * @description 手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
          *
-         *     僅限 PENDING：已簽/已作廢/不存在一律 404——手持裝置不得憑 ID 枚舉歷史內容快照。
+         *     僅限此裝置目前的活動任務；終態/逾時/不存在一律 404，不能憑 ID 枚舉歷史內容。
          */
         get: operations["getKioskTask"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Kiosk Task */
+        post: operations["acknowledgeKioskTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Kiosk Task Activity */
+        post: operations["recordKioskTaskActivity"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1980,6 +2065,23 @@ export interface paths {
         };
         /** Premium Rate History */
         get: operations["getPremiumRateHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signing/retention-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signature Retention Report */
+        get: operations["getSignatureRetentionReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2719,6 +2821,13 @@ export interface components {
          * @enum {string}
          */
         CampaignStatus: "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED";
+        /** CartBeginCheckoutRequest */
+        CartBeginCheckoutRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Signature Task Id */
+            signature_task_id?: number | null;
+        };
         /** CartCancelRequest */
         CartCancelRequest: {
             /** Expected Revision */
@@ -2738,6 +2847,23 @@ export interface components {
             to_qty?: number | null;
             /** Type */
             type: string;
+        };
+        /** CartFreezeRead */
+        CartFreezeRead: {
+            cart: components["schemas"]["StaffCartSessionRead"];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            signature_status: components["schemas"]["SignatureTaskStatus"];
+            /** Signature Task Id */
+            signature_task_id: number;
+        };
+        /** CartFreezeRequest */
+        CartFreezeRequest: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** CartItemRead */
         CartItemRead: {
@@ -3949,6 +4075,30 @@ export interface components {
             /** Phone */
             phone: string | null;
         };
+        /** KioskActivityRequest */
+        KioskActivityRequest: {
+            /** Activity */
+            activity: string;
+        };
+        /**
+         * KioskCartSessionRead
+         * @description 客顯渲染所需最小購物車視圖；不暴露櫃檯／裝置內部識別。
+         */
+        KioskCartSessionRead: {
+            /** Changes */
+            changes: components["schemas"]["CartChangeRead"][];
+            /** Id */
+            id: number;
+            /** Revision */
+            revision: number;
+            snapshot: components["schemas"]["CartSnapshotRead"];
+            status: components["schemas"]["CartSessionStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** KioskDeviceLoginRequest */
         KioskDeviceLoginRequest: {
             /** Installation Id */
@@ -4028,49 +4178,24 @@ export interface components {
         };
         /**
          * KioskTaskRead
-         * @description 手持端任務視圖：AFFIDAVIT 任務附上切結書全文（客人簽的就是這份）。
+         * @description 客顯最小任務視圖；不送店別、會員主鍵、來源單據或歷史綁定資訊。
          */
         KioskTaskRead: {
             /** Agreement Body */
             agreement_body: string | null;
             /** Agreement Title */
             agreement_title: string | null;
-            /** Agreement Version */
-            agreement_version: number | null;
-            /** Bound Acquisition Id */
-            bound_acquisition_id?: number | null;
-            /** Bound Sale Id */
-            bound_sale_id?: number | null;
-            /** Cancelled At */
-            cancelled_at: string | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
-            /** Contact Id */
-            contact_id: number;
             /** Content */
             content: {
                 [key: string]: unknown;
             };
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Has Signature */
-            has_signature: boolean;
+            /** Expires At */
+            expires_at: string | null;
             /** Id */
             id: number;
             kind: components["schemas"]["SignatureTaskKind"];
-            /** Ref Id */
-            ref_id: number | null;
-            /** Ref Type */
-            ref_type: string | null;
-            /** Signed At */
-            signed_at: string | null;
-            /** Signer Name */
-            signer_name?: string | null;
             status: components["schemas"]["SignatureTaskStatus"];
-            /** Store Id */
-            store_id: number;
         };
         /**
          * LiabilityReport
@@ -4400,6 +4525,29 @@ export interface components {
             method: string;
             /** Received */
             received: string;
+        };
+        /** PaymentReconciliationRead */
+        PaymentReconciliationRead: {
+            cart: components["schemas"]["StaffCartSessionRead"];
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "SUCCESS_CONFIRMED" | "FAILED_CONFIRMED" | "STILL_UNCERTAIN";
+        };
+        /** PaymentReconciliationRequest */
+        PaymentReconciliationRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "QUERY_PROVIDER" | "MANUAL_SUCCESS" | "MANUAL_FAILED";
+            /** Evidence Reference */
+            evidence_reference?: string | null;
+            /** Evidence Type */
+            evidence_type?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * PayoutMethod
@@ -4795,6 +4943,10 @@ export interface components {
         SaleCreateRequest: {
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
+            /** Cart Revision */
+            cart_revision?: number | null;
+            /** Cart Session Id */
+            cart_session_id?: number | null;
             /** Expected Einvoice Enabled */
             expected_einvoice_enabled?: boolean | null;
             invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
@@ -5233,6 +5385,10 @@ export interface components {
             require_acquisition_affidavit: boolean;
             /** Require Store Credit Signing */
             require_store_credit_signing: boolean;
+            /** Signature Cleanup Enforcement Mode */
+            signature_cleanup_enforcement_mode: string;
+            /** Signature Png Retention Days */
+            signature_png_retention_days: number;
             /** Store Credit Engine Params */
             store_credit_engine_params: {
                 [key: string]: unknown;
@@ -5288,6 +5444,10 @@ export interface components {
             require_acquisition_affidavit?: boolean | null;
             /** Require Store Credit Signing */
             require_store_credit_signing?: boolean | null;
+            /** Signature Cleanup Enforcement Mode */
+            signature_cleanup_enforcement_mode?: "REPORT_ONLY" | null;
+            /** Signature Png Retention Days */
+            signature_png_retention_days?: number | null;
             /** Store Credit Engine Params */
             store_credit_engine_params?: {
                 [key: string]: unknown;
@@ -5298,6 +5458,29 @@ export interface components {
             taiwanpay_fee_pct?: number | string | null;
             /** Tax Rate */
             tax_rate?: number | string | null;
+        };
+        /** SignatureRetentionReportItem */
+        SignatureRetentionReportItem: {
+            kind: components["schemas"]["SignatureTaskKind"];
+            /**
+             * Reported At
+             * Format: date-time
+             */
+            reported_at: string;
+            /**
+             * Retention Until
+             * Format: date-time
+             */
+            retention_until: string;
+            /** Signature Png Retained */
+            signature_png_retained: boolean;
+            /**
+             * Signed At
+             * Format: date-time
+             */
+            signed_at: string;
+            /** Task Id */
+            task_id: number;
         };
         /** SignatureTaskCreate */
         SignatureTaskCreate: {
@@ -5312,6 +5495,8 @@ export interface components {
             ref_id?: number | null;
             /** Ref Type */
             ref_type?: string | null;
+            /** Terminal Id */
+            terminal_id?: number | null;
         };
         /**
          * SignatureTaskKind
@@ -5331,9 +5516,9 @@ export interface components {
             bound_acquisition_id?: number | null;
             /** Bound Sale Id */
             bound_sale_id?: number | null;
-            /** Cancelled At */
-            cancelled_at: string | null;
             chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** Consumed At */
+            consumed_at: string | null;
             /** Contact Id */
             contact_id: number;
             /** Content */
@@ -5345,6 +5530,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Expired At */
+            expired_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Failed At */
+            failed_at: string | null;
             /** Has Signature */
             has_signature: boolean;
             /** Id */
@@ -5361,20 +5552,36 @@ export interface components {
             status: components["schemas"]["SignatureTaskStatus"];
             /** Store Id */
             store_id: number;
+            /** Voided At */
+            voided_at: string | null;
         };
         /**
          * SignatureTaskStatus
-         * @description 簽署任務狀態機：PENDING → SIGNED / CANCELLED。
-         *
-         *     無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。
+         * @description 簽署任務完整狀態機；SIGNED 不是完成，必須再被單據單次 CONSUMED。
          * @enum {string}
          */
-        SignatureTaskStatus: "PENDING" | "SIGNED" | "CANCELLED";
+        SignatureTaskStatus: "PENDING" | "SIGNING" | "SIGNED" | "CONSUMED" | "VOIDED" | "EXPIRED" | "FAILED";
+        /** SignatureTaskVoidRequest */
+        SignatureTaskVoidRequest: {
+            /**
+             * Reason
+             * @default 店員撤回簽署
+             */
+            reason: string;
+            /**
+             * Reason Code
+             * @default STAFF_WITHDRAWN
+             * @enum {string}
+             */
+            reason_code: "STAFF_WITHDRAWN" | "CONTENT_CHANGED" | "KIOSK_FAILURE_CASH_FALLBACK" | "OTHER";
+        };
         /**
          * StaffCartSessionRead
          * @description POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。
          */
         StaffCartSessionRead: {
+            /** Active Signature Task Id */
+            active_signature_task_id: number | null;
             /** Buyer Contact Id */
             buyer_contact_id: number | null;
             /** Changes */
@@ -5388,10 +5595,18 @@ export interface components {
             id: number;
             /** Kiosk Device Id */
             kiosk_device_id: number;
+            /** Payment Order Id */
+            payment_order_id: string | null;
+            /** Payment Uncertain At */
+            payment_uncertain_at: string | null;
+            /** Payment Uncertain Reason */
+            payment_uncertain_reason: string | null;
             /** Pos Terminal Id */
             pos_terminal_id: number;
             /** Revision */
             revision: number;
+            /** Sale Id */
+            sale_id: number | null;
             snapshot: components["schemas"]["CartSnapshotRead"];
             status: components["schemas"]["CartSessionStatus"];
             /**
@@ -7525,6 +7740,41 @@ export interface operations {
             };
         };
     };
+    beginCustomerDisplayCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartBeginCheckoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffCartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cancelCustomerDisplayCart: {
         parameters: {
             query?: never;
@@ -7578,6 +7828,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StaffCartSessionRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    freezeCustomerDisplayCartForSignature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartFreezeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartFreezeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcileCustomerDisplayPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentReconciliationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliationRead"];
                 };
             };
             /** @description Validation Error */
@@ -7890,7 +8210,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CartSessionRead"] | null;
+                    "application/json": components["schemas"]["KioskCartSessionRead"] | null;
                 };
             };
             /** @description Validation Error */
@@ -8074,7 +8394,9 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -8087,6 +8409,15 @@ export interface operations {
                     "application/json": components["schemas"]["KioskTaskRead"] | null;
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     getKioskTask: {
@@ -8096,9 +8427,85 @@ export interface operations {
             path: {
                 task_id: number;
             };
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledgeKioskTask: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                task_id: number;
+            };
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordKioskTaskActivity: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                task_id: number;
+            };
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KioskActivityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8123,11 +8530,15 @@ export interface operations {
     signKioskTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
             path: {
                 task_id: number;
             };
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody: {
             content: {
@@ -9519,6 +9930,37 @@ export interface operations {
             };
         };
     };
+    getSignatureRetentionReport: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignatureRetentionReportItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listSignatureTasks: {
         parameters: {
             query?: {
@@ -9627,7 +10069,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SignatureTaskVoidRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
+import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -527,6 +528,19 @@ export default function SalesPage() {
   const pushAck = useMutation({
     mutationFn: async (sale: SaleSummary) => {
       if (sale.buyer_contact_id == null) throw new Error("此單無買方會員，無法推送簽收");
+      const terminalResponse = await api.POST("/api/v1/customer-display/terminals", {
+        body: {
+          installation_id: terminalInstallationId(),
+          name: "主要櫃檯",
+        },
+      });
+      const terminal = terminalResponse.data;
+      if (!terminal?.paired_kiosk) {
+        throw new Error("請先將此 POS 櫃檯與顧客顯示裝置配對");
+      }
+      if (!terminal.paired_kiosk.online) {
+        throw new Error("顧客顯示裝置目前離線，無法推送交易簽收");
+      }
       // content 由後端以銷售單為準重建（單號/總額/時間），客端不提供（Codex K5 第三輪：
       // 簽收證據不可由客端敘述）。
       const { data, error } = await api.POST("/api/v1/signing/tasks", {
@@ -534,6 +548,7 @@ export default function SalesPage() {
           kind: "TRANSACTION_ACK",
           contact_id: sale.buyer_contact_id,
           content: {},
+          terminal_id: terminal.id,
           ref_type: "sale",
           ref_id: sale.id,
         },

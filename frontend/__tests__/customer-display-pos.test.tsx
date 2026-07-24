@@ -32,6 +32,18 @@ function wrapper() {
   return Wrapper;
 }
 
+function wrapperWithClient() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+  }
+  return { client, Wrapper };
+}
+
 const LINE: SaleLine = {
   line_type: "CATALOG",
   item_code: null,
@@ -168,5 +180,108 @@ describe("POS 客顯同步", () => {
       buyer_contact_id: null,
       tenders: TENDERS,
     });
+  });
+
+  it("外部撤回解凍帶回較新 revision 後，下一次同步使用新的 CAS 基準", async () => {
+    const putBodies: Record<string, unknown>[] = [];
+    let responseRevision = 1;
+    const serverCart = (revision: number) => ({
+      id: 21,
+      status: "DRAFT",
+      revision,
+      pos_terminal_id: 3,
+      kiosk_device_id: 8,
+      snapshot: {
+        content_version: "cart-v1",
+        items: [],
+        total: "240",
+        discount_total: "0",
+        campaign_name: null,
+        member: null,
+        tenders: TENDERS,
+      },
+      changes: [],
+      created_at: "2026-07-24T10:00:00Z",
+      updated_at: "2026-07-24T10:00:00Z",
+      buyer_contact_id: null,
+      active_signature_task_id: null,
+      payment_order_id: null,
+      payment_uncertain_at: null,
+      payment_uncertain_reason: null,
+      sale_id: null,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (
+          request.url.endsWith("/api/v1/customer-display/terminals") &&
+          request.method === "POST"
+        ) {
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          });
+        }
+        if (request.url.endsWith("/terminals/3/cart/current")) return json(null);
+        if (
+          request.url.endsWith("/terminals/3/cart") &&
+          request.method === "PUT"
+        ) {
+          putBodies.push(await request.clone().json());
+          return json(serverCart(responseRevision++));
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const { client, Wrapper } = wrapperWithClient();
+    const view = render(
+      <PosCustomerDisplay
+        lines={[]}
+        buyerContactId={null}
+        tenders={[]}
+        ready
+        onRestore={vi.fn()}
+      />,
+      { wrapper: Wrapper },
+    );
+    await screen.findByText(/客顯已連線/);
+    view.rerender(
+      <PosCustomerDisplay
+        lines={[LINE]}
+        buyerContactId={null}
+        tenders={TENDERS}
+        ready
+        onRestore={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(putBodies).toHaveLength(1));
+
+    // 模擬簽署 freeze→cancel 在其他 mutation 中把 revision 從 1 推到 3。
+    client.setQueryData(
+      ["customer-display", "cart", 3],
+      serverCart(3),
+    );
+    await screen.findByText("購物車版本 3");
+    view.rerender(
+      <PosCustomerDisplay
+        lines={[LINE]}
+        buyerContactId={null}
+        tenders={[{ tender_type: "TAIWAN_PAY", amount: "240" }]}
+        ready
+        onRestore={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(putBodies).toHaveLength(2));
+    expect(putBodies[1]).toMatchObject({ expected_revision: 3 });
   });
 });

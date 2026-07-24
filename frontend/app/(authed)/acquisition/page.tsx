@@ -23,6 +23,7 @@ import {
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
 import { isValidNationalId } from "@/features/member/national-id";
+import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
 import { openCashDrawer, printAcquisitionReceipt, printLabel } from "@/lib/agent";
@@ -576,7 +577,7 @@ export default function AcquisitionPage() {
       return response.status === 200 ? (data ?? null) : null;
     },
   });
-  // 手持切結任務狀態輪詢（PENDING 時每 2 秒；SIGNED/CANCELLED 停）。
+  // 手持切結任務狀態輪詢（等待客顯 ACK／簽署時每 2 秒；終態停）。
   // 完成收購時的簽署快照（K6 憑證聯列印用）：**全部取自已簽切結內容與簽署時間**（後端
   // 綁定驗證過的不可變值）——不用活的 UI 狀態/列印當下讀值，證據欄位不隨時間漂移
   //（Codex K6 第一輪）。
@@ -592,7 +593,10 @@ export default function AcquisitionPage() {
   const signTask = useQuery({
     queryKey: ["signing-task", signTaskId],
     enabled: signTaskId != null,
-    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 2000 : false),
+    refetchInterval: (q) =>
+      q.state.data?.status === "PENDING" || q.state.data?.status === "SIGNING"
+        ? 2000
+        : false,
     queryFn: async () => {
       if (signTaskId == null) return null;
       const { data } = await api.GET("/api/v1/signing/tasks/{task_id}", {
@@ -602,6 +606,10 @@ export default function AcquisitionPage() {
     },
   });
   const signed = signTask.data?.status === "SIGNED";
+  const signTaskEnded =
+    signTask.data?.status === "VOIDED" ||
+    signTask.data?.status === "EXPIRED" ||
+    signTask.data?.status === "FAILED";
   const signedPayout = signTask.data?.chosen_payout ?? null;
 
   const isConsignment = type === "CONSIGNMENT";
@@ -807,8 +815,6 @@ export default function AcquisitionPage() {
         ? [{ name: lot.name || "散裝批", amount: String(payable) }]
         : rows.map((r) => ({ name: r.name || "品項", amount: String(parseNtd(r.acquisitionCost) ?? 0) }));
       const content: Record<string, unknown> = {
-        seller_name: seller.name,
-        phone: seller.phone,
         items,
         total: String(payable),
       };
@@ -820,11 +826,25 @@ export default function AcquisitionPage() {
           acquisition_basis: lot.acquisitionBasis,
         };
       }
+      const terminalResponse = await api.POST("/api/v1/customer-display/terminals", {
+        body: {
+          installation_id: terminalInstallationId(),
+          name: "主要櫃檯",
+        },
+      });
+      const terminal = terminalResponse.data;
+      if (!terminal?.paired_kiosk) {
+        throw new Error("請先將此 POS 櫃檯與顧客顯示裝置配對");
+      }
+      if (!terminal.paired_kiosk.online) {
+        throw new Error("顧客顯示裝置目前離線，無法進行收購簽署");
+      }
       const { data, error } = await api.POST("/api/v1/signing/tasks", {
         body: {
           kind: "ACQUISITION_AFFIDAVIT",
           contact_id: seller.id,
           content,
+          terminal_id: terminal.id,
           ref_type: "acquisition",
         },
       });
@@ -842,15 +862,19 @@ export default function AcquisitionPage() {
       if (signTaskId == null) return;
       const { response } = await api.POST("/api/v1/signing/tasks/{task_id}/cancel", {
         params: { path: { task_id: signTaskId } },
+        body: {
+          reason_code: "CONTENT_CHANGED",
+          reason: "撤回收購簽署並修改鑑價內容",
+        },
       });
-      // 非 2xx（如客人剛好已簽 → 409）不可視為取消成功而清除綁定（Codex K4 high）：
-      // 重新輪詢取回最新狀態（可能已 SIGNED），保留 signTaskId，令送出仍須帶已簽切結。
+      // 非 2xx 不可視為取消成功而清除綁定：SIGNED 在成交前可依規格作廢；
+      // 只有 CONSUMED 等終態會拒絕，屆時重新輪詢並保留 signTaskId。
       if (!response.ok) {
         await signTask.refetch();
-        throw new Error("此簽署已完成或無法取消，請確認手持裝置狀態");
+        throw new Error("此簽署已進入不可撤回狀態，請確認收購是否已成立");
       }
     },
-    onSuccess: () => setSignTaskId(null), // 僅確認 CANCELLED（2xx）才解除綁定
+    onSuccess: () => setSignTaskId(null), // 僅確認 VOIDED（2xx）才解除綁定
     onError: (e: Error) => setErrors([e.message]),
   });
 
@@ -881,6 +905,15 @@ export default function AcquisitionPage() {
     <section className="acq">
       <h1 className="page-title">收購鑑價入庫</h1>
 
+      <fieldset
+        className="acq-signature-lock"
+        disabled={signTaskId !== null && !signTaskEnded}
+      >
+        {signTaskId !== null && !signTaskEnded && (
+          <p className="hint" aria-live="polite">
+            簽署任務進行中，鑑價內容已凍結；如需修改請先撤回簽署。
+          </p>
+        )}
       <div className="acq-types" role="tablist">
         {(["BUYOUT", "CONSIGNMENT", "BULK_LOT"] as AcqType[]).map((t) => (
           <button
@@ -974,6 +1007,7 @@ export default function AcquisitionPage() {
           )}
         </div>
       )}
+      </fieldset>
 
       {/* 手持切結（docs/23 K4）：BUYOUT/BULK_LOT 可送至手持裝置請客人確認切結＋撥款＋簽名 */}
       {!isConsignment && (
@@ -988,18 +1022,49 @@ export default function AcquisitionPage() {
             >
               送至手持裝置簽署
             </button>
-          ) : signed ? (
-            <p className="form-success">✓ 客人已完成簽署，可送出收購。</p>
-          ) : (
+          ) : signTaskEnded ? (
             <div className="acq-sign-wait">
-              <p>已送至手持裝置，等待客人確認並簽署…</p>
+              <p role="alert" className="form-error">
+                {signTask.data?.status === "EXPIRED"
+                  ? "簽署任務已逾時，請重新送出。"
+                  : signTask.data?.status === "FAILED"
+                    ? "此簽署已標記失敗，重試必須重新簽署。"
+                    : "簽署已撤回。"}
+              </p>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setSignTaskId(null)}
+              >
+                建立新簽署
+              </button>
+            </div>
+          ) : signed ? (
+            <div className="acq-sign-wait">
+              <p className="form-success">✓ 客人已完成簽署，可送出收購。</p>
               <button
                 type="button"
                 className="btn-ghost"
                 disabled={cancelSign.isPending}
                 onClick={() => cancelSign.mutate()}
               >
-                取消／重新推送
+                撤回簽署並修改
+              </button>
+            </div>
+          ) : (
+            <div className="acq-sign-wait">
+              <p>
+                {signTask.data?.status === "SIGNING"
+                  ? "客人正在核對內容並簽署…"
+                  : "已送至顧客顯示裝置，等待客人開啟簽署畫面…"}
+              </p>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={cancelSign.isPending}
+                onClick={() => cancelSign.mutate()}
+              >
+                撤回簽署並修改
               </button>
             </div>
           )}

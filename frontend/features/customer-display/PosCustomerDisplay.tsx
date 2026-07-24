@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import type { CartLine } from "@/features/pos/cart";
 import { api } from "@/lib/api";
@@ -12,12 +12,13 @@ import { newIdempotencyKey } from "@/lib/uuid";
 type SaleLine = components["schemas"]["SaleLineCreateRequest"];
 type Tender = components["schemas"]["CartTenderRequest"];
 type StaffCart = components["schemas"]["StaffCartSessionRead"];
+type CartSession = components["schemas"]["CartSessionRead"];
 type CartItem = components["schemas"]["CartItemRead"];
 type Terminal = components["schemas"]["TerminalRead"];
 
 const TERMINAL_INSTALLATION_KEY = "lu-camp.pos-terminal.installation";
 
-function terminalInstallationId(): string {
+export function terminalInstallationId(): string {
   const existing = window.localStorage.getItem(TERMINAL_INSTALLATION_KEY);
   if (existing) return existing;
   const generated = newIdempotencyKey();
@@ -77,6 +78,8 @@ interface PosCustomerDisplayProps {
   tenders: Tender[];
   ready: boolean;
   onRestore: (cart: StaffCart) => void | Promise<void>;
+  onTerminalChange?: (terminal: Terminal | null) => void;
+  onCartChange?: (cart: CartSession | StaffCart | null) => void;
 }
 
 type PendingSync =
@@ -94,6 +97,8 @@ export function PosCustomerDisplay({
   tenders,
   ready,
   onRestore,
+  onTerminalChange,
+  onCartChange,
 }: PosCustomerDisplayProps) {
   const queryClient = useQueryClient();
   const [pairingCode, setPairingCode] = useState("");
@@ -144,6 +149,14 @@ export function PosCustomerDisplay({
   });
 
   useEffect(() => {
+    onTerminalChange?.(terminal.data ?? null);
+  }, [onTerminalChange, terminal.data]);
+
+  useEffect(() => {
+    if (current.isSuccess) onCartChange?.(current.data ?? null);
+  }, [current.data, current.isSuccess, onCartChange]);
+
+  useEffect(() => {
     payload.current = { lines, buyerContactId, tenders };
   }, [buyerContactId, lines, tenders]);
 
@@ -170,7 +183,19 @@ export function PosCustomerDisplay({
     };
   }, [current.data, current.isSuccess, hydrated, onRestore, terminal.data]);
 
-  async function drain(terminalRow: Terminal) {
+  useEffect(() => {
+    if (!hydrated || !current.isSuccess || current.data == null) return;
+    // freeze / cancel / begin-checkout 由 POS 頁的其他 mutation 更新同一購物車。current refetch
+    // 讀到較新 revision 時同步內部 CAS 基準；只接受單調遞增，舊回應不得倒灌覆蓋。
+    if (
+      revision.current === null ||
+      current.data.revision > revision.current
+    ) {
+      revision.current = current.data.revision;
+    }
+  }, [current.data, current.isSuccess, hydrated]);
+
+  const drain = useCallback(async (terminalRow: Terminal) => {
     if (draining.current) return;
     draining.current = true;
     try {
@@ -199,6 +224,7 @@ export function PosCustomerDisplay({
           }
           revision.current = data.revision;
           setSyncedRevision(data.revision);
+          onCartChange?.(data);
         } else if (revision.current !== null) {
           const { data } = await api.POST(
             "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel",
@@ -213,6 +239,7 @@ export function PosCustomerDisplay({
           if (!data) throw new Error("客顯清場失敗，請重新整理 POS。");
           revision.current = null;
           setSyncedRevision(null);
+          onCartChange?.(null);
         }
         setSyncError(null);
       }
@@ -222,7 +249,7 @@ export function PosCustomerDisplay({
     } finally {
       draining.current = false;
     }
-  }
+  }, [onCartChange]);
 
   useEffect(() => {
     const terminalRow = terminal.data;
@@ -250,6 +277,7 @@ export function PosCustomerDisplay({
     return () => window.clearTimeout(timer);
   }, [
     buyerContactId,
+    drain,
     hydrated,
     payloadFingerprint,
     ready,
@@ -322,12 +350,16 @@ export function PosCustomerDisplay({
     );
   }
   const kiosk = terminal.data.paired_kiosk;
+  const visibleRevision = Math.max(
+    syncedRevision ?? 0,
+    current.data?.revision ?? 0,
+  );
   return (
     <div className={`pos-kiosk-status ${kiosk.online ? "is-online" : "is-warning"}`}>
       <span className="pos-kiosk-dot" aria-hidden />
       <strong>{kiosk.online ? "客顯已連線" : "客顯離線"}</strong>
       <span>{kiosk.label}</span>
-      {syncedRevision !== null && <span>購物車版本 {syncedRevision}</span>}
+      {visibleRevision > 0 && <span>購物車版本 {visibleRevision}</span>}
       {syncError && (
         <span role="alert" className="form-error">
           {syncError}

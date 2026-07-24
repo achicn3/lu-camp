@@ -16,6 +16,7 @@ import { discountDisplay } from "@/features/campaigns/campaigns";
 import {
   PosCustomerDisplay,
   restoreLines,
+  terminalInstallationId,
 } from "@/features/customer-display/PosCustomerDisplay";
 import {
   type CartLine,
@@ -50,6 +51,10 @@ type InvoiceRead = components["schemas"]["InvoiceRead"];
 type ContactRead = components["schemas"]["ContactRead"];
 type CampaignRead = components["schemas"]["CampaignRead"];
 type MenuItemRead = components["schemas"]["MenuItemRead"];
+type TerminalRead = components["schemas"]["TerminalRead"];
+type DisplayCart =
+  | components["schemas"]["CartSessionRead"]
+  | components["schemas"]["StaffCartSessionRead"];
 
 /** 證明聯可印：print_mark 且 Amego 回傳的條碼/QR 內容齊備（docs/24）。 */
 function invoiceProofPrintable(invoice: components["schemas"]["InvoiceRead"]): boolean {
@@ -78,7 +83,13 @@ function Money({ value }: { value: number }) {
 // 一般商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 一般商品 一格通吃。
 const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
 
-function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
+function ScanBar({
+  onResolved,
+  disabled = false,
+}: {
+  onResolved: (line: CartLine) => void;
+  disabled?: boolean;
+}) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
@@ -171,7 +182,7 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
 
   function submit(raw: string) {
     const value = raw.trim();
-    if (!value || mutation.isPending) return;
+    if (!value || mutation.isPending || disabled) return;
     mutation.mutate(value);
   }
 
@@ -205,11 +216,15 @@ function ScanBar({ onResolved }: { onResolved: (line: CartLine) => void }) {
           inputMode="text"
           autoComplete="off"
           placeholder="掃描商品條碼，或手動輸入後按 Enter"
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || disabled}
         />
       </label>
       <span className="hint pos-scan-hint">
-        {mutation.isPending ? "查詢中…" : "掃描後自動加入購物車（免按 Enter）。"}
+        {disabled
+          ? "簽署或付款處理期間，購物車已鎖定。"
+          : mutation.isPending
+            ? "查詢中…"
+            : "掃描後自動加入購物車（免按 Enter）。"}
       </span>
       {error !== null && (
         <p role="alert" className="form-error">
@@ -225,10 +240,12 @@ function MemberPanel({
   member,
   onSelect,
   onClear,
+  disabled = false,
 }: {
   member: ContactRead | null;
   onSelect: (c: ContactRead) => void;
   onClear: () => void;
+  disabled?: boolean;
 }) {
   const [q, setQ] = useState("");
   const search = useMutation({
@@ -273,7 +290,7 @@ function MemberPanel({
             )}
           </div>
         </div>
-        <button type="button" className="btn-ghost" onClick={onClear}>
+        <button type="button" className="btn-ghost" onClick={onClear} disabled={disabled}>
           取消歸戶
         </button>
       </div>
@@ -298,9 +315,14 @@ function MemberPanel({
             onChange={(e) => setQ(e.target.value)}
             placeholder="姓名或電話"
             inputMode="text"
+            disabled={disabled}
           />
         </label>
-        <button type="submit" className="btn-ghost" disabled={search.isPending}>
+        <button
+          type="submit"
+          className="btn-ghost"
+          disabled={search.isPending || disabled}
+        >
           查詢會員
         </button>
       </form>
@@ -320,6 +342,7 @@ function MemberPanel({
                 type="button"
                 className="btn-ghost"
                 onClick={() => onSelect(c)}
+                disabled={disabled}
               >
                 {c.name}
                 {c.phone ? ` · ${c.phone}` : ""}
@@ -356,6 +379,7 @@ function TenderPanel({
   setTaiwanPayConfirmed,
   receivedInput,
   setReceivedInput,
+  disabled = false,
 }: {
   total: number;
   hasMember: boolean;
@@ -383,6 +407,7 @@ function TenderPanel({
   setTaiwanPayConfirmed: (v: boolean) => void;
   receivedInput: string;
   setReceivedInput: (v: string) => void;
+  disabled?: boolean;
 }) {
   const plan = resolvePlan(
     mode,
@@ -427,6 +452,7 @@ function TenderPanel({
               name="tender-mode"
               checked={mode === m}
               onChange={() => setMode(m)}
+              disabled={disabled}
             />
             {m === "CASH"
               ? "現金"
@@ -450,12 +476,13 @@ function TenderPanel({
                 value={storeCreditInput}
                 onChange={(e) => setStoreCreditInput(e.target.value)}
                 inputMode="numeric"
+                disabled={disabled}
               />
             </label>
             <button
               type="button"
               className="btn-ghost pos-use-max-credit"
-              disabled={maxStoreCredit <= 0}
+              disabled={disabled || maxStoreCredit <= 0}
               onClick={() => setStoreCreditInput(String(maxStoreCredit))}
             >
               使用可用上限
@@ -493,6 +520,7 @@ function TenderPanel({
                   name="mixed-remainder-method"
                   checked={mixedRemainder === method}
                   onChange={() => setMixedRemainder(method)}
+                  disabled={disabled}
                 />
                 {method === "CASH"
                   ? "現金"
@@ -533,6 +561,7 @@ function TenderPanel({
               type="checkbox"
               checked={taiwanPayConfirmed}
               onChange={(e) => setTaiwanPayConfirmed(e.target.checked)}
+              disabled={disabled}
             />
             <span>
               已於台灣Pay收到 <Money value={plan.taiwanPay} />
@@ -552,6 +581,7 @@ function TenderPanel({
               onChange={(e) => setLinePayKey(e.target.value)}
               placeholder="以掃描槍讀取，或手動輸入付款碼數字"
               autoComplete="off"
+              disabled={disabled}
             />
           </label>
           <p className="hint">
@@ -574,6 +604,7 @@ function TenderPanel({
             value={receivedInput}
             onChange={(e) => setReceivedInput(e.target.value)}
             inputMode="numeric"
+            disabled={disabled}
           />
         </label>
       )}
@@ -755,7 +786,13 @@ function QuantityDialog({
 }
 
 // 餐飲菜單磚：可售品項一格一格圓角方塊；點磚開數量彈窗。
-function MenuPanel({ onAdd }: { onAdd: (line: CartLine) => void }) {
+function MenuPanel({
+  onAdd,
+  disabled = false,
+}: {
+  onAdd: (line: CartLine) => void;
+  disabled?: boolean;
+}) {
   const [selected, setSelected] = useState<MenuItemRead | null>(null);
   const query = useQuery({
     queryKey: ["menu-items", "available"],
@@ -793,6 +830,7 @@ function MenuPanel({ onAdd }: { onAdd: (line: CartLine) => void }) {
             type="button"
             className="pos-menu-tile"
             onClick={() => setSelected(item)}
+            disabled={disabled}
           >
             <span className="pos-menu-tile-name">{item.name}</span>
             <span className="pos-menu-tile-price">
@@ -830,12 +868,19 @@ export default function PosPage() {
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
+  const [displayTerminal, setDisplayTerminal] = useState<TerminalRead | null>(null);
+  const [displayCart, setDisplayCart] = useState<DisplayCart | null>(null);
+  const [reconcileReason, setReconcileReason] = useState("");
+  const [reconcileEvidenceType, setReconcileEvidenceType] = useState("");
+  const [reconcileEvidenceReference, setReconcileEvidenceReference] = useState("");
   // 完成結帳時綁定的簽署快照（K6 明細聯加印折抵/剩餘＋簽名用；未綁定為 null）。
   const [completedSignature, setCompletedSignature] = useState<CompletedSignature | null>(null);
+  const isManager = decodeSession()?.role === "MANAGER";
 
   const restoreCustomerDisplayCart = useCallback(
     async (cart: components["schemas"]["StaffCartSessionRead"]) => {
       setLines(restoreLines(cart.snapshot.items));
+      setSignTaskId(cart.active_signature_task_id ?? null);
       const storeCredit = cart.snapshot.tenders.find(
         (tender) => tender.tender_type === "STORE_CREDIT",
       );
@@ -1060,7 +1105,10 @@ export default function PosPage() {
   const signTask = useQuery({
     queryKey: ["signing-task", signTaskId],
     enabled: signTaskId != null,
-    refetchInterval: (q) => (q.state.data?.status === "PENDING" ? 2000 : false),
+    refetchInterval: (q) =>
+      q.state.data?.status === "PENDING" || q.state.data?.status === "SIGNING"
+        ? 2000
+        : false,
     queryFn: async () => {
       if (signTaskId == null) return null;
       const { data } = await api.GET("/api/v1/signing/tasks/{task_id}", {
@@ -1070,21 +1118,33 @@ export default function PosPage() {
     },
   });
   const signed = signTask.data?.status === "SIGNED";
+  const signTaskFinishedWithoutSale =
+    signTask.data?.status === "VOIDED" ||
+    signTask.data?.status === "EXPIRED" ||
+    signTask.data?.status === "FAILED";
   const signedDebit =
     signTask.data != null
-      ? String((signTask.data.content as Record<string, unknown>).debit ?? "")
+      ? String(
+          (signTask.data.content as Record<string, unknown>).store_credit_amount ?? "",
+        )
       : null;
   const signedTotal =
     signTask.data != null
-      ? String((signTask.data.content as Record<string, unknown>).sale_total ?? "")
+      ? String((signTask.data.content as Record<string, unknown>).total ?? "")
       : null;
   const signedBalanceBefore =
     signTask.data != null
-      ? String((signTask.data.content as Record<string, unknown>).balance_before ?? "")
+      ? String(
+          (signTask.data.content as Record<string, unknown>)
+            .store_credit_balance_before ?? "",
+        )
       : null;
   const signedBalanceAfter =
     signTask.data != null
-      ? String((signTask.data.content as Record<string, unknown>).balance_after ?? "")
+      ? String(
+          (signTask.data.content as Record<string, unknown>)
+            .store_credit_balance_after ?? "",
+        )
       : null;
   // 失配＝折抵額/消費合計/餘額快照任一與簽署不符（客人簽的必須就是這筆交易與當下餘額；
   // 後端結帳時亦以帳戶行鎖精確比對——此處為即時 UX 提示）。
@@ -1093,50 +1153,187 @@ export default function PosPage() {
     (signedDebit !== String(plan.storeCredit) ||
       signedTotal !== String(total) ||
       (memberBalance !== null && signedBalanceBefore !== String(memberBalance)));
-  const requireScSigning = settings.data?.require_store_credit_signing === true;
-  // 結帳簽署閘門：已推送但未簽/失配 → 擋；政策開啟且以購物金付款而未推送 → 擋。
+  // 購物金一律須由已配對客顯簽署；政策設定不再能略過這道證據閘門。
   const scSignBlock =
-    (signTaskId != null && (!signed || signMismatch)) ||
-    (requireScSigning && plan.storeCredit > 0 && signTaskId == null);
+    plan.storeCredit > 0 &&
+    (signTaskId == null ||
+      !signed ||
+      signMismatch ||
+      displayCart?.status !== "FROZEN");
+  const cartMutationLocked =
+    displayCart?.status === "FROZEN" ||
+    displayCart?.status === "PROCESSING" ||
+    displayCart?.status === "PAYMENT_UNCERTAIN";
 
   const pushSign = useMutation({
     mutationFn: async () => {
       if (!member) throw new Error("請先選擇會員");
-      const { data, error } = await api.POST("/api/v1/signing/tasks", {
-        body: {
-          kind: "STORE_CREDIT_USE",
-          contact_id: member.id,
-          content: {
-            debit: String(plan.storeCredit),
-            sale_total: String(total),
+      let terminal = displayTerminal;
+      if (!terminal) {
+        const registered = await api.POST("/api/v1/customer-display/terminals", {
+          body: {
+            installation_id: terminalInstallationId(),
+            name: "主要櫃檯",
           },
-          ref_type: "sale",
+        });
+        terminal = registered.data ?? null;
+      }
+      if (!terminal?.paired_kiosk) {
+        throw new Error("購物金付款必須先配對並連線顧客顯示裝置");
+      }
+      if (!terminal.paired_kiosk.online) {
+        throw new Error("顧客顯示裝置目前離線；請改用其他付款方式");
+      }
+      const current = await api.GET(
+        "/api/v1/customer-display/terminals/{terminal_id}/cart/current",
+        { params: { path: { terminal_id: terminal.id } } },
+      );
+      if (!current.data || current.data.status !== "DRAFT") {
+        throw new Error("客顯購物車尚未同步完成，請稍候後再送出簽署");
+      }
+      const { data, error } = await api.POST(
+        "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature",
+        {
+          params: { path: { terminal_id: terminal.id } },
+          body: { expected_revision: current.data.revision },
         },
-      });
+      );
       if (!data) throw new Error(extractDetail(error) ?? "推送手持簽署失敗");
       return data;
     },
     onSuccess: (d) => {
       setNotice(null);
-      setSignTaskId(d.id);
+      setDisplayCart(d.cart);
+      setSignTaskId(d.signature_task_id);
     },
     onError: (e: Error) => setNotice(e.message),
   });
   const cancelSign = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (cashFallback: boolean) => {
       if (signTaskId == null) return;
       const { response } = await api.POST("/api/v1/signing/tasks/{task_id}/cancel", {
         params: { path: { task_id: signTaskId } },
+        body: cashFallback
+          ? {
+              reason_code: "KIOSK_FAILURE_CASH_FALLBACK",
+              reason: "客顯故障，改用現金",
+            }
+          : {
+              reason_code: "CONTENT_CHANGED",
+              reason: "撤回簽署並修改交易內容",
+            },
       });
       // 非 2xx（如客人剛好已簽 → 409）不可視為取消成功而清除綁定（同 K4）：重新輪詢取回
-      // 最新狀態，保留 signTaskId。
+      // 最新狀態，保留 signTaskId。SIGNED 在成交前可依規格作廢；只有 CONSUMED 等終態會拒絕。
       if (!response.ok) {
         await signTask.refetch();
-        throw new Error("此簽署已完成或無法取消，請確認手持裝置狀態");
+        throw new Error("此簽署已進入不可撤回狀態，請確認交易是否已成立");
       }
     },
-    onSuccess: () => setSignTaskId(null),
+    onSuccess: async (_data, cashFallback) => {
+      setSignTaskId(null);
+      if (cashFallback) {
+        setMode("CASH");
+        setStoreCreditInput("");
+        setMixedRemainder("CASH");
+        setLinePayKey("");
+        setTaiwanPayConfirmed(false);
+        setNotice("舊簽署已保留為作廢證據；本筆付款已改為全額現金。");
+      }
+      await queryClient.invalidateQueries({
+        queryKey: ["customer-display", "cart", displayTerminal?.id],
+      });
+      if (displayTerminal) {
+        const { data } = await api.GET(
+          "/api/v1/customer-display/terminals/{terminal_id}/cart/current",
+          { params: { path: { terminal_id: displayTerminal.id } } },
+        );
+        setDisplayCart(data ?? null);
+      }
+    },
     onError: (e: Error) => setNotice(e.message),
+  });
+
+  async function showCompletedCart(
+    cart: components["schemas"]["StaffCartSessionRead"],
+    successNotice: string,
+  ): Promise<void> {
+    if (cart.sale_id == null) return;
+    const { data: sale, error } = await api.GET("/api/v1/sales/{sale_id}", {
+      params: { path: { sale_id: cart.sale_id } },
+    });
+    if (!sale) {
+      setNotice(extractDetail(error) ?? "交易已成立，但無法載入完成畫面；請至交易紀錄確認。");
+      return;
+    }
+    clearPersistedIdemKey("pos-checkout");
+    setCompleted(sale);
+    setCompletedCampaign(cart.snapshot.campaign_name ?? null);
+    setCompletedSignature(
+      signTaskId != null && signedBalanceAfter != null
+        ? {
+            taskId: signTaskId,
+            deducted: String(plan.storeCredit),
+            remaining: signedBalanceAfter,
+          }
+        : null,
+    );
+    setCompletedInvoice(null);
+    setInvoiceNote(null);
+    setShowDialog(true);
+    setNotice(successNotice);
+    if (sale.invoice_status === "PENDING_ISSUE") {
+      setInvoiceNote("發票開立中…");
+      issueInvoice.mutate(sale);
+    }
+    if (plan.cash > 0) {
+      setDrawerNotice(null);
+      openCashDrawer().catch((error: Error) => setDrawerNotice(error.message));
+    }
+  }
+
+  const reconcilePayment = useMutation({
+    mutationFn: async (
+      action: "QUERY_PROVIDER" | "MANUAL_SUCCESS" | "MANUAL_FAILED",
+    ) => {
+      if (!displayTerminal) throw new Error("找不到目前 POS 櫃檯");
+      const manual = action !== "QUERY_PROVIDER";
+      const { data, error } = await api.POST(
+        "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
+        {
+          params: { path: { terminal_id: displayTerminal.id } },
+          body: {
+            action,
+            reason: manual ? reconcileReason.trim() || null : null,
+            evidence_type: manual ? reconcileEvidenceType.trim() || null : null,
+            evidence_reference: manual
+              ? reconcileEvidenceReference.trim() || null
+              : null,
+          },
+        },
+      );
+      if (!data) throw new Error(extractDetail(error) ?? "付款對帳失敗");
+      return data;
+    },
+    onSuccess: async (data) => {
+      setDisplayCart(data.cart);
+      if (data.outcome === "STILL_UNCERTAIN") {
+        setNotice("LINE Pay 平台目前仍無法確認結果；請稍後再查，或由店長依外部證據裁定。");
+      } else if (data.outcome === "SUCCESS_CONFIRMED") {
+        if (data.cart.sale_id == null) {
+          setNotice("已確認 LINE Pay 付款成功，但本機交易尚未補成立；請勿重新付款並聯絡管理員。");
+        } else {
+          await showCompletedCart(
+            data.cart,
+            "已確認 LINE Pay 付款成功，並自動補成立本機交易。",
+          );
+        }
+      } else {
+        setNotice("已確認 LINE Pay 未付款；購物車已解鎖。使用購物金時須重新簽署。");
+        setSignTaskId(null);
+      }
+    },
+    onError: (error: Error) => setNotice(error.message),
   });
 
   const checkout = useMutation({
@@ -1169,12 +1366,80 @@ export default function PosPage() {
             : "電子發票設定剛變更為停用：本單將不開發票，請確認後再結帳",
         );
       }
+      let checkoutCart: DisplayCart | null = null;
+      // 正常由 PosCustomerDisplay 註冊櫃檯；若結帳點擊早於該查詢完成，這裡再做一次
+      // idempotent 註冊，避免明明已配對卻漏帶權威 cart。註冊失敗時一般付款仍可備援，
+      // 購物金則在下方 fail-closed。
+      let terminal = displayTerminal;
+      if (!terminal) {
+        try {
+          const registered = await api.POST("/api/v1/customer-display/terminals", {
+            body: {
+              installation_id: terminalInstallationId(),
+              name: "主要櫃檯",
+            },
+          });
+          terminal = registered.data ?? null;
+          if (terminal) setDisplayTerminal(terminal);
+        } catch {
+          terminal = null;
+        }
+      }
+      if (terminal?.paired_kiosk) {
+        const current = await api.GET(
+          "/api/v1/customer-display/terminals/{terminal_id}/cart/current",
+          { params: { path: { terminal_id: terminal.id } } },
+        );
+        if (!current.data) {
+          throw new Error("客顯購物車尚未同步完成，請稍候後再結帳");
+        }
+        checkoutCart = current.data;
+        setDisplayCart(current.data);
+        if (current.data.status === "PAYMENT_UNCERTAIN") {
+          throw new Error(
+            "PAYMENT_UNCERTAIN：本筆付款結果尚未裁定，禁止再次付款；請由店長執行付款對帳",
+          );
+        }
+        if (plan.storeCredit > 0) {
+          if (
+            current.data.status !== "FROZEN" ||
+            current.data.id !== displayCart?.id ||
+            signTaskId == null ||
+            !signed
+          ) {
+            throw new Error("購物金簽署與目前權威購物車不一致，請撤回後重新送簽");
+          }
+        } else if (current.data.status !== "DRAFT") {
+          throw new Error("客顯購物車目前不可結帳，請重新載入或完成既有流程");
+        }
+      } else if (plan.storeCredit > 0) {
+        throw new Error("購物金付款必須先配對並連線顧客顯示裝置");
+      }
+      if (terminal?.paired_kiosk && checkoutCart) {
+        const begun = await api.POST(
+          "/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout",
+          {
+            params: { path: { terminal_id: terminal.id } },
+            body: {
+              expected_revision: checkoutCart.revision,
+              signature_task_id: plan.storeCredit > 0 ? signTaskId : null,
+            },
+          },
+        );
+        if (!begun.data) {
+          throw new Error(extractDetail(begun.error) ?? "無法開始結帳，請重新讀取購物車");
+        }
+        checkoutCart = begun.data;
+        setDisplayCart(begun.data);
+      }
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
         tenders: toTenders(plan, { linePayKey }) ?? null,
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
+        cart_session_id: checkoutCart?.id ?? null,
+        cart_revision: checkoutCart?.revision ?? null,
         // 發票資訊（docs/24）：任一欄有值才帶；後端驗互斥與格式並入冪等指紋。
         // 以**結帳當下重讀**的設定判斷（非畫面快取）。
         invoice:
@@ -1216,6 +1481,9 @@ export default function PosPage() {
         .sort();
       const sigBody = {
         ...body,
+        // revision 是伺服器併發控制版本；PAYMENT_UNCERTAIN→對帳會遞增，但交易內容與
+        // LINE Pay orderId 不得因此換鍵，否則可能重複扣款。購物車 id 仍保留在指紋中。
+        cart_revision: null,
         lines: canonLines,
         tenders: canonTenders,
       };
@@ -1257,13 +1525,34 @@ export default function PosPage() {
     },
     onError: (err: Error) => {
       setNotice(err.message);
+      if (displayTerminal) {
+        void api
+          .GET("/api/v1/customer-display/terminals/{terminal_id}/cart/current", {
+            params: { path: { terminal_id: displayTerminal.id } },
+          })
+          .then(async ({ data }) => {
+            setDisplayCart(data ?? null);
+            if (data?.status === "COMPLETED" && data.sale_id != null) {
+              await showCompletedCart(
+                data,
+                "交易已在後端完成；已從客顯工作階段恢復完成畫面。",
+              );
+            }
+          });
+      }
       // LINE Pay 結帳失敗：一次性付款碼已作廢（單次使用/已過期）→ 清空，提示店員重新掃碼。
       // 冪等鍵已排除付款碼、保持穩定，重掃不會產生新 orderId 重複扣款（見上 sigBody）。
-      if (plan.linePay > 0) setLinePayKey("");
+      if (plan.linePay > 0 && !err.message.includes("PAYMENT_UNCERTAIN")) {
+        setLinePayKey("");
+      }
     },
   });
 
   function addToCart(line: CartLine) {
+    if (cartMutationLocked) {
+      setNotice("簽署或付款處理期間，購物車已由伺服器鎖定。");
+      return;
+    }
     const result = addLine(lines, line);
     setLines(result.lines);
     setNotice(
@@ -1288,6 +1577,10 @@ export default function PosPage() {
     setShowDialog(false);
     setDrawerNotice(null);
     setSignTaskId(null); // 本單完成/重來，下一單重新推送簽署
+    setDisplayCart(null);
+    setReconcileReason("");
+    setReconcileEvidenceType("");
+    setReconcileEvidenceReference("");
     setCompletedSignature(null);
     setInvTaxId("");
     setInvBuyerName("");
@@ -1406,11 +1699,13 @@ export default function PosPage() {
         tenders={customerDisplayTenders}
         ready={quoteReady}
         onRestore={restoreCustomerDisplayCart}
+        onTerminalChange={setDisplayTerminal}
+        onCartChange={setDisplayCart}
       />
       <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">
-          <ScanBar onResolved={addToCart} />
+          <ScanBar onResolved={addToCart} disabled={cartMutationLocked} />
           {notice !== null && (
             <p role="alert" className="form-error">
               {notice}
@@ -1479,6 +1774,7 @@ export default function PosPage() {
                               inputMode="numeric"
                               value={line.qty}
                               aria-label={`${line.description} 數量`}
+                              disabled={cartMutationLocked}
                               onChange={(e) =>
                                 setLines(
                                   setQty(
@@ -1499,6 +1795,7 @@ export default function PosPage() {
                             type="button"
                             className="btn-ghost"
                             aria-label={`移除 ${line.description}`}
+                            disabled={cartMutationLocked}
                             onClick={() => setLines(removeLine(lines, line.key))}
                           >
                             移除
@@ -1511,7 +1808,7 @@ export default function PosPage() {
               </table>
             </div>
           )}
-          <MenuPanel onAdd={addToCart} />
+          <MenuPanel onAdd={addToCart} disabled={cartMutationLocked} />
         </div>
 
         <aside className="pos-right card">
@@ -1534,6 +1831,7 @@ export default function PosPage() {
             member={member}
             onSelect={setMember}
             onClear={() => setMember(null)}
+            disabled={cartMutationLocked}
           />
 
           <TenderPanel
@@ -1559,6 +1857,7 @@ export default function PosPage() {
             setTaiwanPayConfirmed={setTaiwanPayConfirmed}
             receivedInput={receivedInput}
             setReceivedInput={setReceivedInput}
+            disabled={cartMutationLocked}
           />
 
           {/* 購物金扣抵手持簽署（docs/23 K5，D3）：客人於手持端核對折抵/剩餘後手寫簽名 */}
@@ -1567,28 +1866,54 @@ export default function PosPage() {
               <h3>扣抵確認簽署</h3>
               {signTaskId == null ? (
                 <>
-                  {requireScSigning && (
-                    <p className="hint">本店要求購物金扣抵須由客人於手持裝置簽名確認。</p>
-                  )}
+                  <p className="hint">
+                    購物金扣抵須由客人在已配對的顧客顯示裝置核對內容並簽名。
+                  </p>
                   <button
                     type="button"
                     className="btn-secondary"
-                    disabled={pushSign.isPending || !quoteReady}
+                    disabled={
+                      pushSign.isPending ||
+                      !quoteReady ||
+                      displayCart?.status !== "DRAFT" ||
+                      displayTerminal?.paired_kiosk?.online !== true
+                    }
                     onClick={() => pushSign.mutate()}
                   >
                     送至手持裝置簽署
                   </button>
                 </>
+              ) : signTaskFinishedWithoutSale ? (
+                <>
+                  <p role="alert" className="form-error">
+                    {signTask.data?.status === "EXPIRED"
+                      ? "簽署任務已逾時，購物車已解凍；請重新送出。"
+                      : signTask.data?.status === "FAILED"
+                        ? "本次結帳未成立，舊簽署已留存為失敗證據；重試必須重新簽署。"
+                        : "簽署已作廢，請重新送出。"}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setSignTaskId(null)}
+                  >
+                    建立新簽署
+                  </button>
+                </>
               ) : !signed ? (
                 <>
-                  <p className="hint">已送至手持裝置，等待客人確認並簽署…</p>
+                  <p className="hint">
+                    {signTask.data?.status === "SIGNING"
+                      ? "客人正在核對並簽署；購物車已由伺服器鎖定。"
+                      : "已送至顧客顯示裝置，等待客人開啟簽署畫面…"}
+                  </p>
                   <button
                     type="button"
                     className="btn-ghost"
                     disabled={cancelSign.isPending}
-                    onClick={() => cancelSign.mutate()}
+                    onClick={() => cancelSign.mutate(false)}
                   >
-                    作廢此簽署（重推）
+                    撤回簽署並修改
                   </button>
                 </>
               ) : signMismatch ? (
@@ -1601,17 +1926,116 @@ export default function PosPage() {
                     type="button"
                     className="btn-ghost"
                     disabled={cancelSign.isPending}
-                    onClick={() => cancelSign.mutate()}
+                    onClick={() => cancelSign.mutate(false)}
                   >
-                    作廢此簽署（重推）
+                    撤回簽署並修改
                   </button>
                 </>
               ) : (
-                <p className="pos-sign-done">
-                  ✓ 客人已完成簽署（折抵 <Money value={plan.storeCredit} />）
-                </p>
+                <>
+                  <p className="pos-sign-done">
+                    ✓ 客人已完成簽署（折抵 <Money value={plan.storeCredit} />）
+                  </p>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={cancelSign.isPending}
+                    onClick={() => cancelSign.mutate(false)}
+                  >
+                    撤回簽署並修改
+                  </button>
+                </>
               )}
+              {signTaskId !== null &&
+                !signTaskFinishedWithoutSale &&
+                displayCart?.status !== "PAYMENT_UNCERTAIN" &&
+                displayTerminal?.paired_kiosk?.online === false && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={cancelSign.isPending}
+                    onClick={() => cancelSign.mutate(true)}
+                  >
+                    客顯故障，撤回並改用現金
+                  </button>
+                )}
             </div>
+          )}
+
+          {displayCart?.status === "PAYMENT_UNCERTAIN" && (
+            <section className="pos-sign-panel" aria-labelledby="payment-reconcile-title">
+              <h3 id="payment-reconcile-title">LINE Pay 付款待對帳</h3>
+              <p role="alert" className="form-error">
+                付款結果不明期間，本筆購物車已鎖定；請勿重新刷付款碼或建立新交易。
+              </p>
+              {"payment_order_id" in displayCart && displayCart.payment_order_id && (
+                <p className="hint">交易識別：{displayCart.payment_order_id}</p>
+              )}
+              {isManager ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={reconcilePayment.isPending}
+                    onClick={() => reconcilePayment.mutate("QUERY_PROVIDER")}
+                  >
+                    {reconcilePayment.isPending ? "查詢中…" : "向 LINE Pay 查詢結果"}
+                  </button>
+                  <details>
+                    <summary>平台仍查不到時，以外部證據人工裁定</summary>
+                    <label className="field">
+                      <span className="field-label">裁定原因</span>
+                      <input
+                        value={reconcileReason}
+                        onChange={(event) => setReconcileReason(event.target.value)}
+                        maxLength={300}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">證據類型</span>
+                      <input
+                        value={reconcileEvidenceType}
+                        onChange={(event) =>
+                          setReconcileEvidenceType(event.target.value)
+                        }
+                        placeholder="例如：LINE Pay 對帳單截圖"
+                        maxLength={60}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="field-label">外部交易識別／證據位置</span>
+                      <input
+                        value={reconcileEvidenceReference}
+                        onChange={(event) =>
+                          setReconcileEvidenceReference(event.target.value)
+                        }
+                        maxLength={200}
+                      />
+                    </label>
+                    <div className="pos-dialog-actions">
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={reconcilePayment.isPending}
+                        onClick={() => reconcilePayment.mutate("MANUAL_SUCCESS")}
+                      >
+                        裁定付款成功
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={reconcilePayment.isPending}
+                        onClick={() => reconcilePayment.mutate("MANUAL_FAILED")}
+                      >
+                        裁定付款失敗
+                      </button>
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <p className="hint">請請店長登入此頁執行平台查詢或人工裁定。</p>
+              )}
+            </section>
           )}
 
           {/* 發票區（docs/10 §5/§6）：讀不到設定時不可逕自當「不開票」（Codex F3 P3）。 */}
@@ -1694,6 +2118,7 @@ export default function PosPage() {
               checkout.isPending ||
               !quoteReady ||
               scSignBlock ||
+              displayCart?.status === "PAYMENT_UNCERTAIN" ||
               invoiceInputBad ||
               // fail-closed（Codex 第十九/二十輪）：結帳需要**新鮮的** settings——
               // pending/失敗、掛載後重抓仍在途（isFetching）、或上次重抓失敗
@@ -1708,6 +2133,8 @@ export default function PosPage() {
           >
             {checkout.isPending
               ? "結帳中…"
+              : displayCart?.status === "PAYMENT_UNCERTAIN"
+                ? "等待付款對帳…"
               : lines.length > 0 && !quoteReady
                 ? "試算中…"
                 : scSignBlock && signTaskId != null

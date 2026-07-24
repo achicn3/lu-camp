@@ -15,6 +15,8 @@ import { formatNtd, parseNtd } from "@/lib/money";
 type SettingsRead = components["schemas"]["SettingsRead"];
 type PremiumSuggestionResponse = components["schemas"]["PremiumSuggestionResponse"];
 type PremiumRateHistoryRead = components["schemas"]["PremiumRateHistoryRead"];
+type SignatureRetentionReportItem =
+  components["schemas"]["SignatureRetentionReportItem"];
 
 /** 後端回 401/403 時用以標記「無權限」，與一般讀取失敗區分（驅動「需管理者權限」提示）。 */
 class ForbiddenError extends Error {}
@@ -34,6 +36,9 @@ function GeneralSettingsCard({
   settings: SettingsRead;
   onSaved: () => void;
 }) {
+  // Rolling deployments and older fixtures may not include this newly added
+  // setting yet. Keep the UI usable and aligned with the server-side default.
+  const retentionDaysCurrent = settings.signature_png_retention_days ?? 183;
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -67,6 +72,7 @@ function GeneralSettingsCard({
     const marginRaw = String(form.get("default_margin_pct") ?? "");
     const outflowRaw = String(form.get("monthly_fixed_cash_outflow") ?? "");
     const minSpendRaw = String(form.get("store_credit_min_spend") ?? "");
+    const retentionRaw = String(form.get("signature_png_retention_days") ?? "");
 
     const taxRate = parseRateInput(taxRateRaw);
     if (taxRate === null) {
@@ -95,6 +101,15 @@ function GeneralSettingsCard({
       setError("購物金低消門檻請輸入非負整數（0＝不限制）");
       return;
     }
+    const retentionDays = Number(retentionRaw);
+    if (
+      !Number.isInteger(retentionDays) ||
+      retentionDays < 1 ||
+      retentionDays > 3650
+    ) {
+      setError("簽名 PNG 保存天數請輸入 1–3650 的整數");
+      return;
+    }
 
     // Only send changed fields
     const body: components["schemas"]["SettingsUpdateRequest"] = {};
@@ -110,6 +125,8 @@ function GeneralSettingsCard({
       body.monthly_fixed_cash_outflow = outflow;
     if (minSpend !== parseNtd(settings.store_credit_min_spend))
       body.store_credit_min_spend = minSpend;
+    if (retentionDays !== retentionDaysCurrent)
+      body.signature_png_retention_days = retentionDays;
 
     if (Object.keys(body).length === 0) {
       setSuccess(true);
@@ -136,6 +153,21 @@ function GeneralSettingsCard({
       <label className="field">
         <span className="field-label">稅率 (%)</span>
         <input name="tax_rate" inputMode="decimal" defaultValue={taxPct} required />
+      </label>
+      <label className="field">
+        <span className="field-label">簽名 PNG 保存天數</span>
+        <input
+          name="signature_png_retention_days"
+          inputMode="numeric"
+          defaultValue={String(retentionDaysCurrent)}
+          min={1}
+          max={3650}
+          required
+        />
+        <span className="hint">
+          預設 183 天（半年）。目前為 REPORT_ONLY：到期只列入待清理報表，不會刪除影像；
+          交易快照、hash 與事件仍保存五年。
+        </span>
       </label>
       <label className="field">
         <span className="field-label">寄售抽成預設 (%)</span>
@@ -540,6 +572,56 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
   );
 }
 
+function SignatureRetentionReportCard({
+  rows,
+}: {
+  rows: SignatureRetentionReportItem[];
+}) {
+  return (
+    <div className="card">
+      <h2>簽名 PNG 待清理報表</h2>
+      <p className="hint">
+        第一版只列報、不刪檔。快照、signature/content hash、evidence hash 與狀態事件不受
+        PNG 保存期限影響。
+      </p>
+      {rows.length === 0 ? (
+        <p className="hint">目前沒有已到保存期限的簽名 PNG。</p>
+      ) : (
+        <table className="settings-history-table">
+          <thead>
+            <tr>
+              <th>任務</th>
+              <th>類型</th>
+              <th>簽署時間</th>
+              <th>到期時間</th>
+              <th>報表列入時間</th>
+              <th>影像</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.task_id}>
+                <td>#{row.task_id}</td>
+                <td>
+                  {row.kind === "STORE_CREDIT_USE"
+                    ? "購物金使用"
+                    : row.kind === "ACQUISITION_AFFIDAVIT"
+                      ? "收購切結"
+                      : "交易簽收"}
+                </td>
+                <td>{formatTaipeiDateTime(row.signed_at)}</td>
+                <td>{formatTaipeiDateTime(row.retention_until)}</td>
+                <td>{formatTaipeiDateTime(row.reported_at)}</td>
+                <td>{row.signature_png_retained ? "仍保留（REPORT_ONLY）" : "已移除"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
 
@@ -574,6 +656,16 @@ export default function SettingsPage() {
       return data;
     },
     retry: false, // gate 查詢：權限/錯誤即時決斷，不重試（403 立即顯示提示）
+  });
+  const retentionReportQuery = useQuery({
+    queryKey: ["signature-retention-report"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/signing/retention-report", {
+        params: { query: { limit: 200 } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取簽名待清理報表失敗");
+      return data;
+    },
   });
 
   function refreshSettings() {
@@ -624,6 +716,11 @@ export default function SettingsPage() {
           <ErrorCard title="溢價率變更紀錄" message="讀取變更紀錄失敗，請稍後再試" />
         ) : (
           <PremiumHistoryCard history={historyQuery.data ?? []} />
+        )}
+        {retentionReportQuery.isError ? (
+          <ErrorCard title="簽名 PNG 待清理報表" message="讀取待清理報表失敗，請稍後再試" />
+        ) : (
+          <SignatureRetentionReportCard rows={retentionReportQuery.data ?? []} />
         )}
       </div>
     </section>

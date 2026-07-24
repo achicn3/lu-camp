@@ -2,7 +2,13 @@
 // 客顯／手持簽署共用頁：裝置 cookie 登入與配對，SSE 通知後全量重讀權威購物車；
 // 使用購物金或收購任務時，沿用下方不可變內容快照與簽名流程。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { API_BASE_URL, kioskApi } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -14,7 +20,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 import { SignatureCanvas, type SignatureCanvasHandle } from "./SignatureCanvas";
 
 type KioskDevice = components["schemas"]["KioskDeviceRead"];
-type KioskCart = components["schemas"]["CartSessionRead"];
+type KioskCart = components["schemas"]["KioskCartSessionRead"];
 type KioskTask = NonNullable<
   Awaited<ReturnType<typeof fetchCurrentTask>>
 >;
@@ -31,6 +37,7 @@ async function fetchCurrentTask() {
 
 const DEVICE_INSTALLATION_KEY = "lu-camp.kiosk.installation";
 const DEVICE_CSRF_KEY = "lu-camp.kiosk.csrf";
+const csrfListeners = new Set<() => void>();
 
 function readCsrf(): string | null {
   return typeof window === "undefined"
@@ -38,8 +45,14 @@ function readCsrf(): string | null {
     : window.localStorage.getItem(DEVICE_CSRF_KEY);
 }
 
+function subscribeCsrf(listener: () => void): () => void {
+  csrfListeners.add(listener);
+  return () => csrfListeners.delete(listener);
+}
+
 function writeCsrf(value: string): void {
   window.localStorage.setItem(DEVICE_CSRF_KEY, value);
+  csrfListeners.forEach((listener) => listener());
 }
 
 function installationId(): string {
@@ -103,11 +116,16 @@ function writeEngagedTask(id: number | null): void {
 }
 
 export default function KioskPage() {
-  const [csrf, setCsrf] = useState(readCsrf);
+  // SSR 與 hydration 都先使用 null；commit 後再由 React 讀取 localStorage，
+  // 避免重新整理時伺服器登入畫面與瀏覽器客顯畫面不一致。
+  const csrf = useSyncExternalStore(subscribeCsrf, readCsrf, () => null);
   const device = useQuery({
     queryKey: ["kiosk", "device"],
     enabled: csrf !== null,
     retry: false,
+    // 登入回應是配對明碼唯一一次可取得的來源；先讓它完成首屏渲染，避免啟用 query 後
+    // 立即 GET（只回裝置狀態、不保存明碼）在 React commit 前覆蓋快取。
+    staleTime: 5_000,
     refetchInterval: (query) =>
       query.state.data?.paired_terminal == null ? 5000 : false,
     queryFn: async () => {
@@ -121,7 +139,6 @@ export default function KioskPage() {
   if (csrf === null || device.isError) {
     return (
       <KioskLogin
-        onAuthenticated={setCsrf}
         initialError={
           device.error instanceof Error && device.error.message !== "AUTH_REQUIRED"
             ? "裝置連線失敗，請重新登入。"
@@ -140,10 +157,8 @@ export default function KioskPage() {
 // ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
 function KioskLogin({
   initialError = null,
-  onAuthenticated,
 }: {
   initialError?: string | null;
-  onAuthenticated: (csrf: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(initialError);
@@ -180,9 +195,8 @@ function KioskLogin({
         setError(detail);
         return;
       }
-      writeCsrf(data.csrf_token);
       queryClient.setQueryData<KioskDevice>(["kiosk", "device"], data);
-      onAuthenticated(data.csrf_token);
+      writeCsrf(data.csrf_token);
     } catch {
       setError("無法連線到伺服器，請確認店內網路。");
     } finally {
@@ -223,14 +237,35 @@ function KioskLogin({
 function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  // 配對明碼只在登入／重新產生的 POST 回應出現，後端只落 hash；狀態輪詢回 null 時不可
+  // 把仍有效的明碼從畫面抹掉。到 expires_at 時才由本地 UI 清除並要求重新產生。
+  const [pairingCode, setPairingCode] = useState(device.pairing_code);
+  const [pairingCodeExpiresAt, setPairingCodeExpiresAt] = useState(
+    device.pairing_code_expires_at,
+  );
+
+  useEffect(() => {
+    if (pairingCode === null || pairingCodeExpiresAt === null) return;
+    const remaining = Date.parse(pairingCodeExpiresAt) - Date.now();
+    const timer = window.setTimeout(() => {
+      setPairingCode(null);
+      setPairingCodeExpiresAt(null);
+    }, Math.max(0, remaining));
+    return () => window.clearTimeout(timer);
+  }, [pairingCode, pairingCodeExpiresAt]);
 
   async function refreshCode() {
     setError(null);
     const { data } = await kioskApi.POST("/api/v1/kiosk/pairing-codes", {
       headers: { "X-CSRF-Token": csrf },
     });
-    if (data) queryClient.setQueryData(["kiosk", "device"], data);
-    else setError("無法取得新配對碼，請確認店內網路。");
+    if (data) {
+      setPairingCode(data.pairing_code);
+      setPairingCodeExpiresAt(data.pairing_code_expires_at);
+      queryClient.setQueryData(["kiosk", "device"], data);
+    } else {
+      setError("無法取得新配對碼，請確認店內網路。");
+    }
   }
 
   return (
@@ -239,9 +274,9 @@ function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) 
         <p className="kiosk-eyebrow">裝置已啟用 · {device.label}</p>
         <h1>連接您的 POS 櫃檯</h1>
         <p>請在 POS 輸入配對碼。配對完成後，此畫面會自動切換為顧客購物車。</p>
-        {device.pairing_code ? (
+        {pairingCode ? (
           <output className="kiosk-pairing-code" aria-label="配對碼">
-            {device.pairing_code}
+            {pairingCode}
           </output>
         ) : (
           <button type="button" className="btn-primary" onClick={refreshCode}>
@@ -362,9 +397,39 @@ function KioskConsole({ csrf }: { csrf: string }) {
   // 需店員確認解鎖後才採用。以 React 官方「prop 變更時調整 state」模式於 render 中同步（非
   // effect、非 ref-in-render），待機清除、首張認領、不同任務不採用（交由 render 顯示閘門）。
   const [engagedTaskId, setEngagedTaskId] = useState<number | null>(readEngagedTask);
+  // 任務被店員撤回後若立刻換成另一位顧客的任務，只保留新任務 id 作為交接閘門；
+  // 新任務完整內容立刻自 Query cache 清除，待店員確認後才重新向後端讀取。
+  const [pendingTaskId, setPendingTaskId] = useState<number | null>(null);
   const [syncedData, setSyncedData] = useState<KioskTask | null | undefined>(undefined);
+  const [ackError, setAckError] = useState<string | null>(null);
+  const acknowledging = useRef<number | null>(null);
   const signing = frozenTask !== null;
-  const paused = completed || signing || recovering;
+  const paused = completed || signing || recovering || pendingTaskId !== null;
+
+  useEffect(() => {
+    if (cart.data?.status !== "COMPLETED") return;
+    const completedAt = Date.parse(cart.data.updated_at);
+    const remaining = Number.isFinite(completedAt)
+      ? Math.max(0, completedAt + 10_000 - Date.now())
+      : 10_000;
+    const timer = window.setTimeout(() => {
+      // 成交後舊簽署已 CONSUMED；完成畫面到期時一併清掉交回鎖、任務釘選與
+      // 本機快取，否則會從「交易已完成」退回已完成簽署閘門而無法回待機。
+      setHandoffLock(false);
+      setSigningLock(false);
+      writeEngagedTask(null);
+      queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+      setSyncedData(undefined);
+      setAckError(null);
+      setPendingTaskId(null);
+      setEngagedTaskId(null);
+      setRecovering(false);
+      setCompleted(false);
+      void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [cart.data?.status, cart.data?.updated_at, queryClient]);
+
   const { data } = useQuery({
     queryKey: ["kiosk", "current"],
     queryFn: fetchCurrentTask,
@@ -372,15 +437,47 @@ function KioskConsole({ csrf }: { csrf: string }) {
     enabled: !paused,
   });
 
+  useEffect(() => {
+    if (paused || data?.status !== "PENDING" || acknowledging.current === data.id) return;
+    acknowledging.current = data.id;
+    setAckError(null);
+    void kioskApi
+      .POST("/api/v1/kiosk/tasks/{task_id}/ack", {
+        params: { path: { task_id: data.id } },
+        headers: { "X-CSRF-Token": csrf },
+      })
+      .then(async ({ response }) => {
+        if (!response.ok) {
+          setAckError("簽署任務已逾時或被撤回，正在重新載入…");
+        }
+        await queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+      })
+      .catch(() => setAckError("無法確認簽署畫面，正在重新連線…"))
+      .finally(() => {
+        acknowledging.current = null;
+      });
+  }, [csrf, data?.id, data?.status, paused, queryClient]);
+
   // 於 render 中同步釘選（React 官方模式；React Query 結構共享使 data 參考在內容不變時穩定）。
   // **釘選只由店員解鎖清除、絕不因輪詢回 null 而清**（Codex K3 第十一輪 high）：否則
   // 「顯示 A → 店員取消 A（current=null）→ 建立 B」的空窗會讓 B 被當成首張任務直接顯示、
   // 繞過閘門。認領一次後即長駐，之後任何不同任務都會撞閘門。
   if (!paused && data !== syncedData) {
-    setSyncedData(data);
     const id = data?.id ?? null;
     if (id !== null && engagedTaskId === null) {
+      setSyncedData(data);
       setEngagedTaskId(id); // 認領首張任務（僅在尚未認領時）
+    } else if (
+      id !== null &&
+      engagedTaskId !== null &&
+      id !== engagedTaskId &&
+      pendingTaskId === null
+    ) {
+      // 不把下一位顧客的內容留在本地同步 state；只保留任務 id 供店員交接確認。
+      setSyncedData(undefined);
+      setPendingTaskId(id);
+    } else {
+      setSyncedData(data);
     }
     // id===null（暫無待簽）或不同任務：不動 engagedTaskId → render 顯示待機或店員確認閘門
   }
@@ -391,6 +488,11 @@ function KioskConsole({ csrf }: { csrf: string }) {
     writeEngagedTask(engagedTaskId);
   }, [engagedTaskId]);
 
+  useEffect(() => {
+    if (pendingTaskId === null) return;
+    queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+  }, [pendingTaskId, queryClient]);
+
   function onSigningChange(active: boolean, task?: KioskTask) {
     if (active && task) {
       setFrozenTask(task); // 凍結顯示的任務
@@ -398,6 +500,21 @@ function KioskConsole({ csrf }: { csrf: string }) {
     } else {
       setFrozenTask(null);
     }
+  }
+
+  // 付款階段是購物車的權威狀態，必須蓋過簽署交回鎖與仍為 SIGNED 的任務：
+  // - PROCESSING 讓顧客知道店員正在收款；
+  // - PAYMENT_UNCERTAIN 明確警告不得重複付款；
+  // - COMPLETED 立即顯示成交結果。
+  // 這些畫面只使用同一筆交易的後端最小快照，不會切換到下一位顧客的簽署內容。
+  if (
+    cart.data?.status === "PROCESSING" ||
+    cart.data?.status === "PAYMENT_UNCERTAIN"
+  ) {
+    return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
+  }
+  if (cart.data?.status === "COMPLETED") {
+    return <CompletedSaleScreen cart={cart.data} />;
   }
 
   if (recovering) {
@@ -411,6 +528,7 @@ function KioskConsole({ csrf }: { csrf: string }) {
           // 店員已確認：清簽署鎖＋當前任務快取＋釘選再恢復輪詢。
           setSigningLock(false);
           setEngagedTaskId(null);
+          setPendingTaskId(null);
           queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
           setRecovering(false);
         }}
@@ -428,8 +546,23 @@ function KioskConsole({ csrf }: { csrf: string }) {
           // 店員解鎖：清持久化交回鎖＋當前任務快取＋釘選再恢復輪詢，避免恢復瞬間閃現舊任務。
           setHandoffLock(false);
           setEngagedTaskId(null);
+          setPendingTaskId(null);
           queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
           setCompleted(false);
+        }}
+      />
+    );
+  }
+  if (pendingTaskId !== null) {
+    return (
+      <StaffGate
+        variant="recover"
+        title="任務已更新"
+        message="內容已由店員更新，請店員確認後解鎖再交予客人。"
+        unlockLabel="店員確認並解鎖"
+        onReset={() => {
+          setEngagedTaskId(pendingTaskId);
+          setPendingTaskId(null);
         }}
       />
     );
@@ -443,16 +576,22 @@ function KioskConsole({ csrf }: { csrf: string }) {
     }
     return <Standby />;
   }
-  // 顯示任務與已認領不符（店員取消並改推了不同任務）→ 需店員確認才採用新任務，保護前一位客人
-  // 不被自動換上他人內容（Codex K3 第十輪 high）。簽名進行中（frozenTask）不受此限。
-  if (!frozenTask && engagedTaskId !== null && shown.id !== engagedTaskId) {
+  if (shown.status === "PENDING") {
+    return (
+      <PendingTaskScreen
+        task={shown}
+        message={ackError ?? "正在確認簽署畫面…"}
+      />
+    );
+  }
+  if (shown.status === "SIGNED") {
     return (
       <StaffGate
-        variant="recover"
-        title="任務已更新"
-        message="內容已由店員更新，請店員確認後解鎖再交予客人。"
-        unlockLabel="店員確認並解鎖"
-        onReset={() => setEngagedTaskId(shown.id)}
+        variant="done"
+        title="簽署已完成"
+        message="請將裝置交回店員，等待完成結帳。"
+        unlockLabel="重新確認狀態"
+        onReset={() => void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] })}
       />
     );
   }
@@ -462,13 +601,37 @@ function KioskConsole({ csrf }: { csrf: string }) {
     <TaskScreen
       key={shown.id}
       task={shown}
+      csrf={csrf}
       onSigningChange={onSigningChange}
       onComplete={() => {
+        // 簽名是個資：完成後立即從客顯記憶體快取與同步 state 清除，
+        // 交回店員畫面只保留不含內容的 handoff lock。
+        queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+        setSyncedData(undefined);
+        setAckError(null);
+        setPendingTaskId(null);
         setHandoffLock(true); // 持久化交回鎖：重整也停在交回畫面，須店員解鎖
         setFrozenTask(null);
         setCompleted(true);
       }}
     />
+  );
+}
+
+function CompletedSaleScreen({ cart }: { cart: KioskCart }) {
+  return (
+    <main className="kiosk-thanks">
+      <div className="kiosk-thanks-inner">
+        <div className="kiosk-thanks-check" aria-hidden>
+          ✓
+        </div>
+        <h1 className="kiosk-thanks-title">交易已完成</h1>
+        <p className="kiosk-standby-sub">
+          本次金額 ${formatNtd(parseNtd(cart.snapshot.total) ?? 0)}
+        </p>
+        <p className="hint">謝謝光臨，畫面將自動清除。</p>
+      </div>
+    </main>
   );
 }
 
@@ -480,13 +643,23 @@ function CartScreen({
   streamConnected: boolean;
 }) {
   const { snapshot, changes } = cart;
-  const latestChange = changes[changes.length - 1];
+  const changesByItem = new Map(
+    changes
+      .filter((change) => change.item_key !== "TOTAL")
+      .map((change) => [change.item_key, change.type]),
+  );
   return (
     <main className="kiosk-cart-shell">
       <header className="kiosk-cart-header">
         <div>
           <p className="kiosk-eyebrow">顧客購物明細</p>
-          <h1>請核對本次購買內容</h1>
+          <h1>
+            {cart.status === "PROCESSING"
+              ? "付款處理中，請稍候"
+              : cart.status === "PAYMENT_UNCERTAIN"
+                ? "付款確認中，請勿重複付款"
+                : "請核對本次購買內容"}
+          </h1>
         </div>
         <span className={streamConnected ? "kiosk-live is-online" : "kiosk-live"}>
           <i aria-hidden />
@@ -494,25 +667,42 @@ function CartScreen({
         </span>
       </header>
 
-      {latestChange && (
-        <p className={`kiosk-cart-change is-${latestChange.type.toLowerCase()}`} aria-live="polite">
-          <strong>{latestChange.name}</strong>
-          {latestChange.type === "ADDED" && " 已加入"}
-          {latestChange.type === "REMOVED" && " 已移除"}
-          {latestChange.type === "QUANTITY_CHANGED" && (
-            <>
-              {" "}
-              <span>
-                {latestChange.from_qty} → {latestChange.to_qty}
-              </span>
-            </>
-          )}
-        </p>
+      {changes.length > 0 && (
+        <div className="kiosk-cart-changes" aria-live="polite">
+          {changes.map((change, index) => (
+            <p
+              key={`${cart.revision}:${change.type}:${change.item_key}:${index}`}
+              className={`kiosk-cart-change is-${change.type.toLowerCase()}`}
+            >
+              <strong>{change.name}</strong>
+              {change.type === "ADDED" && " 已加入"}
+              {change.type === "REMOVED" && " 已移除"}
+              {change.type === "DISCOUNT_CHANGED" && "，應付總額已更新"}
+              {change.type === "QUANTITY_CHANGED" && (
+                <>
+                  {" "}
+                  <span>
+                    {change.from_qty} → {change.to_qty}
+                  </span>
+                </>
+              )}
+            </p>
+          ))}
+        </div>
       )}
 
       <section className="kiosk-cart-items" aria-label="商品明細">
         {snapshot.items.map((item) => (
-          <article className="kiosk-cart-item" key={item.item_key}>
+          <article
+            className={`kiosk-cart-item ${
+              changesByItem.get(item.item_key) === "ADDED"
+                ? "is-added"
+                : changesByItem.get(item.item_key) === "QUANTITY_CHANGED"
+                  ? "is-updated"
+                  : ""
+            }`}
+            key={item.item_key}
+          >
             <div>
               <h2>{item.name}</h2>
               <p>
@@ -661,15 +851,47 @@ function Standby({
   );
 }
 
+function PendingTaskScreen({
+  task,
+  message,
+}: {
+  task: KioskTask;
+  message: string;
+}) {
+  return (
+    <main className="kiosk-task">
+      <header className="kiosk-task-header">
+        <h1 className="kiosk-task-title">{taskHeading(task.kind)}</h1>
+      </header>
+      <section className="kiosk-task-body" aria-busy="true">
+        <ContentSnapshot content={task.content} />
+        {task.agreement_body !== null && (
+          <div className="kiosk-agreement">
+            <h2 className="kiosk-agreement-title">{task.agreement_title}</h2>
+            <div className="kiosk-agreement-body">{task.agreement_body}</div>
+          </div>
+        )}
+      </section>
+      <footer className="kiosk-task-footer">
+        <p className="hint" aria-live="polite">
+          {message}
+        </p>
+      </footer>
+    </main>
+  );
+}
+
 // ── 任務畫面：切結書 + 明細 + 撥款 + 簽名 ────────────────────────────────
 const PAYOUT_KINDS = new Set(["ACQUISITION_AFFIDAVIT"]);
 
 function TaskScreen({
   task,
+  csrf,
   onComplete,
   onSigningChange,
 }: {
   task: KioskTask;
+  csrf: string;
   onComplete: () => void;
   onSigningChange: (signing: boolean, task?: KioskTask) => void;
 }) {
@@ -697,6 +919,22 @@ function TaskScreen({
   const needsAgreement = task.agreement_body !== null;
   // 送出在途或曖昧鎖定時，撥款/同意/簽名一律不可改（重試須與已送出的 payload 一致）。
   const controlsLocked = submitting || payloadLocked;
+
+  function reportActivity(
+    activity: "SIGNATURE_STARTED" | "SIGNATURE_INPUT" | "SIGNATURE_CLEARED" | "PAYOUT_SELECTED",
+  ) {
+    void kioskApi.POST("/api/v1/kiosk/tasks/{task_id}/activity", {
+      params: { path: { task_id: task.id } },
+      headers: { "X-CSRF-Token": csrf },
+      body: { activity },
+    });
+  }
+
+  useEffect(() => {
+    reportActivity("SIGNATURE_STARTED");
+    // 任務 id 變更會以 key 重新掛載；每張任務只送一次開始事件。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const canSubmit =
     hasInk &&
@@ -734,6 +972,7 @@ function TaskScreen({
     try {
       const { response } = await kioskApi.POST("/api/v1/kiosk/tasks/{task_id}/sign", {
         params: { path: { task_id: task.id } },
+        headers: { "X-CSRF-Token": csrf },
         body: {
           signature_image_base64: frozen.image,
           chosen_payout: frozen.payout,
@@ -823,7 +1062,10 @@ function TaskScreen({
                 type="button"
                 className={payoutClass(payout === "CASH")}
                 disabled={controlsLocked}
-                onClick={() => setPayout("CASH")}
+                onClick={() => {
+                  setPayout("CASH");
+                  reportActivity("PAYOUT_SELECTED");
+                }}
               >
                 <span className="kiosk-payout-label">現金</span>
                 <span className="kiosk-payout-amount">{formatAmount(task.content.total)}</span>
@@ -832,7 +1074,10 @@ function TaskScreen({
                 type="button"
                 className={payoutClass(payout === "STORE_CREDIT")}
                 disabled={controlsLocked}
-                onClick={() => setPayout("STORE_CREDIT")}
+                onClick={() => {
+                  setPayout("STORE_CREDIT");
+                  reportActivity("PAYOUT_SELECTED");
+                }}
               >
                 <span className="kiosk-payout-label">購物金</span>
                 {storeCreditPremium(task.content) ? (
@@ -852,7 +1097,14 @@ function TaskScreen({
 
         <div className="kiosk-signature">
           <h2 className="kiosk-section-title">簽名確認</h2>
-          <SignatureCanvas ref={canvasRef} onInkChange={setHasInk} locked={controlsLocked} />
+          <SignatureCanvas
+            ref={canvasRef}
+            onInkChange={(ink) => {
+              setHasInk(ink);
+              reportActivity(ink ? "SIGNATURE_INPUT" : "SIGNATURE_CLEARED");
+            }}
+            locked={controlsLocked}
+          />
         </div>
       </section>
 
@@ -894,8 +1146,10 @@ function payoutClass(active: boolean): string {
 
 // content 為店員端凍結的顯示快照（自由 dict）：優雅呈現已知欄位（品項清單＋常見純量）。
 const CONTENT_LABELS: Record<string, string> = {
+  content_version: "內容版本",
   seller_name: "姓名",
   member_name: "會員",
+  member: "會員",
   national_id_masked: "身分證字號",
   phone: "電話",
   address: "住址",
@@ -908,6 +1162,17 @@ const CONTENT_LABELS: Record<string, string> = {
   sale_total: "本次消費合計",
   sale_ref: "銷售單號",
   purchased_at: "交易時間",
+  discount_total: "折扣合計",
+  store_credit_amount: "本次使用購物金",
+  store_credit_balance_before: "扣抵前購物金餘額",
+  store_credit_balance_after: "扣抵後購物金餘額",
+  remaining_tenders: "剩餘付款",
+  campaign_name: "優惠活動",
+  qty: "數量",
+  unit_price: "單價",
+  original_unit_price: "原價",
+  discount_amount: "折扣",
+  line_total: "小計",
 };
 
 // 客人簽的是完整 JSON 快照，故此處**窮舉渲染**所有欄位、不靜默丟棄任何鍵
@@ -939,18 +1204,29 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
             {items.map((raw, i) => {
               const item = (raw ?? {}) as Record<string, unknown>;
               // name/amount 以外的品項欄位一併呈現，避免遺漏客人所簽內容。
-              const extra = Object.entries(item).filter(([k]) => k !== "name" && k !== "amount");
+              const extra = Object.entries(item).filter(
+                ([k]) => k !== "name" && k !== "amount" && k !== "line_total",
+              );
               return (
                 <tr key={i}>
                   <td>
                     {String(item.name ?? "—")}
                     {extra.length > 0 && (
                       <span className="kiosk-item-extra">
-                        {extra.map(([k, v]) => `${CONTENT_LABELS[k] ?? k}：${renderValue(v)}`).join("；")}
+                        {extra
+                          .map(
+                            ([k, v]) =>
+                              `${CONTENT_LABELS[k] ?? k}：${
+                                isAmountKey(k) ? formatAmount(v) : renderValue(v)
+                              }`,
+                          )
+                          .join("；")}
                       </span>
                     )}
                   </td>
-                  <td className="kiosk-items-amount">{formatAmount(item.amount)}</td>
+                  <td className="kiosk-items-amount">
+                    {formatAmount(item.line_total ?? item.amount)}
+                  </td>
                 </tr>
               );
             })}
@@ -967,7 +1243,7 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
                   ? formatAmount(value)
                   : key === "purchased_at" && typeof value === "string"
                     ? formatTaipeiDateTime(value)
-                    : renderValue(value)}
+                    : renderContentValue(key, value)}
               </dd>
             </div>
           ))}
@@ -978,7 +1254,53 @@ function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
 }
 
 function isAmountKey(key: string): boolean {
-  return ["total", "deduct", "debit", "balance", "balance_before", "balance_after", "sale_total"].includes(key);
+  return [
+    "total",
+    "deduct",
+    "debit",
+    "balance",
+    "balance_before",
+    "balance_after",
+    "sale_total",
+    "discount_total",
+    "store_credit_amount",
+    "store_credit_balance_before",
+    "store_credit_balance_after",
+    "unit_price",
+    "original_unit_price",
+    "discount_amount",
+    "line_total",
+  ].includes(key);
+}
+
+function renderContentValue(key: string, value: unknown): string {
+  if (
+    key === "member" &&
+    value !== null &&
+    typeof value === "object" &&
+    "display_name" in value
+  ) {
+    return String((value as { display_name: unknown }).display_name);
+  }
+  if (key === "remaining_tenders" && Array.isArray(value)) {
+    return value
+      .map((raw) => {
+        if (raw === null || typeof raw !== "object") return renderValue(raw);
+        const tender = raw as Record<string, unknown>;
+        const type = tender.tender_type;
+        const label =
+          type === "LINE_PAY"
+            ? "LINE Pay"
+            : type === "TAIWAN_PAY"
+              ? "台灣 Pay"
+              : type === "STORE_CREDIT"
+                ? "購物金"
+                : "現金";
+        return `${label} ${formatAmount(tender.amount)}`;
+      })
+      .join("＋");
+  }
+  return renderValue(value);
 }
 
 function renderValue(value: unknown): string {

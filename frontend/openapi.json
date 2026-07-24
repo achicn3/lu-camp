@@ -1288,6 +1288,32 @@
         "title": "CampaignStatus",
         "type": "string"
       },
+      "CartBeginCheckoutRequest": {
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "CartBeginCheckoutRequest",
+        "type": "object"
+      },
       "CartCancelRequest": {
         "properties": {
           "expected_revision": {
@@ -1352,6 +1378,47 @@
           "name"
         ],
         "title": "CartChangeRead",
+        "type": "object"
+      },
+      "CartFreezeRead": {
+        "properties": {
+          "cart": {
+            "$ref": "#/components/schemas/StaffCartSessionRead"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "signature_status": {
+            "$ref": "#/components/schemas/SignatureTaskStatus"
+          },
+          "signature_task_id": {
+            "title": "Signature Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cart",
+          "signature_task_id",
+          "signature_status",
+          "expires_at"
+        ],
+        "title": "CartFreezeRead",
+        "type": "object"
+      },
+      "CartFreezeRequest": {
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "CartFreezeRequest",
         "type": "object"
       },
       "CartItemRead": {
@@ -4598,6 +4665,61 @@
         "title": "ItemSourceRead",
         "type": "object"
       },
+      "KioskActivityRequest": {
+        "properties": {
+          "activity": {
+            "pattern": "^(SIGNATURE_STARTED|SIGNATURE_INPUT|SIGNATURE_CLEARED|PAYOUT_SELECTED)$",
+            "title": "Activity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activity"
+        ],
+        "title": "KioskActivityRequest",
+        "type": "object"
+      },
+      "KioskCartSessionRead": {
+        "description": "客顯渲染所需最小購物車視圖；不暴露櫃檯／裝置內部識別。",
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/CartChangeRead"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/CartSnapshotRead"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CartSessionStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "revision",
+          "snapshot",
+          "changes",
+          "updated_at"
+        ],
+        "title": "KioskCartSessionRead",
+        "type": "object"
+      },
       "KioskDeviceLoginRequest": {
         "properties": {
           "installation_id": {
@@ -4882,7 +5004,7 @@
         "type": "object"
       },
       "KioskTaskRead": {
-        "description": "手持端任務視圖：AFFIDAVIT 任務附上切結書全文（客人簽的就是這份）。",
+        "description": "客顯最小任務視圖；不送店別、會員主鍵、來源單據或歷史綁定資訊。",
         "properties": {
           "agreement_body": {
             "anyOf": [
@@ -4906,51 +5028,6 @@
             ],
             "title": "Agreement Title"
           },
-          "agreement_version": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agreement Version"
-          },
-          "bound_acquisition_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bound Acquisition Id"
-          },
-          "bound_sale_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bound Sale Id"
-          },
-          "cancelled_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cancelled At"
-          },
           "chosen_payout": {
             "anyOf": [
               {
@@ -4961,54 +5038,12 @@
               }
             ]
           },
-          "contact_id": {
-            "title": "Contact Id",
-            "type": "integer"
-          },
           "content": {
             "additionalProperties": true,
             "title": "Content",
             "type": "object"
           },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "has_signature": {
-            "title": "Has Signature",
-            "type": "boolean"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/SignatureTaskKind"
-          },
-          "ref_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref Id"
-          },
-          "ref_type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ref Type"
-          },
-          "signed_at": {
+          "expires_at": {
             "anyOf": [
               {
                 "format": "date-time",
@@ -5018,42 +5053,26 @@
                 "type": "null"
               }
             ],
-            "title": "Signed At"
+            "title": "Expires At"
           },
-          "signer_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Signer Name"
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SignatureTaskKind"
           },
           "status": {
             "$ref": "#/components/schemas/SignatureTaskStatus"
-          },
-          "store_id": {
-            "title": "Store Id",
-            "type": "integer"
           }
         },
         "required": [
           "id",
-          "store_id",
           "kind",
           "status",
-          "contact_id",
           "content",
-          "agreement_version",
           "chosen_payout",
-          "has_signature",
-          "signed_at",
-          "cancelled_at",
-          "ref_type",
-          "ref_id",
-          "created_at",
+          "expires_at",
           "agreement_title",
           "agreement_body"
         ],
@@ -5884,6 +5903,82 @@
           "fee"
         ],
         "title": "PaymentMethodTotal",
+        "type": "object"
+      },
+      "PaymentReconciliationRead": {
+        "properties": {
+          "cart": {
+            "$ref": "#/components/schemas/StaffCartSessionRead"
+          },
+          "outcome": {
+            "enum": [
+              "SUCCESS_CONFIRMED",
+              "FAILED_CONFIRMED",
+              "STILL_UNCERTAIN"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "cart"
+        ],
+        "title": "PaymentReconciliationRead",
+        "type": "object"
+      },
+      "PaymentReconciliationRequest": {
+        "properties": {
+          "action": {
+            "enum": [
+              "QUERY_PROVIDER",
+              "MANUAL_SUCCESS",
+              "MANUAL_FAILED"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "evidence_reference": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Reference"
+          },
+          "evidence_type": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Type"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "PaymentReconciliationRequest",
         "type": "object"
       },
       "PayoutMethod": {
@@ -6826,6 +6921,30 @@
               }
             ],
             "title": "Buyer Contact Id"
+          },
+          "cart_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cart Revision"
+          },
+          "cart_session_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cart Session Id"
           },
           "expected_einvoice_enabled": {
             "anyOf": [
@@ -8032,6 +8151,14 @@
             "title": "Require Store Credit Signing",
             "type": "boolean"
           },
+          "signature_cleanup_enforcement_mode": {
+            "title": "Signature Cleanup Enforcement Mode",
+            "type": "string"
+          },
+          "signature_png_retention_days": {
+            "title": "Signature Png Retention Days",
+            "type": "integer"
+          },
           "store_credit_engine_params": {
             "additionalProperties": true,
             "title": "Store Credit Engine Params",
@@ -8063,6 +8190,8 @@
           "allow_clerk_manage_categories",
           "require_acquisition_affidavit",
           "require_store_credit_signing",
+          "signature_png_retention_days",
+          "signature_cleanup_enforcement_mode",
           "premium_rate",
           "premium_rate_min",
           "premium_rate_max",
@@ -8311,6 +8440,31 @@
             ],
             "title": "Require Store Credit Signing"
           },
+          "signature_cleanup_enforcement_mode": {
+            "anyOf": [
+              {
+                "const": "REPORT_ONLY",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Cleanup Enforcement Mode"
+          },
+          "signature_png_retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Png Retention Days"
+          },
           "store_credit_engine_params": {
             "anyOf": [
               {
@@ -8378,6 +8532,46 @@
         "title": "SettingsUpdateRequest",
         "type": "object"
       },
+      "SignatureRetentionReportItem": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SignatureTaskKind"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "retention_until": {
+            "format": "date-time",
+            "title": "Retention Until",
+            "type": "string"
+          },
+          "signature_png_retained": {
+            "title": "Signature Png Retained",
+            "type": "boolean"
+          },
+          "signed_at": {
+            "format": "date-time",
+            "title": "Signed At",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_id",
+          "kind",
+          "signed_at",
+          "retention_until",
+          "reported_at",
+          "signature_png_retained"
+        ],
+        "title": "SignatureRetentionReportItem",
+        "type": "object"
+      },
       "SignatureTaskCreate": {
         "properties": {
           "contact_id": {
@@ -8414,6 +8608,18 @@
               }
             ],
             "title": "Ref Type"
+          },
+          "terminal_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Id"
           }
         },
         "required": [
@@ -8491,18 +8697,6 @@
             ],
             "title": "Bound Sale Id"
           },
-          "cancelled_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cancelled At"
-          },
           "chosen_payout": {
             "anyOf": [
               {
@@ -8512,6 +8706,18 @@
                 "type": "null"
               }
             ]
+          },
+          "consumed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumed At"
           },
           "contact_id": {
             "title": "Contact Id",
@@ -8526,6 +8732,42 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "expired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expired At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "failed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At"
           },
           "has_signature": {
             "title": "Has Signature",
@@ -8589,6 +8831,18 @@
           "store_id": {
             "title": "Store Id",
             "type": "integer"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
           }
         },
         "required": [
@@ -8602,7 +8856,11 @@
           "chosen_payout",
           "has_signature",
           "signed_at",
-          "cancelled_at",
+          "voided_at",
+          "expired_at",
+          "failed_at",
+          "consumed_at",
+          "expires_at",
           "ref_type",
           "ref_id",
           "created_at"
@@ -8611,18 +8869,57 @@
         "type": "object"
       },
       "SignatureTaskStatus": {
-        "description": "簽署任務狀態機：PENDING → SIGNED / CANCELLED。\n\n無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。",
+        "description": "簽署任務完整狀態機；SIGNED 不是完成，必須再被單據單次 CONSUMED。",
         "enum": [
           "PENDING",
+          "SIGNING",
           "SIGNED",
-          "CANCELLED"
+          "CONSUMED",
+          "VOIDED",
+          "EXPIRED",
+          "FAILED"
         ],
         "title": "SignatureTaskStatus",
         "type": "string"
       },
+      "SignatureTaskVoidRequest": {
+        "properties": {
+          "reason": {
+            "default": "店員撤回簽署",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "reason_code": {
+            "default": "STAFF_WITHDRAWN",
+            "enum": [
+              "STAFF_WITHDRAWN",
+              "CONTENT_CHANGED",
+              "KIOSK_FAILURE_CASH_FALLBACK",
+              "OTHER"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "title": "SignatureTaskVoidRequest",
+        "type": "object"
+      },
       "StaffCartSessionRead": {
         "description": "POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。",
         "properties": {
+          "active_signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Signature Task Id"
+          },
           "buyer_contact_id": {
             "anyOf": [
               {
@@ -8654,6 +8951,40 @@
             "title": "Kiosk Device Id",
             "type": "integer"
           },
+          "payment_order_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Order Id"
+          },
+          "payment_uncertain_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Uncertain At"
+          },
+          "payment_uncertain_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Uncertain Reason"
+          },
           "pos_terminal_id": {
             "title": "Pos Terminal Id",
             "type": "integer"
@@ -8661,6 +8992,17 @@
           "revision": {
             "title": "Revision",
             "type": "integer"
+          },
+          "sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Id"
           },
           "snapshot": {
             "$ref": "#/components/schemas/CartSnapshotRead"
@@ -8684,7 +9026,12 @@
           "changes",
           "created_at",
           "updated_at",
-          "buyer_contact_id"
+          "buyer_contact_id",
+          "active_signature_task_id",
+          "payment_order_id",
+          "payment_uncertain_at",
+          "payment_uncertain_reason",
+          "sale_id"
         ],
         "title": "StaffCartSessionRead",
         "type": "object"
@@ -12725,6 +13072,63 @@
         ]
       }
     },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout": {
+      "post": {
+        "operationId": "beginCustomerDisplayCheckout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartBeginCheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffCartSessionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Begin Checkout",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
     "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
       "post": {
         "operationId": "cancelCustomerDisplayCart",
@@ -12832,6 +13236,120 @@
           }
         ],
         "summary": "Get Current Terminal Cart",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature": {
+      "post": {
+        "operationId": "freezeCustomerDisplayCartForSignature",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartFreezeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartFreezeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Freeze Cart For Signature",
+        "tags": [
+          "customer-display"
+        ]
+      }
+    },
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment": {
+      "post": {
+        "operationId": "reconcileCustomerDisplayPayment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "terminal_id",
+            "required": true,
+            "schema": {
+              "title": "Terminal Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentReconciliationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentReconciliationRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reconcile Cart Payment",
         "tags": [
           "customer-display"
         ]
@@ -13328,7 +13846,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/CartSessionRead"
+                      "$ref": "#/components/schemas/KioskCartSessionRead"
                     },
                     {
                       "type": "null"
@@ -13635,8 +14153,26 @@
     },
     "/api/v1/kiosk/tasks/current": {
       "get": {
-        "description": "手持端輪詢：最新待簽任務；無任務回 null（前端顯示待機畫面）。",
+        "description": "只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。",
         "operationId": "getCurrentKioskTask",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13655,13 +14191,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Get Current Kiosk Task",
         "tags": [
           "kiosk"
@@ -13670,7 +14211,7 @@
     },
     "/api/v1/kiosk/tasks/{task_id}": {
       "get": {
-        "description": "手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。\n\n僅限 PENDING：已簽/已作廢/不存在一律 404——手持裝置不得憑 ID 枚舉歷史內容快照。",
+        "description": "手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。\n\n僅限此裝置目前的活動任務；終態/逾時/不存在一律 404，不能憑 ID 枚舉歷史內容。",
         "operationId": "getKioskTask",
         "parameters": [
           {
@@ -13680,6 +14221,22 @@
             "schema": {
               "title": "Task Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
             }
           }
         ],
@@ -13705,12 +14262,165 @@
             "description": "Validation Error"
           }
         },
-        "security": [
+        "summary": "Get Kiosk Task",
+        "tags": [
+          "kiosk"
+        ]
+      }
+    },
+    "/api/v1/kiosk/tasks/{task_id}/ack": {
+      "post": {
+        "operationId": "acknowledgeKioskTask",
+        "parameters": [
           {
-            "HTTPBearer": []
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
           }
         ],
-        "summary": "Get Kiosk Task",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Acknowledge Kiosk Task",
+        "tags": [
+          "kiosk"
+        ]
+      }
+    },
+    "/api/v1/kiosk/tasks/{task_id}/activity": {
+      "post": {
+        "operationId": "recordKioskTaskActivity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KioskActivityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KioskTaskRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Kiosk Task Activity",
         "tags": [
           "kiosk"
         ]
@@ -13727,6 +14437,38 @@
             "schema": {
               "title": "Task Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "lu_camp_kiosk_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lu Camp Kiosk Session"
             }
           }
         ],
@@ -13762,11 +14504,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "summary": "Sign Kiosk Task",
         "tags": [
           "kiosk"
@@ -16341,6 +17078,60 @@
         ]
       }
     },
+    "/api/v1/signing/retention-report": {
+      "get": {
+        "operationId": "getSignatureRetentionReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SignatureRetentionReportItem"
+                  },
+                  "title": "Response Getsignatureretentionreport",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Signature Retention Report",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
     "/api/v1/signing/tasks": {
       "get": {
         "operationId": "listSignatureTasks",
@@ -16560,6 +17351,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SignatureTaskVoidRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
