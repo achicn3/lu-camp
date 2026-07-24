@@ -1,11 +1,11 @@
-"""signing 資料存取：簽署任務與切結書版本（唯一可碰 signing 資料表的層）。"""
+"""signing 資料存取：簽署任務、狀態事件與切結書版本。"""
 
-from typing import Any, cast
+from datetime import datetime
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.signing.models import AgreementVersion, SignatureTask
+from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
 from app.shared.enums import SignatureTaskKind, SignatureTaskStatus
 
 
@@ -17,6 +17,11 @@ class SigningRepository:
         self._session.add(task)
         await self._session.flush()
         return task
+
+    async def add_event(self, event: SignatureTaskEvent) -> SignatureTaskEvent:
+        self._session.add(event)
+        await self._session.flush()
+        return event
 
     async def get(self, store_id: int, task_id: int) -> SignatureTask | None:
         result: SignatureTask | None = await self._session.scalar(
@@ -32,36 +37,130 @@ class SigningRepository:
             select(SignatureTask)
             .where(SignatureTask.store_id == store_id, SignatureTask.id == task_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return result
 
-    async def cancel_pending_tasks(self, store_id: int) -> int:
-        """作廢同店所有 PENDING 任務（重推＝舊單作廢；守護「同時最多一件待簽」）。"""
-        result = cast(
-            "CursorResult[Any]",
-            await self._session.execute(
-                update(SignatureTask)
-                .where(
-                    SignatureTask.store_id == store_id,
-                    SignatureTask.status == SignatureTaskStatus.PENDING,
-                )
-                .values(status=SignatureTaskStatus.CANCELLED, cancelled_at=func.now())
-            ),
-        )
-        return result.rowcount or 0
-
-    async def latest_pending(self, store_id: int) -> SignatureTask | None:
-        """最新一筆 PENDING（手持端輪詢用；單店單裝置，同時最多一件在簽）。"""
-        result: SignatureTask | None = await self._session.scalar(
+    async def active_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+        *,
+        for_update: bool = False,
+    ) -> SignatureTask | None:
+        """裝置目前可見的唯一任務；SIGNED 仍須顯示等待店員完成結帳。"""
+        stmt = (
             select(SignatureTask)
             .where(
                 SignatureTask.store_id == store_id,
-                SignatureTask.status == SignatureTaskStatus.PENDING,
+                SignatureTask.kiosk_device_id == device_id,
+                SignatureTask.status.in_(
+                    (
+                        SignatureTaskStatus.PENDING,
+                        SignatureTaskStatus.SIGNING,
+                        SignatureTaskStatus.SIGNED,
+                    )
+                ),
             )
             .order_by(SignatureTask.id.desc())
             .limit(1)
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result: SignatureTask | None = await self._session.scalar(stmt)
         return result
+
+    async def get_active_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+        *,
+        for_update: bool = False,
+    ) -> SignatureTask | None:
+        stmt = select(SignatureTask).where(
+            SignatureTask.id == task_id,
+            SignatureTask.store_id == store_id,
+            SignatureTask.kiosk_device_id == device_id,
+            SignatureTask.status.in_(
+                (
+                    SignatureTaskStatus.PENDING,
+                    SignatureTaskStatus.SIGNING,
+                    SignatureTaskStatus.SIGNED,
+                )
+            ),
+        )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result: SignatureTask | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+        *,
+        for_update: bool = False,
+    ) -> SignatureTask | None:
+        stmt = select(SignatureTask).where(
+            SignatureTask.id == task_id,
+            SignatureTask.store_id == store_id,
+            SignatureTask.kiosk_device_id == device_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        result: SignatureTask | None = await self._session.scalar(stmt)
+        return result
+
+    async def expirable_tasks(self, now: datetime) -> list[SignatureTask]:
+        """只列出候選；逐筆轉移時由 service 依 cart→task 的全域順序加鎖。"""
+        rows = await self._session.scalars(
+            select(SignatureTask)
+            .where(
+                SignatureTask.status.in_(
+                    (
+                        SignatureTaskStatus.PENDING,
+                        SignatureTaskStatus.SIGNING,
+                        SignatureTaskStatus.SIGNED,
+                    )
+                ),
+                SignatureTask.expires_at.is_not(None),
+                SignatureTask.expires_at <= now,
+            )
+            .order_by(SignatureTask.id)
+        )
+        return list(rows)
+
+    async def due_signature_images(self, now: datetime) -> list[SignatureTask]:
+        rows = await self._session.scalars(
+            select(SignatureTask)
+            .where(
+                SignatureTask.signature_image.is_not(None),
+                SignatureTask.signature_retention_until.is_not(None),
+                SignatureTask.signature_retention_until <= now,
+                SignatureTask.signature_cleanup_reported_at.is_(None),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        return list(rows)
+
+    async def signature_retention_report(
+        self,
+        store_id: int,
+        *,
+        limit: int,
+    ) -> list[SignatureTask]:
+        rows = await self._session.scalars(
+            select(SignatureTask)
+            .where(
+                SignatureTask.store_id == store_id,
+                SignatureTask.signature_cleanup_reported_at.is_not(None),
+            )
+            .order_by(SignatureTask.signature_cleanup_reported_at.desc())
+            .limit(limit)
+        )
+        return list(rows)
 
     async def list_tasks(
         self,

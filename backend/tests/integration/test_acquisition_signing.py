@@ -1,8 +1,6 @@
 """K4 收購×手持切結整合（docs/23）：收購綁定已簽切結、撥款一致、單次使用。"""
 
-import base64
 import itertools
-import zlib
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -22,37 +20,13 @@ from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import PayoutMethod, SignatureTaskKind, UserRole
+from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus, UserRole
 from app.shared.exceptions import AcquisitionRequiresNationalId, SignatureContentMismatch
+from tests.integration.customer_display_helpers import (
+    ensure_paired_customer_display,
+    signed_affidavit,
+)
 
-
-def _signature_png(width: int = 200, height: int = 80) -> str:
-    magic = b"\x89PNG\r\n\x1a\n"
-
-    def chunk(ctype: bytes, data: bytes) -> bytes:
-        return (
-            len(data).to_bytes(4, "big")
-            + ctype
-            + data
-            + zlib.crc32(ctype + data).to_bytes(4, "big")
-        )
-
-    raw = bytearray()
-    for y in range(height):
-        raw.append(0)
-        for _x in range(width):
-            raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
-    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
-    png = (
-        magic
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(bytes(raw)))
-        + chunk(b"IEND", b"")
-    )
-    return base64.b64encode(png).decode()
-
-
-_PNG = _signature_png()
 _idem = itertools.count()
 
 
@@ -97,6 +71,11 @@ async def _seed(session: AsyncSession) -> tuple[int, str, int]:
     session.add_all([clerk, contact])
     await session.flush()
     token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
+    await ensure_paired_customer_display(
+        session,
+        store_id=store.id,
+        actor_user_id=clerk.id,
+    )
     await session.commit()
     return store.id, token, contact.id
 
@@ -105,19 +84,14 @@ async def _signed_affidavit(
     session: AsyncSession, store_id: int, contact_id: int, clerk_id: int, payout: PayoutMethod
 ) -> int:
     """建立並簽署一張收購切結任務（內容＝相機/1800），回 task_id。"""
-    svc = SigningService(session)
-    task = await svc.create_task(
-        store_id,
-        SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content={"items": [{"name": "相機", "amount": "1800"}], "total": "1800"},
-        ),
-        created_by=clerk_id,
+    return await signed_affidavit(
+        session,
+        store_id=store_id,
+        contact_id=contact_id,
+        actor_user_id=clerk_id,
+        content={"items": [{"name": "相機", "amount": "1800"}], "total": "1800"},
+        payout=payout,
     )
-    await svc.sign_task(store_id, task.id, signature_image_base64=_PNG, chosen_payout=payout)
-    await session.commit()
-    return task.id
 
 
 def _buyout_body(
@@ -153,6 +127,38 @@ async def test_acquisition_binds_signed_affidavit(
     acq_id = resp.json()["acquisition_id"]
     linked = await db_session.scalar(select(Acquisition).where(Acquisition.id == acq_id))
     assert linked is not None and linked.signature_task_id == task_id
+
+
+async def test_unexpected_acquisition_failure_marks_signed_task_failed(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store_id, token, contact_id = await _seed(db_session)
+    clerk_id = await _clerk_id(db_session, store_id)
+    task_id = await _signed_affidavit(
+        db_session,
+        store_id,
+        contact_id,
+        clerk_id,
+        PayoutMethod.CASH,
+    )
+
+    async def _crash(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated local failure")
+
+    monkeypatch.setattr(AcquisitionService, "create_acquisition", _crash)
+    with pytest.raises(RuntimeError, match="simulated local failure"):
+        await client.post(
+            "/api/v1/acquisitions",
+            json=_buyout_body(contact_id, task_id, "CASH"),
+            headers=_auth(token),
+        )
+
+    await db_session.rollback()
+    task = await SigningService(db_session).get_task(store_id, task_id)
+    assert task is not None
+    assert task.status is SignatureTaskStatus.FAILED
 
 
 async def test_signature_lost_response_replays_same_acquisition(
@@ -530,25 +536,18 @@ async def _signed_bulk_affidavit(
     basis: str = "BAG",
 ) -> int:
     """建立並簽署一張**散裝批**收購切結（含數量/基準快照），回 task_id。"""
-    svc = SigningService(session)
-    task = await svc.create_task(
-        store_id,
-        SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content={
-                "items": [{"name": "雜書一批", "amount": "1800"}],
-                "total": "1800",
-                "lot": {"total_qty": total_qty, "acquisition_basis": basis},
-            },
-        ),
-        created_by=clerk_id,
+    return await signed_affidavit(
+        session,
+        store_id=store_id,
+        contact_id=contact_id,
+        actor_user_id=clerk_id,
+        content={
+            "items": [{"name": "雜書一批", "amount": "1800"}],
+            "total": "1800",
+            "lot": {"total_qty": total_qty, "acquisition_basis": basis},
+        },
+        payout=PayoutMethod.CASH,
     )
-    await svc.sign_task(
-        store_id, task.id, signature_image_base64=_PNG, chosen_payout=PayoutMethod.CASH
-    )
-    await session.commit()
-    return task.id
 
 
 def _bulk_body(
@@ -617,45 +616,24 @@ async def test_bulk_affidavit_binds_basis(
     assert bad.status_code == 422, bad.text
 
 
-async def test_kiosk_api_never_exposes_identity_fingerprint(
+async def test_signing_api_never_exposes_identity_fingerprint(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """手持端 API 回應不得含綁定用身分指紋（national_id_blind_index）（Codex K4 第十一輪 medium）。
+    """簽署 API 回應不得含綁定用身分指紋（national_id_blind_index）（Codex K4 第十一輪 medium）。
 
     指紋為 HMAC、可跨任務關聯身分——即使前端只是視覺隱藏，API 也絕不能回傳。改存後端內部欄後，
     /kiosk/tasks/{id} 的 content 不再含該值。
     """
-    store_id, _token, contact_id = await _seed(db_session)
+    store_id, token, contact_id = await _seed(db_session)
     clerk_id = await _clerk_id(db_session, store_id)
-    # 建 KIOSK 帳號取手持端 token
-    kiosk = User(store_id=store_id, username="pad", password_hash="h", role=UserRole.KIOSK)
-    db_session.add(kiosk)
-    await db_session.flush()
-    kiosk_token = encode_access_token(user_id=kiosk.id, role="KIOSK", store_id=store_id)
-    await db_session.commit()
     task_id = await _signed_affidavit(db_session, store_id, contact_id, clerk_id, PayoutMethod.CASH)
 
     # 身分指紋的實際 HMAC 值（絕不該出現在回應任何角落）
     fp = national_id_blind_index("A123456789")
     resp = await client.get(
-        f"/api/v1/kiosk/tasks/{task_id}", headers={"Authorization": f"Bearer {kiosk_token}"}
+        f"/api/v1/signing/tasks/{task_id}",
+        headers={"Authorization": f"Bearer {token}"},
     )
-    # 已簽任務手持端不再可取（get_pending_task_for_kiosk 僅 PENDING）→ 用 pending 任務驗證
-    if resp.status_code != 200:
-        task2 = await SigningService(db_session).create_task(
-            store_id,
-            SignatureTaskCreate(
-                kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-                contact_id=contact_id,
-                content={"items": [{"name": "相機", "amount": "1800"}], "total": "1800"},
-            ),
-            created_by=clerk_id,
-        )
-        await db_session.commit()
-        resp = await client.get(
-            f"/api/v1/kiosk/tasks/{task2.id}",
-            headers={"Authorization": f"Bearer {kiosk_token}"},
-        )
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "national_id_fingerprint" not in body["content"]
@@ -828,27 +806,21 @@ async def test_lot_bearing_affidavit_cannot_bind_buyout(
         "/api/v1/cash-sessions/open", json={"opening_float": "5000"}, headers=_auth(token)
     )
     clerk_id = await _clerk_id(db_session, store_id)
-    svc = SigningService(db_session)
-    task = await svc.create_task(
-        store_id,
-        SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content={
-                "items": [{"name": "相機", "amount": "1800"}],
-                "total": "1800",
-                "lot": {"total_qty": 10, "acquisition_basis": "BAG"},
-            },
-        ),
-        created_by=clerk_id,
+    task_id = await signed_affidavit(
+        db_session,
+        store_id=store_id,
+        contact_id=contact_id,
+        actor_user_id=clerk_id,
+        content={
+            "items": [{"name": "相機", "amount": "1800"}],
+            "total": "1800",
+            "lot": {"total_qty": 10, "acquisition_basis": "BAG"},
+        },
+        payout=PayoutMethod.CASH,
     )
-    await svc.sign_task(
-        store_id, task.id, signature_image_base64=_PNG, chosen_payout=PayoutMethod.CASH
-    )
-    await db_session.commit()
     # 品名/金額/總額都相符的 BUYOUT，但切結含 lot → 422
     resp = await client.post(
-        "/api/v1/acquisitions", json=_buyout_body(contact_id, task.id, "CASH"), headers=_auth(token)
+        "/api/v1/acquisitions", json=_buyout_body(contact_id, task_id, "CASH"), headers=_auth(token)
     )
     assert resp.status_code == 422, resp.text
 

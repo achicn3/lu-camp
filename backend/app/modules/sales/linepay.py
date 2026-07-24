@@ -209,9 +209,7 @@ class HttpxLinePayTransport:
                 resp.raise_for_status()
                 payload = resp.json()
         except httpx.HTTPError as exc:
-            raise LinePayTransportError(
-                f"LINE Pay API 呼叫失敗：{exc.__class__.__name__}"
-            ) from exc
+            raise LinePayTransportError(f"LINE Pay API 呼叫失敗：{exc.__class__.__name__}") from exc
         except ValueError as exc:
             raise LinePayTransportError("LINE Pay API 回應非 JSON") from exc
         if not isinstance(payload, dict):

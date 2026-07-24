@@ -33,6 +33,10 @@ from app.shared.enums import (
     StoreCreditSourceType,
     UserRole,
 )
+from tests.integration.customer_display_helpers import (
+    CustomerDisplayAwareClient,
+    delete_customer_display_rows,
+)
 
 
 @pytest_asyncio.fixture
@@ -44,7 +48,9 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
     app.dependency_overrides[get_session] = _override
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with CustomerDisplayAwareClient(
+        transport=transport, base_url="http://test", db_session=db_session
+    ) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -301,7 +307,8 @@ async def test_insufficient_store_credit_rolls_back_whole_sale() -> None:
                 },
                 headers=_auth(token, "insuf"),
             )
-        assert resp.status_code == 409, resp.text
+        # 餘額不足時連簽署任務都不得建立，HTTP 銷售端維持 fail-closed。
+        assert resp.status_code == 422, resp.text
         async with sm() as s:
             # 整筆回滾：庫存未扣（仍 10）、餘額仍 100、無 sale/tender
             cat_row = await s.get(CatalogProduct, cat)
@@ -528,6 +535,7 @@ async def test_db_guard_rejects_unbalanced_tenders_at_commit() -> None:
             from sqlalchemy import delete
 
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(delete(User).where(User.store_id == store_id))
             await s.execute(delete(Store).where(Store.id == store_id))
@@ -578,6 +586,7 @@ async def test_store_credit_tender_without_ledger_debit_blocked() -> None:
             from sqlalchemy import delete
 
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))
@@ -640,6 +649,7 @@ async def test_cross_store_tender_blocked() -> None:
             from sqlalchemy import delete
 
             await s.execute(delete(SaleTender).where(SaleTender.store_id == a_id))
+            await delete_customer_display_rows(s, store_id=a_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": a_id})
             await s.execute(delete(User).where(User.store_id == a_id))
             await s.execute(delete(Store).where(Store.id.in_([a_id, b_id])))
@@ -703,6 +713,7 @@ async def test_cross_store_sale_debit_blocked() -> None:
 
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
             await s.execute(delete(SaleTender).where(SaleTender.store_id == a_id))
+            await delete_customer_display_rows(s, store_id=a_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": a_id})
             await s.execute(text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": b_id})
             await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": b_id})
@@ -728,18 +739,21 @@ async def test_void_without_reversal_blocked() -> None:
         async with sm() as s:
             cat = await _seed_catalog(s, store_id, price="100", qty=10)
             await s.commit()
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            created = await c.post(
-                "/api/v1/sales",
-                json={
-                    "lines": [_catalog_line(cat, 2)],
-                    "buyer_contact_id": member_id,
-                    "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
-                },
-                headers=_auth(token, "void-raw"),
-            )
-            assert created.status_code == 201, created.text
-            sale_id = created.json()["id"]
+        async with sm() as helper_s:
+            async with CustomerDisplayAwareClient(
+                transport=transport, base_url="http://test", db_session=helper_s
+            ) as c:
+                created = await c.post(
+                    "/api/v1/sales",
+                    json={
+                        "lines": [_catalog_line(cat, 2)],
+                        "buyer_contact_id": member_id,
+                        "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+                    },
+                    headers=_auth(token, "void-raw"),
+                )
+                assert created.status_code == 201, created.text
+                sale_id = created.json()["id"]
         # 直接把 sale 標 VOID，但不寫沖正 → COMMIT 應被擋
         async with sm() as s:
             await s.execute(
@@ -758,6 +772,7 @@ async def test_void_without_reversal_blocked() -> None:
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
             )
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
@@ -789,18 +804,21 @@ async def test_sale_void_reversal_requires_voided_sale() -> None:
 
     transport = httpx.ASGITransport(app=create_app())
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            created = await c.post(
-                "/api/v1/sales",
-                json={
-                    "lines": [_catalog_line(cat, 2)],
-                    "buyer_contact_id": member_id,
-                    "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
-                },
-                headers=_auth(token, "rev-active"),
-            )
-            assert created.status_code == 201, created.text
-            sale_id = created.json()["id"]
+        async with sm() as helper_s:
+            async with CustomerDisplayAwareClient(
+                transport=transport, base_url="http://test", db_session=helper_s
+            ) as c:
+                created = await c.post(
+                    "/api/v1/sales",
+                    json={
+                        "lines": [_catalog_line(cat, 2)],
+                        "buyer_contact_id": member_id,
+                        "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+                    },
+                    headers=_auth(token, "rev-active"),
+                )
+                assert created.status_code == 201, created.text
+                sale_id = created.json()["id"]
         # 銷售仍 NOT_ISSUED（未作廢）→ 直插 SALE_VOID 沖正應被擋
         async with sm() as s:
             debit = await s.scalar(
@@ -842,6 +860,7 @@ async def test_sale_void_reversal_requires_voided_sale() -> None:
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
             )
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
@@ -875,20 +894,23 @@ async def test_moving_tender_rechecks_origin_sale() -> None:
 
     transport = httpx.ASGITransport(app=create_app())
     try:
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-            sale_ids = []
-            for i in range(2):
-                r = await c.post(
-                    "/api/v1/sales",
-                    json={
-                        "lines": [_catalog_line(cat, 1)],
-                        "buyer_contact_id": member_id,
-                        "tenders": [{"tender_type": "STORE_CREDIT", "amount": "100"}],
-                    },
-                    headers=_auth(token, f"move-{i}"),
-                )
-                assert r.status_code == 201, r.text
-                sale_ids.append(r.json()["id"])
+        async with sm() as helper_s:
+            async with CustomerDisplayAwareClient(
+                transport=transport, base_url="http://test", db_session=helper_s
+            ) as c:
+                sale_ids = []
+                for i in range(2):
+                    r = await c.post(
+                        "/api/v1/sales",
+                        json={
+                            "lines": [_catalog_line(cat, 1)],
+                            "buyer_contact_id": member_id,
+                            "tenders": [{"tender_type": "STORE_CREDIT", "amount": "100"}],
+                        },
+                        headers=_auth(token, f"move-{i}"),
+                    )
+                    assert r.status_code == 201, r.text
+                    sale_ids.append(r.json()["id"])
         sale_a, sale_b = sale_ids
         async with sm() as s:
             # 刪 B 的收款，把 A 的收款改掛到 B → B 對平、A 留下無收款的 DEBIT
@@ -918,6 +940,7 @@ async def test_moving_tender_rechecks_origin_sale() -> None:
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
             )
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
@@ -967,6 +990,7 @@ async def test_raw_zero_total_sale_blocked_at_commit() -> None:
         async with sm() as s:
             from sqlalchemy import delete
 
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
             await s.execute(delete(User).where(User.store_id == store_id))
             await s.execute(delete(Store).where(Store.id == store_id))

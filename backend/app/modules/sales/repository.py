@@ -31,13 +31,27 @@ from app.shared.enums import (
 
 # 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
 _SoldRowDB = tuple[
-    int | None, int | None, OwnershipType, Decimal | None, int | None,
-    datetime, datetime | None, Decimal,
+    int | None,
+    int | None,
+    OwnershipType,
+    Decimal | None,
+    int | None,
+    datetime,
+    datetime | None,
+    Decimal,
 ]
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
 #            intake, sold, line_total)
 _BulkSoldRowDB = tuple[
-    int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+    int | None,
+    int | None,
+    int | None,
+    Decimal,
+    int,
+    int,
+    datetime,
+    datetime,
+    Decimal,
 ]
 
 
@@ -111,9 +125,7 @@ class SalesRepository:
         result: LinePayTransaction | None = await self._session.scalar(stmt)
         return result
 
-    async def list_pending_refund_attempts(
-        self, store_id: int
-    ) -> list[LinePayRefundAttempt]:
+    async def list_pending_refund_attempts(self, store_id: int) -> list[LinePayRefundAttempt]:
         """列出結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁：人工確認/解決）。"""
         stmt = (
             select(LinePayRefundAttempt)

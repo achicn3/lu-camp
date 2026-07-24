@@ -35,6 +35,10 @@ from app.shared.enums import (
     PayoutMethod,
     UserRole,
 )
+from tests.integration.customer_display_helpers import (
+    delete_customer_display_rows,
+    prepare_signed_store_credit_cart,
+)
 
 
 @pytest_asyncio.fixture
@@ -203,7 +207,7 @@ async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
 ) -> None:
     """SPLIT 作廢(cash_session→account) vs『購物金-先』混合銷售(account→cash_session) 同一 contact：
     sales _apply_tenders 已固定 CASH 先於 STORE_CREDIT，與作廢 cash→credit 同一全域鎖序，不得 AB-BA
-    死結 500。給足獨立購物金 → 兩者皆乾淨成功（餘額不相爭）。"""
+    死結 500。若作廢先改變餘額，簽署快照必須讓銷售乾淨失敗；若銷售先鎖定，兩者可依序成功。"""
     sm = app_db.get_sessionmaker()
     async with sm() as s:
         store = Store(name="混合收款作廢店")
@@ -271,6 +275,25 @@ async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
         catalog_id, member_id = catalog.id, member.id
         clerk_token = encode_access_token(user_id=clerk.id, role="CLERK", store_id=store.id)
         mgr_token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+        signed = await prepare_signed_store_credit_cart(
+            s,
+            store_id=store.id,
+            actor_user_id=clerk.id,
+            payload={
+                "buyer_contact_id": member.id,
+                "lines": [
+                    {
+                        "line_type": "CATALOG",
+                        "catalog_product_id": catalog.id,
+                        "qty": 1,
+                    }
+                ],
+                "tenders": [
+                    {"tender_type": "STORE_CREDIT", "amount": "100"},
+                    {"tender_type": "CASH", "amount": "50"},
+                ],
+            },
+        )
         await s.commit()
 
     try:
@@ -287,6 +310,9 @@ async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
                         {"tender_type": "STORE_CREDIT", "amount": "100"},
                         {"tender_type": "CASH", "amount": "50"},
                     ],
+                    "signature_task_id": signed.signature_task_id,
+                    "cart_session_id": signed.cart_session_id,
+                    "cart_revision": signed.cart_revision,
                 },
                 headers=sale_headers,
             ),
@@ -294,13 +320,17 @@ async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
                 f"/api/v1/acquisitions/{acq_id}/void", json={"reason": "x"}, headers=void_headers
             ),
         )
-        # 無 DB 死結 500；餘額充足 → 兩者皆乾淨成功
-        assert r_sale.status_code == 201, r_sale.text
+        # 無 DB 死結 500；作廢一定成功。銷售若較晚取得鎖，因簽署後餘額已變動而安全拒絕。
+        assert r_sale.status_code != 500, r_sale.text
         assert r_void.status_code == 200, r_void.text
+        assert r_sale.status_code in {201, 422}, r_sale.text
+        if r_sale.status_code == 422:
+            assert "餘額已變動" in r_sale.text
     finally:
         async with sm() as s:
             # 帳本 insert-only（ADR-012）連 DELETE 都擋；清理用 TRUNCATE（不觸發列級 trigger）。
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
             await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
             await s.execute(delete(Sale).where(Sale.store_id == store_id))

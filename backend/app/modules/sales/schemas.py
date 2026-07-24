@@ -164,6 +164,9 @@ class SaleCreateRequest(BaseModel):
     tenders: list[SaleTenderRequest] | None = None
     # 購物金扣抵手持簽署（docs/23 K5，D3）：以購物金付款時綁定的已簽 STORE_CREDIT_USE 任務。
     signature_task_id: int | None = None
+    # POS 客顯權威購物車；購物金簽署時必填，其他付款由 POS 帶入以完成客顯清場。
+    cart_session_id: int | None = Field(default=None, ge=1)
+    cart_revision: int | None = Field(default=None, ge=1)
     # 發票資訊（docs/24）：einvoice_enabled 時 POS 可帶統編/載具/捐贈碼；省略＝B2C 一般開立。
     invoice: SaleInvoiceInfoRequest | None = None
     # 結帳當下 POS 觀察到的 einvoice_enabled（Codex 第二十二輪）：後端於結帳交易內

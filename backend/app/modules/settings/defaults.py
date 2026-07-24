@@ -13,6 +13,9 @@ DEFAULT_MARGIN_PCT = 45  # 定價輔助目標毛利率（整數百分數，§7.9
 DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES = False  # 分類維護預設限 MANAGER（docs/13 §2）。
 DEFAULT_REQUIRE_ACQUISITION_AFFIDAVIT = False  # 收購須手持切結預設關（docs/23 K4；店家就緒後開）。
 DEFAULT_REQUIRE_STORE_CREDIT_SIGNING = False  # 購物金扣抵須手持簽名預設關（docs/23 K5）。
+# 簽名 PNG 個資載體預設保留半年；第一版只列待清理報表，不實際刪檔。
+DEFAULT_SIGNATURE_PNG_RETENTION_DAYS = 183
+DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE = "REPORT_ONLY"
 DEFAULT_PREMIUM_RATE = Decimal("0.1000")  # 購物金溢價率（docs/16 §1.5 起手 +10%；4dp 與 DB 一致）
 DEFAULT_PREMIUM_RATE_MIN = Decimal("0.0000")  # 溢價率下限（docs/16 §6.1，預設 0%）
 DEFAULT_PREMIUM_RATE_MAX = Decimal("0.2000")  # 溢價率上限（docs/16 §6.1，預設 20%）

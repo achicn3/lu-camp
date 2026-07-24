@@ -46,6 +46,7 @@ from app.shared.exceptions import (
     EInvoiceResultConflict,
     EInvoiceSettingsChanged,
 )
+from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
 
 # f0401 成功回應樣板（doc 回應欄位；invoice_time 為 Unix 秒）。
 _F0401_OK = {
@@ -450,6 +451,29 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
     )
     line_transport = _MixedLinePayTransport()
     line_client = _mixed_linepay_client(line_transport)
+    signed = await prepare_signed_store_credit_cart(
+        db_session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload={
+            "buyer_contact_id": member.id,
+            "lines": [
+                {
+                    "line_type": "CATALOG",
+                    "catalog_product_id": product.id,
+                    "qty": 5,
+                }
+            ],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "300"},
+                {
+                    "tender_type": "LINE_PAY",
+                    "amount": "700",
+                    "line_pay_one_time_key": "OTK-amego-mixed",
+                },
+            ],
+        },
+    )
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
@@ -470,6 +494,9 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
             ),
         ],
         idempotency_key="amego-mixed-sale",
+        signature_task_id=signed.signature_task_id,
+        cart_session_id=signed.cart_session_id,
+        cart_revision=signed.cart_revision,
         linepay_client=line_client,
     )
     einvoice = EInvoiceService(db_session)

@@ -32,6 +32,7 @@ from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import SaleLineType, StoreCreditSourceType, UserRole
+from tests.integration.customer_display_helpers import CustomerDisplayAwareClient
 
 
 @pytest_asyncio.fixture
@@ -43,7 +44,9 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
     app.dependency_overrides[get_session] = _override
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with CustomerDisplayAwareClient(
+        transport=transport, base_url="http://test", db_session=db_session
+    ) as c:
         yield c
     app.dependency_overrides.clear()
 
@@ -278,9 +281,7 @@ async def test_campaign_discount_not_applied_to_menu(
     assert resp.status_code == 201
     # 餐飲不折：仍為原價 200、無折讓、無 campaign 留痕。
     assert resp.json()["total"] == "200"
-    line = await db_session.scalar(
-        select(SaleLine).where(SaleLine.line_type == SaleLineType.MENU)
-    )
+    line = await db_session.scalar(select(SaleLine).where(SaleLine.line_type == SaleLineType.MENU))
     assert line is not None
     assert line.discount_amount == Decimal(0)
     assert line.campaign_id is None
@@ -361,9 +362,7 @@ async def test_store_credit_ok_at_min_spend(
     assert resp.status_code == 201
 
 
-async def test_quote_echoes_min_spend(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_quote_echoes_min_spend(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     token, store_id, _ = await _seed(db_session)
     await _set_min_spend(db_session, store_id, 500)
     cat = await _catalog(db_session, store_id, price="200", qty=5)

@@ -2,12 +2,12 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.modules.sales.inputs import SaleLineInput
-from app.shared.enums import CartSessionStatus, SaleLineType, TenderType
+from app.shared.enums import CartSessionStatus, SaleLineType, SignatureTaskStatus, TenderType
 
 
 class KioskDeviceLoginRequest(BaseModel):
@@ -135,6 +135,15 @@ class CartCancelRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=200)
 
 
+class CartFreezeRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class CartBeginCheckoutRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    signature_task_id: int | None = Field(default=None, ge=1)
+
+
 class CartItemRead(BaseModel):
     item_key: str
     line_type: SaleLineType
@@ -185,7 +194,54 @@ class CartSessionRead(BaseModel):
     updated_at: datetime
 
 
+class KioskCartSessionRead(BaseModel):
+    """客顯渲染所需最小購物車視圖；不暴露櫃檯／裝置內部識別。"""
+
+    id: int
+    status: CartSessionStatus
+    revision: int
+    snapshot: CartSnapshotRead
+    changes: list[CartChangeRead]
+    updated_at: datetime
+
+
 class StaffCartSessionRead(CartSessionRead):
     """POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。"""
 
     buyer_contact_id: int | None
+    active_signature_task_id: int | None
+    payment_order_id: str | None
+    payment_uncertain_at: datetime | None
+    payment_uncertain_reason: str | None
+    sale_id: int | None
+
+
+class CartFreezeRead(BaseModel):
+    cart: StaffCartSessionRead
+    signature_task_id: int
+    signature_status: SignatureTaskStatus
+    expires_at: datetime
+
+
+class PaymentReconciliationRequest(BaseModel):
+    action: Literal["QUERY_PROVIDER", "MANUAL_SUCCESS", "MANUAL_FAILED"]
+    reason: str | None = Field(default=None, max_length=300)
+    evidence_type: str | None = Field(default=None, max_length=60)
+    evidence_reference: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _manual_requires_audit_evidence(self) -> "PaymentReconciliationRequest":
+        if self.action.startswith("MANUAL_") and not all(
+            (
+                self.reason and self.reason.strip(),
+                self.evidence_type and self.evidence_type.strip(),
+                self.evidence_reference and self.evidence_reference.strip(),
+            )
+        ):
+            raise ValueError("人工裁定必須填寫原因、外部證據類型與交易識別")
+        return self
+
+
+class PaymentReconciliationRead(BaseModel):
+    outcome: Literal["SUCCESS_CONFIRMED", "FAILED_CONFIRMED", "STILL_UNCERTAIN"]
+    cart: StaffCartSessionRead

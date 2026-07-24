@@ -1,7 +1,7 @@
-"""signing 業務邏輯：任務狀態機（PENDING→SIGNED/CANCELLED）、簽名守衛、切結書版本落庫。
+"""signing 業務邏輯：完整任務狀態機、簽名守衛、切結書版本與不可變證據落庫。
 
 - 簽名綁定內容快照：content 於建立時凍結；內容要變＝作廢重推重簽（docs/23 §3）。
-- 簽名影像守衛：base64 → PNG magic bytes → 大小上限，擋非影像垃圾與超大 payload。
+- 簽名影像守衛：base64 → 嚴格解碼/可見墨跡驗證 → 無 metadata 的標準 PNG。
 - chosen_payout：AFFIDAVIT 必選且限 CASH/STORE_CREDIT（D7）；其他種類不得帶。
 """
 
@@ -20,8 +20,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.canonical import canonical_json_bytes
+from app.modules.customerdisplay.models import CartSessionEvent
+from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.signing import agreements
-from app.modules.signing.models import AgreementVersion, SignatureTask
+from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
 from app.modules.signing.repository import SigningRepository
 from app.modules.signing.schemas import (
     MAX_SIGNATURE_B64_CHARS,
@@ -29,6 +32,7 @@ from app.modules.signing.schemas import (
     SignatureTaskCreate,
 )
 from app.shared.enums import (
+    CartSessionStatus,
     PayoutMethod,
     SaleInvoiceStatus,
     SaleStatus,
@@ -67,15 +71,17 @@ _PNG_VALID_BIT_DEPTHS = {6: {8}}
 # 會改變透明度/合成語意的 ancillary chunk：一律拒收（避免「渲染空白卻算有墨跡」）。
 _PNG_FORBIDDEN_CHUNKS = frozenset({b"tRNS", b"bKGD"})
 _PNG_FILTER_TYPES = frozenset({0, 1, 2, 3, 4})  # 掃描線 filter byte 合法值（規格 §9.2）
-# 已簽 STORE_CREDIT_USE 的結帳綁定時效（Codex K5 第十一輪）：簽名→放行結帳為連續現場動作，
-# 15 分鐘遠大於正常流程；逾時未用＝結帳已被放棄，該授權不可再綁新銷售（防不記名重用）。
-_STORE_CREDIT_USE_BINDING_TTL = timedelta(minutes=15)
+_PENDING_ACK_TTL = timedelta(seconds=60)
+_SIGNING_IDLE_TTL = timedelta(minutes=5)
+_SIGNED_CHECKOUT_TTL = timedelta(minutes=5)
+_ACTIVITY_WRITE_THROTTLE = timedelta(seconds=2)
 
 
 class SigningService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repo = SigningRepository(session)
+        self._display_repo = CustomerDisplayRepository(session)
 
     async def _lock_store_signing(self, store_id: int) -> None:
         """取本店簽署互斥鎖（pg_advisory_xact_lock，交易結束自動釋放）。
@@ -91,6 +97,46 @@ class SigningService:
         await self._session.execute(
             text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key}
         )
+
+    async def _lock_device_task_after_cart(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+    ) -> SignatureTask | None:
+        """跨購物車任務一律先鎖 cart、再鎖 task，與結帳保持同一全域鎖順序。"""
+        preview = await self._repo.get_for_device(store_id, device_id, task_id)
+        if preview is None:
+            return None
+        if preview.cart_session_id is not None:
+            await self._display_repo.get_cart(
+                store_id,
+                preview.cart_session_id,
+                for_update=True,
+            )
+        return await self._repo.get_for_device(
+            store_id,
+            device_id,
+            task_id,
+            for_update=True,
+        )
+
+    async def _lock_task_after_cart(
+        self,
+        store_id: int,
+        task_id: int,
+    ) -> SignatureTask | None:
+        """背景與補償流程同樣採 cart→task，避免和結帳形成 AB-BA 死結。"""
+        preview = await self._repo.get(store_id, task_id)
+        if preview is None:
+            return None
+        if preview.cart_session_id is not None:
+            await self._display_repo.get_cart(
+                store_id,
+                preview.cart_session_id,
+                for_update=True,
+            )
+        return await self._repo.get_for_update(store_id, task_id)
 
     async def create_task(
         self, store_id: int, data: SignatureTaskCreate, *, created_by: int
@@ -119,9 +165,32 @@ class SigningService:
         elif data.kind is SignatureTaskKind.TRANSACTION_ACK:
             content = await self._canonical_transaction_ack_content(store_id, data)
 
-        # 重推＝舊單作廢：同店同時最多一件待簽（DB 部分唯一索引為最終防線）。
-        # 否則店員改內容重推後，停在舊頁面的平板仍可簽下舊快照，留下錯誤證據。
-        await self._repo.cancel_pending_tasks(store_id)
+        if data.kind is SignatureTaskKind.STORE_CREDIT_USE:
+            raise SignatureTaskConflict("購物金簽署必須從 POS 權威購物車凍結流程建立")
+        kiosk_device_id = await self._resolve_kiosk_device(
+            store_id,
+            terminal_id=data.terminal_id,
+        )
+        existing = await self._repo.active_for_device(
+            store_id,
+            kiosk_device_id,
+            for_update=True,
+        )
+        if existing is not None:
+            raise SignatureTaskConflict(
+                f"此客顯已有進行中的簽署任務 #{existing.id}；請先撤回再重新送出"
+            )
+        if data.kind is SignatureTaskKind.TRANSACTION_ACK:
+            await self._ensure_ack_belongs_to_device(store_id, data.ref_id, kiosk_device_id)
+        from app.modules.customerdisplay.service import CustomerDisplayService
+
+        device = await self._display_repo.get_device(
+            store_id,
+            kiosk_device_id,
+            for_update=True,
+        )
+        if device is None or not CustomerDisplayService.kiosk_is_online(device):
+            raise SignatureTaskConflict("顧客顯示裝置目前離線，無法建立簽署任務")
 
         # 身分指紋於建立（＝內容凍結）時擷取入內部欄；收購綁定時比對此值與當前會員檔。
         identity_fingerprint: str | None = None
@@ -132,17 +201,114 @@ class SigningService:
             store_id=store_id,
             kind=data.kind,
             contact_id=data.contact_id,
+            kiosk_device_id=kiosk_device_id,
             content=content,
             agreement_version_id=agreement_version_id,
             identity_fingerprint=identity_fingerprint,
             ref_type=data.ref_type,
             ref_id=data.ref_id,
             created_by=created_by,
+            content_sha256=hashlib.sha256(canonical_json_bytes(content)).hexdigest(),
+            expires_at=datetime.now(UTC) + _PENDING_ACK_TTL,
         )
         try:
-            return await self._repo.add(task)
+            task = await self._repo.add(task)
+            await self._record_event(
+                task,
+                from_status=None,
+                to_status=SignatureTaskStatus.PENDING,
+                reason_code="CREATED",
+                actor_user_id=created_by,
+            )
+            return task
         except IntegrityError as exc:  # 併發重推：另一筆先建成功（單一待簽唯一索引）
             raise SignatureTaskConflict("簽署任務建立衝突（另一筆同時建立），請重試") from exc
+
+    async def _resolve_kiosk_device(
+        self,
+        store_id: int,
+        *,
+        terminal_id: int | None,
+    ) -> int:
+        if terminal_id is not None:
+            terminal = await self._display_repo.get_terminal(
+                store_id,
+                terminal_id,
+                for_update=True,
+            )
+            if terminal is None or not terminal.is_active:
+                raise SignatureTaskConflict("POS 櫃檯不存在或已停用")
+            pairing = await self._display_repo.get_active_pairing_for_terminal(
+                store_id,
+                terminal_id,
+                for_update=True,
+            )
+            if pairing is None:
+                raise SignatureTaskConflict("POS 櫃檯尚未配對客顯")
+            return pairing.kiosk_device_id
+        pairings = await self._display_repo.list_active_pairings_for_store(store_id)
+        if len(pairings) != 1:
+            raise SignatureTaskConflict("請指定 POS 櫃檯；目前無法唯一判定簽署客顯")
+        return pairings[0].kiosk_device_id
+
+    async def create_store_credit_task_for_cart(
+        self,
+        *,
+        store_id: int,
+        cart_session_id: int,
+        kiosk_device_id: int,
+        contact_id: int,
+        content: dict[str, object],
+        cart_snapshot_fingerprint: str,
+        created_by: int,
+    ) -> SignatureTask:
+        """由已鎖定的權威購物車建立不可變購物金簽署證據。"""
+        existing = await self._repo.active_for_device(
+            store_id,
+            kiosk_device_id,
+            for_update=True,
+        )
+        if existing is not None:
+            raise SignatureTaskConflict(f"此客顯已有進行中的簽署任務 #{existing.id}；請先撤回")
+        canonical = canonical_json_bytes(content)
+        fingerprint = hashlib.sha256(canonical).hexdigest()
+        task = SignatureTask(
+            store_id=store_id,
+            kind=SignatureTaskKind.STORE_CREDIT_USE,
+            status=SignatureTaskStatus.PENDING,
+            contact_id=contact_id,
+            kiosk_device_id=kiosk_device_id,
+            cart_session_id=cart_session_id,
+            content=content,
+            content_sha256=fingerprint,
+            cart_snapshot_fingerprint=cart_snapshot_fingerprint,
+            created_by=created_by,
+            expires_at=datetime.now(UTC) + _PENDING_ACK_TTL,
+        )
+        try:
+            await self._repo.add(task)
+            await self._record_event(
+                task,
+                from_status=None,
+                to_status=SignatureTaskStatus.PENDING,
+                reason_code="CART_FROZEN_FOR_SIGNATURE",
+                actor_user_id=created_by,
+            )
+        except IntegrityError as exc:
+            raise SignatureTaskConflict("簽署任務建立衝突，請重新載入購物車") from exc
+        return task
+
+    async def _ensure_ack_belongs_to_device(
+        self,
+        store_id: int,
+        sale_id: int | None,
+        kiosk_device_id: int,
+    ) -> None:
+        if sale_id is None:
+            raise SignatureContentMismatch("交易簽收缺少 sale ref_id")
+        cart = await self._display_repo.get_cart_by_sale(store_id, sale_id)
+        if cart is None or cart.kiosk_device_id != kiosk_device_id:
+            raise SignatureContentMismatch("該銷售不屬於此櫃檯配對的客顯")
 
     async def _enrich_affidavit_content(
         self,
@@ -302,9 +468,7 @@ class SigningService:
             name = str(it.get("name") or "").strip()
             amount = self._whole_ntd(it.get("amount"))
             if not name or amount is None:
-                raise SignatureContentMismatch(
-                    "收購切結品項必須帶名稱與有效金額（非負整數元）"
-                )
+                raise SignatureContentMismatch("收購切結品項必須帶名稱與有效金額（非負整數元）")
             items.append({"name": name, "amount": str(amount)})
         total = self._whole_ntd(content.get("total"))
         if total is None:
@@ -360,47 +524,142 @@ class SigningService:
         # 綁定時效（Codex K5 第十一輪 high）：簽名→放行結帳是連續現場動作（docs/23 §3），
         # 逾時未用的已簽授權不可再綁新銷售（結帳被放棄後它是「不記名扣抵憑證」）。
         # 已綁定銷售的回應遺失重放走 find_signature_replay、不經此處，不受時效影響。
-        if task.signed_at is None or (
-            datetime.now(UTC) - task.signed_at > _STORE_CREDIT_USE_BINDING_TTL
+        if (
+            task.signed_at is None
+            or task.expires_at is None
+            or task.expires_at <= datetime.now(UTC)
         ):
-            raise SignatureTaskNotPending(
-                f"簽署任務 {task_id} 已逾綁定時效（{_STORE_CREDIT_USE_BINDING_TTL}），"
-                "請重新推送簽署"
-            )
+            raise SignatureTaskNotPending(f"簽署任務 {task_id} 已逾 5 分鐘結帳時效，請重新推送簽署")
         return task
 
-    async def cancel_task(self, store_id: int, task_id: int) -> SignatureTask:
-        """作廢任務（店員端；客人反悔/內容要改都走這裡再重推）。
-
-        PENDING 一律可作廢。**已簽的 STORE_CREDIT_USE 於「尚未綁定任何銷售」時也可作廢**
-        （Codex K5 第十一輪 high）：客人簽完、結帳被放棄/內容變更時，若不能收回，這張已簽
-        授權會一直是可再用的「不記名扣抵憑證」。已綁定銷售＝交易證據，不可作廢。
-        其他已簽/已作廢狀態維持拒絕。
-        """
+    async def cancel_task(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        actor_user_id: int,
+        reason_code: str = "STAFF_WITHDRAWN",
+        reason: str = "店員撤回簽署",
+    ) -> SignatureTask:
+        """店員撤回待簽、簽署中或尚未成交的已簽任務；同交易解凍購物車。"""
         await self._lock_store_signing(store_id)
+        preview = await self._repo.get(store_id, task_id)
+        if preview is None:
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
+        cart = (
+            await self._display_repo.get_cart(
+                store_id,
+                preview.cart_session_id,
+                for_update=True,
+            )
+            if preview.cart_session_id is not None
+            else None
+        )
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
-        if task.status is SignatureTaskStatus.SIGNED and (
-            task.kind is SignatureTaskKind.STORE_CREDIT_USE
+        if cart is not None and cart.status is CartSessionStatus.PAYMENT_UNCERTAIN:
+            raise SignatureTaskNotPending("付款結果待確認期間不可撤回簽署，請先完成付款對帳")
+        if task.status not in (
+            SignatureTaskStatus.PENDING,
+            SignatureTaskStatus.SIGNING,
+            SignatureTaskStatus.SIGNED,
         ):
-            from app.modules.sales.service import SalesService
-
-            bound = await SalesService(self._session).find_sale_by_signature_task(
-                store_id, task_id
-            )
-            if bound is not None:
-                raise SignatureTaskNotPending(
-                    f"簽署任務 {task_id} 已綁定銷售 #{bound.id}（交易證據），不可作廢"
-                )
-        elif task.status is not SignatureTaskStatus.PENDING:
-            raise SignatureTaskNotPending(
-                f"簽署任務 {task_id} 非待簽狀態（{task.status}），不可作廢"
-            )
-        task.status = SignatureTaskStatus.CANCELLED
-        task.cancelled_at = datetime.now(UTC)
+            raise SignatureTaskNotPending(f"簽署任務 {task_id} 已是終態（{task.status}），不可作廢")
+        await self._terminate_task(
+            task,
+            target=SignatureTaskStatus.VOIDED,
+            reason_code=reason_code,
+            reason_detail=reason,
+            actor_user_id=actor_user_id,
+        )
         await self._session.flush()
         await self._session.refresh(task)
+        return task
+
+    async def acknowledge_task(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+    ) -> SignatureTask:
+        """客顯明確 ACK 已取得並渲染，PENDING→SIGNING；SSE 到達不能代替此步。"""
+        task = await self._lock_device_task_after_cart(
+            store_id,
+            device_id,
+            task_id,
+        )
+        if task is None:
+            raise SignatureTaskNotFound("簽署任務不存在或不屬於此客顯")
+        if task.status is SignatureTaskStatus.SIGNING:
+            return task
+        if task.status is not SignatureTaskStatus.PENDING:
+            raise SignatureTaskNotPending(f"簽署任務已是 {task.status}，不可開始簽署")
+        now = datetime.now(UTC)
+        if task.expires_at is not None and task.expires_at <= now:
+            await self._terminate_task(
+                task,
+                target=SignatureTaskStatus.EXPIRED,
+                reason_code="PENDING_ACK_TTL",
+                actor_kiosk_device_id=device_id,
+                observed_at=now,
+            )
+            raise SignatureTaskInvalidated("簽署任務等待客顯確認逾時，請由店員重新送出")
+        task.status = SignatureTaskStatus.SIGNING
+        task.last_user_activity_at = now
+        task.expires_at = now + _SIGNING_IDLE_TTL
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.PENDING,
+            to_status=SignatureTaskStatus.SIGNING,
+            reason_code="KIOSK_RENDERED_ACK",
+            actor_kiosk_device_id=device_id,
+        )
+        await self._session.flush()
+        return task
+
+    async def record_user_activity(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+        *,
+        activity: str,
+    ) -> SignatureTask:
+        """只記白名單互動的最近時間；節流且不保存筆劃或觸控座標。"""
+        task = await self._lock_device_task_after_cart(
+            store_id,
+            device_id,
+            task_id,
+        )
+        if task is None:
+            raise SignatureTaskNotFound("簽署任務不存在或不屬於此客顯")
+        if task.status is not SignatureTaskStatus.SIGNING:
+            raise SignatureTaskNotPending("只有正在簽署的任務可回報顧客操作")
+        now = datetime.now(UTC)
+        if task.expires_at is not None and task.expires_at <= now:
+            await self._terminate_task(
+                task,
+                target=SignatureTaskStatus.EXPIRED,
+                reason_code="SIGNING_IDLE_TTL",
+                actor_kiosk_device_id=device_id,
+                observed_at=now,
+            )
+            raise SignatureTaskInvalidated("簽署任務因顧客長時間無操作已逾時")
+        if (
+            task.last_user_activity_at is None
+            or now - task.last_user_activity_at >= _ACTIVITY_WRITE_THROTTLE
+        ):
+            task.last_user_activity_at = now
+            task.expires_at = now + _SIGNING_IDLE_TTL
+            await self._record_event(
+                task,
+                from_status=SignatureTaskStatus.SIGNING,
+                to_status=SignatureTaskStatus.SIGNING,
+                reason_code=f"KIOSK_ACTIVITY_{activity}",
+                actor_kiosk_device_id=device_id,
+            )
+            await self._session.flush()
         return task
 
     async def sign_task(
@@ -408,6 +667,7 @@ class SigningService:
         store_id: int,
         task_id: int,
         *,
+        device_id: int,
         signature_image_base64: str,
         chosen_payout: PayoutMethod | None,
         idempotency_key: str | None = None,
@@ -427,18 +687,32 @@ class SigningService:
             else None
         )
         await self._lock_store_signing(store_id)
-        task = await self._repo.get_for_update(store_id, task_id)
+        task = await self._lock_device_task_after_cart(
+            store_id,
+            device_id,
+            task_id,
+        )
         if task is None:
-            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在")
-        if task.status is SignatureTaskStatus.SIGNED:
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬於此客顯")
+        if task.status in (SignatureTaskStatus.SIGNED, SignatureTaskStatus.CONSUMED):
             # 冪等回放：同鍵＋同內容已簽成 → 回原任務（視為成功）；同鍵但內容不同/無鍵 → 409。
             if fingerprint is not None and task.sign_idempotency_key == fingerprint:
                 return task
             raise SignatureTaskNotPending(f"簽署任務 {task_id} 已簽署，請店員重新推送")
-        if task.status is not SignatureTaskStatus.PENDING:
+        if task.status is not SignatureTaskStatus.SIGNING:
             raise SignatureTaskNotPending(
-                f"簽署任務 {task_id} 非待簽狀態（{task.status}），請店員重新推送"
+                f"簽署任務 {task_id} 非簽署中狀態（{task.status}），請重新載入"
             )
+        now = datetime.now(UTC)
+        if task.expires_at is not None and task.expires_at <= now:
+            await self._terminate_task(
+                task,
+                target=SignatureTaskStatus.EXPIRED,
+                reason_code="SIGNING_IDLE_TTL",
+                actor_kiosk_device_id=device_id,
+                observed_at=now,
+            )
+            raise SignatureTaskInvalidated("簽署任務因顧客長時間無操作已逾時")
         if task.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             if chosen_payout not in (PayoutMethod.CASH, PayoutMethod.STORE_CREDIT):
                 raise InvalidKioskPayout("收購撥款須於現金/購物金中二選一（docs/23 D7）")
@@ -455,19 +729,69 @@ class SigningService:
                 await self._ensure_sale_ackable(
                     store_id, task.ref_type, task.ref_id, task.contact_id
                 )
+                await self._ensure_ack_belongs_to_device(store_id, task.ref_id, device_id)
             except SignatureContentMismatch as exc:
-                task.status = SignatureTaskStatus.CANCELLED
-                task.cancelled_at = datetime.now(UTC)
-                await self._session.flush()
-                raise SignatureTaskInvalidated(
-                    f"該銷售已作廢/退貨，簽收已失效：{exc}"
-                ) from exc
+                await self._terminate_task(
+                    task,
+                    target=SignatureTaskStatus.VOIDED,
+                    reason_code="TRANSACTION_ACK_INVALIDATED",
+                    reason_detail=str(exc),
+                    actor_kiosk_device_id=device_id,
+                )
+                raise SignatureTaskInvalidated(f"該銷售已作廢/退貨，簽收已失效：{exc}") from exc
 
+        # 設定查詢在某些門市首次使用時會建立 settings 並 flush；必須先完成，避免已簽欄位
+        # 分兩次 UPDATE，讓資料庫不可變證據 trigger 把第二段誤判為封存後修改。
+        from app.modules.settings.service import StoreSettingsService
+
+        retention_days = (
+            await StoreSettingsService(self._session).get_effective_settings(store_id)
+        ).signature_png_retention_days
+        signed_at = datetime.now(UTC)
+        signature_sha256 = hashlib.sha256(image).hexdigest()
+        content_sha256 = (
+            task.content_sha256 or hashlib.sha256(canonical_json_bytes(task.content)).hexdigest()
+        )
+        evidence_hash = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "task_id": task.id,
+                    "content_sha256": content_sha256,
+                    "signature_sha256": signature_sha256,
+                    "signed_at": signed_at.isoformat(),
+                }
+            )
+        ).hexdigest()
         task.signature_image = image
-        task.signed_at = datetime.now(UTC)
+        task.signature_sha256 = signature_sha256
+        task.content_sha256 = content_sha256
+        task.evidence_hash = evidence_hash
+        task.signed_at = signed_at
         task.chosen_payout = chosen_payout
         task.sign_idempotency_key = fingerprint
         task.status = SignatureTaskStatus.SIGNED
+        task.expires_at = signed_at + _SIGNED_CHECKOUT_TTL
+        task.last_user_activity_at = signed_at
+        task.signature_retention_until = signed_at + timedelta(days=retention_days)
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.SIGNING,
+            to_status=SignatureTaskStatus.SIGNED,
+            reason_code="SIGNATURE_ACCEPTED",
+            actor_kiosk_device_id=device_id,
+        )
+        if task.kind is SignatureTaskKind.TRANSACTION_ACK:
+            task.status = SignatureTaskStatus.CONSUMED
+            task.consumed_at = signed_at
+            task.expires_at = None
+            await self._record_event(
+                task,
+                from_status=SignatureTaskStatus.SIGNED,
+                to_status=SignatureTaskStatus.CONSUMED,
+                reason_code="TRANSACTION_ACK_BOUND",
+                actor_kiosk_device_id=device_id,
+                sale_id=task.ref_id,
+            )
         await self._session.flush()
         await self._session.refresh(task)
         return task
@@ -491,6 +815,371 @@ class SigningService:
     async def get_task(self, store_id: int, task_id: int) -> SignatureTask | None:
         return await self._repo.get(store_id, task_id)
 
+    async def get_task_for_update(self, store_id: int, task_id: int) -> SignatureTask | None:
+        return await self._repo.get_for_update(store_id, task_id)
+
+    async def _record_event(
+        self,
+        task: SignatureTask,
+        *,
+        from_status: SignatureTaskStatus | None,
+        to_status: SignatureTaskStatus,
+        reason_code: str,
+        reason_detail: str | None = None,
+        actor_user_id: int | None = None,
+        actor_kiosk_device_id: int | None = None,
+        sale_id: int | None = None,
+    ) -> None:
+        await self._repo.add_event(
+            SignatureTaskEvent(
+                store_id=task.store_id,
+                signature_task_id=task.id,
+                from_status=from_status,
+                to_status=to_status,
+                actor_user_id=actor_user_id,
+                actor_kiosk_device_id=actor_kiosk_device_id,
+                reason_code=reason_code,
+                reason_detail=reason_detail,
+                cart_session_id=task.cart_session_id,
+                sale_id=sale_id,
+            )
+        )
+
+    async def _terminate_task(
+        self,
+        task: SignatureTask,
+        *,
+        target: SignatureTaskStatus,
+        reason_code: str,
+        reason_detail: str | None = None,
+        actor_user_id: int | None = None,
+        actor_kiosk_device_id: int | None = None,
+        observed_at: datetime | None = None,
+    ) -> None:
+        """任務死亡與 FROZEN 購物車解凍必須在同一 DB 交易完成。"""
+        if target not in (
+            SignatureTaskStatus.VOIDED,
+            SignatureTaskStatus.EXPIRED,
+            SignatureTaskStatus.FAILED,
+        ):
+            raise ValueError(f"非法簽署終態：{target}")
+        from_status = task.status
+        if from_status not in (
+            SignatureTaskStatus.PENDING,
+            SignatureTaskStatus.SIGNING,
+            SignatureTaskStatus.SIGNED,
+        ):
+            raise SignatureTaskNotPending(f"簽署任務已是終態 {from_status}")
+        now = observed_at or datetime.now(UTC)
+        task.status = target
+        task.expires_at = None
+        if target is SignatureTaskStatus.VOIDED:
+            task.voided_at = now
+        elif target is SignatureTaskStatus.EXPIRED:
+            task.expired_at = now
+        else:
+            task.failed_at = now
+            task.failure_reason = reason_detail or reason_code
+        await self._record_event(
+            task,
+            from_status=from_status,
+            to_status=target,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            actor_user_id=actor_user_id,
+            actor_kiosk_device_id=actor_kiosk_device_id,
+        )
+        if task.cart_session_id is None:
+            return
+        cart = await self._display_repo.get_cart(
+            task.store_id,
+            task.cart_session_id,
+            for_update=True,
+        )
+        if (
+            cart is None
+            or cart.active_signature_task_id != task.id
+            or cart.status is CartSessionStatus.PAYMENT_UNCERTAIN
+        ):
+            return
+        if cart.status in (
+            CartSessionStatus.FROZEN,
+            CartSessionStatus.PROCESSING,
+        ):
+            cart.status = CartSessionStatus.DRAFT
+            cart.active_signature_task_id = None
+            cart.revision += 1
+            cart.last_activity_at = now
+            cart.updated_at = now
+            cart.last_changes = []
+            await self._session.flush()
+            await self._display_repo.add(
+                CartSessionEvent(
+                    store_id=cart.store_id,
+                    cart_session_id=cart.id,
+                    revision=cart.revision,
+                    event_type="SIGNATURE_RELEASED",
+                    payload={
+                        "signature_task_id": task.id,
+                        "task_status": target.value,
+                        "reason_code": reason_code,
+                    },
+                    actor_user_id=actor_user_id,
+                )
+            )
+
+    async def consume_task(
+        self,
+        task: SignatureTask,
+        *,
+        reason_code: str,
+        actor_user_id: int | None = None,
+        sale_id: int | None = None,
+    ) -> SignatureTask:
+        """單據成立交易內把已鎖定的 SIGNED 任務一次性轉 CONSUMED。"""
+        if task.status is not SignatureTaskStatus.SIGNED:
+            raise SignatureTaskNotPending(f"簽署任務 {task.id} 非 SIGNED，不可綁定")
+        now = datetime.now(UTC)
+        task.status = SignatureTaskStatus.CONSUMED
+        task.consumed_at = now
+        task.expires_at = None
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.SIGNED,
+            to_status=SignatureTaskStatus.CONSUMED,
+            reason_code=reason_code,
+            actor_user_id=actor_user_id,
+            sale_id=sale_id,
+        )
+        await self._session.flush()
+        return task
+
+    async def fail_task(
+        self,
+        task: SignatureTask,
+        *,
+        reason_code: str,
+        reason_detail: str,
+        actor_user_id: int | None = None,
+    ) -> SignatureTask:
+        await self._terminate_task(
+            task,
+            target=SignatureTaskStatus.FAILED,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            actor_user_id=actor_user_id,
+        )
+        await self._session.flush()
+        return task
+
+    async def fail_signed_task_by_id(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        reason_code: str,
+        reason_detail: str,
+        actor_user_id: int,
+    ) -> SignatureTask | None:
+        task = await self._repo.get_for_update(store_id, task_id)
+        if task is None or task.status is not SignatureTaskStatus.SIGNED:
+            return None
+        return await self.fail_task(
+            task,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            actor_user_id=actor_user_id,
+        )
+
+    async def pause_signed_ttl_for_payment_uncertain(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        actor_user_id: int,
+    ) -> SignatureTask:
+        task = await self._repo.get_for_update(store_id, task_id)
+        if task is None or task.status is not SignatureTaskStatus.SIGNED:
+            raise SignatureTaskNotPending("付款待確認只能暫停 SIGNED 任務的 TTL")
+        task.expires_at = None
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.SIGNED,
+            to_status=SignatureTaskStatus.SIGNED,
+            reason_code="PAYMENT_UNCERTAIN_TTL_PAUSED",
+            actor_user_id=actor_user_id,
+        )
+        await self._session.flush()
+        return task
+
+    async def resume_signed_ttl_after_reconciliation(
+        self,
+        task: SignatureTask,
+        *,
+        actor_user_id: int,
+    ) -> SignatureTask:
+        if task.status is not SignatureTaskStatus.SIGNED:
+            raise SignatureTaskNotPending("付款對帳後只能恢復 SIGNED 任務")
+        task.expires_at = datetime.now(UTC) + _SIGNED_CHECKOUT_TTL
+        await self._record_event(
+            task,
+            from_status=SignatureTaskStatus.SIGNED,
+            to_status=SignatureTaskStatus.SIGNED,
+            reason_code="PAYMENT_RECONCILED_TTL_RESUMED",
+            actor_user_id=actor_user_id,
+        )
+        await self._session.flush()
+        return task
+
+    async def active_task_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+    ) -> SignatureTask | None:
+        """重連後以後端真相決定畫面；逾時任務原子作廢並清場。"""
+        preview = await self._repo.active_for_device(store_id, device_id)
+        if preview is None:
+            return None
+        task = await self._lock_device_task_after_cart(
+            store_id,
+            device_id,
+            preview.id,
+        )
+        if task is None or task.status not in (
+            SignatureTaskStatus.PENDING,
+            SignatureTaskStatus.SIGNING,
+            SignatureTaskStatus.SIGNED,
+        ):
+            return None
+        now = datetime.now(UTC)
+        if task.expires_at is not None and task.expires_at <= now:
+            cart = (
+                await self._display_repo.get_cart(task.store_id, task.cart_session_id)
+                if task.cart_session_id is not None
+                else None
+            )
+            if cart is None or cart.status is not CartSessionStatus.PAYMENT_UNCERTAIN:
+                reason = {
+                    SignatureTaskStatus.PENDING: "PENDING_ACK_TTL",
+                    SignatureTaskStatus.SIGNING: "SIGNING_IDLE_TTL",
+                    SignatureTaskStatus.SIGNED: "SIGNED_CHECKOUT_TTL",
+                }[task.status]
+                await self._terminate_task(
+                    task,
+                    target=SignatureTaskStatus.EXPIRED,
+                    reason_code=reason,
+                    observed_at=now,
+                )
+                return None
+        return task
+
+    async def peek_active_task_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+    ) -> SignatureTask | None:
+        """SSE 只用來通知版本／狀態；真正 TTL 裁定由全量 GET 與 sweeper 負責。"""
+        return await self._repo.active_for_device(store_id, device_id)
+
+    async def sweep_expired_tasks(self, *, now: datetime | None = None) -> int:
+        observed_at = now or datetime.now(UTC)
+        candidates = await self._repo.expirable_tasks(observed_at)
+        expired = 0
+        for candidate in candidates:
+            task = await self._lock_task_after_cart(candidate.store_id, candidate.id)
+            if (
+                task is None
+                or task.status
+                not in (
+                    SignatureTaskStatus.PENDING,
+                    SignatureTaskStatus.SIGNING,
+                    SignatureTaskStatus.SIGNED,
+                )
+                or task.expires_at is None
+                or task.expires_at > observed_at
+            ):
+                continue
+            cart = (
+                await self._display_repo.get_cart(
+                    task.store_id,
+                    task.cart_session_id,
+                    for_update=True,
+                )
+                if task.cart_session_id is not None
+                else None
+            )
+            if cart is not None and cart.status is CartSessionStatus.PAYMENT_UNCERTAIN:
+                continue
+            reason = {
+                SignatureTaskStatus.PENDING: "PENDING_ACK_TTL",
+                SignatureTaskStatus.SIGNING: "SIGNING_IDLE_TTL",
+                SignatureTaskStatus.SIGNED: "SIGNED_CHECKOUT_TTL",
+            }[task.status]
+            await self._terminate_task(
+                task,
+                target=SignatureTaskStatus.EXPIRED,
+                reason_code=reason,
+                observed_at=observed_at,
+            )
+            expired += 1
+        return expired
+
+    async def expire_signed_task_if_due(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """Persist a lazy SIGNED TTL decision after a failed checkout transaction rolls back."""
+        observed_at = now or datetime.now(UTC)
+        task = await self._lock_task_after_cart(store_id, task_id)
+        if (
+            task is None
+            or task.status is not SignatureTaskStatus.SIGNED
+            or task.expires_at is None
+            or task.expires_at > observed_at
+        ):
+            return False
+        cart = (
+            await self._display_repo.get_cart(store_id, task.cart_session_id, for_update=True)
+            if task.cart_session_id is not None
+            else None
+        )
+        if cart is not None and cart.status is CartSessionStatus.PAYMENT_UNCERTAIN:
+            return False
+        await self._terminate_task(
+            task,
+            target=SignatureTaskStatus.EXPIRED,
+            reason_code="SIGNED_CHECKOUT_TTL",
+            observed_at=observed_at,
+        )
+        return True
+
+    async def report_due_signature_images(self, *, now: datetime | None = None) -> int:
+        """第一版 REPORT_ONLY：只標記待清理報表，絕不刪 PNG、快照、hash 或事件。"""
+        observed_at = now or datetime.now(UTC)
+        rows = await self._repo.due_signature_images(observed_at)
+        for task in rows:
+            task.signature_cleanup_reported_at = observed_at
+            await self._record_event(
+                task,
+                from_status=task.status,
+                to_status=task.status,
+                reason_code="SIGNATURE_PNG_RETENTION_DUE",
+                reason_detail="REPORT_ONLY：簽名 PNG 到期，未執行刪除",
+            )
+        await self._session.flush()
+        return len(rows)
+
+    async def signature_retention_report(
+        self,
+        store_id: int,
+        *,
+        limit: int = 200,
+    ) -> list[SignatureTask]:
+        return await self._repo.signature_retention_report(store_id, limit=limit)
+
     async def get_signed_affidavit(
         self, store_id: int, task_id: int, *, contact_id: int
     ) -> SignatureTask:
@@ -499,7 +1188,7 @@ class SigningService:
 
         供 acquisition service 在建立收購時驗證＋讀 chosen_payout（跨模組只經對方 service）。
         """
-        task = await self._repo.get(store_id, task_id)
+        task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬本店")
         if (
@@ -512,20 +1201,15 @@ class SigningService:
             )
         return task
 
-    async def get_pending_task_for_kiosk(self, store_id: int, task_id: int) -> SignatureTask | None:
-        """手持端重讀：僅回 PENDING 中的任務，其餘一律 None（→404）。
-
-        手持裝置在客人手上，不得憑 ID 枚舉歷史簽署單的內容快照；簽名送出的
-        回應已帶最終狀態，事後不需要（也不允許）再讀。
-        """
-        task = await self._repo.get(store_id, task_id)
-        if task is None or task.status is not SignatureTaskStatus.PENDING:
-            return None
-        return task
-
-    async def latest_pending_task(self, store_id: int) -> SignatureTask | None:
-        """手持端輪詢：最新一筆待簽任務（單店單裝置，同時最多一件在簽）。"""
-        return await self._repo.latest_pending(store_id)
+    async def get_active_task_for_kiosk(
+        self,
+        store_id: int,
+        device_id: int,
+        task_id: int,
+    ) -> SignatureTask | None:
+        """僅允許裝置讀取自己目前且未逾時的任務；終態與其他裝置視為不存在。"""
+        task = await self.active_task_for_device(store_id, device_id)
+        return task if task is not None and task.id == task_id else None
 
     async def list_tasks(
         self,
@@ -585,8 +1269,8 @@ class SigningService:
         if not image.startswith(_PNG_MAGIC):
             raise InvalidSignatureImage("簽名影像必須為 PNG 格式")
         idat = SigningService._validate_png_chunks(image)
-        SigningService._validate_png_renderable(image, idat)
-        return image
+        width, height, pixels = SigningService._validate_png_renderable(image, idat)
+        return SigningService._encode_normalized_png(width, height, pixels)
 
     @staticmethod
     def _validate_png_chunks(image: bytes) -> bytes:
@@ -645,7 +1329,7 @@ class SigningService:
             pos = data_end + 4
 
     @staticmethod
-    def _validate_png_renderable(image: bytes, idat: bytes) -> None:
+    def _validate_png_renderable(image: bytes, idat: bytes) -> tuple[int, int, bytes]:
         """證明影像資料真的可渲染，而非只有 chunk 形狀正確（Codex 第三輪 high）。
 
         IHDR 語意驗證（尺寸、bit_depth/color_type 合法組合、compression/filter 必為 0、
@@ -694,10 +1378,11 @@ class SigningService:
         stride = 1 + (width * bits_per_pixel + 7) // 8
         if any(raw[row * stride] not in _PNG_FILTER_TYPES for row in range(height)):
             raise InvalidSignatureImage("簽名影像的掃描線資料非法（無法渲染）")
-        SigningService._require_visible_ink(raw, width, height, color_type)
+        pixels = SigningService._require_visible_ink(raw, width, height, color_type)
+        return width, height, pixels
 
     @staticmethod
-    def _require_visible_ink(raw: bytes, width: int, height: int, color_type: int) -> None:
+    def _require_visible_ink(raw: bytes, width: int, height: int, color_type: int) -> bytes:
         """解濾波（PNG 規格 §9：None/Sub/Up/Average/Paeth）並驗可見墨跡像素數。
 
         空白/全透明影像不得成為已簽署的法律證據（Codex 第七輪 high）。上游已收斂為
@@ -710,6 +1395,7 @@ class SigningService:
         prev = bytes(stride)
         ink = 0
         pos = 0
+        pixels = bytearray()
         for _row in range(height):
             filter_type = raw[pos]
             row = bytearray(raw[pos + 1 : pos + 1 + stride])
@@ -739,7 +1425,32 @@ class SigningService:
                 luma = (row[x] + row[x + 1] + row[x + 2]) // 3
                 if alpha >= _INK_ALPHA_MIN and luma < _INK_DARKNESS_MAX:
                     ink += 1
-            if ink >= _MIN_INK_PIXELS:
-                return
+            pixels.extend(row)
             prev = bytes(row)
-        raise InvalidSignatureImage("簽名影像為空白（未偵測到可見簽名筆跡）")
+        if ink < _MIN_INK_PIXELS:
+            raise InvalidSignatureImage("簽名影像為空白（未偵測到可見簽名筆跡）")
+        return bytes(pixels)
+
+    @staticmethod
+    def _encode_normalized_png(width: int, height: int, pixels: bytes) -> bytes:
+        """以固定 RGBA/filter-0/zlib 參數重編碼，剝除所有 metadata 後才計 hash／落地。"""
+
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            return (
+                len(data).to_bytes(4, "big")
+                + kind
+                + data
+                + zlib.crc32(kind + data).to_bytes(4, "big")
+            )
+
+        stride = width * 4
+        scanlines = b"".join(
+            b"\x00" + pixels[row * stride : (row + 1) * stride] for row in range(height)
+        )
+        ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
+        return (
+            _PNG_MAGIC
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(scanlines, level=9))
+            + chunk(b"IEND", b"")
+        )

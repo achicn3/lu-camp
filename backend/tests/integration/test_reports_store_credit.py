@@ -18,6 +18,7 @@ from app.modules.storecredit.models import StoreCreditAccount, StoreCreditLedger
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
 from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType, UserRole
+from tests.integration.customer_display_helpers import CustomerDisplayAwareClient
 
 
 @pytest_asyncio.fixture
@@ -29,7 +30,9 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
     app.dependency_overrides[get_session] = _override
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+    async with CustomerDisplayAwareClient(
+        transport=transport, base_url="http://test", db_session=db_session
+    ) as c:
         yield c
     app.dependency_overrides.clear()
 

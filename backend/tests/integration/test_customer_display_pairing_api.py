@@ -155,7 +155,8 @@ async def test_kiosk_login_sets_scoped_http_only_cookie_and_returns_pairing_code
     cookie = next(c for c in raw_cookie if c.name == "lu_camp_kiosk_session")
     assert cookie.path == "/api/v1/kiosk"
     assert cookie.has_nonstandard_attr("HttpOnly")
-    assert cookie.get_nonstandard_attr("SameSite").lower() == "strict"
+    same_site = cookie.get_nonstandard_attr("SameSite")
+    assert same_site is not None and same_site.lower() == "strict"
 
     # Cookie Path 不涵蓋一般店務 API；沒有 bearer token 時仍須 401。
     general = await client.get("/api/v1/cash-sessions/current")

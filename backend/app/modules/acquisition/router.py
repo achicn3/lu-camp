@@ -79,6 +79,30 @@ def _http_status_for(exc: DomainError) -> int:
     return _STATUS_BY_EXC.get(type(exc), status.HTTP_400_BAD_REQUEST)
 
 
+async def _fail_acquisition_signature(
+    session: AsyncSession,
+    *,
+    store_id: int,
+    task_id: int | None,
+    actor_user_id: int,
+    reason_detail: str,
+) -> None:
+    """在原收購交易回滾後，以新交易封存已簽但未成交的任務。"""
+    if task_id is None:
+        return
+    from app.modules.signing.service import SigningService
+
+    failed = await SigningService(session).fail_signed_task_by_id(
+        store_id,
+        task_id,
+        reason_code="ACQUISITION_FAILED",
+        reason_detail=reason_detail,
+        actor_user_id=actor_user_id,
+    )
+    if failed is not None:
+        await session.commit()
+
+
 @router.post(
     "",
     response_model=AcquisitionResult,
@@ -100,10 +124,28 @@ async def create_acquisition(
         )
     except DomainError as exc:
         await session.rollback()
+        await _fail_acquisition_signature(
+            session,
+            store_id=user.store_id,
+            task_id=payload.signature_task_id,
+            actor_user_id=user.id,
+            reason_detail=str(exc),
+        )
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
     except Exception:
-        # 任何非預期錯誤也整筆回復，不留半套（再向上拋為 500）。
+        # 收購只涉及同一筆本機 DB 交易；回滾後可確定未成交，已簽任務必須封存為 FAILED。
         await session.rollback()
+        try:
+            await _fail_acquisition_signature(
+                session,
+                store_id=user.store_id,
+                task_id=payload.signature_task_id,
+                actor_user_id=user.id,
+                reason_detail="收購發生未預期的後端錯誤",
+            )
+        except Exception:
+            # 保留原始例外；若資料庫本身不可用，後續 sweeper/稽核可處理殘留任務。
+            await session.rollback()
         raise
     await session.commit()
     return result

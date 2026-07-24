@@ -23,13 +23,16 @@ from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, SerializedItem, StockMovement
-from app.modules.signing.models import SignatureTask
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import Grade, PayoutMethod, SignatureTaskKind, UserRole
 from app.shared.exceptions import SignatureContentMismatch, SignatureTaskConflict
+from tests.integration.customer_display_helpers import (
+    delete_customer_display_rows,
+    ensure_paired_customer_display,
+)
 
 
 def _png() -> str:
@@ -44,8 +47,11 @@ def _png() -> str:
         for _x in range(200):
             raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
     ihdr = (200).to_bytes(4, "big") + (80).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
-    png = magic + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(
-        b"IEND", b""
+    png = (
+        magic
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw)))
+        + chunk(b"IEND", b"")
     )
     return base64.b64encode(png).decode()
 
@@ -69,6 +75,11 @@ async def test_identity_edit_serialized_with_binding() -> None:
         await s.flush()
         store_id, clerk_id, contact_id = store.id, clerk.id, contact.id
         await CashDrawerService(s).open_session(store_id, clerk_id, Decimal("1000"))
+        terminal, device = await ensure_paired_customer_display(
+            s,
+            store_id=store_id,
+            actor_user_id=clerk_id,
+        )
         svc = SigningService(s)
         task = await svc.create_task(
             store_id,
@@ -76,11 +87,17 @@ async def test_identity_edit_serialized_with_binding() -> None:
                 kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
                 contact_id=contact_id,
                 content={"items": [{"name": "相機", "amount": "1800"}], "total": "1800"},
+                terminal_id=terminal.id,
             ),
             created_by=clerk_id,
         )
+        await svc.acknowledge_task(store_id, device.id, task.id)
         await svc.sign_task(
-            store_id, task.id, signature_image_base64=_png(), chosen_payout=PayoutMethod.CASH
+            store_id,
+            task.id,
+            device_id=device.id,
+            signature_image_base64=_png(),
+            chosen_payout=PayoutMethod.CASH,
         )
         task_id = task.id
         await s.commit()
@@ -131,7 +148,7 @@ async def test_identity_edit_serialized_with_binding() -> None:
     finally:
         # 本測試以真 session 提交資料；FK 順序清列，不留殘餘干擾其他測試。
         async with sm() as s:
-            await s.execute(delete(SignatureTask).where(SignatureTask.store_id == store_id))
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
@@ -163,6 +180,11 @@ async def test_void_in_progress_serializes_replay() -> None:
         await s.flush()
         store_id, clerk_id, contact_id = store.id, clerk.id, contact.id
         await CashDrawerService(s).open_session(store_id, clerk_id, Decimal("5000"))
+        terminal, device = await ensure_paired_customer_display(
+            s,
+            store_id=store_id,
+            actor_user_id=clerk_id,
+        )
         svc = SigningService(s)
         task = await svc.create_task(
             store_id,
@@ -170,11 +192,17 @@ async def test_void_in_progress_serializes_replay() -> None:
                 kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
                 contact_id=contact_id,
                 content={"items": [{"name": "相機", "amount": "1800"}], "total": "1800"},
+                terminal_id=terminal.id,
             ),
             created_by=clerk_id,
         )
+        await svc.acknowledge_task(store_id, device.id, task.id)
         await svc.sign_task(
-            store_id, task.id, signature_image_base64=_png(), chosen_payout=PayoutMethod.CASH
+            store_id,
+            task.id,
+            device_id=device.id,
+            signature_image_base64=_png(),
+            chosen_payout=PayoutMethod.CASH,
         )
         payload = AcquisitionCreate(
             type="BUYOUT",
@@ -226,12 +254,12 @@ async def test_void_in_progress_serializes_replay() -> None:
         # 本測試建立了帶完整副作用（庫存/現金/稽核）的真收購；清列時暫停本 session 的 FK 觸發
         # （lucamp 為資料表擁有者），即可不受深層 FK 圖牽制、順序無關地清乾淨，不留殘餘。
         async with sm() as s:
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("SET session_replication_role = replica"))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
             await s.execute(delete(BulkLot).where(BulkLot.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
-            await s.execute(delete(SignatureTask).where(SignatureTask.store_id == store_id))
             await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))

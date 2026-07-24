@@ -47,6 +47,7 @@ from app.shared.exceptions import (
     LinePayTransportError,
     ManualRefundRequired,
 )
+from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
 
 _CHECK_NOT_FOUND: dict[str, object] = {
     "returnCode": "1150",
@@ -576,6 +577,26 @@ async def test_mixed_store_credit_linepay_returns_credit_first_then_line_delta(
     await _seed_item(db_session, store_id, code="ML2", price="200")
     await _seed_item(db_session, store_id, code="ML3", price="600")
     transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    signed = await prepare_signed_store_credit_cart(
+        db_session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload={
+            "buyer_contact_id": member.id,
+            "lines": [
+                {"line_type": "SERIALIZED", "item_code": code, "qty": 1}
+                for code in ("ML1", "ML2", "ML3")
+            ],
+            "tenders": [
+                {"tender_type": "STORE_CREDIT", "amount": "300"},
+                {
+                    "tender_type": "LINE_PAY",
+                    "amount": "700",
+                    "line_pay_one_time_key": "OTK-mixed-line",
+                },
+            ],
+        },
+    )
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
@@ -590,6 +611,9 @@ async def test_mixed_store_credit_linepay_returns_credit_first_then_line_delta(
             ),
         ],
         idempotency_key="mixed-line-sale",
+        signature_task_id=signed.signature_task_id,
+        cart_session_id=signed.cart_session_id,
+        cart_revision=signed.cart_revision,
         linepay_client=_client(transport),
     )
     first_line = await _line_id(db_session, sale.id, "ML1")

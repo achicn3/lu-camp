@@ -12,6 +12,8 @@ from app.modules.settings.defaults import (
     DEFAULT_COMMISSION_PCT,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
+    DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE,
+    DEFAULT_SIGNATURE_PNG_RETENTION_DAYS,
     DEFAULT_TAX_RATE,
 )
 from app.modules.settings.models import StoreSettings
@@ -47,6 +49,10 @@ async def test_get_effective_returns_defaults_without_persisting(db_session: Asy
     assert s.default_commission_pct == DEFAULT_COMMISSION_PCT
     assert s.default_margin_pct == DEFAULT_MARGIN_PCT
     assert s.allow_clerk_manage_categories is DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES
+    assert s.signature_png_retention_days == 183
+    assert s.signature_png_retention_days == DEFAULT_SIGNATURE_PNG_RETENTION_DAYS
+    assert s.signature_cleanup_enforcement_mode == "REPORT_ONLY"
+    assert s.signature_cleanup_enforcement_mode == DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE
     # 未持久化：DB 尚無該店 settings 列。
     assert await svc.get_persisted(store_id) is None
 
@@ -174,3 +180,8 @@ async def test_enable_einvoice_blocked_until_amego_key_configured(
 def test_update_request_rejects_out_of_range(patch_kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         SettingsUpdateRequest(**patch_kwargs)
+
+
+def test_v1_rejects_automatic_signature_image_deletion() -> None:
+    with pytest.raises(ValueError):
+        SettingsUpdateRequest(signature_cleanup_enforcement_mode="AUTO_DELETE")

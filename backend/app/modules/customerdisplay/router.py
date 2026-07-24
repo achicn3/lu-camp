@@ -13,19 +13,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.customerdisplay.models import CartSession, KioskDevice, PosTerminal
 from app.modules.customerdisplay.schemas import (
+    CartBeginCheckoutRequest,
     CartCancelRequest,
+    CartFreezeRead,
+    CartFreezeRequest,
     CartSessionRead,
     CartSnapshotRead,
     CartUpsertRequest,
+    KioskCartSessionRead,
     KioskDeviceLoginRequest,
     KioskDeviceRead,
     KioskDeviceSessionRead,
     KioskHeartbeatRead,
     KioskHeartbeatRequest,
     KioskSummary,
+    PaymentReconciliationRead,
+    PaymentReconciliationRequest,
     StaffCartSessionRead,
     TerminalCreateRequest,
     TerminalPairRequest,
@@ -45,7 +51,8 @@ from app.modules.customerdisplay.service import (
     TerminalNotFound,
 )
 from app.modules.user.router import ThrottleDep
-from app.shared.exceptions import DomainError
+from app.shared.enums import UserRole
+from app.shared.exceptions import DomainError, LinePayTransportError
 
 KIOSK_COOKIE = "lu_camp_kiosk_session"
 KIOSK_COOKIE_PATH = "/api/v1/kiosk"
@@ -59,6 +66,7 @@ kiosk_router = APIRouter(prefix="/kiosk", tags=["kiosk-device"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 StaffDep = Annotated[CurrentUser, Depends(get_current_user)]
+ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value))]
 
 
 def _trusted_origins() -> set[str]:
@@ -149,10 +157,26 @@ def _cart_read(cart: CartSession) -> CartSessionRead:
     )
 
 
+def _kiosk_cart_read(cart: CartSession) -> KioskCartSessionRead:
+    return KioskCartSessionRead(
+        id=cart.id,
+        status=cart.status,
+        revision=cart.revision,
+        snapshot=CartSnapshotRead.model_validate(cart.snapshot),
+        changes=cart.last_changes,
+        updated_at=cart.updated_at,
+    )
+
+
 def _staff_cart_read(cart: CartSession) -> StaffCartSessionRead:
     return StaffCartSessionRead(
         **_cart_read(cart).model_dump(),
         buyer_contact_id=cart.buyer_contact_id,
+        active_signature_task_id=cart.active_signature_task_id,
+        payment_order_id=cart.payment_order_id,
+        payment_uncertain_at=cart.payment_uncertain_at,
+        payment_uncertain_reason=cart.payment_uncertain_reason,
+        sale_id=cart.sale_id,
     )
 
 
@@ -221,15 +245,15 @@ async def create_kiosk_device_session(
 
 @kiosk_router.get(
     "/cart/current",
-    response_model=CartSessionRead | None,
+    response_model=KioskCartSessionRead | None,
     operation_id="getCurrentKioskCart",
 )
 async def get_current_kiosk_cart(
     session: SessionDep,
     principal: KioskPrincipalDep,
-) -> CartSessionRead | None:
+) -> KioskCartSessionRead | None:
     cart = await CustomerDisplayService(session).current_cart_for_device(principal)
-    return _cart_read(cart) if cart is not None else None
+    return _kiosk_cart_read(cart) if cart is not None else None
 
 
 @kiosk_router.get(
@@ -244,21 +268,42 @@ async def stream_kiosk_events(
     principal: KioskPrincipalDep,
 ) -> StreamingResponse:
     """只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。"""
-    _require_trusted_origin(request)
 
     async def events() -> AsyncIterator[str]:
-        previous: tuple[int | None, int] | None = None
+        previous: tuple[int | None, int, int | None, str | None] | None = None
         heartbeat_elapsed = SSE_HEARTBEAT_SECONDS
         while not await request.is_disconnected():
             # 同一長連線持有的 identity map 不可遮蔽別筆交易剛提交的 revision。
             session.expire_all()
             cart = await CustomerDisplayService(session).current_cart_for_device(principal)
-            current = (cart.id, cart.revision) if cart is not None else (None, 0)
+            from app.modules.signing.service import SigningService
+
+            task = await SigningService(session).peek_active_task_for_device(
+                principal.store_id,
+                principal.device_id,
+            )
+            current = (
+                cart.id if cart is not None else None,
+                cart.revision if cart is not None else 0,
+                task.id if task is not None else None,
+                task.status.value if task is not None else None,
+            )
+            # SSE 可能持續數小時；每輪完整讀取後結束唯讀 transaction，避免 idle transaction
+            # 長期佔用連線／妨礙 VACUUM。下一輪會自然開新 transaction 並讀到最新提交。
+            await session.rollback()
             if current != previous:
                 yield _sse_event(
                     "state",
-                    {"cart_session_id": current[0], "revision": current[1]},
-                    event_id=f"cart:{current[0] or 0}:{current[1]}",
+                    {
+                        "cart_session_id": current[0],
+                        "revision": current[1],
+                        "signature_task_id": current[2],
+                        "signature_status": current[3],
+                    },
+                    event_id=(
+                        f"cart:{current[0] or 0}:{current[1]}:"
+                        f"task:{current[2] or 0}:{current[3] or 'NONE'}"
+                    ),
                 )
                 previous = current
             if heartbeat_elapsed >= SSE_HEARTBEAT_SECONDS:
@@ -448,6 +493,36 @@ async def get_current_terminal_cart(
 
 
 @staff_router.post(
+    "/terminals/{terminal_id}/cart/begin-checkout",
+    response_model=StaffCartSessionRead,
+    operation_id="beginCustomerDisplayCheckout",
+)
+async def begin_checkout(
+    terminal_id: int,
+    body: CartBeginCheckoutRequest,
+    session: SessionDep,
+    user: StaffDep,
+) -> StaffCartSessionRead:
+    try:
+        cart = await CustomerDisplayService(session).begin_checkout(
+            user.store_id,
+            terminal_id,
+            expected_revision=body.expected_revision,
+            signature_task_id=body.signature_task_id,
+            actor_user_id=user.id,
+        )
+    except TerminalNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except CartSessionConflict as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = _staff_cart_read(cart)
+    await session.commit()
+    return payload
+
+
+@staff_router.post(
     "/terminals/{terminal_id}/cart/cancel",
     response_model=CartSessionRead,
     operation_id="cancelCustomerDisplayCart",
@@ -473,6 +548,88 @@ async def cancel_cart(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     payload = _cart_read(cart)
+    await session.commit()
+    return payload
+
+
+@staff_router.post(
+    "/terminals/{terminal_id}/cart/freeze-for-signature",
+    response_model=CartFreezeRead,
+    operation_id="freezeCustomerDisplayCartForSignature",
+)
+async def freeze_cart_for_signature(
+    terminal_id: int,
+    body: CartFreezeRequest,
+    session: SessionDep,
+    user: StaffDep,
+) -> CartFreezeRead:
+    try:
+        cart, task = await CustomerDisplayService(session).freeze_store_credit_cart(
+            user.store_id,
+            terminal_id,
+            expected_revision=body.expected_revision,
+            actor_user_id=user.id,
+        )
+    except TerminalNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except (PairingConflict, CartSessionConflict) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (CartSessionInvalid, DomainError) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    assert task.expires_at is not None
+    payload = CartFreezeRead(
+        cart=_staff_cart_read(cart),
+        signature_task_id=task.id,
+        signature_status=task.status,
+        expires_at=task.expires_at,
+    )
+    await session.commit()
+    return payload
+
+
+@staff_router.post(
+    "/terminals/{terminal_id}/cart/reconcile-payment",
+    response_model=PaymentReconciliationRead,
+    operation_id="reconcileCustomerDisplayPayment",
+)
+async def reconcile_cart_payment(
+    terminal_id: int,
+    body: PaymentReconciliationRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> PaymentReconciliationRead:
+    from app.modules.sales.linepay import linepay_client_from_config
+
+    try:
+        outcome, cart = await CustomerDisplayService(session).reconcile_payment(
+            user.store_id,
+            terminal_id,
+            action=body.action,
+            actor_user_id=user.id,
+            linepay_client=linepay_client_from_config(),
+            reason=body.reason,
+            evidence_type=body.evidence_type,
+            evidence_reference=body.evidence_reference,
+        )
+    except (CartSessionConflict, LinePayTransportError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (CartSessionInvalid, DomainError) as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    payload = PaymentReconciliationRead(
+        outcome=outcome,
+        cart=_staff_cart_read(cart),
+    )
     await session.commit()
     return payload
 

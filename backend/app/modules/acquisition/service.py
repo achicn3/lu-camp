@@ -14,6 +14,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,6 +60,9 @@ from app.shared.exceptions import (
     SignatureTaskConflict,
     StoreCreditMemberRequired,
 )
+
+if TYPE_CHECKING:
+    from app.modules.signing.models import SignatureTask
 
 COMMISSION_PCT_MIN = 0
 COMMISSION_PCT_MAX = 100
@@ -425,6 +429,7 @@ class AcquisitionService:
         # 再沿用同一簽署」（Codex K4 high）。純讀驗證，先於任何寫入；單次使用由 DB UNIQUE 守護。
         # 簽署凍結的購物金溢價率（Codex K4 第五輪）：STORE_CREDIT 簽署收購以此入帳、不重讀。
         signed_premium_rate: Decimal | None = None
+        affidavit: SignatureTask | None = None
 
         # D2 政策（docs/23）：店家開啟 require_acquisition_affidavit 後，付現/購物金收購必須
         # 綁定已簽手持切結；未帶即擋（防「跳過簽署直接完成」的漏證據路徑，Codex K4 第四輪）。
@@ -605,6 +610,14 @@ class AcquisitionService:
                 "lot_code": lot_code,
             },
         )
+        if affidavit is not None:
+            from app.modules.signing.service import SigningService
+
+            await SigningService(self._session).consume_task(
+                affidavit,
+                reason_code="ACQUISITION_BOUND",
+                actor_user_id=clerk_user_id,
+            )
 
         return AcquisitionResult(
             acquisition_id=acquisition.id,

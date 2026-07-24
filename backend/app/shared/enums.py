@@ -365,14 +365,15 @@ class SignatureTaskKind(StrEnum):
 
 
 class SignatureTaskStatus(StrEnum):
-    """簽署任務狀態機：PENDING → SIGNED / CANCELLED。
-
-    無 EXPIRED 自動過期（單店無排程；過時任務由店員作廢或被新任務取代——kiosk 只顯示最新）。
-    """
+    """簽署任務完整狀態機；SIGNED 不是完成，必須再被單據單次 CONSUMED。"""
 
     PENDING = "PENDING"
+    SIGNING = "SIGNING"
     SIGNED = "SIGNED"
-    CANCELLED = "CANCELLED"
+    CONSUMED = "CONSUMED"
+    VOIDED = "VOIDED"
+    EXPIRED = "EXPIRED"
+    FAILED = "FAILED"
 
 
 class CartSessionStatus(StrEnum):

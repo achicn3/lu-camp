@@ -9,26 +9,35 @@ import logging
 
 from app.core.db import get_sessionmaker
 from app.modules.customerdisplay.service import CustomerDisplayService
+from app.modules.signing.service import SigningService
 
 logger = logging.getLogger(__name__)
 
 SWEEP_INTERVAL_SECONDS = 60
 
 
-async def sweep_once() -> int:
+async def sweep_once() -> tuple[int, int, int]:
     factory = get_sessionmaker()
     async with factory() as session:
-        count = await CustomerDisplayService(session).sweep_expired_carts()
+        carts = await CustomerDisplayService(session).sweep_expired_carts()
+        signing = SigningService(session)
+        tasks = await signing.sweep_expired_tasks()
+        retention_due = await signing.report_due_signature_images()
         await session.commit()
-        return count
+        return carts, tasks, retention_due
 
 
 async def scheduler_loop(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
-            expired = await sweep_once()
-            if expired:
-                logger.info("customer-display sweeper expired carts=%s", expired)
+            carts, tasks, retention_due = await sweep_once()
+            if carts or tasks or retention_due:
+                logger.info(
+                    "customer-display sweeper expired carts=%s tasks=%s retention_due=%s",
+                    carts,
+                    tasks,
+                    retention_due,
+                )
         except Exception:
             logger.exception("customer-display sweeper tick failed")
         with contextlib.suppress(asyncio.TimeoutError):

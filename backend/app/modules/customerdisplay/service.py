@@ -1,7 +1,6 @@
 """客顯裝置 session、櫃檯註冊與一次性配對業務邏輯。"""
 
 import hashlib
-import json
 import secrets
 import unicodedata
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from typing import cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.canonical import canonical_json_bytes
 from app.modules.contacts.service import ContactService
 from app.modules.customerdisplay.models import (
     CartSession,
@@ -25,13 +25,26 @@ from app.modules.customerdisplay.models import (
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.customerdisplay.schemas import CartTenderRequest, CartUpsertRequest
 from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.linepay import LinePayClient, LinePayResult
+from app.modules.sales.schemas import SaleCreateRequest
 from app.modules.sales.service import SalesService
+from app.modules.signing.models import SignatureTask
+from app.modules.signing.service import SigningService
+from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
-from app.shared.enums import CartSessionStatus, SaleLineType, TenderType, UserRole
+from app.shared.enums import (
+    CartSessionStatus,
+    SaleLineType,
+    SignatureTaskStatus,
+    TenderType,
+    UserRole,
+)
 
 PAIRING_CODE_TTL = timedelta(minutes=5)
 KIOSK_OFFLINE_AFTER = timedelta(seconds=45)
 DRAFT_CART_TTL = timedelta(minutes=30)
+PROCESSING_CART_TTL = timedelta(minutes=2)
+COMPLETED_DISPLAY_TTL = timedelta(seconds=10)
 
 
 class CustomerDisplayError(Exception):
@@ -124,14 +137,7 @@ def _line_key(line: SaleLineInput) -> str:
 
 
 def _snapshot_fingerprint(snapshot: dict[str, object]) -> str:
-    encoded = json.dumps(
-        snapshot,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(canonical_json_bytes(snapshot)).hexdigest()
 
 
 def _cart_changes(
@@ -197,6 +203,16 @@ def _cart_changes(
                     "to_qty": None,
                 }
             )
+    if old_snapshot.get("discount_total") != new_snapshot.get("discount_total"):
+        changes.append(
+            {
+                "type": "DISCOUNT_CHANGED",
+                "item_key": "TOTAL",
+                "name": "折扣已重新計算",
+                "from_qty": None,
+                "to_qty": None,
+            }
+        )
     return changes
 
 
@@ -387,12 +403,30 @@ class CustomerDisplayService:
             if displayed_revision != 0:
                 raise CartSessionConflict("待機回報的購物車版本必須為 0")
         else:
-            cart = await self._repo.get_active_cart_for_device_by_id(
+            cart = await self._repo.get_cart(
                 principal.store_id,
-                principal.device_id,
                 current_session_id,
             )
-            if cart is None:
+            completed_visible = (
+                cart is not None
+                and cart.status is CartSessionStatus.COMPLETED
+                and cart.completed_at is not None
+                and cart.completed_at >= now - COMPLETED_DISPLAY_TTL
+            )
+            if (
+                cart is None
+                or cart.kiosk_device_id != principal.device_id
+                or (
+                    cart.status
+                    not in (
+                        CartSessionStatus.DRAFT,
+                        CartSessionStatus.FROZEN,
+                        CartSessionStatus.PROCESSING,
+                        CartSessionStatus.PAYMENT_UNCERTAIN,
+                    )
+                    and not completed_visible
+                )
+            ):
                 raise CartSessionConflict("客顯回報的購物車已結束或不屬於此裝置")
             if displayed_revision > cart.revision:
                 raise CartSessionConflict("客顯回報的版本不存在，請重新載入最新購物車")
@@ -690,6 +724,10 @@ class CustomerDisplayService:
         current.snapshot = snapshot
         current.snapshot_fingerprint = fingerprint
         current.last_changes = changes
+        current.payment_order_id = None
+        current.payment_uncertain_at = None
+        current.payment_uncertain_reason = None
+        current.payment_checkout_payload = None
         current.last_activity_at = now
         current.updated_at = now
         await self._session.flush()
@@ -715,13 +753,140 @@ class CustomerDisplayService:
             raise TerminalNotFound("POS 櫃檯不存在")
         return await self._repo.get_active_cart_for_terminal(store_id, terminal_id)
 
+    async def freeze_store_credit_cart(
+        self,
+        store_id: int,
+        terminal_id: int,
+        *,
+        expected_revision: int,
+        actor_user_id: int,
+    ) -> tuple[CartSession, SignatureTask]:
+        """凍結購物車與建立簽署任務；兩者同一交易，失敗不留下半套狀態。"""
+        terminal = await self._repo.get_terminal(store_id, terminal_id, for_update=True)
+        if terminal is None or not terminal.is_active:
+            raise TerminalNotFound("POS 櫃檯不存在")
+        pairing = await self._repo.get_active_pairing_for_terminal(
+            store_id,
+            terminal_id,
+            for_update=True,
+        )
+        if pairing is None:
+            raise PairingConflict("POS 櫃檯尚未配對客顯")
+        device = await self._repo.get_device(
+            store_id,
+            pairing.kiosk_device_id,
+            for_update=True,
+        )
+        if device is None or not self.kiosk_is_online(device):
+            raise PairingConflict("客顯目前離線；購物金付款不可略過簽署")
+        cart = await self._repo.get_active_cart_for_terminal(
+            store_id,
+            terminal_id,
+            for_update=True,
+        )
+        if cart is None:
+            raise CartSessionConflict("目前沒有可送簽的購物車")
+        if cart.status is not CartSessionStatus.DRAFT:
+            raise CartSessionConflict("購物車已凍結或正在付款")
+        if cart.revision != expected_revision:
+            raise CartSessionConflict(f"購物車版本不符（目前 {cart.revision}），請重新讀取後再送簽")
+        if cart.buyer_contact_id is None:
+            raise CartSessionInvalid("使用購物金必須先選擇會員")
+        tenders = cart.snapshot.get("tenders")
+        if not isinstance(tenders, list):
+            raise CartSessionInvalid("購物車付款拆分格式錯誤")
+        store_credit_amount: Decimal | None = None
+        for tender in tenders:
+            if (
+                isinstance(tender, dict)
+                and tender.get("tender_type") == TenderType.STORE_CREDIT.value
+            ):
+                store_credit_amount = Decimal(str(tender.get("amount")))
+                break
+        if store_credit_amount is None or store_credit_amount <= 0:
+            raise CartSessionInvalid("只有使用購物金的購物車需要送簽")
+        balance_before = await StoreCreditService(self._session).get_balance_for_update(
+            store_id,
+            cart.buyer_contact_id,
+        )
+        balance_after = balance_before - store_credit_amount
+        if balance_after < 0:
+            raise CartSessionInvalid(
+                f"購物金餘額不足（餘額 {_ntd(balance_before)}，"
+                f"本次使用 {_ntd(store_credit_amount)}）"
+            )
+        raw_items = cart.snapshot.get("items")
+        if not isinstance(raw_items, list):
+            raise CartSessionInvalid("購物車商品快照格式錯誤")
+        signed_items = [
+            {
+                "name": item["name"],
+                "qty": item["qty"],
+                "unit_price": item["unit_price"],
+                "original_unit_price": item["original_unit_price"],
+                "discount_amount": item["discount_amount"],
+                "line_total": item["line_total"],
+            }
+            for item in raw_items
+            if isinstance(item, dict)
+        ]
+        content: dict[str, object] = {
+            "content_version": "store-credit-signature-v1",
+            "items": signed_items,
+            "total": str(cart.snapshot["total"]),
+            "discount_total": str(cart.snapshot["discount_total"]),
+            "campaign_name": cart.snapshot.get("campaign_name"),
+            "store_credit_amount": _ntd(store_credit_amount),
+            "store_credit_balance_before": _ntd(balance_before),
+            "store_credit_balance_after": _ntd(balance_after),
+            "remaining_tenders": [
+                tender
+                for tender in tenders
+                if isinstance(tender, dict)
+                and tender.get("tender_type") != TenderType.STORE_CREDIT.value
+            ],
+            "member": cart.snapshot.get("member"),
+        }
+        task = await SigningService(self._session).create_store_credit_task_for_cart(
+            store_id=store_id,
+            cart_session_id=cart.id,
+            kiosk_device_id=cart.kiosk_device_id,
+            contact_id=cart.buyer_contact_id,
+            content=content,
+            cart_snapshot_fingerprint=cart.snapshot_fingerprint,
+            created_by=actor_user_id,
+        )
+        now = datetime.now(UTC)
+        cart.status = CartSessionStatus.FROZEN
+        cart.active_signature_task_id = task.id
+        cart.revision += 1
+        cart.last_activity_at = now
+        cart.updated_at = now
+        cart.last_changes = []
+        await self._session.flush()
+        await self._repo.add(
+            CartSessionEvent(
+                store_id=store_id,
+                cart_session_id=cart.id,
+                revision=cart.revision,
+                event_type="CART_FROZEN_FOR_SIGNATURE",
+                payload={
+                    "signature_task_id": task.id,
+                    "snapshot_fingerprint": task.cart_snapshot_fingerprint,
+                },
+                actor_user_id=actor_user_id,
+            )
+        )
+        return cart, task
+
     async def current_cart_for_device(
         self,
         principal: DevicePrincipal,
     ) -> CartSession | None:
-        return await self._repo.get_active_cart_for_device(
+        return await self._repo.get_display_cart_for_device(
             principal.store_id,
             principal.device_id,
+            completed_after=datetime.now(UTC) - COMPLETED_DISPLAY_TTL,
         )
 
     async def cancel_cart(
@@ -768,8 +933,393 @@ class CustomerDisplayService:
         )
         return current
 
+    async def begin_checkout(
+        self,
+        store_id: int,
+        terminal_id: int,
+        *,
+        expected_revision: int,
+        signature_task_id: int | None,
+        actor_user_id: int,
+    ) -> CartSession:
+        """先提交 PROCESSING，讓客顯在外部付款期間真正看得到處理中狀態。"""
+        terminal = await self._repo.get_terminal(store_id, terminal_id, for_update=True)
+        if terminal is None or not terminal.is_active:
+            raise TerminalNotFound("POS 櫃檯不存在")
+        cart = await self._repo.get_active_cart_for_terminal(
+            store_id,
+            terminal_id,
+            for_update=True,
+        )
+        if cart is None:
+            raise CartSessionConflict("目前沒有可結帳的購物車")
+        if cart.status is CartSessionStatus.PROCESSING:
+            if (
+                cart.revision == expected_revision + 1
+                and cart.active_signature_task_id == signature_task_id
+            ):
+                return cart
+            raise CartSessionConflict("此購物車已有另一筆結帳正在處理")
+        if cart.revision != expected_revision:
+            raise CartSessionConflict(f"購物車版本不符（目前 {cart.revision}），請重新讀取後再結帳")
+        if signature_task_id is None:
+            if cart.status is not CartSessionStatus.DRAFT:
+                raise CartSessionConflict("一般付款只能從可編輯購物車開始結帳")
+        elif (
+            cart.status is not CartSessionStatus.FROZEN
+            or cart.active_signature_task_id != signature_task_id
+        ):
+            raise CartSessionConflict("購物金簽署與目前凍結的購物車不一致")
+        else:
+            task = await SigningService(self._session).get_task_for_update(
+                store_id,
+                signature_task_id,
+            )
+            if (
+                task is None
+                or task.status is not SignatureTaskStatus.SIGNED
+                or task.cart_session_id != cart.id
+            ):
+                raise CartSessionConflict("購物金簽署尚未完成或不屬於目前購物車")
+        now = datetime.now(UTC)
+        cart.status = CartSessionStatus.PROCESSING
+        cart.revision += 1
+        cart.last_activity_at = now
+        cart.updated_at = now
+        cart.last_changes = []
+        await self._session.flush()
+        await self._repo.add(
+            CartSessionEvent(
+                store_id=store_id,
+                cart_session_id=cart.id,
+                revision=cart.revision,
+                event_type="PAYMENT_PROCESSING",
+                payload={"signature_task_id": signature_task_id},
+                actor_user_id=actor_user_id,
+            )
+        )
+        return cart
+
+    async def release_failed_checkout(
+        self,
+        store_id: int,
+        cart_session_id: int,
+        *,
+        reason: str,
+        actor_user_id: int,
+    ) -> CartSession | None:
+        """明確未成交時解除一般付款的 PROCESSING；購物金由簽署終態流程原子解凍。"""
+        cart = await self._repo.get_cart(store_id, cart_session_id, for_update=True)
+        if cart is None or cart.status is not CartSessionStatus.PROCESSING:
+            return cart
+        if cart.active_signature_task_id is not None:
+            raise CartSessionConflict("購物金結帳失敗必須連同簽署任務一併裁定")
+        now = datetime.now(UTC)
+        cart.status = CartSessionStatus.DRAFT
+        cart.revision += 1
+        cart.last_activity_at = now
+        cart.updated_at = now
+        cart.last_changes = []
+        await self._session.flush()
+        await self._repo.add(
+            CartSessionEvent(
+                store_id=store_id,
+                cart_session_id=cart.id,
+                revision=cart.revision,
+                event_type="PAYMENT_FAILED_RELEASED",
+                payload={"reason": reason[:300]},
+                actor_user_id=actor_user_id,
+            )
+        )
+        return cart
+
+    async def mark_payment_uncertain(
+        self,
+        store_id: int,
+        cart_session_id: int,
+        *,
+        payment_order_id: str,
+        reason: str,
+        actor_user_id: int,
+        checkout_payload: dict[str, object],
+    ) -> CartSession:
+        """外部付款結果不明時保留購物車與 SIGNED 任務，禁止重付並暫停簽署 TTL。"""
+        cart = await self._repo.get_cart(store_id, cart_session_id, for_update=True)
+        if cart is None:
+            raise CartSessionConflict("付款結果不明，但找不到原 POS 購物車")
+        if cart.status not in (
+            CartSessionStatus.DRAFT,
+            CartSessionStatus.FROZEN,
+            CartSessionStatus.PROCESSING,
+        ):
+            if (
+                cart.status is CartSessionStatus.PAYMENT_UNCERTAIN
+                and cart.payment_order_id == payment_order_id
+            ):
+                if (
+                    cart.payment_checkout_payload is not None
+                    and cart.payment_checkout_payload != checkout_payload
+                ):
+                    raise CartSessionConflict("同一 LINE Pay 單號的待補交易內容不一致")
+                cart.payment_checkout_payload = checkout_payload
+                return cart
+            raise CartSessionConflict(f"購物車狀態 {cart.status} 不可轉付款待確認")
+        now = datetime.now(UTC)
+        cart.status = CartSessionStatus.PAYMENT_UNCERTAIN
+        cart.payment_order_id = payment_order_id
+        cart.payment_uncertain_at = now
+        cart.payment_uncertain_reason = reason[:300]
+        cart.payment_checkout_payload = checkout_payload
+        cart.revision += 1
+        cart.last_activity_at = now
+        cart.updated_at = now
+        cart.last_changes = []
+        if cart.active_signature_task_id is not None:
+            await SigningService(self._session).pause_signed_ttl_for_payment_uncertain(
+                store_id,
+                cart.active_signature_task_id,
+                actor_user_id=actor_user_id,
+            )
+        await self._session.flush()
+        await self._repo.add(
+            CartSessionEvent(
+                store_id=store_id,
+                cart_session_id=cart.id,
+                revision=cart.revision,
+                event_type="PAYMENT_UNCERTAIN",
+                payload={
+                    "provider": "LINE_PAY",
+                    "payment_order_id": payment_order_id,
+                    "reason": reason[:300],
+                },
+                actor_user_id=actor_user_id,
+            )
+        )
+        return cart
+
+    async def fail_signed_checkout(
+        self,
+        store_id: int,
+        cart_session_id: int,
+        signature_task_id: int,
+        *,
+        reason: str,
+        actor_user_id: int,
+    ) -> None:
+        cart = await self._repo.get_cart(store_id, cart_session_id, for_update=True)
+        if cart is None or cart.active_signature_task_id != signature_task_id:
+            return
+        await SigningService(self._session).fail_signed_task_by_id(
+            store_id,
+            signature_task_id,
+            reason_code="CHECKOUT_FAILED",
+            reason_detail=reason[:300],
+            actor_user_id=actor_user_id,
+        )
+
+    async def reconcile_payment(
+        self,
+        store_id: int,
+        terminal_id: int,
+        *,
+        action: str,
+        actor_user_id: int,
+        linepay_client: object | None,
+        reason: str | None,
+        evidence_type: str | None,
+        evidence_reference: str | None,
+    ) -> tuple[str, CartSession]:
+        """平台查詢優先；只有查不到權威結果時才接受店長附證據人工裁定。"""
+        cart = await self._repo.get_active_cart_for_terminal(
+            store_id,
+            terminal_id,
+            for_update=True,
+        )
+        if (
+            cart is None
+            or cart.status is not CartSessionStatus.PAYMENT_UNCERTAIN
+            or cart.payment_order_id is None
+        ):
+            raise CartSessionConflict("此櫃檯目前沒有待對帳的付款")
+        from app.shared.exceptions import LinePayTransportError
+
+        definitive: str | None = None
+        provider_detail: str | None = None
+        provider_result: LinePayResult | None = None
+        expected_linepay_amount = next(
+            (
+                Decimal(str(tender.get("amount")))
+                for tender in cast(list[object], cart.snapshot.get("tenders") or [])
+                if isinstance(tender, dict)
+                and tender.get("tender_type") == TenderType.LINE_PAY.value
+            ),
+            None,
+        )
+        if expected_linepay_amount is None:
+            raise CartSessionInvalid("待對帳購物車缺少 LINE Pay 付款金額")
+        if isinstance(linepay_client, LinePayClient):
+            try:
+                result = await linepay_client.check(order_id=cart.payment_order_id)
+                provider_detail = f"{result.return_code}/{result.status or 'UNKNOWN'}"
+                if result.is_complete:
+                    if result.amount is None or result.amount != expected_linepay_amount:
+                        raise CartSessionConflict(
+                            "LINE Pay 平台已完成的金額與本機購物車不符，禁止補成立交易"
+                        )
+                    definitive = "SUCCESS_CONFIRMED"
+                    provider_result = result
+                elif result.status in ("FAIL", "CANCEL"):
+                    definitive = "FAILED_CONFIRMED"
+            except LinePayTransportError as exc:
+                provider_detail = f"QUERY_UNAVAILABLE:{exc}"
+        else:
+            provider_detail = "QUERY_UNAVAILABLE:LINE Pay client 未設定"
+
+        if definitive is None and action == "QUERY_PROVIDER":
+            return "STILL_UNCERTAIN", cart
+        if definitive is None:
+            if action not in ("MANUAL_SUCCESS", "MANUAL_FAILED"):
+                raise CartSessionConflict("不支援的付款對帳動作")
+            if not all((reason, evidence_type, evidence_reference)):
+                raise CartSessionInvalid("人工裁定必須附原因、證據類型與交易識別")
+            definitive = "SUCCESS_CONFIRMED" if action == "MANUAL_SUCCESS" else "FAILED_CONFIRMED"
+
+        now = datetime.now(UTC)
+        task = None
+        if cart.active_signature_task_id is not None:
+            from app.modules.signing.service import SigningService
+
+            task = await SigningService(self._session).get_task_for_update(
+                store_id,
+                cart.active_signature_task_id,
+            )
+        if definitive == "SUCCESS_CONFIRMED":
+            cart.status = (
+                CartSessionStatus.FROZEN
+                if task is not None and task.status.value == "SIGNED"
+                else CartSessionStatus.DRAFT
+            )
+            if task is not None and task.status.value == "SIGNED":
+                from app.modules.signing.service import SigningService
+
+                await SigningService(self._session).resume_signed_ttl_after_reconciliation(
+                    task,
+                    actor_user_id=actor_user_id,
+                )
+        else:
+            if task is not None and task.status.value == "SIGNED":
+                from app.modules.signing.service import SigningService
+
+                await SigningService(self._session).fail_task(
+                    task,
+                    reason_code="PAYMENT_RECONCILED_FAILED",
+                    reason_detail=reason or provider_detail or "LINE Pay 確認未付款",
+                    actor_user_id=actor_user_id,
+                )
+            cart.status = CartSessionStatus.DRAFT
+            cart.active_signature_task_id = None
+            cart.payment_order_id = None
+            cart.payment_checkout_payload = None
+        cart.payment_uncertain_at = None
+        cart.payment_uncertain_reason = None
+        cart.revision += 1
+        cart.last_activity_at = now
+        cart.updated_at = now
+        cart.last_changes = []
+        await self._session.flush()
+        await self._repo.add(
+            CartSessionEvent(
+                store_id=store_id,
+                cart_session_id=cart.id,
+                revision=cart.revision,
+                event_type="PAYMENT_RECONCILED",
+                payload={
+                    "outcome": definitive,
+                    "provider_result": provider_detail,
+                    "manual": action.startswith("MANUAL_"),
+                    "reason": reason,
+                    "evidence_type": evidence_type,
+                    "evidence_reference": evidence_reference,
+                },
+                actor_user_id=actor_user_id,
+            )
+        )
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="RECONCILE_CUSTOMER_DISPLAY_PAYMENT",
+            entity_type="cart_session",
+            entity_id=str(cart.id),
+            before={"status": CartSessionStatus.PAYMENT_UNCERTAIN.value},
+            after={
+                "status": cart.status.value,
+                "outcome": definitive,
+                "provider_result": provider_detail,
+                "manual": action.startswith("MANUAL_"),
+                "reason": reason,
+                "evidence_type": evidence_type,
+                "evidence_reference": evidence_reference,
+            },
+            is_sensitive=True,
+        )
+        if definitive == "SUCCESS_CONFIRMED":
+            pending = cart.payment_checkout_payload
+            if not isinstance(pending, dict):
+                raise CartSessionConflict("待對帳交易缺少後端保存的原始結帳內容，無法安全補單")
+            request_raw = pending.get("request")
+            idempotency_key = pending.get("idempotency_key")
+            clerk_user_id = pending.get("clerk_user_id")
+            if (
+                not isinstance(request_raw, dict)
+                or not isinstance(idempotency_key, str)
+                or not isinstance(clerk_user_id, int)
+            ):
+                raise CartSessionConflict("待對帳交易保存內容不完整，無法安全補單")
+            request = SaleCreateRequest.model_validate(request_raw)
+            if request.cart_session_id != cart.id:
+                raise CartSessionConflict("待對帳交易與購物車工作階段不一致")
+            confirmed_result = provider_result
+            if confirmed_result is None:
+                assert evidence_reference is not None
+                synthetic_transaction_id = (
+                    "MANUAL-" + hashlib.sha256(evidence_reference.encode()).hexdigest()[:24]
+                )
+                confirmed_result = LinePayResult(
+                    return_code="0000",
+                    return_message="店長依外部證據人工確認成功",
+                    transaction_id=synthetic_transaction_id,
+                    status="COMPLETE",
+                    amount=expected_linepay_amount,
+                    raw={
+                        "manual_reconciliation": True,
+                        "reason": reason,
+                        "evidence_type": evidence_type,
+                        "evidence_reference": evidence_reference,
+                    },
+                )
+            await SalesService(self._session).create_sale(
+                store_id,
+                clerk_user_id,
+                lines=request.to_inputs(),
+                buyer_contact_id=request.buyer_contact_id,
+                tenders=request.to_tender_inputs(),
+                idempotency_key=idempotency_key,
+                signature_task_id=request.signature_task_id,
+                cart_session_id=cart.id,
+                cart_revision=cart.revision,
+                invoice_info=request.to_invoice_info(),
+                expected_einvoice_enabled=request.expected_einvoice_enabled,
+                require_einvoice_confirmation=True,
+                linepay_client=(
+                    linepay_client if isinstance(linepay_client, LinePayClient) else None
+                ),
+                reconciled_linepay_result=confirmed_result,
+            )
+        return definitive, cart
+
     async def sweep_expired_carts(self, *, now: datetime | None = None) -> int:
-        """將無操作逾 30 分鐘的 DRAFT 原子轉終態，釋放櫃檯／客顯唯一佔用。"""
+        """清除閒置 DRAFT，並復原因程序中斷而殘留的 PROCESSING。"""
         observed_at = now or datetime.now(UTC)
         rows = await self._repo.list_expired_draft_carts(observed_at - DRAFT_CART_TTL)
         for cart in rows:
@@ -787,4 +1337,36 @@ class CustomerDisplayService:
                     actor_user_id=None,
                 )
             )
-        return len(rows)
+        stale_processing = await self._repo.list_stale_processing_carts(
+            observed_at - PROCESSING_CART_TTL
+        )
+        for cart in stale_processing:
+            if cart.active_signature_task_id is not None:
+                signing = SigningService(self._session)
+                task = await signing.get_task_for_update(
+                    cart.store_id,
+                    cart.active_signature_task_id,
+                )
+                if task is not None and task.status is SignatureTaskStatus.SIGNED:
+                    await signing.fail_task(
+                        task,
+                        reason_code="PROCESSING_STALE",
+                        reason_detail="付款處理超過兩分鐘且未進入結果不明狀態",
+                    )
+                    continue
+            cart.status = CartSessionStatus.DRAFT
+            cart.revision += 1
+            cart.last_activity_at = observed_at
+            cart.updated_at = observed_at
+            cart.last_changes = []
+            await self._repo.add(
+                CartSessionEvent(
+                    store_id=cart.store_id,
+                    cart_session_id=cart.id,
+                    revision=cart.revision,
+                    event_type="PAYMENT_PROCESSING_RECOVERED",
+                    payload={"reason": "PROCESSING_STALE"},
+                    actor_user_id=None,
+                )
+            )
+        return len(rows) + len(stale_processing)

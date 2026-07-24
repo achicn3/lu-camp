@@ -17,6 +17,8 @@ from app.core.audit import AuditLog
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
+from app.modules.customerdisplay.schemas import CartUpsertRequest
+from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.schemas import SaleLineCreateRequest
@@ -28,6 +30,11 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import SaleInvoiceStatus, SignatureTaskKind, SignatureTaskStatus, UserRole
 from app.shared.exceptions import SignatureTaskInvalidated
+from tests.integration.customer_display_helpers import (
+    delete_customer_display_rows,
+    ensure_paired_customer_display,
+    prepare_signed_store_credit_cart,
+)
 
 
 def _png() -> str:
@@ -42,8 +49,11 @@ def _png() -> str:
         for _x in range(200):
             raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
     ihdr = (200).to_bytes(4, "big") + (80).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
-    png = magic + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(
-        b"IEND", b""
+    png = (
+        magic
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw)))
+        + chunk(b"IEND", b"")
     )
     return base64.b64encode(png).decode()
 
@@ -68,6 +78,30 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
         await s.flush()
         store_id, clerk_id, member_id = store.id, clerk.id, member.id
         await CashDrawerService(s).open_session(store_id, clerk_id, Decimal("1000"))
+        terminal, device = await ensure_paired_customer_display(
+            s,
+            store_id=store_id,
+            actor_user_id=clerk_id,
+        )
+        cart = await CustomerDisplayService(s).upsert_cart(
+            store_id,
+            terminal.id,
+            CartUpsertRequest.model_validate(
+                {
+                    "expected_revision": None,
+                    "lines": [
+                        {
+                            "line_type": "CATALOG",
+                            "catalog_product_id": product.id,
+                            "qty": 1,
+                        }
+                    ],
+                    "buyer_contact_id": member_id,
+                    "tenders": [{"tender_type": "CASH", "amount": "100"}],
+                }
+            ),
+            actor_user_id=clerk_id,
+        )
         sale = await SalesService(s).create_sale(
             store_id,
             clerk_id,
@@ -78,6 +112,8 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
             ],
             buyer_contact_id=member_id,
             idempotency_key="ack-race-sale",
+            cart_session_id=cart.id,
+            cart_revision=cart.revision,
         )
         sale_id = sale.id
         task = await SigningService(s).create_task(
@@ -86,20 +122,21 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
                 kind=SignatureTaskKind.TRANSACTION_ACK,
                 contact_id=member_id,
                 content={},
+                terminal_id=terminal.id,
                 ref_type="sale",
                 ref_id=sale_id,
             ),
             created_by=clerk_id,
         )
+        await SigningService(s).acknowledge_task(store_id, device.id, task.id)
         task_id = task.id
+        device_id = device.id
         await s.commit()
 
     try:
         # 作廢方：鎖住銷售列＋標 VOID，持鎖不 commit。
         async with sm() as void_s:
-            locked = await void_s.scalar(
-                select(Sale).where(Sale.id == sale_id).with_for_update()
-            )
+            locked = await void_s.scalar(select(Sale).where(Sale.id == sale_id).with_for_update())
             assert locked is not None
             locked.invoice_status = SaleInvoiceStatus.VOID
             await void_s.flush()  # 持有銷售行鎖
@@ -108,7 +145,11 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
                 async with sm() as sign_s:
                     try:
                         await SigningService(sign_s).sign_task(
-                            store_id, task_id, signature_image_base64=_png(), chosen_payout=None
+                            store_id,
+                            task_id,
+                            device_id=device_id,
+                            signature_image_base64=_png(),
+                            chosen_payout=None,
                         )
                         await sign_s.commit()
                         return "signed"
@@ -123,21 +164,19 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
             await void_s.commit()  # 釋放鎖，銷售已 VOID
             outcome = await sign_run
         assert outcome == "invalidated", outcome
-        # 最終狀態：任務 CANCELLED、絕非 SIGNED。
+        # 最終狀態：任務 VOIDED、絕非 SIGNED。
         async with sm() as s:
-            final = await s.scalar(
-                select(SignatureTask.status).where(SignatureTask.id == task_id)
-            )
-            assert final is SignatureTaskStatus.CANCELLED, final
+            final = await s.scalar(select(SignatureTask.status).where(SignatureTask.id == task_id))
+            assert final is SignatureTaskStatus.VOIDED, final
     finally:
         # 真收購/銷售副作用（庫存/現金/稽核）；暫停本 session FK 觸發，由葉往根順序無關清列。
         async with sm() as s:
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("SET session_replication_role = replica"))
             for model in (
                 SaleTender,
                 SaleLine,
                 StockMovement,
-                SignatureTask,
                 CashMovement,
                 CashSession,
                 AuditLog,
@@ -210,21 +249,26 @@ async def test_signed_mixed_tender_keeps_cash_first_lock_order() -> None:
             source_id=acq_id,
             created_by=clerk_id,
         )
-        # 簽署：折抵 100、合計 300（現金 200＋購物金 100）
-        svc = SigningService(s)
-        task = await svc.create_task(
-            store_id,
-            SignatureTaskCreate(
-                kind=SignatureTaskKind.STORE_CREDIT_USE,
-                contact_id=member_id,
-                content={"debit": "100", "sale_total": "300"},
-            ),
-            created_by=clerk_id,
+        signed = await prepare_signed_store_credit_cart(
+            s,
+            store_id=store_id,
+            actor_user_id=clerk_id,
+            payload={
+                "lines": [
+                    {
+                        "line_type": "CATALOG",
+                        "catalog_product_id": product_id,
+                        "qty": 1,
+                    }
+                ],
+                "buyer_contact_id": member_id,
+                "tenders": [
+                    {"tender_type": "CASH", "amount": "200"},
+                    {"tender_type": "STORE_CREDIT", "amount": "100"},
+                ],
+            },
         )
-        await svc.sign_task(
-            store_id, task.id, signature_image_base64=_png(), chosen_payout=None
-        )
-        task_id = task.id
+        task_id = signed.signature_task_id
         await s.commit()
 
     try:
@@ -256,6 +300,8 @@ async def test_signed_mixed_tender_keeps_cash_first_lock_order() -> None:
                         ],
                         idempotency_key="lock-order-mixed",
                         signature_task_id=task_id,
+                        cart_session_id=signed.cart_session_id,
+                        cart_revision=signed.cart_revision,
                     )
                     await b_s.commit()
                     return f"sale-{sale.id}"
@@ -284,9 +330,9 @@ async def test_signed_mixed_tender_keeps_cash_first_lock_order() -> None:
         assert outcome.startswith("sale-"), outcome
     finally:
         async with sm() as s:
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("SET session_replication_role = replica"))
-            for model in (SaleTender, SaleLine, StockMovement, SignatureTask, CashMovement,
-                          CashSession, AuditLog):
+            for model in (SaleTender, SaleLine, StockMovement, CashMovement, CashSession, AuditLog):
                 await s.execute(delete(model).where(model.store_id == store_id))
             await s.execute(delete(Sale).where(Sale.store_id == store_id))
             await s.execute(
@@ -322,7 +368,14 @@ async def test_checkout_binding_serializes_with_signed_task_cancel() -> None:
         await s.flush()
         clerk = User(store_id=store.id, username="c", password_hash="h", role=UserRole.CLERK)
         member = Contact(store_id=store.id, name="買家", phone="0912000555", roles=["MEMBER"])
-        s.add_all([clerk, member])
+        product = CatalogProduct(
+            store_id=store.id,
+            sku="RACE-CART",
+            name="瓦斯罐",
+            unit_price=Decimal("100"),
+            quantity_on_hand=5,
+        )
+        s.add_all([clerk, member, product])
         await s.flush()
         store_id, clerk_id, member_id = store.id, clerk.id, member.id
         acq_id = await s.scalar(
@@ -354,20 +407,23 @@ async def test_checkout_binding_serializes_with_signed_task_cancel() -> None:
             source_id=acq_id,
             created_by=clerk_id,
         )
-        svc = SigningService(s)
-        task = await svc.create_task(
-            store_id,
-            SignatureTaskCreate(
-                kind=SignatureTaskKind.STORE_CREDIT_USE,
-                contact_id=member_id,
-                content={"debit": "100", "sale_total": "100"},
-            ),
-            created_by=clerk_id,
+        signed = await prepare_signed_store_credit_cart(
+            s,
+            store_id=store_id,
+            actor_user_id=clerk_id,
+            payload={
+                "lines": [
+                    {
+                        "line_type": "CATALOG",
+                        "catalog_product_id": product.id,
+                        "qty": 1,
+                    }
+                ],
+                "buyer_contact_id": member_id,
+                "tenders": [{"tender_type": "STORE_CREDIT", "amount": "100"}],
+            },
         )
-        await svc.sign_task(
-            store_id, task.id, signature_image_base64=_png(), chosen_payout=None
-        )
-        task_id = task.id
+        task_id = signed.signature_task_id
         await s.commit()
 
     try:
@@ -381,7 +437,11 @@ async def test_checkout_binding_serializes_with_signed_task_cancel() -> None:
             async def do_cancel() -> str:
                 async with sm() as c_s:
                     try:
-                        await SigningService(c_s).cancel_task(store_id, task_id)
+                        await SigningService(c_s).cancel_task(
+                            store_id,
+                            task_id,
+                            actor_user_id=clerk_id,
+                        )
                         await c_s.commit()
                         return "cancelled"
                     except SignatureTaskNotPending:
@@ -398,8 +458,8 @@ async def test_checkout_binding_serializes_with_signed_task_cancel() -> None:
         assert outcome == "cancelled", outcome
     finally:
         async with sm() as s:
+            await delete_customer_display_rows(s, store_id=store_id)
             await s.execute(text("SET session_replication_role = replica"))
-            await s.execute(delete(SignatureTask).where(SignatureTask.store_id == store_id))
             await s.execute(
                 text("DELETE FROM store_credit_ledger WHERE store_id = :sid"), {"sid": store_id}
             )
@@ -413,6 +473,7 @@ async def test_checkout_binding_serializes_with_signed_task_cancel() -> None:
                 text("DELETE FROM acquisitions WHERE store_id = :sid"), {"sid": store_id}
             )
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
+            await s.execute(delete(CatalogProduct).where(CatalogProduct.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))
             await s.execute(delete(Store).where(Store.id == store_id))

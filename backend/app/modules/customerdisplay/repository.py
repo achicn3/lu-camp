@@ -189,6 +189,18 @@ class CustomerDisplayRepository:
         result: TerminalKioskPairing | None = await self._session.scalar(stmt)
         return result
 
+    async def list_active_pairings_for_store(
+        self,
+        store_id: int,
+    ) -> list[TerminalKioskPairing]:
+        rows = await self._session.scalars(
+            select(TerminalKioskPairing).where(
+                TerminalKioskPairing.store_id == store_id,
+                TerminalKioskPairing.unpaired_at.is_(None),
+            )
+        )
+        return list(rows)
+
     async def get_active_cart_for_terminal(
         self,
         store_id: int,
@@ -213,6 +225,35 @@ class CustomerDisplayRepository:
         result: CartSession | None = await self._session.scalar(stmt)
         return result
 
+    async def get_cart(
+        self,
+        store_id: int,
+        cart_session_id: int,
+        *,
+        for_update: bool = False,
+    ) -> CartSession | None:
+        stmt = select(CartSession).where(
+            CartSession.store_id == store_id,
+            CartSession.id == cart_session_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: CartSession | None = await self._session.scalar(stmt)
+        return result
+
+    async def get_cart_by_sale(
+        self,
+        store_id: int,
+        sale_id: int,
+    ) -> CartSession | None:
+        result: CartSession | None = await self._session.scalar(
+            select(CartSession).where(
+                CartSession.store_id == store_id,
+                CartSession.sale_id == sale_id,
+            )
+        )
+        return result
+
     async def get_active_cart_for_device(
         self,
         store_id: int,
@@ -231,6 +272,29 @@ class CustomerDisplayRepository:
                     )
                 ),
             )
+        )
+        return result
+
+    async def get_display_cart_for_device(
+        self,
+        store_id: int,
+        device_id: int,
+        *,
+        completed_after: datetime,
+    ) -> CartSession | None:
+        active = await self.get_active_cart_for_device(store_id, device_id)
+        if active is not None:
+            return active
+        result: CartSession | None = await self._session.scalar(
+            select(CartSession)
+            .where(
+                CartSession.store_id == store_id,
+                CartSession.kiosk_device_id == device_id,
+                CartSession.status == CartSessionStatus.COMPLETED,
+                CartSession.completed_at >= completed_after,
+            )
+            .order_by(CartSession.completed_at.desc())
+            .limit(1)
         )
         return result
 
@@ -265,6 +329,20 @@ class CustomerDisplayRepository:
             select(CartSession)
             .where(
                 CartSession.status == CartSessionStatus.DRAFT,
+                CartSession.last_activity_at <= cutoff,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        return list(rows)
+
+    async def list_stale_processing_carts(
+        self,
+        cutoff: datetime,
+    ) -> list[CartSession]:
+        rows = await self._session.scalars(
+            select(CartSession)
+            .where(
+                CartSession.status == CartSessionStatus.PROCESSING,
                 CartSession.last_activity_at <= cutoff,
             )
             .with_for_update(skip_locked=True)

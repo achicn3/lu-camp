@@ -6,7 +6,7 @@ tax_rate 以字串傳輸（§11，避免浮點誤差）。
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
@@ -34,6 +34,8 @@ class SettingsRead(BaseModel):
     allow_clerk_manage_categories: bool
     require_acquisition_affidavit: bool
     require_store_credit_signing: bool
+    signature_png_retention_days: int
+    signature_cleanup_enforcement_mode: str
     premium_rate: RateOut
     premium_rate_min: RateOut
     premium_rate_max: RateOut
@@ -68,6 +70,9 @@ class SettingsUpdateRequest(BaseModel):
     allow_clerk_manage_categories: bool | None = None
     require_acquisition_affidavit: bool | None = None
     require_store_credit_signing: bool | None = None
+    signature_png_retention_days: Annotated[int, Field(ge=1, le=3650)] | None = None
+    # 第一版只產生到期報表，不開放實刪。法遵確認後才另案擴充 AUTO_DELETE。
+    signature_cleanup_enforcement_mode: Literal["REPORT_ONLY"] | None = None
     premium_rate: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_min: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None
     premium_rate_max: Annotated[Decimal, Field(ge=0, le=_RATE_HARD_MAX)] | None = None

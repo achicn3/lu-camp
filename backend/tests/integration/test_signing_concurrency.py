@@ -1,19 +1,20 @@
-"""signing 併發不變量：同店同時最多一件 PENDING 簽署任務（Codex 第二輪 high）。
-
-需要真正的兩條交易並行，故用獨立 session（各自 commit），不走 db_session 回滾隔離；
-最終防線是 signature_tasks 的 partial unique index（status='PENDING'），且輸家必須拿到
-可重試的 SignatureTaskConflict（不得漏出裸 IntegrityError → 500）。
-測試結束在 finally 清掉自建的列，不留殘餘。
-"""
+"""Signing concurrency invariants for paired devices and expected-state transitions."""
 
 import asyncio
+from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy import delete, select
 
 import app.core.db as app_db
 from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.modules.contacts.models import Contact
-from app.modules.signing.models import SignatureTask
+from app.modules.customerdisplay.models import (
+    KioskDevice,
+    PosTerminal,
+    TerminalKioskPairing,
+)
+from app.modules.signing.models import SignatureTask, SignatureTaskEvent
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
@@ -24,207 +25,226 @@ from app.shared.exceptions import (
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
+from tests.integration.customer_display_helpers import (
+    delete_customer_display_rows,
+    ensure_paired_customer_display,
+    signature_png_base64,
+)
 
 
-async def test_concurrent_create_keeps_single_pending() -> None:
-    sm = app_db.get_sessionmaker()
-    async with sm() as s:
-        store = Store(name="併發簽署店")
-        s.add(store)
-        await s.flush()
+async def _seed() -> tuple[int, int, int, int, int]:
+    sessionmaker = app_db.get_sessionmaker()
+    async with sessionmaker() as session:
+        store = Store(name="簽署併發門市")
+        session.add(store)
+        await session.flush()
         clerk = User(
-            store_id=store.id, username="conc-sign", password_hash="h", role=UserRole.CLERK
+            store_id=store.id,
+            username=f"concurrent-sign-{store.id}",
+            password_hash="h",
+            role=UserRole.CLERK,
         )
         contact = Contact(
             store_id=store.id,
-            name="併發客",
+            name="併發顧客",
             phone="0955555555",
             national_id_enc=get_pii_cipher().encrypt("A123456789"),
             national_id_blind_index=national_id_blind_index("A123456789"),
             roles=["SELLER"],
         )
-        s.add_all([clerk, contact])
-        await s.flush()
-        store_id, clerk_id, contact_id = store.id, clerk.id, contact.id
-        await s.commit()
+        session.add_all([clerk, contact])
+        await session.flush()
+        terminal, device = await ensure_paired_customer_display(
+            session,
+            store_id=store.id,
+            actor_user_id=clerk.id,
+        )
+        result = (store.id, clerk.id, contact.id, terminal.id, device.id)
+        await session.commit()
+        return result
 
+
+def _affidavit(contact_id: int, terminal_id: int, *, amount: str) -> SignatureTaskCreate:
+    return SignatureTaskCreate(
+        kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+        contact_id=contact_id,
+        terminal_id=terminal_id,
+        content={"items": [{"name": "品項", "amount": amount}], "total": amount},
+    )
+
+
+async def _cleanup(store_id: int) -> None:
+    sessionmaker = app_db.get_sessionmaker()
+    async with sessionmaker() as session:
+        await delete_customer_display_rows(session, store_id=store_id)
+        await session.execute(delete(Contact).where(Contact.store_id == store_id))
+        await session.execute(delete(User).where(User.store_id == store_id))
+        await session.execute(delete(Store).where(Store.id == store_id))
+        await session.commit()
+
+
+async def test_concurrent_create_keeps_one_active_task_per_device() -> None:
+    sessionmaker = app_db.get_sessionmaker()
+    store_id, clerk_id, contact_id, terminal_id, _device_id = await _seed()
     try:
 
-        async def create_once() -> bool:
-            async with sm() as s:
+        async def create_once(amount: str) -> bool:
+            async with sessionmaker() as session:
                 try:
-                    await SigningService(s).create_task(
+                    await SigningService(session).create_task(
                         store_id,
-                        SignatureTaskCreate(
-                            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-                            contact_id=contact_id,
-                            content={"items": [{"name": "品", "amount": "100"}], "total": "100"},
-                        ),
+                        _affidavit(contact_id, terminal_id, amount=amount),
                         created_by=clerk_id,
                     )
-                    await s.commit()
+                    await session.commit()
                     return True
                 except SignatureTaskConflict:
-                    await s.rollback()
+                    await session.rollback()
                     return False
 
-        # 兩條獨立交易同時建立：可能其一撞唯一索引（收斂為 SignatureTaskConflict），
-        # 也可能後者先作廢前者再建（合法的「重推＝舊單作廢」）。裸 IntegrityError
-        # 逸出即測試失敗。不變量：結束時同店恰好一件 PENDING。
-        results = await asyncio.gather(create_once(), create_once())
-        assert any(results)
-
-        async with sm() as s:
-            pending = (
-                await s.scalars(
-                    select(SignatureTask).where(
-                        SignatureTask.store_id == store_id,
-                        SignatureTask.status == SignatureTaskStatus.PENDING,
+        results = await asyncio.gather(create_once("100"), create_once("200"))
+        assert sorted(results) == [False, True]
+        async with sessionmaker() as session:
+            active = list(
+                (
+                    await session.scalars(
+                        select(SignatureTask).where(
+                            SignatureTask.store_id == store_id,
+                            SignatureTask.status == SignatureTaskStatus.PENDING,
+                        )
                     )
-                )
-            ).all()
-            assert len(pending) == 1
+                ).all()
+            )
+            assert len(active) == 1
     finally:
-        async with sm() as s:
-            await s.execute(delete(SignatureTask).where(SignatureTask.store_id == store_id))
-            await s.execute(delete(Contact).where(Contact.id == contact_id))
-            await s.execute(delete(User).where(User.id == clerk_id))
-            await s.execute(delete(Store).where(Store.id == store_id))
-            # 條款版本為全域列（無 store_id）：僅在本測試種下時清除會誤刪他測資料，
-            # 但 lazy 種子冪等且 lucamp_pytest 每輪重建，留存無害。
-            await s.commit()
+        await _cleanup(store_id)
 
 
-async def test_repush_and_old_sign_serialized() -> None:
-    """重推 vs 舊頁簽名的競態：per-store advisory lock 使兩者序列化（Codex 第八輪 medium）。
-
-    無鎖時，重推的 cancel_pending_tasks 可在客人送簽「之間」錯過剛被簽的舊列，留下
-    「對已被取代內容的有效簽名」＋一張新待簽任務。加鎖後結果必為乾淨的二擇一：
-    重推先 → 舊任務 CANCELLED、簽名 409；簽名先 → 舊任務 SIGNED、重推另建新待簽。
-    不變量（兩序皆須成立）：同店 PENDING ≤ 1，且舊任務落於 SIGNED/CANCELLED 終態。
-    """
-    sm = app_db.get_sessionmaker()
-    async with sm() as s:
-        store = Store(name="重推競態店")
-        s.add(store)
-        await s.flush()
-        clerk = User(
-            store_id=store.id, username="repush-clerk", password_hash="h", role=UserRole.CLERK
-        )
-        contact = Contact(
-            store_id=store.id,
-            name="重推客",
-            phone="0955000111",
-            national_id_enc=get_pii_cipher().encrypt("B123456780"),
-            national_id_blind_index=national_id_blind_index("B123456780"),
-            roles=["SELLER"],
-        )
-        s.add_all([clerk, contact])
-        await s.flush()
-        store_id, clerk_id, contact_id = store.id, clerk.id, contact.id
-        old_task = SignatureTask(
-            store_id=store_id,
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content={"items": [{"name": "品", "amount": "100"}], "total": "100"},
-            agreement_version_id=(await SigningService(s)._get_or_seed_current_agreement()).id,
-            created_by=clerk_id,
-        )
-        s.add(old_task)
-        await s.flush()
-        old_id = old_task.id
-        await s.commit()
-
-    png = _nonblank_png_base64()
-
+async def test_two_paired_devices_in_same_store_can_hold_separate_tasks() -> None:
+    sessionmaker = app_db.get_sessionmaker()
+    store_id, clerk_id, contact_id, terminal_a_id, _device_a_id = await _seed()
     try:
+        async with sessionmaker() as session:
+            kiosk_user = User(
+                store_id=store_id,
+                username=f"second-kiosk-{store_id}",
+                password_hash="h",
+                role=UserRole.KIOSK,
+            )
+            session.add(kiosk_user)
+            await session.flush()
+            terminal_b = PosTerminal(
+                store_id=store_id,
+                installation_id=str(uuid4()),
+                name="第二櫃檯",
+                created_by=clerk_id,
+                last_seen_at=datetime.now(UTC),
+            )
+            device_b = KioskDevice(
+                store_id=store_id,
+                kiosk_user_id=kiosk_user.id,
+                installation_id=str(uuid4()),
+                label="第二客顯",
+                last_seen_at=datetime.now(UTC),
+            )
+            session.add_all([terminal_b, device_b])
+            await session.flush()
+            session.add(
+                TerminalKioskPairing(
+                    store_id=store_id,
+                    pos_terminal_id=terminal_b.id,
+                    kiosk_device_id=device_b.id,
+                    paired_by=clerk_id,
+                    paired_at=datetime.now(UTC),
+                )
+            )
+            await session.flush()
+            signing = SigningService(session)
+            first = await signing.create_task(
+                store_id,
+                _affidavit(contact_id, terminal_a_id, amount="100"),
+                created_by=clerk_id,
+            )
+            second = await signing.create_task(
+                store_id,
+                _affidavit(contact_id, terminal_b.id, amount="200"),
+                created_by=clerk_id,
+            )
+            await session.commit()
+            assert first.kiosk_device_id != second.kiosk_device_id
+            assert first.status is second.status is SignatureTaskStatus.PENDING
+    finally:
+        await _cleanup(store_id)
 
-        async def repush() -> str:
-            async with sm() as s:
-                try:
-                    await SigningService(s).create_task(
-                        store_id,
-                        SignatureTaskCreate(
-                            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-                            contact_id=contact_id,
-                            content={"items": [{"name": "品", "amount": "200"}], "total": "200"},
-                        ),
-                        created_by=clerk_id,
-                    )
-                    await s.commit()
-                    return "repushed"
-                except SignatureTaskConflict:
-                    await s.rollback()
-                    return "conflict"
 
-        async def sign_old() -> str:
-            async with sm() as s:
+async def test_sign_and_staff_void_race_has_one_ordered_evidence_chain() -> None:
+    sessionmaker = app_db.get_sessionmaker()
+    store_id, clerk_id, contact_id, terminal_id, device_id = await _seed()
+    try:
+        async with sessionmaker() as session:
+            signing = SigningService(session)
+            task = await signing.create_task(
+                store_id,
+                _affidavit(contact_id, terminal_id, amount="100"),
+                created_by=clerk_id,
+            )
+            await signing.acknowledge_task(store_id, device_id, task.id)
+            task_id = task.id
+            await session.commit()
+
+        async def sign() -> str:
+            async with sessionmaker() as session:
                 try:
-                    await SigningService(s).sign_task(
+                    await SigningService(session).sign_task(
                         store_id,
-                        old_id,
-                        signature_image_base64=png,
+                        task_id,
+                        device_id=device_id,
+                        signature_image_base64=signature_png_base64(),
                         chosen_payout=PayoutMethod.CASH,
                     )
-                    await s.commit()
+                    await session.commit()
                     return "signed"
                 except (SignatureTaskNotPending, SignatureTaskNotFound):
-                    await s.rollback()
+                    await session.rollback()
                     return "rejected"
 
-        await asyncio.gather(repush(), sign_old())
-
-        async with sm() as s:
-            pending = (
-                await s.scalars(
-                    select(SignatureTask).where(
-                        SignatureTask.store_id == store_id,
-                        SignatureTask.status == SignatureTaskStatus.PENDING,
+        async def void() -> str:
+            async with sessionmaker() as session:
+                try:
+                    await SigningService(session).cancel_task(
+                        store_id,
+                        task_id,
+                        actor_user_id=clerk_id,
+                        reason="併發撤回測試",
                     )
-                )
-            ).all()
-            assert len(pending) <= 1
-            old = await s.get(SignatureTask, old_id)
-            assert old is not None
-            assert old.status in (SignatureTaskStatus.SIGNED, SignatureTaskStatus.CANCELLED)
-            # 簽名先勝：舊任務 SIGNED，其簽名影像必實際落地（非半完成狀態）。
-            if old.status is SignatureTaskStatus.SIGNED:
-                assert old.signature_image is not None
+                    await session.commit()
+                    return "voided"
+                except SignatureTaskNotPending:
+                    await session.rollback()
+                    return "rejected"
+
+        sign_result, void_result = await asyncio.gather(sign(), void())
+        assert void_result == "voided"
+        assert sign_result in {"signed", "rejected"}
+        async with sessionmaker() as session:
+            final_task = await session.get(SignatureTask, task_id)
+            assert final_task is not None and final_task.status is SignatureTaskStatus.VOIDED
+            events = list(
+                (
+                    await session.scalars(
+                        select(SignatureTaskEvent.to_status)
+                        .where(SignatureTaskEvent.signature_task_id == task_id)
+                        .order_by(SignatureTaskEvent.id)
+                    )
+                ).all()
+            )
+            assert events[:2] == [SignatureTaskStatus.PENDING, SignatureTaskStatus.SIGNING]
+            assert events[-1] is SignatureTaskStatus.VOIDED
+            if SignatureTaskStatus.SIGNED in events:
+                assert events[-2:] == [
+                    SignatureTaskStatus.SIGNED,
+                    SignatureTaskStatus.VOIDED,
+                ]
+                assert final_task.signature_image is not None
     finally:
-        async with sm() as s:
-            await s.execute(delete(SignatureTask).where(SignatureTask.store_id == store_id))
-            await s.execute(delete(Contact).where(Contact.id == contact_id))
-            await s.execute(delete(User).where(User.id == clerk_id))
-            await s.execute(delete(Store).where(Store.id == store_id))
-            await s.commit()
-
-
-def _nonblank_png_base64() -> str:
-    """非空白簽名 PNG（200×80 RGBA、中段黑色筆跡），滿足伺服端可見墨跡門檻。"""
-    import base64
-    import zlib
-
-    magic = b"\x89PNG\r\n\x1a\n"
-
-    def chunk(ctype: bytes, data: bytes) -> bytes:
-        return (
-            len(data).to_bytes(4, "big")
-            + ctype
-            + data
-            + zlib.crc32(ctype + data).to_bytes(4, "big")
-        )
-
-    width, height = 200, 80
-    raw = bytearray()
-    for y in range(height):
-        raw.append(0)
-        for _x in range(width):
-            raw += b"\x00\x00\x00\xff" if 20 <= y <= 40 else b"\xff\xff\xff\xff"
-    ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00"
-    png = (
-        magic
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(bytes(raw)))
-        + chunk(b"IEND", b"")
-    )
-    return base64.b64encode(png).decode()
+        await _cleanup(store_id)

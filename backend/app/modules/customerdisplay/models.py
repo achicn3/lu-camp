@@ -202,7 +202,19 @@ class CartSession(Base, TimestampMixin):
             ["contacts.id", "contacts.store_id"],
             name="fk_cart_sessions_buyer_store",
         ),
+        ForeignKeyConstraint(
+            ["active_signature_task_id", "store_id"],
+            ["signature_tasks.id", "signature_tasks.store_id"],
+            name="fk_cart_sessions_active_signature_task_store",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["sale_id", "store_id"],
+            ["sales.id", "sales.store_id"],
+            name="fk_cart_sessions_sale_store",
+        ),
         UniqueConstraint("id", "store_id", name="uq_cart_sessions_id_store"),
+        UniqueConstraint("sale_id", name="uq_cart_sessions_sale_id"),
         Index(
             "uq_cart_sessions_active_terminal",
             "pos_terminal_id",
@@ -241,6 +253,14 @@ class CartSession(Base, TimestampMixin):
         nullable=False,
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sale_id: Mapped[int | None] = mapped_column(index=True)
+    payment_order_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    payment_uncertain_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_uncertain_reason: Mapped[str | None] = mapped_column(String(300))
+    # 外部付款已送出但結果不明時，保存可補成立本機銷售的權威請求；LINE Pay 一次性碼必先剝除。
+    # 成功補單或確認失敗後立即清除。
+    payment_checkout_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    active_signature_task_id: Mapped[int | None] = mapped_column(index=True)
 
 
 class CartSessionEvent(Base):

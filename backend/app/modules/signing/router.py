@@ -1,8 +1,8 @@
-"""signing 路由：店務端 /signing（發起/查詢/作廢/取簽名圖）＋手持端 /kiosk（輪詢/簽名）。
+"""signing 路由：店務端 /signing（發起/查詢/作廢/取簽名圖）＋客顯端 /kiosk。
 
-只做 I/O 與驗證；業務邏輯在 service。角色圍堵（docs/23 D4）雙向：
-- /signing 走 get_current_user → KIOSK 於中央被 403；
-- /kiosk 走 get_kiosk_user → 僅 KIOSK 可通過，店務帳號 403。
+只做 I/O 與驗證；業務邏輯在 service。角色圍堵雙向：
+- /signing 使用店務 JWT；
+- /kiosk 使用權限最小化的 HttpOnly 裝置 session cookie。
 """
 
 from typing import Annotated
@@ -11,16 +11,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.deps import CurrentUser, get_current_user, get_kiosk_user
+from app.core.deps import CurrentUser, get_current_user, require_role
+from app.modules.customerdisplay.router import KioskMutationDep, KioskPrincipalDep
 from app.modules.signing.models import AgreementVersion, SignatureTask
 from app.modules.signing.schemas import (
+    KioskActivityRequest,
     KioskSignRequest,
     KioskTaskRead,
+    SignatureRetentionReportItem,
     SignatureTaskCreate,
     SignatureTaskRead,
+    SignatureTaskVoidRequest,
 )
 from app.modules.signing.service import SigningService
-from app.shared.enums import SignatureTaskKind, SignatureTaskStatus
+from app.shared.enums import SignatureTaskKind, SignatureTaskStatus, UserRole
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
@@ -38,7 +42,7 @@ kiosk_router = APIRouter(prefix="/kiosk", tags=["kiosk"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 StaffDep = Annotated[CurrentUser, Depends(get_current_user)]
-KioskDep = Annotated[CurrentUser, Depends(get_kiosk_user)]
+ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value))]
 
 
 def _to_read(
@@ -66,7 +70,11 @@ def _to_read(
         chosen_payout=task.chosen_payout,
         has_signature=task.signature_image is not None,
         signed_at=task.signed_at,
-        cancelled_at=task.cancelled_at,
+        voided_at=task.voided_at,
+        expired_at=task.expired_at,
+        failed_at=task.failed_at,
+        consumed_at=task.consumed_at,
+        expires_at=task.expires_at,
         ref_type=task.ref_type,
         ref_id=task.ref_id,
         created_at=task.created_at,
@@ -74,21 +82,53 @@ def _to_read(
 
 
 def _to_kiosk_read(task: SignatureTask, agreement: AgreementVersion | None) -> KioskTaskRead:
-    # base 已含 agreement_title/agreement_body 欄位（SignatureTaskRead 於簽署證據調閱新增，
-    # 預設 None）；kiosk 版要用 agreement 真值覆蓋，故先自 base dump 排除同名鍵再顯式傳入，
-    # 否則 KioskTaskRead(**base, agreement_title=…) 撞「multiple values」。
-    base = _to_read(task, agreement)
-    base_data = base.model_dump()
-    base_data.pop("agreement_title", None)
-    base_data.pop("agreement_body", None)
+    sealed = task.status in (
+        SignatureTaskStatus.SIGNED,
+        SignatureTaskStatus.CONSUMED,
+    )
     return KioskTaskRead(
-        **base_data,
-        agreement_title=agreement.title if agreement is not None else None,
-        agreement_body=agreement.body if agreement is not None else None,
+        id=task.id,
+        kind=task.kind,
+        status=task.status,
+        content={} if sealed else task.content,
+        chosen_payout=task.chosen_payout,
+        expires_at=task.expires_at,
+        agreement_title=agreement.title if agreement is not None and not sealed else None,
+        agreement_body=agreement.body if agreement is not None and not sealed else None,
     )
 
 
 # ── 店務端 ──────────────────────────────────────────────────────────────
+
+
+@staff_router.get(
+    "/retention-report",
+    response_model=list[SignatureRetentionReportItem],
+    operation_id="getSignatureRetentionReport",
+)
+async def get_signature_retention_report(
+    session: SessionDep,
+    user: ManagerDep,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> list[SignatureRetentionReportItem]:
+    tasks = await SigningService(session).signature_retention_report(
+        user.store_id,
+        limit=limit,
+    )
+    return [
+        SignatureRetentionReportItem(
+            task_id=task.id,
+            kind=task.kind,
+            signed_at=task.signed_at,
+            retention_until=task.signature_retention_until,
+            reported_at=task.signature_cleanup_reported_at,
+            signature_png_retained=task.signature_image is not None,
+        )
+        for task in tasks
+        if task.signed_at is not None
+        and task.signature_retention_until is not None
+        and task.signature_cleanup_reported_at is not None
+    ]
 
 
 @staff_router.post(
@@ -190,11 +230,21 @@ async def get_signature_task(
     operation_id="cancelSignatureTask",
 )
 async def cancel_signature_task(
-    task_id: int, session: SessionDep, user: StaffDep
+    task_id: int,
+    session: SessionDep,
+    user: StaffDep,
+    body: SignatureTaskVoidRequest | None = None,
 ) -> SignatureTaskRead:
     service = SigningService(session)
+    request = body or SignatureTaskVoidRequest()
     try:
-        task = await service.cancel_task(user.store_id, task_id)
+        task = await service.cancel_task(
+            user.store_id,
+            task_id,
+            actor_user_id=user.id,
+            reason_code=request.reason_code,
+            reason=request.reason,
+        )
     except SignatureTaskNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -229,39 +279,124 @@ async def get_signature_image(task_id: int, session: SessionDep, user: StaffDep)
     response_model=KioskTaskRead | None,
     operation_id="getCurrentKioskTask",
 )
-async def get_current_kiosk_task(session: SessionDep, user: KioskDep) -> KioskTaskRead | None:
-    """手持端輪詢：最新待簽任務；無任務回 null（前端顯示待機畫面）。"""
+async def get_current_kiosk_task(
+    session: SessionDep,
+    principal: KioskPrincipalDep,
+) -> KioskTaskRead | None:
+    """只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。"""
     service = SigningService(session)
-    task = await service.latest_pending_task(user.store_id)
+    task = await service.active_task_for_device(principal.store_id, principal.device_id)
     if task is None:
+        await session.commit()
         return None
-    return _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    payload = _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    await session.commit()
+    return payload
 
 
 @kiosk_router.get("/tasks/{task_id}", response_model=KioskTaskRead, operation_id="getKioskTask")
-async def get_kiosk_task(task_id: int, session: SessionDep, user: KioskDep) -> KioskTaskRead:
+async def get_kiosk_task(
+    task_id: int,
+    session: SessionDep,
+    principal: KioskPrincipalDep,
+) -> KioskTaskRead:
     """手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
 
-    僅限 PENDING：已簽/已作廢/不存在一律 404——手持裝置不得憑 ID 枚舉歷史內容快照。
+    僅限此裝置目前的活動任務；終態/逾時/不存在一律 404，不能憑 ID 枚舉歷史內容。
     """
     service = SigningService(session)
-    task = await service.get_pending_task_for_kiosk(user.store_id, task_id)
+    task = await service.get_active_task_for_kiosk(
+        principal.store_id,
+        principal.device_id,
+        task_id,
+    )
     if task is None:
+        await session.commit()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="簽署任務不存在或已結束")
-    return _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    payload = _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    await session.commit()
+    return payload
+
+
+@kiosk_router.post(
+    "/tasks/{task_id}/ack",
+    response_model=KioskTaskRead,
+    operation_id="acknowledgeKioskTask",
+)
+async def acknowledge_kiosk_task(
+    task_id: int,
+    session: SessionDep,
+    principal: KioskMutationDep,
+) -> KioskTaskRead:
+    service = SigningService(session)
+    try:
+        task = await service.acknowledge_task(
+            principal.store_id,
+            principal.device_id,
+            task_id,
+        )
+    except SignatureTaskNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SignatureTaskInvalidated as exc:
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SignatureTaskNotPending as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    await session.commit()
+    return payload
+
+
+@kiosk_router.post(
+    "/tasks/{task_id}/activity",
+    response_model=KioskTaskRead,
+    operation_id="recordKioskTaskActivity",
+)
+async def record_kiosk_task_activity(
+    task_id: int,
+    body: KioskActivityRequest,
+    session: SessionDep,
+    principal: KioskMutationDep,
+) -> KioskTaskRead:
+    service = SigningService(session)
+    try:
+        task = await service.record_user_activity(
+            principal.store_id,
+            principal.device_id,
+            task_id,
+            activity=body.activity,
+        )
+    except SignatureTaskNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except SignatureTaskInvalidated as exc:
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except SignatureTaskNotPending as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    payload = _to_kiosk_read(task, await service.get_agreement_for_task(task))
+    await session.commit()
+    return payload
 
 
 @kiosk_router.post(
     "/tasks/{task_id}/sign", response_model=KioskTaskRead, operation_id="signKioskTask"
 )
 async def sign_kiosk_task(
-    task_id: int, body: KioskSignRequest, session: SessionDep, user: KioskDep
+    task_id: int,
+    body: KioskSignRequest,
+    session: SessionDep,
+    principal: KioskMutationDep,
 ) -> KioskTaskRead:
     service = SigningService(session)
     try:
         task = await service.sign_task(
-            user.store_id,
+            principal.store_id,
             task_id,
+            device_id=principal.device_id,
             signature_image_base64=body.signature_image_base64,
             chosen_payout=body.chosen_payout,
             idempotency_key=body.idempotency_key,

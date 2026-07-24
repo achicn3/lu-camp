@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.time import AwareDateTime
-from app.modules.sales.linepay import LinePayClient, linepay_client_from_config
+from app.modules.customerdisplay.service import CustomerDisplayService
+from app.modules.sales.linepay import (
+    LinePayClient,
+    linepay_client_from_config,
+    linepay_order_id,
+)
 from app.modules.sales.schemas import (
     LinePayRefundAttemptRead,
     LinePayRefundResolveRequest,
@@ -25,7 +30,7 @@ from app.modules.sales.schemas import (
     SaleRead,
     SaleSummaryRead,
 )
-from app.modules.sales.service import SalesService
+from app.modules.sales.service import LinePayAttemptState, SalesService
 from app.shared.enums import UserRole
 from app.shared.exceptions import (
     CrossStoreReference,
@@ -39,6 +44,7 @@ from app.shared.exceptions import (
     InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
+    LinePayTransportError,
     ManualRefundRequired,
     MemberPointsAdjustFailed,
     MenuItemNotFound,
@@ -102,6 +108,97 @@ def _linepay_client() -> LinePayClient | None:
     return linepay_client_from_config()
 
 
+async def _record_definitive_checkout_failure(
+    session: AsyncSession,
+    user: CurrentUser,
+    payload: SaleCreateRequest,
+    *,
+    reason: str,
+) -> None:
+    if payload.cart_session_id is None:
+        return
+    if payload.signature_task_id is not None:
+        from app.modules.signing.service import SigningService
+
+        expired = await SigningService(session).expire_signed_task_if_due(
+            user.store_id,
+            payload.signature_task_id,
+        )
+        if not expired:
+            await CustomerDisplayService(session).fail_signed_checkout(
+                user.store_id,
+                payload.cart_session_id,
+                payload.signature_task_id,
+                reason=reason,
+                actor_user_id=user.id,
+            )
+    else:
+        await CustomerDisplayService(session).release_failed_checkout(
+            user.store_id,
+            payload.cart_session_id,
+            reason=reason,
+            actor_user_id=user.id,
+        )
+    await session.commit()
+
+
+async def _record_payment_uncertain(
+    session: AsyncSession,
+    user: CurrentUser,
+    payload: SaleCreateRequest,
+    *,
+    idempotency_key: str,
+    reason: str,
+) -> None:
+    if payload.cart_session_id is None or payload.tenders is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="LINE Pay 結果不明，且缺少 POS 購物車可供對帳；禁止直接重試",
+        )
+    line_pay = next(
+        (tender for tender in payload.tenders if tender.tender_type.value == "LINE_PAY"),
+        None,
+    )
+    if line_pay is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="外部付款結果不明；禁止直接重試",
+        )
+    checkout_request = payload.model_dump(mode="json")
+    raw_tenders = checkout_request.get("tenders")
+    if isinstance(raw_tenders, list):
+        for tender in raw_tenders:
+            if isinstance(tender, dict):
+                tender.pop("line_pay_one_time_key", None)
+    await CustomerDisplayService(session).mark_payment_uncertain(
+        user.store_id,
+        payload.cart_session_id,
+        payment_order_id=linepay_order_id(
+            store_id=user.store_id,
+            idempotency_key=idempotency_key,
+            amount=line_pay.amount,
+        ),
+        reason=reason,
+        actor_user_id=user.id,
+        checkout_payload={
+            "request": checkout_request,
+            "idempotency_key": idempotency_key,
+            "clerk_user_id": user.id,
+        },
+    )
+    await session.commit()
+
+
+def _payment_uncertain_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            "PAYMENT_UNCERTAIN：LINE Pay 扣款結果不明，已鎖定本筆交易；"
+            "禁止再次付款，請由店長進入付款對帳"
+        ),
+    )
+
+
 @router.post(
     "",
     response_model=SaleRead,
@@ -115,6 +212,7 @@ async def create_sale(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
 ) -> SaleRead:
     svc = SalesService(session)
+    linepay_attempt = LinePayAttemptState()
     try:
         sale = await svc.create_sale(
             user.store_id,
@@ -124,13 +222,29 @@ async def create_sale(
             tenders=payload.to_tender_inputs(),
             idempotency_key=idempotency_key,
             signature_task_id=payload.signature_task_id,
+            cart_session_id=payload.cart_session_id,
+            cart_revision=payload.cart_revision,
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
             linepay_client=_linepay_client(),
+            linepay_attempt=linepay_attempt,
         )
     except IntegrityError as exc:
         await session.rollback()
+        constraint = str(exc.orig)
+        if linepay_attempt.may_have_succeeded and not (
+            "uq_sales_signature_task" in constraint
+            or "uq_sales_store_idempotency_key" in constraint
+        ):
+            await _record_payment_uncertain(
+                session,
+                user,
+                payload,
+                idempotency_key=idempotency_key,
+                reason=f"LINE Pay 已送出後本機資料庫寫入失敗：{exc}",
+            )
+            raise _payment_uncertain_error() from exc
         # 一份購物金扣抵簽署至多綁一筆銷售（docs/23 K5，D3）：撞單次使用唯一約束。並發首寫
         # 競態（前置回放時尚無既有列、插入互撞）落到這裡——贏家已可見：指紋相符回原單回放、
         # 不符/已作廢 → 409（Codex K5 第一輪；同 K4 第九輪模式）。
@@ -176,15 +290,102 @@ async def create_sale(
         lines = await svc.get_lines(existing.id)
         tenders = await svc.get_tenders(existing.id)
         return SaleRead.build(existing, lines, tenders)
+    except LinePayTransportError as exc:
+        await session.rollback()
+        try:
+            await _record_payment_uncertain(
+                session,
+                user,
+                payload,
+                idempotency_key=idempotency_key,
+                reason=str(exc),
+            )
+        except Exception:
+            await session.rollback()
+            raise
+        raise _payment_uncertain_error() from exc
     except DomainError as exc:
         await session.rollback()
+        if linepay_attempt.may_have_succeeded:
+            await _record_payment_uncertain(
+                session,
+                user,
+                payload,
+                idempotency_key=idempotency_key,
+                reason=f"LINE Pay 已送出後本機結帳失敗：{exc}",
+            )
+            raise _payment_uncertain_error() from exc
+        await _record_definitive_checkout_failure(
+            session,
+            user,
+            payload,
+            reason=str(exc),
+        )
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
-    except Exception:
+    except Exception as exc:
         await session.rollback()
+        if linepay_attempt.may_have_succeeded:
+            replay = await svc.find_idempotent_replay(
+                user.store_id,
+                idempotency_key,
+                lines=payload.to_inputs(),
+                buyer_contact_id=payload.buyer_contact_id,
+                tenders=payload.to_tender_inputs(),
+                invoice_info=payload.to_invoice_info(),
+            )
+            if replay is not None:
+                replay_lines = await svc.get_lines(replay.id)
+                replay_tenders = await svc.get_tenders(replay.id)
+                return SaleRead.build(replay, replay_lines, replay_tenders)
+            await _record_payment_uncertain(
+                session,
+                user,
+                payload,
+                idempotency_key=idempotency_key,
+                reason="LINE Pay 已送出後本機發生未預期錯誤",
+            )
+            raise _payment_uncertain_error() from exc
+        await _record_definitive_checkout_failure(
+            session,
+            user,
+            payload,
+            reason="結帳發生未預期的後端錯誤",
+        )
         raise
-    lines = await svc.get_lines(sale.id)
-    tenders = await svc.get_tenders(sale.id)
-    await session.commit()
+    try:
+        lines = await svc.get_lines(sale.id)
+        tenders = await svc.get_tenders(sale.id)
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        if linepay_attempt.may_have_succeeded:
+            replay = await svc.find_idempotent_replay(
+                user.store_id,
+                idempotency_key,
+                lines=payload.to_inputs(),
+                buyer_contact_id=payload.buyer_contact_id,
+                tenders=payload.to_tender_inputs(),
+                invoice_info=payload.to_invoice_info(),
+            )
+            if replay is not None:
+                replay_lines = await svc.get_lines(replay.id)
+                replay_tenders = await svc.get_tenders(replay.id)
+                return SaleRead.build(replay, replay_lines, replay_tenders)
+            await _record_payment_uncertain(
+                session,
+                user,
+                payload,
+                idempotency_key=idempotency_key,
+                reason="LINE Pay 已完成後本機交易提交結果不明",
+            )
+            raise _payment_uncertain_error() from exc
+        await _record_definitive_checkout_failure(
+            session,
+            user,
+            payload,
+            reason="本機交易提交失敗",
+        )
+        raise
     return SaleRead.build(sale, lines, tenders)
 
 

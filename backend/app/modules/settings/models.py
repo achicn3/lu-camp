@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -31,7 +32,17 @@ class StoreSettings(Base, TimestampMixin):
     """單店系統設定。每店一列（store_id 唯一）。"""
 
     __tablename__ = "settings"
-    __table_args__ = (UniqueConstraint("store_id", name="uq_settings_store_id"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", name="uq_settings_store_id"),
+        CheckConstraint(
+            "signature_png_retention_days BETWEEN 1 AND 3650",
+            name="ck_settings_signature_png_retention_days",
+        ),
+        CheckConstraint(
+            "signature_cleanup_enforcement_mode = 'REPORT_ONLY'",
+            name="ck_settings_signature_cleanup_report_only",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -60,6 +71,16 @@ class StoreSettings(Base, TimestampMixin):
     # 就緒後開啟）。
     require_store_credit_signing: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
+    )
+    signature_png_retention_days: Mapped[int] = mapped_column(
+        Integer,
+        server_default=text("183"),
+        nullable=False,
+    )
+    signature_cleanup_enforcement_mode: Mapped[str] = mapped_column(
+        String(20),
+        server_default=text("'REPORT_ONLY'"),
+        nullable=False,
     )
     # 購物金溢價率與政策界線（docs/16 §1.5/§6.1）：premium_rate 夾在 [min, max]。
     premium_rate: Mapped[Decimal] = mapped_column(
