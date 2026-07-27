@@ -1,6 +1,5 @@
-// 手持簽署裝置瀏覽器煙霧（docs/23 K3）：店員端經 API 建收購切結任務 → 手持端（KIOSK 帳號）
-// 登入 /kiosk → 看到切結書/品項/撥款 → 勾同意、選現金、手寫簽名 → 送出 → 完成畫面。
-// K4（收購頁推任務）尚未建，故任務以 API 種入；K3 只驗手持端的顯示與簽名送出。
+// 手持簽署裝置瀏覽器煙霧（docs/23 K3）：真後端建立並配對客顯 → 店員經 API 建收購
+// 切結任務 → 手持端看到後端 canonical PII、完整條款、品項與撥款 → 手寫簽名送出。
 // 執行：node scripts/kiosk-smoke.mjs（需 backend:8000 + frontend:3000、dev-manager + dev-kiosk 可登入）。
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -75,15 +74,46 @@ async function drawSignature(page) {
 
 const browser = await chromium.launch();
 try {
-  // ── 前置：店員端經 API 建立收購切結任務 ──────────────────────────────
+  // ── 前置：KIOSK 登入、建立櫃檯並配對（真 cookie/device session）─────────
   const mgrToken = await apiLogin(MGR_USER, MGR_PASS);
+  const page = await browser.newPage({ viewport: { width: 834, height: 1112 } }); // 直式平板
+  await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await page.fill('input[name="username"]', KIOSK_USER);
+  await page.fill('input[name="password"]', KIOSK_PASS);
+  await page.click('button:has-text("啟用裝置")');
+  await page.waitForSelector(".kiosk-pairing-code", { timeout: 8000 });
+  const pairingCode = (await page.textContent(".kiosk-pairing-code"))?.trim();
+  const terminal = await apiJson(
+    mgrToken,
+    "POST",
+    "/api/v1/customer-display/terminals",
+    {
+      installation_id: crypto.randomUUID(),
+      name: `客顯煙霧櫃檯 ${Date.now()}`,
+    },
+  );
+  ok("建立 E2E 櫃檯", terminal.status === 201, `status=${terminal.status}`);
+  const terminalId = terminal.json?.id;
+  const paired = await apiJson(
+    mgrToken,
+    "POST",
+    `/api/v1/customer-display/terminals/${terminalId}/pair`,
+    { pairing_code: pairingCode },
+  );
+  ok("客顯與櫃檯配對", paired.status === 200, `status=${paired.status}`);
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+
+  // ── 店員端經 API 建立收購切結任務 ────────────────────────────────────
   const phone = uniquePhone();
   const nid = validNationalId();
+  const sellerName = "煙霧簽署客";
+  const address = "臺北市大安區露營路 88 號";
   const created = await apiJson(mgrToken, "POST", "/api/v1/contacts", {
-    name: "煙霧簽署客",
+    name: sellerName,
     phone,
+    address,
     national_id: nid,
-    roles: ["SELLER"],
+    roles: ["SELLER", "MEMBER"],
   });
   ok("建立 SELLER 聯絡人", created.status === 201, `status=${created.status}`);
   const contactId = created.json?.id;
@@ -92,10 +122,12 @@ try {
   const taskRes = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
+    terminal_id: terminalId,
     content: {
-      seller_name: "煙霧簽署客",
-      national_id_masked: masked,
-      phone,
+      seller_name: "前端偽造姓名不得進入快照",
+      national_id_masked: "Z99****999",
+      phone: "0900000000",
+      address: "前端偽造地址不得進入快照",
       items: [
         { name: "登山背包", amount: "1200" },
         { name: "登山杖一組", amount: "600" },
@@ -105,23 +137,46 @@ try {
   });
   ok("建立收購切結任務", taskRes.status === 201, `status=${taskRes.status}`);
   const taskId = taskRes.json?.id;
+  ok(
+    "後端以聯絡人主檔覆寫切結 PII",
+    taskRes.json?.content?.seller_name === sellerName &&
+      taskRes.json?.content?.phone === phone &&
+      taskRes.json?.content?.address === address &&
+      taskRes.json?.content?.national_id_masked === masked,
+  );
 
-  // ── 手持端：KIOSK 登入 → 顯示任務 → 簽名送出 ─────────────────────────
-  const page = await browser.newPage({ viewport: { width: 834, height: 1112 } }); // 直式平板
-  await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
-  await page.waitForTimeout(400);
-
-  // 裝置登入
-  await page.fill('input[name="username"]', KIOSK_USER);
-  await page.fill('input[name="password"]', KIOSK_PASS);
-  await page.click('button:has-text("啟用裝置")');
-
-  // 輪詢後應出現任務標題與切結書
+  // ── 手持端：顯示真任務 → 簽名送出 ────────────────────────────────────
   await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  // PENDING 畫面與 SIGNING 畫面共用標題；等撥款按鈕出現才代表 ACK 已完成、完整互動畫面就緒。
+  await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
   ok("手持端顯示切結任務", true);
   const bodyText = await page.textContent(".kiosk-task-body");
   ok("顯示品項與金額", bodyText.includes("登山背包") && bodyText.includes("1,800"));
-  ok("顯示切結書全文", bodyText.includes("非贓物") && bodyText.includes("個人資料"));
+  ok(
+    "手持端顯示後端 canonical PII",
+    bodyText.includes(sellerName) &&
+      bodyText.includes(phone) &&
+      bodyText.includes(address) &&
+      bodyText.includes(masked),
+  );
+  const agreementTitle = await page.textContent(".kiosk-agreement-title");
+  ok(
+    "顯示正式切結書標題",
+    agreementTitle === "二手商品讓售切結書 暨 個人資料告知同意書",
+    agreementTitle ?? "",
+  );
+  const agreementSections = [
+    "一、物品來源保證（非贓物切結）",
+    "二、交易確認",
+    "三、售出概不退還",
+    "四、瑕疵告知",
+    "五、個人資料告知與同意（個人資料保護法第 8 條）",
+    "六、其他",
+  ];
+  ok(
+    "顯示完整六節切結條款",
+    agreementSections.every((section) => bodyText.includes(section)),
+  );
   // 購物金溢價（使用者裁示）：預設 10% → 1800 現金 → 購物金多得 $180
   ok(
     "購物金按鈕顯示溢價（多得）",
@@ -129,6 +184,27 @@ try {
     bodyText.match(/多得[^，。]*/)?.[0] ?? "",
   );
   await page.screenshot({ path: join(SHOTS, "01-task.png"), fullPage: true });
+  const agreementBody = page.locator(".kiosk-agreement-body");
+  const agreementScroll = await agreementBody.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  ok(
+    "完整條款區可上下捲動",
+    agreementScroll.scrollHeight > agreementScroll.clientHeight,
+    `${agreementScroll.clientHeight}/${agreementScroll.scrollHeight}`,
+  );
+  await agreementBody.evaluate((element) => {
+    element.scrollTop = (element.scrollHeight - element.clientHeight) / 2;
+  });
+  await page.screenshot({ path: join(SHOTS, "01b-agreement-middle.png"), fullPage: true });
+  await agreementBody.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.screenshot({ path: join(SHOTS, "01c-agreement-bottom.png"), fullPage: true });
+  await agreementBody.evaluate((element) => {
+    element.scrollTop = 0;
+  });
 
   // 送出鈕在未同意/未選撥款/未簽名時應 disabled
   const disabledInitially = await page.locator("button.kiosk-submit").isDisabled();
@@ -169,25 +245,32 @@ try {
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
 
   // ── 交回鎖持久化：完成畫面重整後仍停在交回、不解鎖（Codex K3 第六輪 high）──
-  // （通用第二任務改用 STORE_CREDIT_USE：K5 起 TRANSACTION_ACK 內容由後端以銷售單為準重建，
-  //  不再接受自由內容；渲染穩健性回歸靠 STORE_CREDIT_USE 的客端鍵合併路徑。）
-  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
-    kind: "STORE_CREDIT_USE",
+  // 已簽但未綁定收購的切結仍是 active；先依現行狀態機明確作廢，再推下一張切結測交回鎖。
+  const voidedFirst = await apiJson(
+    mgrToken,
+    "POST",
+    `/api/v1/signing/tasks/${taskId}/cancel`,
+  );
+  ok("未綁定切結先明確作廢", voidedFirst.status === 200, `status=${voidedFirst.status}`);
+  const nextTask = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+    kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
-    content: { debit: "100", sale_total: "100" },
+    terminal_id: terminalId,
+    content: { total: "100", items: [{ name: "恢復測試品", amount: "100" }] },
   });
-  await page.reload({ waitUntil: "networkidle" });
+  ok("建立下一張切結任務", nextTask.status === 201, `status=${nextTask.status}`);
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(600);
   ok(
     "重整後仍停在交回畫面（持久鎖）",
     (await page.locator('h1:has-text("已完成簽署")').isVisible()) &&
-      !(await page.locator('h1:has-text("購物金使用確認")').isVisible()),
+      !(await page.locator('h1:has-text("收購確認與切結")').isVisible()),
   );
 
   // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
   await page.waitForTimeout(3000); // 跨過一個輪詢週期（2s）
   const stillHandoff = await page.locator('h1:has-text("已完成簽署")').isVisible();
-  const nextLeaked = await page.locator('h1:has-text("購物金使用確認")').isVisible();
+  const nextLeaked = await page.locator('h1:has-text("收購確認與切結")').isVisible();
   ok("交回前不自動帶出下一位任務", stillHandoff && !nextLeaked);
 
   // 解鎖需現場店務員帳密：錯帳密不得解鎖
@@ -201,14 +284,15 @@ try {
   // 正確店務帳密 → 恢復輪詢，下一張任務才出現
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
   ok("店務帳密解鎖後帶出下一張任務", true);
 
-  // ── 回歸：K5 第七輪 canonical 內容完整渲染（本次折抵/合計/餘額由後端補齊）─────
+  // ── 回歸：後端 canonical 切結內容仍完整渲染 ──────────────────────────
   const ackBody = await page.textContent(".kiosk-task-body");
   ok(
-    "canonical 扣抵內容完整渲染",
-    ackBody.includes("本次折抵") && ackBody.includes("折抵後剩餘"),
+    "canonical 切結內容完整渲染",
+    ackBody.includes("恢復測試品") && ackBody.includes("合計金額"),
   );
 
   // ── 回歸：5xx 為曖昧（可能已寫入）不得清鎖恢復輪詢＋在途鎖定 payload（Codex K3 第八/九輪）
@@ -217,6 +301,8 @@ try {
     await new Promise((r) => setTimeout(r, 800));
     await route.fulfill({ status: 500, contentType: "application/json", body: '{"detail":"boom"}' });
   });
+  await page.check('.kiosk-agree-check input[type="checkbox"]');
+  await page.click('button.kiosk-payout-btn:has-text("現金")');
   await drawSignature(page);
   const submitClick = page.click("button.kiosk-submit");
   await page.waitForTimeout(300); // POST 在途
@@ -225,7 +311,7 @@ try {
   await page.waitForSelector(".kiosk-task-footer .form-error", { timeout: 6000 });
   await page.waitForTimeout(200);
   const recoverable =
-    (await page.locator('h1:has-text("購物金使用確認")').isVisible()) &&
+    (await page.locator('h1:has-text("收購確認與切結")').isVisible()) &&
     (await page.locator("button.kiosk-submit").isEnabled());
   ok("5xx 後可重試、不卡死", recoverable);
 
@@ -237,11 +323,11 @@ try {
   ok("5xx 為曖昧、持久簽署鎖未清", lockKept === "1", `lock=${lockKept}`);
 
   // 曖昧失敗後重整 → 進店員恢復畫面、不輪詢、不顯示待簽任務（Codex K3 第七輪 high）
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('h1:has-text("上一筆簽署尚未確認")', { timeout: 8000 });
   ok(
     "曖昧失敗重整後進恢復畫面、不洩漏任務",
-    !(await page.locator('h1:has-text("購物金使用確認")').isVisible()),
+    !(await page.locator('h1:has-text("收購確認與切結")').isVisible()),
   );
   // 店員確認並解鎖 → 恢復輪詢，待簽任務重新出現（可重新簽署）
   await page.unroute("**/api/v1/kiosk/tasks/*/sign");
@@ -249,14 +335,27 @@ try {
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
   ok("店員解鎖恢復後任務重現", true);
 
   // 重新簽署 → 成功進交回；再解鎖回待機
+  await page.check('.kiosk-agree-check input[type="checkbox"]');
+  await page.click('button.kiosk-payout-btn:has-text("現金")');
   await drawSignature(page);
   await page.click("button.kiosk-submit");
   await page.waitForSelector('h1:has-text("已完成簽署")', { timeout: 8000 });
   ok("恢復後重新簽署成功", true);
+  const voidedRecovery = await apiJson(
+    mgrToken,
+    "POST",
+    `/api/v1/signing/tasks/${nextTask.json.id}/cancel`,
+  );
+  ok(
+    "恢復測試切結明確作廢",
+    voidedRecovery.status === 200,
+    `status=${voidedRecovery.status}`,
+  );
   await page.click('button:has-text("店員解鎖，接續下一位")');
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
@@ -265,34 +364,40 @@ try {
 
   // ── 釘選閘門：顯示任務 A 時店員取消並改推不同任務 B，不得自動換到客人面前，
   //    須店員確認解鎖才採用（Codex K3 第十輪 high）───────────────────────────
-  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+  const taskA = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
+    terminal_id: terminalId,
     content: { seller_name: "釘選客A", total: "500", items: [{ name: "A物", amount: "500" }] },
   });
   await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 }); // 顯示 A、釘選
-  // 店員改推不同任務 B（建立即取消 A）
+  // 現行狀態機要求先明確撤回 A，再推不同內容的 B。
+  await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskA.json.id}/cancel`);
   const taskB = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
-    kind: "STORE_CREDIT_USE",
+    kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
-    content: { debit: "87654", sale_total: "87654" },
+    terminal_id: terminalId,
+    content: { total: "87654", items: [{ name: "B物", amount: "87654" }] },
   });
   await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
   ok(
     "改推不同任務不自動換到客人面前",
-    !(await page.locator('h1:has-text("購物金使用確認")').isVisible()) &&
+    !(await page.locator('h1:has-text("收購確認與切結")').isVisible()) &&
       !(await page.locator("text=87,654").isVisible()),
   );
   // 閘門顯示時重整 → 釘選持久，仍停在閘門、不放行 B（Codex K3 第十二輪 high）
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
-  ok("閘門顯示時重整仍被擋", !(await page.locator('h1:has-text("購物金使用確認")').isVisible()));
+  ok(
+    "閘門顯示時重整仍被擋",
+    !(await page.locator('h1:has-text("收購確認與切結")').isVisible()),
+  );
   // 店員確認解鎖 → 採用新任務 B
   await page.click('button:has-text("店員確認並解鎖")');
   await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
   await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
   await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("購物金使用確認")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
   ok("店員解鎖後採用新任務", true);
 
   // ── 釘選閘門（空窗）：取消 B → current=null 待機 → 建 C，C 仍須被閘門擋，不得因空窗
@@ -300,11 +405,12 @@ try {
   await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskB.json.id}/cancel`);
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 }); // current=null → 待機
   // 空窗（current=null）期間重整 → 釘選持久，仍非「首張」狀態（Codex K3 第十二輪）
-  await page.reload({ waitUntil: "networkidle" });
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
   await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
+    terminal_id: terminalId,
     content: { seller_name: "空窗後客C", total: "700", items: [{ name: "C物", amount: "700" }] },
   });
   await page.waitForSelector('h1:has-text("任務已更新")', { timeout: 8000 });
@@ -319,19 +425,21 @@ try {
   await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
   ok("空窗後解鎖採用新任務", true);
 
-  // ── 回歸：KIOSK token 導到店務頁 → 不渲染店務殼、導回 /kiosk（Codex K3 medium）──
+  // ── 回歸：裝置 cookie 不具店務權限，進店務頁只會回登入 ─────────────────
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   await page.waitForTimeout(600);
-  ok("KIOSK token 不得進店務殼", page.url().replace(/\/+$/, "").endsWith("/kiosk"), page.url());
+  ok("客顯裝置 cookie 不得進店務殼", page.url().endsWith("/login"), page.url());
 
-  // ── 回歸：客人裝置上殘留店務 token → /kiosk 不掛載 console、清除並回裝置登入
-  //    （Codex K3 high：非 KIOSK token 絕不留在客人裝置）───────────────────────
+  // 客顯 API 身分只取 HttpOnly device cookie；即使同 origin 殘留店務 bearer，
+  // /kiosk 仍使用已配對裝置 session，不會被 bearer 取代成店務畫面。
   await page.evaluate((t) => window.localStorage.setItem("lu-camp.access-token", t), mgrToken);
-  await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/kiosk`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(600);
-  const loginShown = await page.locator('button:has-text("啟用裝置")').isVisible();
-  const cleared = await page.evaluate(() => window.localStorage.getItem("lu-camp.access-token"));
-  ok("殘留店務 token 被清除且回裝置登入", loginShown && cleared === null);
+  ok(
+    "店務 bearer 不得取代客顯裝置身分",
+    (await page.locator(".kiosk-task").isVisible()) &&
+      !(await page.locator(".app-shell").isVisible()),
+  );
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
 } finally {

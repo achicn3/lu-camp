@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import PosPage from "@/app/(authed)/pos/page";
+import { formatSalePaymentSummary } from "@/lib/payment";
 import { setToken } from "@/lib/token";
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -98,6 +99,18 @@ afterEach(() => {
 });
 
 describe("/pos 結帳頁", () => {
+  it("完成卡直接顯示購物金與剩餘付款拆分", () => {
+    expect(
+      formatSalePaymentSummary({
+        payment_method: "MIXED",
+        tenders: [
+          { tender_type: "STORE_CREDIT", amount: "300" },
+          { tender_type: "TAIWAN_PAY", amount: "700" },
+        ],
+      }),
+    ).toBe("購物金 $300＋台灣Pay $700");
+  });
+
   it("空車：顯示提示、發票區標示本期不開票、結帳鍵停用", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);

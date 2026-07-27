@@ -850,7 +850,9 @@ async def test_post_charge_local_failure_enters_uncertain_instead_of_failing_sig
     assert response.status_code == 409
     assert "PAYMENT_UNCERTAIN" in response.text
     task = await db_session.get(SignatureTask, task_id)
-    cart = await db_session.get(CartSession, int(sale_payload["cart_session_id"]))
+    cart_session_id = sale_payload["cart_session_id"]
+    assert isinstance(cart_session_id, int)
+    cart = await db_session.get(CartSession, cart_session_id)
     assert task is not None and cart is not None
     await db_session.refresh(task)
     await db_session.refresh(cart)
@@ -893,8 +895,9 @@ async def test_linepay_transport_uncertainty_pauses_ttl_and_provider_success_rec
     await db_session.refresh(task)
     assert cart.status.value == "PAYMENT_UNCERTAIN"
     assert cart.payment_order_id is not None
-    assert cart.payment_checkout_payload is not None
-    assert "line_pay_one_time_key" not in str(cart.payment_checkout_payload)
+    pending_checkout_payload = cart.payment_checkout_payload
+    assert pending_checkout_payload is not None
+    assert "line_pay_one_time_key" not in str(pending_checkout_payload)
     assert task.status.value == "SIGNED"
     assert task.expires_at is None
     forbidden_void = await client.post(
@@ -907,8 +910,10 @@ async def test_linepay_transport_uncertainty_pauses_ttl_and_provider_success_rec
     )
     assert forbidden_void.status_code == 409
     assert await db_session.scalar(select(func.count()).select_from(Sale)) == 0
-    product = await db_session.get(CatalogProduct, seeded.product_id)
-    assert product is not None and product.quantity_on_hand == 20
+    initial_quantity = await db_session.scalar(
+        select(CatalogProduct.quantity_on_hand).where(CatalogProduct.id == seeded.product_id)
+    )
+    assert initial_quantity == 20
     assert await StoreCreditService(db_session).get_balance(store_id, seeded.member_id) == Decimal(
         "100"
     )
@@ -940,11 +945,13 @@ async def test_linepay_transport_uncertainty_pauses_ttl_and_provider_success_rec
     # 對帳確認成功即以後端保存且已剝除一次性碼的原請求補成立本機交易；不依賴原瀏覽器。
     await db_session.refresh(task)
     await db_session.refresh(cart)
-    await db_session.refresh(product)
+    updated_quantity: int | None = await db_session.scalar(
+        select(CatalogProduct.quantity_on_hand).where(CatalogProduct.id == seeded.product_id)
+    )
     assert task.status.value == "CONSUMED"
     assert cart.status.value == "COMPLETED"
     assert cart.payment_checkout_payload is None
-    assert product.quantity_on_hand == 19
+    assert updated_quantity == 19
     assert await StoreCreditService(db_session).get_balance(store_id, seeded.member_id) == Decimal(
         "50"
     )

@@ -306,9 +306,12 @@ async def _sign_affidavit(
         ),
         created_by=sim.clerk_id,
     )
+    device_id = task.kiosk_device_id
+    assert device_id is not None
     await svc.sign_task(
         sim.store_id,
         task.id,
+        device_id=device_id,
         signature_image_base64=signature_png(_RNG),
         chosen_payout=payout,
         idempotency_key=sim.key("signk"),
@@ -554,8 +557,11 @@ async def _one_sale(sim: Sim, day: int) -> None:
                 ),
                 created_by=sim.clerk_id,
             )
+            device_id = task.kiosk_device_id
+            assert device_id is not None
             await svc.sign_task(
                 sim.store_id, task.id,
+                device_id=device_id,
                 signature_image_base64=signature_png(_RNG),
                 chosen_payout=None, idempotency_key=sim.key("signk"),
             )
@@ -604,8 +610,11 @@ async def _store_credit_sale(sim: Sim, day: int) -> None:
                 ),
                 created_by=sim.clerk_id,
             )
+            device_id = task.kiosk_device_id
+            assert device_id is not None
             await svc.sign_task(
                 sim.store_id, task.id,
+                device_id=device_id,
                 signature_image_base64=signature_png(_RNG),
                 chosen_payout=None, idempotency_key=sim.key("signk"),
             )

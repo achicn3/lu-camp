@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,7 +99,7 @@ describe("/kiosk 客顯", () => {
               label: "收銀台客顯",
               csrf_token: "csrf-token-at-least-thirty-two-characters",
               pairing_code: "482913",
-              pairing_code_expires_at: "2026-07-24T10:05:00Z",
+              pairing_code_expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
               paired_terminal: null,
             },
             201,
@@ -159,18 +159,35 @@ describe("/kiosk 客顯", () => {
                   name: "瓦斯罐三入組",
                   qty: 2,
                   unit_price: "120",
-                  original_unit_price: null,
-                  discount_amount: "0",
+                  original_unit_price: "140",
+                  discount_amount: "40",
                   line_total: "240",
                 },
+                ...Array.from({ length: 11 }, (_, index) => ({
+                  item_key: `CATALOG:${index + 7}`,
+                  line_type: "CATALOG",
+                  name: `露營補充品 ${index + 1}`,
+                  qty: 1,
+                  unit_price: "10",
+                  original_unit_price: null,
+                  discount_amount: "0",
+                  line_total: "10",
+                })),
               ],
-              total: "240",
-              discount_total: "0",
+              total: "350",
+              discount_total: "40",
               campaign_name: null,
               member: null,
-              tenders: [{ tender_type: "CASH", amount: "240" }],
+              tenders: [{ tender_type: "CASH", amount: "350" }],
             },
             changes: [
+              {
+                type: "ADDED",
+                item_key: "CATALOG:7",
+                name: "露營補充品 1",
+                from_qty: null,
+                to_qty: 1,
+              },
               {
                 type: "QUANTITY_CHANGED",
                 item_key: "CATALOG:6",
@@ -200,19 +217,42 @@ describe("/kiosk 客顯", () => {
     renderPage();
 
     expect((await screen.findAllByText("瓦斯罐三入組")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("露營補充品 1").length).toBeGreaterThan(0);
+    expect(screen.queryByText("已加入", { exact: false })).toBeNull();
     expect(screen.getByText("1 → 2")).toBeTruthy();
     expect(screen.getByText("折扣已重新計算").parentElement?.textContent).toBe(
       "折扣已重新計算，應付總額已更新",
     );
+    expect(screen.getByText("原價 $140")).toBeTruthy();
+    expect(screen.getByText("優惠價 $120")).toBeTruthy();
+    expect(screen.getByText("本行折抵 $40")).toBeTruthy();
+    expect(screen.getByText("本次共折抵 $40")).toBeTruthy();
     expect(screen.queryByText("會員")).toBeNull();
     const total = screen.getByTestId("kiosk-total-bar");
     expect(total.classList.contains("kiosk-cart-total")).toBe(true);
-    expect(total.textContent).toContain("$240");
+    expect(total.textContent).toContain("$350");
+    const itemList = screen.getByLabelText("商品明細");
+    Object.defineProperties(itemList, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1200 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+    });
+    fireEvent.scroll(itemList);
+    expect(screen.getByText("共 12 個品項 · 向下滑查看更多 ↓")).toBeTruthy();
+    expect(itemList.classList.contains("has-scroll-hint")).toBe(true);
+    itemList.scrollTop = 800;
+    fireEvent.scroll(itemList);
+    expect(
+      screen.getByText("已顯示全部 12 個品項 · 向上滑可返回 ↑"),
+    ).toBeTruthy();
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(FakeEventSource.instances[0].withCredentials).toBe(true);
     cartStatus = "PROCESSING";
     FakeEventSource.instances[0].dispatchEvent(new Event("state"));
     expect(await screen.findByText("付款處理中，請稍候")).toBeTruthy();
+    expect(
+      screen.getByRole("status", { name: "付款處理中" }),
+    ).toBeTruthy();
   });
 
   it("送出簽名時帶裝置 CSRF token", async () => {
@@ -226,11 +266,16 @@ describe("/kiosk 客顯", () => {
       status: "SIGNING",
       contact_id: 7,
       content: {
-        content_version: "store-credit-use-v1",
-        items: [{ name: "露營燈", qty: 1, unit_price: "1000", line_total: "1000" }],
-        sale_total: "1000",
-        store_credit_amount: "300",
+        store_credit_balance_after: "700",
         remaining_tenders: [{ tender_type: "LINE_PAY", amount: "700" }],
+        member: { display_name: "林○○試" },
+        content_version: "store-credit-signature-v1",
+        total: "1000",
+        store_credit_amount: "300",
+        items: [{ name: "露營燈", qty: 1, unit_price: "1000", line_total: "1000" }],
+        store_credit_balance_before: "1000",
+        discount_total: "0",
+        campaign_name: null,
       },
       agreement_title: null,
       agreement_body: null,
@@ -262,6 +307,22 @@ describe("/kiosk 客顯", () => {
     const user = userEvent.setup();
     const { client } = renderPage();
 
+    expect(await screen.findByText("文件版本 v1")).toBeTruthy();
+    expect(screen.queryByText("store-credit-signature-v1")).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll(".kiosk-field-row dt")).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual([
+      "合計金額",
+      "會員",
+      "優惠活動",
+      "折扣合計",
+      "扣抵前購物金餘額",
+      "本次使用購物金",
+      "扣抵後購物金餘額",
+      "剩餘付款",
+    ]);
     await user.click(await screen.findByRole("button", { name: "模擬簽名" }));
     await user.click(screen.getByRole("button", { name: "確認並送出" }));
 
@@ -320,6 +381,91 @@ describe("/kiosk 客顯", () => {
     expect(await screen.findByText("露營燈")).toBeTruthy();
     expect(screen.getByText("正在確認簽署畫面…")).toBeTruthy();
     resolveAck(json({ ...task, status: "SIGNING" }));
+  });
+
+  it("收購切結依賣方與交易分組，並要求明確選擇收款方式", async () => {
+    const csrf = "csrf-token-at-least-thirty-two-characters";
+    window.localStorage.setItem("lu-camp.kiosk.csrf", csrf);
+    const task = {
+      id: 44,
+      kind: "ACQUISITION_AFFIDAVIT",
+      status: "SIGNING",
+      content: {
+        phone: "0911888777",
+        address: "台北市測試路 1 號",
+        seller_name: "林客顯測試",
+        national_id_masked: "B10****002",
+        items: [{ name: "二手睡袋", amount: "400" }],
+        store_credit_premium: { rate: "0.1", amount: "440", extra: "40" },
+      },
+      agreement_title: "二手商品讓售切結書",
+      agreement_body: "本人確認上述內容。",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(task);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        if (request.url.endsWith("/activity")) return json(task);
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const sellerGroup = (await screen.findByRole("heading", {
+      name: "賣方資料",
+    })).closest("section");
+    const transactionGroup = screen
+      .getByRole("heading", { name: "收購資料" })
+      .closest("section");
+    expect(
+      Array.from(sellerGroup?.querySelectorAll("dt") ?? []).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["姓名", "身分證字號", "電話", "住址"]);
+    expect(
+      Array.from(transactionGroup?.querySelectorAll("dt") ?? []).map(
+        (element) => element.textContent,
+      ),
+    ).toEqual([]);
+    expect(transactionGroup?.textContent).toContain("二手睡袋");
+    expect(
+      Boolean(
+        sellerGroup &&
+          transactionGroup &&
+          sellerGroup.compareDocumentPosition(transactionGroup) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+    expect(screen.getByText("必選")).toBeTruthy();
+
+    const cash = screen.getByRole("button", { name: /現金/ });
+    const storeCredit = screen.getByRole("button", { name: /購物金/ });
+    const submit = screen.getByRole("button", { name: "確認並送出" });
+    expect(cash.classList.contains("kiosk-payout-btn--active")).toBe(false);
+    expect(storeCredit.classList.contains("kiosk-payout-btn--active")).toBe(false);
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(storeCredit);
+    expect(storeCredit.classList.contains("kiosk-payout-btn--active")).toBe(true);
+    expect(cash.classList.contains("kiosk-payout-btn--active")).toBe(false);
+    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "模擬簽名" }));
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("簽署仍為 SIGNED 時，PAYMENT_UNCERTAIN 必須蓋過交回鎖並警告勿重複付款", async () => {
@@ -403,6 +549,56 @@ describe("/kiosk 客顯", () => {
     expect(screen.queryByText("已完成簽署")).toBeNull();
   });
 
+  it("成交完成畫面顯示實際剩餘秒數", async () => {
+    window.localStorage.setItem(
+      "lu-camp.kiosk.csrf",
+      "csrf-token-at-least-thirty-two-characters",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) {
+          return json({
+            id: 21,
+            status: "COMPLETED",
+            revision: 9,
+            snapshot: {
+              content_version: "cart-v1",
+              items: [],
+              total: "1000",
+              discount_total: "0",
+              campaign_name: null,
+              member: null,
+              tenders: [{ tender_type: "CASH", amount: "1000" }],
+            },
+            changes: [],
+            updated_at: new Date().toISOString(),
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: new Date().toISOString() });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("交易已完成")).toBeTruthy();
+    expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
+  });
+
   it("成交完成畫面到期後清除舊簽署鎖並回待機", async () => {
     window.localStorage.setItem(
       "lu-camp.kiosk.csrf",
@@ -459,6 +655,7 @@ describe("/kiosk 客顯", () => {
     renderPage();
 
     expect(await screen.findByText("露營二手")).toBeTruthy();
+    expect(await screen.findByText("櫃檯 · 主櫃檯")).toBeTruthy();
     await waitFor(() => {
       expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
       expect(window.localStorage.getItem("lu-camp.kiosk-engaged")).toBeNull();

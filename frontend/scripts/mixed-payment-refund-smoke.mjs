@@ -5,7 +5,7 @@
 // 4) 同時保留桌機與手機版關鍵畫面，並由 API 核對最終帳本／退貨結果。
 //
 // 執行：node scripts/mixed-payment-refund-smoke.mjs
-// 需 backend:8000、frontend:3000、hardware-agent:8001 與 dev-manager 測試帳號。
+// 需 backend:8000、frontend:3000、hardware-agent:8001，以及 dev-manager / dev-kiosk 測試帳號。
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,6 +17,8 @@ const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/,
 const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const USERNAME = process.env.SMOKE_USERNAME ?? "dev-manager";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
+const KIOSK_USERNAME = process.env.SMOKE_KIOSK_USERNAME ?? "dev-kiosk";
+const KIOSK_PASSWORD = process.env.SMOKE_KIOSK_PASSWORD ?? "dev-test-123456";
 const SHOTS =
   process.env.SMOKE_SHOTS ?? resolve(homedir(), "tmp", "lu-camp-shots", "mixed-payment-refund");
 
@@ -106,6 +108,21 @@ async function prepareFixtures(token) {
     token,
     body: { sku, name: `混合退款測試商品 ${stamp}`, unit_price: "200" },
   });
+  const scrollProducts = [];
+  for (let index = 1; index <= 12; index += 1) {
+    const padded = String(index).padStart(2, "0");
+    scrollProducts.push(
+      await apiJson("/api/v1/catalog-products", {
+        method: "POST",
+        token,
+        body: {
+          sku: `KIOSK-SCROLL-${Date.now()}-${padded}`,
+          name: `客顯捲動測試品項 ${padded}`,
+          unit_price: "50",
+        },
+      }),
+    );
+  }
   const supplier = await apiJson("/api/v1/suppliers", {
     method: "POST",
     token,
@@ -117,16 +134,28 @@ async function prepareFixtures(token) {
     body: {
       supplier_id: supplier.id,
       submit: true,
-      lines: [{ catalog_product_id: product.id, qty: 2, unit_cost: "100" }],
+      lines: [
+        { catalog_product_id: product.id, qty: 2, unit_cost: "100" },
+        ...scrollProducts.map((scrollProduct) => ({
+          catalog_product_id: scrollProduct.id,
+          qty: 1,
+          unit_cost: "25",
+        })),
+      ],
     },
   });
   await apiJson(`/api/v1/purchase-orders/${purchaseOrder.id}/receive`, {
     method: "POST",
     token,
     headers: { "Idempotency-Key": idempotencyKey("receive") },
-    body: { lines: [{ line_id: purchaseOrder.lines[0].id, qty: 2 }] },
+    body: {
+      lines: purchaseOrder.lines.map((line, index) => ({
+        line_id: line.id,
+        qty: index === 0 ? 2 : 1,
+      })),
+    },
   });
-  return { originalSettings, member, product };
+  return { originalSettings, member, product, scrollProducts };
 }
 
 async function loginBrowser(page) {
@@ -135,6 +164,60 @@ async function loginBrowser(page) {
   await page.fill('input[name="password"]', PASSWORD);
   await page.click('button:has-text("登入")');
   await page.waitForURL((url) => !url.pathname.endsWith("/login"), { timeout: 15_000 });
+}
+
+async function pairKiosk(browser, managerToken, installationId) {
+  const kioskContext = await browser.newContext({ viewport: { width: 834, height: 1112 } });
+  const kioskPage = await kioskContext.newPage();
+  await kioskPage.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
+  await kioskPage.fill('input[name="username"]', KIOSK_USERNAME);
+  await kioskPage.fill('input[name="password"]', KIOSK_PASSWORD);
+  await kioskPage.click('button:has-text("啟用裝置")');
+  await kioskPage.waitForSelector(".kiosk-pairing-code", { timeout: 8_000 });
+  const pairingCode = (await kioskPage.textContent(".kiosk-pairing-code"))?.trim();
+  if (!pairingCode) throw new Error("客顯未產生配對碼");
+
+  const terminal = await apiJson("/api/v1/customer-display/terminals", {
+    method: "POST",
+    token: managerToken,
+    body: {
+      installation_id: installationId,
+      name: `混合付款 E2E 櫃檯 ${Date.now()}`,
+    },
+  });
+  await apiJson(`/api/v1/customer-display/terminals/${terminal.id}/pair`, {
+    method: "POST",
+    token: managerToken,
+    body: { pairing_code: pairingCode },
+  });
+  await kioskPage.waitForSelector('h1:has-text("露營二手")', { timeout: 8_000 });
+  return { kioskContext, kioskPage, terminal };
+}
+
+async function drawSignature(page) {
+  const canvas = page.locator("canvas.kiosk-sign-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("找不到購物金簽名畫布");
+  const points = [
+    [0.15, 0.55],
+    [0.3, 0.25],
+    [0.45, 0.7],
+    [0.6, 0.3],
+    [0.75, 0.62],
+    [0.85, 0.4],
+  ];
+  await page.mouse.move(
+    box.x + box.width * points[0][0],
+    box.y + box.height * points[0][1],
+  );
+  await page.mouse.down();
+  for (const [x, y] of points.slice(1)) {
+    await page.mouse.move(box.x + box.width * x, box.y + box.height * y, {
+      steps: 12,
+    });
+  }
+  await page.mouse.up();
 }
 
 async function openReturnDialog(page, saleId) {
@@ -146,6 +229,7 @@ async function openReturnDialog(page, saleId) {
 }
 
 let browser;
+let kioskContext;
 let token;
 let originalSettings;
 try {
@@ -159,11 +243,94 @@ try {
   ok("API 備妥會員、購物金與兩件一般商品", true, fixtures.product.sku);
 
   browser = await chromium.launch();
+  const installationId = randomUUID();
+  const pairedKiosk = await pairKiosk(browser, token, installationId);
+  kioskContext = pairedKiosk.kioskContext;
+  const kioskPage = pairedKiosk.kioskPage;
+  ok("真客顯裝置已登入並配對本次 POS 櫃檯", true);
+
+  const scrollCart = await apiJson(
+    `/api/v1/customer-display/terminals/${pairedKiosk.terminal.id}/cart`,
+    {
+      method: "PUT",
+      token,
+      body: {
+        expected_revision: null,
+        lines: fixtures.scrollProducts.map((scrollProduct) => ({
+          line_type: "CATALOG",
+          catalog_product_id: scrollProduct.id,
+          qty: 1,
+        })),
+        buyer_contact_id: null,
+        tenders: [{ tender_type: "CASH", amount: "600" }],
+      },
+    },
+  );
+  await kioskPage.waitForFunction(
+    () => document.querySelectorAll(".kiosk-cart-item").length === 12,
+  );
+  await kioskPage.getByText(/共 12 個品項/).waitFor();
+  const scrollList = kioskPage.locator(".kiosk-cart-items");
+  await scrollList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await kioskPage.getByText(/已顯示全部 12 個品項/).waitFor();
+  const scrollLayout = await kioskPage.evaluate(() => {
+    const list = document.querySelector(".kiosk-cart-items");
+    const lastItem = document.querySelector(".kiosk-cart-item:last-child");
+    const hint = document.querySelector(".kiosk-cart-scroll-hint");
+    if (!(list instanceof HTMLElement) || !(lastItem instanceof HTMLElement) || !hint) {
+      return null;
+    }
+    const listRect = list.getBoundingClientRect();
+    const itemRect = lastItem.getBoundingClientRect();
+    const hintRect = hint.getBoundingClientRect();
+    return {
+      hasReservedPadding: Number.parseFloat(getComputedStyle(list).paddingBottom) >= 52,
+      lastItemClearsHint: itemRect.bottom <= hintRect.top,
+      canScroll: list.scrollHeight > list.clientHeight,
+      listBottom: listRect.bottom,
+      itemBottom: itemRect.bottom,
+      hintTop: hintRect.top,
+    };
+  });
+  ok(
+    "客顯 12 個品項可上下捲動，提示膠囊不遮住最後一列",
+    scrollLayout?.canScroll === true &&
+      scrollLayout.hasReservedPadding === true &&
+      scrollLayout.lastItemClearsHint === true,
+    scrollLayout === null ? "找不到捲動元件" : JSON.stringify(scrollLayout),
+  );
+  await kioskPage.screenshot({
+    path: resolve(SHOTS, "00-kiosk-12-items-bottom.png"),
+    fullPage: true,
+  });
+  await apiJson(
+    `/api/v1/customer-display/terminals/${pairedKiosk.terminal.id}/cart/cancel`,
+    {
+      method: "POST",
+      token,
+      body: {
+        expected_revision: scrollCart.revision,
+        reason: "完成客顯長清單版面驗證",
+      },
+    },
+  );
+  await kioskPage.waitForSelector('h1:has-text("露營二手")', { timeout: 8_000 });
+
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on("pageerror", (error) => ok("頁面沒有未捕捉例外", false, String(error)));
 
   await loginBrowser(page);
+  await page.evaluate((value) => {
+    window.localStorage.setItem("lu-camp.pos-terminal.installation", value);
+  }, installationId);
   await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
+  await page.locator(".pos-kiosk-status", { hasText: "客顯已連線" }).waitFor({
+    state: "visible",
+    timeout: 12_000,
+  });
   await page.fill('input[name="code"]', fixtures.product.sku);
   await page.press('input[name="code"]', "Enter");
   await page.getByText(fixtures.product.name, { exact: true }).waitFor();
@@ -185,6 +352,51 @@ try {
   await page.locator(".pos-tender-mode", { hasText: "購物金＋其他付款" }).click();
   await page.locator('label:has-text("本次使用購物金") input').fill("300");
   await page.locator(".pos-mixed-method", { hasText: "LINE Pay" }).click();
+  const paymentLayout = await page.evaluate(() => {
+    const modes = document.querySelector(".pos-tender-modes")?.getBoundingClientRect();
+    const mixed = Array.from(document.querySelectorAll(".pos-tender-mode"))
+      .find((element) => element.textContent?.includes("購物金＋其他付款"))
+      ?.getBoundingClientRect();
+    const panel = document.querySelector(".pos-mixed-panel")?.getBoundingClientRect();
+    const methods = Array.from(document.querySelectorAll(".pos-mixed-method")).map((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      };
+    });
+    return {
+      modes: modes && { left: modes.left, right: modes.right },
+      mixed: mixed && {
+        left: mixed.left,
+        right: mixed.right,
+        bottom: mixed.bottom,
+      },
+      panel: panel && { left: panel.left, right: panel.right, top: panel.top },
+      methods,
+    };
+  });
+  ok(
+    "購物金＋其他付款橫跨完整兩欄且不壓住設定面板",
+    paymentLayout.modes != null &&
+      paymentLayout.mixed != null &&
+      paymentLayout.panel != null &&
+      Math.abs(paymentLayout.mixed.left - paymentLayout.modes.left) <= 1 &&
+      Math.abs(paymentLayout.mixed.right - paymentLayout.modes.right) <= 1 &&
+      paymentLayout.mixed.bottom <= paymentLayout.panel.top,
+  );
+  ok(
+    "混合付款三個子選項完整位於面板內且文字未裁切",
+    paymentLayout.panel != null &&
+      paymentLayout.methods.every(
+        (method) =>
+          method.left >= paymentLayout.panel.left &&
+          method.right <= paymentLayout.panel.right &&
+          method.scrollWidth <= method.clientWidth,
+      ),
+  );
   const linePaySplit = page.locator('[aria-label="付款金額拆分"]');
   ok(
     "桌機 POS 顯示購物金 $300＋LINE Pay $100",
@@ -206,6 +418,33 @@ try {
   ok("桌機 POS 顯示台灣Pay 剩餘 $100", await split.getByText(/剩餘應付\s*\$100/).isVisible());
   await page.screenshot({ path: resolve(SHOTS, "01-desktop-pos-mixed.png"), fullPage: true });
 
+  const sendForSignature = page.getByRole("button", {
+    name: "送至手持裝置簽署",
+  });
+  await sendForSignature.waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const button = Array.from(document.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === "送至手持裝置簽署",
+    );
+    return button instanceof HTMLButtonElement && !button.disabled;
+  });
+  await sendForSignature.click();
+  await kioskPage.waitForSelector('h1:has-text("購物金使用確認")', {
+    timeout: 8_000,
+  });
+  await kioskPage.waitForSelector("canvas.kiosk-sign-canvas", { timeout: 8_000 });
+  await drawSignature(kioskPage);
+  await kioskPage.locator("button.kiosk-submit").click();
+  await kioskPage.waitForSelector('h1:has-text("已完成簽署")', {
+    timeout: 8_000,
+  });
+  ok("購物金＋台灣Pay 已由真客顯完成簽署", true);
+  await kioskPage.screenshot({
+    path: resolve(SHOTS, "01b-kiosk-signature-complete.png"),
+    fullPage: true,
+  });
+  await page.getByText(/客人已完成簽署/).waitFor({ timeout: 8_000 });
+
   const saleResponsePromise = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/v1/sales") &&
@@ -215,6 +454,21 @@ try {
   await page.locator("button.pos-checkout").click();
   const sale = await (await saleResponsePromise).json();
   await page.locator(".pos-complete", { hasText: `#${sale.id}` }).waitFor();
+  await kioskPage.waitForSelector('h1:has-text("交易已完成")', {
+    timeout: 8_000,
+  });
+  const countdown = (await kioskPage
+    .getByText(/秒後自動清除/)
+    .textContent())?.trim();
+  ok(
+    "客顯完成畫面顯示實際清場倒數",
+    /^謝謝光臨，(?:[1-9]|10) 秒後自動清除。$/.test(countdown ?? ""),
+    countdown ?? "",
+  );
+  await kioskPage.screenshot({
+    path: resolve(SHOTS, "02a-kiosk-sale-countdown.png"),
+    fullPage: true,
+  });
   const saleTenders = tenderMap(sale.tenders);
   ok(
     "POS 真實成立購物金 $300＋台灣Pay $100",
@@ -222,6 +476,13 @@ try {
       saleTenders.STORE_CREDIT === 300 &&
       saleTenders.TAIWAN_PAY === 100,
     `sale=${sale.id}`,
+  );
+  ok(
+    "POS 完成卡直接顯示實際付款拆分",
+    await page
+      .locator(".pos-complete .stat", { hasText: "收款方式" })
+      .getByText("購物金 $300＋台灣Pay $100", { exact: true })
+      .isVisible(),
   );
   await page.screenshot({ path: resolve(SHOTS, "02-desktop-pos-complete.png"), fullPage: true });
 
@@ -328,6 +589,7 @@ try {
       },
     }).catch((error) => ok("還原測試前設定", false, String(error)));
   }
+  if (kioskContext) await kioskContext.close();
   if (browser) await browser.close();
 }
 

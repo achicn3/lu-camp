@@ -41,6 +41,7 @@ import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { formatSalePaymentSummary } from "@/lib/payment";
 import {
   clearPersistedIdemKey,
   getOrCreatePersistedIdemKey,
@@ -1614,17 +1615,7 @@ export default function PosPage() {
             </div>
             <div className="stat">
               <dt>收款方式</dt>
-              <dd>
-                {completed.payment_method === "CASH"
-                  ? "現金"
-                  : completed.payment_method === "STORE_CREDIT"
-                    ? "購物金"
-                    : completed.payment_method === "TAIWAN_PAY"
-                      ? "台灣Pay"
-                      : completed.payment_method === "LINE_PAY"
-                        ? "LINE Pay"
-                        : "混合"}
-              </dd>
+              <dd>{formatSalePaymentSummary(completed)}</dd>
             </div>
           </dl>
           {drawerNotice !== null && (

@@ -4,6 +4,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type FormEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -151,7 +152,12 @@ export default function KioskPage() {
   if (device.data.paired_terminal === null) {
     return <PairingScreen device={device.data} csrf={csrf} />;
   }
-  return <KioskConsole csrf={csrf} />;
+  return (
+    <KioskConsole
+      csrf={csrf}
+      terminalName={device.data.paired_terminal.name}
+    />
+  );
 }
 
 // ── 裝置登入（KIOSK 帳號，一次長駐）──────────────────────────────────────
@@ -297,7 +303,13 @@ function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) 
 }
 
 // ── 已配對主控：SSE 通知 → 全量重讀購物車／任務 → 待機／簽署／完成 ────────
-function KioskConsole({ csrf }: { csrf: string }) {
+function KioskConsole({
+  csrf,
+  terminalName,
+}: {
+  csrf: string;
+  terminalName: string;
+}) {
   const queryClient = useQueryClient();
   const cart = useQuery({
     queryKey: ["kiosk", "cart"],
@@ -403,6 +415,7 @@ function KioskConsole({ csrf }: { csrf: string }) {
   const [syncedData, setSyncedData] = useState<KioskTask | null | undefined>(undefined);
   const [ackError, setAckError] = useState<string | null>(null);
   const acknowledging = useRef<number | null>(null);
+  const [completionSeconds, setCompletionSeconds] = useState(10);
   const signing = frozenTask !== null;
   const paused = completed || signing || recovering || pendingTaskId !== null;
 
@@ -412,6 +425,14 @@ function KioskConsole({ csrf }: { csrf: string }) {
     const remaining = Number.isFinite(completedAt)
       ? Math.max(0, completedAt + 10_000 - Date.now())
       : 10_000;
+    const updateCountdown = () => {
+      const milliseconds = Number.isFinite(completedAt)
+        ? Math.max(0, completedAt + 10_000 - Date.now())
+        : 10_000;
+      setCompletionSeconds(Math.ceil(milliseconds / 1_000));
+    };
+    updateCountdown();
+    const countdown = window.setInterval(updateCountdown, 1_000);
     const timer = window.setTimeout(() => {
       // 成交後舊簽署已 CONSUMED；完成畫面到期時一併清掉交回鎖、任務釘選與
       // 本機快取，否則會從「交易已完成」退回已完成簽署閘門而無法回待機。
@@ -427,7 +448,10 @@ function KioskConsole({ csrf }: { csrf: string }) {
       setCompleted(false);
       void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
     }, remaining);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearInterval(countdown);
+      window.clearTimeout(timer);
+    };
   }, [cart.data?.status, cart.data?.updated_at, queryClient]);
 
   const { data } = useQuery({
@@ -514,7 +538,7 @@ function KioskConsole({ csrf }: { csrf: string }) {
     return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
   }
   if (cart.data?.status === "COMPLETED") {
-    return <CompletedSaleScreen cart={cart.data} />;
+    return <CompletedSaleScreen cart={cart.data} remainingSeconds={completionSeconds} />;
   }
 
   if (recovering) {
@@ -570,11 +594,18 @@ function KioskConsole({ csrf }: { csrf: string }) {
   // 簽名進行中一律顯示凍結的任務（忽略在途 refetch 回填的新 data），避免 POST 途中換人。
   const shown = frozenTask ?? data;
   if (!shown) {
-    if (cart.isError) return <Standby message="客顯同步中斷，正在重新連線…" />;
+    if (cart.isError) {
+      return (
+        <Standby
+          message="客顯同步中斷，正在重新連線…"
+          terminalName={terminalName}
+        />
+      );
+    }
     if (cart.data) {
       return <CartScreen cart={cart.data} streamConnected={streamConnected} />;
     }
-    return <Standby />;
+    return <Standby terminalName={terminalName} />;
   }
   if (shown.status === "PENDING") {
     return (
@@ -618,7 +649,13 @@ function KioskConsole({ csrf }: { csrf: string }) {
   );
 }
 
-function CompletedSaleScreen({ cart }: { cart: KioskCart }) {
+function CompletedSaleScreen({
+  cart,
+  remainingSeconds,
+}: {
+  cart: KioskCart;
+  remainingSeconds: number;
+}) {
   return (
     <main className="kiosk-thanks">
       <div className="kiosk-thanks-inner">
@@ -629,7 +666,9 @@ function CompletedSaleScreen({ cart }: { cart: KioskCart }) {
         <p className="kiosk-standby-sub">
           本次金額 ${formatNtd(parseNtd(cart.snapshot.total) ?? 0)}
         </p>
-        <p className="hint">謝謝光臨，畫面將自動清除。</p>
+        <p className="hint" role="status">
+          謝謝光臨，{remainingSeconds} 秒後自動清除。
+        </p>
       </div>
     </main>
   );
@@ -643,17 +682,58 @@ function CartScreen({
   streamConnected: boolean;
 }) {
   const { snapshot, changes } = cart;
+  const itemListRef = useRef<HTMLElement>(null);
+  const [scrollState, setScrollState] = useState({
+    hasAbove: false,
+    hasBelow: false,
+  });
+  const updateScrollState = useCallback(() => {
+    const list = itemListRef.current;
+    if (!list) return;
+    const next = {
+      hasAbove: list.scrollTop > 4,
+      hasBelow: list.scrollTop + list.clientHeight < list.scrollHeight - 4,
+    };
+    setScrollState((current) =>
+      current.hasAbove === next.hasAbove && current.hasBelow === next.hasBelow
+        ? current
+        : next,
+    );
+  }, []);
+  useEffect(() => {
+    updateScrollState();
+    const frame = window.requestAnimationFrame(updateScrollState);
+    window.addEventListener("resize", updateScrollState);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(updateScrollState);
+    if (itemListRef.current) observer?.observe(itemListRef.current);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateScrollState);
+      observer?.disconnect();
+    };
+  }, [snapshot.items.length, updateScrollState]);
   const changesByItem = new Map(
     changes
       .filter((change) => change.item_key !== "TOTAL")
       .map((change) => [change.item_key, change.type]),
   );
+  const visibleChanges = changes.filter((change) => change.type !== "ADDED");
   return (
     <main className="kiosk-cart-shell">
       <header className="kiosk-cart-header">
         <div>
           <p className="kiosk-eyebrow">顧客購物明細</p>
           <h1>
+            {cart.status === "PROCESSING" && (
+              <span
+                className="kiosk-payment-spinner"
+                role="status"
+                aria-label="付款處理中"
+              />
+            )}
             {cart.status === "PROCESSING"
               ? "付款處理中，請稍候"
               : cart.status === "PAYMENT_UNCERTAIN"
@@ -667,15 +747,14 @@ function CartScreen({
         </span>
       </header>
 
-      {changes.length > 0 && (
+      {visibleChanges.length > 0 && (
         <div className="kiosk-cart-changes" aria-live="polite">
-          {changes.map((change, index) => (
+          {visibleChanges.map((change, index) => (
             <p
               key={`${cart.revision}:${change.type}:${change.item_key}:${index}`}
               className={`kiosk-cart-change is-${change.type.toLowerCase()}`}
             >
               <strong>{change.name}</strong>
-              {change.type === "ADDED" && " 已加入"}
               {change.type === "REMOVED" && " 已移除"}
               {change.type === "DISCOUNT_CHANGED" && "，應付總額已更新"}
               {change.type === "QUANTITY_CHANGED" && (
@@ -691,7 +770,14 @@ function CartScreen({
         </div>
       )}
 
-      <section className="kiosk-cart-items" aria-label="商品明細">
+      <section
+        ref={itemListRef}
+        className={`kiosk-cart-items${scrollState.hasAbove ? " has-above" : ""}${
+          scrollState.hasAbove || scrollState.hasBelow ? " has-scroll-hint" : ""
+        }`}
+        aria-label="商品明細"
+        onScroll={updateScrollState}
+      >
         {snapshot.items.map((item) => (
           <article
             className={`kiosk-cart-item ${
@@ -705,10 +791,19 @@ function CartScreen({
           >
             <div>
               <h2>{item.name}</h2>
-              <p>
-                單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}
-                {item.discount_amount !== "0" && (
-                  <span> · 折扣 −${formatNtd(parseNtd(item.discount_amount) ?? 0)}</span>
+              <p className="kiosk-cart-price-detail">
+                {item.original_unit_price !== null ? (
+                  <>
+                    <span className="kiosk-cart-original-price">
+                      原價 ${formatNtd(parseNtd(item.original_unit_price) ?? 0)}
+                    </span>
+                    <span>優惠價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
+                    <span className="kiosk-cart-line-discount">
+                      本行折抵 ${formatNtd(parseNtd(item.discount_amount) ?? 0)}
+                    </span>
+                  </>
+                ) : (
+                  <span>單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
                 )}
               </p>
             </div>
@@ -717,6 +812,15 @@ function CartScreen({
           </article>
         ))}
       </section>
+      {(scrollState.hasAbove || scrollState.hasBelow) && (
+        <p className="kiosk-cart-scroll-hint" aria-live="polite">
+          {scrollState.hasBelow
+            ? scrollState.hasAbove
+              ? `共 ${snapshot.items.length} 個品項 · 可上下滑動 ↕`
+              : `共 ${snapshot.items.length} 個品項 · 向下滑查看更多 ↓`
+            : `已顯示全部 ${snapshot.items.length} 個品項 · 向上滑可返回 ↑`}
+        </p>
+      )}
 
       <footer className="kiosk-cart-total" data-testid="kiosk-total-bar">
         <div className="kiosk-cart-meta">
@@ -837,11 +941,16 @@ function StaffGate({
 
 function Standby({
   message = "請稍候，店員將為您加入商品。",
+  terminalName,
 }: {
   message?: string;
+  terminalName?: string;
 }) {
   return (
     <main className="kiosk-standby">
+      {terminalName && (
+        <p className="kiosk-terminal-label">櫃檯 · {terminalName}</p>
+      )}
       <div className="kiosk-standby-inner">
         <h1 className="kiosk-standby-title">露營二手</h1>
         <p className="kiosk-standby-sub">{message}</p>
@@ -864,7 +973,7 @@ function PendingTaskScreen({
         <h1 className="kiosk-task-title">{taskHeading(task.kind)}</h1>
       </header>
       <section className="kiosk-task-body" aria-busy="true">
-        <ContentSnapshot content={task.content} />
+        <ContentSnapshot kind={task.kind} content={task.content} />
         {task.agreement_body !== null && (
           <div className="kiosk-agreement">
             <h2 className="kiosk-agreement-title">{task.agreement_title}</h2>
@@ -1036,7 +1145,7 @@ function TaskScreen({
       </header>
 
       <section className="kiosk-task-body">
-        <ContentSnapshot content={task.content} />
+        <ContentSnapshot kind={task.kind} content={task.content} />
 
         {needsAgreement && (
           <div className="kiosk-agreement">
@@ -1056,7 +1165,10 @@ function TaskScreen({
 
         {needsPayout && (
           <div className="kiosk-payout">
-            <h2 className="kiosk-section-title">請選擇收款方式</h2>
+            <h2 className="kiosk-section-title">
+              請選擇收款方式
+              <span className="kiosk-required-badge">必選</span>
+            </h2>
             <div className="kiosk-payout-options">
               <button
                 type="button"
@@ -1146,7 +1258,6 @@ function payoutClass(active: boolean): string {
 
 // content 為店員端凍結的顯示快照（自由 dict）：優雅呈現已知欄位（品項清單＋常見純量）。
 const CONTENT_LABELS: Record<string, string> = {
-  content_version: "內容版本",
   seller_name: "姓名",
   member_name: "會員",
   member: "會員",
@@ -1175,82 +1286,189 @@ const CONTENT_LABELS: Record<string, string> = {
   line_total: "小計",
 };
 
+type ContentEntry = [string, unknown];
+type ContentFieldGroup = { title: string | null; entries: ContentEntry[] };
+
+const STORE_CREDIT_FIELD_ORDER = [
+  "total",
+  "sale_total",
+  "member",
+  "campaign_name",
+  "discount_total",
+  "store_credit_balance_before",
+  "balance_before",
+  "store_credit_amount",
+  "debit",
+  "store_credit_balance_after",
+  "balance_after",
+  "remaining_tenders",
+];
+const AFFIDAVIT_IDENTITY_FIELD_ORDER = [
+  "seller_name",
+  "national_id_masked",
+  "phone",
+  "address",
+];
+const AFFIDAVIT_TRANSACTION_FIELD_ORDER = ["total", "lot"];
+const ACK_FIELD_ORDER = ["sale_ref", "purchased_at", "total"];
+const ITEM_EXTRA_ORDER = [
+  "qty",
+  "original_unit_price",
+  "unit_price",
+  "discount_amount",
+];
+
 // 客人簽的是完整 JSON 快照，故此處**窮舉渲染**所有欄位、不靜默丟棄任何鍵
 // （Codex K3 high：簽到沒看到的內容＝證據風險）。已知鍵給中文標籤與金額格式，
 // 未知鍵照原樣列出；巢狀物件/陣列（items 以外）以可讀字串呈現。
-function ContentSnapshot({ content }: { content: Record<string, unknown> }) {
+function ContentSnapshot({
+  kind,
+  content,
+}: {
+  kind: string;
+  content: Record<string, unknown>;
+}) {
   const itemsIsArray = Array.isArray(content.items);
   const items = itemsIsArray ? (content.items as unknown[]) : [];
   // 僅在 items 真的以陣列渲染時，才將它排除於一般欄位；若 items 非陣列（schema 漂移/
   // 錯誤生產者），仍以一般欄位 renderValue 列出，絕不靜默丟棄客人所簽內容（Codex K3 高）。
   // store_credit_premium 於撥款按鈕另外呈現，不列入通用明細。
   // （綁定用身分指紋已移至後端內部欄，不在 content，故此處不再需要遮蔽。）
-  const hidden = new Set(["store_credit_premium"]);
+  const hidden = new Set(["store_credit_premium", "content_version"]);
   const rest = Object.entries(content).filter(
     ([key]) => !hidden.has(key) && (key !== "items" || !itemsIsArray),
   );
+  const groups = contentFieldGroups(kind, rest);
+  const documentVersion =
+    "content_version" in content ? friendlyDocumentVersion(content.content_version) : null;
+  const itemTable =
+    items.length > 0 ? (
+      <table className="kiosk-items">
+        <thead>
+          <tr>
+            <th>品項</th>
+            <th className="kiosk-items-amount">金額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((raw, i) => {
+            const item = (raw ?? {}) as Record<string, unknown>;
+            // name/amount 以外的品項欄位一併呈現，避免遺漏客人所簽內容。
+            const extra = orderEntries(
+              Object.entries(item).filter(
+                ([k]) => k !== "name" && k !== "amount" && k !== "line_total",
+              ),
+              ITEM_EXTRA_ORDER,
+            );
+            return (
+              <tr key={i}>
+                <td>
+                  {String(item.name ?? "—")}
+                  {extra.length > 0 && (
+                    <span className="kiosk-item-extra">
+                      {extra
+                        .map(
+                          ([k, v]) =>
+                            `${CONTENT_LABELS[k] ?? k}：${
+                              isAmountKey(k) ? formatAmount(v) : renderValue(v)
+                            }`,
+                        )
+                        .join("；")}
+                    </span>
+                  )}
+                </td>
+                <td className="kiosk-items-amount">
+                  {formatAmount(item.line_total ?? item.amount)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    ) : null;
 
   return (
     <div className="kiosk-snapshot">
-      {items.length > 0 && (
-        <table className="kiosk-items">
-          <thead>
-            <tr>
-              <th>品項</th>
-              <th className="kiosk-items-amount">金額</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((raw, i) => {
-              const item = (raw ?? {}) as Record<string, unknown>;
-              // name/amount 以外的品項欄位一併呈現，避免遺漏客人所簽內容。
-              const extra = Object.entries(item).filter(
-                ([k]) => k !== "name" && k !== "amount" && k !== "line_total",
-              );
-              return (
-                <tr key={i}>
-                  <td>
-                    {String(item.name ?? "—")}
-                    {extra.length > 0 && (
-                      <span className="kiosk-item-extra">
-                        {extra
-                          .map(
-                            ([k, v]) =>
-                              `${CONTENT_LABELS[k] ?? k}：${
-                                isAmountKey(k) ? formatAmount(v) : renderValue(v)
-                              }`,
-                          )
-                          .join("；")}
-                      </span>
-                    )}
-                  </td>
-                  <td className="kiosk-items-amount">
-                    {formatAmount(item.line_total ?? item.amount)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-      {rest.length > 0 && (
-        <dl className="kiosk-fields">
-          {rest.map(([key, value]) => (
-            <div className="kiosk-field-row" key={key}>
-              <dt>{CONTENT_LABELS[key] ?? key}</dt>
-              <dd>
-                {isAmountKey(key)
-                  ? formatAmount(value)
-                  : key === "purchased_at" && typeof value === "string"
-                    ? formatTaipeiDateTime(value)
-                    : renderContentValue(key, value)}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {kind !== "ACQUISITION_AFFIDAVIT" && itemTable}
+      {groups.map((group, index) => (
+        <section className="kiosk-field-group" key={group.title ?? `fields-${index}`}>
+          {group.title && <h2 className="kiosk-field-group-title">{group.title}</h2>}
+          {kind === "ACQUISITION_AFFIDAVIT" &&
+            group.title === "收購資料" &&
+            itemTable}
+          <dl className="kiosk-fields">
+            {group.entries.map(([key, value]) => (
+              <div className="kiosk-field-row" key={key}>
+                <dt>{CONTENT_LABELS[key] ?? key}</dt>
+                <dd>
+                  {isAmountKey(key)
+                    ? formatAmount(value)
+                    : key === "purchased_at" && typeof value === "string"
+                      ? formatTaipeiDateTime(value)
+                      : renderContentValue(key, value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ))}
+      {kind === "ACQUISITION_AFFIDAVIT" &&
+        itemTable &&
+        !groups.some((group) => group.title === "收購資料") && (
+          <section className="kiosk-field-group">
+            <h2 className="kiosk-field-group-title">收購資料</h2>
+            {itemTable}
+          </section>
+        )}
+      {documentVersion && <p className="kiosk-document-version">{documentVersion}</p>}
     </div>
   );
+}
+
+function contentFieldGroups(kind: string, entries: ContentEntry[]): ContentFieldGroup[] {
+  if (kind === "ACQUISITION_AFFIDAVIT") {
+    const identityKeys = new Set(AFFIDAVIT_IDENTITY_FIELD_ORDER);
+    const transactionKeys = new Set(AFFIDAVIT_TRANSACTION_FIELD_ORDER);
+    const identity = orderEntries(
+      entries.filter(([key]) => identityKeys.has(key)),
+      AFFIDAVIT_IDENTITY_FIELD_ORDER,
+    );
+    const transaction = orderEntries(
+      entries.filter(([key]) => transactionKeys.has(key)),
+      AFFIDAVIT_TRANSACTION_FIELD_ORDER,
+    );
+    const other = entries.filter(
+      ([key]) => !identityKeys.has(key) && !transactionKeys.has(key),
+    );
+    return [
+      { title: "賣方資料", entries: identity },
+      { title: "收購資料", entries: transaction },
+      { title: "其他內容", entries: other },
+    ].filter((group) => group.entries.length > 0);
+  }
+  const order = kind === "STORE_CREDIT_USE" ? STORE_CREDIT_FIELD_ORDER : ACK_FIELD_ORDER;
+  return [{ title: null, entries: orderEntries(entries, order) }];
+}
+
+function orderEntries(entries: ContentEntry[], order: string[]): ContentEntry[] {
+  const rank = new Map(order.map((key, index) => [key, index]));
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort(
+      (left, right) =>
+        (rank.get(left.entry[0]) ?? order.length) -
+          (rank.get(right.entry[0]) ?? order.length) ||
+        left.index - right.index,
+    )
+    .map(({ entry }) => entry);
+}
+
+function friendlyDocumentVersion(value: unknown): string {
+  if (typeof value === "string") {
+    const version = value.match(/(?:^|-)v(\d+)$/i)?.[1];
+    if (version) return `文件版本 v${version}`;
+  }
+  return `文件版本 ${renderValue(value)}`;
 }
 
 function isAmountKey(key: string): boolean {
