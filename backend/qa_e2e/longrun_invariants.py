@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from decimal import Decimal
 
 from sqlalchemy import select, text
@@ -19,9 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.main  # noqa: F401  # 觸發模型註冊
 from app.core.db import get_sessionmaker
 from app.core.money import round_ntd
+from app.core.national_id import is_valid_national_id
 from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.shared.enums import CashSessionStatus
+
+# 身分證字號形狀（英文字母＋性別碼＋8 碼數字）；命中後仍須通過檢核碼才算真證號。
+_NID_SHAPE = re.compile(r"[A-Z][12][0-9]{8}")
 
 _results: list[tuple[str, bool, str]] = []
 
@@ -443,23 +448,30 @@ async def b13_audit_presence(session: AsyncSession) -> None:
     missing = [name for name in required if counts.get(name, 0) == 0]
     check("B13 活動/購物金敏感操作有 audit_log", not missing, f"缺少 {missing}")
 
-    plaintext_ids = (
+    # 形狀先由 SQL 粗篩，再以**戶役政檢核碼**逐一驗證候選字串：真證號一定過檢核碼
+    # （系統於建檔時即驗），而 `L1-C135750357` 這類批號雖同形狀卻過不了——不加驗檢核碼
+    # 會讓合法批號被誤報成 PII 外洩（隨機批號約 1/10 機率撞上，屬資料相依的假警報）。
+    candidates = (
         await session.execute(
             text(
                 """
-        SELECT id, action
+        SELECT id, action, COALESCE(before::text,'') || ' ' || COALESCE(after::text,'')
         FROM audit_log
         WHERE COALESCE(before::text,'') ~ '[A-Z][12][0-9]{8}'
            OR COALESCE(after::text,'') ~ '[A-Z][12][0-9]{8}'
-        LIMIT 5
         """
             )
         )
     ).all()
+    plaintext_ids = [
+        (row[0], row[1])
+        for row in candidates
+        if any(is_valid_national_id(token) for token in _NID_SHAPE.findall(str(row[2])))
+    ]
     check(
         "B13 audit_log 不含身分證明文",
         len(plaintext_ids) == 0,
-        f"疑似 {plaintext_ids[:5]}",
+        f"疑似 {plaintext_ids[:5]}（形狀相符但非合法證號者 {len(candidates)} 筆已排除）",
     )
 
 

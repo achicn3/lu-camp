@@ -9,9 +9,12 @@ AcquisitionService＋手持切結簽署、寄售結算走付款流程、每日�
 用法（隔離 DB，嚴禁對 dev/pytest 庫執行）：
   DATABASE_URL=postgresql+asyncpg://lucamp:...@127.0.0.1:1234/lucamp_sim \
   APP_ENV=development ALLOW_DEV_SEED=true SIM_DAYS=200 SIM_SEED=20260716 \
-  uv run python -m qa_e2e.sim_180d
+  SEED_USER_PASSWORD=<dev 帳號密碼> uv run python -m qa_e2e.sim_180d
 
 前置：seed_dev_store、seed_dev_user 已跑（store id=1、dev-manager/dev-clerk/dev-kiosk）。
+客顯（dev-kiosk）密碼由 SEED_USER_PASSWORD（或 SIM_KIOSK_PASSWORD）提供：K 系列後所有
+簽署都要求「已配對且在線的客顯」，模擬開場會以真實流程登入裝置、註冊櫃檯並配對，
+之後每日開店與每次推送簽署前補心跳（在線窗 45 秒 < 快轉模擬的真實耗時）。
 產出：qa_e2e/sim_manifest.json（筆數/跨度/種子；Phase 2 各層驗證啟動前先核對）。
 """
 
@@ -21,6 +24,7 @@ import asyncio
 import json
 import os
 import random
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -45,6 +49,13 @@ from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
+from app.modules.customerdisplay.models import CartSession
+from app.modules.customerdisplay.schemas import (
+    CartLineRequest,
+    CartTenderRequest,
+    CartUpsertRequest,
+)
+from app.modules.customerdisplay.service import CustomerDisplayService, DevicePrincipal
 from app.modules.menu.service import MenuService
 from app.modules.purchasing.schemas import (
     InputInvoiceIn,
@@ -143,18 +154,102 @@ _SHIFT_TABLES = (
 )
 
 FIRST_AFFIDAVIT_DAY = 15  # 之前：未強制簽署（require_acquisition_affidavit 關）
-FIRST_SCU_DAY = 30  # 此日起模擬購物金扣抵銷售（其簽署一律強制，無旗標可切）
 PREMIUM_BUMP_DAY = 100  # 溢價率 0.10 → 0.12（寫 premium_rate_history）
+
+# 客顯／櫃檯的固定安裝識別（同一模擬庫重跑會沿用同一台裝置，不會長出殭屍裝置）。
+KIOSK_USERNAME = os.environ.get("SIM_KIOSK_USERNAME", "dev-kiosk")
+KIOSK_INSTALLATION_ID = "5c1b7f2e-0000-4a00-9c00-51d0c0ffee01"
+TERMINAL_INSTALLATION_ID = "5c1b7f2e-0000-4a00-9c00-51d0c0ffee02"
+KIOSK_LABEL = "模擬客顯"
+TERMINAL_NAME = "模擬收銀櫃檯"
+
+
+@dataclass(frozen=True)
+class KioskSetup:
+    """模擬用的 POS 櫃檯 × 客顯配對（一律由真實 CustomerDisplayService 產生）。"""
+
+    terminal_id: int
+    device_id: int
+    principal: DevicePrincipal
+
+
+async def provision_kiosk(
+    session: AsyncSession,
+    store_id: int,
+    *,
+    actor_user_id: int,
+    username: str,
+    password: str,
+) -> KioskSetup:
+    """以真實流程備妥簽署所需的客顯：裝置登入 → 註冊櫃檯 → 一次性配對碼配對。
+
+    K 系列後所有簽署任務都要求「櫃檯已配對且客顯在線」，模擬器必須先走完這條真流程
+    （raw-insert 裝置/配對會繞過 service 不變量，違反 sim 的「一律經真實 service」原則）。
+    """
+    display = CustomerDisplayService(session)
+    result = await display.create_device_session(
+        username=username,
+        password=password,
+        installation_id=KIOSK_INSTALLATION_ID,
+        label=KIOSK_LABEL,
+    )
+    device = result.device
+    if device.store_id != store_id:
+        raise SystemExit(f"客顯帳號屬於 store {device.store_id}，與模擬門市 {store_id} 不符")
+    if result.paired_terminal is not None:
+        terminal_id = result.paired_terminal.id
+    else:
+        if result.pairing_code is None:
+            raise SystemExit("客顯未配對卻沒有配對碼，無法備妥簽署裝置")
+        terminal = await display.register_terminal(
+            store_id,
+            installation_id=TERMINAL_INSTALLATION_ID,
+            name=TERMINAL_NAME,
+            actor_user_id=actor_user_id,
+        )
+        await display.pair_terminal(
+            store_id,
+            terminal.id,
+            pairing_code=result.pairing_code,
+            actor_user_id=actor_user_id,
+        )
+        terminal_id = terminal.id
+    principal = await display.authenticate_device_session(result.raw_session_token)
+    await session.commit()
+    return KioskSetup(terminal_id=terminal_id, device_id=device.id, principal=principal)
+
+
+async def kiosk_heartbeat(session: AsyncSession, principal: DevicePrincipal) -> None:
+    """客顯待機心跳：`kiosk_is_online` 依真實牆鐘的 last_seen_at 判定（離線即不可簽署）。
+
+    模擬是快轉時鐘、一次跑數十分鐘，遠超過 45 秒的在線窗，故每次推送簽署前補打一次。
+    時間回填不含 kiosk_devices，心跳寫的是真實 now、不會被平移成過期。
+    """
+    await CustomerDisplayService(session).heartbeat(
+        principal,
+        current_session_id=None,
+        displayed_revision=0,
+    )
+    await session.commit()
 
 
 class Sim:
     """單次模擬執行的共享狀態。"""
 
-    def __init__(self, session: AsyncSession, store_id: int, manager_id: int, clerk_id: int):
+    def __init__(
+        self,
+        session: AsyncSession,
+        store_id: int,
+        manager_id: int,
+        clerk_id: int,
+        *,
+        kiosk: KioskSetup,
+    ):
         self.s = session
         self.store_id = store_id
         self.manager_id = manager_id
         self.clerk_id = clerk_id
+        self.kiosk = kiosk
         self.seq = 0
         self.member_ids: list[int] = []
         self.seller_ids: list[int] = []  # 有合法證號者（可簽切結/收購物金）
@@ -233,15 +328,23 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
     store_credit_ledger 等表有 insert-only／守衛觸發器（ADR-012）擋任何 UPDATE；
     時間平移只動時間欄、不碰金額與鏈，故以 session_replication_role=replica 暫時
     跳過觸發器（僅本交易），結束即還原。
+
+    **NULL 一律保留**：`voided_at`/`signed_at`/`confirmed_at`/`received_at`/`closed_at`
+    都是「事件發生才有值」的欄位，無條件覆寫會把每一列都寫成「已作廢/已簽/已收貨」
+    （F-1 併同修正：每筆收購都變成 voided_at 非空，S2 的快照深度比對因此永遠 0 筆樣本）。
     """
     await sim.s.execute(text("SET session_replication_role = replica"))
     for tab, cs in cols.items():
         wm = sim.watermarks[tab]
         sets = ", ".join(
-            f"{c} = CAST(:base AS timestamptz)"
-            f" + make_interval(secs => LEAST((id - :wm) * 75, 39600))"
-            if c != "intake_date"
-            else f"{c} = CAST(:day AS date)"
+            f"{c} = CASE WHEN {c} IS NULL THEN NULL ELSE "
+            + (
+                "CAST(:base AS timestamptz)"
+                " + make_interval(secs => LEAST((id - :wm) * 75, 39600))"
+                if c != "intake_date"
+                else "CAST(:day AS date)"
+            )
+            + " END"
             for c in cs
         )
         await sim.s.execute(
@@ -286,6 +389,43 @@ def _day_start(day_index: int) -> datetime:
     return simulation_day_start(_NOW, DAYS, day_index)
 
 
+async def _prepare_signature_device(sim: Sim) -> None:
+    """推送簽署前的現場整備：撤回殘留任務（店員撤回）＋補一次客顯心跳。
+
+    前一筆流程若在簽完後失敗回滾（例如收購被擋），該客顯會留著一張 SIGNED 任務占位，
+    下一次推送就會撞 SignatureTaskConflict；真實店務的解法就是店員撤回，模擬照做。
+    """
+    signing = SigningService(sim.s)
+    stale = await signing.active_task_for_device(sim.store_id, sim.kiosk.device_id)
+    if stale is not None:
+        await signing.cancel_task(
+            sim.store_id,
+            stale.id,
+            actor_user_id=sim.clerk_id,
+            reason_code="STAFF_WITHDRAWN",
+            reason="模擬：改推下一張簽署",
+        )
+    await sim.s.commit()  # active_task_for_device 可能已把逾時任務判定為 EXPIRED
+    await kiosk_heartbeat(sim.s, sim.kiosk.principal)
+
+
+async def _sign_on_kiosk(
+    sim: Sim, task_id: int, payout: PayoutMethod | None
+) -> None:
+    """客顯端兩步：ACK（PENDING→SIGNING，SSE 到達不算）→ 送出簽名。"""
+    svc = SigningService(sim.s)
+    await svc.acknowledge_task(sim.store_id, sim.kiosk.device_id, task_id)
+    await svc.sign_task(
+        sim.store_id,
+        task_id,
+        device_id=sim.kiosk.device_id,
+        signature_image_base64=signature_png(_RNG),
+        chosen_payout=payout,
+        idempotency_key=sim.key("signk"),
+    )
+    await sim.s.commit()
+
+
 async def _sign_affidavit(
     sim: Sim,
     contact_id: int,
@@ -294,7 +434,8 @@ async def _sign_affidavit(
     payout: PayoutMethod,
     lot: dict[str, Any] | None = None,
 ) -> int:
-    """建立並簽署收購切結（K4 全鏈：店員推送 → 手持簽名）。回 task_id。"""
+    """建立並簽署收購切結（K4 全鏈：店員推送 → 客顯 ACK → 手持簽名）。回 task_id。"""
+    await _prepare_signature_device(sim)
     svc = SigningService(sim.s)
     content: dict[str, Any] = {"items": items, "total": str(total)}
     if lot is not None:
@@ -302,21 +443,15 @@ async def _sign_affidavit(
     task = await svc.create_task(
         sim.store_id,
         SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT, contact_id=contact_id, content=content
+            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+            contact_id=contact_id,
+            content=content,
+            terminal_id=sim.kiosk.terminal_id,
         ),
         created_by=sim.clerk_id,
     )
-    device_id = task.kiosk_device_id
-    assert device_id is not None
-    await svc.sign_task(
-        sim.store_id,
-        task.id,
-        device_id=device_id,
-        signature_image_base64=signature_png(_RNG),
-        chosen_payout=payout,
-        idempotency_key=sim.key("signk"),
-    )
     await sim.s.commit()
+    await _sign_on_kiosk(sim, task.id, payout)
     sim.stats["affidavits"] += 1
     return task.id
 
@@ -460,6 +595,67 @@ async def _do_bulk_lot(sim: Sim, day: int) -> None:
             sim.bulk_ids.append(int(lot_id))
 
 
+def _cart_line(line: SaleLineInput) -> CartLineRequest:
+    """銷售明細 → 客顯購物車明細（同一份購物內容，兩層各自的輸入型別）。"""
+    return CartLineRequest(
+        line_type=line.line_type,
+        item_code=line.item_code,
+        catalog_product_id=line.catalog_product_id,
+        bulk_lot_id=line.bulk_lot_id,
+        menu_item_id=line.menu_item_id,
+        qty=line.qty,
+    )
+
+
+async def _open_cart(
+    sim: Sim,
+    lines: list[SaleLineInput],
+    buyer_contact_id: int | None,
+    *,
+    tenders: list[CartTenderRequest] | None = None,
+) -> CartSession:
+    """把本次購物內容推上 POS 權威購物車（客顯即時同步）；回傳可供結帳綁定的 DRAFT 車。
+
+    先整備裝置：撤回殘留簽署（順帶把被凍結的購物車解回 DRAFT）並補心跳，之後才 upsert。
+    """
+    await _prepare_signature_device(sim)
+    display = CustomerDisplayService(sim.s)
+    current = await display.current_cart_for_terminal(sim.store_id, sim.kiosk.terminal_id)
+    cart = await display.upsert_cart(
+        sim.store_id,
+        sim.kiosk.terminal_id,
+        CartUpsertRequest(
+            expected_revision=current.revision if current is not None else None,
+            lines=[_cart_line(line) for line in lines],
+            buyer_contact_id=buyer_contact_id,
+            tenders=tenders,
+        ),
+        actor_user_id=sim.clerk_id,
+    )
+    await sim.s.commit()
+    return cart
+
+
+def _cart_total(cart: CartSession) -> Decimal:
+    """權威購物車快照的應付總額（含活動折扣後）。"""
+    return Decimal(str(cart.snapshot["total"]))
+
+
+async def _open_cash_cart(
+    sim: Sim, lines: list[SaleLineInput], buyer_contact_id: int | None
+) -> tuple[CartSession, Decimal]:
+    """POS 兩步：先掃商品（取得權威總額）→ 再選現金付款。結帳會逐欄比對這份拆分。"""
+    cart = await _open_cart(sim, lines, buyer_contact_id)
+    total = _cart_total(cart)
+    cart = await _open_cart(
+        sim,
+        lines,
+        buyer_contact_id,
+        tenders=[CartTenderRequest(tender_type=TenderType.CASH, amount=total)],
+    )
+    return cart, total
+
+
 async def _one_sale(sim: Sim, day: int) -> None:
     sales_svc = SalesService(sim.s)
     lines: list[SaleLineInput] = []
@@ -528,10 +724,21 @@ async def _one_sale(sim: Sim, day: int) -> None:
     if not lines:
         return  # 空車不送單（POS 前端本就擋空車）
     buyer = _RNG.choice(sim.member_ids) if _RNG.random() < 0.65 else None
+    # 交易紀錄簽收（K5b）：小樣本、會員單、當場簽收。簽收只接受「該客顯看過的那筆交易」
+    # （_ensure_ack_belongs_to_device），故這些單必須走 POS 權威購物車結帳。
+    want_ack = buyer is not None and _RNG.random() < 0.012
+    cart: CartSession | None = None
+    tenders: list[TenderInput] | None = None
     try:
+        if want_ack:
+            cart, cart_total = await _open_cash_cart(sim, lines, buyer)
+            tenders = [TenderInput(tender_type=TenderType.CASH, amount=cart_total)]
         sale = await sales_svc.create_sale(
             sim.store_id, sim.clerk_id, lines=lines, buyer_contact_id=buyer,
+            tenders=tenders,
             idempotency_key=sim.key("sale"),
+            cart_session_id=cart.id if cart is not None else None,
+            cart_revision=cart.revision if cart is not None else None,
         )
         await sim.s.commit()
     except Exception as exc:
@@ -542,38 +749,35 @@ async def _one_sale(sim: Sim, day: int) -> None:
     sim.recent_cash_sales.append(sale.id)
     if len(sim.recent_cash_sales) > 120:
         sim.recent_cash_sales = sim.recent_cash_sales[-120:]
-    # 交易紀錄簽收（K5b）：小樣本，會員單、當場簽收
-    if buyer is not None and _RNG.random() < 0.012:
+    if want_ack and buyer is not None:
         try:
-            svc = SigningService(sim.s)
-            task = await svc.create_task(
+            await _prepare_signature_device(sim)
+            task = await SigningService(sim.s).create_task(
                 sim.store_id,
                 SignatureTaskCreate(
                     kind=SignatureTaskKind.TRANSACTION_ACK,
                     contact_id=buyer,
                     content={},
+                    terminal_id=sim.kiosk.terminal_id,
                     ref_type="sale",
                     ref_id=sale.id,
                 ),
                 created_by=sim.clerk_id,
             )
-            device_id = task.kiosk_device_id
-            assert device_id is not None
-            await svc.sign_task(
-                sim.store_id, task.id,
-                device_id=device_id,
-                signature_image_base64=signature_png(_RNG),
-                chosen_payout=None, idempotency_key=sim.key("signk"),
-            )
             await sim.s.commit()
+            await _sign_on_kiosk(sim, task.id, None)
             sim.stats["ack_tasks"] += 1
         except Exception as exc:
             sim.note_err("ack", exc)
             await sim.s.rollback()
 
 
-async def _store_credit_sale(sim: Sim, day: int) -> None:
-    """購物金折抵銷售：用寄售品（活動不折寄售 → 總額＝標價可精準拆帳）＋SCU 簽署（生效後）。"""
+async def _store_credit_sale(sim: Sim) -> None:
+    """購物金折抵銷售（docs/23 K5 全鏈）：用寄售品（活動不折寄售 → 總額＝標價可精準拆帳）。
+
+    購物金一律要簽：POS 權威購物車 → 凍結送簽 → 客顯 ACK＋簽名 → 帶
+    signature_task_id/cart_session_id/cart_revision 結帳（結帳會逐欄比對簽署快照）。
+    """
     if not sim.sc_reserved:
         return
     holders = (
@@ -595,42 +799,43 @@ async def _store_credit_sale(sim: Sim, day: int) -> None:
     item = await sim.s.scalar(select(SerializedItem).where(SerializedItem.item_code == code))
     if item is None:
         return
-    total = int(item.listed_price)
-    use = min(int(bal), max(1, total - 1))
-    task_id: int | None = None
+    lines = [SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)]
     try:
-        if day >= FIRST_SCU_DAY:
-            svc = SigningService(sim.s)
-            task = await svc.create_task(
-                sim.store_id,
-                SignatureTaskCreate(
-                    kind=SignatureTaskKind.STORE_CREDIT_USE,
-                    contact_id=cid,
-                    content={"debit": str(use), "sale_total": str(total)},
-                ),
-                created_by=sim.clerk_id,
-            )
-            device_id = task.kiosk_device_id
-            assert device_id is not None
-            await svc.sign_task(
-                sim.store_id, task.id,
-                device_id=device_id,
-                signature_image_base64=signature_png(_RNG),
-                chosen_payout=None, idempotency_key=sim.key("signk"),
-            )
-            await sim.s.commit()
-            task_id = task.id
-            sim.stats["scu_tasks"] += 1
+        # 先掃商品拿權威總額（拆分必須等於購物車總額，不可用標價自行推算），再選付款方式。
+        cart = await _open_cart(sim, lines, cid)
+        total = int(_cart_total(cart))
+        use = min(int(bal), max(1, total - 1))
+        tenders = [
+            TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal(use)),
+            TenderInput(tender_type=TenderType.CASH, amount=Decimal(total - use)),
+        ]
+        cart = await _open_cart(
+            sim,
+            lines,
+            cid,
+            tenders=[
+                CartTenderRequest(tender_type=t.tender_type, amount=t.amount) for t in tenders
+            ],
+        )
+        cart, task = await CustomerDisplayService(sim.s).freeze_store_credit_cart(
+            sim.store_id,
+            sim.kiosk.terminal_id,
+            expected_revision=cart.revision,
+            actor_user_id=sim.clerk_id,
+        )
+        await sim.s.commit()
+        task_id, cart_id, cart_revision = task.id, cart.id, cart.revision
+        await _sign_on_kiosk(sim, task_id, None)
+        sim.stats["scu_tasks"] += 1
         await SalesService(sim.s).create_sale(
             sim.store_id, sim.clerk_id,
-            lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+            lines=lines,
             buyer_contact_id=cid,
-            tenders=[
-                TenderInput(tender_type=TenderType.STORE_CREDIT, amount=Decimal(use)),
-                TenderInput(tender_type=TenderType.CASH, amount=Decimal(total - use)),
-            ],
+            tenders=tenders,
             idempotency_key=sim.key("sale"),
             signature_task_id=task_id,
+            cart_session_id=cart_id,
+            cart_revision=cart_revision,
         )
         await sim.s.commit()
         sim.stats["sc_sales"] += 1
@@ -1097,6 +1302,7 @@ async def _run_day(sim: Sim, plan: DayPlan, cols: dict[str, list[str]]) -> None:
     await sim.s.commit()
     session_id = cash_session.id
     sim.stats["cash_sessions"] += 1
+    await kiosk_heartbeat(sim.s, sim.kiosk.principal)  # 開店：客顯上線待命
 
     await _new_members(sim, _RNG.randint(6, 14))
     if plan.po_action:
@@ -1124,7 +1330,7 @@ async def _run_day(sim: Sim, plan: DayPlan, cols: dict[str, list[str]]) -> None:
     for _ in range(plan.n_sales):
         await _one_sale(sim, day)
     if day >= 20 and _RNG.random() < 0.8:
-        await _store_credit_sale(sim, day)
+        await _store_credit_sale(sim)
     await _maybe_void_and_return(sim)
     if plan.settle_payout_day:
         await _settlement_payouts(sim)
@@ -1191,7 +1397,21 @@ async def _main() -> None:
         clerk = await session.scalar(select(User).where(User.username == "dev-clerk"))
         if store is None or manager is None:
             raise SystemExit("請先跑 seed_dev_store 與 seed_dev_user")
-        sim = Sim(session, store.id, manager.id, (clerk or manager).id)
+        kiosk_password = os.environ.get("SIM_KIOSK_PASSWORD") or os.environ.get(
+            "SEED_USER_PASSWORD", ""
+        )
+        if not kiosk_password.strip():
+            raise SystemExit(
+                "需 SEED_USER_PASSWORD（或 SIM_KIOSK_PASSWORD）：客顯必須以真實帳密登入配對"
+            )
+        kiosk = await provision_kiosk(
+            session,
+            store.id,
+            actor_user_id=manager.id,
+            username=KIOSK_USERNAME,
+            password=kiosk_password,
+        )
+        sim = Sim(session, store.id, manager.id, (clerk or manager).id, kiosk=kiosk)
         cols = await _shiftable_columns(session)
         schedule = build_schedule(DAYS, SEED)
         await _snapshot_watermarks(sim, cols)

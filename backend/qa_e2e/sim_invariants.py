@@ -80,24 +80,31 @@ async def s0_manifest_binding(session: AsyncSession) -> None:
 
 
 async def s1_signing_evidence(session: AsyncSession) -> None:
-    """S1：簽署證據完整性——SIGNED 必有影像/時間/冪等指紋；影像為合法 PNG(RGBA)。"""
+    """S1：簽署證據完整性——已簽必有影像/時間/冪等指紋；影像為合法 PNG(RGBA)。
+
+    綁定單據後任務轉 CONSUMED（收購綁切結、結帳綁購物金、簽收即時綁定），證據要求相同，
+    故已簽集合＝SIGNED ∪ CONSUMED（只看 SIGNED 會讓絕大多數證據漏檢）。
+    """
     rows = (
         await session.execute(
             text(
                 "SELECT id, signature_image IS NULL AS no_img, signed_at IS NULL AS no_ts, "
                 "sign_idempotency_key IS NULL AS no_key FROM signature_tasks "
-                "WHERE status = 'SIGNED'"
+                "WHERE status IN ('SIGNED', 'CONSUMED')"
             )
         )
     ).all()
     bad = [r[0] for r in rows if r[1] or r[2]]
-    check("S1 SIGNED 必有簽名影像+時間", len(bad) == 0, f"缺件 task={bad[:5]}（共{len(rows)}筆）")
+    check("S1 已簽必有簽名影像+時間", len(bad) == 0, f"缺件 task={bad[:5]}（共{len(rows)}筆）")
     no_key = [r[0] for r in rows if r[3]]
-    check("S1 SIGNED 有冪等指紋", len(no_key) == 0, f"缺鍵 task={no_key[:5]}")
+    check("S1 已簽有冪等指紋", len(no_key) == 0, f"缺鍵 task={no_key[:5]}")
 
     imgs = (
         await session.execute(
-            text("SELECT id, signature_image FROM signature_tasks WHERE status='SIGNED'")
+            text(
+                "SELECT id, signature_image FROM signature_tasks "
+                "WHERE status IN ('SIGNED', 'CONSUMED')"
+            )
         )
     ).all()
     # 以後端簽署驗證器全量重驗（chunk 結構/CRC/IHDR/zlib 解壓/可見墨跡）——魔術字節
@@ -118,7 +125,7 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
         await session.execute(
             text(
                 "SELECT COUNT(*) FROM signature_tasks "
-                "WHERE status='SIGNED' AND signed_at < created_at"
+                "WHERE signed_at IS NOT NULL AND signed_at < created_at"
             )
         )
     ).scalar_one()
@@ -128,7 +135,7 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
         await session.execute(
             text(
                 "SELECT COUNT(*) FROM signature_tasks WHERE kind='ACQUISITION_AFFIDAVIT' "
-                "AND status='SIGNED' AND agreement_version_id IS NULL"
+                "AND status IN ('SIGNED', 'CONSUMED') AND agreement_version_id IS NULL"
             )
         )
     ).scalar_one()
@@ -136,7 +143,7 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
 
 
 async def s2_acquisition_binding(session: AsyncSession) -> None:
-    """S2：收購↔切結綁定——綁定任務必為同店同人已簽 AFFIDAVIT；切結單次使用。"""
+    """S2：收購↔切結綁定——綁定任務必為同店同人已簽 AFFIDAVIT（綁定即 CONSUMED）；單次使用。"""
     rows = (
         await session.execute(
             text(
@@ -152,7 +159,7 @@ async def s2_acquisition_binding(session: AsyncSession) -> None:
     bad = [
         r[0]
         for r in rows
-        if r[2] != "ACQUISITION_AFFIDAVIT" or r[3] != "SIGNED" or not r[4] or not r[5]
+        if r[2] != "ACQUISITION_AFFIDAVIT" or r[3] != "CONSUMED" or not r[4] or not r[5]
     ]
     check("S2 綁定切結＝同店同人已簽 AFFIDAVIT", len(bad) == 0, f"違規 acq={bad[:5]}")
     dup = (
@@ -310,15 +317,17 @@ async def s4_member_points(session: AsyncSession) -> None:
 
 
 async def s5_scu_binding(session: AsyncSession) -> None:
-    """S5：購物金扣抵簽署——sale 綁定任務＝已簽 SCU、同買方，debit＝購物金 tender。"""
+    """S5：購物金扣抵簽署——sale 綁定任務＝已簽 SCU（成交即 CONSUMED）、同買方、同一權威購物車，
+    且客人簽的折抵額/消費合計與實際 tender、銷售總額精確相符（docs/23 K5）。"""
     rows = (
         await session.execute(
             text(
                 """
         SELECT s.id, t.kind, t.status, t.contact_id = s.buyer_contact_id AS same_buyer,
-               t.content->>'debit' AS debit,
+               t.content->>'store_credit_amount' AS debit,
                (SELECT SUM(amount) FROM sale_tenders st
-                 WHERE st.sale_id = s.id AND st.tender_type='STORE_CREDIT') AS credit_amt
+                 WHERE st.sale_id = s.id AND st.tender_type='STORE_CREDIT') AS credit_amt,
+               t.content->>'total' AS signed_total, s.total, t.cart_session_id
         FROM sales s JOIN signature_tasks t ON t.id = s.signature_task_id
         WHERE s.signature_task_id IS NOT NULL
         """
@@ -328,11 +337,12 @@ async def s5_scu_binding(session: AsyncSession) -> None:
     bad = [
         r[0]
         for r in rows
-        if r[1] != "STORE_CREDIT_USE" or r[2] != "SIGNED" or not r[3]
+        if r[1] != "STORE_CREDIT_USE" or r[2] != "CONSUMED" or not r[3]
         or r[4] is None or r[5] is None or int(r[4]) != int(r[5])
+        or r[6] is None or int(r[6]) != int(r[7]) or r[8] is None
     ]
     detail5 = f"違規 sale={bad[:5]}（綁定{len(rows)}筆）"
-    check("S5 SCU 綁定＝已簽同買方且 debit 相符", len(bad) == 0, detail5)
+    check("S5 SCU 綁定＝已簽同買方且折抵/總額相符", len(bad) == 0, detail5)
 
 
 async def s6_ack_content(session: AsyncSession) -> None:
@@ -345,7 +355,7 @@ async def s6_ack_content(session: AsyncSession) -> None:
                s.id AS sale_id, s.total, t.contact_id = s.buyer_contact_id AS same
         FROM signature_tasks t
         JOIN sales s ON s.id = t.ref_id AND t.ref_type = 'sale'
-        WHERE t.kind = 'TRANSACTION_ACK' AND t.status = 'SIGNED'
+        WHERE t.kind = 'TRANSACTION_ACK' AND t.status IN ('SIGNED', 'CONSUMED')
         """
             )
         )
