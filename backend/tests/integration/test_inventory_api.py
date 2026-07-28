@@ -107,11 +107,12 @@ async def _seed_item(
     status: SerializedItemStatus = SerializedItemStatus.IN_STOCK,
     ownership: OwnershipType = OwnershipType.OWNED,
     listed_price: str = "1280",
+    name: str = "雙人帳篷",
 ) -> SerializedItem:
     item = SerializedItem(
         store_id=store_id,
         item_code=item_code,
-        name="雙人帳篷",
+        name=name,
         grade=Grade.A,
         ownership_type=ownership,
         listed_price=Decimal(listed_price),
@@ -1025,3 +1026,37 @@ async def test_update_catalog_and_bulk_price(
         f"/api/v1/bulk-lots/{lot.id}/price", json={"unit_price": "65"}, headers=mgr
     )
     assert rb.status_code == 200 and rb.json()["unit_price"] == "65"
+
+
+# ── 品名建議（收購頁 autocomplete；純提示，不限制輸入）────────────────────────
+async def test_item_name_suggestions_match_prefix_and_dedupe(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收購輸入品名時提示曾用過的名稱：子字串比對、去重、依常用度排序。"""
+    store_id = await _seed_store(db_session)
+    await _seed_item(db_session, store_id, item_code="N-1", name="Snow Peak 焚火台 L")
+    await _seed_item(db_session, store_id, item_code="N-2", name="Snow Peak 焚火台 L")
+    await _seed_item(db_session, store_id, item_code="N-3", name="Snow Peak 鈦杯")
+    await _seed_item(db_session, store_id, item_code="N-4", name="Coleman 氣化燈")
+
+    res = await client.get(
+        "/api/v1/item-name-suggestions", params={"q": "snow"}, headers=_auth(store_id)
+    )
+    assert res.status_code == 200
+    names = res.json()
+    assert names == ["Snow Peak 焚火台 L", "Snow Peak 鈦杯"]  # 用過兩次者排前、且不重複
+
+
+async def test_item_name_suggestions_are_store_scoped(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """§4 店別隔離：不得提示他店用過的品名。"""
+    store_id = await _seed_store(db_session)
+    other = await _seed_store(db_session, "他店")
+    await _seed_item(db_session, other, item_code="O-1", name="他店專用睡袋")
+
+    res = await client.get(
+        "/api/v1/item-name-suggestions", params={"q": "睡袋"}, headers=_auth(store_id)
+    )
+    assert res.status_code == 200
+    assert res.json() == []

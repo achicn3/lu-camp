@@ -3,7 +3,14 @@
 // （品牌/型號/分類 combobox + 雙重約束定價輔助）→ 撥款（現金/購物金/混合）→ 送出。
 // 全中文（labels 單一真實來源）；金額整數元、走 OpenAPI 生成型別 client；標籤列印待後端（不放假按鈕）。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
 import { ACQ_TYPE_LABEL, GRADE_LABEL, PAYOUT_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
@@ -264,6 +271,62 @@ function SellerSection({
   );
 }
 
+// ── 品名輸入（純提示 autocomplete）──
+// 只把本店用過的品名叫回來當建議，**不限制**店員輸入新品名：同型號商品常因成色/配件而
+// 需要不同描述，強制選單反而綁手綁腳。用原生 datalist：行動裝置與鍵盤操作都天然可用。
+function ItemNameField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const listId = useId();
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    const term = value.trim();
+    let active = true;
+    // 一律延後到 timer 內才動 state：effect 內同步 setState 會觸發連鎖 render（lint 規則）。
+    const timer = setTimeout(() => {
+      if (!term) {
+        if (active) setSuggestions([]);
+        return;
+      }
+      void api
+        .GET("/api/v1/item-name-suggestions", { params: { query: { q: term, limit: 10 } } })
+        .then(({ data }) => {
+          if (active) setSuggestions(data ?? []);
+        })
+        .catch(() => {
+          if (active) setSuggestions([]); // 提示失敗不擋收購，靜默降級為純輸入框
+        });
+    }, 200);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [value]);
+
+  return (
+    <label className="field">
+      <span className="field-label">品名</span>
+      <input
+        aria-label="品名"
+        list={listId}
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <datalist id={listId}>
+        {suggestions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+    </label>
+  );
+}
+
 // ── 鑑價列（買斷/寄售）──
 function ItemRowCard({
   type,
@@ -351,14 +414,7 @@ function ItemRowCard({
         </button>
       </div>
       <div className="acq-row-grid">
-        <label className="field">
-          <span className="field-label">品名</span>
-          <input
-            aria-label="品名"
-            value={row.name}
-            onChange={(e) => onChange({ name: e.target.value })}
-          />
-        </label>
+        <ItemNameField value={row.name} onChange={(name) => onChange({ name })} />
         <CreatableCombobox
           label="品牌"
           search={searchBrands}

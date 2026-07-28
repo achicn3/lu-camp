@@ -168,6 +168,21 @@ async def update_bulk_price(
 
 
 @router.get(
+    "/item-name-suggestions",
+    response_model=list[str],
+    operation_id="suggestItemNames",
+)
+async def suggest_item_names(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str, Query(max_length=100)] = "",
+    limit: Annotated[int, Query(ge=1, le=20)] = 10,
+) -> list[str]:
+    """收購頁品名輸入的提示清單（本店用過的品名，常用優先）。"""
+    return await InventoryService(session).suggest_item_names(user.store_id, q, limit)
+
+
+@router.get(
     "/serialized-items",
     response_model=list[SerializedItemRead],
     operation_id="listSerializedItems",

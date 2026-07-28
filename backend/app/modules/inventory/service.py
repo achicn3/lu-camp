@@ -774,6 +774,16 @@ class InventoryService:
         """有庫存一般商品（quantity_on_hand>0；庫存價值報表唯讀用，成本未建模）。"""
         return await self._repo.catalog_for_valuation(store_id)
 
+    async def suggest_item_names(self, store_id: int, q: str, limit: int = 10) -> list[str]:
+        """收購頁品名提示：回本店用過的品名（常用優先）。空查詢字串回空清單。
+
+        定位是**純提示**（店員仍可自由輸入新品名），故不做任何驗證或限制。
+        """
+        term = q.strip()
+        if not term:
+            return []
+        return await self._repo.suggest_item_names(store_id, term, limit)
+
     async def list_serialized_by_acquisitions(
         self,
         store_id: int,

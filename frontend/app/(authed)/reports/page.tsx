@@ -69,6 +69,19 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "reconciliation", label: "對帳" },
 ];
 
+// -- 指標說明（滑鼠移到 ⓘ 顯示；以店長看得懂的白話為準，不用會計術語）--
+// 寄售是三者的差異來源：收銀機收了全額，但抽成以外的錢要付給寄售人、不是店家收入。
+const TIP_GROSS_TURNOVER =
+  "收銀機實際收到的總金額，寄售品也算全額。例：賣出寄售品 1,000 元 → 營業額 +1,000。" +
+  "看生意規模用這個，但它不等於店家賺到的錢。";
+const TIP_RECOGNIZED_REVENUE =
+  "真正屬於店家的收入。自有商品算全額；寄售品只算抽成（其餘要付給寄售人）。" +
+  "例：賣出寄售品 1,000 元、抽成 50% → 認列營收只有 500。看店賺不賺錢，看這個。";
+const TIP_SECONDHAND_REVENUE = "認列營收中扣掉餐飲的部分，也就是二手買賣與寄售抽成的收入。";
+const TIP_FOOD_REVENUE = "認列營收中屬於餐飲（內用）的部分。";
+const TIP_OUTSTANDING =
+  "已發出但客人還沒用掉的購物金總額——這是店家欠客人的金額（負債），日後客人消費時會用掉。";
+
 // -- Shared sub-components --
 
 function MoneyText({ value }: { value: string | null | undefined }) {
@@ -298,19 +311,39 @@ function DashboardPanel() {
 
       <dl className="rpt-summary rpt-dashboard-cards">
         <div className="rpt-stat rpt-stat-hero">
-          <dt>營業額</dt>
+          <dt>
+            營業額
+            <span className="rpt-tip" title={TIP_GROSS_TURNOVER}>
+              ⓘ
+            </span>
+          </dt>
           <dd><MoneyText value={report.gross_turnover} /></dd>
         </div>
         <div className="rpt-stat rpt-stat-hero">
-          <dt>認列營收</dt>
+          <dt>
+            認列營收
+            <span className="rpt-tip" title={TIP_RECOGNIZED_REVENUE}>
+              ⓘ
+            </span>
+          </dt>
           <dd><MoneyText value={report.recognized_revenue} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>二手營收</dt>
+          <dt>
+            二手營收
+            <span className="rpt-tip" title={TIP_SECONDHAND_REVENUE}>
+              ⓘ
+            </span>
+          </dt>
           <dd><MoneyText value={report.secondhand_revenue} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>餐飲營收</dt>
+          <dt>
+            餐飲營收
+            <span className="rpt-tip" title={TIP_FOOD_REVENUE}>
+              ⓘ
+            </span>
+          </dt>
           <dd><MoneyText value={report.food_revenue} /></dd>
         </div>
         <div className="rpt-stat rpt-stat-hero">
@@ -1487,6 +1520,36 @@ const METRIC_KEYS: (keyof typeof EFFECTIVENESS_LABELS)[] = [
   "delta_per_1000",
 ];
 
+/** 指標值可讀化：六項比率轉百分比，delta 是「每千元的元」故取整數元。
+ *
+ * 後端回的是原始 Ratio（例 `0.4629285902900901580595269531`），直接印出來店長無從解讀。
+ */
+function formatMetricValue(key: string, raw: string | null): string {
+  if (raw === null || raw === "") return "N/A";
+  if (key === "delta_per_1000") {
+    const n = Number(raw);
+    return Number.isNaN(n) ? "N/A" : `${Math.round(n).toLocaleString("zh-TW")} 元`;
+  }
+  return formatRate(raw);
+}
+
+// 每個指標的白話說明（顯示於「備註」欄；名稱沿用財務模型用語，說明負責讓店長看得懂）。
+// 結論指標是「每千元損益」，其餘六項都是算出它的原料。
+const METRIC_NOTES: Record<string, string> = {
+  take_rate: "收購時，客人選購物金（而不是拿現金）的比例。越高代表方案越受歡迎。",
+  avg_premium_rate:
+    "選購物金時你多送了幾成。例：收購價 1,000 元、給 1,100 元購物金 → 10%。這是店家的成本。",
+  beta_retention:
+    "發出去的購物金，過了半年還沒被用掉的比例。沒用掉的等於店家實質賺到，越高越有利。",
+  excess_spend_rate: "客人用購物金結帳時，另外再掏現金的比例。越高代表購物金有帶動額外消費。",
+  alpha_incremental:
+    "有多少消費是「因為有購物金才發生的」。無法直接量測（帳本看不出客人本來會不會買），只能推估。",
+  gross_margin_m: "商品本身的毛利率（買斷毛利＋寄售抽成 ÷ 銷售收入）。",
+  delta_per_1000:
+    "結論指標：每發出 1,000 元購物金，店家最後淨賺（正數）或淨賠（負數）多少。" +
+    "由上面六項推算，正數代表這個方案划算。",
+};
+
 function EffectivenessPanel() {
   const defaults = defaultDateRange();
   const [from, setFrom] = useState(defaults.from);
@@ -1567,8 +1630,8 @@ function EffectivenessPanel() {
                         {isEstimate && <span className="rpt-badge-estimate">估計值</span>}
                         {isAlpha && <span className="rpt-badge-proxy">代理法</span>}
                       </td>
-                      <td>{val ?? "N/A"}</td>
-                      <td />
+                      <td className="rpt-metric-value">{formatMetricValue(key, val)}</td>
+                      <td className="rpt-metric-note">{METRIC_NOTES[key] ?? ""}</td>
                     </tr>
                   );
                 })}
@@ -1620,17 +1683,22 @@ function ReconciliationPanel() {
       </p>
       <dl className="rpt-summary">
         <div className="rpt-stat">
-          <dt>帳本總負債</dt>
+          <dt>
+            購物金總負債
+            <span className="rpt-tip" title={TIP_OUTSTANDING}>
+              ⓘ
+            </span>
+          </dt>
           <dd><MoneyText value={report.ledger_total_outstanding} /></dd>
         </div>
+        {/* 「帳本 vs 快取」是內部實作（同一筆餘額存兩份：流水帳與預先算好的總數）；
+            店長只需要知道帳目對不對得起來，故收斂成一句結論，不再暴露「快取」字眼。 */}
         <div className="rpt-stat">
-          <dt>快取總負債</dt>
-          <dd><MoneyText value={report.cached_total_outstanding} /></dd>
-        </div>
-        <div className="rpt-stat">
-          <dt>快取可信</dt>
+          <dt>帳目核對</dt>
           <dd className={report.cached_total_trustworthy ? "rpt-ok" : "rpt-mismatch"}>
-            {report.cached_total_trustworthy ? "是" : "否"}
+            {report.cached_total_trustworthy
+              ? "正常"
+              : `不一致（${report.mismatches.length} 個帳戶，請聯絡工程）`}
           </dd>
         </div>
       </dl>

@@ -2000,6 +2000,55 @@ body {
   background: var(--surface);
   font-size: var(--text-sm);
 }
+/* 已選定：以標籤呈現，與「輸入中」外觀明確區隔（避免手打未選卻看似已填）。 */
+.combo-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap-min);
+  padding: 6px 8px 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(47, 93, 58, 0.08);
+  font-size: var(--text-sm);
+}
+.combo-chip-check {
+  color: var(--accent);
+  font-weight: 800;
+}
+.combo-chip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.combo-chip-clear {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.combo-chip-clear:hover:not(:disabled) {
+  background: rgba(24, 48, 36, 0.1);
+  color: var(--ink);
+}
+/* 有字但尚未選定：邊框轉警示色＋下方提示，明確告知「還沒生效」。 */
+.combo-input--unconfirmed {
+  border-color: var(--warn);
+}
+.combo-unconfirmed-hint {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
 .combo-menu {
   position: absolute;
   top: 100%;

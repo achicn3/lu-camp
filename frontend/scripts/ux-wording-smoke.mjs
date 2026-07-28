@@ -1,0 +1,115 @@
+// UX 用語與提示煙霧（報表說明 tooltip／效益指標備註／對帳收斂／收購品名提示＋選定標籤）。
+// 需：backend:8000、frontend:3000、已 seed dev-manager。截圖輸出 SMOKE_SHOTS。
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+import { chromium } from "playwright";
+
+const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
+const SHOTS = process.env.SMOKE_SHOTS ?? "/home/test/tmp/lu-camp-uxfix/wording";
+const USER = process.env.SMOKE_USERNAME ?? "dev-manager";
+const PASS = process.env.SEED_USER_PASSWORD ?? "dev-test-123456";
+
+mkdirSync(SHOTS, { recursive: true });
+let pass = 0;
+let fail = 0;
+function ok(name, cond, detail = "") {
+  if (cond) {
+    pass += 1;
+    console.log(`✅ ${name}${detail ? ` — ${detail}` : ""}`);
+  } else {
+    fail += 1;
+    console.log(`❌ ${name}${detail ? ` — ${detail}` : ""}`);
+  }
+}
+
+const browser = await chromium.launch();
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+  const jsErrors = [];
+  page.on("pageerror", (e) => jsErrors.push(String(e)));
+
+  await page.goto(`${BASE}/login`, { waitUntil: "domcontentloaded" });
+  await page.fill('input[name="username"]', USER);
+  await page.fill('input[name="password"]', PASS);
+  await page.click('button[type="submit"]');
+  await page.waitForURL((u) => !u.pathname.endsWith("/login"), { timeout: 15000 });
+
+  // ── 1) 今日營運：營收三指標有 ⓘ 說明，且說明是白話（含實例）──
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await page.waitForSelector("text=營業額", { timeout: 15000 });
+  const tipTitles = await page.$$eval(".rpt-tip", (els) => els.map((e) => e.getAttribute("title")));
+  const turnoverTip = tipTitles.find((t) => t && t.includes("收銀機"));
+  const recognizedTip = tipTitles.find((t) => t && t.includes("真正屬於店家"));
+  ok("營業額有白話說明", Boolean(turnoverTip), (turnoverTip ?? "").slice(0, 24) + "…");
+  ok("認列營收有白話說明（含寄售實例）", Boolean(recognizedTip) && recognizedTip.includes("寄售"));
+  ok("說明用實例而非公式", Boolean(turnoverTip) && turnoverTip.includes("例："));
+  await page.screenshot({ path: join(SHOTS, "01-dashboard-tips.png"), fullPage: true });
+
+  // ── 2) 效益指標：備註欄不再空白，且結論指標講人話 ──
+  await page.click('[role="tab"]:has-text("效益指標")');
+  await page.waitForSelector(".inv-table tbody tr", { timeout: 15000 });
+  const notes = await page.$$eval(".rpt-metric-note", (els) =>
+    els.map((e) => (e.textContent ?? "").trim()),
+  );
+  ok("七項指標備註全數填寫", notes.length === 7 && notes.every((n) => n.length > 8), `共 ${notes.length} 筆`);
+  const deltaNote = notes.find((n) => n.includes("每發出"));
+  ok("結論指標說明白話（淨賺/淨賠）", Boolean(deltaNote) && deltaNote.includes("淨賺"));
+  ok("說明不出現希臘字母術語", !notes.some((n) => /α|β|Δ/.test(n)));
+  await page.screenshot({ path: join(SHOTS, "02-effectiveness-notes.png"), fullPage: true });
+
+  // ── 3) 對帳：不再出現「快取」，改為一句結論 ──
+  // 精確比對：「對帳」子字串也會命中「現金對帳」分頁。
+  await page.getByRole("tab", { name: "對帳", exact: true }).click();
+  await page.waitForSelector("text=帳目核對", { timeout: 15000 });
+  const reconBody = await page.innerText("body");
+  ok("對帳頁不再出現「快取」字眼", !reconBody.includes("快取"));
+  ok("改為白話結論「帳目核對」", reconBody.includes("帳目核對"));
+  await page.screenshot({ path: join(SHOTS, "03-reconciliation.png"), fullPage: true });
+
+  // ── 4) 收購：品名提示（datalist）＋ 品牌選定後標籤化 ──
+  await page.goto(`${BASE}/acquisition`, { waitUntil: "networkidle" });
+  await page.waitForSelector('input[aria-label="品名"]', { timeout: 15000 });
+  const nameInput = page.locator('input[aria-label="品名"]').first();
+  ok("品名欄位掛上建議清單", (await nameInput.getAttribute("list")) !== null);
+  await nameInput.fill("帳");
+  await page.waitForTimeout(900); // debounce 200ms + 往返
+  const optionCount = await page.evaluate(() => {
+    const input = document.querySelector('input[aria-label="品名"]');
+    const list = input?.getAttribute("list");
+    return list ? (document.getElementById(list)?.querySelectorAll("option").length ?? 0) : 0;
+  });
+  ok("輸入後取得歷史品名建議", optionCount > 0, `${optionCount} 筆`);
+  ok("品名仍可自由輸入（純提示）", !(await nameInput.getAttribute("readonly")));
+  await page.screenshot({ path: join(SHOTS, "04-item-name-suggest.png"), fullPage: true });
+
+  // 品牌：輸入但未選 → 應提示「尚未選定」；點選後 → 變成標籤
+  const brandInput = page.locator(".combo-input").first();
+  await brandInput.fill("Snow");
+  await page.waitForTimeout(700);
+  const menuOption = page.locator(".combo-option").first();
+  const hasExisting = await menuOption.count();
+  if (hasExisting > 0) {
+    await menuOption.click();
+  } else {
+    await page.locator(".combo-create").first().click();
+  }
+  await page.waitForSelector('[data-testid="combo-selected"]', { timeout: 10000 });
+  ok("品牌選定後以標籤呈現（可一眼分辨已確認）", true);
+  const chipText = await page.locator('[data-testid="combo-selected"]').first().innerText();
+  ok("標籤顯示已選名稱與勾號", chipText.includes("✓"), chipText.replace(/\s+/g, " ").slice(0, 30));
+  await page.screenshot({ path: join(SHOTS, "05-brand-chip.png"), fullPage: true });
+
+  // 清除標籤 → 回到可輸入狀態
+  await page.locator(".combo-chip-clear").first().click();
+  await page.waitForSelector(".combo-input", { timeout: 10000 });
+  ok("按 ✕ 可清除已選並重新輸入", true);
+
+  ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
+
+  console.log(`\n結果：${pass}/${pass + fail} 通過`);
+  console.log(`截圖：${SHOTS}`);
+  if (fail > 0) process.exitCode = 1;
+} finally {
+  await browser.close();
+}

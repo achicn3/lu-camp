@@ -24,6 +24,10 @@ export function CreatableCombobox({
   disabled?: boolean;
 }) {
   const [text, setText] = useState("");
+  // 已選項目單獨記錄：選定後改以「標籤」呈現，與「還在打字」外觀明確區隔。
+  // 舊版只把名稱填回輸入框，導致「手打了字但沒選」與「已選定」畫面完全相同，
+  // 且改字會靜默清掉已選 → 送出才發現品牌是空的。
+  const [selected, setSelected] = useState<ComboOption | null>(null);
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState<ComboOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,9 +79,19 @@ export function CreatableCombobox({
 
   function pick(option: ComboOption) {
     setText(option.name);
+    setSelected(option);
     setOpen(false);
     setError(null);
     onChange(option);
+  }
+
+  /** 清除已選、回到可輸入狀態（標籤上的 ✕）。 */
+  function clearSelection() {
+    setSelected(null);
+    setText("");
+    setError(null);
+    onChange(null);
+    setOpen(true);
   }
 
   async function doCreate() {
@@ -108,21 +122,43 @@ export function CreatableCombobox({
       <label className="field-label" htmlFor={fieldId}>
         {label}
       </label>
-      <input
-        id={fieldId}
-        className="combo-input"
-        value={text}
-        placeholder={placeholder}
-        disabled={disabled}
-        autoComplete="off"
-        onFocus={() => setOpen(true)}
-        onChange={(event) => {
-          setText(event.target.value);
-          setOpen(true);
-          onChange(null); // 編輯即清除已選，需重新挑/建
-        }}
-        onKeyDown={onKeyDown}
-      />
+      {selected !== null ? (
+        <div className="combo-chip" data-testid="combo-selected">
+          <span className="combo-chip-check" aria-hidden>
+            ✓
+          </span>
+          <span className="combo-chip-name">{selected.name}</span>
+          <button
+            type="button"
+            className="combo-chip-clear"
+            aria-label={`清除已選的${label}`}
+            disabled={disabled}
+            onClick={clearSelection}
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <input
+          id={fieldId}
+          className={`combo-input${text.trim() ? " combo-input--unconfirmed" : ""}`}
+          value={text}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoComplete="off"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setText(event.target.value);
+            setOpen(true);
+            onChange(null); // 編輯即清除已選，需重新挑/建
+          }}
+          onKeyDown={onKeyDown}
+        />
+      )}
+      {/* 有字卻未選定＝尚未生效，明確提示，避免店員誤以為已填好（送出才發現是空的）。 */}
+      {selected === null && text.trim() !== "" && !open && (
+        <p className="combo-unconfirmed-hint">尚未選定：請從清單點選，或按「建立」新增</p>
+      )}
       {open && !disabled && (
         <div className="combo-menu" role="listbox">
           {loading && <div className="combo-hint">查詢中…</div>}

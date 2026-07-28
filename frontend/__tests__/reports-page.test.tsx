@@ -524,7 +524,9 @@ describe("ReportsPage", () => {
     });
   });
 
-  it("reconciliation tab shows ledger vs cached totals", async () => {
+  it("reconciliation tab shows outstanding total and a plain-language verdict", async () => {
+    // 「帳本 vs 快取」是內部實作（同一餘額存流水帳與預算好的總數兩份）；店長只需要一句
+    // 結論，故畫面收斂為「購物金總負債」＋「帳目核對：正常/不一致」，不再出現「快取」。
     loginAs("MANAGER");
     stubReportsFetch();
     renderPage();
@@ -532,10 +534,12 @@ describe("ReportsPage", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "對帳" }));
     await waitFor(() => {
-      // Both ledger and cached are 58,000 - there will be multiple
-      const moneyElements = screen.getAllByText("58,000");
-      expect(moneyElements.length).toBeGreaterThanOrEqual(2); // at least ledger + cached
+      expect(screen.getByText("購物金總負債")).toBeTruthy();
+      expect(screen.getByText("58,000")).toBeTruthy();
+      expect(screen.getByText("帳目核對")).toBeTruthy();
+      expect(screen.getByText("正常")).toBeTruthy();
     });
+    expect(screen.queryByText(/快取/)).toBeNull();
   });
 
   it("reconciliation tab exports CSV with Authorization header", async () => {

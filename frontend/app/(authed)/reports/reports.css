@@ -58,6 +58,20 @@
   margin-top: var(--sp-3);
 }
 
+/* 效益指標的白話備註：說明較長，需覆寫 .inv-table 儲存格的 nowrap 才能換行。 */
+.inv-table td.rpt-metric-note {
+  max-width: 46ch;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: normal;
+}
+/* 指標值：比率一律以百分比呈現（0.4629… 這種原始比率店長無法解讀）。 */
+.rpt-metric-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 .rpt-badge-estimate {
   display: inline-block;
   background: var(--warn);

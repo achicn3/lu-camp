@@ -338,6 +338,24 @@ class InventoryRepository:
         )
         return list((await self._session.scalars(stmt)).all())
 
+    async def suggest_item_names(self, store_id: int, q: str, limit: int) -> list[str]:
+        """本店曾用過的序號品品名（子字串比對、去重、常用者優先）。
+
+        供收購頁品名輸入的「純提示」：只是把打過的名稱叫回來，不限制店員輸入新名稱。
+        以 name 分組計數排序，同次數者以名稱排序讓結果穩定（分頁/快取一致）。
+        """
+        stmt = (
+            select(SerializedItem.name, func.count().label("uses"))
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.name.ilike(f"%{q}%"),
+            )
+            .group_by(SerializedItem.name)
+            .order_by(func.count().desc(), SerializedItem.name)
+            .limit(limit)
+        )
+        return [row[0] for row in (await self._session.execute(stmt)).all()]
+
     async def list_serialized_by_acquisitions(
         self,
         store_id: int,
