@@ -1,4 +1,4 @@
-"""客顯裝置 session、櫃檯註冊與一次性配對業務邏輯。"""
+"""顧客螢幕 session、櫃檯註冊與一次性配對業務邏輯。"""
 
 import hashlib
 import secrets
@@ -48,7 +48,7 @@ COMPLETED_DISPLAY_TTL = timedelta(seconds=10)
 
 
 class CustomerDisplayError(Exception):
-    """客顯領域可預期錯誤。"""
+    """顧客螢幕領域可預期錯誤。"""
 
 
 class InvalidKioskCredentials(CustomerDisplayError):
@@ -310,19 +310,19 @@ class CustomerDisplayService:
 
     async def authenticate_device_session(self, raw_token: str | None) -> DevicePrincipal:
         if not raw_token:
-            raise InvalidDeviceSession("未提供客顯裝置憑證")
+            raise InvalidDeviceSession("未提供顧客螢幕憑證")
         row = await self._repo.get_device_session(_sha256(raw_token))
         if row is None:
-            raise InvalidDeviceSession("客顯裝置憑證無效或已撤銷")
+            raise InvalidDeviceSession("顧客螢幕憑證無效或已撤銷")
         device = await self._repo.get_device(row.store_id, row.kiosk_device_id)
         if device is None or not device.is_active:
-            raise InvalidDeviceSession("客顯裝置已停用")
+            raise InvalidDeviceSession("顧客螢幕已停用")
         user = await UserService(self._session).get_user_in_store(
             row.store_id,
             device.kiosk_user_id,
         )
         if user is None or not user.is_active or user.role is not UserRole.KIOSK:
-            raise InvalidDeviceSession("客顯裝置帳號已停用或角色不符")
+            raise InvalidDeviceSession("顧客螢幕帳號已停用或角色不符")
         return DevicePrincipal(
             session_id=row.id,
             device_id=device.id,
@@ -345,7 +345,7 @@ class CustomerDisplayService:
     ) -> tuple[KioskDevice, PosTerminal | None]:
         device = await self._repo.get_device(principal.store_id, principal.device_id)
         if device is None:
-            raise InvalidDeviceSession("客顯裝置不存在")
+            raise InvalidDeviceSession("顧客螢幕不存在")
         pairing = await self._repo.get_active_pairing_for_device(
             principal.store_id,
             principal.device_id,
@@ -368,13 +368,13 @@ class CustomerDisplayService:
             for_update=True,
         )
         if device is None or not device.is_active:
-            raise InvalidDeviceSession("客顯裝置不存在或已停用")
+            raise InvalidDeviceSession("顧客螢幕不存在或已停用")
         if await self._repo.get_active_pairing_for_device(
             principal.store_id,
             principal.device_id,
             for_update=True,
         ):
-            raise PairingConflict("客顯仍與 POS 櫃檯配對，請先由店員解除配對")
+            raise PairingConflict("顧客螢幕仍與 POS 櫃檯配對，請先由店員解除配對")
         code, expires_at = await self._replace_pairing_code(device, datetime.now(UTC))
         return device, code, expires_at
 
@@ -391,14 +391,14 @@ class CustomerDisplayService:
             for_update=True,
         )
         if row is None:
-            raise InvalidDeviceSession("客顯裝置憑證已撤銷")
+            raise InvalidDeviceSession("顧客螢幕憑證已撤銷")
         device = await self._repo.get_device(
             principal.store_id,
             principal.device_id,
             for_update=True,
         )
         if device is None:
-            raise InvalidDeviceSession("客顯裝置不存在")
+            raise InvalidDeviceSession("顧客螢幕不存在")
         if current_session_id is None:
             if displayed_revision != 0:
                 raise CartSessionConflict("待機回報的購物車版本必須為 0")
@@ -427,9 +427,9 @@ class CustomerDisplayService:
                     and not completed_visible
                 )
             ):
-                raise CartSessionConflict("客顯回報的購物車已結束或不屬於此裝置")
+                raise CartSessionConflict("顧客螢幕回報的購物車已結束或不屬於此裝置")
             if displayed_revision > cart.revision:
-                raise CartSessionConflict("客顯回報的版本不存在，請重新載入最新購物車")
+                raise CartSessionConflict("顧客螢幕回報的版本不存在，請重新載入最新購物車")
         row.last_seen_at = now
         device.last_seen_at = now
         device.displayed_cart_session_id = current_session_id
@@ -494,19 +494,19 @@ class CustomerDisplayService:
             raise PairingConflict("配對碼無效、已使用或已逾時")
         device = await self._repo.get_device(store_id, code.kiosk_device_id, for_update=True)
         if device is None or not device.is_active:
-            raise PairingConflict("配對碼所屬客顯裝置已停用")
+            raise PairingConflict("配對碼所屬顧客螢幕已停用")
         if await self._repo.get_active_pairing_for_terminal(
             store_id,
             terminal.id,
             for_update=True,
         ):
-            raise PairingConflict("此 POS 櫃檯已配對客顯，請先解除配對")
+            raise PairingConflict("此 POS 櫃檯已配對顧客螢幕，請先解除配對")
         if await self._repo.get_active_pairing_for_device(
             store_id,
             device.id,
             for_update=True,
         ):
-            raise PairingConflict("此客顯已配對其他櫃檯，請先解除配對")
+            raise PairingConflict("此顧客螢幕已配對其他櫃檯，請先解除配對")
         pairing = TerminalKioskPairing(
             store_id=store_id,
             pos_terminal_id=terminal.id,
@@ -559,7 +559,7 @@ class CustomerDisplayService:
             for_update=True,
         )
         if pairing is None:
-            raise PairingConflict("此 POS 櫃檯目前沒有配對客顯")
+            raise PairingConflict("此 POS 櫃檯目前沒有配對顧客螢幕")
         before_device_id = pairing.kiosk_device_id
         pairing.unpaired_at = datetime.now(UTC)
         await self._session.flush()
@@ -670,7 +670,7 @@ class CustomerDisplayService:
             for_update=True,
         )
         if pairing is None:
-            raise PairingConflict("POS 櫃檯尚未配對客顯")
+            raise PairingConflict("POS 櫃檯尚未配對顧客螢幕")
         snapshot = await self._cart_snapshot(store_id, data)
         fingerprint = _snapshot_fingerprint(snapshot)
         current = await self._repo.get_active_cart_for_terminal(
@@ -771,14 +771,14 @@ class CustomerDisplayService:
             for_update=True,
         )
         if pairing is None:
-            raise PairingConflict("POS 櫃檯尚未配對客顯")
+            raise PairingConflict("POS 櫃檯尚未配對顧客螢幕")
         device = await self._repo.get_device(
             store_id,
             pairing.kiosk_device_id,
             for_update=True,
         )
         if device is None or not self.kiosk_is_online(device):
-            raise PairingConflict("客顯目前離線；購物金付款不可略過簽署")
+            raise PairingConflict("顧客螢幕目前離線；購物金付款不可略過簽署")
         cart = await self._repo.get_active_cart_for_terminal(
             store_id,
             terminal_id,
@@ -942,7 +942,7 @@ class CustomerDisplayService:
         signature_task_id: int | None,
         actor_user_id: int,
     ) -> CartSession:
-        """先提交 PROCESSING，讓客顯在外部付款期間真正看得到處理中狀態。"""
+        """先提交 PROCESSING，讓顧客螢幕在外部付款期間真正看得到處理中狀態。"""
         terminal = await self._repo.get_terminal(store_id, terminal_id, for_update=True)
         if terminal is None or not terminal.is_active:
             raise TerminalNotFound("POS 櫃檯不存在")

@@ -227,7 +227,7 @@ describe("/kiosk 客顯", () => {
     expect(screen.getByText("優惠價 $120")).toBeTruthy();
     expect(screen.getByText("折扣 $40")).toBeTruthy();
     expect(screen.queryByText(/本行折抵/)).toBeNull();
-    expect(screen.getByText("本次共折抵 $40")).toBeTruthy();
+    expect(screen.getByText("本次共折扣 $40")).toBeTruthy();
     expect(screen.queryByText("會員")).toBeNull();
     const total = screen.getByTestId("kiosk-total-bar");
     expect(total.classList.contains("kiosk-cart-total")).toBe(true);
@@ -750,6 +750,70 @@ describe("/kiosk 客顯", () => {
 
     expect(await screen.findByText("交易已完成")).toBeTruthy();
     expect(screen.getByText(/謝謝光臨，10 秒後自動清除。/)).toBeTruthy();
+  });
+
+  it("升級後殘留的舊交回鎖不得讓下一張任務要求店員帳密", async () => {
+    // 舊版會留下 kiosk-handoff=1 與當時的 kiosk-engaged；交回鎖移除後若不一併清掉，
+    // 升級後第一張任務會被當成「任務已更新」而擋在帳密閘門——正是本次要消除的重複登入。
+    window.localStorage.setItem(
+      "lu-camp.kiosk.csrf",
+      "csrf-token-at-least-thirty-two-characters",
+    );
+    window.localStorage.setItem("lu-camp.kiosk-handoff", "1");
+    window.localStorage.setItem("lu-camp.kiosk-engaged", "41"); // 已結束的舊任務
+    const upgradedTask = {
+      id: 99,
+      store_id: 1,
+      kind: "STORE_CREDIT_USE",
+      status: "PENDING",
+      contact_id: 7,
+      content: {
+        total: "500",
+        store_credit_amount: "200",
+        store_credit_balance_before: "800",
+        store_credit_balance_after: "600",
+        remaining_tenders: [{ tender_type: "CASH", amount: "300" }],
+        items: [{ name: "營燈", qty: 1, unit_price: "500", line_total: "500" }],
+        member: { display_name: "王○○" },
+        discount_total: "0",
+        campaign_name: null,
+      },
+      agreement_title: null,
+      agreement_body: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+        if (request.url.includes("/api/v1/kiosk/tasks/current")) {
+          return json(upgradedTask); // 升級後推來的新任務
+        }
+        if (request.url.includes("/acknowledge")) {
+          return json({ ...upgradedTask, status: "SIGNING" });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        return json({});
+      }),
+    );
+
+    renderPage();
+
+    // 新任務直接顯示，不出現任何帳密欄位
+    expect(await screen.findByText(/收購確認與切結|購物金使用確認/)).toBeTruthy();
+    expect(screen.queryByLabelText("店員帳號")).toBeNull();
+    expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
   });
 
   it("成交完成畫面到期後清除舊簽署鎖並回待機", async () => {

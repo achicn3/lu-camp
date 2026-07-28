@@ -93,8 +93,17 @@ function setSigningLock(on: boolean): void {
 // 使空窗或閘門期間的下一張任務被當首張直接顯示、繞過店員確認。改存 localStorage，
 // 僅由店員解鎖路徑更新/清除。
 const ENGAGED_KEY = "lu-camp.kiosk-engaged";
+// 舊版「交回鎖」的 key。交回鎖已移除（簽畢自動回待機），但既有平板的 localStorage 仍可能
+// 留著它與當時的釘選；若不一併清除，升級後第一張任務會被當成「任務已更新」而要求店員帳密
+// ——正是這次要消除的重複登入（Codex P1）。清除是安全的：留有交回鎖代表上一位已簽畢離場。
+const LEGACY_HANDOFF_KEY = "lu-camp.kiosk-handoff";
 function readEngagedTask(): number | null {
   if (typeof window === "undefined") return null;
+  if (window.localStorage.getItem(LEGACY_HANDOFF_KEY) !== null) {
+    window.localStorage.removeItem(LEGACY_HANDOFF_KEY);
+    window.localStorage.removeItem(ENGAGED_KEY);
+    return null;
+  }
   const v = window.localStorage.getItem(ENGAGED_KEY);
   if (v === null) return null;
   const n = Number(v);
@@ -866,7 +875,7 @@ function CartScreen({
         </div>
         {snapshot.discount_total !== "0" && (
           <p className="kiosk-cart-discount">
-            本次共折抵 ${formatNtd(parseNtd(snapshot.discount_total) ?? 0)}
+            本次共折扣 ${formatNtd(parseNtd(snapshot.discount_total) ?? 0)}
           </p>
         )}
         <div className="kiosk-cart-grand-total">

@@ -178,7 +178,7 @@ class SigningService:
         )
         if existing is not None:
             raise SignatureTaskConflict(
-                f"此客顯已有進行中的簽署任務 #{existing.id}；請先撤回再重新送出"
+                f"此顧客螢幕已有進行中的簽署任務 #{existing.id}；請先撤回再重新送出"
             )
         if data.kind is SignatureTaskKind.TRANSACTION_ACK:
             await self._ensure_ack_belongs_to_device(store_id, data.ref_id, kiosk_device_id)
@@ -190,7 +190,7 @@ class SigningService:
             for_update=True,
         )
         if device is None or not CustomerDisplayService.kiosk_is_online(device):
-            raise SignatureTaskConflict("顧客顯示裝置目前離線，無法建立簽署任務")
+            raise SignatureTaskConflict("顧客螢幕目前離線，無法建立簽署任務")
 
         # 身分指紋於建立（＝內容凍結）時擷取入內部欄；收購綁定時比對此值與當前會員檔。
         identity_fingerprint: str | None = None
@@ -244,11 +244,11 @@ class SigningService:
                 for_update=True,
             )
             if pairing is None:
-                raise SignatureTaskConflict("POS 櫃檯尚未配對客顯")
+                raise SignatureTaskConflict("POS 櫃檯尚未配對顧客螢幕")
             return pairing.kiosk_device_id
         pairings = await self._display_repo.list_active_pairings_for_store(store_id)
         if len(pairings) != 1:
-            raise SignatureTaskConflict("請指定 POS 櫃檯；目前無法唯一判定簽署客顯")
+            raise SignatureTaskConflict("請指定 POS 櫃檯；目前無法唯一判定簽署顧客螢幕")
         return pairings[0].kiosk_device_id
 
     async def create_store_credit_task_for_cart(
@@ -269,7 +269,7 @@ class SigningService:
             for_update=True,
         )
         if existing is not None:
-            raise SignatureTaskConflict(f"此客顯已有進行中的簽署任務 #{existing.id}；請先撤回")
+            raise SignatureTaskConflict(f"此顧客螢幕已有進行中的簽署任務 #{existing.id}；請先撤回")
         canonical = canonical_json_bytes(content)
         fingerprint = hashlib.sha256(canonical).hexdigest()
         task = SignatureTask(
@@ -308,7 +308,7 @@ class SigningService:
             raise SignatureContentMismatch("交易簽收缺少 sale ref_id")
         cart = await self._display_repo.get_cart_by_sale(store_id, sale_id)
         if cart is None or cart.kiosk_device_id != kiosk_device_id:
-            raise SignatureContentMismatch("該銷售不屬於此櫃檯配對的客顯")
+            raise SignatureContentMismatch("該銷售不屬於此櫃檯配對的顧客螢幕")
 
     async def _enrich_affidavit_content(
         self,
@@ -583,14 +583,14 @@ class SigningService:
         device_id: int,
         task_id: int,
     ) -> SignatureTask:
-        """客顯明確 ACK 已取得並渲染，PENDING→SIGNING；SSE 到達不能代替此步。"""
+        """顧客螢幕明確 ACK 已取得並渲染，PENDING→SIGNING；SSE 到達不能代替此步。"""
         task = await self._lock_device_task_after_cart(
             store_id,
             device_id,
             task_id,
         )
         if task is None:
-            raise SignatureTaskNotFound("簽署任務不存在或不屬於此客顯")
+            raise SignatureTaskNotFound("簽署任務不存在或不屬於此顧客螢幕")
         if task.status is SignatureTaskStatus.SIGNING:
             return task
         if task.status is not SignatureTaskStatus.PENDING:
@@ -604,7 +604,7 @@ class SigningService:
                 actor_kiosk_device_id=device_id,
                 observed_at=now,
             )
-            raise SignatureTaskInvalidated("簽署任務等待客顯確認逾時，請由店員重新送出")
+            raise SignatureTaskInvalidated("簽署任務等待顧客螢幕確認逾時，請由店員重新送出")
         task.status = SignatureTaskStatus.SIGNING
         task.last_user_activity_at = now
         task.expires_at = now + _SIGNING_IDLE_TTL
@@ -633,7 +633,7 @@ class SigningService:
             task_id,
         )
         if task is None:
-            raise SignatureTaskNotFound("簽署任務不存在或不屬於此客顯")
+            raise SignatureTaskNotFound("簽署任務不存在或不屬於此顧客螢幕")
         if task.status is not SignatureTaskStatus.SIGNING:
             raise SignatureTaskNotPending("只有正在簽署的任務可回報顧客操作")
         now = datetime.now(UTC)
@@ -693,7 +693,7 @@ class SigningService:
             task_id,
         )
         if task is None:
-            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬於此客顯")
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬於此顧客螢幕")
         if task.status in (SignatureTaskStatus.SIGNED, SignatureTaskStatus.CONSUMED):
             # 冪等回放：同鍵＋同內容已簽成 → 回原任務（視為成功）；同鍵但內容不同/無鍵 → 409。
             if fingerprint is not None and task.sign_idempotency_key == fingerprint:

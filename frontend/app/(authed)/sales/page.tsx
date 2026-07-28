@@ -536,10 +536,10 @@ export default function SalesPage() {
       });
       const terminal = terminalResponse.data;
       if (!terminal?.paired_kiosk) {
-        throw new Error("請先將此 POS 櫃檯與顧客顯示裝置配對");
+        throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
       }
       if (!terminal.paired_kiosk.online) {
-        throw new Error("顧客顯示裝置目前離線，無法推送交易簽收");
+        throw new Error("顧客螢幕目前離線，無法推送交易簽收");
       }
       // content 由後端以銷售單為準重建（單號/總額/時間），客端不提供（Codex K5 第三輪：
       // 簽收證據不可由客端敘述）。

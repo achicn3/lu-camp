@@ -464,6 +464,12 @@ try {
     });
   }
   const now = Date.now();
+  // 一店僅能有一個 ACTIVE 活動：既存活動會讓建立/啟用回 409，且其折扣會污染本段的
+  // 金額斷言。先結束既存活動再建自己的，結束時再收掉（避免留給後續煙霧當殘留）。
+  const activeBefore = await apiJson(mgrToken, "GET", "/api/v1/campaigns?status=ACTIVE");
+  for (const existing of activeBefore.json ?? []) {
+    await apiJson(mgrToken, "POST", `/api/v1/campaigns/${existing.id}/end`);
+  }
   const campaign = await apiJson(mgrToken, "POST", "/api/v1/campaigns", {
     name: `顧客螢幕折扣用語煙測 ${now}`,
     discount_pct: 10,
@@ -524,6 +530,8 @@ try {
     { expected_revision: cartPushed.json.revision, reason: "煙霧測試結束清場" },
   );
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  // 收掉自建活動：不留 ACTIVE 殘留影響後續煙霧的價格斷言。
+  await apiJson(mgrToken, "POST", `/api/v1/campaigns/${campaign.json.id}/end`);
 
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
