@@ -73,10 +73,15 @@ async function drawSignature(page) {
   await page.mouse.up();
 }
 
+// 折扣情境的活動狀態：沿用既有 ACTIVE 者則不改動它；自建者記下 id 於 finally 收掉。
+let createdCampaignId = null;
+let discountPct = 10;
+let cleanupToken = null;  // finally 收尾用（mgrToken 宣告於 try 內，作用域看不到）
 const browser = await chromium.launch();
 try {
   // ── 前置：KIOSK 登入、建立櫃檯並配對（真 cookie/device session）─────────
   const mgrToken = await apiLogin(MGR_USER, MGR_PASS);
+  cleanupToken = mgrToken;
   const page = await browser.newPage({ viewport: { width: 834, height: 1112 } }); // 直式平板
   await page.goto(`${BASE}/kiosk`, { waitUntil: "networkidle" });
   await page.fill('input[name="username"]', KIOSK_USER);
@@ -464,15 +469,16 @@ try {
     });
   }
   const now = Date.now();
-  // 一店僅能有一個 ACTIVE 活動：既存活動會讓建立/啟用回 409，且其折扣會污染本段的
-  // 金額斷言。先結束既存活動再建自己的，結束時再收掉（避免留給後續煙霧當殘留）。
+  // 一店僅能有一個 ACTIVE 活動。**不結束既存活動**——ENDED 是終態、無法復原，會毀掉
+  // 店家或 seed 的設定；改為沿用它的折扣率來斷言。無既存活動時才自建，並於 finally 收掉。
   const activeBefore = await apiJson(mgrToken, "GET", "/api/v1/campaigns?status=ACTIVE");
-  for (const existing of activeBefore.json ?? []) {
-    await apiJson(mgrToken, "POST", `/api/v1/campaigns/${existing.id}/end`);
-  }
-  const campaign = await apiJson(mgrToken, "POST", "/api/v1/campaigns", {
+  const reusable = (activeBefore.json ?? []).find((c) => c.applies_owned_serialized);
+  if (reusable) discountPct = reusable.discount_pct;
+  const campaign = reusable
+    ? { json: reusable, status: 200, reused: true }
+    : await apiJson(mgrToken, "POST", "/api/v1/campaigns", {
     name: `顧客螢幕折扣用語煙測 ${now}`,
-    discount_pct: 10,
+    discount_pct: discountPct,
     starts_at: new Date(now - 86_400_000).toISOString(),
     ends_at: new Date(now + 86_400_000).toISOString(),
     applies_owned_serialized: true,
@@ -481,7 +487,10 @@ try {
     applies_consignment: false,
     consignment_discount_bearing: "STORE_ABSORBS",
   });
-  await apiJson(mgrToken, "POST", `/api/v1/campaigns/${campaign.json.id}/activate`);
+  if (!campaign.reused) {
+    await apiJson(mgrToken, "POST", `/api/v1/campaigns/${campaign.json.id}/activate`);
+    createdCampaignId = campaign.json.id;
+  }
   const acquired = await apiJson(
     mgrToken,
     "POST",
@@ -514,11 +523,15 @@ try {
   ok("推送折扣購物車到顧客螢幕", cartPushed.status === 200, `status=${cartPushed.status}`);
   await page.waitForSelector(".kiosk-cart-item", { timeout: 8000 });
   const cartText = (await page.textContent(".kiosk-cart-items")) ?? "";
+  // 折扣金額依實際生效的活動折扣率計算（沿用既有活動時未必是 10%）。
+  const discountAmount = Math.round((1000 * discountPct) / 100);
+  const salePrice = 1000 - discountAmount;
+  const money = (n) => n.toLocaleString("en-US");
   ok(
     "顧客螢幕逐行顯示「折扣」而非「本行折抵」",
-    cartText.includes("折扣 $100") &&
+    cartText.includes(`折扣 $${money(discountAmount)}`) &&
       cartText.includes("原價 $1,000") &&
-      cartText.includes("優惠價 $900") &&
+      cartText.includes(`優惠價 $${money(salePrice)}`) &&
       !cartText.includes("本行折抵"),
     cartText.replace(/\s+/g, " ").slice(0, 120),
   );
@@ -530,12 +543,16 @@ try {
     { expected_revision: cartPushed.json.revision, reason: "煙霧測試結束清場" },
   );
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
-  // 收掉自建活動：不留 ACTIVE 殘留影響後續煙霧的價格斷言。
-  await apiJson(mgrToken, "POST", `/api/v1/campaigns/${campaign.json.id}/end`);
 
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
 } finally {
+  // 自建活動一律收掉（即使中途拋錯），否則殘留的 ACTIVE 會污染後續煙霧的價格斷言。
+  if (createdCampaignId !== null) {
+    await apiJson(cleanupToken, "POST", `/api/v1/campaigns/${createdCampaignId}/end`).catch(
+      () => {},
+    );
+  }
   await browser.close();
 }
 
