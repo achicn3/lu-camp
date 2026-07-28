@@ -1,5 +1,5 @@
 "use client";
-// 客顯／手持簽署共用頁：裝置 cookie 登入與配對，SSE 通知後全量重讀權威購物車；
+// 顧客螢幕／手持簽署共用頁：裝置 cookie 登入與配對，SSE 通知後全量重讀權威購物車；
 // 使用購物金或收購任務時，沿用下方不可變內容快照與簽名流程。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -73,18 +73,8 @@ function installationId(): string {
   return uuid;
 }
 
-// 交回鎖持久化（Codex K3 第六輪 high）：簽署完成的隱私鎖不可只存記憶體——瀏覽器重整/
-// 重掛會以 completed=false 重啟輪詢、把下一位任務顯示給前一位客人。改存 localStorage，
-// 僅由店員解鎖清除。單店單裝置故用單一鍵。
-const HANDOFF_KEY = "lu-camp.kiosk-handoff";
-function readHandoffLock(): boolean {
-  return typeof window !== "undefined" && window.localStorage.getItem(HANDOFF_KEY) === "1";
-}
-function setHandoffLock(on: boolean): void {
-  if (typeof window === "undefined") return;
-  if (on) window.localStorage.setItem(HANDOFF_KEY, "1");
-  else window.localStorage.removeItem(HANDOFF_KEY);
-}
+// 完成畫面自動清場秒數：簽署完成與成交完成共用同一套倒數 UX。
+const AUTO_STANDBY_MS = 10_000;
 
 // 曖昧簽署鎖（Codex K3 第七輪 high）：POST **送出前**即持久化——若後端已寫入但回應遺失、
 // 客人又在重送前重整，重掛後據此進入店員解鎖的恢復畫面、絕不恢復輪詢顯示下一位任務。
@@ -118,7 +108,7 @@ function writeEngagedTask(id: number | null): void {
 
 export default function KioskPage() {
   // SSR 與 hydration 都先使用 null；commit 後再由 React 讀取 localStorage，
-  // 避免重新整理時伺服器登入畫面與瀏覽器客顯畫面不一致。
+  // 避免重新整理時伺服器登入畫面與瀏覽器顧客螢幕畫面不一致。
   const csrf = useSyncExternalStore(subscribeCsrf, readCsrf, () => null);
   const device = useQuery({
     queryKey: ["kiosk", "device"],
@@ -132,7 +122,7 @@ export default function KioskPage() {
     queryFn: async () => {
       const { data, response } = await kioskApi.GET("/api/v1/kiosk/device");
       if (response.status === 401) throw new Error("AUTH_REQUIRED");
-      if (!data) throw new Error("無法讀取客顯裝置狀態");
+      if (!data) throw new Error("無法讀取顧客螢幕裝置狀態");
       return data;
     },
   });
@@ -213,7 +203,7 @@ function KioskLogin({
   return (
     <main className="kiosk-login">
       <form className="kiosk-login-card" onSubmit={onSubmit}>
-        <h1 className="kiosk-login-title">顧客顯示裝置設定</h1>
+        <h1 className="kiosk-login-title">顧客螢幕設定</h1>
         <p className="kiosk-login-sub">以本店 KIOSK 帳號啟用；登入後再與 POS 櫃檯配對。</p>
         <label className="field">
           <span className="field-label">帳號</span>
@@ -392,22 +382,25 @@ function KioskConsole({
       wakeLock.current = null;
     };
   }, [queryClient]);
-  // 簽署完成後暫停輪詢並停在「交回店員」畫面（Codex K3 high）：否則店員在客人尚未
-  // 交回裝置前建立下一張任務，輪詢會讓上一位客人看到下一位客人的內容/個資。
-  // 初值讀持久化交回鎖：重整/重掛後若上一位尚未由店員解鎖，仍停在交回畫面。
-  const [completed, setCompleted] = useState(readHandoffLock);
+  // 簽署完成的感謝畫面（店主裁示：移除店員帳密交回鎖）：上一位客人整筆結束離場後才會叫
+  // 下一位，故不需帳密交接；此畫面本身不含任何個資。倒數期間暫停輪詢，避免感謝畫面被
+  // 下一張任務直接取代，到期後自動清場回待機（比照成交完成畫面）。
+  const [signedAt, setSignedAt] = useState<number | null>(null);
+  const completed = signedAt !== null;
+  const [signedSeconds, setSignedSeconds] = useState(AUTO_STANDBY_MS / 1_000);
   // 曖昧簽署恢復（Codex K3 第七輪 high）：重掛時若持久化簽署鎖仍在（thrown 後未收斂又重整），
   // 進入店員解鎖恢復畫面、不輪詢——避免把下一位任務顯示給前一位客人。
-  const [recovering, setRecovering] = useState(() => readSigningLock() && !readHandoffLock());
+  const [recovering, setRecovering] = useState(readSigningLock);
   // 簽名送出進行中亦暫停輪詢（Codex K3 high）：否則 POST 尚未回應期間，輪詢可能因
   // 店員重推而換掉 data、使 key=id 重掛出下一張任務，讓前一位客人看到他人內容。
   // 僅暫停 enabled 不夠——POST 前已在途的 refetch 仍可能回填快取；故簽名期間另以
   // frozenTask 凍結畫面上的任務、並 cancelQueries 中止在途請求（Codex K3 第五輪 high）。
   const [frozenTask, setFrozenTask] = useState<KioskTask | null>(null);
-  // 顯示中的任務一經呈現即「釘住」其 id（Codex K3 第十輪 high）：店員於客人尚未簽/交回前
+  // 顯示中的任務一經呈現即「釘住」其 id（Codex K3 第十輪 high）：店員於客人**尚未簽完**前
   // 取消並改推另一張任務時，不得自動把新任務換到客人面前（可能是下一位客人的內容/個資）——
   // 需店員確認解鎖後才採用。以 React 官方「prop 變更時調整 state」模式於 render 中同步（非
   // effect、非 ref-in-render），待機清除、首張認領、不同任務不採用（交由 render 顯示閘門）。
+  // 任務一旦 SIGNED 即釋放釘選：該客人已簽畢離場，下一張任務直接顯示、不必店員解鎖。
   const [engagedTaskId, setEngagedTaskId] = useState<number | null>(readEngagedTask);
   // 任務被店員撤回後若立刻換成另一位顧客的任務，只保留新任務 id 作為交接閘門；
   // 新任務完整內容立刻自 Query cache 清除，待店員確認後才重新向後端讀取。
@@ -423,20 +416,19 @@ function KioskConsole({
     if (cart.data?.status !== "COMPLETED") return;
     const completedAt = Date.parse(cart.data.updated_at);
     const remaining = Number.isFinite(completedAt)
-      ? Math.max(0, completedAt + 10_000 - Date.now())
-      : 10_000;
+      ? Math.max(0, completedAt + AUTO_STANDBY_MS - Date.now())
+      : AUTO_STANDBY_MS;
     const updateCountdown = () => {
       const milliseconds = Number.isFinite(completedAt)
-        ? Math.max(0, completedAt + 10_000 - Date.now())
-        : 10_000;
+        ? Math.max(0, completedAt + AUTO_STANDBY_MS - Date.now())
+        : AUTO_STANDBY_MS;
       setCompletionSeconds(Math.ceil(milliseconds / 1_000));
     };
     updateCountdown();
     const countdown = window.setInterval(updateCountdown, 1_000);
     const timer = window.setTimeout(() => {
-      // 成交後舊簽署已 CONSUMED；完成畫面到期時一併清掉交回鎖、任務釘選與
-      // 本機快取，否則會從「交易已完成」退回已完成簽署閘門而無法回待機。
-      setHandoffLock(false);
+      // 成交後舊簽署已 CONSUMED；完成畫面到期時一併清掉簽署鎖、任務釘選與
+      // 本機快取，否則會從「交易已完成」退回簽署畫面而無法回待機。
       setSigningLock(false);
       writeEngagedTask(null);
       queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
@@ -445,7 +437,7 @@ function KioskConsole({
       setPendingTaskId(null);
       setEngagedTaskId(null);
       setRecovering(false);
-      setCompleted(false);
+      setSignedAt(null);
       void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
     }, remaining);
     return () => {
@@ -453,6 +445,35 @@ function KioskConsole({
       window.clearTimeout(timer);
     };
   }, [cart.data?.status, cart.data?.updated_at, queryClient]);
+
+  // 簽署完成 → 感謝畫面倒數 → 自動清場回待機並恢復輪詢（不需店員操作）。
+  useEffect(() => {
+    if (signedAt === null) return;
+    const updateCountdown = () => {
+      setSignedSeconds(
+        Math.ceil(Math.max(0, signedAt + AUTO_STANDBY_MS - Date.now()) / 1_000),
+      );
+    };
+    updateCountdown();
+    const countdown = window.setInterval(updateCountdown, 1_000);
+    const timer = window.setTimeout(
+      () => {
+        // 與原「店員解鎖」相同的清場：清任務釘選、待確認任務與本機快取後再恢復輪詢，
+        // 避免恢復瞬間閃現上一位客人的舊任務。
+        setEngagedTaskId(null);
+        setPendingTaskId(null);
+        setSyncedData(undefined);
+        setAckError(null);
+        queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
+        setSignedAt(null);
+      },
+      Math.max(0, signedAt + AUTO_STANDBY_MS - Date.now()),
+    );
+    return () => {
+      window.clearInterval(countdown);
+      window.clearTimeout(timer);
+    };
+  }, [queryClient, signedAt]);
 
   const { data } = useQuery({
     queryKey: ["kiosk", "current"],
@@ -483,14 +504,16 @@ function KioskConsole({
   }, [csrf, data?.id, data?.status, paused, queryClient]);
 
   // 於 render 中同步釘選（React 官方模式；React Query 結構共享使 data 參考在內容不變時穩定）。
-  // **釘選只由店員解鎖清除、絕不因輪詢回 null 而清**（Codex K3 第十一輪 high）：否則
-  // 「顯示 A → 店員取消 A（current=null）→ 建立 B」的空窗會讓 B 被當成首張任務直接顯示、
-  // 繞過閘門。認領一次後即長駐，之後任何不同任務都會撞閘門。
+  // **釘選不因輪詢回 null 而清**（Codex K3 第十一輪 high）：否則「顯示 A → 店員取消 A
+  // （current=null）→ 建立 B」的空窗會讓 B 被當成首張任務直接顯示、繞過閘門。
+  // 只有兩條路徑會釋放釘選：店員確認解鎖，或該任務已 SIGNED（客人已簽畢、交易結束）。
   if (!paused && data !== syncedData) {
     const id = data?.id ?? null;
+    const alreadySigned = data?.status === "SIGNED";
     if (id !== null && engagedTaskId === null) {
       setSyncedData(data);
-      setEngagedTaskId(id); // 認領首張任務（僅在尚未認領時）
+      // 已簽畢的任務不再釘選：下一張任務可直接顯示，不需店員帳密交接。
+      if (!alreadySigned) setEngagedTaskId(id);
     } else if (
       id !== null &&
       engagedTaskId !== null &&
@@ -502,6 +525,8 @@ function KioskConsole({
       setPendingTaskId(id);
     } else {
       setSyncedData(data);
+      // 釘選中的任務已完成簽署 → 釋放釘選（客人已簽畢離場）。
+      if (id !== null && id === engagedTaskId && alreadySigned) setEngagedTaskId(null);
     }
     // id===null（暫無待簽）或不同任務：不動 engagedTaskId → render 顯示待機或店員確認閘門
   }
@@ -526,7 +551,7 @@ function KioskConsole({
     }
   }
 
-  // 付款階段是購物車的權威狀態，必須蓋過簽署交回鎖與仍為 SIGNED 的任務：
+  // 付款階段是購物車的權威狀態，必須蓋過簽署完成畫面與仍為 SIGNED 的任務：
   // - PROCESSING 讓顧客知道店員正在收款；
   // - PAYMENT_UNCERTAIN 明確警告不得重複付款；
   // - COMPLETED 立即顯示成交結果。
@@ -544,7 +569,6 @@ function KioskConsole({
   if (recovering) {
     return (
       <StaffGate
-        variant="recover"
         title="上一筆簽署尚未確認"
         message="請店員確認此筆是否已簽署後解鎖，再接續作業。"
         unlockLabel="店員確認並解鎖"
@@ -560,27 +584,11 @@ function KioskConsole({
     );
   }
   if (completed) {
-    return (
-      <StaffGate
-        variant="done"
-        title="已完成簽署"
-        message="感謝您，請將裝置交回給店員。"
-        unlockLabel="店員解鎖，接續下一位"
-        onReset={() => {
-          // 店員解鎖：清持久化交回鎖＋當前任務快取＋釘選再恢復輪詢，避免恢復瞬間閃現舊任務。
-          setHandoffLock(false);
-          setEngagedTaskId(null);
-          setPendingTaskId(null);
-          queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
-          setCompleted(false);
-        }}
-      />
-    );
+    return <SignedThanksScreen remainingSeconds={signedSeconds} />;
   }
   if (pendingTaskId !== null) {
     return (
       <StaffGate
-        variant="recover"
         title="任務已更新"
         message="內容已由店員更新，請店員確認後解鎖再交予客人。"
         unlockLabel="店員確認並解鎖"
@@ -597,7 +605,7 @@ function KioskConsole({
     if (cart.isError) {
       return (
         <Standby
-          message="客顯同步中斷，正在重新連線…"
+          message="顧客螢幕同步中斷，正在重新連線…"
           terminalName={terminalName}
         />
       );
@@ -616,15 +624,9 @@ function KioskConsole({
     );
   }
   if (shown.status === "SIGNED") {
-    return (
-      <StaffGate
-        variant="done"
-        title="簽署已完成"
-        message="請將裝置交回店員，等待完成結帳。"
-        unlockLabel="重新確認狀態"
-        onReset={() => void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] })}
-      />
-    );
+    // 已簽畢但店員尚未完成後續作業（收購送出／結帳）：只顯示等待訊息，輪詢照常，
+    // 任務被消化或換新任務時自動更新畫面。
+    return <SignedThanksScreen remainingSeconds={null} />;
   }
   // key=task.id：任務換人即重新掛載，本地狀態（簽名/勾選/撥款）自然重置，
   // 不需 effect 手動清（避免沿用上一位客人的確認旗標）。
@@ -635,15 +637,17 @@ function KioskConsole({
       csrf={csrf}
       onSigningChange={onSigningChange}
       onComplete={() => {
-        // 簽名是個資：完成後立即從客顯記憶體快取與同步 state 清除，
-        // 交回店員畫面只保留不含內容的 handoff lock。
+        // 簽名是個資：完成後立即從顧客螢幕記憶體快取與同步 state 清除；
+        // 感謝畫面只有不含內容的倒數，到期自動回待機。
         queryClient.removeQueries({ queryKey: ["kiosk", "current"] });
         setSyncedData(undefined);
         setAckError(null);
         setPendingTaskId(null);
-        setHandoffLock(true); // 持久化交回鎖：重整也停在交回畫面，須店員解鎖
+        // 客人已簽畢＝不再「進行中」：釋放釘選（含 localStorage），倒數結束或中途重整
+        // 都能直接接續下一張任務，不必店員輸入帳密。
+        setEngagedTaskId(null);
         setFrozenTask(null);
-        setCompleted(true);
+        setSignedAt(Date.now());
       }}
     />
   );
@@ -668,6 +672,27 @@ function CompletedSaleScreen({
         </p>
         <p className="hint" role="status">
           謝謝光臨，{remainingSeconds} 秒後自動清除。
+        </p>
+      </div>
+    </main>
+  );
+}
+
+// 簽署完成的顧客畫面（店主裁示取代店員交回鎖）：倒數中自動回待機；若店員後續作業尚未
+// 完成（任務仍為 SIGNED）則不倒數，僅告知稍候，畫面不含任何個資。
+function SignedThanksScreen({ remainingSeconds }: { remainingSeconds: number | null }) {
+  return (
+    <main className="kiosk-thanks">
+      <div className="kiosk-thanks-inner">
+        <div className="kiosk-thanks-check" aria-hidden>
+          ✓
+        </div>
+        <h1 className="kiosk-thanks-title">已完成簽署</h1>
+        <p className="kiosk-standby-sub">感謝您</p>
+        <p className="hint" role="status">
+          {remainingSeconds === null
+            ? "請稍候，店員將完成後續作業。"
+            : `${remainingSeconds} 秒後自動回到待機畫面。`}
         </p>
       </div>
     </main>
@@ -799,7 +824,7 @@ function CartScreen({
                     </span>
                     <span>優惠價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
                     <span className="kiosk-cart-line-discount">
-                      本行折抵 ${formatNtd(parseNtd(item.discount_amount) ?? 0)}
+                      折扣 ${formatNtd(parseNtd(item.discount_amount) ?? 0)}
                     </span>
                   </>
                 ) : (
@@ -866,16 +891,15 @@ function tenderLabel(tender: components["schemas"]["TenderType"]): string {
   }
 }
 
-// 店員帳密解鎖畫面（Codex K3 high）：交回鎖／曖昧簽署恢復皆須現場店務員帳密授權，避免
-// 客人自行點按解鎖看到下一位客人內容。驗證不持久化 token（裝置身分仍為 KIOSK）。
+// 店員帳密解鎖畫面（Codex K3 high）：需人工判斷的恢復路徑（曖昧簽署、店員中途換任務）
+// 才走這裡，須現場店務員帳密授權，避免客人自行點按解鎖看到下一位客人內容。
+// 驗證不持久化 token（裝置身分仍為 KIOSK）。
 function StaffGate({
-  variant,
   title,
   message,
   unlockLabel,
   onReset,
 }: {
-  variant: "done" | "recover";
   title: string;
   message: string;
   unlockLabel: string;
@@ -902,11 +926,8 @@ function StaffGate({
   return (
     <main className="kiosk-thanks">
       <div className="kiosk-thanks-inner">
-        <div
-          className={variant === "done" ? "kiosk-thanks-check" : "kiosk-thanks-check kiosk-thanks-check--warn"}
-          aria-hidden
-        >
-          {variant === "done" ? "✓" : "!"}
+        <div className="kiosk-thanks-check kiosk-thanks-check--warn" aria-hidden>
+          !
         </div>
         <h1 className="kiosk-thanks-title">{title}</h1>
         <p className="kiosk-standby-sub">{message}</p>

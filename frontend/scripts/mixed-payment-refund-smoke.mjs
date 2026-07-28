@@ -327,7 +327,7 @@ try {
     window.localStorage.setItem("lu-camp.pos-terminal.installation", value);
   }, installationId);
   await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
-  await page.locator(".pos-kiosk-status", { hasText: "客顯已連線" }).waitFor({
+  await page.locator(".pos-kiosk-status", { hasText: "顧客螢幕已連線" }).waitFor({
     state: "visible",
     timeout: 12_000,
   });

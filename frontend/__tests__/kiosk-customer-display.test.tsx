@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -225,7 +225,8 @@ describe("/kiosk 客顯", () => {
     );
     expect(screen.getByText("原價 $140")).toBeTruthy();
     expect(screen.getByText("優惠價 $120")).toBeTruthy();
-    expect(screen.getByText("本行折抵 $40")).toBeTruthy();
+    expect(screen.getByText("折扣 $40")).toBeTruthy();
+    expect(screen.queryByText(/本行折抵/)).toBeNull();
     expect(screen.getByText("本次共折抵 $40")).toBeTruthy();
     expect(screen.queryByText("會員")).toBeNull();
     const total = screen.getByTestId("kiosk-total-bar");
@@ -327,9 +328,162 @@ describe("/kiosk 客顯", () => {
     await user.click(screen.getByRole("button", { name: "確認並送出" }));
 
     await screen.findByText("已完成簽署");
+    // 店主裁示：簽完即感謝並自動回待機，不再要求店員輸入帳密交接。
+    expect(screen.getByText(/秒後自動回到待機畫面/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /店員解鎖/ })).toBeNull();
+    expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
+    // 簽畢即釋放任務釘選：中途重整或倒數結束都能直接接續下一位，不必店員解鎖。
+    expect(window.localStorage.getItem("lu-camp.kiosk-engaged")).toBeNull();
     expect(client.getQueryData(["kiosk", "current"])).toBeUndefined();
     const signRequest = requests.find((request) => request.url.endsWith("/sign"));
     expect(signRequest?.headers.get("X-CSRF-Token")).toBe(csrf);
+  });
+
+  it("簽署完成倒數結束自動回待機，下一張任務免店員帳密即自動顯示", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const csrf = "csrf-token-at-least-thirty-two-characters";
+      window.localStorage.setItem("lu-camp.kiosk.csrf", csrf);
+      const signing = {
+        id: 51,
+        kind: "STORE_CREDIT_USE",
+        status: "SIGNING",
+        content: {
+          total: "1000",
+          items: [{ name: "露營燈", qty: 1, unit_price: "1000", line_total: "1000" }],
+        },
+        agreement_title: null,
+        agreement_body: null,
+      };
+      const nextCustomerTask = {
+        id: 52,
+        kind: "STORE_CREDIT_USE",
+        status: "SIGNING",
+        content: {
+          total: "2000",
+          items: [{ name: "折疊露營椅", qty: 1, unit_price: "2000", line_total: "2000" }],
+        },
+        agreement_title: null,
+        agreement_body: null,
+      };
+      let currentTask: Record<string, unknown> = signing;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const request = input instanceof Request ? input : new Request(input);
+          if (request.url.endsWith("/api/v1/kiosk/device")) {
+            return json({
+              device_id: 8,
+              label: "收銀台顧客螢幕",
+              pairing_code: null,
+              pairing_code_expires_at: null,
+              paired_terminal: { id: 3, name: "主櫃檯" },
+            });
+          }
+          if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+          if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(currentTask);
+          if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+            return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+          }
+          if (request.url.endsWith("/activity")) return json(currentTask);
+          if (request.url.endsWith("/sign")) {
+            currentTask = { ...signing, status: "SIGNED" };
+            return json(currentTask);
+          }
+          throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+        }),
+      );
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "模擬簽名" }));
+      await user.click(screen.getByRole("button", { name: "確認並送出" }));
+      expect(await screen.findByText("已完成簽署")).toBeTruthy();
+      expect(screen.getByText(/10 秒後自動回到待機畫面/)).toBeTruthy();
+
+      // 倒數結束：不需任何店員操作即恢復輪詢；此筆仍為 SIGNED 時只顯示等待訊息。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(await screen.findByText(/請稍候，店員將完成後續作業/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /解鎖/ })).toBeNull();
+
+      // 店員推下一位客人的任務：不再需要帳密解鎖，直接顯示。
+      currentTask = nextCustomerTask;
+      await act(async () => {
+        FakeEventSource.instances[0].dispatchEvent(new Event("state"));
+        await vi.advanceTimersByTimeAsync(50);
+      });
+      expect(await screen.findByText("折疊露營椅")).toBeTruthy();
+      expect(screen.queryByText("已完成簽署")).toBeNull();
+      expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("曖昧簽署恢復畫面仍要求店員帳密才解鎖", async () => {
+    const csrf = "csrf-token-at-least-thirty-two-characters";
+    window.localStorage.setItem("lu-camp.kiosk.csrf", csrf);
+    // 送出後回應遺失（曖昧）留下的持久簽署鎖：此路徑保留店員確認。
+    window.localStorage.setItem("lu-camp.kiosk-signing", "1");
+    const task = {
+      id: 61,
+      kind: "STORE_CREDIT_USE",
+      status: "SIGNING",
+      content: {
+        total: "500",
+        items: [{ name: "營釘組", qty: 1, unit_price: "500", line_total: "500" }],
+      },
+      agreement_title: null,
+      agreement_body: null,
+    };
+    const clerkToken = `h.${btoa(JSON.stringify({ role: "CLERK" }))}.s`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台顧客螢幕",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(task);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        if (request.url.endsWith("/activity")) return json(task);
+        if (request.url.endsWith("/api/v1/auth/login")) {
+          const body = (await request.clone().json()) as { password: string };
+          return body.password === "right-pass"
+            ? json({ access_token: clerkToken, token_type: "bearer" })
+            : json({ detail: "帳號或密碼錯誤" }, 401);
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText("上一筆簽署尚未確認")).toBeTruthy();
+    expect(screen.queryByText("營釘組")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "店員確認並解鎖" }));
+    await user.type(screen.getByLabelText("店員帳號"), "dev-clerk");
+    await user.type(screen.getByLabelText("密碼"), "wrong-pass");
+    await user.click(screen.getByRole("button", { name: "解鎖" }));
+    expect(await screen.findByText("店務員帳密不正確，無法解鎖。")).toBeTruthy();
+    expect(screen.getByText("上一筆簽署尚未確認")).toBeTruthy();
+    expect(screen.queryByText("營釘組")).toBeNull();
+
+    await user.clear(screen.getByLabelText("密碼"));
+    await user.type(screen.getByLabelText("密碼"), "right-pass");
+    await user.click(screen.getByRole("button", { name: "解鎖" }));
+    expect(await screen.findByText("營釘組")).toBeTruthy();
   });
 
   it("客顯先實際渲染 PENDING 快照，再送 ACK 進入簽署", async () => {
@@ -468,12 +622,11 @@ describe("/kiosk 客顯", () => {
     expect((submit as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("簽署仍為 SIGNED 時，PAYMENT_UNCERTAIN 必須蓋過交回鎖並警告勿重複付款", async () => {
+  it("簽署仍為 SIGNED 時，PAYMENT_UNCERTAIN 必須蓋過完成畫面並警告勿重複付款", async () => {
     window.localStorage.setItem(
       "lu-camp.kiosk.csrf",
       "csrf-token-at-least-thirty-two-characters",
     );
-    window.localStorage.setItem("lu-camp.kiosk-handoff", "1");
     const task = {
       id: 43,
       kind: "STORE_CREDIT_USE",
@@ -604,7 +757,7 @@ describe("/kiosk 客顯", () => {
       "lu-camp.kiosk.csrf",
       "csrf-token-at-least-thirty-two-characters",
     );
-    window.localStorage.setItem("lu-camp.kiosk-handoff", "1");
+    window.localStorage.setItem("lu-camp.kiosk-signing", "1");
     window.localStorage.setItem("lu-camp.kiosk-engaged", "43");
     let cartReads = 0;
     vi.stubGlobal(
@@ -657,7 +810,7 @@ describe("/kiosk 客顯", () => {
     expect(await screen.findByText("露營二手")).toBeTruthy();
     expect(await screen.findByText("櫃檯 · 主櫃檯")).toBeTruthy();
     await waitFor(() => {
-      expect(window.localStorage.getItem("lu-camp.kiosk-handoff")).toBeNull();
+      expect(window.localStorage.getItem("lu-camp.kiosk-signing")).toBeNull();
       expect(window.localStorage.getItem("lu-camp.kiosk-engaged")).toBeNull();
     });
     expect(screen.queryByText("已完成簽署")).toBeNull();

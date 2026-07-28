@@ -143,7 +143,7 @@ export function PosCustomerDisplay({
         "/api/v1/customer-display/terminals/{terminal_id}/cart/current",
         { params: { path: { terminal_id: terminal.data.id } } },
       );
-      if (!response.ok) throw new Error("無法恢復客顯購物車");
+      if (!response.ok) throw new Error("無法恢復顧客螢幕購物車");
       return data ?? null;
     },
   });
@@ -218,8 +218,8 @@ export function PosCustomerDisplay({
           if (!data) {
             throw new Error(
               response.status === 409
-                ? "客顯購物車版本衝突，請重新整理 POS 後再操作。"
-                : "客顯同步失敗，請確認店內網路。",
+                ? "顧客螢幕購物車版本衝突，請重新整理 POS 後再操作。"
+                : "顧客螢幕同步失敗，請確認店內網路。",
             );
           }
           revision.current = data.revision;
@@ -236,7 +236,7 @@ export function PosCustomerDisplay({
               },
             },
           );
-          if (!data) throw new Error("客顯清場失敗，請重新整理 POS。");
+          if (!data) throw new Error("顧客螢幕清場失敗，請重新整理 POS。");
           revision.current = null;
           setSyncedRevision(null);
           onCartChange?.(null);
@@ -245,7 +245,7 @@ export function PosCustomerDisplay({
       }
     } catch (error) {
       pending.current = null;
-      setSyncError(error instanceof Error ? error.message : "客顯同步失敗");
+      setSyncError(error instanceof Error ? error.message : "顧客螢幕同步失敗");
     } finally {
       draining.current = false;
     }
@@ -316,21 +316,21 @@ export function PosCustomerDisplay({
   }
 
   if (terminal.isPending) {
-    return <div className="pos-kiosk-status is-muted">客顯設定載入中…</div>;
+    return <div className="pos-kiosk-status is-muted">顧客螢幕設定載入中…</div>;
   }
   if (terminal.isError || !terminal.data) {
     return (
       <div className="pos-kiosk-status is-error" role="alert">
-        客顯設定無法連線；一般付款仍可繼續，購物金暫不可用。
+        顧客螢幕設定無法連線；一般付款仍可繼續，購物金暫不可用。
       </div>
     );
   }
   if (!terminal.data.paired_kiosk) {
     return (
       <form className="pos-kiosk-status is-warning" onSubmit={submitPair}>
-        <strong>客顯尚未配對</strong>
+        <strong>顧客螢幕尚未配對</strong>
         <label>
-          <span className="sr-only">客顯配對碼</span>
+          <span className="sr-only">顧客螢幕配對碼</span>
           <input
             inputMode="numeric"
             pattern="\d{6}"
@@ -357,7 +357,7 @@ export function PosCustomerDisplay({
   return (
     <div className={`pos-kiosk-status ${kiosk.online ? "is-online" : "is-warning"}`}>
       <span className="pos-kiosk-dot" aria-hidden />
-      <strong>{kiosk.online ? "客顯已連線" : "客顯離線"}</strong>
+      <strong>{kiosk.online ? "顧客螢幕已連線" : "顧客螢幕離線"}</strong>
       <span>{kiosk.label}</span>
       {visibleRevision > 0 && <span>購物車版本 {visibleRevision}</span>}
       {syncError && (

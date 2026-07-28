@@ -1154,7 +1154,7 @@ export default function PosPage() {
     (signedDebit !== String(plan.storeCredit) ||
       signedTotal !== String(total) ||
       (memberBalance !== null && signedBalanceBefore !== String(memberBalance)));
-  // 購物金一律須由已配對客顯簽署；政策設定不再能略過這道證據閘門。
+  // 購物金一律須由已配對顧客螢幕簽署；政策設定不再能略過這道證據閘門。
   const scSignBlock =
     plan.storeCredit > 0 &&
     (signTaskId == null ||
@@ -1180,17 +1180,17 @@ export default function PosPage() {
         terminal = registered.data ?? null;
       }
       if (!terminal?.paired_kiosk) {
-        throw new Error("購物金付款必須先配對並連線顧客顯示裝置");
+        throw new Error("購物金付款必須先配對並連線顧客螢幕");
       }
       if (!terminal.paired_kiosk.online) {
-        throw new Error("顧客顯示裝置目前離線；請改用其他付款方式");
+        throw new Error("顧客螢幕目前離線；請改用其他付款方式");
       }
       const current = await api.GET(
         "/api/v1/customer-display/terminals/{terminal_id}/cart/current",
         { params: { path: { terminal_id: terminal.id } } },
       );
       if (!current.data || current.data.status !== "DRAFT") {
-        throw new Error("客顯購物車尚未同步完成，請稍候後再送出簽署");
+        throw new Error("顧客螢幕購物車尚未同步完成，請稍候後再送出簽署");
       }
       const { data, error } = await api.POST(
         "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature",
@@ -1217,7 +1217,7 @@ export default function PosPage() {
         body: cashFallback
           ? {
               reason_code: "KIOSK_FAILURE_CASH_FALLBACK",
-              reason: "客顯故障，改用現金",
+              reason: "顧客螢幕故障，改用現金",
             }
           : {
               reason_code: "CONTENT_CHANGED",
@@ -1392,7 +1392,7 @@ export default function PosPage() {
           { params: { path: { terminal_id: terminal.id } } },
         );
         if (!current.data) {
-          throw new Error("客顯購物車尚未同步完成，請稍候後再結帳");
+          throw new Error("顧客螢幕購物車尚未同步完成，請稍候後再結帳");
         }
         checkoutCart = current.data;
         setDisplayCart(current.data);
@@ -1411,10 +1411,10 @@ export default function PosPage() {
             throw new Error("購物金簽署與目前權威購物車不一致，請撤回後重新送簽");
           }
         } else if (current.data.status !== "DRAFT") {
-          throw new Error("客顯購物車目前不可結帳，請重新載入或完成既有流程");
+          throw new Error("顧客螢幕購物車目前不可結帳，請重新載入或完成既有流程");
         }
       } else if (plan.storeCredit > 0) {
-        throw new Error("購物金付款必須先配對並連線顧客顯示裝置");
+        throw new Error("購物金付款必須先配對並連線顧客螢幕");
       }
       if (terminal?.paired_kiosk && checkoutCart) {
         const begun = await api.POST(
@@ -1536,7 +1536,7 @@ export default function PosPage() {
             if (data?.status === "COMPLETED" && data.sale_id != null) {
               await showCompletedCart(
                 data,
-                "交易已在後端完成；已從客顯工作階段恢復完成畫面。",
+                "交易已在後端完成；已從顧客螢幕工作階段恢復完成畫面。",
               );
             }
           });
@@ -1858,7 +1858,7 @@ export default function PosPage() {
               {signTaskId == null ? (
                 <>
                   <p className="hint">
-                    購物金扣抵須由客人在已配對的顧客顯示裝置核對內容並簽名。
+                    購物金扣抵須由客人在已配對的顧客螢幕核對內容並簽名。
                   </p>
                   <button
                     type="button"
@@ -1896,7 +1896,7 @@ export default function PosPage() {
                   <p className="hint">
                     {signTask.data?.status === "SIGNING"
                       ? "客人正在核對並簽署；購物車已由伺服器鎖定。"
-                      : "已送至顧客顯示裝置，等待客人開啟簽署畫面…"}
+                      : "已送至顧客螢幕，等待客人開啟簽署畫面…"}
                   </p>
                   <button
                     type="button"
@@ -1947,7 +1947,7 @@ export default function PosPage() {
                     disabled={cancelSign.isPending}
                     onClick={() => cancelSign.mutate(true)}
                   >
-                    客顯故障，撤回並改用現金
+                    顧客螢幕故障，撤回並改用現金
                   </button>
                 )}
             </div>

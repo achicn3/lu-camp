@@ -34,12 +34,13 @@ async function apiLogin(username, password) {
   return (await res.json()).access_token;
 }
 
-async function apiJson(token, method, path, body) {
+async function apiJson(token, method, path, body, extraHeaders = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${token}`,
+      ...extraHeaders,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -230,8 +231,23 @@ try {
 
   await page.click("button.kiosk-submit");
   await page.waitForSelector('h1:has-text("已完成簽署")', { timeout: 8000 });
+  const signedAt = Date.now();
   ok("送出後顯示完成畫面", true);
   await page.screenshot({ path: join(SHOTS, "03-done.png"), fullPage: true });
+
+  // ── 完成畫面：感謝＋自動回待機倒數，且不再有店員帳密交回鎖（店主裁示）──────
+  const thanksText = (await page.textContent(".kiosk-thanks-inner"))?.trim() ?? "";
+  ok(
+    "完成畫面顯示感謝與自動回待機倒數",
+    /感謝您/.test(thanksText) && /\d+ 秒後自動回到待機畫面/.test(thanksText),
+    thanksText.replace(/\s+/g, " "),
+  );
+  ok(
+    "完成畫面不再要求店員帳密交回",
+    (await page.locator('button:has-text("店員解鎖，接續下一位")').count()) === 0 &&
+      (await page.locator(".kiosk-unlock-form").count()) === 0 &&
+      (await page.locator('input[name="password"]').count()) === 0,
+  );
 
   // ── 驗證後端狀態：任務 SIGNED、撥款 CASH、有簽名影像 ────────────────
   const check = await apiJson(mgrToken, "GET", `/api/v1/signing/tasks/${taskId}`);
@@ -244,8 +260,7 @@ try {
   });
   ok("簽名 PNG 可取回", sig.ok && sig.headers.get("content-type") === "image/png");
 
-  // ── 交回鎖持久化：完成畫面重整後仍停在交回、不解鎖（Codex K3 第六輪 high）──
-  // 已簽但未綁定收購的切結仍是 active；先依現行狀態機明確作廢，再推下一張切結測交回鎖。
+  // 已簽但未綁定收購的切結仍是 active；先依現行狀態機明確作廢，再推下一張切結。
   const voidedFirst = await apiJson(
     mgrToken,
     "POST",
@@ -259,34 +274,34 @@ try {
     content: { total: "100", items: [{ name: "恢復測試品", amount: "100" }] },
   });
   ok("建立下一張切結任務", nextTask.status === 201, `status=${nextTask.status}`);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(600);
+
+  // 倒數尚未結束前不得換人：感謝畫面仍在、下一張任務不得插隊到客人面前。
+  await page.waitForTimeout(Math.max(0, signedAt + 6000 - Date.now()));
   ok(
-    "重整後仍停在交回畫面（持久鎖）",
+    "倒數期間不提早帶出下一張任務",
     (await page.locator('h1:has-text("已完成簽署")').isVisible()) &&
       !(await page.locator('h1:has-text("收購確認與切結")').isVisible()),
   );
 
-  // ── 交回鎖：簽署完成後即使店員建了下一張任務，也不得自動帶出（Codex K3 high）──
-  await page.waitForTimeout(3000); // 跨過一個輪詢週期（2s）
-  const stillHandoff = await page.locator('h1:has-text("已完成簽署")').isVisible();
-  const nextLeaked = await page.locator('h1:has-text("收購確認與切結")').isVisible();
-  ok("交回前不自動帶出下一位任務", stillHandoff && !nextLeaked);
-
-  // 解鎖需現場店務員帳密：錯帳密不得解鎖
-  await page.click('button:has-text("店員解鎖，接續下一位")');
-  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
-  await page.fill('.kiosk-unlock-form input[name="password"]', "wrong-pass");
-  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('.kiosk-unlock-form .form-error', { timeout: 6000 });
-  ok("錯誤店務帳密不得解鎖", await page.locator('h1:has-text("已完成簽署")').isVisible());
-
-  // 正確店務帳密 → 恢復輪詢，下一張任務才出現
-  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
-  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  // 倒數結束 → 自動清場回待機並恢復輪詢，直接帶出下一張任務（全程未輸入任何帳密）。
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 15000 });
   await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
-  ok("店務帳密解鎖後帶出下一張任務", true);
+  ok(
+    "倒數結束自動接續下一張任務（免店員帳密）",
+    (await page.locator(".kiosk-unlock-form").count()) === 0 &&
+      Date.now() - signedAt >= 9000,
+    `${Math.round((Date.now() - signedAt) / 1000)}s`,
+  );
+
+  // 重整不再卡在交回鎖：仍直接顯示當前任務、不要求帳密。
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('h1:has-text("收購確認與切結")', { timeout: 8000 });
+  ok(
+    "重整後不再卡在交回鎖",
+    (await page.locator(".kiosk-unlock-form").count()) === 0 &&
+      (await page.locator('button:has-text("店員解鎖，接續下一位")').count()) === 0,
+  );
+  await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
 
   // ── 回歸：後端 canonical 切結內容仍完整渲染 ──────────────────────────
   const ackBody = await page.textContent(".kiosk-task-body");
@@ -339,7 +354,7 @@ try {
   await page.waitForSelector("button.kiosk-payout-btn", { timeout: 8000 });
   ok("店員解鎖恢復後任務重現", true);
 
-  // 重新簽署 → 成功進交回；再解鎖回待機
+  // 重新簽署 → 感謝畫面；作廢後倒數到期自動回待機（無需任何店員操作）
   await page.check('.kiosk-agree-check input[type="checkbox"]');
   await page.click('button.kiosk-payout-btn:has-text("現金")');
   await drawSignature(page);
@@ -356,11 +371,9 @@ try {
     voidedRecovery.status === 200,
     `status=${voidedRecovery.status}`,
   );
-  await page.click('button:has-text("店員解鎖，接續下一位")');
-  await page.fill('.kiosk-unlock-form input[name="username"]', MGR_USER);
-  await page.fill('.kiosk-unlock-form input[name="password"]', MGR_PASS);
-  await page.click('.kiosk-unlock-form button:has-text("解鎖")');
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 15000 });
+  ok("完成畫面到期自動回待機（無店員操作）", true);
+  await page.screenshot({ path: join(SHOTS, "03b-standby.png"), fullPage: true });
 
   // ── 釘選閘門：顯示任務 A 時店員取消並改推不同任務 B，不得自動換到客人面前，
   //    須店員確認解鎖才採用（Codex K3 第十輪 high）───────────────────────────
@@ -407,7 +420,7 @@ try {
   // 空窗（current=null）期間重整 → 釘選持久，仍非「首張」狀態（Codex K3 第十二輪）
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
-  await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
+  const taskC = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
     terminal_id: terminalId,
@@ -440,6 +453,78 @@ try {
     (await page.locator(".kiosk-task").isVisible()) &&
       !(await page.locator(".app-shell").isVisible()),
   );
+
+  // ── 顧客購物車折扣用語：顧客只看到「折扣」，不出現內部用語「本行折抵」──────
+  await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskC.json.id}/cancel`);
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  const cashSession = await apiJson(mgrToken, "GET", "/api/v1/cash-sessions/current");
+  if (cashSession.json === null) {
+    await apiJson(mgrToken, "POST", "/api/v1/cash-sessions/open", {
+      opening_float: "2000",
+    });
+  }
+  const now = Date.now();
+  const campaign = await apiJson(mgrToken, "POST", "/api/v1/campaigns", {
+    name: `顧客螢幕折扣用語煙測 ${now}`,
+    discount_pct: 10,
+    starts_at: new Date(now - 86_400_000).toISOString(),
+    ends_at: new Date(now + 86_400_000).toISOString(),
+    applies_owned_serialized: true,
+    applies_owned_bulk: false,
+    applies_catalog: false,
+    applies_consignment: false,
+    consignment_discount_bearing: "STORE_ABSORBS",
+  });
+  await apiJson(mgrToken, "POST", `/api/v1/campaigns/${campaign.json.id}/activate`);
+  const acquired = await apiJson(
+    mgrToken,
+    "POST",
+    "/api/v1/acquisitions",
+    {
+      type: "BUYOUT",
+      contact_id: contactId,
+      payout_method: "CASH",
+      items: [
+        {
+          name: `折扣用語測試帳篷 ${now}`,
+          grade: "A",
+          listed_price: "1000",
+          acquisition_cost: "400",
+        },
+      ],
+    },
+    { "Idempotency-Key": `kiosk-smoke-discount-${now}` },
+  );
+  ok("收購折扣測試品（標價 1000）", acquired.status === 201, `status=${acquired.status}`);
+  const cartPushed = await apiJson(
+    mgrToken,
+    "PUT",
+    `/api/v1/customer-display/terminals/${terminalId}/cart`,
+    {
+      expected_revision: null,
+      lines: [{ line_type: "SERIALIZED", item_code: acquired.json.item_codes[0], qty: 1 }],
+    },
+  );
+  ok("推送折扣購物車到顧客螢幕", cartPushed.status === 200, `status=${cartPushed.status}`);
+  await page.waitForSelector(".kiosk-cart-item", { timeout: 8000 });
+  const cartText = (await page.textContent(".kiosk-cart-items")) ?? "";
+  ok(
+    "顧客螢幕逐行顯示「折扣」而非「本行折抵」",
+    cartText.includes("折扣 $100") &&
+      cartText.includes("原價 $1,000") &&
+      cartText.includes("優惠價 $900") &&
+      !cartText.includes("本行折抵"),
+    cartText.replace(/\s+/g, " ").slice(0, 120),
+  );
+  await page.screenshot({ path: join(SHOTS, "04-cart-discount.png"), fullPage: true });
+  await apiJson(
+    mgrToken,
+    "POST",
+    `/api/v1/customer-display/terminals/${terminalId}/cart/cancel`,
+    { expected_revision: cartPushed.json.revision, reason: "煙霧測試結束清場" },
+  );
+  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));
 } finally {

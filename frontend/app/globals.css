@@ -2823,7 +2823,7 @@ body {
   color: var(--accent-ink);
 }
 
-/* 客顯購物車：明細區獨立捲動，總額永遠固定在顧客視線底部。 */
+/* 顧客螢幕購物車：明細區獨立捲動，總額永遠固定在顧客視線底部。 */
 .kiosk-cart-shell {
   height: 100dvh;
   min-height: 100dvh;

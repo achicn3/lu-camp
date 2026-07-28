@@ -60,7 +60,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("POS 客顯同步", () => {
+describe("POS 顧客螢幕同步", () => {
   it("能從伺服器快照重建四種商品識別，不使用顧客端自行計價", () => {
     expect(
       restoreLines([
@@ -161,7 +161,7 @@ describe("POS 客顯同步", () => {
       />,
       { wrapper: wrapper() },
     );
-    expect(await screen.findByText(/客顯已連線/)).toBeTruthy();
+    expect(await screen.findByText(/顧客螢幕已連線/)).toBeTruthy();
 
     view.rerender(
       <PosCustomerDisplay
@@ -254,7 +254,7 @@ describe("POS 客顯同步", () => {
       />,
       { wrapper: Wrapper },
     );
-    await screen.findByText(/客顯已連線/);
+    await screen.findByText(/顧客螢幕已連線/);
     view.rerender(
       <PosCustomerDisplay
         lines={[LINE]}
