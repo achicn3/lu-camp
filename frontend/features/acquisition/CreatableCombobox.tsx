@@ -15,6 +15,7 @@ export function CreatableCombobox({
   create,
   placeholder,
   disabled = false,
+  selectedId = null,
 }: {
   label: string;
   onChange: (option: ComboOption | null) => void;
@@ -22,6 +23,8 @@ export function CreatableCombobox({
   create: (name: string) => Promise<ComboOption>;
   placeholder?: string;
   disabled?: boolean;
+  /** 呼叫端持有的目前選定 id：外部清空（如改品牌連帶清型號）時，標籤必須跟著消失。 */
+  selectedId?: number | null;
 }) {
   const [text, setText] = useState("");
   // 已選項目單獨記錄：選定後改以「標籤」呈現，與「還在打字」外觀明確區隔。
@@ -29,6 +32,17 @@ export function CreatableCombobox({
   // 且改字會靜默清掉已選 → 送出才發現品牌是空的。
   const [selected, setSelected] = useState<ComboOption | null>(null);
   const [open, setOpen] = useState(false);
+  // 外部把選定值清掉時（例：改品牌 → 父層將 productModelId 設為 null 並停用型號欄），
+  // 標籤必須同步消失，否則畫面顯示「✓ 已選型號」但送出的內容其實是空的（Codex P2）。
+  // 以 React 官方「prop 變更時於 render 內調整 state」模式處理（effect 內 setState 會連鎖 render）。
+  const [lastSelectedId, setLastSelectedId] = useState<number | null>(selectedId);
+  if (selectedId !== lastSelectedId) {
+    setLastSelectedId(selectedId);
+    if (selectedId === null && selected !== null) {
+      setSelected(null);
+      setText("");
+    }
+  }
   const [options, setOptions] = useState<ComboOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);

@@ -1629,18 +1629,45 @@ body {
 .rpt-intro b {
   color: var(--accent);
 }
+.rpt-tip-wrap {
+  position: relative;
+  display: inline-block;
+}
 .rpt-tip {
   display: inline-block;
   margin-left: 4px;
+  padding: 0;
   width: 16px;
   height: 16px;
   line-height: 16px;
   text-align: center;
+  border: 0;
   border-radius: 50%;
   background: var(--accent);
   color: var(--accent-ink);
   font-size: 11px;
   cursor: help;
+}
+/* 觸控/鍵盤：點擊或 Enter 展開，不再只靠滑鼠 hover 的原生 title。 */
+.rpt-tip-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: block;
+  width: max-content;
+  max-width: 40ch;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 8px 20px rgba(24, 48, 36, 0.16);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  text-align: left;
 }
 
 /* ── 報表：經營洞察（#8） ── */

@@ -100,10 +100,26 @@ try {
   ok("標籤顯示已選名稱與勾號", chipText.includes("✓"), chipText.replace(/\s+/g, " ").slice(0, 30));
   await page.screenshot({ path: join(SHOTS, "05-brand-chip.png"), fullPage: true });
 
-  // 清除標籤 → 回到可輸入狀態
+  // 型號選定後改品牌 → 父層會清掉 productModelId，型號標籤必須跟著消失，
+  // 否則畫面顯示「✓ 已選型號」但送出的內容是空的（Codex P2 迴歸）。
+  const modelInput = page.locator(".combo-input").first(); // 品牌已是標籤，故第一個輸入框＝型號
+  await modelInput.fill("測試型號");
+  await page.waitForTimeout(700);
+  const modelCreate = page.locator(".combo-create").first();
+  if ((await modelCreate.count()) > 0) {
+    await modelCreate.click();
+  } else {
+    await page.locator(".combo-option").first().click();
+  }
+  await page.waitForTimeout(500);
+  const chipsBefore = await page.locator('[data-testid="combo-selected"]').count();
+  ok("型號也可選定為標籤", chipsBefore >= 2, `${chipsBefore} 個標籤`);
+  // 清掉品牌 → 型號應連帶失效
   await page.locator(".combo-chip-clear").first().click();
-  await page.waitForSelector(".combo-input", { timeout: 10000 });
-  ok("按 ✕ 可清除已選並重新輸入", true);
+  await page.waitForTimeout(600);
+  const chipsAfter = await page.locator('[data-testid="combo-selected"]').count();
+  ok("清除品牌後型號標籤同步消失（不留假的已選狀態）", chipsAfter === 0, `剩 ${chipsAfter} 個`);
+  await page.screenshot({ path: join(SHOTS, "06-brand-cleared.png"), fullPage: true });
 
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 

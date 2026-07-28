@@ -420,6 +420,7 @@ function ItemRowCard({
           search={searchBrands}
           create={createBrand}
           placeholder="選擇或新增品牌"
+          selectedId={row.brandId}
           onChange={(o) => onChange({ brandId: o?.id ?? null, productModelId: null })}
         />
         <CreatableCombobox
@@ -428,6 +429,7 @@ function ItemRowCard({
           create={createModel}
           placeholder={row.brandId === null ? "先選品牌" : "選擇或新增型號"}
           disabled={row.brandId === null}
+          selectedId={row.productModelId}
           onChange={(o) => onChange({ productModelId: o?.id ?? null })}
         />
         <CreatableCombobox
@@ -447,6 +449,7 @@ function ItemRowCard({
             })
           }
           placeholder="選擇或新增分類"
+          selectedId={row.categoryId}
           onChange={(o) => onChange({ categoryId: o?.id ?? null })}
         />
         <label className="field">

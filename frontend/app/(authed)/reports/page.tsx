@@ -76,13 +76,42 @@ const TIP_GROSS_TURNOVER =
   "看生意規模用這個，但它不等於店家賺到的錢。";
 const TIP_RECOGNIZED_REVENUE =
   "真正屬於店家的收入。自有商品算全額；寄售品只算抽成（其餘要付給寄售人）。" +
-  "例：賣出寄售品 1,000 元、抽成 50% → 認列營收只有 500。看店賺不賺錢，看這個。";
-const TIP_SECONDHAND_REVENUE = "認列營收中扣掉餐飲的部分，也就是二手買賣與寄售抽成的收入。";
+  "例：賣出寄售品 1,000 元、抽成 50% → 認列營收只有 500。" +
+  "注意這是「收入」不是「利潤」——還沒扣掉收購成本，要看賺賠請看毛利。";
+// secondhand_revenue ＝ 認列營收 − 餐飲營收，因此也含一般商品（新品），不只二手與寄售。
+const TIP_SECONDHAND_REVENUE = "認列營收中扣掉餐飲的部分：二手買賣、寄售抽成與一般商品的收入。";
 const TIP_FOOD_REVENUE = "認列營收中屬於餐飲（內用）的部分。";
 const TIP_OUTSTANDING =
   "已發出但客人還沒用掉的購物金總額——這是店家欠客人的金額（負債），日後客人消費時會用掉。";
 
 // -- Shared sub-components --
+
+/** 指標說明的 ⓘ：滑鼠停留看 title、點擊/鍵盤展開說明。
+ *
+ * 原本是不可 focus 的 `<span title>`，在觸控（POS 螢幕）與鍵盤操作下等於看不到說明。
+ */
+function InfoTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="rpt-tip-wrap">
+      <button
+        type="button"
+        className="rpt-tip"
+        title={text}
+        aria-label={`說明：${text}`}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        ⓘ
+      </button>
+      {open && (
+        <span role="tooltip" className="rpt-tip-pop">
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 function MoneyText({ value }: { value: string | null | undefined }) {
   if (value === null || value === undefined) return <span className="money">N/A</span>;
@@ -313,36 +342,28 @@ function DashboardPanel() {
         <div className="rpt-stat rpt-stat-hero">
           <dt>
             營業額
-            <span className="rpt-tip" title={TIP_GROSS_TURNOVER}>
-              ⓘ
-            </span>
+            <InfoTip text={TIP_GROSS_TURNOVER} />
           </dt>
           <dd><MoneyText value={report.gross_turnover} /></dd>
         </div>
         <div className="rpt-stat rpt-stat-hero">
           <dt>
             認列營收
-            <span className="rpt-tip" title={TIP_RECOGNIZED_REVENUE}>
-              ⓘ
-            </span>
+            <InfoTip text={TIP_RECOGNIZED_REVENUE} />
           </dt>
           <dd><MoneyText value={report.recognized_revenue} /></dd>
         </div>
         <div className="rpt-stat">
           <dt>
             二手營收
-            <span className="rpt-tip" title={TIP_SECONDHAND_REVENUE}>
-              ⓘ
-            </span>
+            <InfoTip text={TIP_SECONDHAND_REVENUE} />
           </dt>
           <dd><MoneyText value={report.secondhand_revenue} /></dd>
         </div>
         <div className="rpt-stat">
           <dt>
             餐飲營收
-            <span className="rpt-tip" title={TIP_FOOD_REVENUE}>
-              ⓘ
-            </span>
+            <InfoTip text={TIP_FOOD_REVENUE} />
           </dt>
           <dd><MoneyText value={report.food_revenue} /></dd>
         </div>
@@ -1352,7 +1373,7 @@ function LiabilityPanel() {
           <dd><MoneyText value={report.total_outstanding} /></dd>
         </div>
         <div className="rpt-stat">
-          <dt>負債健康比<span className="rpt-tip" title="未兌付購物金 ÷ 月固定支出。數字越小，代表購物金負債相對每月開銷越輕、越健康；越大代表負債偏重。">ⓘ</span></dt>
+          <dt>負債健康比<InfoTip text="未兌付購物金 ÷ 月固定支出。數字越小，代表購物金負債相對每月開銷越輕、越健康；越大代表負債偏重。" /></dt>
           <dd>{report.liability_health_ratio ?? "N/A"}</dd>
         </div>
       </dl>
@@ -1539,8 +1560,10 @@ const METRIC_NOTES: Record<string, string> = {
   take_rate: "收購時，客人選購物金（而不是拿現金）的比例。越高代表方案越受歡迎。",
   avg_premium_rate:
     "選購物金時你多送了幾成。例：收購價 1,000 元、給 1,100 元購物金 → 10%。這是店家的成本。",
+  // 未兌付的購物金仍是店家欠客人的負債（客人隨時可能來用），不可說成「已經賺到」。
   beta_retention:
-    "發出去的購物金，過了半年還沒被用掉的比例。沒用掉的等於店家實質賺到，越高越有利。",
+    "發出去的購物金，過了半年仍未被用掉的比例。比例越高，模型上對店家越有利；" +
+    "但這些餘額在客人用掉之前仍算店家的負債，不是已入袋的錢。",
   excess_spend_rate: "客人用購物金結帳時，另外再掏現金的比例。越高代表購物金有帶動額外消費。",
   alpha_incremental:
     "有多少消費是「因為有購物金才發生的」。無法直接量測（帳本看不出客人本來會不會買），只能推估。",
@@ -1685,9 +1708,7 @@ function ReconciliationPanel() {
         <div className="rpt-stat">
           <dt>
             購物金總負債
-            <span className="rpt-tip" title={TIP_OUTSTANDING}>
-              ⓘ
-            </span>
+            <InfoTip text={TIP_OUTSTANDING} />
           </dt>
           <dd><MoneyText value={report.ledger_total_outstanding} /></dd>
         </div>
