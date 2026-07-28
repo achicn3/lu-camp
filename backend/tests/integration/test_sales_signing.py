@@ -181,7 +181,7 @@ async def test_store_credit_sale_consumes_one_signed_snapshot(
     assert await StoreCreditService(db_session).get_balance(store_id, member_id) == Decimal("1700")
 
 
-async def test_unsigned_store_credit_is_rejected_even_when_legacy_setting_is_false(
+async def test_unsigned_store_credit_is_always_rejected(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     token, _store_id, _clerk_id, member_id, product_id = await _seed(db_session)

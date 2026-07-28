@@ -5383,8 +5383,6 @@ export interface components {
             premium_rate_min: string;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit: boolean;
-            /** Require Store Credit Signing */
-            require_store_credit_signing: boolean;
             /** Signature Cleanup Enforcement Mode */
             signature_cleanup_enforcement_mode: string;
             /** Signature Png Retention Days */
@@ -5442,8 +5440,6 @@ export interface components {
             premium_rate_min?: number | string | null;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit?: boolean | null;
-            /** Require Store Credit Signing */
-            require_store_credit_signing?: boolean | null;
             /** Signature Cleanup Enforcement Mode */
             signature_cleanup_enforcement_mode?: "REPORT_ONLY" | null;
             /** Signature Png Retention Days */

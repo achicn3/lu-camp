@@ -185,3 +185,19 @@ def test_update_request_rejects_out_of_range(patch_kwargs: dict[str, object]) ->
 def test_v1_rejects_automatic_signature_image_deletion() -> None:
     with pytest.raises(ValueError):
         SettingsUpdateRequest(signature_cleanup_enforcement_mode="AUTO_DELETE")
+
+
+def test_store_credit_signing_is_not_a_configurable_flag() -> None:
+    """購物金扣抵簽署為無條件強制（docs/23 K5）：不得再以設定旗標暴露成可切換。
+
+    旗標留著卻無人讀 ⇒ 管理者切了沒效果、誤以為已放寬（審計 F-2）。強制邏輯本身由
+    tests/integration/test_sales_signing.py::test_unsigned_store_credit_is_always_rejected 守護。
+    """
+    assert "require_store_credit_signing" not in SettingsRead.model_fields
+    assert "require_store_credit_signing" not in SettingsUpdateRequest.model_fields
+
+
+def test_removed_store_credit_signing_flag_is_ignored_not_applied() -> None:
+    """舊版收銀端可能仍送此欄：靜默忽略（不 500、不落庫），維持向後相容。"""
+    patch = SettingsUpdateRequest(require_store_credit_signing=True)
+    assert patch.model_dump(exclude_unset=True) == {}

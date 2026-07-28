@@ -8147,10 +8147,6 @@
             "title": "Require Acquisition Affidavit",
             "type": "boolean"
           },
-          "require_store_credit_signing": {
-            "title": "Require Store Credit Signing",
-            "type": "boolean"
-          },
           "signature_cleanup_enforcement_mode": {
             "title": "Signature Cleanup Enforcement Mode",
             "type": "string"
@@ -8189,7 +8185,6 @@
           "default_margin_pct",
           "allow_clerk_manage_categories",
           "require_acquisition_affidavit",
-          "require_store_credit_signing",
           "signature_png_retention_days",
           "signature_cleanup_enforcement_mode",
           "premium_rate",
@@ -8428,17 +8423,6 @@
               }
             ],
             "title": "Require Acquisition Affidavit"
-          },
-          "require_store_credit_signing": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Require Store Credit Signing"
           },
           "signature_cleanup_enforcement_mode": {
             "anyOf": [

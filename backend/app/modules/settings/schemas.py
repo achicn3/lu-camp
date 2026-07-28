@@ -33,7 +33,6 @@ class SettingsRead(BaseModel):
     default_margin_pct: int
     allow_clerk_manage_categories: bool
     require_acquisition_affidavit: bool
-    require_store_credit_signing: bool
     signature_png_retention_days: int
     signature_cleanup_enforcement_mode: str
     premium_rate: RateOut
@@ -69,7 +68,6 @@ class SettingsUpdateRequest(BaseModel):
     default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
     allow_clerk_manage_categories: bool | None = None
     require_acquisition_affidavit: bool | None = None
-    require_store_credit_signing: bool | None = None
     signature_png_retention_days: Annotated[int, Field(ge=1, le=3650)] | None = None
     # 第一版只產生到期報表，不開放實刪。法遵確認後才另案擴充 AUTO_DELETE。
     signature_cleanup_enforcement_mode: Literal["REPORT_ONLY"] | None = None

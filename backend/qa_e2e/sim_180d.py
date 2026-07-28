@@ -143,7 +143,7 @@ _SHIFT_TABLES = (
 )
 
 FIRST_AFFIDAVIT_DAY = 15  # 之前：未強制簽署（require_acquisition_affidavit 關）
-FIRST_SCU_DAY = 30  # 之前：購物金扣抵不需簽署
+FIRST_SCU_DAY = 30  # 此日起模擬購物金扣抵銷售（其簽署一律強制，無旗標可切）
 PREMIUM_BUMP_DAY = 100  # 溢價率 0.10 → 0.12（寫 premium_rate_history）
 
 
@@ -975,12 +975,7 @@ async def _mid_sim_adjustments(sim: Sim, day: int) -> None:
             patch=SettingsUpdateRequest(require_acquisition_affidavit=True),
         )
         await sim.s.commit()
-    if day == FIRST_SCU_DAY:
-        await settings_svc.update_settings(
-            sim.store_id, actor_user_id=sim.manager_id,
-            patch=SettingsUpdateRequest(require_store_credit_signing=True),
-        )
-        await sim.s.commit()
+    # 購物金扣抵簽署無條件強制（docs/23 K5），無設定旗標可切換 → 此處不再有對應調整。
     if day == PREMIUM_BUMP_DAY:
         await settings_svc.update_settings(
             sim.store_id, actor_user_id=sim.manager_id,

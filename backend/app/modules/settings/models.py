@@ -66,12 +66,8 @@ class StoreSettings(Base, TimestampMixin):
     require_acquisition_affidavit: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )
-    # 購物金扣抵須手持簽名確認（docs/23 K5，D3）：開啟後以購物金付款的結帳必須綁定已簽
-    # STORE_CREDIT_USE 任務（客人手持端確認本次折抵/剩餘後手寫簽名）才可完成。預設關（店家
-    # 就緒後開啟）。
-    require_store_credit_signing: Mapped[bool] = mapped_column(
-        Boolean, server_default=text("false"), nullable=False
-    )
+    # 購物金扣抵的手持簽名確認為**無條件強制**（docs/23 K5，D3），故無對應設定旗標：
+    # 以購物金付款的結帳一律須綁定已簽 STORE_CREDIT_USE 任務，由 sales service 強制。
     signature_png_retention_days: Mapped[int] = mapped_column(
         Integer,
         server_default=text("183"),
