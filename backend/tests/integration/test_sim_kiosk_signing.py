@@ -6,7 +6,9 @@ K 系列客顯重構後，`SigningService.create_task` 要求「已配對且在�
 避免模擬器再度靜默退化成「零簽署任務」。
 """
 
+import hashlib
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -21,6 +23,7 @@ from qa_e2e.sim_180d import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.canonical import canonical_json_bytes
 from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.core.security import hash_password
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
@@ -97,6 +100,24 @@ def _sim(db_session: AsyncSession, env: _Fixture, kiosk: KioskSetup) -> Sim:
     return Sim(db_session, env.store_id, env.manager_id, env.clerk_id, kiosk=kiosk)
 
 
+def _assert_simulated_evidence(task: SignatureTask) -> None:
+    """簽署證據必須由**模擬時鐘**當場產生：signed_at 落在模擬歷史，且 evidence_hash
+    能以 `sign_task` 的同一算式由欄位重算（事後平移 signed_at 會讓雜湊永久失效）。"""
+    assert task.signed_at is not None
+    assert task.signed_at < datetime.now(UTC) - timedelta(days=1)
+    recomputed = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "task_id": task.id,
+                "content_sha256": task.content_sha256,
+                "signature_sha256": task.signature_sha256,
+                "signed_at": task.signed_at.isoformat(),
+            }
+        )
+    ).hexdigest()
+    assert recomputed == task.evidence_hash
+
+
 async def _seller(db_session: AsyncSession, store_id: int, name: str, phone: str) -> Contact:
     nid = "A123456789"
     contact = Contact(
@@ -157,6 +178,7 @@ async def test_sim_affidavit_chain_produces_signed_task(
     assert task.chosen_payout is PayoutMethod.CASH
     assert sim.stats["affidavits"] == 1
     assert sim.errors == {}
+    _assert_simulated_evidence(task)
 
 
 @pytest.mark.asyncio
@@ -215,6 +237,7 @@ async def test_sim_store_credit_sale_binds_frozen_cart_signature(
     assert task.cart_session_id is not None
     assert task.content["store_credit_amount"] == "500"
     assert task.content["total"] == "1200"
+    _assert_simulated_evidence(task)
     item = await db_session.scalar(
         select(SerializedItem).where(SerializedItem.item_code == consign.item_codes[0])
     )

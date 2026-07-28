@@ -24,11 +24,14 @@ import asyncio
 import json
 import os
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,6 +74,7 @@ from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
+from app.modules.signing import service as signing_service
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.stocktake.service import StocktakeService
@@ -107,10 +111,11 @@ _MANIFEST_PATH = Path(
 )
 
 # 時間回填：這些表的白名單時間欄，會被平移到模擬日（僅當日新增列，watermark 以 id 界定）。
+# **不含 `signed_at`**：它被封進 evidence_hash，事後平移會讓證據雜湊永久失效
+# （改由 `signing_clock` 讓 service 當場算出模擬時刻，見 _shift_day docstring）。
 _SHIFT_COLS = (
     "created_at",
     "updated_at",
-    "signed_at",
     "intake_date",
     "opened_at",
     "closed_at",
@@ -119,6 +124,8 @@ _SHIFT_COLS = (
     "submitted_at",
     "ordered_at",
     "voided_at",
+    "completed_at",  # cart_sessions：成交時間須與該筆銷售同日
+    "last_activity_at",  # cart_sessions
     "changed_at",  # premium_rate_history：政策時間線須與帳本同步平移（Codex 第二輪 P2）
 )
 _SHIFT_TABLES = (
@@ -134,6 +141,8 @@ _SHIFT_TABLES = (
     "store_credit_ledger",
     "consignment_settlements",
     "signature_tasks",
+    "cart_sessions",
+    "cart_session_events",
     "agreement_versions",
     "purchase_orders",
     "purchase_order_lines",
@@ -162,6 +171,39 @@ KIOSK_INSTALLATION_ID = "5c1b7f2e-0000-4a00-9c00-51d0c0ffee01"
 TERMINAL_INSTALLATION_ID = "5c1b7f2e-0000-4a00-9c00-51d0c0ffee02"
 KIOSK_LABEL = "模擬客顯"
 TERMINAL_NAME = "模擬收銀櫃檯"
+
+
+# 模擬時鐘：簽署事件在營業日內依序推進（首筆 +15 分，其後每筆 +3 分，尾端夾在 +10h45m）。
+SIGNING_FIRST_EVENT_OFFSET = timedelta(minutes=15)
+SIGNING_EVENT_STEP = timedelta(minutes=3)
+SIGNING_LAST_EVENT_OFFSET = timedelta(hours=10, minutes=45)
+
+
+class _FrozenClock:
+    """`datetime` 的最小替身：service 只以 `datetime.now(UTC)` 取當下時間。"""
+
+    def __init__(self, moment: datetime) -> None:
+        self._moment = moment
+
+    def now(self, tz: tzinfo | None = None) -> datetime:
+        return self._moment if tz is None else self._moment.astimezone(tz)
+
+
+@contextmanager
+def signing_clock(moment: datetime) -> Iterator[None]:
+    """讓 signing service 以「模擬時刻」產生 `signed_at` 等時間戳。
+
+    `sign_task` 會把 wall-clock `signed_at` 一起封進 `evidence_hash`；若像其他表那樣
+    事後平移 `signed_at`，雜湊就再也算不回來（產品端有 `signature_task_evidence_immutable`
+    trigger 擋這種修改，模擬的回填是靠 `session_replication_role=replica` 繞過去的）。
+    **絕不事後重算雜湊寫回**——那等於偽造證據。改成時鐘驅動 service：service 自己算出的
+    `signed_at`／`expires_at`／`signature_retention_until` 就落在模擬日，雜湊天生一致。
+
+    只換 signing service 的時鐘：客顯在線判定（customerdisplay service）與折扣生效判定
+    （sales/campaigns）必須維持真實牆鐘，否則心跳與活動視窗的檢查會變成空轉。
+    """
+    with patch.object(signing_service, "datetime", _FrozenClock(moment)):
+        yield
 
 
 @dataclass(frozen=True)
@@ -250,6 +292,8 @@ class Sim:
         self.manager_id = manager_id
         self.clerk_id = clerk_id
         self.kiosk = kiosk
+        self.day_start = _day_start(0)
+        self.clock = self.day_start + SIGNING_FIRST_EVENT_OFFSET
         self.seq = 0
         self.member_ids: list[int] = []
         self.seller_ids: list[int] = []  # 有合法證號者（可簽切結/收購物金）
@@ -280,6 +324,19 @@ class Sim:
     def key(self, kind: str) -> str:
         self.seq += 1
         return f"sim-{kind}-{self.seq}"
+
+    def start_day(self, day_start: datetime) -> None:
+        """每個模擬日重置事件時鐘（簽署時間戳由 service 當場寫入，事後不再平移）。"""
+        self.day_start = day_start
+        self.clock = day_start + SIGNING_FIRST_EVENT_OFFSET - SIGNING_EVENT_STEP
+
+    def tick(self) -> datetime:
+        """推進到下一個簽署事件時刻（同日內單調遞增，夾在營業時段內）。"""
+        self.clock = min(
+            self.clock + SIGNING_EVENT_STEP,
+            self.day_start + SIGNING_LAST_EVENT_OFFSET,
+        )
+        return self.clock
 
     def note_err(self, where: str, exc: Exception) -> None:
         """例外可見化：每種（位置×型別）首次列印、其後計數，避免靜默吞噬掩蓋流程壞損。"""
@@ -329,9 +386,19 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
     時間平移只動時間欄、不碰金額與鏈，故以 session_replication_role=replica 暫時
     跳過觸發器（僅本交易），結束即還原。
 
-    **NULL 一律保留**：`voided_at`/`signed_at`/`confirmed_at`/`received_at`/`closed_at`
+    **NULL 一律保留**：`voided_at`/`confirmed_at`/`received_at`/`closed_at`
     都是「事件發生才有值」的欄位，無條件覆寫會把每一列都寫成「已作廢/已簽/已收貨」
     （F-1 併同修正：每筆收購都變成 voided_at 非空，S2 的快照深度比對因此永遠 0 筆樣本）。
+
+    **`signed_at` 不在平移範圍**（F-1 第二輪 P1）：它被封進 `evidence_hash`，平移＝雜湊
+    永久失效。改由 `signing_clock` 讓 service 當場以模擬時刻寫入，此處反過來把
+    `created_at` 對齊到 `signed_at − 4 分鐘`（建立→簽名的先後仍成立）。
+
+    **`cart_sessions`／`cart_session_events` 納入平移的取捨**（F-1 第二輪 P2a）：這兩表的
+    `created_at`／`updated_at` 是 `server_default=func.now()`（DB 時鐘，見 core/db.py
+    TimestampMixin 與 customerdisplay/models.py），Python 端換時鐘改不到，只能事後平移；
+    `cart_session_events` 的 append-only trigger 與 store_credit_ledger 同樣以
+    replica 角色暫時跳過（只動時間欄，不碰 revision／payload／指紋）。
     """
     await sim.s.execute(text("SET session_replication_role = replica"))
     for tab, cs in cols.items():
@@ -351,13 +418,35 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
             text(f"UPDATE {tab} SET {sets} WHERE id > :wm"),
             {"base": day_start, "day": store_date(day_start), "wm": wm},
         )
-    # 一致性修正：簽名時間 ≥ 建立時間；開/關帳定錨在營業時段兩端。
+    # 一致性修正：已簽任務的建立時間對齊到「簽名前 4 分鐘」（signed_at 由模擬時鐘寫死、
+    # 絕不更動，否則 evidence_hash 失效）；開/關帳定錨在營業時段兩端。
     await sim.s.execute(
         text(
-            "UPDATE signature_tasks SET signed_at = created_at + interval '4 minutes' "
+            "UPDATE signature_tasks SET created_at = signed_at - interval '4 minutes', "
+            "updated_at = signed_at "
             "WHERE id > :wm AND signed_at IS NOT NULL"
         ),
         {"wm": sim.watermarks["signature_tasks"]},
+    )
+    # 購物車錨定到它成交的那筆銷售（F-1 第二輪 P2a）：泛用平移只保證「同一天」，但兩表的
+    # 列序偏移尺度不同（同日購物車少、銷售多），跨午夜的固定樣本日會被推到隔天。改以
+    # 「建車→3 分鐘後成交」錨定，購物車與其銷售必然同日同時段；事件再依 revision 排在車後。
+    await sim.s.execute(
+        text(
+            "UPDATE cart_sessions c SET created_at = s.created_at - interval '3 minutes', "
+            "updated_at = s.created_at, last_activity_at = s.created_at, "
+            "completed_at = CASE WHEN c.completed_at IS NULL THEN NULL ELSE s.created_at END "
+            "FROM sales s WHERE s.id = c.sale_id AND c.id > :wm"
+        ),
+        {"wm": sim.watermarks["cart_sessions"]},
+    )
+    await sim.s.execute(
+        text(
+            "UPDATE cart_session_events e "
+            "SET created_at = c.created_at + make_interval(secs => LEAST(e.revision * 20, 170)) "
+            "FROM cart_sessions c WHERE c.id = e.cart_session_id AND e.id > :wm"
+        ),
+        {"wm": sim.watermarks["cart_session_events"]},
     )
     # 因果鏈修正（Codex 第三輪 P1）：綁定切結的收購，其建立時間必須**晚於**該切結的
     # 簽署時間（先簽才收）——同日同序的泛用平移會讓兩者同刻、簽名反而在收購之後。
@@ -440,18 +529,19 @@ async def _sign_affidavit(
     content: dict[str, Any] = {"items": items, "total": str(total)}
     if lot is not None:
         content["lot"] = lot
-    task = await svc.create_task(
-        sim.store_id,
-        SignatureTaskCreate(
-            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
-            contact_id=contact_id,
-            content=content,
-            terminal_id=sim.kiosk.terminal_id,
-        ),
-        created_by=sim.clerk_id,
-    )
-    await sim.s.commit()
-    await _sign_on_kiosk(sim, task.id, payout)
+    with signing_clock(sim.tick()):
+        task = await svc.create_task(
+            sim.store_id,
+            SignatureTaskCreate(
+                kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+                contact_id=contact_id,
+                content=content,
+                terminal_id=sim.kiosk.terminal_id,
+            ),
+            created_by=sim.clerk_id,
+        )
+        await sim.s.commit()
+        await _sign_on_kiosk(sim, task.id, payout)
     sim.stats["affidavits"] += 1
     return task.id
 
@@ -752,20 +842,21 @@ async def _one_sale(sim: Sim, day: int) -> None:
     if want_ack and buyer is not None:
         try:
             await _prepare_signature_device(sim)
-            task = await SigningService(sim.s).create_task(
-                sim.store_id,
-                SignatureTaskCreate(
-                    kind=SignatureTaskKind.TRANSACTION_ACK,
-                    contact_id=buyer,
-                    content={},
-                    terminal_id=sim.kiosk.terminal_id,
-                    ref_type="sale",
-                    ref_id=sale.id,
-                ),
-                created_by=sim.clerk_id,
-            )
-            await sim.s.commit()
-            await _sign_on_kiosk(sim, task.id, None)
+            with signing_clock(sim.tick()):
+                task = await SigningService(sim.s).create_task(
+                    sim.store_id,
+                    SignatureTaskCreate(
+                        kind=SignatureTaskKind.TRANSACTION_ACK,
+                        contact_id=buyer,
+                        content={},
+                        terminal_id=sim.kiosk.terminal_id,
+                        ref_type="sale",
+                        ref_id=sale.id,
+                    ),
+                    created_by=sim.clerk_id,
+                )
+                await sim.s.commit()
+                await _sign_on_kiosk(sim, task.id, None)
             sim.stats["ack_tasks"] += 1
         except Exception as exc:
             sim.note_err("ack", exc)
@@ -817,27 +908,31 @@ async def _store_credit_sale(sim: Sim) -> None:
                 CartTenderRequest(tender_type=t.tender_type, amount=t.amount) for t in tenders
             ],
         )
-        cart, task = await CustomerDisplayService(sim.s).freeze_store_credit_cart(
-            sim.store_id,
-            sim.kiosk.terminal_id,
-            expected_revision=cart.revision,
-            actor_user_id=sim.clerk_id,
-        )
-        await sim.s.commit()
-        task_id, cart_id, cart_revision = task.id, cart.id, cart.revision
-        await _sign_on_kiosk(sim, task_id, None)
-        sim.stats["scu_tasks"] += 1
-        await SalesService(sim.s).create_sale(
-            sim.store_id, sim.clerk_id,
-            lines=lines,
-            buyer_contact_id=cid,
-            tenders=tenders,
-            idempotency_key=sim.key("sale"),
-            signature_task_id=task_id,
-            cart_session_id=cart_id,
-            cart_revision=cart_revision,
-        )
-        await sim.s.commit()
+        # 凍結送簽→簽名→結帳綁定全程共用同一個模擬時刻：sign_task 寫進 evidence_hash 的
+        # signed_at 與結帳當下判定的「已簽 5 分鐘結帳時效」必須是同一把時鐘，否則
+        # 模擬時間的 expires_at 對上真實 now 會被判逾時。
+        with signing_clock(sim.tick()):
+            cart, task = await CustomerDisplayService(sim.s).freeze_store_credit_cart(
+                sim.store_id,
+                sim.kiosk.terminal_id,
+                expected_revision=cart.revision,
+                actor_user_id=sim.clerk_id,
+            )
+            await sim.s.commit()
+            task_id, cart_id, cart_revision = task.id, cart.id, cart.revision
+            await _sign_on_kiosk(sim, task_id, None)
+            sim.stats["scu_tasks"] += 1
+            await SalesService(sim.s).create_sale(
+                sim.store_id, sim.clerk_id,
+                lines=lines,
+                buyer_contact_id=cid,
+                tenders=tenders,
+                idempotency_key=sim.key("sale"),
+                signature_task_id=task_id,
+                cart_session_id=cart_id,
+                cart_revision=cart_revision,
+            )
+            await sim.s.commit()
         sim.stats["sc_sales"] += 1
         sim.stats["sales"] += 1
     except Exception as exc:
@@ -1291,6 +1386,7 @@ async def _expected_cash(sim: Sim, session_id: int, opening: Decimal) -> Decimal
 async def _run_day(sim: Sim, plan: DayPlan, cols: dict[str, list[str]]) -> None:
     day = plan.day_index
     day_start = _day_start(day)
+    sim.start_day(day_start)
     await _snapshot_watermarks(sim, cols)
     await _mid_sim_adjustments(sim, day)
     await _campaigns(sim, day)

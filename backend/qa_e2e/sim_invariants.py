@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import sys
@@ -23,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.main  # noqa: F401  # 觸發模型註冊
+from app.core.canonical import canonical_json_bytes
 from app.core.db import get_sessionmaker
 from qa_e2e.longrun_invariants import (
     _results,
@@ -131,6 +133,8 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
     ).scalar_one()
     check("S1 signed_at ≥ created_at", ts_bad == 0, f"倒置 {ts_bad} 筆")
 
+    await _s1_evidence_hashes(session)
+
     aff = (
         await session.execute(
             text(
@@ -140,6 +144,50 @@ async def s1_signing_evidence(session: AsyncSession) -> None:
         )
     ).scalar_one()
     check("S1 已簽切結必綁切結書版本", aff == 0, f"缺版本 {aff} 筆")
+
+
+async def _s1_evidence_hashes(session: AsyncSession) -> None:
+    """證據雜湊全量重算（不設 LIMIT）：content_sha256、signature_sha256、evidence_hash
+    都必須能由 DB 欄位以 `SigningService.sign_task` 的同一算式重現。
+
+    這是簽署證據「事後不可竄改」的實質檢驗：任何對 content／簽名影像／`signed_at`
+    的事後修改都會讓雜湊對不上（產品端另有 DB trigger 擋，模擬的時間回填會繞過它）。
+    """
+    rows = (
+        await session.execute(
+            text(
+                "SELECT id, content, content_sha256, signature_sha256, signature_image, "
+                "signed_at, evidence_hash FROM signature_tasks "
+                "WHERE status IN ('SIGNED', 'CONSUMED')"
+            )
+        )
+    ).all()
+    bad: list[tuple[int, str]] = []
+    for tid, content_raw, content_sha, signature_sha, image, signed_at, evidence_hash in rows:
+        content = content_raw if isinstance(content_raw, dict) else json.loads(content_raw)
+        if hashlib.sha256(canonical_json_bytes(content)).hexdigest() != content_sha:
+            bad.append((tid, "content_sha256"))
+            continue
+        if image is None or hashlib.sha256(bytes(image)).hexdigest() != signature_sha:
+            bad.append((tid, "signature_sha256"))
+            continue
+        recomputed = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "task_id": tid,
+                    "content_sha256": content_sha,
+                    "signature_sha256": signature_sha,
+                    "signed_at": signed_at.isoformat(),
+                }
+            )
+        ).hexdigest()
+        if recomputed != evidence_hash:
+            bad.append((tid, "evidence_hash"))
+    check(
+        "S1 證據雜湊可由欄位重算且相符",
+        len(bad) == 0,
+        f"不符 {bad[:5]}（共{len(rows)}筆，壞 {len(bad)} 筆）",
+    )
 
 
 async def s2_acquisition_binding(session: AsyncSession) -> None:
@@ -327,8 +375,9 @@ async def s5_scu_binding(session: AsyncSession) -> None:
                t.content->>'store_credit_amount' AS debit,
                (SELECT SUM(amount) FROM sale_tenders st
                  WHERE st.sale_id = s.id AND st.tender_type='STORE_CREDIT') AS credit_amt,
-               t.content->>'total' AS signed_total, s.total, t.cart_session_id
+               t.content->>'total' AS signed_total, s.total, c.id AS cart_id, c.sale_id
         FROM sales s JOIN signature_tasks t ON t.id = s.signature_task_id
+        LEFT JOIN cart_sessions c ON c.id = t.cart_session_id
         WHERE s.signature_task_id IS NOT NULL
         """
             )
@@ -339,7 +388,8 @@ async def s5_scu_binding(session: AsyncSession) -> None:
         for r in rows
         if r[1] != "STORE_CREDIT_USE" or r[2] != "CONSUMED" or not r[3]
         or r[4] is None or r[5] is None or int(r[4]) != int(r[5])
-        or r[6] is None or int(r[6]) != int(r[7]) or r[8] is None
+        or r[6] is None or int(r[6]) != int(r[7])
+        or r[8] is None or r[9] != r[0]  # 綁定的權威購物車必須就是成交這筆銷售的那台車
     ]
     detail5 = f"違規 sale={bad[:5]}（綁定{len(rows)}筆）"
     check("S5 SCU 綁定＝已簽同買方且折抵/總額相符", len(bad) == 0, detail5)
