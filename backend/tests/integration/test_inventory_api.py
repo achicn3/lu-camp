@@ -1060,3 +1060,26 @@ async def test_item_name_suggestions_are_store_scoped(
     )
     assert res.status_code == 200
     assert res.json() == []
+
+
+async def test_item_name_suggestions_treat_wildcards_as_literals(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """`%` / `_` 是 LIKE 萬用字元：未轉義時 `q=%` 會回全部、搜「100%」會誤中「100」。
+
+    端點語意是子字串比對，故萬用字元須當字面字元處理。
+    """
+    store_id = await _seed_store(db_session)
+    await _seed_item(db_session, store_id, item_code="W-1", name="純棉 100% 天幕")
+    await _seed_item(db_session, store_id, item_code="W-2", name="尼龍 100 丹")
+
+    pct = await client.get(
+        "/api/v1/item-name-suggestions", params={"q": "100%"}, headers=_auth(store_id)
+    )
+    assert pct.status_code == 200
+    assert pct.json() == ["純棉 100% 天幕"]  # 不得因萬用字元而命中「尼龍 100 丹」
+
+    only_wildcard = await client.get(
+        "/api/v1/item-name-suggestions", params={"q": "%"}, headers=_auth(store_id)
+    )
+    assert only_wildcard.json() == ["純棉 100% 天幕"]  # 只回真的含「%」者，不是全部

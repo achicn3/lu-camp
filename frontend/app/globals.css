@@ -1629,6 +1629,20 @@ body {
 .rpt-intro b {
   color: var(--accent);
 }
+/* 收購欄位的說明圖示：沿用報表 ⓘ 的視覺語彙，滑鼠停留顯示 title。 */
+.acq-hint-icon {
+  display: inline-block;
+  margin-left: 4px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  cursor: help;
+}
 .rpt-tip-wrap {
   position: relative;
   display: inline-block;
@@ -1652,11 +1666,13 @@ body {
 .rpt-tip-pop {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  /* 靠右卡片的說明若一律向右展開會超出畫面：改以右緣對齊、寬度夾在視窗內。 */
+  right: 0;
+  left: auto;
   z-index: 20;
   display: block;
   width: max-content;
-  max-width: 40ch;
+  max-width: min(40ch, calc(100vw - 32px));
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);

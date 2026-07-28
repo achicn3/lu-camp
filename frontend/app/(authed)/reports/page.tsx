@@ -1549,7 +1549,11 @@ function formatMetricValue(key: string, raw: string | null): string {
   if (raw === null || raw === "") return "N/A";
   if (key === "delta_per_1000") {
     const n = Number(raw);
-    return Number.isNaN(n) ? "N/A" : `${Math.round(n).toLocaleString("zh-TW")} 元`;
+    if (Number.isNaN(n)) return "N/A";
+    // 專案金額規則為 ROUND_HALF_UP；JS 的 Math.round 對負數是 half-up-toward-zero
+    // （-1.5 → -1），會少報一元虧損。delta 可為負（方案賠錢），故需對稱處理。
+    const rounded = n < 0 ? -Math.round(-n) : Math.round(n);
+    return `${rounded.toLocaleString("zh-TW")} 元`;
   }
   return formatRate(raw);
 }
@@ -1560,9 +1564,10 @@ const METRIC_NOTES: Record<string, string> = {
   take_rate: "收購時，客人選購物金（而不是拿現金）的比例。越高代表方案越受歡迎。",
   avg_premium_rate:
     "選購物金時你多送了幾成。例：收購價 1,000 元、給 1,100 元購物金 → 10%。這是店家的成本。",
-  // 未兌付的購物金仍是店家欠客人的負債（客人隨時可能來用），不可說成「已經賺到」。
+  // 觀察期由 settings 的 beta_n_days 決定（預設 180 天），故不寫死「半年」。
+  // 另：未兌付的購物金仍是店家欠客人的負債（客人隨時可能來用），不可說成「已經賺到」。
   beta_retention:
-    "發出去的購物金，過了半年仍未被用掉的比例。比例越高，模型上對店家越有利；" +
+    "發出去的購物金，經過設定的觀察期後仍未被用掉的比例。比例越高，模型上對店家越有利；" +
     "但這些餘額在客人用掉之前仍算店家的負債，不是已入袋的錢。",
   excess_spend_rate: "客人用購物金結帳時，另外再掏現金的比例。越高代表購物金有帶動額外消費。",
   alpha_incremental:
@@ -1719,7 +1724,8 @@ function ReconciliationPanel() {
           <dd className={report.cached_total_trustworthy ? "rpt-ok" : "rpt-mismatch"}>
             {report.cached_total_trustworthy
               ? "正常"
-              : `不一致（${report.mismatches.length} 個帳戶，請聯絡工程）`}
+              : // mismatches 也含帳本鏈驗證的逐列異常（contact_id=-1），不等於帳戶數，故稱「筆」。
+                `不一致（${report.mismatches.length} 筆異常，請聯絡工程）`}
           </dd>
         </div>
       </dl>

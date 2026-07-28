@@ -348,7 +348,9 @@ class InventoryRepository:
             select(SerializedItem.name, func.count().label("uses"))
             .where(
                 SerializedItem.store_id == store_id,
-                SerializedItem.name.ilike(f"%{q}%"),
+                # autoescape：`%`／`_` 是 LIKE 萬用字元，未轉義時 q="%" 會回全部、
+                # 搜「100%」會誤中「100…」，與本端點的子字串語意不符。
+                SerializedItem.name.icontains(q, autoescape=True),
             )
             .group_by(SerializedItem.name)
             .order_by(func.count().desc(), SerializedItem.name)

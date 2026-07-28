@@ -1,12 +1,15 @@
 // UX 用語與提示煙霧（報表說明 tooltip／效益指標備註／對帳收斂／收購品名提示＋選定標籤）。
 // 需：backend:8000、frontend:3000、已 seed dev-manager。截圖輸出 SMOKE_SHOTS。
 import { mkdirSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
-const SHOTS = process.env.SMOKE_SHOTS ?? "/home/test/tmp/lu-camp-uxfix/wording";
+// 不寫死家目錄：他人 checkout 下會 EACCES/ENOENT（Codex P3）。
+const SHOTS =
+  process.env.SMOKE_SHOTS ?? join(homedir() || tmpdir(), "tmp", "lu-camp-uxfix", "wording");
 const USER = process.env.SMOKE_USERNAME ?? "dev-manager";
 const PASS = process.env.SEED_USER_PASSWORD ?? "dev-test-123456";
 
@@ -120,6 +123,21 @@ try {
   const chipsAfter = await page.locator('[data-testid="combo-selected"]').count();
   ok("清除品牌後型號標籤同步消失（不留假的已選狀態）", chipsAfter === 0, `剩 ${chipsAfter} 個`);
   await page.screenshot({ path: join(SHOTS, "06-brand-cleared.png"), fullPage: true });
+
+  // ── 5) 估計轉售價 → 上架售價一鍵帶入（兩者常相同，省去重複輸入）──
+  await page.locator('input[aria-label="估計轉售價"]').first().fill("2500");
+  await page.waitForTimeout(300);
+  const fillBtn = page.locator('button:has-text("同估計轉售價")').first();
+  ok("出現「同估計轉售價」快捷", (await fillBtn.count()) > 0);
+  await fillBtn.click();
+  const listed = await page.locator('input[aria-label="上架售價"]').first().inputValue();
+  ok("一鍵帶入後上架售價＝估計轉售價", listed === "2500", `上架售價=${listed}`);
+  const resaleHint = await page
+    .locator('input[aria-label="估計轉售價"]')
+    .first()
+    .evaluate((el) => el.closest("label")?.querySelector(".acq-hint-icon")?.getAttribute("title") ?? "");
+  ok("估計轉售價有說明（點出不會存入系統）", resaleHint.includes("不會存入"), resaleHint.slice(0, 20) + "…");
+  await page.screenshot({ path: join(SHOTS, "07-resale-fill.png"), fullPage: true });
 
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 

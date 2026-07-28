@@ -464,7 +464,15 @@ function ItemRowCard({
           </select>
         </label>
         <label className="field">
-          <span className="field-label">估計轉售價（鑑價輔助）</span>
+          <span className="field-label">
+            估計轉售價（鑑價輔助）
+            <span
+              className="acq-hint-icon"
+              title="你評估這件商品大概能賣多少。系統據此算出「建議最高收購成本」，避免收太貴。這個數字只用於試算，不會存入系統。"
+            >
+              ⓘ
+            </span>
+          </span>
           <input
             aria-label="估計轉售價"
             inputMode="numeric"
@@ -506,6 +514,12 @@ function ItemRowCard({
       <label className="field">
         <span className="field-label">
           上架售價
+          <span
+            className="acq-hint-icon"
+            title="實際掛牌販售的價格，會存入系統。常與估計轉售價相同，可按右方一鍵帶入。"
+          >
+            ⓘ
+          </span>
           {category !== null && cost !== null && (
             <button
               type="button"
@@ -519,6 +533,17 @@ function ItemRowCard({
               }
             >
               套用建議（目標毛利 {category.target_margin_pct}%）
+            </button>
+          )}
+          {/* 估計轉售價是鑑價輔助（用來反推最高可收多少），上架售價才是實際掛牌價；
+              兩者常常相同，給一鍵帶入省去重複輸入，但仍保留「刻意決定」這一步。 */}
+          {resale !== null && resale > 0 && (
+            <button
+              type="button"
+              className="acq-link"
+              onClick={() => onChange({ listedPrice: String(resale) })}
+            >
+              同估計轉售價（{formatNtd(resale)}）
             </button>
           )}
         </span>
