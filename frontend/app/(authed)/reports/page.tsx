@@ -17,6 +17,7 @@ import {
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
+import { InfoTip } from "@/features/shared/InfoTip";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDate, formatTaipeiDateTime } from "@/lib/datetime";
@@ -85,33 +86,6 @@ const TIP_OUTSTANDING =
   "已發出但客人還沒用掉的購物金總額——這是店家欠客人的金額（負債），日後客人消費時會用掉。";
 
 // -- Shared sub-components --
-
-/** 指標說明的 ⓘ：滑鼠停留看 title、點擊/鍵盤展開說明。
- *
- * 原本是不可 focus 的 `<span title>`，在觸控（POS 螢幕）與鍵盤操作下等於看不到說明。
- */
-function InfoTip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="rpt-tip-wrap">
-      <button
-        type="button"
-        className="rpt-tip"
-        title={text}
-        aria-label={`說明：${text}`}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⓘ
-      </button>
-      {open && (
-        <span role="tooltip" className="rpt-tip-pop">
-          {text}
-        </span>
-      )}
-    </span>
-  );
-}
 
 function MoneyText({ value }: { value: string | null | undefined }) {
   if (value === null || value === undefined) return <span className="money">N/A</span>;
@@ -1553,7 +1527,9 @@ function formatMetricValue(key: string, raw: string | null): string {
     // 專案金額規則為 ROUND_HALF_UP；JS 的 Math.round 對負數是 half-up-toward-zero
     // （-1.5 → -1），會少報一元虧損。delta 可為負（方案賠錢），故需對稱處理。
     const rounded = n < 0 ? -Math.round(-n) : Math.round(n);
-    return `${rounded.toLocaleString("zh-TW")} 元`;
+    // -0.4 會得到 JS 負零，toLocaleString 印成「-0 元」，讓接近打平看起來像虧損。
+    const normalized = rounded === 0 ? 0 : rounded;
+    return `${normalized.toLocaleString("zh-TW")} 元`;
   }
   return formatRate(raw);
 }

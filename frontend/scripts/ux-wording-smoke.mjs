@@ -41,7 +41,7 @@ try {
   // ── 1) 今日營運：營收三指標有 ⓘ 說明，且說明是白話（含實例）──
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
   await page.waitForSelector("text=營業額", { timeout: 15000 });
-  const tipTitles = await page.$$eval(".rpt-tip", (els) => els.map((e) => e.getAttribute("title")));
+  const tipTitles = await page.$$eval(".info-tip", (els) => els.map((e) => e.getAttribute("title")));
   const turnoverTip = tipTitles.find((t) => t && t.includes("收銀機"));
   const recognizedTip = tipTitles.find((t) => t && t.includes("真正屬於店家"));
   ok("營業額有白話說明", Boolean(turnoverTip), (turnoverTip ?? "").slice(0, 24) + "…");
@@ -132,11 +132,15 @@ try {
   await fillBtn.click();
   const listed = await page.locator('input[aria-label="上架售價"]').first().inputValue();
   ok("一鍵帶入後上架售價＝估計轉售價", listed === "2500", `上架售價=${listed}`);
-  const resaleHint = await page
-    .locator('input[aria-label="估計轉售價"]')
-    .first()
-    .evaluate((el) => el.closest("label")?.querySelector(".acq-hint-icon")?.getAttribute("title") ?? "");
-  ok("估計轉售價有說明（點出不會存入系統）", resaleHint.includes("不會存入"), resaleHint.slice(0, 20) + "…");
+  const acqTips = await page.$$eval(".info-tip", (els) =>
+    els.map((e) => e.getAttribute("title") ?? ""),
+  );
+  const resaleHint = acqTips.find((t) => t.includes("不會存入")) ?? "";
+  ok("估計轉售價有說明（點出不會存入系統）", resaleHint !== "", resaleHint.slice(0, 20) + "…");
+  // 觸控/鍵盤可用：說明是可點擊的按鈕，點擊後展開（非僅 hover 的 title）。
+  await page.locator(".info-tip").first().click();
+  const popCount = await page.locator('[role="tooltip"]').count();
+  ok("說明可點擊展開（觸控/鍵盤可用）", popCount > 0, `${popCount} 個泡泡`);
   await page.screenshot({ path: join(SHOTS, "07-resale-fill.png"), fullPage: true });
 
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));

@@ -1629,25 +1629,11 @@ body {
 .rpt-intro b {
   color: var(--accent);
 }
-/* 收購欄位的說明圖示：沿用報表 ⓘ 的視覺語彙，滑鼠停留顯示 title。 */
-.acq-hint-icon {
-  display: inline-block;
-  margin-left: 4px;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
-  text-align: center;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 11px;
-  cursor: help;
-}
-.rpt-tip-wrap {
+.info-tip-wrap {
   position: relative;
   display: inline-block;
 }
-.rpt-tip {
+.info-tip {
   display: inline-block;
   margin-left: 4px;
   padding: 0;
@@ -1663,12 +1649,12 @@ body {
   cursor: help;
 }
 /* 觸控/鍵盤：點擊或 Enter 展開，不再只靠滑鼠 hover 的原生 title。 */
-.rpt-tip-pop {
+.info-tip-pop {
   position: absolute;
   top: calc(100% + 6px);
-  /* 靠右卡片的說明若一律向右展開會超出畫面：改以右緣對齊、寬度夾在視窗內。 */
-  right: 0;
-  left: auto;
+  /* 預設向右展開；靠視窗右半的按鈕由 --end 改為向左，兩側都不會被切在畫面外。 */
+  left: 0;
+  right: auto;
   z-index: 20;
   display: block;
   width: max-content;
@@ -1684,6 +1670,10 @@ body {
   line-height: 1.5;
   white-space: normal;
   text-align: left;
+}
+.info-tip-pop--end {
+  left: auto;
+  right: 0;
 }
 
 /* ── 報表：經營洞察（#8） ── */

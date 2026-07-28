@@ -30,6 +30,7 @@ import {
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
 import { isValidNationalId } from "@/features/member/national-id";
+import { InfoTip } from "@/features/shared/InfoTip";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { VoidAcquisitionSection } from "@/features/acquisition/VoidAcquisitionSection";
 import { VoidConfirmDialog } from "@/features/acquisition/VoidConfirmDialog";
@@ -466,12 +467,7 @@ function ItemRowCard({
         <label className="field">
           <span className="field-label">
             估計轉售價（鑑價輔助）
-            <span
-              className="acq-hint-icon"
-              title="你評估這件商品大概能賣多少。系統據此算出「建議最高收購成本」，避免收太貴。這個數字只用於試算，不會存入系統。"
-            >
-              ⓘ
-            </span>
+            <InfoTip text="你評估這件商品大概能賣多少。系統據此算出「建議最高收購成本」，避免收太貴。這個數字只用於試算，不會存入系統。" />
           </span>
           <input
             aria-label="估計轉售價"
@@ -514,12 +510,7 @@ function ItemRowCard({
       <label className="field">
         <span className="field-label">
           上架售價
-          <span
-            className="acq-hint-icon"
-            title="實際掛牌販售的價格，會存入系統。常與估計轉售價相同，可按右方一鍵帶入。"
-          >
-            ⓘ
-          </span>
+          <InfoTip text="實際掛牌販售的價格，會存入系統。常與估計轉售價相同，可按右方一鍵帶入。" />
           {category !== null && cost !== null && (
             <button
               type="button"
@@ -918,10 +909,10 @@ export default function AcquisitionPage() {
       });
       const terminal = terminalResponse.data;
       if (!terminal?.paired_kiosk) {
-        throw new Error("請先將此 POS 櫃檯與顧客顯示裝置配對");
+        throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
       }
       if (!terminal.paired_kiosk.online) {
-        throw new Error("顧客顯示裝置目前離線，無法進行收購簽署");
+        throw new Error("顧客螢幕目前離線，無法進行收購簽署");
       }
       const { data, error } = await api.POST("/api/v1/signing/tasks", {
         body: {
@@ -1140,7 +1131,7 @@ export default function AcquisitionPage() {
               <p>
                 {signTask.data?.status === "SIGNING"
                   ? "客人正在核對內容並簽署…"
-                  : "已送至顧客顯示裝置，等待客人開啟簽署畫面…"}
+                  : "已送至顧客螢幕，等待客人開啟簽署畫面…"}
               </p>
               <button
                 type="button"
