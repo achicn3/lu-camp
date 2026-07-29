@@ -975,8 +975,11 @@ export default function AcquisitionPage() {
     submit.mutate();
   }
 
-  function patchRow(index: number, patch: Partial<Row>) {
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  // 以 rowKey（非 index）定位：品牌/型號的「建立」是非同步的，若在等待期間刪掉前面的列，
+  // 捕獲了舊 index 的回呼會把回來的 id 寫進「現在佔用該 index」的別列——品牌/型號為選填，
+  // 這種錯置不會被驗證擋下，會靜默把商品資訊掛到錯的品項上。
+  function patchRow(rowKey: string, patch: Partial<Row>) {
+    setRows((prev) => prev.map((r) => (r.rowKey === rowKey ? { ...r, ...patch } : r)));
   }
 
   return (
@@ -1029,8 +1032,10 @@ export default function AcquisitionPage() {
               index={i}
               row={row}
               categories={categoriesQuery.data ?? []}
-              onChange={(patch) => patchRow(i, patch)}
-              onRemove={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+              onChange={(patch) => patchRow(row.rowKey, patch)}
+              onRemove={() =>
+                setRows((prev) => prev.filter((r) => r.rowKey !== row.rowKey))
+              }
               refreshCategories={() =>
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })
               }

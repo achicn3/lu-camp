@@ -165,21 +165,31 @@ try {
   }
   ok("窄螢幕下說明泡泡不溢出視窗（四向）", overflowed === 0, `檢查 ${tipCount} 個，溢出 ${overflowed} 個`);
 
-  // 靠近視窗底部的說明應往上翻，而非被切在下緣。
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const lastTip = tips.nth((await tips.count()) - 1);
-  await lastTip.scrollIntoViewIfNeeded();
-  await page.evaluate(() => window.scrollBy(0, -200)); // 讓該 ⓘ 落在視窗偏下方
-  await page.waitForTimeout(200);
-  await lastTip.click();
-  await page.waitForTimeout(200);
-  const lastBox = await page.locator('[role="tooltip"]').first().boundingBox();
+  // 靠底部的說明必須「往上翻」。前一版只驗「沒溢出」，一個永遠向下展開的實作只要泡泡夠小
+  // 也會通過；且 Playwright 的 click() 會自動把元素捲進畫面，位置無法保證（Codex 補審）。
+  // 改為：明確把某個 ⓘ 釘在視窗底部附近，再斷言泡泡底緣不低於按鈕頂緣（＝確實在上方）。
+  const bottomTip = tips.first();
+  const preBox = await bottomTip.boundingBox();
+  // 直接把視窗高度縮到「按鈕下方只剩 24px」：靠捲動不可靠（頁面可能已到底，且 Playwright
+  // 的 click 會自動捲回可見），而泡泡僅約 40px 高，留太多空間根本不會觸發翻轉。
+  const shortHeight = Math.round((preBox?.y ?? 0) + (preBox?.height ?? 0) + 24);
+  await page.setViewportSize({ width: 375, height: shortHeight });
+  await page.waitForTimeout(250);
+  const anchorBox = await bottomTip.boundingBox();
+  await bottomTip.click({ force: true });
+  await page.waitForTimeout(250);
+  const popBox = await page.locator('[role="tooltip"]').first().boundingBox();
+  const flippedUp =
+    popBox !== null && anchorBox !== null && popBox.y + popBox.height <= anchorBox.y + 1;
+  const inViewport = popBox !== null && popBox.y >= 0 && popBox.y + popBox.height <= shortHeight;
   ok(
-    "靠底部的說明不被切在畫面下緣",
-    lastBox !== null && lastBox.y >= 0 && lastBox.y + lastBox.height <= 800,
-    lastBox ? `y=${Math.round(lastBox.y)} h=${Math.round(lastBox.height)}` : "無泡泡",
+    "靠底部的說明往上翻且完整可見",
+    flippedUp && inViewport,
+    popBox && anchorBox
+      ? `泡泡底=${Math.round(popBox.y + popBox.height)} ⓘ頂=${Math.round(anchorBox.y)} 視窗高=${shortHeight}`
+      : "無泡泡",
   );
-  await lastTip.click();
+  await bottomTip.click({ force: true });
   await tips.first().click();
   await page.screenshot({ path: join(SHOTS, "08-narrow-tooltip.png"), fullPage: false });
   await page.setViewportSize({ width: 1440, height: 1100 });
