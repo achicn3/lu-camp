@@ -41,9 +41,15 @@ export function InfoTip({ text }: { text: string }) {
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
+    // 版面變動（非捲動、非視窗縮放）也要跟上：例如開著說明時刪掉上方的鑑價列，該列因為
+    // 有穩定 key 不會重新掛載，fixed 座標若不重算，泡泡就會停在原地、脫離它的按鈕。
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
+    observer?.observe(document.body);
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      observer?.disconnect();
     };
   }, [open, place]);
 

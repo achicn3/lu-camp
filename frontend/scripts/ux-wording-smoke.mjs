@@ -194,6 +194,38 @@ try {
   await page.screenshot({ path: join(SHOTS, "08-narrow-tooltip.png"), fullPage: false });
   await page.setViewportSize({ width: 1440, height: 1100 });
 
+  // ── 7) 版面變動（刪除上方列）時，開著的說明必須跟著移動而非脫離按鈕 ──
+  await page.goto(`${BASE}/acquisition`, { waitUntil: "networkidle" });
+  await page.waitForSelector('input[aria-label="品名"]', { timeout: 15000 });
+  await page.locator('button:has-text("新增一列")').click();
+  await page.waitForTimeout(300);
+  const secondRowTip = page.locator(".acq-row").nth(1).locator(".info-tip").first();
+  await secondRowTip.click();
+  await page.waitForTimeout(250);
+  // 貼齊＝泡泡緊鄰按鈕的上緣或下緣（翻轉方向可能因空間而改變，不能假設固定在下方）。
+  const attachGap = (anchor, pop) =>
+    anchor === null || pop === null
+      ? null
+      : Math.round(
+          Math.min(
+            Math.abs(pop.y - (anchor.y + anchor.height)), // 在下方
+            Math.abs(anchor.y - (pop.y + pop.height)), // 在上方
+          ),
+        );
+  const gapBefore = attachGap(await secondRowTip.boundingBox(), await page.locator('[role="tooltip"]').first().boundingBox());
+  // 刪掉第一列：第二列往上移，但它有穩定 rowKey 故不會重新掛載
+  await page.locator(".acq-row").first().locator('button:has-text("移除")').click();
+  await page.waitForTimeout(400);
+  const afterAnchor = await page.locator(".acq-row").first().locator(".info-tip").first().boundingBox();
+  const afterPop = await page.locator('[role="tooltip"]').first().boundingBox();
+  const gapAfter = attachGap(afterAnchor, afterPop);
+  ok(
+    "刪除上方列後說明仍貼齊其按鈕（未脫離）",
+    afterPop === null || (gapAfter !== null && gapAfter <= 10),
+    `移動前貼齊距=${gapBefore} 移動後=${gapAfter}（脫離時會是數十至上百）`,
+  );
+  await page.screenshot({ path: join(SHOTS, "09-tooltip-after-row-remove.png"), fullPage: false });
+
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 
   console.log(`\n結果：${pass}/${pass + fail} 通過`);

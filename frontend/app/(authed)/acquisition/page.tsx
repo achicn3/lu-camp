@@ -1282,6 +1282,7 @@ function BulkLotForm({
             })
           }
           placeholder="選擇或新增品牌"
+          selectedId={lot.brandId}
           onChange={(o) => patch({ brandId: o?.id ?? null })}
         />
         <CreatableCombobox
@@ -1300,6 +1301,7 @@ function BulkLotForm({
             })
           }
           placeholder="選擇或新增分類"
+          selectedId={lot.categoryId}
           onChange={(o) => patch({ categoryId: o?.id ?? null })}
         />
         <label className="field">
