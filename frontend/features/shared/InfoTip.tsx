@@ -9,6 +9,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 const VIEWPORT_MARGIN = 8;
+const GAP = 6;  // 泡泡與觸發按鈕的間距
 
 export function InfoTip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -23,8 +24,14 @@ export function InfoTip({ text }: { text: string }) {
     const anchor = button.getBoundingClientRect();
     const box = pop.getBoundingClientRect();
     const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - box.width - VIEWPORT_MARGIN);
+    // 垂直也要夾：靠近視窗底部時往上翻，否則說明會被切在畫面下緣（fixed 定位不會自動避讓）。
+    const below = anchor.bottom + GAP;
+    const fitsBelow = below + box.height <= window.innerHeight - VIEWPORT_MARGIN;
+    const top = fitsBelow
+      ? below
+      : Math.max(VIEWPORT_MARGIN, anchor.top - GAP - box.height);
     setPos({
-      top: anchor.bottom + 6,
+      top,
       left: Math.min(Math.max(anchor.left, VIEWPORT_MARGIN), maxLeft),
     });
   }, []);

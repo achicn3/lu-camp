@@ -154,10 +154,32 @@ try {
     await tips.nth(i).click();
     await page.waitForTimeout(150);
     const box = await page.locator('[role="tooltip"]').first().boundingBox();
-    if (box && (box.x < 0 || box.x + box.width > 375)) overflowed += 1;
+    // 四個方向都要驗：先前只檢查左右，漏掉了「靠近底部時往下溢出」（Codex 補審抓到）。
+    if (
+      box &&
+      (box.x < 0 || box.x + box.width > 375 || box.y < 0 || box.y + box.height > 800)
+    ) {
+      overflowed += 1;
+    }
     await tips.nth(i).click(); // 收起
   }
-  ok("窄螢幕下說明泡泡不溢出視窗", overflowed === 0, `檢查 ${tipCount} 個，溢出 ${overflowed} 個`);
+  ok("窄螢幕下說明泡泡不溢出視窗（四向）", overflowed === 0, `檢查 ${tipCount} 個，溢出 ${overflowed} 個`);
+
+  // 靠近視窗底部的說明應往上翻，而非被切在下緣。
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const lastTip = tips.nth((await tips.count()) - 1);
+  await lastTip.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, -200)); // 讓該 ⓘ 落在視窗偏下方
+  await page.waitForTimeout(200);
+  await lastTip.click();
+  await page.waitForTimeout(200);
+  const lastBox = await page.locator('[role="tooltip"]').first().boundingBox();
+  ok(
+    "靠底部的說明不被切在畫面下緣",
+    lastBox !== null && lastBox.y >= 0 && lastBox.y + lastBox.height <= 800,
+    lastBox ? `y=${Math.round(lastBox.y)} h=${Math.round(lastBox.height)}` : "無泡泡",
+  );
+  await lastTip.click();
   await tips.first().click();
   await page.screenshot({ path: join(SHOTS, "08-narrow-tooltip.png"), fullPage: false });
   await page.setViewportSize({ width: 1440, height: 1100 });

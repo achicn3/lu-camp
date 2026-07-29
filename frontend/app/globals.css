@@ -1652,7 +1652,9 @@ body {
 .info-tip-pop {
   /* fixed + JS 量測後夾進視窗：absolute 加單向對齊在窄螢幕仍會溢出。 */
   position: fixed;
-  z-index: 60;
+  /* 需高於頁面內容，但**低於** sticky header(40)／導覽遮罩(50)／對話框(1000)——
+     否則開著說明時拉出選單，過期的泡泡會蓋在遮罩上面。 */
+  z-index: 30;
   display: block;
   width: max-content;
   max-width: min(40ch, calc(100vw - 16px));
