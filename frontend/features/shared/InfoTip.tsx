@@ -38,19 +38,22 @@ export function InfoTip({ text }: { text: string }) {
 
   useLayoutEffect(() => {
     if (!open) return undefined;
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    // 版面變動（非捲動、非視窗縮放）也要跟上：例如開著說明時刪掉上方的鑑價列，該列因為
-    // 有穩定 key 不會重新掛載，fixed 座標若不重算，泡泡就會停在原地、脫離它的按鈕。
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => place());
-    observer?.observe(document.body);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-      observer?.disconnect();
+    // 開啟期間以 rAF 追蹤按鈕的實際座標：捲動、視窗縮放、以及**不改變 body 尺寸的版面位移**
+    // （例如刪掉上方鑑價列時，若內容不足、頁面高度由 min-height:100vh 決定，body 尺寸不變，
+    // 觀察 body 的 ResizeObserver 不會觸發）一律涵蓋。只在泡泡開著時執行，成本可忽略。
+    let frame = 0;
+    let lastAnchor = "";
+    const tick = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      const key = rect ? `${Math.round(rect.x)},${Math.round(rect.y)}` : "";
+      if (key !== lastAnchor) {
+        lastAnchor = key;
+        place();
+      }
+      frame = requestAnimationFrame(tick);
     };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [open, place]);
 
   return (

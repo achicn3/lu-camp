@@ -219,12 +219,44 @@ try {
   const afterAnchor = await page.locator(".acq-row").first().locator(".info-tip").first().boundingBox();
   const afterPop = await page.locator('[role="tooltip"]').first().boundingBox();
   const gapAfter = attachGap(afterAnchor, afterPop);
+  // 不可把「泡泡不見了」當成通過：若穩定 rowKey 退化導致該列被重新掛載，泡泡會消失、
+  // boundingBox() 回 null——那並不符合本斷言宣稱的「仍保持開啟且貼齊」（Codex 補審）。
   ok(
     "刪除上方列後說明仍貼齊其按鈕（未脫離）",
-    afterPop === null || (gapAfter !== null && gapAfter <= 10),
-    `移動前貼齊距=${gapBefore} 移動後=${gapAfter}（脫離時會是數十至上百）`,
+    afterPop !== null && gapAfter !== null && gapAfter <= 10,
+    afterPop === null
+      ? "泡泡在刪除列後消失（列被重新掛載？）"
+      : `移動前貼齊距=${gapBefore} 移動後=${gapAfter}（脫離時會是數十至上百）`,
   );
   await page.screenshot({ path: join(SHOTS, "09-tooltip-after-row-remove.png"), fullPage: false });
+
+  // 同一情境但**頁面高度不由內容決定**（視窗夠高，min-height:100vh 主導）：此時刪除列不會
+  // 改變 body 尺寸，只觀察 body 的方案會失效（Codex 補審指出）。用超高視窗重跑一次。
+  await page.setViewportSize({ width: 1440, height: 3200 });
+  await page.goto(`${BASE}/acquisition`, { waitUntil: "networkidle" });
+  await page.waitForSelector('input[aria-label="品名"]', { timeout: 15000 });
+  await page.locator('button:has-text("新增一列")').click();
+  await page.waitForTimeout(300);
+  const bodyBefore = await page.evaluate(() => document.body.getBoundingClientRect().height);
+  const tallTip = page.locator(".acq-row").nth(1).locator(".info-tip").first();
+  await tallTip.click();
+  await page.waitForTimeout(250);
+  await page.locator(".acq-row").first().locator('button:has-text("移除")').click();
+  await page.waitForTimeout(500);
+  const bodyAfter = await page.evaluate(() => document.body.getBoundingClientRect().height);
+  const tallAnchor = await page.locator(".acq-row").first().locator(".info-tip").first().boundingBox();
+  const tallPop = await page.locator('[role="tooltip"]').first().boundingBox();
+  const tallGap = attachGap(tallAnchor, tallPop);
+  // 前提：body 尺寸必須真的沒變，否則這條測不到「不依賴 body 尺寸」這件事。
+  const bodyUnchanged = Math.abs(bodyBefore - bodyAfter) < 1;
+  ok(
+    "頁面高度不變時說明仍跟隨（不依賴 body 尺寸變化）",
+    bodyUnchanged && tallPop !== null && tallGap !== null && tallGap <= 10,
+    bodyUnchanged
+      ? `body 維持 ${Math.round(bodyAfter)}、貼齊距=${tallGap}`
+      : `情境未成立：body ${Math.round(bodyBefore)}→${Math.round(bodyAfter)}（視窗需再加高）`,
+  );
+  await page.setViewportSize({ width: 1440, height: 1100 });
 
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 
