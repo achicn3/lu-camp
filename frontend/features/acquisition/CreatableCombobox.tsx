@@ -38,7 +38,10 @@ export function CreatableCombobox({
   const [lastSelectedId, setLastSelectedId] = useState<number | null>(selectedId);
   if (selectedId !== lastSelectedId) {
     setLastSelectedId(selectedId);
-    if (selectedId === null && selected !== null) {
+    // 只處理「變成 null」不夠：外部也可能換成**另一個** id（例如刪除前面的鑑價列後，
+    // 倖存列重用了同一個元件實例）。此時本地標籤仍是舊選項的名稱，畫面顯示 A、送出卻是 B。
+    // 本地只有目前 option 的名稱，無從得知新 id 的名稱 → 一律清掉，回到可重選狀態。
+    if (selected !== null && selectedId !== selected.id) {
       setSelected(null);
       setText("");
     }

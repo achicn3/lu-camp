@@ -2,34 +2,69 @@
 // 指標／欄位說明的 ⓘ：滑鼠停留看 title、點擊或鍵盤 Enter 展開說明。
 //
 // 為何不是單純的 `<span title>`：門市用觸控 POS 螢幕，且鍵盤操作者無法 focus 到 span，
-// 原生 title 等於只有滑鼠使用者看得到（Codex）。
+// 原生 title 等於只有滑鼠使用者看得到。
 //
-// 定位：靠視窗左半的按鈕向右展開、右半向左展開，避免長說明被切在畫面外——單向固定對齊
-// （不論 left:0 或 right:0）都只會把溢出問題換到另一邊。
-import { useState } from "react";
+// 定位：展開後**實際量測**泡泡尺寸再夾進視窗（fixed 座標）。只依按鈕落在左半/右半選展開
+// 方向並不夠——窄螢幕上泡泡可能接近整個視窗寬，往哪邊展開都會溢出。
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+
+const VIEWPORT_MARGIN = 8;
 
 export function InfoTip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const [alignEnd, setAlignEnd] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLSpanElement>(null);
+
+  const place = useCallback(() => {
+    const button = buttonRef.current;
+    const pop = popRef.current;
+    if (!button || !pop) return;
+    const anchor = button.getBoundingClientRect();
+    const box = pop.getBoundingClientRect();
+    const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - box.width - VIEWPORT_MARGIN);
+    setPos({
+      top: anchor.bottom + 6,
+      left: Math.min(Math.max(anchor.left, VIEWPORT_MARGIN), maxLeft),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, place]);
 
   return (
     <span className="info-tip-wrap">
       <button
+        ref={buttonRef}
         type="button"
         className="info-tip"
         title={text}
         aria-label={`說明：${text}`}
         aria-expanded={open}
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setAlignEnd(rect.left > window.innerWidth / 2);
+        onClick={() => {
+          setPos(null); // 量測完成前不定位，避免先閃在錯的位置
           setOpen((v) => !v);
         }}
       >
         ⓘ
       </button>
       {open && (
-        <span role="tooltip" className={`info-tip-pop${alignEnd ? " info-tip-pop--end" : ""}`}>
+        <span
+          ref={popRef}
+          role="tooltip"
+          className="info-tip-pop"
+          style={
+            pos === null ? { visibility: "hidden", top: 0, left: 0 } : { top: pos.top, left: pos.left }
+          }
+        >
           {text}
         </span>
       )}

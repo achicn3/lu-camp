@@ -67,8 +67,11 @@ function detail(error: unknown): string | null {
   return null;
 }
 
-function emptyItem(): ItemDraft & { estimatedResale: string } {
+function emptyItem(): ItemDraft & { estimatedResale: string; rowKey: string } {
   return {
+    // 穩定的列識別：用 index 當 React key 時，刪除中間列會讓後面的列沿用同一個元件實例，
+    // 連帶把前一列的內部狀態（如已選標籤）帶過去。不進 API payload（逐欄挑選）。
+    rowKey: newIdempotencyKey(),
     name: "",
     grade: "",
     categoryId: null,
@@ -94,7 +97,7 @@ function emptyLot(): LotDraft {
   };
 }
 
-type Row = ItemDraft & { estimatedResale: string };
+type Row = ItemDraft & { estimatedResale: string; rowKey: string };
 
 // ── 賣方/寄售人 ──
 function SellerSection({
@@ -1021,7 +1024,7 @@ export default function AcquisitionPage() {
         <div className="acq-rows">
           {rows.map((row, i) => (
             <ItemRowCard
-              key={`${formKey}-${i}`}
+              key={row.rowKey}
               type={type}
               index={i}
               row={row}

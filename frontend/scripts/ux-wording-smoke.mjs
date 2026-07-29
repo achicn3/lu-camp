@@ -143,6 +143,25 @@ try {
   ok("說明可點擊展開（觸控/鍵盤可用）", popCount > 0, `${popCount} 個泡泡`);
   await page.screenshot({ path: join(SHOTS, "07-resale-fill.png"), fullPage: true });
 
+  // ── 6) 窄螢幕（手機/直式平板）說明泡泡不得溢出視窗 ──
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await page.waitForSelector(".info-tip", { timeout: 15000 });
+  const tips = page.locator(".info-tip");
+  const tipCount = Math.min(await tips.count(), 4);
+  let overflowed = 0;
+  for (let i = 0; i < tipCount; i += 1) {
+    await tips.nth(i).click();
+    await page.waitForTimeout(150);
+    const box = await page.locator('[role="tooltip"]').first().boundingBox();
+    if (box && (box.x < 0 || box.x + box.width > 375)) overflowed += 1;
+    await tips.nth(i).click(); // 收起
+  }
+  ok("窄螢幕下說明泡泡不溢出視窗", overflowed === 0, `檢查 ${tipCount} 個，溢出 ${overflowed} 個`);
+  await tips.first().click();
+  await page.screenshot({ path: join(SHOTS, "08-narrow-tooltip.png"), fullPage: false });
+  await page.setViewportSize({ width: 1440, height: 1100 });
+
   ok("無 JS 錯誤", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
 
   console.log(`\n結果：${pass}/${pass + fail} 通過`);

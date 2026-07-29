@@ -1650,15 +1650,12 @@ body {
 }
 /* 觸控/鍵盤：點擊或 Enter 展開，不再只靠滑鼠 hover 的原生 title。 */
 .info-tip-pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  /* 預設向右展開；靠視窗右半的按鈕由 --end 改為向左，兩側都不會被切在畫面外。 */
-  left: 0;
-  right: auto;
-  z-index: 20;
+  /* fixed + JS 量測後夾進視窗：absolute 加單向對齊在窄螢幕仍會溢出。 */
+  position: fixed;
+  z-index: 60;
   display: block;
   width: max-content;
-  max-width: min(40ch, calc(100vw - 32px));
+  max-width: min(40ch, calc(100vw - 16px));
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1670,10 +1667,6 @@ body {
   line-height: 1.5;
   white-space: normal;
   text-align: left;
-}
-.info-tip-pop--end {
-  left: auto;
-  right: 0;
 }
 
 /* ── 報表：經營洞察（#8） ── */
