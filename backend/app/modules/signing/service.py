@@ -34,7 +34,6 @@ from app.modules.signing.schemas import (
 from app.shared.enums import (
     CartSessionStatus,
     PayoutMethod,
-    SaleInvoiceStatus,
     SaleStatus,
     SignatureTaskKind,
     SignatureTaskStatus,
@@ -425,7 +424,7 @@ class SigningService:
             raise SignatureContentMismatch(f"找不到銷售 {ref_id}，無法推送簽收")
         if sale.buyer_contact_id != contact_id:
             raise SignatureContentMismatch("簽收對象與該銷售的買方不符")
-        if sale.invoice_status is SaleInvoiceStatus.VOID:
+        if sale.status is SaleStatus.VOIDED:
             raise SignatureContentMismatch("已作廢的銷售不可簽收")
         if sale.status is SaleStatus.RETURNED or (
             await ReturnsService(self._session).has_returns_for_sale(store_id, ref_id)

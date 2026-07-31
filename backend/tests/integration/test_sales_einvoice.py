@@ -28,9 +28,11 @@ from app.shared.enums import (
     EInvoiceMessageType,
     Grade,
     InvoiceStatus,
+    InvoiceVoidReason,
     OwnershipType,
     SaleInvoiceStatus,
     SaleLineType,
+    SaleStatus,
     UploadStatus,
     UserRole,
 )
@@ -162,10 +164,11 @@ async def test_void_sale_voids_pending_invoice(db_session: AsyncSession) -> None
 
     await svc.void_sale(sale, clerk_id)
 
-    assert sale.invoice_status is SaleInvoiceStatus.VOID
+    assert sale.status is SaleStatus.VOIDED  # 銷售作廢記在 sale.status
     invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale.id))
     assert invoice is not None
     assert invoice.status is InvoiceStatus.VOID  # 待送發票被中止，drop_pending 將拒絕
+    assert invoice.void_reason is InvoiceVoidReason.SALE_VOID  # 作廢原因可分辨
 
 
 async def test_checkout_no_invoice_when_disabled(db_session: AsyncSession) -> None:

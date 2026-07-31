@@ -61,6 +61,7 @@ function timeLabel(iso: string): string {
 const SALE_STATUS_LABELS: Record<string, string> = {
   COMPLETED: "已完成",
   RETURNED: "已退貨",
+  VOIDED: "已作廢",
 };
 
 function VoidConfirmDialog({
@@ -604,7 +605,9 @@ export default function SalesPage() {
           </thead>
           <tbody>
             {rows.map((sale) => {
-              const voided = sale.invoice_status === "VOID";
+              // 「這筆銷售是否作廢」看 sale.status——invoice_status 是**發票**的狀態，
+              // 未啟用電子發票時根本沒有發票，兩者語意不同（見 ADR-013）。
+              const voided = sale.status === "VOIDED";
               const returned = sale.status === "RETURNED";
               return (
                 <tr key={sale.id}>

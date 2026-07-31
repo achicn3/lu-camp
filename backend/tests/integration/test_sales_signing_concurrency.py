@@ -28,7 +28,12 @@ from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import SaleInvoiceStatus, SignatureTaskKind, SignatureTaskStatus, UserRole
+from app.shared.enums import (
+    SaleStatus,
+    SignatureTaskKind,
+    SignatureTaskStatus,
+    UserRole,
+)
 from app.shared.exceptions import SignatureTaskInvalidated
 from tests.integration.customer_display_helpers import (
     delete_customer_display_rows,
@@ -138,7 +143,7 @@ async def test_void_in_progress_serializes_ack_sign() -> None:
         async with sm() as void_s:
             locked = await void_s.scalar(select(Sale).where(Sale.id == sale_id).with_for_update())
             assert locked is not None
-            locked.invoice_status = SaleInvoiceStatus.VOID
+            locked.status = SaleStatus.VOIDED
             await void_s.flush()  # 持有銷售行鎖
 
             async def do_sign() -> str:

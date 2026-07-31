@@ -39,6 +39,7 @@ from app.shared.enums import (
     EInvoiceMessageType,
     InvoiceStatus,
     InvoiceType,
+    InvoiceVoidReason,
     UploadStatus,
 )
 
@@ -107,6 +108,12 @@ class Invoice(Base, TimestampMixin):
     donate_mark: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     npoban: Mapped[str | None] = mapped_column(String(7))  # 捐贈碼 3–7 碼
     print_mark: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # 作廢原因（僅作廢時有值）：SALE_VOID＝整筆銷售作廢、FULL_RETURN＝銷售有效但全退、
+    # CORRECTION＝開立內容有誤重開。同樣是「作廢」，帳務意義不同，報表/稽核須能分辨。
+    void_reason: Mapped[InvoiceVoidReason | None] = mapped_column(
+        _enum_col(InvoiceVoidReason),
+        nullable=True,
+    )
     net: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 未稅
     tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 稅額
     total: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 含稅總額

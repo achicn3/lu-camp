@@ -18,7 +18,8 @@ from app.shared.enums import (
 
 
 def test_sale_status_values() -> None:
-    assert {s.value for s in SaleStatus} == {"COMPLETED", "RETURNED"}
+    # VOIDED：銷售自身作廢（與發票狀態分離；發票關閉時也適用）。
+    assert {s.value for s in SaleStatus} == {"COMPLETED", "RETURNED", "VOIDED"}
 
 
 def test_sale_line_type_values() -> None:

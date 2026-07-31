@@ -32,8 +32,8 @@ from app.shared.enums import (
     Grade,
     InvoiceStatus,
     OwnershipType,
-    SaleInvoiceStatus,
     SaleLineType,
+    SaleStatus,
     UploadStatus,
     UserRole,
 )
@@ -162,7 +162,7 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
             ]
             assert len(void_items) == 1
             sale_row = await SalesService(s3).get_sale(store_id, sale_id)
-            assert sale_row is not None and sale_row.invoice_status is SaleInvoiceStatus.VOID
+            assert sale_row is not None and sale_row.status is SaleStatus.VOIDED
     finally:
         await _cleanup(sm, store_id)
 

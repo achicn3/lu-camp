@@ -178,7 +178,7 @@ class ReturnsService:
             raise ReturnSaleNotFound(f"找不到銷售單 {sale_id}")
         if sale.status == SaleStatus.RETURNED:
             raise ReturnConflict(f"銷售單 {sale_id} 已全數退貨，不可重複退貨")
-        if sale.invoice_status == SaleInvoiceStatus.VOID:
+        if sale.status is SaleStatus.VOIDED:
             raise ReturnConflict(f"銷售單 {sale_id} 已作廢，不可退貨")
 
         sale_lines = await self._sales.list_lines(sale.id)

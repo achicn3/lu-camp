@@ -82,12 +82,12 @@ describe("/sales 交易紀錄頁", () => {
       if (url.includes("/linepay-refunds/pending")) return json([]);
       if (url.includes("/api/v1/sales/7/void") && method === "POST") {
         voided = true;
-        return json(sale(7, { invoice_status: "VOID" }));
+        return json(sale(7, { status: "VOIDED" }));
       }
       if (url.includes("/api/v1/sales") && method === "GET") {
         return json([
           sale(7),
-          sale(6, { invoice_status: "VOID" }), // 已作廢：不再有作廢鈕
+          sale(6, { status: "VOIDED" }), // 已作廢（記在 sale.status）：不再有作廢鈕
         ]);
       }
       return null;

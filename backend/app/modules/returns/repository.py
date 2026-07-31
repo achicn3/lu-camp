@@ -11,7 +11,7 @@ from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.sales.models import Sale, SaleLine
-from app.shared.enums import OwnershipType, SaleInvoiceStatus, SaleLineType
+from app.shared.enums import OwnershipType, SaleLineType, SaleStatus
 
 
 @dataclass(frozen=True)
@@ -118,7 +118,7 @@ class ReturnsRepository:
                 CustomerReturn.store_id == store_id,
                 CustomerReturn.created_at >= date_from,
                 CustomerReturn.created_at < date_to,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
             )
         )
         rows = [(r[0], r[1]) for r in (await self._session.execute(base)).all()]

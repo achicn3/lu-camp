@@ -25,7 +25,7 @@ from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import SaleInvoiceStatus, SaleLineType, UserRole
+from app.shared.enums import SaleLineType, SaleStatus, UserRole
 
 
 @pytest_asyncio.fixture
@@ -75,7 +75,7 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
 
         async with sm() as s:
             voided = await s.get(Sale, sale_id)
-            assert voided is not None and voided.invoice_status == SaleInvoiceStatus.VOID
+            assert voided is not None and voided.status is SaleStatus.VOIDED
             audit_count = await s.scalar(
                 select(func.count())
                 .select_from(AuditLog)

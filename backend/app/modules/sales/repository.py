@@ -24,8 +24,8 @@ from app.modules.sales.models import (
 from app.shared.enums import (
     LinePayRefundStatus,
     OwnershipType,
-    SaleInvoiceStatus,
     SaleLineType,
+    SaleStatus,
     TenderType,
 )
 
@@ -240,7 +240,7 @@ class SalesRepository:
                 SaleLine.serialized_item_id == serialized_item_id,
                 # 排除已作廢銷售（Codex P2）：作廢已把品項回補為 IN_STOCK，
                 # 不應再對在庫品顯示來自作廢交易的成交價/單號。
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
             )
             .order_by(SaleLine.id.desc())
             .limit(1)
@@ -305,7 +305,7 @@ class SalesRepository:
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
@@ -337,7 +337,7 @@ class SalesRepository:
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
@@ -365,7 +365,7 @@ class SalesRepository:
         """期間內未作廢的銷售 id（供寄售抽成依 sale_id 取數）。"""
         stmt = select(Sale.id).where(
             Sale.store_id == store_id,
-            Sale.invoice_status != SaleInvoiceStatus.VOID,
+            Sale.status != SaleStatus.VOIDED,
             Sale.created_at >= date_from,
             Sale.created_at < date_to,
         )
@@ -385,7 +385,7 @@ class SalesRepository:
             .join(Sale, SaleLine.sale_id == Sale.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 SaleLine.campaign_id.is_not(None),
             )
             .group_by(SaleLine.campaign_id)
@@ -415,7 +415,7 @@ class SalesRepository:
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
@@ -437,7 +437,7 @@ class SalesRepository:
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
@@ -470,7 +470,7 @@ class SalesRepository:
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
@@ -500,7 +500,7 @@ class SalesRepository:
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
             .where(
                 Sale.store_id == store_id,
-                Sale.invoice_status != SaleInvoiceStatus.VOID,
+                Sale.status != SaleStatus.VOIDED,
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
@@ -521,7 +521,7 @@ class SalesRepository:
                     .join(Sale, SaleLine.sale_id == Sale.id)
                     .where(
                         Sale.store_id == store_id,
-                        Sale.invoice_status != SaleInvoiceStatus.VOID,
+                        Sale.status != SaleStatus.VOIDED,
                         Sale.created_at >= date_from,
                         Sale.created_at < date_to,
                         SaleLine.line_type == SaleLineType.CATALOG,
@@ -538,7 +538,7 @@ class SalesRepository:
                     .join(Sale, SaleLine.sale_id == Sale.id)
                     .where(
                         Sale.store_id == store_id,
-                        Sale.invoice_status != SaleInvoiceStatus.VOID,
+                        Sale.status != SaleStatus.VOIDED,
                         Sale.created_at >= date_from,
                         Sale.created_at < date_to,
                         SaleLine.line_type == SaleLineType.MENU,
@@ -557,7 +557,7 @@ class SalesRepository:
                 .join(Sale, SaleTender.sale_id == Sale.id)
                 .where(
                     Sale.store_id == store_id,
-                    Sale.invoice_status != SaleInvoiceStatus.VOID,
+                    Sale.status != SaleStatus.VOIDED,
                     Sale.created_at >= date_from,
                     Sale.created_at < date_to,
                 )
@@ -585,7 +585,7 @@ class SalesRepository:
                 await self._session.execute(
                     select(func.count(Sale.id)).where(
                         Sale.store_id == store_id,
-                        Sale.invoice_status != SaleInvoiceStatus.VOID,
+                        Sale.status != SaleStatus.VOIDED,
                         Sale.created_at >= date_from,
                         Sale.created_at < date_to,
                     )
@@ -628,7 +628,7 @@ class SalesRepository:
                 .join(SaleTender, SaleTender.sale_id == Sale.id)
                 .where(
                     Sale.store_id == store_id,
-                    Sale.invoice_status != SaleInvoiceStatus.VOID,
+                    Sale.status != SaleStatus.VOIDED,
                     Sale.created_at >= date_from,
                     Sale.created_at < date_to,
                     SaleTender.tender_type == TenderType.STORE_CREDIT,
@@ -646,7 +646,7 @@ class SalesRepository:
         stmt = select(func.count()).where(
             Sale.store_id == store_id,
             Sale.buyer_contact_id == contact_id,
-            Sale.invoice_status != SaleInvoiceStatus.VOID,
+            Sale.status != SaleStatus.VOIDED,
             Sale.created_at >= date_from,
             Sale.created_at < date_to,
         )

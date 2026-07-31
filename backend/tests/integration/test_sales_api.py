@@ -20,7 +20,7 @@ from app.modules.sales.models import Sale
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import UserRole
+from app.shared.enums import SaleInvoiceStatus, SaleStatus, UserRole
 
 
 @pytest_asyncio.fixture
@@ -231,10 +231,10 @@ async def test_void_requires_manager_and_marks_void(
     forbidden = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_auth(token))
     assert forbidden.status_code == 403
 
-    # 店長作廢 → invoice_status=VOID，並寫稽核。
+    # 店長作廢 → sale.status=VOIDED，並寫稽核（發票狀態不在此處臆測）。
     voided = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_auth(mgr_token))
     assert voided.status_code == 200
-    assert voided.json()["invoice_status"] == "VOID"
+    assert voided.json()["status"] == "VOIDED"
     audits = (
         await db_session.scalars(select(AuditLog).where(AuditLog.action == "VOID_SALE"))
     ).all()
@@ -537,3 +537,35 @@ async def test_http_checkout_requires_einvoice_confirmation_when_enabled(
     )
     assert resp2.status_code == 201, resp2.text
     assert resp2.json()["invoice_status"] == "PENDING_ISSUE"
+
+
+async def test_void_sale_without_invoice_does_not_touch_invoice_status(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢銷售時，「銷售已作廢」應記在 sale.status，不得汙染 invoice_status。
+
+    電子發票關閉（本專案預設）時這筆交易根本沒有發票，卻被標成 invoice_status=VOID
+    ——那是把「發票狀態」當成「銷售是否作廢」在用。報表與清單也因此以
+    `invoice_status != VOID` 過濾已作廢銷售，語意錯置。
+    """
+    token, store_id, _ = await _seed(db_session)
+    mgr_token = await _seed_manager(db_session, store_id)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    created = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 1)]},
+        headers=_auth(token, idem="void-status-split"),
+    )
+    sale_id = created.json()["id"]
+    assert created.json()["invoice_status"] == "NOT_ISSUED"  # 未啟用電子發票
+
+    voided = await client.post(f"/api/v1/sales/{sale_id}/void", headers=_auth(mgr_token))
+    assert voided.status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    await db_session.refresh(sale)
+    # 銷售作廢記在 sale.status
+    assert sale.status is SaleStatus.VOIDED
+    # 沒有發票 → 發票狀態不應被改動
+    assert sale.invoice_status is SaleInvoiceStatus.NOT_ISSUED

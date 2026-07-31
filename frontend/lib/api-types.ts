@@ -5164,10 +5164,17 @@ export interface components {
         };
         /**
          * SaleStatus
-         * @description 銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。
+         * @description 銷售單自身的生命週期（與發票生命週期分離）。
+         *
+         *     COMPLETED：正常成立；RETURNED：全數退貨（退貨流程設定）；
+         *     VOIDED：整筆作廢（打錯單，視同未發生）。
+         *
+         *     **VOIDED 是「這筆銷售是否有效」的唯一事實來源**：報表、清單與後續操作一律以
+         *     `sale.status != VOIDED` 判斷，不得再用 `invoice_status == VOID` 代替——後者是
+         *     **發票**的狀態，電子發票關閉時根本沒有發票，兩者語意不同（見 ADR）。
          * @enum {string}
          */
-        SaleStatus: "COMPLETED" | "RETURNED";
+        SaleStatus: "COMPLETED" | "RETURNED" | "VOIDED";
         /**
          * SaleSummaryRead
          * @description 銷售單摘要輸出（列表用，不含明細）。

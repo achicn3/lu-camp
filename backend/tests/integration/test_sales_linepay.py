@@ -34,8 +34,8 @@ from app.shared.enums import (
     LinePayStatus,
     OwnershipType,
     PaymentMethod,
-    SaleInvoiceStatus,
     SaleLineType,
+    SaleStatus,
     TenderType,
     UserRole,
 )
@@ -378,7 +378,7 @@ async def test_void_linepay_sale_refunds_and_marks_refunded(db_session: AsyncSes
     voided = await SalesService(db_session).void_sale(
         sale, clerk_id, linepay_client=_client(transport)
     )
-    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    assert voided.status is SaleStatus.VOIDED  # 作廢記在銷售狀態，非發票狀態
     assert transport.refund_calls == 1
     txn = await db_session.scalar(
         select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
@@ -406,7 +406,7 @@ async def test_void_cash_sale_records_refund_movement(
 
     voided = await SalesService(db_session).void_sale(sale, clerk_id)
 
-    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    assert voided.status is SaleStatus.VOIDED  # 作廢記在銷售狀態，非發票狀態
     cash_refunds = (
         await db_session.scalars(
             select(CashMovement).where(
@@ -433,7 +433,7 @@ async def test_void_linepay_already_refunded_on_platform_is_idempotent(
     voided = await SalesService(db_session).void_sale(
         sale, clerk_id, linepay_client=_client(transport)
     )
-    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    assert voided.status is SaleStatus.VOIDED  # 作廢記在銷售狀態，非發票狀態
     txn = await db_session.scalar(
         select(LinePayTransaction).where(LinePayTransaction.sale_id == sale.id)
     )
@@ -926,7 +926,7 @@ async def test_void_taiwanpay_requires_manual_refund_ack(db_session: AsyncSessio
         await SalesService(db_session).void_sale(sale, clerk_id)
     # 帶手動退款確認 → 放行
     voided = await SalesService(db_session).void_sale(sale, clerk_id, manual_refund_ack=True)
-    assert voided.invoice_status == SaleInvoiceStatus.VOID
+    assert voided.status is SaleStatus.VOIDED  # 作廢記在銷售狀態，非發票狀態
 
 
 @pytest.mark.asyncio

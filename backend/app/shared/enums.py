@@ -151,10 +151,19 @@ class StocktakeStatus(StrEnum):
 
 
 class SaleStatus(StrEnum):
-    """銷售單狀態。RETURNED 由退貨流程（Phase 4）設定。"""
+    """銷售單自身的生命週期（與發票生命週期分離）。
+
+    COMPLETED：正常成立；RETURNED：全數退貨（退貨流程設定）；
+    VOIDED：整筆作廢（打錯單，視同未發生）。
+
+    **VOIDED 是「這筆銷售是否有效」的唯一事實來源**：報表、清單與後續操作一律以
+    `sale.status != VOIDED` 判斷，不得再用 `invoice_status == VOID` 代替——後者是
+    **發票**的狀態，電子發票關閉時根本沒有發票，兩者語意不同（見 ADR）。
+    """
 
     COMPLETED = "COMPLETED"
     RETURNED = "RETURNED"
+    VOIDED = "VOIDED"
 
 
 class SaleLineType(StrEnum):
@@ -222,6 +231,18 @@ class InvoiceType(StrEnum):
 
     B2C = "B2C"
     B2B = "B2B"
+
+
+class InvoiceVoidReason(StrEnum):
+    """發票作廢的原因——同樣是「作廢」，帳務意義不同，必須可分辨。
+
+    SALE_VOID：整筆銷售作廢（打錯單）；FULL_RETURN：銷售有效但客人全部退貨；
+    CORRECTION：開立內容有誤需重開。
+    """
+
+    SALE_VOID = "SALE_VOID"
+    FULL_RETURN = "FULL_RETURN"
+    CORRECTION = "CORRECTION"
 
 
 class InvoiceStatus(StrEnum):

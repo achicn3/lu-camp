@@ -57,6 +57,7 @@ from app.shared.enums import (
     CartSessionStatus,
     CashMovementType,
     InvoiceType,
+    InvoiceVoidReason,
     ItemKind,
     LinePayRefundStatus,
     LinePayStatus,
@@ -1446,7 +1447,7 @@ class SalesService:
             )
         # 已作廢的銷售不可回放為成功（K4 第十四/十六輪同款）：作廢已反轉點數/寄售結算，
         # 回 201 會讓 POS 又開櫃/印明細、與已反轉帳本脫節 → 409。
-        if existing.invoice_status is SaleInvoiceStatus.VOID:
+        if existing.status is SaleStatus.VOIDED:
             raise SaleAlreadyVoid(f"sale {existing.id} 已作廢，不可以原冪等鍵重放；請重新結帳")
         return existing
 
@@ -1472,7 +1473,7 @@ class SalesService:
         )
         if existing is None:
             raise SignatureTaskConflict("此購物金扣抵簽署結帳衝突，請重試")
-        if existing.invoice_status is SaleInvoiceStatus.VOID:
+        if existing.status is SaleStatus.VOIDED:
             raise SignatureTaskConflict(
                 "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
             )
@@ -1706,7 +1707,7 @@ class SalesService:
         linepay_client: LinePayClient | None = None,
         manual_refund_ack: bool = False,
     ) -> Sale:
-        """作廢銷售：反轉原收款與庫存、標記 invoice_status=VOID（待作廢）並寫稽核；不刪除。
+        """作廢銷售：反轉原收款與庫存、標記 **sale.status=VOIDED** 並寫稽核；不刪除。
 
         若原銷售已開發票（invoice_status=ISSUED），此 VOID 為「作廢發票流程」的接縫——實際
         電子發票作廢 XML 由 T13/T14 處理。**寄售結算反轉**亦於此一併處理
@@ -1714,12 +1715,15 @@ class SalesService:
         否則作廢後該結算仍 PENDING、可被付款給寄售人造成現金漏出（Codex adversarial round-2）。
 
         併發保證：先以 FOR UPDATE 鎖 sale 列並刷新到已提交狀態，再檢查/轉移（比照 D-1）；
-        兩個並行作廢只一個成功，另一個鎖後見 VOID → SaleAlreadyVoid，稽核也只寫一筆。
+        兩個並行作廢只一個成功，另一個鎖後見 VOIDED → SaleAlreadyVoid，稽核也只寫一筆。
         """
         locked = await self._repo.lock_sale(sale.store_id, sale.id)
-        if locked is None or locked.invoice_status == SaleInvoiceStatus.VOID:
+        if locked is None or locked.status is SaleStatus.VOIDED:
             raise SaleAlreadyVoid(f"sale {sale.id} 已作廢，不可重複作廢")
         sale = locked
+        # 作廢前的銷售狀態：下方庫存回補只針對「未退貨」的單，必須用**變更前**的值判斷
+        # （設成 VOIDED 之後再判就永遠不成立、庫存不會回補）。
+        status_before_void = sale.status
         # 已退貨的銷售不可作廢（Codex P1）：退貨已回補庫存/退款，且退回的序號品可能已被
         # 後續銷售再賣出——若再作廢回補會重複放回庫存、或把別單賣掉的品翻回 IN_STOCK。
         # 函式內 import 打破 sales↔returns 潛在循環相依（§9 例外）。
@@ -1757,8 +1761,11 @@ class SalesService:
                 ref_type="sale_void",
                 ref_id=sale.id,
             )
-        before = sale.invoice_status.value
-        sale.invoice_status = SaleInvoiceStatus.VOID
+        # 「這筆銷售作廢了」記在 sale.status（唯一事實來源）。發票狀態不在此處臆測——
+        # 由下方 void_invoice_for_sale 依「實際上有沒有發票、平台是否已核可」決定；
+        # 電子發票關閉時根本沒有發票，invoice_status 應維持原值（NOT_ISSUED）。
+        before = sale.status.value
+        sale.status = SaleStatus.VOIDED
         await self._session.flush()
         await write_audit_log(
             self._session,
@@ -1767,8 +1774,8 @@ class SalesService:
             action="VOID_SALE",
             entity_type="sale",
             entity_id=str(sale.id),
-            before={"invoice_status": before},
-            after={"invoice_status": SaleInvoiceStatus.VOID.value},
+            before={"status": before},
+            after={"status": SaleStatus.VOIDED.value},
         )
         # 作廢沖回該筆「當時實際累積」的點數（awarded_points；歷史單為 0 → 不倒扣）。
         if sale.buyer_contact_id is not None and sale.awarded_points > 0:
@@ -1788,12 +1795,14 @@ class SalesService:
         # 電子發票中止（§6）：把該銷售的待開立發票標 VOID，使其待送佇列列被 drop_pending 拒絕，
         # 不會把已作廢銷售的發票拋上平台。已核可（ISSUED）發票的作廢須另送 F0501/F0701 平台訊息
         # ——該路徑待收尾階段依 作廢 vs 註銷 規則接線。無發票（einvoice 關閉時建的單）→ no-op。
-        await self._einvoice.void_invoice_for_sale(sale.store_id, sale.id)
+        await self._einvoice.void_invoice_for_sale(
+            sale.store_id, sale.id, reason=InvoiceVoidReason.SALE_VOID
+        )
         # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
         # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、一般商品現量加回（與退貨同口徑，
         # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、
         # 散裝守恆破（B6）。只對「未退貨（COMPLETED）」的單回補，避免與退貨流程重複回補。
-        if sale.status == SaleStatus.COMPLETED:
+        if status_before_void is SaleStatus.COMPLETED:
             for line in await self._repo.list_lines(sale.id):
                 if line.line_type == SaleLineType.CATALOG and line.catalog_product_id is not None:
                     await self._inventory.return_catalog_items(

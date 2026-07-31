@@ -53,6 +53,7 @@ from app.shared.enums import (
     EInvoiceMessageType,
     InvoiceStatus,
     InvoiceType,
+    InvoiceVoidReason,
     UploadStatus,
 )
 from app.shared.exceptions import (
@@ -156,7 +157,13 @@ class EInvoiceService:
             )
         )
 
-    async def void_invoice_for_sale(self, store_id: int, sale_id: int) -> Invoice | None:
+    async def void_invoice_for_sale(
+        self,
+        store_id: int,
+        sale_id: int,
+        *,
+        reason: InvoiceVoidReason = InvoiceVoidReason.SALE_VOID,
+    ) -> Invoice | None:
         """銷售作廢時中止其電子發票（由 sales.void_sale 呼叫；跨模組經 service，§2）。
 
         依「平台是否可能已收到開立」決定，避免把已交付 Turnkey 的發票當成平台沒收過：
@@ -172,6 +179,9 @@ class EInvoiceService:
             return None
         if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
             return invoice
+        # 作廢原因（SALE_VOID／FULL_RETURN／CORRECTION）：同樣是「作廢」，帳務意義不同，
+        # 必須可分辨——報表與稽核據此區分「這筆交易不算數」與「交易有效但全退」。
+        invoice.void_reason = reason
         if invoice.status is InvoiceStatus.ISSUED:
             invoice.status = InvoiceStatus.VOID_PENDING
             await self._enqueue_f0501(store_id, invoice.id)
