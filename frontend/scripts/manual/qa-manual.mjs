@@ -31,6 +31,17 @@ ok(`所有 <img> 皆為 Base64 內嵌（${dataImgCount}/${imgCount - 1}）`, dat
 const altMissing = [...raw.matchAll(/<img (?![^>]*alt=)[^>]*>/g)].length;
 ok("每張圖片都有 alt 文字", altMissing <= 1, `缺 alt：${altMissing}（燈箱佔位圖不計）`);
 
+// 語意檢查（Codex 第四/五輪）：手冊絕不可指示操作者用「正式環境／正式憑證」驗證不可逆的
+// 稅務或金流行為。因此凡出現「正式環境」「正式憑證」「正式商店憑證」，同一句必須帶否定語
+// （不可／不要／勿／切勿），否則視為危險指引並讓 QA 失敗。
+const text = raw.replace(/<[^>]+>/g, "");
+const risky = [];
+for (const match of text.matchAll(/[^。；\n]*正式(環境|憑證|商店憑證)[^。；\n]*[。；]?/g)) {
+  const sentence = match[0];
+  if (!/(不可|不要|勿|切勿)/.test(sentence)) risky.push(sentence.trim().slice(0, 80));
+}
+ok("沒有『用正式環境/正式憑證驗證』的危險指引", risky.length === 0, risky.join(" / "));
+
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ locale: "zh-TW" });
 const page = await ctx.newPage();
