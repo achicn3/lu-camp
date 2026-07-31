@@ -1,6 +1,6 @@
 // 操作手冊製作共用工具：登入、截圖、標註、測試資料產生。
 // 只在本機手冊專用資料庫（lucamp_manual）執行。
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +31,35 @@ assertDisposableTarget();
 export const SHOTS_ROOT = process.env.MANUAL_SHOTS ?? join(homedir(), "tmp", "lu-camp-manual", "shots");
 export const MGR = { u: "dev-manager", p: "dev-test-123456" };
 export const KIOSK = { u: "dev-kiosk", p: "dev-test-123456" };
+
+/**
+ * 登入權杖（storageState）的存放處：獨立於截圖樹之外的 0700 私有目錄。
+ *
+ * 本專案裁示「登入永不過期」，storageState 內的權杖等同一把長期有效的管理員鑰匙，
+ * 因此 ① 不放在會被打包/分享的截圖目錄裡 ② 目錄 0700、檔案 0600 ③ 用完以
+ * `node scripts/manual/99-cleanup.mjs` 刪除（手冊產完務必執行）。
+ */
+export function statePath(name) {
+  const dir = join(SHOTS_ROOT, "..", ".manual-state");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  return join(dir, name);
+}
+
+/** 刪除所有已保存的登入權杖檔（收尾用；不存在也不報錯）。 */
+export function purgeStateFiles() {
+  const removed = [];
+  for (const name of ["kiosk-state.json", "staff-state.json"]) {
+    const path = statePath(name);
+    try {
+      rmSync(path, { force: true });
+      removed.push(path);
+    } catch {
+      /* 已不存在或無權限：由呼叫端自行確認 */
+    }
+  }
+  return removed;
+}
 
 export function shotsDir(section) {
   const dir = join(SHOTS_ROOT, section);

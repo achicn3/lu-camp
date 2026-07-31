@@ -1,10 +1,9 @@
 // 手冊 04：顧客螢幕（手持簽署裝置）啟用與配對。保存兩邊 storageState 供後續腳本重用。
 import { chmodSync } from "node:fs";
-import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, KIOSK, MGR, SHOTS_ROOT, makeShot, note, shotsDir } from "./_lib.mjs";
+import { BASE, KIOSK, MGR, makeShot, note, shotsDir, statePath } from "./_lib.mjs";
 
 const dir = shotsDir("04-kiosk");
 const shot = makeShot(dir);
@@ -62,15 +61,18 @@ await kiosk.waitForSelector(".kiosk-standby", { timeout: 20000 });
 await kiosk.waitForTimeout(800);
 await shot(kiosk, "kiosk-standby", { locator: ".kiosk-standby" });
 
-// storageState 內含登入權杖（本專案裁示「登入永不過期」→ 等同一把長期有效的管理員鑰匙），
-// 因此檔案權限收成 0600（僅本人可讀）。手冊產完後請自行刪除
-// ~/tmp/lu-camp-manual/*-state.json，勿隨截圖一起散布。
+// storageState 內含登入權杖（本專案裁示「登入永不過期」→ 等同一把長期有效的管理員鑰匙）：
+// 寫進**截圖樹之外**的 0700 私有目錄（statePath），檔案建立後立刻收成 0600。
+// 手冊產完務必執行 `node scripts/manual/99-cleanup.mjs` 刪除，勿隨截圖一起散布。
+const saved = [];
 for (const name of ["kiosk-state.json", "staff-state.json"]) {
-  const path = join(SHOTS_ROOT, name);
+  const path = statePath(name);
   await (name.startsWith("kiosk") ? kioskCtx : staffCtx).storageState({ path });
   chmodSync(path, 0o600);
+  saved.push(path);
 }
-note("已保存 kiosk-state.json / staff-state.json（權限 0600；用完請刪除）");
+note(`已保存權杖檔（0600）：${saved.join(", ")}`);
+note("⚠ 手冊產完請執行：node scripts/manual/99-cleanup.mjs（刪除這些權杖檔）");
 
 await browser.close();
 console.log("✅ 04-kiosk 完成");

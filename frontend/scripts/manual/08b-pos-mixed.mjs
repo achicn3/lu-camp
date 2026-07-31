@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, makeShot, note, shotsDir } from "./_lib.mjs";
+import { BASE, makeShot, note, SHOTS_ROOT, shotsDir, statePath } from "./_lib.mjs";
 
 const dir = shotsDir("08-pos-mixed");
 const shot = makeShot(dir);
@@ -14,14 +14,14 @@ const contacts = JSON.parse(readFileSync(join(SHOTS_ROOT, "03-contacts", "data.j
 
 const browser = await chromium.launch();
 const staffCtx = await browser.newContext({
-  storageState: join(SHOTS_ROOT, "staff-state.json"),
+  storageState: statePath("staff-state.json"),
   viewport: { width: 1440, height: 950 },
   deviceScaleFactor: 2,
   locale: "zh-TW",
   timezoneId: "Asia/Taipei",
 });
 const kioskCtx = await browser.newContext({
-  storageState: join(SHOTS_ROOT, "kiosk-state.json"),
+  storageState: statePath("kiosk-state.json"),
   viewport: { width: 834, height: 1112 },
   deviceScaleFactor: 2,
   locale: "zh-TW",

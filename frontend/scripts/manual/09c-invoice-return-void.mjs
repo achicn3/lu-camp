@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, allowEInvoiceIssue, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
+import { allowEInvoiceIssue, apiJson, apiLogin, BASE, makeShot, note, SHOTS_ROOT, shotsDir, statePath, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("09-invoice-return-void");
 const shot = makeShot(dir);
@@ -31,14 +31,14 @@ async function invoiceQueue() {
 
 const browser = await chromium.launch();
 const staffCtx = await browser.newContext({
-  storageState: join(SHOTS_ROOT, "staff-state.json"),
+  storageState: statePath("staff-state.json"),
   viewport: { width: 1440, height: 950 },
   deviceScaleFactor: 2,
   locale: "zh-TW",
   timezoneId: "Asia/Taipei",
 });
 const kioskCtx = await browser.newContext({
-  storageState: join(SHOTS_ROOT, "kiosk-state.json"),
+  storageState: statePath("kiosk-state.json"),
   viewport: { width: 834, height: 1112 },
   deviceScaleFactor: 2,
   locale: "zh-TW",

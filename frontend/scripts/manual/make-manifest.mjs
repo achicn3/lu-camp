@@ -1,5 +1,5 @@
 // 產生要內嵌的截圖清單（id → 檔案），供 convert-images.mjs 使用。
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { SHOTS_ROOT } from "./_lib.mjs";
@@ -41,9 +41,40 @@ for (const [dir, files] of Object.entries(PICK)) {
       missing.push(id);
       continue;
     }
-    manifest.push({ id, file, maxWidth: 1000, quality: 0.72 });
+    manifest.push({ id, file, mtime: statSync(file).mtimeMs, maxWidth: 1000, quality: 0.72 });
   }
 }
-writeFileSync(join(SHOTS_ROOT, "manifest.json"), JSON.stringify(manifest, null, 2));
-console.log(`清單 ${manifest.length} 張；缺檔 ${missing.length}`);
+
+// 陳舊截圖偵測：有些情境預設會被跳過（例如需 opt-in 的發票開立），此時舊圖仍留在磁碟上，
+// 只憑「檔案存在」就收進手冊，會把過期的畫面當成本次驗證結果出貨（QA 只驗圖能顯示，抓不到）。
+// 因此以「本批最新截圖時間」為基準，超過門檻的舊圖一律列出並讓產生流程失敗，
+// 除非操作者明確以 MANUAL_ALLOW_STALE=true 表示知情。
+const STALE_HOURS = Number(process.env.MANUAL_STALE_HOURS ?? 48);
+const newest = manifest.reduce((max, item) => Math.max(max, item.mtime), 0);
+const stale = manifest
+  .filter((item) => newest - item.mtime > STALE_HOURS * 3600_000)
+  .map((item) => ({ id: item.id, ageHours: ((newest - item.mtime) / 3600_000).toFixed(1) }));
+
+writeFileSync(
+  join(SHOTS_ROOT, "manifest.json"),
+  JSON.stringify(
+    manifest.map(({ id, file, maxWidth, quality }) => ({ id, file, maxWidth, quality })),
+    null,
+    2,
+  ),
+);
+console.log(`清單 ${manifest.length} 張；缺檔 ${missing.length}；最新截圖 ${new Date(newest).toISOString()}`);
 if (missing.length) console.log(missing.join("\n"));
+if (stale.length > 0) {
+  console.error(
+    `\n⚠ 有 ${stale.length} 張截圖比本批最新的舊超過 ${STALE_HOURS} 小時，可能是被跳過的情境沿用舊圖：`,
+  );
+  for (const item of stale) console.error(`   ${item.id}（舊 ${item.ageHours} 小時）`);
+  if (process.env.MANUAL_ALLOW_STALE !== "true") {
+    console.error(
+      `\n請重跑對應腳本重新擷取；確認這些舊圖仍正確時，才用 MANUAL_ALLOW_STALE=true 略過本檢查。`,
+    );
+    process.exit(1);
+  }
+  console.error("（已由 MANUAL_ALLOW_STALE=true 明確略過）\n");
+}
