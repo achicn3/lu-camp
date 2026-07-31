@@ -23,20 +23,9 @@ await shot(page, "general-saved", { locator: '.card:has(h2:text("一般設定"))
 // 行動支付設定
 await shot(page, "mobile-pay-card", { locator: '.card:has(h2:text("行動支付設定"))' });
 
-// 溢價率
+// 溢價率設定的變更需要二次確認對話框，改由 15b-settings-premium.mjs 專責擷取（見該檔），
+// 本腳本只截圖卡片外觀，不改值，避免留下未確認的對話框或未還原的費率。
 await shot(page, "premium-card", { locator: '.card:has(h2:text("溢價率設定"))' });
-const premiumInput = page.locator('input[name="premium_rate"], .card:has(h2:text("溢價率設定")) input').first();
-await premiumInput.fill("12");
-await page.click('button:has-text("儲存溢價率")');
-await page.waitForTimeout(2500);
-await shot(page, "premium-saved", { locator: '.card:has(h2:text("溢價率設定"))' });
-await shot(page, "premium-history", { locator: '.card:has(h2:text("溢價率變更紀錄"))' });
-await shot(page, "signature-retention", { locator: '.card:has(h2:text("簽名 PNG 待清理報表"))' });
-
-// 還原設定，避免影響後續示範
-await premiumInput.fill("10");
-await page.click('button:has-text("儲存溢價率")');
-await page.waitForTimeout(2000);
 
 // ══ 備份 ══
 const dir2 = shotsDir("16-backup");

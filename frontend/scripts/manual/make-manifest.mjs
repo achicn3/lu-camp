@@ -19,6 +19,7 @@ const PICK = {
   "08-pos-mixed-linepay": ["01-tender-modes-with-linepay", "02-mixed-linepay-panel", "03-checkout-result"],
   "08-pos-consignment": ["01-cart-consignment-item", "02-cash-change", "03-invoice-off-hint", "04-complete"],
   "09-sales": ["01-list", "02-signature-evidence", "03-push-ack", "03b-kiosk-ack-task", "03c-kiosk-ack-done", "04-return-dialog", "05-return-filled", "06-return-done", "07-void-dialog", "08-void-done"],
+  "09-invoice-return-void": ["02-return-dialog-invoiced", "03-after-return", "04-void-dialog-invoiced", "05-after-void"],
   "09-sales-void": ["01-void-dialog", "02-void-done"],
   "10-consignment": ["01-pending-list", "02-drawer-status", "03-tabs", "04-search-by-phone", "05-pay-dialog", "06-paid", "07-paid-tab", "08-cancelled-tab"],
   "11-purchasing": ["01-po-tab-empty", "02-low-stock", "03-supplier-tab", "04-supplier-create-form", "05-supplier-created", "06-supplier-edit", "07-supplier-search", "08-po-create-empty", "09-po-product-search", "10-po-lines", "11-po-created", "12-po-filter-pending", "13-po-detail", "14-po-receive-dialog", "15-po-receive-invoice", "16-po-received", "17-catalog-after-receive"],

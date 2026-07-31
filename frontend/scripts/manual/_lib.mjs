@@ -8,6 +8,26 @@ import { chromium } from "playwright";
 
 export const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
 export const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
+
+// 這些腳本會實際建單、改庫存、動現金、改設定、作廢與退貨——只能對「本機拋棄式環境」執行。
+// fail-closed：預設只允許 localhost/127.0.0.1；要打其他主機必須明確帶
+// MANUAL_ALLOW_REMOTE=true（代表操作者已確認那不是正式機）。
+// 註：無法從外部確認對方連的是哪個資料庫，故仍需依 docs 使用專用庫 lucamp_manual。
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function assertDisposableTarget() {
+  if (process.env.MANUAL_ALLOW_REMOTE === "true") return;
+  for (const [label, url] of [["SMOKE_BASE", BASE], ["SMOKE_API_BASE", API]]) {
+    const host = new URL(url).hostname;
+    if (!LOCAL_HOSTS.has(host)) {
+      throw new Error(
+        `拒絕執行：${label}=${url} 不是本機位址。手冊腳本會建立/作廢單據、調整庫存與現金、` +
+          `變更全店設定，只能對拋棄式測試環境（專用資料庫 lucamp_manual）執行。` +
+          `確定該環境可被破壞時，才加上 MANUAL_ALLOW_REMOTE=true 重跑。`,
+      );
+    }
+  }
+}
+assertDisposableTarget();
 export const SHOTS_ROOT = process.env.MANUAL_SHOTS ?? join(homedir(), "tmp", "lu-camp-manual", "shots");
 export const MGR = { u: "dev-manager", p: "dev-test-123456" };
 export const KIOSK = { u: "dev-kiosk", p: "dev-test-123456" };
