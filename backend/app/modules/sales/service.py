@@ -357,6 +357,29 @@ class SalesService:
         return d
 
     @staticmethod
+    def _canonical_tenders(tenders: object) -> list[tuple[str, str]] | None:
+        """收款拆分的比對正規化：同一組收款只看「型別＋金額」，與陣列順序無關。
+
+        客顯權威購物車固定以 STORE_CREDIT 起頭寫入快照，POS 送出的 tenders 以 CASH 起頭
+        （features/pos/tender.ts）；兩者是**同一組收款**，若逐位置比對，購物金＋現金這個
+        組合永遠對不上而無法結帳。順序在本系統不帶語意——落地時 `_apply_tenders` 另以固定
+        的 cash→credit 鎖序處理，與此處送入的順序無關。型別與金額仍逐項嚴格比對，不放寬；
+        重複型別亦不會被合併（以多重集合比較）。非預期結構回 None，交由呼叫端視為不一致。
+        """
+        if not isinstance(tenders, list):
+            return None
+        canonical: list[tuple[str, str]] = []
+        for tender in tenders:
+            if not isinstance(tender, dict):
+                return None
+            kind = tender.get("tender_type")
+            amount = tender.get("amount")
+            if not isinstance(kind, str) or not isinstance(amount, str):
+                return None
+            canonical.append((kind, amount))
+        return sorted(canonical)
+
+    @staticmethod
     def _cart_item_key(line: SaleLineInput) -> str:
         if line.line_type is SaleLineType.SERIALIZED:
             return f"SERIALIZED:{line.item_code}"
@@ -407,7 +430,8 @@ class SalesService:
             {"tender_type": tender.tender_type.value, "amount": format(tender.amount, "f")}
             for tender in plan
         ]
-        if cart.snapshot.get("tenders") != actual_tenders:
+        canonical_actual = self._canonical_tenders(actual_tenders)
+        if self._canonical_tenders(cart.snapshot.get("tenders")) != canonical_actual:
             raise SignatureContentMismatch("實際付款拆分與客顯購物車不一致")
         return signed_items
 
@@ -488,7 +512,7 @@ class SalesService:
             {"tender_type": tender.tender_type.value, "amount": format(tender.amount, "f")}
             for tender in plan
         ]
-        if frozen_tenders != actual_tenders:
+        if self._canonical_tenders(frozen_tenders) != self._canonical_tenders(actual_tenders):
             raise SignatureContentMismatch("實際付款拆分與簽署快照不符")
         # 客人簽的**餘額快照**（目前餘額/折抵後剩餘）也不得漂移（Codex K5 第六輪 high）：
         # 此處只做純解析（缺欄/非整數元即拒）；**與帳本的鎖定比對延後到 _apply_tenders 之後**

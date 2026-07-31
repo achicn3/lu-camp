@@ -293,10 +293,24 @@ describe("tender 純邏輯", () => {
     expect(toTenders(resolvePlan("STORE_CREDIT", 500, 0))).toEqual([
       { tender_type: "STORE_CREDIT", amount: "500" },
     ]);
+    // 順序與客顯權威購物車一致（購物金 → 現金 → LINE Pay → 台灣Pay）：
+    // 後端以「型別＋金額」比對收款拆分，但送出的順序與客人在手持端所見一致才好核對。
     expect(toTenders(resolvePlan("MIXED", 500, 200))).toEqual([
-      { tender_type: "CASH", amount: "300" },
       { tender_type: "STORE_CREDIT", amount: "200" },
+      { tender_type: "CASH", amount: "300" },
     ]);
+    expect(
+      (toTenders(resolvePlan("MIXED", 500, 200, "TAIWAN_PAY")) ?? []).map(
+        (t) => t.tender_type,
+      ),
+    ).toEqual(["STORE_CREDIT", "TAIWAN_PAY"]);
+    expect(
+      (
+        toTenders(resolvePlan("MIXED", 500, 200, "LINE_PAY"), {
+          linePayKey: "OTK-1",
+        }) ?? []
+      ).map((t) => t.tender_type),
+    ).toEqual(["STORE_CREDIT", "LINE_PAY"]);
     expect(toTenders(resolvePlan("TAIWAN_PAY", 680, 0))).toEqual([
       { tender_type: "TAIWAN_PAY", amount: "680" },
     ]);

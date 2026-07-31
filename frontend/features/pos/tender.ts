@@ -202,27 +202,31 @@ export function validatePlan(
 }
 
 /** 轉成 POST /sales 的 tenders payload；省略（純現金且未指定）時回 undefined 走後端預設。
- * LINE Pay 需帶掃到的一次性付款碼（oneTimeKey），由 opts.linePayKey 傳入。 */
+ * LINE Pay 需帶掃到的一次性付款碼（oneTimeKey），由 opts.linePayKey 傳入。
+ *
+ * 順序刻意與客顯權威購物車（PosCustomerDisplay 的 allCustomerDisplayTenders）一致：
+ * 購物金 → 現金 → LINE Pay → 台灣Pay。客人在手持端看到與簽的就是這個順序，明細聯與交易
+ * 紀錄的收款摘要也照此顯示，送出的 payload 與客人所見一致、便於核對。 */
 export function toTenders(
   plan: TenderPlan,
   opts: { linePayKey?: string } = {},
 ): components["schemas"]["SaleTenderRequest"][] | undefined {
   const tenders: components["schemas"]["SaleTenderRequest"][] = [];
-  if (plan.cash > 0)
-    tenders.push({ tender_type: "CASH", amount: String(plan.cash) });
   if (plan.storeCredit > 0)
     tenders.push({
       tender_type: "STORE_CREDIT",
       amount: String(plan.storeCredit),
     });
-  if (plan.taiwanPay > 0)
-    tenders.push({ tender_type: "TAIWAN_PAY", amount: String(plan.taiwanPay) });
+  if (plan.cash > 0)
+    tenders.push({ tender_type: "CASH", amount: String(plan.cash) });
   if (plan.linePay > 0)
     tenders.push({
       tender_type: "LINE_PAY",
       amount: String(plan.linePay),
       line_pay_one_time_key: opts.linePayKey?.trim() ?? null,
     });
+  if (plan.taiwanPay > 0)
+    tenders.push({ tender_type: "TAIWAN_PAY", amount: String(plan.taiwanPay) });
   return tenders.length > 0 ? tenders : undefined;
 }
 

@@ -571,3 +571,69 @@ async def test_transaction_ack_revalidates_sale_and_device_ownership(
             ),
             created_by=clerk_id,
         )
+
+
+async def test_checkout_accepts_mixed_tenders_in_any_order(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收款拆分相同、僅陣列順序不同時仍應成交（購物金＋現金混合的真實 POS 情境）。
+
+    客顯權威購物車固定以 STORE_CREDIT 起頭寫入快照，POS 送出的 tenders 則以 CASH 起頭；
+    兩者為同一組收款（型別與金額完全相同），比對必須與順序無關，否則購物金＋現金這個
+    組合永遠無法結帳（回 422「實際付款拆分與客顯購物車不一致」）。
+    """
+    token, store_id, clerk_id, member_id, product_id = await _seed(db_session)
+    # 客顯購物車：購物金在前（PosCustomerDisplay 的固定順序）
+    cart_payload = _base_payload(product_id, member_id, credit="200", cash="100")
+    context = await _signed(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        payload=cart_payload,
+    )
+    # POS 送出：現金在前（features/pos/tender.ts toTenders 的順序）
+    sale_payload = {
+        **cart_payload,
+        "tenders": [
+            {"tender_type": "CASH", "amount": "100"},
+            {"tender_type": "STORE_CREDIT", "amount": "200"},
+        ],
+    }
+    response = await client.post(
+        "/api/v1/sales",
+        json=_with_context(sale_payload, context),
+        headers=_auth(token),
+    )
+    assert response.status_code == 201, response.text
+    sale = await db_session.get(Sale, response.json()["id"])
+    assert sale is not None
+    assert sale.signature_task_id == context.signature_task_id
+    assert await StoreCreditService(db_session).get_balance(store_id, member_id) == Decimal("1800")
+
+
+async def test_checkout_still_rejects_different_tender_amounts(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """順序無關不得放寬金額/型別：拆分金額與客顯不同仍須擋下。"""
+    token, store_id, clerk_id, member_id, product_id = await _seed(db_session)
+    cart_payload = _base_payload(product_id, member_id, credit="200", cash="100")
+    context = await _signed(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        payload=cart_payload,
+    )
+    tampered = {
+        **cart_payload,
+        "tenders": [
+            {"tender_type": "CASH", "amount": "150"},
+            {"tender_type": "STORE_CREDIT", "amount": "150"},
+        ],
+    }
+    response = await client.post(
+        "/api/v1/sales",
+        json=_with_context(tampered, context),
+        headers=_auth(token),
+    )
+    assert response.status_code == 422, response.text
+    assert "不符" in response.text or "不一致" in response.text
