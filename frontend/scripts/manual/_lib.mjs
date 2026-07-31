@@ -62,6 +62,44 @@ export async function apiJson(token, method, path, body, extra = {}) {
   return { status: res.status, json: text ? JSON.parse(text) : null };
 }
 
+/**
+ * 全店設定的快照 → 執行 → 還原（含讀回驗證）。
+ *
+ * 手冊腳本為了截圖會暫時改全店設定（發票開關、LINE Pay、備份間隔…）。這些是**店家共用**
+ * 的值，絕不可假設「原本是關的」而在收尾時無條件關掉，也不可因中途例外就留在被改過的狀態。
+ * 因此：先讀原值 → 用 try/finally 保證還原 → 還原後**讀回比對**，不符就大聲報錯並讓行程
+ * 以非 0 結束（呼叫端 CI/人工都看得到），不靜默吞掉。
+ *
+ * @param {string[]} keys 這次會改到的設定欄位名
+ * @param {(original: Record<string, unknown>) => Promise<void>} fn 實際操作
+ */
+export async function withSettings(keys, fn) {
+  const token = await apiLogin();
+  const current = (await apiJson(token, "GET", "/api/v1/settings")).json;
+  if (current === null) {
+    throw new Error("讀不到目前設定，中止（不在未知狀態下變更全店設定）");
+  }
+  const original = Object.fromEntries(keys.map((k) => [k, current[k]]));
+  console.log(`• 設定快照：${JSON.stringify(original)}`);
+  try {
+    await fn(original);
+  } finally {
+    const restoreToken = await apiLogin();
+    const patched = await apiJson(restoreToken, "PATCH", "/api/v1/settings", original);
+    const after = (await apiJson(restoreToken, "GET", "/api/v1/settings")).json;
+    const mismatched = keys.filter((k) => after === null || String(after[k]) !== String(original[k]));
+    if (patched.status !== 200 || mismatched.length > 0) {
+      process.exitCode = 1;
+      console.error(
+        `❌ 設定還原失敗（HTTP ${patched.status}；不符欄位：${mismatched.join(", ") || "—"}）。` +
+          `請立即到「設定」頁人工確認下列欄位：${keys.join(", ")}`,
+      );
+    } else {
+      console.log(`• 已還原設定並讀回確認：${JSON.stringify(original)}`);
+    }
+  }
+}
+
 /** 合法身分證字號產生器（與前端檢核同規則）。seed 決定尾數，避免重複。 */
 export function validNationalId(seed = Math.floor(Math.random() * 1e7)) {
   const LETTER = { A: 10 };

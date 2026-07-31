@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, makeShot, note, shotsDir } from "./_lib.mjs";
+import { BASE, SHOTS_ROOT, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("08-pos-mixed-linepay");
 const shot = makeShot(dir);
@@ -52,6 +52,7 @@ async function waitVersionChange(before, timeout = 20000) {
   return false;
 }
 
+await withSettings(["linepay_enabled"], async () => {
 // 1) 啟用 LINE Pay
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2500);
@@ -132,14 +133,7 @@ const uncertain = (await page.locator(".pos-sign-panel:has-text('LINE Pay 付款
 note(`是否進入「LINE Pay 付款待對帳」狀態：${uncertain}`);
 if (uncertain) await shot(page, "payment-uncertain-panel", { locator: ".pos-right" });
 note(`API 4xx/5xx：\n${apiErrors.join("\n") || "（無）"}`);
-
-// 5) 還原設定
-await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
-await page.waitForTimeout(2500);
-await page.locator('.card:has(h2:text("行動支付設定")) input[type="checkbox"]').first().uncheck();
-await page.click('button:has-text("儲存行動支付設定")');
-await page.waitForTimeout(2500);
-note("已還原：LINE Pay 停用");
+});
 
 await browser.close();
 console.log("✅ 08e 完成");

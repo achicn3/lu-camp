@@ -5,18 +5,16 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir } from "./_lib.mjs";
+import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("09-invoice-return-void");
 const shot = makeShot(dir);
 const acq = JSON.parse(readFileSync(join(SHOTS_ROOT, "05-acquisition", "data.json"), "utf8"));
 
-const token = await apiLogin();
-const before = (await apiJson(token, "GET", "/api/v1/settings")).json;
+const before = (await apiJson(await apiLogin(), "GET", "/api/v1/settings")).json;
 if (before === null) throw new Error("讀不到原始設定");
-const ORIGINAL = { einvoice_enabled: before.einvoice_enabled };
-if (ORIGINAL.einvoice_enabled) {
-  throw new Error("電子發票原本即啟用：可能為正式環境，中止。");
+if (before.einvoice_enabled) {
+  throw new Error("電子發票原本即為啟用狀態：疑似正式環境，中止。");
 }
 
 async function saleState(id) {
@@ -48,7 +46,7 @@ const kiosk = await kioskCtx.newPage();
 await kiosk.goto(`${BASE}/kiosk`, { waitUntil: "domcontentloaded" });
 await kiosk.waitForSelector(".kiosk-standby, .kiosk-cart-shell, .kiosk-task", { timeout: 30000 });
 
-try {
+await withSettings(["einvoice_enabled"], async () => {
   // 開啟電子發票
   await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
   await page.waitForTimeout(2000);
@@ -115,11 +113,7 @@ try {
   const afterVoid = await saleState(saleB);
   note(`作廢後 #${saleB}：${JSON.stringify(afterVoid)}；佇列＝${(await invoiceQueue()).join(", ")}`);
   await shot(page, "after-void", { content: true });
-} finally {
-  const restore = await apiJson(await apiLogin(), "PATCH", "/api/v1/settings", {
-    einvoice_enabled: ORIGINAL.einvoice_enabled,
-  });
-  console.log(restore.status === 200 ? "✅ 已還原電子發票設定" : `❌ 設定還原失敗 ${restore.status}`);
-  await browser.close();
-}
+});
+
+await browser.close();
 console.log("✅ 09c 完成");

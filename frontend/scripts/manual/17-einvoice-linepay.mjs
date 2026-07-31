@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir } from "./_lib.mjs";
+import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("17-einvoice");
 const shot = makeShot(dir);
@@ -31,24 +31,14 @@ const kiosk = await kioskCtx.newPage();
 await kiosk.goto(`${BASE}/kiosk`, { waitUntil: "domcontentloaded" });
 await kiosk.waitForSelector(".kiosk-standby, .kiosk-cart-shell, .kiosk-task", { timeout: 30000 });
 
-// 先快照原始設定：本腳本會暫時開啟發票/LINE Pay，無論成功或中途失敗都必須還原成原值
-// （不可假設原本是關閉的）。還原放在 finally，確保例外時也會執行。
-const token = await apiLogin();
-const before = (await apiJson(token, "GET", "/api/v1/settings")).json;
-if (before === null) throw new Error("讀不到原始設定，中止（不在未知狀態下改設定）");
-const ORIGINAL = {
-  einvoice_enabled: before.einvoice_enabled,
-  linepay_enabled: before.linepay_enabled,
-};
-note(`原始設定快照：einvoice_enabled=${ORIGINAL.einvoice_enabled}、linepay_enabled=${ORIGINAL.linepay_enabled}`);
-if (ORIGINAL.einvoice_enabled) {
-  throw new Error(
-    "電子發票原本就是啟用狀態：本腳本會實際送出開立請求，可能消耗字軌或開出真發票。" +
-      "請改在確定為測試環境（無正式 Amego 憑證）時執行。",
-  );
+// 電子發票原本就啟用時直接中止：本腳本會實際送出開立請求，可能消耗字軌或開出真發票。
+const settingsNow = (await apiJson(await apiLogin(), "GET", "/api/v1/settings")).json;
+if (settingsNow === null) throw new Error("讀不到目前設定，中止");
+if (settingsNow.einvoice_enabled) {
+  throw new Error("電子發票原本即為啟用狀態：疑似正式環境，中止以免消耗字軌／開出真發票。");
 }
 
-try {
+await withSettings(["einvoice_enabled", "linepay_enabled"], async () => {
 
 // 1) 於設定開啟電子發票與 LINE Pay
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
@@ -95,18 +85,7 @@ note(`發票開立結果：${invoiceNote}`);
 await shot(page, "checkout-invoice-result", { content: true });
 await page.locator('.pos-dialog button:has-text("不用，完成")').click().catch(() => {});
 
-} finally {
-  // 5) 還原設定（以 API 直接還原成快照值，不依賴畫面狀態；失敗時大聲報錯不靜默吞掉）
-  const restoreToken = await apiLogin();
-  const restored = await apiJson(restoreToken, "PATCH", "/api/v1/settings", {
-    einvoice_enabled: ORIGINAL.einvoice_enabled,
-    linepay_enabled: ORIGINAL.linepay_enabled,
-  });
-  if (restored.status !== 200) {
-    console.error(`❌ 設定還原失敗（HTTP ${restored.status}）：請手動確認設定頁的發票/LINE Pay 開關`);
-  } else {
-    note(`已還原設定：einvoice_enabled=${ORIGINAL.einvoice_enabled}、linepay_enabled=${ORIGINAL.linepay_enabled}`);
-  }
-  await browser.close();
-}
+});
+
+await browser.close();
 console.log("✅ 17 完成");
