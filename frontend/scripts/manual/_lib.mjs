@@ -63,6 +63,29 @@ export async function apiJson(token, method, path, body, extra = {}) {
 }
 
 /**
+ * 會實際觸發電子發票開立的步驟，必須明確 opt-in。
+ *
+ * 為什麼不能只看 `einvoice_enabled` 原本是不是關的：**Amego 憑證放在後端 env，不在資料庫裡**。
+ * 只要後端設有正式憑證，腳本把開關打開後結帳就會開出**真發票並消耗字軌**——關回開關救不了
+ * 已經開出去的稅務憑證。資料庫隔離對此無效（憑證不隨資料庫走）。
+ * 因此預設**跳過**這類步驟；確認後端為無憑證或測試憑證時，才用
+ * `MANUAL_ALLOW_EINVOICE_ISSUE=true` 重跑。
+ *
+ * @param {string} what 這個步驟在做什麼（顯示用）
+ * @returns {boolean} 是否允許執行
+ */
+export function allowEInvoiceIssue(what) {
+  if (process.env.MANUAL_ALLOW_EINVOICE_ISSUE === "true") return true;
+  console.log(
+    `⏭  已跳過「${what}」：此步驟會實際送出電子發票開立請求。\n` +
+      `   若後端設有正式 Amego 憑證（憑證在 env、不在資料庫，隔離資料庫也擋不住），\n` +
+      `   會開出真發票並消耗字軌，且無法回復。\n` +
+      `   確認後端無憑證或使用測試憑證後，再加 MANUAL_ALLOW_EINVOICE_ISSUE=true 重跑。`,
+  );
+  return false;
+}
+
+/**
  * 全店設定的快照 → 執行 → 還原（含讀回驗證）。
  *
  * 手冊腳本為了截圖會暫時改全店設定（發票開關、LINE Pay、備份間隔…）。這些是**店家共用**
@@ -81,9 +104,37 @@ export async function withSettings(keys, fn) {
   }
   const original = Object.fromEntries(keys.map((k) => [k, current[k]]));
   console.log(`• 設定快照：${JSON.stringify(original)}`);
+  // Ctrl-C / kill 不會走 finally，但設定此時已被改過。
+  // 這裡的還原是**盡力而為**：Playwright 自己也掛 SIGINT 處理並會直接結束行程，非同步的
+  // 還原請求常來不及送出（實測會被打斷）。因此除了嘗試還原，更重要的是把「還原用的指令」
+  // 印出來，讓操作者一眼看到該怎麼手動收拾——不要讓店家的設定悄悄留在被改過的狀態。
+  let restoring = false;
+  const onSignal = (signal) => {
+    if (restoring) return;
+    restoring = true;
+    console.error(
+      `\n⚠ 收到 ${signal}：全店設定可能仍停在被本腳本改過的狀態。\n` +
+        `   應還原為：${JSON.stringify(original)}\n` +
+        `   請到「設定」頁人工確認，或執行：\n` +
+        `   TOKEN=$(curl -s -X POST ${API}/api/v1/auth/login -H 'content-type: application/json' \\\n` +
+        `     -d '{"username":"${MGR.u}","password":"<密碼>"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')\n` +
+        `   curl -X PATCH ${API}/api/v1/settings -H "authorization: Bearer $TOKEN" \\\n` +
+        `     -H 'content-type: application/json' -d '${JSON.stringify(original)}'`,
+    );
+    void apiLogin()
+      .then((t) => apiJson(t, "PATCH", "/api/v1/settings", original))
+      .then(({ status }) => {
+        if (status === 200) console.error(`✅ 已自動還原：${JSON.stringify(original)}`);
+      })
+      .finally(() => process.exit(130));
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   try {
     await fn(original);
   } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
     const restoreToken = await apiLogin();
     const patched = await apiJson(restoreToken, "PATCH", "/api/v1/settings", original);
     const after = (await apiJson(restoreToken, "GET", "/api/v1/settings")).json;

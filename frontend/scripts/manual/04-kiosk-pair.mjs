@@ -1,4 +1,5 @@
 // 手冊 04：顧客螢幕（手持簽署裝置）啟用與配對。保存兩邊 storageState 供後續腳本重用。
+import { chmodSync } from "node:fs";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
@@ -61,9 +62,15 @@ await kiosk.waitForSelector(".kiosk-standby", { timeout: 20000 });
 await kiosk.waitForTimeout(800);
 await shot(kiosk, "kiosk-standby", { locator: ".kiosk-standby" });
 
-await kioskCtx.storageState({ path: join(SHOTS_ROOT, "kiosk-state.json") });
-await staffCtx.storageState({ path: join(SHOTS_ROOT, "staff-state.json") });
-note("已保存 kiosk-state.json / staff-state.json");
+// storageState 內含登入權杖（本專案裁示「登入永不過期」→ 等同一把長期有效的管理員鑰匙），
+// 因此檔案權限收成 0600（僅本人可讀）。手冊產完後請自行刪除
+// ~/tmp/lu-camp-manual/*-state.json，勿隨截圖一起散布。
+for (const name of ["kiosk-state.json", "staff-state.json"]) {
+  const path = join(SHOTS_ROOT, name);
+  await (name.startsWith("kiosk") ? kioskCtx : staffCtx).storageState({ path });
+  chmodSync(path, 0o600);
+}
+note("已保存 kiosk-state.json / staff-state.json（權限 0600；用完請刪除）");
 
 await browser.close();
 console.log("✅ 04-kiosk 完成");

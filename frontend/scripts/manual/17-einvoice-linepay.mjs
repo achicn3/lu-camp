@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
+import { BASE, SHOTS_ROOT, allowEInvoiceIssue, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("17-einvoice");
 const shot = makeShot(dir);
@@ -31,11 +31,15 @@ const kiosk = await kioskCtx.newPage();
 await kiosk.goto(`${BASE}/kiosk`, { waitUntil: "domcontentloaded" });
 await kiosk.waitForSelector(".kiosk-standby, .kiosk-cart-shell, .kiosk-task", { timeout: 30000 });
 
-// 電子發票原本就啟用時直接中止：本腳本會實際送出開立請求，可能消耗字軌或開出真發票。
+// 本腳本會開啟發票開關並結帳（＝實際送出開立請求）→ 需明確 opt-in（見 allowEInvoiceIssue）。
 const settingsNow = (await apiJson(await apiLogin(), "GET", "/api/v1/settings")).json;
 if (settingsNow === null) throw new Error("讀不到目前設定，中止");
 if (settingsNow.einvoice_enabled) {
   throw new Error("電子發票原本即為啟用狀態：疑似正式環境，中止以免消耗字軌／開出真發票。");
+}
+if (!allowEInvoiceIssue("開啟電子發票並結帳（會觸發開立）")) {
+  await browser.close();
+  process.exit(0);
 }
 
 await withSettings(["einvoice_enabled", "linepay_enabled"], async () => {

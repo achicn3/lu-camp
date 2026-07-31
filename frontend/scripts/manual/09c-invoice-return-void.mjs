@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, SHOTS_ROOT, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
+import { BASE, SHOTS_ROOT, allowEInvoiceIssue, apiJson, apiLogin, makeShot, note, shotsDir, withSettings } from "./_lib.mjs";
 
 const dir = shotsDir("09-invoice-return-void");
 const shot = makeShot(dir);
@@ -15,6 +15,9 @@ const before = (await apiJson(await apiLogin(), "GET", "/api/v1/settings")).json
 if (before === null) throw new Error("讀不到原始設定");
 if (before.einvoice_enabled) {
   throw new Error("電子發票原本即為啟用狀態：疑似正式環境，中止。");
+}
+if (!allowEInvoiceIssue("開啟電子發票、建立兩筆交易並退貨/作廢（會觸發開立）")) {
+  process.exit(0);
 }
 
 async function saleState(id) {
