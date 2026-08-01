@@ -56,6 +56,7 @@ from app.modules.user.service import UserService
 from app.shared.enums import (
     CartSessionStatus,
     CashMovementType,
+    InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
     ItemKind,
@@ -1801,12 +1802,16 @@ class SalesService:
             reason=InvoiceVoidReason.SALE_VOID,
             actor_user_id=actor_user_id,
         )
-        # 顯示用的反正規化欄位要跟上：**有發票才標 VOID**。變更 A 為了修「電子發票關閉、
-        # 根本沒發票卻被標成已作廢」而拿掉這行，卻連「真的有發票」的情況也一起不同步了，
-        # 導致交易紀錄頁把已作廢單的發票顯示成「已開立／待開立」（Codex 第二輪 #3）。
-        # 收斂回呼（mark_invoice_not_issued）只處理 PENDING_ISSUE，正是預期此處已設 VOID。
+        # 顯示用的反正規化欄位要跟上實際發票狀態（Codex 第二／三輪）：
+        # - 沒有發票（電子發票關閉）→ 不動，維持 NOT_ISSUED
+        # - 發票已直接作廢（平台從未收過 F0401）→ 從未成立，NOT_ISSUED
+        # - 作廢請求已送出但平台未確認 → PENDING_VOID；**確認成功才由回呼轉 VOID**
         if voided_invoice is not None:
-            sale.invoice_status = SaleInvoiceStatus.VOID
+            sale.invoice_status = (
+                SaleInvoiceStatus.NOT_ISSUED
+                if voided_invoice.status is InvoiceStatus.VOID
+                else SaleInvoiceStatus.PENDING_VOID
+            )
         # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
         # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、一般商品現量加回（與退貨同口徑，
         # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、
@@ -1871,15 +1876,33 @@ class SalesService:
         return await self._repo.lock_sale(store_id, sale_id)
 
     async def mark_invoice_not_issued(self, store_id: int, sale_id: int) -> None:
-        """待開立發票被中止（退貨觸發的作廢收斂：F0401 失敗或 F0501 核可）後，把對應銷售的
-        invoice_status 由 PENDING_ISSUE 收斂回 NOT_ISSUED——該銷售最終無有效發票。
+        """發票最終**從未成立**時（F0401 失敗、或作廢中的待開立發票被取消），把對應銷售的
+        invoice_status 收斂回 NOT_ISSUED——該銷售最終沒有任何有效發票。
 
-        僅在仍為 PENDING_ISSUE 時轉：sale-void 路徑的 invoice_status 已是 VOID（銷售作廢語意，
-        報表據此排除，D-3），不得覆寫。einvoice service 回執處理時回呼（跨模組經 service，§2）。
+        可由 PENDING_ISSUE（退貨觸發）或 PENDING_VOID（銷售作廢觸發）轉入；已是終態
+        （ISSUED/ALLOWANCE/VOID）者不覆寫。einvoice service 回執處理時回呼（§2）。
         """
         sale = await self._repo.lock_sale(store_id, sale_id)
-        if sale is not None and sale.invoice_status == SaleInvoiceStatus.PENDING_ISSUE:
+        if sale is not None and sale.invoice_status in (
+            SaleInvoiceStatus.PENDING_ISSUE,
+            SaleInvoiceStatus.PENDING_VOID,
+        ):
             sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED
+            await self._session.flush()
+
+    async def mark_invoice_voided(self, store_id: int, sale_id: int) -> None:
+        """平台**確認**作廢（F0501 核可）後才把 invoice_status 轉 VOID。
+
+        在此之前一律停在 PENDING_VOID：F0501 可能被平台拒絕，那張發票在平台上仍然有效，
+        若提前顯示「已作廢」，畫面會永遠謊報而沒有任何後續回呼能改正（Codex 第三輪 #2）。
+        """
+        sale = await self._repo.lock_sale(store_id, sale_id)
+        if sale is not None and sale.invoice_status in (
+            SaleInvoiceStatus.PENDING_ISSUE,
+            SaleInvoiceStatus.PENDING_VOID,
+            SaleInvoiceStatus.ISSUED,
+        ):
+            sale.invoice_status = SaleInvoiceStatus.VOID
             await self._session.flush()
 
     async def record_print_detail(self, sale: Sale, actor_user_id: int) -> None:

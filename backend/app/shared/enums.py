@@ -215,13 +215,17 @@ class SaleInvoiceStatus(StrEnum):
       非「已開立」——尚無 invoice_no/開立日/隨機碼）；
     ISSUED：平台已核可、發票正式開立；
     PENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；
-    ALLOWANCE：G0401 平台核可、折讓成立；VOID：已作廢。
+    ALLOWANCE：G0401 平台核可、折讓成立；
+    PENDING_VOID：已請求作廢（F0501 已排／F0401 在途）、平台尚未確認——**此時平台上的發票
+      仍然有效**，不可先顯示成已作廢，否則 F0501 被拒時畫面會永遠謊報；
+    VOID：平台已確認作廢。
     """
 
     NOT_ISSUED = "NOT_ISSUED"
     PENDING_ISSUE = "PENDING_ISSUE"
     ISSUED = "ISSUED"
     PENDING_ALLOWANCE = "PENDING_ALLOWANCE"
+    PENDING_VOID = "PENDING_VOID"
     ALLOWANCE = "ALLOWANCE"
     VOID = "VOID"
 

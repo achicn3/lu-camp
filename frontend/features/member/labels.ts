@@ -33,6 +33,7 @@ export const INVOICE_STATUS_LABELS: Record<string, string> = {
   PENDING_ISSUE: "發票開立中",
   ISSUED: "已開立",
   PENDING_ALLOWANCE: "折讓開立中",
+  PENDING_VOID: "作廢處理中",
   ALLOWANCE: "已折讓",
   VOID: "已作廢",
 };

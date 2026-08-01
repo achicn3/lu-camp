@@ -227,7 +227,8 @@ async def test_full_return_same_month_voids_invoice_via_f0501(
     sale = await SalesService(db_session).get_sale(store_id, sale_id)
     assert sale is not None
     assert sale.status is SaleStatus.RETURNED  # 銷售有效、只是全退（非 VOIDED）
-    assert sale.invoice_status is SaleInvoiceStatus.VOID
+    # 平台尚未確認 F0501 → 停在 PENDING_VOID；確認成功才由回呼轉 VOID。
+    assert sale.invoice_status is SaleInvoiceStatus.PENDING_VOID
 
 
 async def test_full_return_cross_month_falls_back_to_allowance(
@@ -632,7 +633,9 @@ async def test_failed_allowance_cannot_be_resent_onto_a_voided_invoice(
     )
     await einvoice.record_result(store_id, g0401.id, success=False, message="平台拒絕")
     # 再讓原發票進入作廢流程
-    await einvoice.void_invoice_for_sale(store_id, sale_id, reason=InvoiceVoidReason.SALE_VOID)
+    await einvoice.void_invoice_for_sale(
+        store_id, sale_id, reason=InvoiceVoidReason.SALE_VOID, actor_user_id=None
+    )
     await db_session.refresh(invoice)
     assert invoice.status is InvoiceStatus.VOID_PENDING
 
@@ -749,11 +752,12 @@ async def test_voiding_an_invoice_writes_an_invoice_level_audit(
     assert log is not None
     assert log.entity_type == "invoice"
     assert log.actor_user_id == clerk_id
-    assert log.before == {"status": "ISSUED", "void_reason": None}
+    assert log.before == {"status": "ISSUED"}
     assert log.after is not None
     assert log.after["status"] == "VOID_PENDING"
     assert log.after["void_reason"] == InvoiceVoidReason.FULL_RETURN.value
     assert log.after["sale_id"] == sale_id
+    assert log.after["source"] == "STAFF"  # 店員發起（平台回執另記 F0501_ACCEPTED/F0401_FAILED）
 
 
 async def test_voided_sale_shows_its_invoice_as_voided_in_the_list(
@@ -774,7 +778,8 @@ async def test_voided_sale_shows_its_invoice_as_voided_in_the_list(
     voided = await sales.get_sale(store_id, sale_id)
     assert voided is not None
     assert voided.status is SaleStatus.VOIDED
-    assert voided.invoice_status is SaleInvoiceStatus.VOID
+    # 已請求作廢、平台尚未確認 → 作廢處理中（不可先謊報「已作廢」）
+    assert voided.invoice_status is SaleInvoiceStatus.PENDING_VOID
     await db_session.refresh(invoice)
     assert invoice.status is InvoiceStatus.VOID_PENDING
     assert invoice.void_reason is InvoiceVoidReason.SALE_VOID
@@ -838,3 +843,67 @@ async def test_database_rejects_void_status_without_a_reason(
         )
     await db_session.rollback()
     assert store_id and sale_id  # 種子確實建立
+
+
+async def test_rejected_f0501_leaves_the_sale_showing_void_in_progress(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """平台**拒絕**作廢時，畫面不可顯示「已作廢」——那張發票在平台上還有效。
+
+    回歸測試（Codex 第三輪 #2）：先前只要送出作廢就把 invoice_status 標成 VOID，
+    F0501 被拒後沒有任何回呼會改正它，畫面等於永遠說謊。
+    """
+    store_id, clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    einvoice = EInvoiceService(db_session)
+    sales = SalesService(db_session)
+    await _return_all(db_session, store_id, sale_id, clerk_id)
+
+    during = await sales.get_sale(store_id, sale_id)
+    assert during is not None
+    assert during.invoice_status is SaleInvoiceStatus.PENDING_VOID
+
+    f0501 = next(
+        q for q in await einvoice.list_queue(store_id) if q.action is EInvoiceAction.VOID
+    )
+    await einvoice.drop_pending(
+        store_id, f0501.id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await einvoice.record_result(store_id, f0501.id, success=False, message="平台拒絕作廢")
+
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID_PENDING  # 平台上仍有效，尚未真的作廢
+    after = await sales.get_sale(store_id, sale_id)
+    assert after is not None
+    assert after.invoice_status is SaleInvoiceStatus.PENDING_VOID  # **不是** VOID
+
+
+async def test_accepted_f0501_finally_marks_the_sale_void_with_an_audit(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """平台確認作廢 → 才轉 VOID，且該次終態轉移也留下 invoice 級稽核（標明來源）。"""
+    store_id, clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    einvoice = EInvoiceService(db_session)
+    await _return_all(db_session, store_id, sale_id, clerk_id)
+    f0501 = next(
+        q for q in await einvoice.list_queue(store_id) if q.action is EInvoiceAction.VOID
+    )
+    await einvoice.drop_pending(
+        store_id, f0501.id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await einvoice.record_result(store_id, f0501.id, success=True)
+
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID
+    after = await SalesService(db_session).get_sale(store_id, sale_id)
+    assert after is not None and after.invoice_status is SaleInvoiceStatus.VOID
+
+    logs = (
+        await db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "VOID_INVOICE", AuditLog.entity_id == str(invoice.id))
+            .order_by(AuditLog.id)
+        )
+    ).all()
+    assert [log.after["source"] for log in logs if log.after] == ["STAFF", "F0501_ACCEPTED"]
+    assert logs[-1].before == {"status": "VOID_PENDING"}
+    assert logs[-1].after is not None and logs[-1].after["status"] == "VOID"

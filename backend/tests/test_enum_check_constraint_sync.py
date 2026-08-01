@@ -12,7 +12,7 @@ from importlib import util
 from pathlib import Path
 from types import ModuleType
 
-from app.shared.enums import SaleStatus, SignatureTaskKind
+from app.shared.enums import SaleInvoiceStatus, SaleStatus, SignatureTaskKind
 
 _VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
 
@@ -33,3 +33,8 @@ def test_signature_task_kind_check_lists_every_enum_value() -> None:
 def test_sale_status_check_lists_every_enum_value() -> None:
     migration = _load("f4c5d6e7a8b9_split_sale_invoice_lifecycle.py")
     assert set(migration._NEW_SALE_STATUSES) == {s.value for s in SaleStatus}
+
+
+def test_sale_invoice_status_check_lists_every_enum_value() -> None:
+    migration = _load("a3c5e7f9b1d2_sale_invoice_status_pending_void.py")
+    assert set(migration._NEW) == {s.value for s in SaleInvoiceStatus}

@@ -362,7 +362,9 @@ async def test_full_return_with_inflight_f0401_converges_via_f0501(
     await einvoice.record_result(store_id, f0401_id, success=True)
     void_items = [i for i in await einvoice.list_queue(store_id) if i.action is EInvoiceAction.VOID]
     assert len(void_items) == 1
-    # F0501 核可 → 正式 VOID、sale 收斂 NOT_ISSUED。
+    # F0501 核可 → 正式 VOID。此路徑的 F0401 **成功過**（發票在平台上真的開出、有字軌號碼），
+    # 之後才被作廢 → 顯示「已作廢」才是事實；NOT_ISSUED 只適用於從未開立成功的情形
+    # （見 test_full_return_inflight_then_f0401_failure_goes_void）。
     await einvoice.drop_pending(
         store_id, void_items[0].id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
     )
@@ -370,7 +372,7 @@ async def test_full_return_with_inflight_f0401_converges_via_f0501(
     assert (await einvoice.get_invoice(store_id, invoice.id)).status is InvoiceStatus.VOID
     synced = await sales.get_sale(store_id, sale.id)
     assert synced is not None
-    assert synced.invoice_status is SaleInvoiceStatus.NOT_ISSUED
+    assert synced.invoice_status is SaleInvoiceStatus.VOID
 
 
 async def test_full_return_inflight_then_f0401_failure_goes_void(

@@ -264,7 +264,7 @@ async def test_drop_pending_rejects_voided_invoice(
         store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
     )
     queue_id = await _first_queue_id(svc, store_id)
-    await svc.void_invoice_for_sale(store_id, sale_id)
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     with pytest.raises(EInvoiceQueueNotDroppable):
         await svc.drop_pending(
@@ -529,7 +529,7 @@ async def test_claimed_unexposed_f0401_recovers_after_void(
         )
 
     # 作廢：已認領 → 在途 → VOID_PENDING、F0401 保留（不可當平台沒收過）。
-    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    voided = await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
     assert voided is not None
     assert voided.status is InvoiceStatus.VOID_PENDING
 
@@ -560,7 +560,7 @@ async def test_void_with_claimed_f0401_goes_void_pending(
     )
     await _claim_then_crash(db_session, svc, store_id, tmp_path)
 
-    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    voided = await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     assert voided is not None
     assert voided.status is InvoiceStatus.VOID_PENDING  # 不可當平台沒收過
@@ -807,7 +807,7 @@ async def test_retry_rejected_when_invoice_void(db_session: AsyncSession, tmp_pa
     await svc.drop_pending(
         store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
     )
-    await svc.void_invoice_for_sale(store_id, sale_id)  # 在途 → VOID_PENDING
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)  # 在途 → VOID_PENDING
     await svc.record_result(store_id, queue_id, success=False, message="E0001")  # → 發票 VOID
 
     with pytest.raises(EInvoiceQueueNotRetryable, match="已作廢"):
@@ -915,7 +915,7 @@ async def test_void_pending_invoice_marks_void_without_f0501(db_session: AsyncSe
         store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
     )
 
-    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    voided = await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     assert voided is not None
     assert voided.id == invoice.id
@@ -940,7 +940,7 @@ async def test_void_pending_invoice_with_dropped_f0401_goes_void_pending(
         store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
     )
 
-    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    voided = await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     assert voided is not None
     assert voided.status is InvoiceStatus.VOID_PENDING
@@ -962,7 +962,8 @@ async def test_f0401_success_while_void_requested_enqueues_f0501(
     await svc.drop_pending(
         store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
     )
-    await svc.void_invoice_for_sale(store_id, sale_id)  # VOID_PENDING，F0401 仍在途
+    # VOID_PENDING，F0401 仍在途
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     await svc.record_result(store_id, queue_id, success=True)  # 平台其實開立了
 
@@ -985,7 +986,7 @@ async def test_f0401_failure_while_void_requested_goes_void(
     await svc.drop_pending(
         store_id, queue_id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
     )
-    await svc.void_invoice_for_sale(store_id, sale_id)  # VOID_PENDING
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)  # VOID_PENDING
 
     await svc.record_result(store_id, queue_id, success=False, message="E0001")  # 平台退回開立
 
@@ -1002,7 +1003,7 @@ async def test_void_issued_invoice_f0501_flow_to_void(
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)  # ISSUED
 
-    voided = await svc.void_invoice_for_sale(store_id, sale_id)
+    voided = await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
 
     # 已核可發票作廢 → 先進 VOID_PENDING（尚未平台確認），並排 F0501（作廢）。
     assert voided is not None
@@ -1025,8 +1026,8 @@ async def test_void_invoice_is_idempotent(db_session: AsyncSession, tmp_path: Pa
     svc = EInvoiceService(db_session)
     await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
 
-    await svc.void_invoice_for_sale(store_id, sale_id)
-    await svc.void_invoice_for_sale(store_id, sale_id)  # 再次呼叫
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)
+    await svc.void_invoice_for_sale(store_id, sale_id, actor_user_id=None)  # 再次呼叫
 
     # 不重複排 F0501（只一筆作廢訊息）。
     void_items = [i for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.VOID]
@@ -1035,4 +1036,7 @@ async def test_void_invoice_is_idempotent(db_session: AsyncSession, tmp_path: Pa
 
 async def test_void_invoice_for_sale_noop_when_no_invoice(db_session: AsyncSession) -> None:
     store_id, sale_id = await _seed_sale(db_session)
-    assert await EInvoiceService(db_session).void_invoice_for_sale(store_id, sale_id) is None
+    voided = await EInvoiceService(db_session).void_invoice_for_sale(
+        store_id, sale_id, actor_user_id=None
+    )
+    assert voided is None

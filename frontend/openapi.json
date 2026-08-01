@@ -7137,12 +7137,13 @@
         "type": "object"
       },
       "SaleInvoiceStatus": {
-        "description": "銷售單的開票狀態（sales.invoice_status）。\n\nNOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；\nPENDING_ISSUE：已排入電子發票開立佇列、尚未取得平台核可字軌號碼（本地 outbox pending，\n  非「已開立」——尚無 invoice_no/開立日/隨機碼）；\nISSUED：平台已核可、發票正式開立；\nPENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；\nALLOWANCE：G0401 平台核可、折讓成立；VOID：已作廢。",
+        "description": "銷售單的開票狀態（sales.invoice_status）。\n\nNOT_ISSUED：einvoice_enabled 關閉或尚未開票（銷售仍完整記錄，§6）；\nPENDING_ISSUE：已排入電子發票開立佇列、尚未取得平台核可字軌號碼（本地 outbox pending，\n  非「已開立」——尚無 invoice_no/開立日/隨機碼）；\nISSUED：平台已核可、發票正式開立；\nPENDING_ALLOWANCE：退貨已建 G0401 折讓、平台尚未核可（比照 ISSUE/VOID：等平台成功才轉正式態）；\nALLOWANCE：G0401 平台核可、折讓成立；\nPENDING_VOID：已請求作廢（F0501 已排／F0401 在途）、平台尚未確認——**此時平台上的發票\n  仍然有效**，不可先顯示成已作廢，否則 F0501 被拒時畫面會永遠謊報；\nVOID：平台已確認作廢。",
         "enum": [
           "NOT_ISSUED",
           "PENDING_ISSUE",
           "ISSUED",
           "PENDING_ALLOWANCE",
+          "PENDING_VOID",
           "ALLOWANCE",
           "VOID"
         ],

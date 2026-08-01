@@ -40,12 +40,14 @@ def test_payment_method_values() -> None:
 
 def test_sale_invoice_status_values() -> None:
     # sales.invoice_status：NOT_ISSUED（未開票）、PENDING_ISSUE（已排開立、待平台核可）、ISSUED、
-    # PENDING_ALLOWANCE（已排 G0401 折讓、待平台核可）、ALLOWANCE、VOID。
+    # PENDING_ALLOWANCE（已排 G0401 折讓、待平台核可）、ALLOWANCE、
+    # PENDING_VOID（已排 F0501 作廢、待平台確認——此時平台發票仍有效）、VOID。
     assert {s.value for s in SaleInvoiceStatus} == {
         "NOT_ISSUED",
         "PENDING_ISSUE",
         "ISSUED",
         "PENDING_ALLOWANCE",
+        "PENDING_VOID",
         "ALLOWANCE",
         "VOID",
     }

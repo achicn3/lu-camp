@@ -164,7 +164,7 @@ class EInvoiceService:
         sale_id: int,
         *,
         reason: InvoiceVoidReason = InvoiceVoidReason.SALE_VOID,
-        actor_user_id: int | None = None,
+        actor_user_id: int | None,
     ) -> Invoice | None:
         """銷售作廢時中止其電子發票（由 sales.void_sale 呼叫；跨模組經 service，§2）。
 
@@ -213,6 +213,33 @@ class EInvoiceService:
             invoice.void_reason = reason
         # 作廢發票屬敏感操作，須留下「誰、何時、對象、前後值」（CLAUDE.md §5）。
         # 銷售層的 VOID_SALE／CREATE_RETURN 稽核記的是交易，追不出哪張發票由什麼狀態變成什麼。
+        await self._audit_invoice_void_transition(
+            store_id,
+            invoice,
+            status_before=status_before,
+            source="STAFF",
+            actor_user_id=actor_user_id,
+            reason=reason,
+        )
+        await self._session.flush()
+        return invoice
+
+    async def _audit_invoice_void_transition(
+        self,
+        store_id: int,
+        invoice: Invoice,
+        *,
+        status_before: InvoiceStatus,
+        source: str,
+        actor_user_id: int | None = None,
+        reason: InvoiceVoidReason | None = None,
+    ) -> None:
+        """作廢流程的每一次狀態轉移都留一筆 invoice 級稽核（CLAUDE.md §5）。
+
+        `source` 明確標示這一步是誰推動的：`STAFF`（店員發起作廢）或平台回執
+        （`F0501_ACCEPTED`／`F0401_FAILED`）。平台回執沒有操作者是事實，不是遺漏——
+        以 source 說清楚，比留一個空白的「誰」更誠實（Codex 第三輪 #3）。
+        """
         await write_audit_log(
             self._session,
             store_id=store_id,
@@ -220,17 +247,16 @@ class EInvoiceService:
             action="VOID_INVOICE",
             entity_type="invoice",
             entity_id=str(invoice.id),
-            before={"status": status_before.value, "void_reason": None},
+            before={"status": status_before.value},
             after={
                 "status": invoice.status.value,
-                "void_reason": reason.value,
-                "sale_id": sale_id,
+                "void_reason": (reason or invoice.void_reason or "").__str__(),
+                "sale_id": invoice.sale_id,
                 "invoice_no": invoice.invoice_no,
+                "source": source,
             },
             is_sensitive=True,
         )
-        await self._session.flush()
-        return invoice
 
     async def record_allowance(
         self,
@@ -1020,9 +1046,15 @@ class EInvoiceService:
                 await self._enqueue_f0501(store_id, invoice.id)
         elif item.action is EInvoiceAction.VOID and invoice.status is InvoiceStatus.VOID_PENDING:
             invoice.status = InvoiceStatus.VOID  # H3：F0501 核可後才正式作廢
-            # 退貨觸發的作廢（sale 未被 void、仍 PENDING_ISSUE）→ 收斂為 NOT_ISSUED（無有效發票）。
-            # sale-void 路徑的 invoice_status 已是 VOID（void_sale 設）→ 此呼叫為 no-op。
-            await SalesService(self._session).mark_invoice_not_issued(store_id, invoice.sale_id)
+            await self._audit_invoice_void_transition(
+                store_id, invoice, status_before=InvoiceStatus.VOID_PENDING, source="F0501_ACCEPTED"
+            )
+            # 反正規化收斂：曾取得字軌（平台真的開過）→ VOID；從未取得 → NOT_ISSUED。
+            sales = SalesService(self._session)
+            if invoice.invoice_no is not None:
+                await sales.mark_invoice_voided(store_id, invoice.sale_id)
+            else:
+                await sales.mark_invoice_not_issued(store_id, invoice.sale_id)
 
     async def _apply_failure_transition(self, store_id: int, item: EInvoiceUploadQueue) -> None:
         """ProcessResult 失敗時的狀態收斂：作廢請求中的 F0401 失敗 → 平台未開立 → 正式 VOID。"""
@@ -1031,7 +1063,10 @@ class EInvoiceService:
         invoice = await self._repo.get_invoice(store_id, item.invoice_id)
         if invoice is not None and invoice.status is InvoiceStatus.VOID_PENDING:
             invoice.status = InvoiceStatus.VOID
-            # 同上：退貨觸發（sale 仍 PENDING_ISSUE）→ NOT_ISSUED；sale-void → no-op。
+            await self._audit_invoice_void_transition(
+                store_id, invoice, status_before=InvoiceStatus.VOID_PENDING, source="F0401_FAILED"
+            )
+            # F0401 失敗＝平台從未開立 → 該銷售最終沒有有效發票。
             from app.modules.sales.service import SalesService
 
             await SalesService(self._session).mark_invoice_not_issued(store_id, invoice.sale_id)

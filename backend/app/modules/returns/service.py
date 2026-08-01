@@ -524,8 +524,9 @@ class ReturnsService:
                 reason=InvoiceVoidReason.FULL_RETURN,
                 actor_user_id=actor_user_id,
             )
-            # 銷售本身有效（status=RETURNED），只是那張發票作廢了。
-            sale.invoice_status = SaleInvoiceStatus.VOID
+            # 銷售本身有效（status=RETURNED），只是那張發票正在作廢。
+            # 停在 PENDING_VOID，等 F0501 平台確認才由回呼轉 VOID（Codex 第三輪 #2）。
+            sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
         elif invoice is not None and invoice.status == InvoiceStatus.ISSUED:
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
