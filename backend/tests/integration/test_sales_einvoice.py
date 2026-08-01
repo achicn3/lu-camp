@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.contacts.models import Contact
 from app.modules.einvoice.dropper import EInvoiceDropper
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.einvoice.service import EInvoiceService
@@ -36,6 +37,7 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
+from tests.integration.customer_display_helpers import signed_return_consent
 
 
 class _FakeSerializer:
@@ -115,7 +117,22 @@ async def _return_lines(
     *,
     idem: str,
 ) -> None:
-    """退掉指定明細行（各 qty=1）。"""
+    """退掉指定明細行（各 qty=1）。
+
+    折讓／作廢皆須買受人同意（作業要點第 9 點），故帶一份已簽同意任務——
+    本檔重點是 G0401 機制本身，同意只是前置條件。
+    """
+    contact = Contact(store_id=store_id, name="退貨客", roles=["MEMBER"], phone=f"09{idem[:8]}")
+    session.add(contact)
+    await session.flush()
+    consent = await signed_return_consent(
+        session,
+        store_id=store_id,
+        sale_id=sale_id,
+        contact_id=contact.id,
+        created_by=clerk_id,
+        return_lines={lid: 1 for lid in line_ids},
+    )
     await ReturnsService(session).create_return(
         store_id,
         sale_id=sale_id,
@@ -123,6 +140,8 @@ async def _return_lines(
         reason="測試退貨",
         actor_user_id=clerk_id,
         idempotency_key=idem,
+        invoice_recalled=True,
+        consent_signature_task_id=consent,
     )
 
 
@@ -239,6 +258,10 @@ async def test_return_of_issued_sale_creates_g0401_allowance(
     await _accept_invoice(db_session, einvoice, store_id, invoice, tmp_path)  # 發票 → ISSUED
 
     sale_lines = await sales.get_lines(sale.id)
+    # 折讓須買受人同意（作業要點第 9 點）：帶一份已簽同意任務作為前置。
+    buyer = Contact(store_id=store_id, name="退貨客", roles=["MEMBER"], phone="0911222333")
+    db_session.add(buyer)
+    await db_session.flush()
     customer_return = await ReturnsService(db_session).create_return(
         store_id,
         sale_id=sale.id,
@@ -246,6 +269,15 @@ async def test_return_of_issued_sale_creates_g0401_allowance(
         reason="不合適退貨",
         actor_user_id=clerk_id,
         idempotency_key="ret-1",
+        invoice_recalled=True,
+        consent_signature_task_id=await signed_return_consent(
+            db_session,
+            store_id=store_id,
+            sale_id=sale.id,
+            contact_id=buyer.id,
+            created_by=clerk_id,
+            return_lines={sale_lines[0].id: 1},
+        ),
     )
 
     # 退貨當下：折讓已建 + G0401 排隊，但 sale 先進 PENDING_ALLOWANCE（等平台成功才轉正式）。

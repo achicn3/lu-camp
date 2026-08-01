@@ -214,6 +214,16 @@ describe("/sales 交易紀錄頁", () => {
   it("混合付款退貨：可整筆選取、顯示購物金優先拆帳並確認台灣Pay差額", async () => {
     let returned = false;
     stubFetch((url, method) => {
+      if (url.includes("/api/v1/returns/preview") && method === "POST") {
+        // 無發票的交易：退貨不涉及發票處置，不應要求收回紙本或簽名同意。
+        return json({
+          is_full_return: false,
+          invoice_action: "NONE",
+          requires_paper_recall: false,
+          requires_customer_consent: false,
+          reason: "原交易沒有已開立的發票，本次退貨不涉及發票處置。",
+        });
+      }
       if (url.includes("/api/v1/returns") && method === "POST") {
         returned = true;
         return json({

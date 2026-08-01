@@ -21,7 +21,7 @@ from app.modules.customerdisplay.service import CartSessionInvalid, CustomerDisp
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.user.models import User
-from app.shared.enums import PayoutMethod, SignatureTaskKind, UserRole
+from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus, UserRole
 
 
 @dataclass(frozen=True)
@@ -191,6 +191,47 @@ async def prepare_signed_store_credit_cart(
         cart_session_id=cart.id,
         cart_revision=cart.revision,
     )
+
+
+async def signed_return_consent(
+    session: AsyncSession,
+    *,
+    store_id: int,
+    sale_id: int,
+    contact_id: int | None,
+    created_by: int,
+    return_lines: dict[int, int],
+) -> int:
+    """建立一份已簽的「退貨發票處置同意」任務並回傳 id。
+
+    折讓與作廢皆須買受人同意（電子發票實施作業要點第 9 點）；測試以此夾具滿足該前置，
+    不影響各測試原本要驗證的重點。`return_lines`＝{sale_line_id: qty}，退貨成立時會與
+    實際退貨範圍逐項比對（見 SigningService.consume_return_consent），故夾具必須如實填寫。
+    """
+    from app.modules.signing.models import SignatureTask
+
+    task = SignatureTask(
+        store_id=store_id,
+        kind=SignatureTaskKind.RETURN_INVOICE_CONSENT,
+        contact_id=contact_id,
+        content={
+            "return_lines": [
+                {"sale_line_id": line_id, "qty": qty}
+                for line_id, qty in sorted(return_lines.items())
+            ]
+        },
+        content_sha256="c" * 64,
+        signature_sha256="s" * 64,
+        evidence_hash="e" * 64,
+        status=SignatureTaskStatus.SIGNED,
+        signed_at=datetime.now(UTC),
+        ref_type="sale",
+        ref_id=sale_id,
+        created_by=created_by,
+    )
+    session.add(task)
+    await session.flush()
+    return int(task.id)
 
 
 async def signed_affidavit(

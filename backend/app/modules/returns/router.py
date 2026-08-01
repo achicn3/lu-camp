@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
-from app.modules.returns.schemas import ReturnCreateRequest, ReturnRead
+from app.modules.returns.schemas import (
+    ReturnCreateRequest,
+    ReturnPreviewRead,
+    ReturnPreviewRequest,
+    ReturnRead,
+)
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.linepay import linepay_client_from_config
 from app.shared.exceptions import (
@@ -71,6 +76,8 @@ async def create_return(
             idempotency_key=idempotency_key,
             linepay_client=linepay_client_from_config(),
             taiwan_pay_refund_confirmed=payload.taiwan_pay_refund_confirmed,
+            invoice_recalled=payload.invoice_recalled,
+            consent_signature_task_id=payload.consent_signature_task_id,
         )
     except IntegrityError as exc:
         await session.rollback()
@@ -99,6 +106,33 @@ async def create_return(
         raise _map_domain_error(exc) from exc
     await session.commit()
     return ReturnRead.from_model(customer_return)
+
+
+@router.post(
+    "/returns/preview",
+    response_model=ReturnPreviewRead,
+    operation_id="previewReturn",
+)
+async def preview_return(
+    payload: ReturnPreviewRequest,
+    session: SessionDep,
+    user: CurrentUserDep,
+) -> ReturnPreviewRead:
+    """預覽本次退貨會如何處置原發票（折讓／作廢／轉人工），供畫面提示店員。
+
+    唯讀、不寫任何資料。**結果僅供提示**：實際送出時後端會以當下狀態重新判斷一次
+    （例如預覽時可作廢、送出前又冒出在途的折讓）。
+    """
+    svc = ReturnsService(session)
+    try:
+        result = await svc.preview_return(
+            user.store_id,
+            sale_id=payload.sale_id,
+            lines=[ReturnLineInput(line.sale_line_id, line.qty) for line in payload.lines],
+        )
+    except DomainError as exc:
+        raise _map_domain_error(exc) from exc
+    return ReturnPreviewRead(**result)
 
 
 @router.get("/returns/{return_id}", response_model=ReturnRead, operation_id="getReturn")

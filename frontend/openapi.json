@@ -6747,6 +6747,22 @@
       },
       "ReturnCreateRequest": {
         "properties": {
+          "consent_signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consent Signature Task Id"
+          },
+          "invoice_recalled": {
+            "default": false,
+            "title": "Invoice Recalled",
+            "type": "boolean"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/ReturnLineRequest"
@@ -6824,6 +6840,63 @@
           "qty"
         ],
         "title": "ReturnLineRequest",
+        "type": "object"
+      },
+      "ReturnPreviewRead": {
+        "description": "預覽結果。**僅供畫面提示**，送出時後端會以當下狀態重新判斷一次（條件可能已變）。",
+        "properties": {
+          "invoice_action": {
+            "title": "Invoice Action",
+            "type": "string"
+          },
+          "is_full_return": {
+            "title": "Is Full Return",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requires_customer_consent": {
+            "title": "Requires Customer Consent",
+            "type": "boolean"
+          },
+          "requires_paper_recall": {
+            "title": "Requires Paper Recall",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_full_return",
+          "invoice_action",
+          "requires_paper_recall",
+          "requires_customer_consent",
+          "reason"
+        ],
+        "title": "ReturnPreviewRead",
+        "type": "object"
+      },
+      "ReturnPreviewRequest": {
+        "description": "退貨預覽：店員勾選品項後、實際送出前，先問後端這次會怎麼處理發票。\n\n不可放在 sale detail——店員尚未選定退哪些品項時，後端無從得知是否會構成累計全退。",
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReturnLineRequest"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "sale_id": {
+            "title": "Sale Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sale_id",
+          "lines"
+        ],
+        "title": "ReturnPreviewRequest",
         "type": "object"
       },
       "ReturnRead": {
@@ -8560,8 +8633,15 @@
       "SignatureTaskCreate": {
         "properties": {
           "contact_id": {
-            "title": "Contact Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
           },
           "content": {
             "additionalProperties": true,
@@ -8609,7 +8689,6 @@
         },
         "required": [
           "kind",
-          "contact_id",
           "content"
         ],
         "title": "SignatureTaskCreate",
@@ -8620,7 +8699,8 @@
         "enum": [
           "ACQUISITION_AFFIDAVIT",
           "STORE_CREDIT_USE",
-          "TRANSACTION_ACK"
+          "TRANSACTION_ACK",
+          "RETURN_INVOICE_CONSENT"
         ],
         "title": "SignatureTaskKind",
         "type": "string"
@@ -8705,8 +8785,15 @@
             "title": "Consumed At"
           },
           "contact_id": {
-            "title": "Contact Id",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
           },
           "content": {
             "additionalProperties": true,
@@ -16173,6 +16260,53 @@
           }
         ],
         "summary": "Create Return",
+        "tags": [
+          "returns"
+        ]
+      }
+    },
+    "/api/v1/returns/preview": {
+      "post": {
+        "description": "預覽本次退貨會如何處置原發票（折讓／作廢／轉人工），供畫面提示店員。\n\n唯讀、不寫任何資料。**結果僅供提示**：實際送出時後端會以當下狀態重新判斷一次\n（例如預覽時可作廢、送出前又冒出在途的折讓）。",
+        "operationId": "previewReturn",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnPreviewRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Return",
         "tags": [
           "returns"
         ]

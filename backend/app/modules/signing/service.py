@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.canonical import canonical_json_bytes
 from app.modules.customerdisplay.models import CartSessionEvent
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
+
+# 純政策模組（無 DB、無跨模組相依），可安全於頂層 import。
+from app.modules.returns.invoice_policy import ReturnInvoiceAction
 from app.modules.signing import agreements
 from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
 from app.modules.signing.repository import SigningRepository
@@ -147,9 +150,14 @@ class SigningService:
         from app.modules.contacts.service import ContactService
 
         contacts = ContactService(self._session)
-        contact = await contacts.get_contact(store_id, data.contact_id)
-        if contact is None:
-            raise ContactNotFound(f"contact {data.contact_id} 不存在或不屬本店")
+        # 退貨的買受人常是臨櫃非會員，此類型（且僅此類型）允許無對象；其餘一律必須綁定。
+        contact = None
+        if data.contact_id is not None:
+            contact = await contacts.get_contact(store_id, data.contact_id)
+            if contact is None:
+                raise ContactNotFound(f"contact {data.contact_id} 不存在或不屬本店")
+        elif data.kind is not SignatureTaskKind.RETURN_INVOICE_CONSENT:
+            raise ContactNotFound(f"{data.kind.value} 任務必須指定會員")
 
         content = dict(data.content)
         # 保留鍵防注入/回顯（Codex K4 第十二輪）：綁定用身分指紋只存後端內部欄，絕不容客端
@@ -157,12 +165,16 @@ class SigningService:
         content.pop("national_id_fingerprint", None)
         agreement_version_id: int | None = None
         if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
+            assert contact is not None  # 上方已強制此類型必有對象
             agreement_version_id = (await self._get_or_seed_current_agreement()).id
             content = await self._enrich_affidavit_content(store_id, contact, contacts, content)
         elif data.kind is SignatureTaskKind.STORE_CREDIT_USE:
+            assert contact is not None
             content = await self._enrich_store_credit_content(store_id, contact, content)
         elif data.kind is SignatureTaskKind.TRANSACTION_ACK:
             content = await self._canonical_transaction_ack_content(store_id, data)
+        elif data.kind is SignatureTaskKind.RETURN_INVOICE_CONSENT:
+            content = await self._canonical_return_consent_content(store_id, data)
 
         if data.kind is SignatureTaskKind.STORE_CREDIT_USE:
             raise SignatureTaskConflict("購物金簽署必須從 POS 權威購物車凍結流程建立")
@@ -441,6 +453,7 @@ class SigningService:
         不信任客端 content——否則過期/被竄改的店務端可讓客人簽下描述錯誤交易的「權威」證據。
         內容整份覆寫（單號/總額/時間），客端傳什麼都不進快照。
         """
+        assert data.contact_id is not None  # create_task 已強制此類型必有對象
         sale = await self._ensure_sale_ackable(
             store_id, data.ref_type, data.ref_id, data.contact_id
         )
@@ -448,6 +461,90 @@ class SigningService:
             "sale_ref": f"#{sale.id}",
             "total": str(sale.total),
             "purchased_at": sale.created_at.isoformat(timespec="minutes"),
+        }
+
+    @staticmethod
+    def _parse_return_consent_lines(raw: object) -> dict[int, int]:
+        """自客端 content 取出「要退哪些明細、各退幾件」。客端只能決定**範圍**，金額與
+        處置方式一律由後端重算——故此處只做嚴格解析，不接受任何敘述性欄位。"""
+        if not isinstance(raw, list) or not raw:
+            raise SignatureTaskConflict("退貨同意必須指明要退哪些品項與數量")
+        parsed: dict[int, int] = {}
+        for entry in raw:
+            if not isinstance(entry, dict):
+                raise SignatureTaskConflict("退貨同意的品項格式不正確")
+            sale_line_id = entry.get("sale_line_id")
+            qty = entry.get("qty")
+            if not isinstance(sale_line_id, int) or isinstance(sale_line_id, bool):
+                raise SignatureTaskConflict("退貨同意的品項格式不正確")
+            if not isinstance(qty, int) or isinstance(qty, bool) or qty <= 0:
+                raise SignatureTaskConflict("退貨同意的品項格式不正確")
+            parsed[sale_line_id] = parsed.get(sale_line_id, 0) + qty
+        return parsed
+
+    async def _canonical_return_consent_content(
+        self, store_id: int, data: SignatureTaskCreate
+    ) -> dict[str, object]:
+        """退貨發票處置同意：內容一律以**後端銷售單＋發票政策**為準重建。
+
+        客人簽的是「同意把這張發票作廢／開折讓」，金額與處置方式必須與系統真正要做的事
+        一致——故客端只能指定退哪些明細、退幾件，其餘欄位整份覆寫（沿 TRANSACTION_ACK 原則）。
+        若本次退貨根本不涉及發票處置（無發票／尚未開立），拒絕建立：不讓客人簽一份空同意。
+        """
+        from app.modules.einvoice.service import EInvoiceService
+        from app.modules.returns.service import ReturnLineInput, ReturnsService
+        from app.modules.sales.service import SalesService
+
+        if data.ref_type != "sale" or data.ref_id is None:
+            raise SignatureTaskConflict("退貨同意必須指向一筆銷售（ref_type='sale'＋ref_id）")
+        requested = self._parse_return_consent_lines(data.content.get("lines"))
+
+        sales = SalesService(self._session)
+        sale = await sales.get_sale(store_id, data.ref_id)
+        if sale is None:
+            raise SignatureTaskConflict(f"找不到銷售 {data.ref_id}")
+        if sale.status is SaleStatus.VOIDED:
+            raise SignatureTaskConflict("已作廢的銷售不可再退貨")
+
+        preview = await ReturnsService(self._session).preview_return(
+            store_id,
+            sale_id=sale.id,
+            lines=[ReturnLineInput(line_id, qty) for line_id, qty in requested.items()],
+        )
+        action = str(preview["invoice_action"])
+        if action == ReturnInvoiceAction.NONE.value:
+            raise SignatureTaskConflict("本次退貨不涉及發票處置，毋須請客人簽署同意")
+        if action == ReturnInvoiceAction.REVIEW_REQUIRED.value:
+            raise SignatureTaskConflict(str(preview["reason"]))
+        label = "作廢原發票" if action == ReturnInvoiceAction.VOID.value else "開立折讓單"
+
+        lines_by_id = {line.id: line for line in await sales.get_lines(sale.id)}
+        items: list[dict[str, object]] = []
+        refund_total = Decimal(0)
+        for sale_line_id, qty in requested.items():
+            line = lines_by_id.get(sale_line_id)
+            if line is None:
+                raise SignatureTaskConflict(f"銷售明細 {sale_line_id} 不屬於銷售單 {sale.id}")
+            line_total = line.unit_price * qty
+            refund_total += line_total
+            items.append(
+                {"name": line.description, "qty": qty, "line_total": str(line_total)}
+            )
+        invoice = await EInvoiceService(self._session).get_invoice_for_sale(store_id, sale.id)
+        return {
+            "sale_ref": f"#{sale.id}",
+            "purchased_at": sale.created_at.isoformat(timespec="minutes"),
+            "invoice_no": invoice.invoice_no if invoice is not None else None,
+            # 簽署範圍（機器可比對）：退貨成立時用來確認客人同意的正是這批品項與數量。
+            "return_lines": [
+                {"sale_line_id": line_id, "qty": qty} for line_id, qty in sorted(requested.items())
+            ],
+            "items": items,
+            "refund_total": str(refund_total),
+            "invoice_action_label": label,
+            "consent_note": (
+                f"本人同意就上列退貨品項，由店家{label}，並確認退款金額無誤。"
+            ),
         }
 
     def _canonical_affidavit_client_fields(self, content: dict[str, object]) -> dict[str, object]:
@@ -724,6 +821,8 @@ class SigningService:
         # SignatureTaskInvalidated——router 須**提交**此作廢（非 rollback），任務才不會繼續
         # 被手持端輪詢到。
         if task.kind is SignatureTaskKind.TRANSACTION_ACK:
+            # 非退貨同意的任務一定有對象（DB CHECK ck_signature_tasks_contact_required）。
+            assert task.contact_id is not None
             try:
                 await self._ensure_sale_ackable(
                     store_id, task.ref_type, task.ref_id, task.contact_id
@@ -926,6 +1025,42 @@ class SigningService:
                     actor_user_id=actor_user_id,
                 )
             )
+
+    async def consume_return_consent(
+        self,
+        store_id: int,
+        task_id: int,
+        *,
+        sale_id: int,
+        return_lines: dict[int, int] | None = None,
+    ) -> SignatureTask:
+        """退貨的發票處置同意：驗證並於同一交易內一次性轉 CONSUMED。
+
+        守衛：須存在、屬本店、為 RETURN_INVOICE_CONSENT、狀態 SIGNED、綁定的正是這筆銷售，
+        且**簽署範圍與實際退貨範圍相同**——否則客人簽「退一件」卻被拿去退三件，同意書失去意義。
+        以 FOR UPDATE 鎖任務列與作廢路徑序列化（同 K5）。一份同意只能用於一次退貨。
+        """
+        task = await self._repo.get_for_update(store_id, task_id)
+        if task is None:
+            raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬本店")
+        if (
+            task.kind is not SignatureTaskKind.RETURN_INVOICE_CONSENT
+            or task.status is not SignatureTaskStatus.SIGNED
+            or task.ref_type != "sale"
+            or task.ref_id != sale_id
+        ):
+            raise SignatureTaskNotPending(
+                f"簽署任務 {task_id} 非本銷售之已簽退貨同意，不可用於此退貨"
+            )
+        if return_lines is not None:
+            signed_scope = self._parse_return_consent_lines(task.content.get("return_lines"))
+            if signed_scope != return_lines:
+                raise SignatureContentMismatch(
+                    "客人簽署同意的退貨品項/數量與本次退貨不符，請重新請客人確認簽名"
+                )
+        return await self.consume_task(
+            task, reason_code="RETURN_INVOICE_CONSENT", sale_id=sale_id
+        )
 
     async def consume_task(
         self,

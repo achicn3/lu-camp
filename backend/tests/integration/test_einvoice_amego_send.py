@@ -7,6 +7,7 @@ invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 """
 
 from decimal import Decimal
+from itertools import count
 from typing import cast
 
 import pytest
@@ -46,7 +47,10 @@ from app.shared.exceptions import (
     EInvoiceResultConflict,
     EInvoiceSettingsChanged,
 )
-from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
+from tests.integration.customer_display_helpers import (
+    prepare_signed_store_credit_cart,
+    signed_return_consent,
+)
 
 # f0401 成功回應樣板（doc 回應欄位；invoice_time 為 Unix 秒）。
 _F0401_OK = {
@@ -344,6 +348,32 @@ async def test_void_issued_invoice_sends_f0501(db_session: AsyncSession) -> None
     assert data == [{"CancelInvoiceNumber": "AB00001111"}]
 
 
+_consent_seq = count(1)
+
+
+async def _consent(
+    session: AsyncSession,
+    store_id: int,
+    sale_id: int,
+    clerk_id: int,
+    return_lines: dict[int, int],
+) -> int:
+    """折讓/作廢須買受人同意（作業要點第 9 點）——本檔重點是 Amego 傳輸，同意僅為前置條件。"""
+    buyer = Contact(
+        store_id=store_id, name="退貨客", roles=["MEMBER"], phone=f"09{next(_consent_seq):08d}"
+    )
+    session.add(buyer)
+    await session.flush()
+    return await signed_return_consent(
+        session,
+        store_id=store_id,
+        sale_id=sale_id,
+        contact_id=buyer.id,
+        created_by=clerk_id,
+        return_lines=return_lines,
+    )
+
+
 async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
     store_id, clerk_id, code = await _seed(db_session)
     sale_id = await _checkout(db_session, store_id, clerk_id, code)
@@ -360,6 +390,10 @@ async def test_return_allowance_sends_g0401(db_session: AsyncSession) -> None:
         reason="測試退貨",
         actor_user_id=clerk_id,
         idempotency_key="amego-return-1",
+        invoice_recalled=True,
+        consent_signature_task_id=await _consent(
+            db_session, store_id, sale_id, clerk_id, {lines[0].id: 1}
+        ),
     )
     allowance_queue_id = next(
         i.id
@@ -515,6 +549,10 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
             reason=f"第 {index} 次退貨",
             actor_user_id=clerk_id,
             idempotency_key=f"amego-mixed-return-{index}",
+            invoice_recalled=True,
+            consent_signature_task_id=await _consent(
+                db_session, store_id, sale.id, clerk_id, {sale_lines[0].id: 1}
+            ),
             linepay_client=line_client,
         )
 
@@ -777,6 +815,10 @@ async def test_allowance_reconcile_detects_platform_already_issued(
         reason="測試退貨",
         actor_user_id=clerk_id,
         idempotency_key="amego-return-recover",
+        invoice_recalled=True,
+        consent_signature_task_id=await _consent(
+            db_session, store_id, sale_id, clerk_id, {lines[0].id: 1}
+        ),
     )
     allowance_queue_id = next(
         i.id
@@ -825,6 +867,10 @@ async def test_allowance_split_uses_invoice_snapshot_after_rate_change(
         reason="測試退貨",
         actor_user_id=clerk_id,
         idempotency_key="amego-return-snapshot",
+        invoice_recalled=True,
+        consent_signature_task_id=await _consent(
+            db_session, store_id, sale_id, clerk_id, {lines[0].id: 1}
+        ),
     )
     allowance_queue_id = next(
         i.id
@@ -857,6 +903,10 @@ async def test_allowance_query_error_blocks_resend(db_session: AsyncSession) -> 
         reason="測試退貨",
         actor_user_id=clerk_id,
         idempotency_key="amego-return-blocked",
+        invoice_recalled=True,
+        consent_signature_task_id=await _consent(
+            db_session, store_id, sale_id, clerk_id, {lines[0].id: 1}
+        ),
     )
     allowance_queue_id = next(
         i.id

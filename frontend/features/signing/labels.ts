@@ -7,6 +7,7 @@ export const SIGNING_KIND_LABELS: Record<string, string> = {
   ACQUISITION_AFFIDAVIT: "收購切結",
   STORE_CREDIT_USE: "購物金扣抵確認",
   TRANSACTION_ACK: "交易紀錄簽收",
+  RETURN_INVOICE_CONSENT: "退貨發票處置同意",
 };
 
 export const SIGNING_STATUS_LABELS: Record<string, string> = {
@@ -33,6 +34,10 @@ const KNOWN_FIELD_LABELS: Record<string, string> = {
   sale_ref: "銷售單號",
   purchased_at: "交易時間",
   store_credit_premium: "購物金溢價率（凍結）",
+  invoice_no: "發票號碼",
+  refund_total: "退款金額",
+  invoice_action_label: "發票處置",
+  consent_note: "同意內容",
 };
 
 export interface ContentRow {
@@ -114,7 +119,11 @@ export function refLabel(
   if (kind === "STORE_CREDIT_USE" && boundSaleId != null) {
     return `銷售單 #${boundSaleId}`;
   }
-  if (kind === "TRANSACTION_ACK" && refType === "sale" && refId != null) {
+  if (
+    (kind === "TRANSACTION_ACK" || kind === "RETURN_INVOICE_CONSENT") &&
+    refType === "sale" &&
+    refId != null
+  ) {
     return `銷售單 #${refId}`;
   }
   return null;

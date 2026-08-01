@@ -18,7 +18,9 @@ MAX_SIGNATURE_B64_CHARS = MAX_SIGNATURE_BYTES * 4 // 3 + 8
 
 class SignatureTaskCreate(BaseModel):
     kind: SignatureTaskKind
-    contact_id: int
+    # 退貨發票處置同意的買受人可能是臨櫃非會員（無 contacts 檔）；其餘類型仍必填，由
+    # service 依 kind 強制（見 SigningService.create_task）。
+    contact_id: int | None = None
     content: dict[str, Any]
     # 多櫃檯精確路由；單櫃檯過渡期可省略，但該店必須恰有一組有效配對。
     terminal_id: int | None = Field(default=None, ge=1)
@@ -33,7 +35,7 @@ class SignatureTaskRead(BaseModel):
     store_id: int
     kind: SignatureTaskKind
     status: SignatureTaskStatus
-    contact_id: int
+    contact_id: int | None
     content: dict[str, Any]
     agreement_version: int | None
     chosen_payout: PayoutMethod | None

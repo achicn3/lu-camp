@@ -67,6 +67,24 @@ class EInvoiceRepository:
         result: InvoiceAllowance | None = await self._session.scalar(stmt)
         return result
 
+    async def list_allowance_queue_items_for_invoice(
+        self, store_id: int, invoice_id: int
+    ) -> list[EInvoiceUploadQueue]:
+        """某發票**所有折讓**的佇列列。
+
+        折讓佇列列以 `allowance_id` 關聯（`invoice_id` 為空），故不能用
+        `list_queue_items_for_invoice` 取得——必須經 invoice_allowances 轉一手。
+        """
+        stmt = (
+            select(EInvoiceUploadQueue)
+            .join(InvoiceAllowance, InvoiceAllowance.id == EInvoiceUploadQueue.allowance_id)
+            .where(
+                EInvoiceUploadQueue.store_id == store_id,
+                InvoiceAllowance.invoice_id == invoice_id,
+            )
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     # ── 佇列 ──
 
     async def add_queue_item(self, item: EInvoiceUploadQueue) -> EInvoiceUploadQueue:

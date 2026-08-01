@@ -1045,6 +1045,37 @@ class EInvoiceService:
         """某銷售的發票（無則 None）；供退貨判斷是否已開票、決定是否走 G0401 折讓（§7.5）。"""
         return await self._repo.find_invoice_by_sale(store_id, sale_id)
 
+    async def has_settled_allowance(self, store_id: int, invoice_id: int) -> bool:
+        """該發票是否已有**成功**的折讓（平台已核可）。
+
+        只要有，後續退貨一律繼續折讓、不得再作廢原發票——否則會同時存在「已作廢的原發票」
+        與先前開出的折讓單（見 ADR-014）。
+        """
+        for item in await self._repo.list_allowance_queue_items_for_invoice(store_id, invoice_id):
+            if item.status is UploadStatus.UPLOADED:
+                return True
+        return False
+
+    async def has_inflight_allowance(self, store_id: int, invoice_id: int) -> bool:
+        """該發票是否有折讓**在途或結果未知**（佇列 PENDING＝待送或已送出但回執未到）。
+
+        分次退貨本來就會有多張 G0401 同時在途（系統已能正確收斂），故此旗標**只用來擋作廢**，
+        不擋再開折讓。
+        """
+        return any(
+            item.status is UploadStatus.PENDING
+            for item in await self._repo.list_allowance_queue_items_for_invoice(
+                store_id, invoice_id
+            )
+        )
+
+    async def has_inflight_void(self, store_id: int, invoice_id: int) -> bool:
+        """該發票是否有作廢（F0501）在途或結果未知——此時任何稅務動作都不得再疊加。"""
+        return any(
+            item.action is EInvoiceAction.VOID and item.status is UploadStatus.PENDING
+            for item in await self._repo.list_queue_items_for_invoice(store_id, invoice_id)
+        )
+
     async def get_allowance_for_return(
         self, store_id: int, return_id: int
     ) -> InvoiceAllowance | None:

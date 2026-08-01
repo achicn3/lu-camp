@@ -104,6 +104,12 @@ class SignatureTask(Base, TimestampMixin):
             "OR chosen_payout IS NOT NULL",
             name="ck_signature_tasks_signed_affidavit_payout",
         ),
+        # 退貨的買受人常是臨櫃非會員（無 contacts 檔），故該類型允許無會員；其餘類型仍強制
+        # 綁定對象，DB 層守住既有保證。
+        CheckConstraint(
+            "contact_id IS NOT NULL OR kind = 'RETURN_INVOICE_CONSENT'",
+            name="ck_signature_tasks_contact_required",
+        ),
         UniqueConstraint("id", "store_id", name="uq_signature_tasks_id_store"),
         Index("ix_signature_tasks_store_status", "store_id", "status"),
         Index(
@@ -130,7 +136,9 @@ class SignatureTask(Base, TimestampMixin):
         default=SignatureTaskStatus.PENDING,
         server_default=SignatureTaskStatus.PENDING.value,
     )
-    contact_id: Mapped[int] = mapped_column(index=True)  # 複合租戶 FK 見 __table_args__
+    # 複合租戶 FK 見 __table_args__。僅 RETURN_INVOICE_CONSENT 可為 NULL（臨櫃非會員也要
+    # 能簽退貨同意，見 ck_signature_tasks_contact_required）。
+    contact_id: Mapped[int | None] = mapped_column(index=True)
     kiosk_device_id: Mapped[int | None] = mapped_column(index=True)
     cart_session_id: Mapped[int | None] = mapped_column(index=True)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)  # 顯示內容快照

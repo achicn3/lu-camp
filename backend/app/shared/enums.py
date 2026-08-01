@@ -383,6 +383,8 @@ class SignatureTaskKind(StrEnum):
     ACQUISITION_AFFIDAVIT = "ACQUISITION_AFFIDAVIT"  # 收購切結書＋條款＋品項＋撥款選擇
     STORE_CREDIT_USE = "STORE_CREDIT_USE"  # 購物金扣抵確認
     TRANSACTION_ACK = "TRANSACTION_ACK"  # 交易紀錄簽收
+    # 退貨的發票處置同意（電子發票實施作業要點第 9 點：作廢／折讓皆須買受人同意）。
+    RETURN_INVOICE_CONSENT = "RETURN_INVOICE_CONSENT"
 
 
 class SignatureTaskStatus(StrEnum):

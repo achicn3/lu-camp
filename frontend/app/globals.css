@@ -865,6 +865,31 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* 發票處置提示（作廢／折讓）：退貨對發票的影響不可與一般說明混為一談，需一眼看見。 */
+.return-invoice-notice {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn, var(--border));
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn, var(--accent)) 6%, var(--surface));
+}
+.return-invoice-action {
+  margin: 0 0 var(--sp-1);
+}
+.return-paper-recall {
+  margin-top: var(--sp-2);
+}
+.return-consent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.return-blocker {
+  margin-top: var(--sp-1);
+}
 @media (max-width: 560px) {
   .pos-mixed-input-row,
   .pos-payment-split {

@@ -1833,6 +1833,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/returns/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Return
+         * @description 預覽本次退貨會如何處置原發票（折讓／作廢／轉人工），供畫面提示店員。
+         *
+         *     唯讀、不寫任何資料。**結果僅供提示**：實際送出時後端會以當下狀態重新判斷一次
+         *     （例如預覽時可作廢、送出前又冒出在途的折讓）。
+         */
+        post: operations["previewReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/returns/{return_id}": {
         parameters: {
             query?: never;
@@ -4891,6 +4914,13 @@ export interface components {
         };
         /** ReturnCreateRequest */
         ReturnCreateRequest: {
+            /** Consent Signature Task Id */
+            consent_signature_task_id?: number | null;
+            /**
+             * Invoice Recalled
+             * @default false
+             */
+            invoice_recalled: boolean;
             /** Lines */
             lines: components["schemas"]["ReturnLineRequest"][];
             /** Reason */
@@ -4920,6 +4950,34 @@ export interface components {
             qty: number;
             /** Sale Line Id */
             sale_line_id: number;
+        };
+        /**
+         * ReturnPreviewRead
+         * @description 預覽結果。**僅供畫面提示**，送出時後端會以當下狀態重新判斷一次（條件可能已變）。
+         */
+        ReturnPreviewRead: {
+            /** Invoice Action */
+            invoice_action: string;
+            /** Is Full Return */
+            is_full_return: boolean;
+            /** Reason */
+            reason: string;
+            /** Requires Customer Consent */
+            requires_customer_consent: boolean;
+            /** Requires Paper Recall */
+            requires_paper_recall: boolean;
+        };
+        /**
+         * ReturnPreviewRequest
+         * @description 退貨預覽：店員勾選品項後、實際送出前，先問後端這次會怎麼處理發票。
+         *
+         *     不可放在 sale detail——店員尚未選定退哪些品項時，後端無從得知是否會構成累計全退。
+         */
+        ReturnPreviewRequest: {
+            /** Lines */
+            lines: components["schemas"]["ReturnLineRequest"][];
+            /** Sale Id */
+            sale_id: number;
         };
         /** ReturnRead */
         ReturnRead: {
@@ -5508,7 +5566,7 @@ export interface components {
         /** SignatureTaskCreate */
         SignatureTaskCreate: {
             /** Contact Id */
-            contact_id: number;
+            contact_id?: number | null;
             /** Content */
             content: {
                 [key: string]: unknown;
@@ -5526,7 +5584,7 @@ export interface components {
          * @description 手持簽署任務類型（docs/23）。
          * @enum {string}
          */
-        SignatureTaskKind: "ACQUISITION_AFFIDAVIT" | "STORE_CREDIT_USE" | "TRANSACTION_ACK";
+        SignatureTaskKind: "ACQUISITION_AFFIDAVIT" | "STORE_CREDIT_USE" | "TRANSACTION_ACK" | "RETURN_INVOICE_CONSENT";
         /** SignatureTaskRead */
         SignatureTaskRead: {
             /** Agreement Body */
@@ -5543,7 +5601,7 @@ export interface components {
             /** Consumed At */
             consumed_at: string | null;
             /** Contact Id */
-            contact_id: number;
+            contact_id: number | null;
             /** Content */
             content: {
                 [key: string]: unknown;
@@ -9468,6 +9526,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReturnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnPreviewRead"];
                 };
             };
             /** @description Validation Error */

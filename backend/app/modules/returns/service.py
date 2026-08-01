@@ -4,8 +4,9 @@ import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, time
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,12 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
+from app.modules.returns.invoice_policy import (
+    InvoiceFacts,
+    ReturnInvoiceAction,
+    ReturnInvoiceDecision,
+    decide,
+)
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
 from app.modules.sales.linepay import LinePayClient
@@ -25,6 +32,7 @@ from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     CashMovementType,
     InvoiceStatus,
+    InvoiceVoidReason,
     PaymentMethod,
     SaleInvoiceStatus,
     SaleLineType,
@@ -82,6 +90,9 @@ def _refund_identity(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
 
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+
+
 class ReturnsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -95,6 +106,107 @@ class ReturnsService:
 
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
+
+    async def preview_return(
+        self,
+        store_id: int,
+        *,
+        sale_id: int,
+        lines: Sequence[ReturnLineInput],
+    ) -> dict[str, object]:
+        """唯讀預覽：本次退貨會如何處置原發票。不寫入任何資料。"""
+        sale = await self._sales.get_sale(store_id, sale_id)
+        if sale is None:
+            raise ReturnSaleNotFound(f"找不到銷售單 {sale_id}")
+        requested = self._normalize_lines(lines)
+        sale_lines = await self._sales.list_lines(sale_id)
+        lines_by_id = {line.id: line for line in sale_lines}
+        for sale_line_id in requested:
+            if sale_line_id not in lines_by_id:
+                raise ReturnLineInvalid(f"銷售明細 {sale_line_id} 不屬於銷售單 {sale_id}")
+        previous = await self._repo.returned_qty_by_sale_line_ids(store_id, list(lines_by_id))
+        after = dict(previous)
+        for sale_line_id, qty in requested.items():
+            after[sale_line_id] = after.get(sale_line_id, 0) + qty
+        is_full_return = all(after.get(line.id, 0) >= line.qty for line in sale_lines)
+        decision = await self._decide_invoice_action(
+            store_id, sale_id, is_full_return=is_full_return
+        )
+        return {
+            "is_full_return": is_full_return,
+            "invoice_action": decision.action.value,
+            "requires_paper_recall": decision.requires_paper_recall,
+            "requires_customer_consent": decision.requires_customer_consent,
+            "reason": decision.reason,
+        }
+
+    async def _decide_invoice_action(
+        self, store_id: int, sale_id: int, *, is_full_return: bool
+    ) -> ReturnInvoiceDecision:
+        """自 DB 蒐集原發票事實，交由純政策模組決定折讓／作廢／轉人工（見 invoice_policy）。"""
+        invoice = await self._einvoice.get_invoice_for_sale(store_id, sale_id)
+        if invoice is None:
+            return decide(
+                InvoiceFacts(
+                    exists=False,
+                    is_issued=False,
+                    issued_at=None,
+                    has_settled_allowance=False,
+                    has_inflight_allowance=False,
+                    has_inflight_void=False,
+                    print_mark=False,
+                    carrier_type=None,
+                    donate_mark=False,
+                ),
+                is_full_return=is_full_return,
+                now=datetime.now(UTC),
+            )
+        # 開立日以平台回填的 invoice_date（台北曆日）為準；尚未回填時退回建立時間。
+        issued_at = (
+            datetime.combine(invoice.invoice_date, time(12, 0), tzinfo=_TAIPEI_TZ)
+            if invoice.invoice_date is not None
+            else invoice.created_at
+        )
+        facts = InvoiceFacts(
+            exists=True,
+            is_issued=invoice.status is InvoiceStatus.ISSUED,
+            issued_at=issued_at,
+            has_settled_allowance=await self._einvoice.has_settled_allowance(store_id, invoice.id),
+            has_inflight_allowance=await self._einvoice.has_inflight_allowance(
+                store_id, invoice.id
+            ),
+            has_inflight_void=await self._einvoice.has_inflight_void(store_id, invoice.id),
+            print_mark=invoice.print_mark,
+            carrier_type=invoice.carrier_type,
+            donate_mark=invoice.donate_mark,
+        )
+        return decide(facts, is_full_return=is_full_return, now=datetime.now(UTC))
+
+    async def _require_return_consent(
+        self,
+        store_id: int,
+        *,
+        sale_id: int,
+        signature_task_id: int | None,
+        action: ReturnInvoiceAction,
+        return_lines: dict[int, int],
+    ) -> None:
+        """買受人同意（電子發票實施作業要點第 9 點）：折讓與作廢皆須客人簽名確認。
+
+        fail-closed：未帶已簽任務即拒絕——不可因「畫面沒顯示」就默默略過同意證據。
+        同意的**範圍**也要對得上：客人簽的品項/數量必須正是本次要退的（見 consume_return_consent）。
+        """
+        if signature_task_id is None:
+            raise ReturnConflict(
+                "本次退貨會變更電子發票（"
+                + ("作廢" if action is ReturnInvoiceAction.VOID else "開立折讓")
+                + "），依規定須經買受人同意：請先請客人於顧客螢幕簽名確認。"
+            )
+        from app.modules.signing.service import SigningService
+
+        await SigningService(self._session).consume_return_consent(
+            store_id, signature_task_id, sale_id=sale_id, return_lines=return_lines
+        )
 
     async def margin_adjustments(
         self, store_id: int, date_from: datetime, date_to: datetime
@@ -146,6 +258,8 @@ class ReturnsService:
         idempotency_key: str,
         linepay_client: LinePayClient | None = None,
         taiwan_pay_refund_confirmed: bool = False,
+        invoice_recalled: bool = False,
+        consent_signature_task_id: int | None = None,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
@@ -200,6 +314,35 @@ class ReturnsService:
             line_refund = line.unit_price * qty
             refund_amount += line_refund
             selected.append((line, qty, line_refund))
+
+        # ── 發票處置政策（必須在任何退款動作之前）────────────────────────────────
+        # LINE Pay 退款是**外部 API**，一旦呼叫就不會因交易回滾而收回；因此凡是可能「拒絕本次
+        # 退貨」的判斷，都必須在此先做完，不得等到退款之後才擋。
+        returned_after_preview = dict(previous)
+        for sale_line_id, qty in requested.items():
+            returned_after_preview[sale_line_id] = returned_after_preview.get(sale_line_id, 0) + qty
+        will_be_full_return = all(
+            returned_after_preview.get(line.id, 0) >= line.qty for line in sale_lines
+        )
+        invoice_decision = await self._decide_invoice_action(
+            store_id, sale.id, is_full_return=will_be_full_return
+        )
+        if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
+            raise ReturnConflict(invoice_decision.reason)
+        if invoice_decision.requires_paper_recall and not invoice_recalled:
+            # 店主裁示（2026-08-01）：累計全退且原發票有紙本時，未收回紙本一律拒絕退貨退款。
+            # 真正的部分退貨不受此限——原發票對未退商品仍是客人的憑證，不得收回。
+            raise ReturnConflict(
+                "本次為整筆退貨且原發票有紙本證明聯：請先向客人收回發票並於畫面確認，才能退貨退款。"
+            )
+        if invoice_decision.requires_customer_consent:
+            await self._require_return_consent(
+                store_id,
+                sale_id=sale.id,
+                signature_task_id=consent_signature_task_id,
+                action=invoice_decision.action,
+                return_lines=requested,
+            )
 
         sale_tenders = await self._sales.list_tenders(sale.id)
         previous_refund = sum(
@@ -311,7 +454,10 @@ class ReturnsService:
         returned_after = dict(previous)
         for sale_line_id, qty in requested.items():
             returned_after[sale_line_id] = returned_after.get(sale_line_id, 0) + qty
-        if all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines):
+        # 「累計全退」＝本次退完後所有明細都退光。含餐飲的混合單因餐飲不可退，永遠不成立
+        # ——這正確：餐飲確實沒退，本來就不算整筆退。
+        is_full_return = all(returned_after.get(line.id, 0) >= line.qty for line in sale_lines)
+        if is_full_return:
             sale.status = SaleStatus.RETURNED
 
         # 退貨按比例沖回會員點數（D-8(2)，裁示 2026-07-16；Codex 波次二第三輪 P1 修正口徑）：
@@ -354,7 +500,19 @@ class ReturnsService:
         # 平台 ProcessResult 成功後才由 einvoice 回呼轉正式 ALLOWANCE**（避免 G0401 上傳失敗卻已顯示
         # 已折讓）。折讓金額＝本次退款額；同退貨 return_id 唯一、累計不超過原發票（einvoice 守衛）。
         invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
-        if invoice is not None and invoice.status == InvoiceStatus.ISSUED:
+        if (
+            invoice is not None
+            and invoice.status == InvoiceStatus.ISSUED
+            and invoice_decision.action is ReturnInvoiceAction.VOID
+        ):
+            # 整筆退貨且原發票為本月開立 → **作廢原發票（F0501）**，不開折讓（ADR-014）。
+            # 紙本收回與買受人同意已於本函式前段驗證（在任何退款動作之前）。
+            await self._einvoice.void_invoice_for_sale(
+                store_id, sale.id, reason=InvoiceVoidReason.FULL_RETURN
+            )
+            # 銷售本身有效（status=RETURNED），只是那張發票作廢了。
+            sale.invoice_status = SaleInvoiceStatus.VOID
+        elif invoice is not None and invoice.status == InvoiceStatus.ISSUED:
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
@@ -393,6 +551,9 @@ class ReturnsService:
                     for kind, amount in refund_allocations
                 ],
                 "line_count": len(selected),
+                "invoice_action": invoice_decision.action.value,
+                "invoice_recalled": invoice_recalled,
+                "consent_signature_task_id": consent_signature_task_id,
             },
         )
         await self._session.flush()

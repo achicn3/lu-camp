@@ -1277,6 +1277,8 @@ function taskHeading(kind: string): string {
       return "購物金使用確認";
     case "TRANSACTION_ACK":
       return "交易紀錄簽收";
+    case "RETURN_INVOICE_CONSENT":
+      return "退貨與發票處置同意";
     default:
       return "簽署確認";
   }
@@ -1314,6 +1316,10 @@ const CONTENT_LABELS: Record<string, string> = {
   original_unit_price: "原價",
   discount_amount: "折扣",
   line_total: "小計",
+  invoice_no: "原發票號碼",
+  refund_total: "退款金額",
+  invoice_action_label: "發票處置方式",
+  consent_note: "同意內容",
 };
 
 type ContentEntry = [string, unknown];
@@ -1341,6 +1347,14 @@ const AFFIDAVIT_IDENTITY_FIELD_ORDER = [
 ];
 const AFFIDAVIT_TRANSACTION_FIELD_ORDER = ["total", "lot"];
 const ACK_FIELD_ORDER = ["sale_ref", "purchased_at", "total"];
+const RETURN_CONSENT_FIELD_ORDER = [
+  "sale_ref",
+  "purchased_at",
+  "invoice_no",
+  "refund_total",
+  "invoice_action_label",
+  "consent_note",
+];
 const ITEM_EXTRA_ORDER = [
   "qty",
   "original_unit_price",
@@ -1476,7 +1490,12 @@ function contentFieldGroups(kind: string, entries: ContentEntry[]): ContentField
       { title: "其他內容", entries: other },
     ].filter((group) => group.entries.length > 0);
   }
-  const order = kind === "STORE_CREDIT_USE" ? STORE_CREDIT_FIELD_ORDER : ACK_FIELD_ORDER;
+  const order =
+    kind === "STORE_CREDIT_USE"
+      ? STORE_CREDIT_FIELD_ORDER
+      : kind === "RETURN_INVOICE_CONSENT"
+        ? RETURN_CONSENT_FIELD_ORDER
+        : ACK_FIELD_ORDER;
   return [{ title: null, entries: orderEntries(entries, order) }];
 }
 

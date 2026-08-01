@@ -212,7 +212,12 @@ async def get_signature_task(
     # 簽署人姓名（證據需標明誰簽的，尤其 ACK 內容不含姓名）——經 contacts service（§2）。
     from app.modules.contacts.service import ContactService
 
-    contact = await ContactService(session).get_contact(user.store_id, task.contact_id)
+    # 退貨同意可由臨櫃非會員簽署（無 contact）——此時無姓名可標，證據以任務內容與時間為準。
+    contact = (
+        await ContactService(session).get_contact(user.store_id, task.contact_id)
+        if task.contact_id is not None
+        else None
+    )
     signer_name = getattr(contact, "name", None)
     return _to_read(
         task,

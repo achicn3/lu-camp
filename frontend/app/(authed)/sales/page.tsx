@@ -33,6 +33,10 @@ import {
   refundTenderLabel,
   supportsRefund,
 } from "@/features/returns/refund";
+import {
+  invoiceActionLabel,
+  returnSubmitBlockers,
+} from "@/features/returns/invoice-consent";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
 type ReturnTenderRead = components["schemas"]["ReturnTenderRead"];
@@ -206,6 +210,11 @@ function ReturnDialog({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [taiwanPayRefundConfirmed, setTaiwanPayRefundConfirmed] = useState(false);
+  // 發票處置（作廢／折讓）的兩道前置：收回紙本證明聯、買受人簽名同意。兩者都綁定當下的
+  // 退貨計畫——改了要退什麼，先前的確認/同意即失效（以計畫指紋比對，不另用 effect 清狀態）。
+  const [paperRecalledPlanKey, setPaperRecalledPlanKey] = useState<string | null>(null);
+  const [consentTaskId, setConsentTaskId] = useState<number | null>(null);
+  const [consentPlanKey, setConsentPlanKey] = useState<string | null>(null);
   // 冪等鍵綁定「一次退貨嘗試」：回應遺失後從錯誤重試，必須沿用同鍵才觸發後端 replay、不重複
   // 退款/回補/沖點（Codex P1）。**持久化跨對話框重掛/重整（Codex 第二輪 #3）**：LINE Pay 退款
   // 於本地 commit 前呼叫平台，若之後失敗/崩潰，關開對話框或重整會換出新鍵而繞過 durable 退款
@@ -244,6 +253,81 @@ function ReturnDialog({
     (leg) => leg.tender_type === "TAIWAN_PAY",
   );
 
+  // 本次要退的明細（送預覽、建同意任務、送出退貨三處同一份，避免三邊不一致）。
+  const returnLines = Object.entries(qtys)
+    .filter(([, q]) => q > 0)
+    .map(([id, q]) => ({ sale_line_id: Number(id), qty: q }))
+    .sort((a, b) => a.sale_line_id - b.sale_line_id);
+  const planKey = JSON.stringify(returnLines);
+  const consentMatchesPlan = consentTaskId !== null && consentPlanKey === planKey;
+  const paperRecalled = paperRecalledPlanKey === planKey;
+
+  const preview = useQuery({
+    queryKey: ["return-preview", sale.id, planKey],
+    enabled: returnLines.length > 0,
+    queryFn: async () => {
+      const { data, error: apiError } = await api.POST("/api/v1/returns/preview", {
+        body: { sale_id: sale.id, lines: returnLines },
+      });
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取發票處置預覽失敗");
+      return data;
+    },
+  });
+  const previewData = returnLines.length > 0 ? (preview.data ?? null) : null;
+
+  const consentTask = useQuery({
+    queryKey: ["signing-task", consentTaskId],
+    enabled: consentTaskId != null,
+    refetchInterval: (q) =>
+      q.state.data?.status === "PENDING" || q.state.data?.status === "SIGNING" ? 2000 : false,
+    queryFn: async () => {
+      if (consentTaskId == null) return null;
+      const { data } = await api.GET("/api/v1/signing/tasks/{task_id}", {
+        params: { path: { task_id: consentTaskId } },
+      });
+      return data ?? null;
+    },
+  });
+  const consentSigned = consentMatchesPlan && consentTask.data?.status === "SIGNED";
+
+  const pushConsent = useMutation({
+    mutationFn: async () => {
+      const terminalResponse = await api.POST("/api/v1/customer-display/terminals", {
+        body: { installation_id: terminalInstallationId(), name: "主要櫃檯" },
+      });
+      const terminal = terminalResponse.data;
+      if (!terminal?.paired_kiosk) throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
+      if (!terminal.paired_kiosk.online) {
+        throw new Error("顧客螢幕目前離線，無法請客人簽名同意");
+      }
+      // 同意書內容由後端依銷售單與發票政策重建；客端只送「退哪些、退幾件」。
+      // contact_id 留空：臨櫃非會員也要能簽（有會員時帶入，證據可標明簽署人）。
+      const { data, error: apiError } = await api.POST("/api/v1/signing/tasks", {
+        body: {
+          kind: "RETURN_INVOICE_CONSENT",
+          contact_id: sale.buyer_contact_id ?? null,
+          content: { lines: returnLines },
+          terminal_id: terminal.id,
+          ref_type: "sale",
+          ref_id: sale.id,
+        },
+      });
+      if (!data) throw new Error(extractDetail(apiError) ?? "推送簽名同意失敗");
+      return data.id;
+    },
+    onSuccess: (taskId) => {
+      setError(null);
+      setConsentTaskId(taskId);
+      setConsentPlanKey(planKey);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const blockers = returnSubmitBlockers(previewData, {
+    paperRecalled,
+    consentTaskSigned: consentSigned,
+  });
+
   const submit = useMutation({
     mutationFn: async () => {
       const invalid = validateReturnPlan(lines, qtys, reason);
@@ -258,10 +342,10 @@ function ReturnDialog({
         body: {
           sale_id: sale.id,
           reason: reason.trim(),
-          lines: Object.entries(qtys)
-            .filter(([, q]) => q > 0)
-            .map(([id, q]) => ({ sale_line_id: Number(id), qty: q })),
+          lines: returnLines,
           taiwan_pay_refund_confirmed: taiwanPayRefundConfirmed,
+          invoice_recalled: paperRecalled,
+          consent_signature_task_id: consentSigned ? consentTaskId : null,
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "退貨失敗");
@@ -397,6 +481,67 @@ function ReturnDialog({
             </span>
           </label>
         )}
+        {previewData !== null && previewData.invoice_action !== "NONE" && (
+          <section className="return-invoice-notice" aria-label="發票處置">
+            <p className="return-invoice-action">
+              本次退貨將
+              <b>{invoiceActionLabel(previewData.invoice_action)}</b>
+            </p>
+            <p className="hint">{previewData.reason}</p>
+            {previewData.requires_paper_recall && (
+              <label className="field field-toggle return-paper-recall">
+                <input
+                  type="checkbox"
+                  checked={paperRecalled}
+                  onChange={(event) =>
+                    setPaperRecalledPlanKey(event.target.checked ? planKey : null)
+                  }
+                />
+                <span className="field-label">已向客人收回發票證明聯（紙本）</span>
+              </label>
+            )}
+            {previewData.requires_customer_consent && (
+              <div className="return-consent">
+                {consentSigned ? (
+                  <p className="form-success">客人已簽名同意（簽署單號 #{consentTaskId}）</p>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={pushConsent.isPending}
+                      onClick={() => pushConsent.mutate()}
+                    >
+                      {pushConsent.isPending ? "推送中…" : "請客人於顧客螢幕簽名同意"}
+                    </button>
+                    {consentMatchesPlan && consentTask.data?.status === "PENDING" && (
+                      <span className="hint">已送出，等待客人簽名…</span>
+                    )}
+                    {consentMatchesPlan && consentTask.data?.status === "SIGNING" && (
+                      <span className="hint">客人簽名中…</span>
+                    )}
+                    {consentTaskId !== null && !consentMatchesPlan && (
+                      <span className="hint">退貨品項已變更，請重新請客人簽名。</span>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+        {preview.isError && returnLines.length > 0 && (
+          <p role="alert" className="form-error">
+            無法確認本次退貨的發票處置方式，請重試。{" "}
+            <button type="button" onClick={() => void preview.refetch()}>
+              重試
+            </button>
+          </p>
+        )}
+        {blockers.map((blocker) => (
+          <p key={blocker} className="hint return-blocker">
+            {blocker}
+          </p>
+        ))}
         {error !== null && (
           <p role="alert" className="form-error">
             {error}
@@ -410,7 +555,10 @@ function ReturnDialog({
               submit.isPending ||
               refund <= 0 ||
               !refundSupported ||
-              (hasTaiwanPayRefund && !taiwanPayRefundConfirmed)
+              (hasTaiwanPayRefund && !taiwanPayRefundConfirmed) ||
+              preview.isFetching ||
+              preview.isError ||
+              blockers.length > 0
             }
             onClick={() => {
               setError(null);
