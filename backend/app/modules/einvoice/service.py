@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.core.money import split_tax_inclusive
 from app.modules.einvoice.amego import (
     AmegoClient,
@@ -163,6 +164,7 @@ class EInvoiceService:
         sale_id: int,
         *,
         reason: InvoiceVoidReason = InvoiceVoidReason.SALE_VOID,
+        actor_user_id: int | None = None,
     ) -> Invoice | None:
         """銷售作廢時中止其電子發票（由 sales.void_sale 呼叫；跨模組經 service，§2）。
 
@@ -179,11 +181,14 @@ class EInvoiceService:
             return None
         if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
             return invoice
+        status_before = invoice.status
         # 作廢原因（SALE_VOID／FULL_RETURN／CORRECTION）：同樣是「作廢」，帳務意義不同，
         # 必須可分辨——報表與稽核據此區分「這筆交易不算數」與「交易有效但全退」。
-        invoice.void_reason = reason
+        # **與狀態同時設定**：ck_invoices_void_reason_matches_status 要求兩者一致，中途若被
+        # autoflush 寫出（下方查詢會觸發）就會違反約束。
         if invoice.status is InvoiceStatus.ISSUED:
             invoice.status = InvoiceStatus.VOID_PENDING
+            invoice.void_reason = reason
             await self._enqueue_f0501(store_id, invoice.id)
         else:  # PENDING（尚未平台核可）
             # FOR UPDATE：與交付協議同鎖（Codex 第五輪）——避免讀到過期未認領列、
@@ -205,6 +210,25 @@ class EInvoiceService:
                 invoice.status = InvoiceStatus.VOID
                 for item in issue_items:
                     item.status = UploadStatus.CANCELLED
+            invoice.void_reason = reason
+        # 作廢發票屬敏感操作，須留下「誰、何時、對象、前後值」（CLAUDE.md §5）。
+        # 銷售層的 VOID_SALE／CREATE_RETURN 稽核記的是交易，追不出哪張發票由什麼狀態變成什麼。
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="VOID_INVOICE",
+            entity_type="invoice",
+            entity_id=str(invoice.id),
+            before={"status": status_before.value, "void_reason": None},
+            after={
+                "status": invoice.status.value,
+                "void_reason": reason.value,
+                "sale_id": sale_id,
+                "invoice_no": invoice.invoice_no,
+            },
+            is_sensitive=True,
+        )
         await self._session.flush()
         return invoice
 

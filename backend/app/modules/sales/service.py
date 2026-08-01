@@ -1795,9 +1795,18 @@ class SalesService:
         # 電子發票中止（§6）：把該銷售的待開立發票標 VOID，使其待送佇列列被 drop_pending 拒絕，
         # 不會把已作廢銷售的發票拋上平台。已核可（ISSUED）發票的作廢須另送 F0501/F0701 平台訊息
         # ——該路徑待收尾階段依 作廢 vs 註銷 規則接線。無發票（einvoice 關閉時建的單）→ no-op。
-        await self._einvoice.void_invoice_for_sale(
-            sale.store_id, sale.id, reason=InvoiceVoidReason.SALE_VOID
+        voided_invoice = await self._einvoice.void_invoice_for_sale(
+            sale.store_id,
+            sale.id,
+            reason=InvoiceVoidReason.SALE_VOID,
+            actor_user_id=actor_user_id,
         )
+        # 顯示用的反正規化欄位要跟上：**有發票才標 VOID**。變更 A 為了修「電子發票關閉、
+        # 根本沒發票卻被標成已作廢」而拿掉這行，卻連「真的有發票」的情況也一起不同步了，
+        # 導致交易紀錄頁把已作廢單的發票顯示成「已開立／待開立」（Codex 第二輪 #3）。
+        # 收斂回呼（mark_invoice_not_issued）只處理 PENDING_ISSUE，正是預期此處已設 VOID。
+        if voided_invoice is not None:
+            sale.invoice_status = SaleInvoiceStatus.VOID
         # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
         # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、一般商品現量加回（與退貨同口徑，
         # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、

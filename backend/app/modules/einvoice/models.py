@@ -90,6 +90,13 @@ class Invoice(Base, TimestampMixin):
             " OR (invoice_type = 'B2C' AND buyer_tax_id IS NULL)",
             name="ck_invoices_buyer_tax_id",
         ),
+        # 作廢狀態與作廢原因必須一致：作廢（含作廢中）必有原因，未作廢不得有原因。
+        # **與 migration f7a8b9c0d1e2 同名同條件**——測試庫由 metadata 建立，若只寫在
+        # migration，測試會接受正式資料庫拒絕的資料（先前 signaturetaskkind 即因此漏網）。
+        CheckConstraint(
+            "(status IN ('VOID', 'VOID_PENDING')) = (void_reason IS NOT NULL)",
+            name="ck_invoices_void_reason_matches_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

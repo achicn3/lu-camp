@@ -10,9 +10,11 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.einvoice.dropper import EInvoiceDropper
@@ -725,3 +727,114 @@ async def test_consent_is_rejected_when_the_refund_amount_drifts(
             idempotency_key="drift-2",
             consent_signature_task_id=consent,
         )
+
+
+async def test_voiding_an_invoice_writes_an_invoice_level_audit(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """作廢發票須留下「誰、對象、前後值」（CLAUDE.md §5）。
+
+    銷售層的稽核記的是交易；出事時要追的是「哪張發票、由什麼狀態、因為什麼原因被作廢」。
+    """
+    store_id, clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    await _return_all(db_session, store_id, sale_id, clerk_id)
+
+    log = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.store_id == store_id,
+            AuditLog.action == "VOID_INVOICE",
+            AuditLog.entity_id == str(invoice.id),
+        )
+    )
+    assert log is not None
+    assert log.entity_type == "invoice"
+    assert log.actor_user_id == clerk_id
+    assert log.before == {"status": "ISSUED", "void_reason": None}
+    assert log.after is not None
+    assert log.after["status"] == "VOID_PENDING"
+    assert log.after["void_reason"] == InvoiceVoidReason.FULL_RETURN.value
+    assert log.after["sale_id"] == sale_id
+
+
+async def test_voided_sale_shows_its_invoice_as_voided_in_the_list(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """打錯單作廢一張**已開立**發票的交易 → 交易紀錄的發票狀態必須跟著變「已作廢」。
+
+    回歸測試（Codex 第二輪 #3）：拆分生命週期時把 void_sale 的 invoice_status 同步整個拿掉，
+    導致已作廢的單在列表上仍顯示「已開立」。有發票才標 VOID；沒發票的單維持 NOT_ISSUED。
+    """
+    store_id, clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    sales = SalesService(db_session)
+    to_void = await sales.get_sale(store_id, sale_id)
+    assert to_void is not None
+
+    await sales.void_sale(to_void, clerk_id)
+
+    voided = await sales.get_sale(store_id, sale_id)
+    assert voided is not None
+    assert voided.status is SaleStatus.VOIDED
+    assert voided.invoice_status is SaleInvoiceStatus.VOID
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID_PENDING
+    assert invoice.void_reason is InvoiceVoidReason.SALE_VOID
+
+
+async def test_voided_sale_without_any_invoice_stays_not_issued(
+    db_session: AsyncSession,
+) -> None:
+    """電子發票關閉（根本沒發票）的單作廢後，發票狀態必須維持「未開立」。
+
+    這是變更 A 原本要修的缺陷，補上 void_sale 的同步後不可以又倒退回去。
+    """
+    store = Store(name="無發票門市")
+    db_session.add(store)
+    await db_session.flush()
+    clerk = User(
+        store_id=store.id,
+        username=f"no-inv-{store.id}",
+        password_hash="h",
+        role=UserRole.MANAGER,
+    )
+    db_session.add(clerk)
+    db_session.add(StoreSettings(store_id=store.id, einvoice_enabled=False))
+    await db_session.flush()
+    await CashDrawerService(db_session).open_session(store.id, clerk.id, Decimal("1000"))
+    item = await InventoryService(db_session).create_serialized_item(
+        store.id,
+        item_code=f"NOINV-{store.id}",
+        name="無發票商品",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal("300"),
+        acquisition_cost=Decimal("100"),
+    )
+    sales = SalesService(db_session)
+    sale = await sales.create_sale(
+        store.id,
+        clerk.id,
+        lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
+    )
+
+    await sales.void_sale(sale, clerk.id)
+
+    voided = await sales.get_sale(store.id, sale.id)
+    assert voided is not None
+    assert voided.status is SaleStatus.VOIDED
+    assert voided.invoice_status is SaleInvoiceStatus.NOT_ISSUED
+
+
+async def test_database_rejects_void_status_without_a_reason(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """CHECK 必須同時存在於 models 與 migration（Codex 第二輪 #4）。
+
+    測試庫由 metadata 建立；約束只寫在 migration 的話，測試永遠測不到它。
+    """
+    store_id, _clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    with pytest.raises(IntegrityError):
+        await db_session.execute(
+            text("UPDATE invoices SET status = 'VOID' WHERE id = :iid").bindparams(iid=invoice.id)
+        )
+    await db_session.rollback()
+    assert store_id and sale_id  # 種子確實建立

@@ -188,7 +188,7 @@ class ReturnsService:
         signature_task_id: int | None,
         action: ReturnInvoiceAction,
         return_lines: dict[int, int],
-        invoice_id: int | None,
+        invoice_id: int,
         refund_total: Decimal,
     ) -> None:
         """買受人同意（電子發票實施作業要點第 9 點）：折讓與作廢皆須客人簽名確認。
@@ -334,7 +334,6 @@ class ReturnsService:
             store_id, sale.id, is_full_return=will_be_full_return
         )
         decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
-        decided_invoice_id = decided_invoice.id if decided_invoice is not None else None
         if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
             raise ReturnConflict(invoice_decision.reason)
         if invoice_decision.requires_paper_recall and not invoice_recalled:
@@ -344,13 +343,15 @@ class ReturnsService:
                 "本次為整筆退貨且原發票有紙本證明聯：請先向客人收回發票並於畫面確認，才能退貨退款。"
             )
         if invoice_decision.requires_customer_consent:
+            # 需要同意 ⟹ 政策判定為折讓或作廢 ⟹ 必定有已開立的發票（見 invoice_policy.decide）。
+            assert decided_invoice is not None
             await self._require_return_consent(
                 store_id,
                 sale_id=sale.id,
                 signature_task_id=consent_signature_task_id,
                 action=invoice_decision.action,
                 return_lines=requested,
-                invoice_id=decided_invoice_id,
+                invoice_id=decided_invoice.id,
                 refund_total=refund_amount,
             )
 
@@ -518,7 +519,10 @@ class ReturnsService:
             # 整筆退貨且原發票為本月開立 → **作廢原發票（F0501）**，不開折讓（ADR-014）。
             # 紙本收回與買受人同意已於本函式前段驗證（在任何退款動作之前）。
             await self._einvoice.void_invoice_for_sale(
-                store_id, sale.id, reason=InvoiceVoidReason.FULL_RETURN
+                store_id,
+                sale.id,
+                reason=InvoiceVoidReason.FULL_RETURN,
+                actor_user_id=actor_user_id,
             )
             # 銷售本身有效（status=RETURNED），只是那張發票作廢了。
             sale.invoice_status = SaleInvoiceStatus.VOID
@@ -540,7 +544,9 @@ class ReturnsService:
             # 卻無折讓（買了馬上退是門市真實場景）。void_invoice_for_sale 分流：F0401 未拋檔 →
             # 發票 VOID＋佇列 CANCELLED（平台從未收過）；已拋檔 → VOID_PENDING，由 F0401 回執
             # 決定（成功→續 F0501 作廢、失敗→VOID），最終由 einvoice 回呼收斂 sale 狀態。
-            voided = await self._einvoice.void_invoice_for_sale(store_id, sale.id)
+            voided = await self._einvoice.void_invoice_for_sale(
+                store_id, sale.id, actor_user_id=actor_user_id
+            )
             if voided is not None and voided.status == InvoiceStatus.VOID:
                 sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED  # 未拋檔即取消：無有效發票
         # 部分退貨且發票仍 PENDING：不動——F0401 核可（發票成立）時由 einvoice 回呼

@@ -1046,10 +1046,10 @@ class SigningService:
         task_id: int,
         *,
         sale_id: int,
-        return_lines: dict[int, int] | None = None,
-        invoice_id: int | None = None,
-        invoice_action: str | None = None,
-        refund_total: Decimal | None = None,
+        return_lines: dict[int, int],
+        invoice_id: int,
+        invoice_action: str,
+        refund_total: Decimal,
     ) -> SignatureTask:
         """退貨的發票處置同意：驗證並於同一交易內一次性轉 CONSUMED。
 
@@ -1058,6 +1058,9 @@ class SigningService:
         發票、處置方式（作廢／折讓）、退款金額，任一項漂移都拒絕（Codex 對抗審查 #3）。
         否則客人簽的是「同意作廢」，系統卻在跨月後改做折讓；或客人簽「退一件」被拿去退三件。
         以 FOR UPDATE 鎖任務列與作廢路徑序列化（同 K5）。一份同意只能用於一次退貨。
+
+        四項比對值皆為**必填**（Codex 第二輪 #2）：若給預設值，任何呼叫端只傳 sale_id 就能
+        跳過全部綁定，法律上的同意不變量就變成「靠呼叫端自律」而非唯一消費入口強制。
         """
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
@@ -1071,22 +1074,21 @@ class SigningService:
             raise SignatureTaskNotPending(
                 f"簽署任務 {task_id} 非本銷售之已簽退貨同意，不可用於此退貨"
             )
-        if return_lines is not None:
-            signed_scope = self._parse_return_consent_lines(task.content.get("return_lines"))
-            if signed_scope != return_lines:
-                raise SignatureContentMismatch(
-                    "客人簽署同意的退貨品項/數量與本次退貨不符，請重新請客人確認簽名"
-                )
-        if invoice_id is not None and task.content.get("invoice_id") != invoice_id:
+        signed_scope = self._parse_return_consent_lines(task.content.get("return_lines"))
+        if signed_scope != return_lines:
+            raise SignatureContentMismatch(
+                "客人簽署同意的退貨品項/數量與本次退貨不符，請重新請客人確認簽名"
+            )
+        if task.content.get("invoice_id") != invoice_id:
             raise SignatureContentMismatch(
                 "客人簽署同意的是另一張發票，請重新請客人確認簽名"
             )
-        if invoice_action is not None and task.content.get("invoice_action") != invoice_action:
+        if task.content.get("invoice_action") != invoice_action:
             raise SignatureContentMismatch(
                 "發票處置方式在簽署後已改變（例如已跨月或期間出現其他折讓），"
                 "請重新請客人確認簽名"
             )
-        if refund_total is not None and task.content.get("refund_total") != str(refund_total):
+        if task.content.get("refund_total") != str(refund_total):
             raise SignatureContentMismatch(
                 "退款金額與客人簽署同意的金額不符，請重新請客人確認簽名"
             )
