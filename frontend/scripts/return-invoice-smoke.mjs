@@ -343,6 +343,35 @@ try {
     (await dialog.locator("b", { hasText: "開立折讓單" }).count()) > 0);
   await dialog.locator('button:has-text("取消")').click();
 
+  // ── 情境 7：台灣Pay 整筆退 → 三重確認同時出現（手動退款＋收回紙本＋簽名同意）──────
+  const saleG = await apiJson("/api/v1/sales", {
+    method: "POST",
+    token,
+    idem: `rinv-sale-g-${stamp}`,
+    body: {
+      lines: [{ line_type: "CATALOG", catalog_product_id: product.id, qty: 1 }],
+      tenders: [{ tender_type: "TAIWAN_PAY", amount: "500" }],
+      expected_einvoice_enabled: true,
+    },
+  });
+  markInvoice(saleG.id, { invoiceNo: `AG${stamp}`, date: taipeiToday() });
+  dialog = await openReturnDialog(saleG.id);
+  await dialog.locator('button:has-text("整筆退貨")').click();
+  await dialog.locator('input[placeholder*="尺寸不合"]').fill("台灣Pay 整筆退");
+  await page.waitForSelector("text=作廢原發票", { timeout: 15000 });
+  await shot(page, "s7-taiwanpay-triple-confirmation");
+  const twConfirm = dialog.locator('button:has-text("確認退貨")');
+  ok(
+    "情境7：台灣Pay＋作廢 → 手動退款確認與收回紙本兩個勾選同時出現",
+    (await dialog.getByLabel(/已於台灣Pay完成退款/).count()) > 0 &&
+      (await dialog.getByLabel("已向客人收回發票證明聯（紙本）").count()) > 0,
+  );
+  await dialog.getByLabel(/已於台灣Pay完成退款/).check();
+  await dialog.getByLabel("已向客人收回發票證明聯（紙本）").check();
+  ok("情境7：兩個勾選都完成、但未簽名仍不可送出", await twConfirm.isDisabled());
+  await shot(page, "s7-taiwanpay-still-needs-consent");
+  await dialog.locator('button:has-text("取消")').click();
+
   // ── 情境 6：沒有發票的交易 → 完全不出現發票處置區塊 ───────────────────────
   await apiJson("/api/v1/settings", { method: "PATCH", token, body: { einvoice_enabled: false } });
   const saleF = await makeSale(1, "f", { einvoice: false });
