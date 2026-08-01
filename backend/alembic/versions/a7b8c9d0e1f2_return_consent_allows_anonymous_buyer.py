@@ -27,9 +27,21 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _CK = "ck_signature_tasks_contact_required"
+# 列舉以 VARCHAR + CHECK 儲存（native_enum=False），新增列舉值必須重建該 CHECK，
+# 否則只有由 models 直接建表的測試庫能寫入，實際遷移過的資料庫會被擋（本次即由真 DB 煙霧抓出）。
+_KIND_CK = "signaturetaskkind"
+_OLD_KINDS = ("ACQUISITION_AFFIDAVIT", "STORE_CREDIT_USE", "TRANSACTION_ACK")
+_NEW_KINDS = (*_OLD_KINDS, "RETURN_INVOICE_CONSENT")
+
+
+def _replace_kind_check(values: tuple[str, ...]) -> None:
+    op.drop_constraint(_KIND_CK, "signature_tasks", type_="check")
+    allowed = ", ".join(f"'{v}'" for v in values)
+    op.create_check_constraint(_KIND_CK, "signature_tasks", sa.text(f"kind IN ({allowed})"))
 
 
 def upgrade() -> None:
+    _replace_kind_check(_NEW_KINDS)
     op.alter_column(
         "signature_tasks",
         "contact_id",
@@ -62,3 +74,16 @@ def downgrade() -> None:
         existing_type=sa.Integer(),
         nullable=False,
     )
+    # 同理，回滾前該類型的任務必須已不存在，否則 CHECK 會擋下既有列。
+    consents = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT count(*) FROM signature_tasks WHERE kind = 'RETURN_INVOICE_CONSENT'"
+            )
+        )
+        .scalar_one()
+    )
+    if consents:
+        raise RuntimeError(f"尚有 {consents} 筆退貨同意任務；回滾前請先人工處理。")
+    _replace_kind_check(_OLD_KINDS)

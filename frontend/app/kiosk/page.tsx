@@ -1378,7 +1378,9 @@ function ContentSnapshot({
   // 錯誤生產者），仍以一般欄位 renderValue 列出，絕不靜默丟棄客人所簽內容（Codex K3 高）。
   // store_credit_premium 於撥款按鈕另外呈現，不列入通用明細。
   // （綁定用身分指紋已移至後端內部欄，不在 content，故此處不再需要遮蔽。）
-  const hidden = new Set(["store_credit_premium", "content_version"]);
+  // return_lines 與上方品項明細**同一份資料**（系統比對「同意範圍＝實際退貨範圍」用的
+  // 機器格式），客人看到的內容不因隱藏而少一分；沿 store_credit_premium 的既有做法排除。
+  const hidden = new Set(["store_credit_premium", "content_version", "return_lines"]);
   const rest = Object.entries(content).filter(
     ([key]) => !hidden.has(key) && (key !== "items" || !itemsIsArray),
   );
@@ -1536,6 +1538,7 @@ function isAmountKey(key: string): boolean {
     "unit_price",
     "original_unit_price",
     "discount_amount",
+    "refund_total",
     "line_total",
   ].includes(key);
 }
