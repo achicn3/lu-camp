@@ -388,7 +388,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>露營二手 POS — 系統操作手冊 v1.3</title>
+<title>露營二手 POS — 系統操作手冊 v1.4</title>
 <meta name="description" content="露營二手 POS 門市營運系統的完整操作手冊，含實機截圖與逐步操作說明。" />
 <style>${css}</style>
 </head>
@@ -405,7 +405,7 @@ const html = `<!DOCTYPE html>
   <main class="main" id="main-content">
     <div class="topbar">
       <button type="button" id="menu-toggle" aria-expanded="false" aria-controls="sidebar">☰ 目錄</button>
-      <span class="doc-title">露營二手 POS — 系統操作手冊 v1.3</span>
+      <span class="doc-title">露營二手 POS — 系統操作手冊 v1.4</span>
       <div class="search-box">
         <label class="sr-only" for="search-input">搜尋章節</label>
         <input type="search" id="search-input" placeholder="搜尋章節關鍵字，例如：退貨" aria-label="搜尋章節" autocomplete="off" />
