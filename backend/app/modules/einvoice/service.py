@@ -806,6 +806,18 @@ class EInvoiceService:
                 raise EInvoiceQueueNotRetryable(
                     f"折讓 {allowance.id} 已作廢，折讓訊息不可重送（此列維持 FAILED 供稽核）"
                 )
+            # 母發票已進入作廢流程 → 折讓不可再送（Codex 對抗審查 #1）：否則會同時對同一張
+            # 發票送出 G0401 與 F0501，帳目自相矛盾且無法事後判斷孰先孰後。
+            if allowance is not None:
+                parent = await self._repo.get_invoice(store_id, allowance.invoice_id)
+                if parent is not None and parent.status in (
+                    InvoiceStatus.VOID,
+                    InvoiceStatus.VOID_PENDING,
+                ):
+                    raise EInvoiceQueueNotRetryable(
+                        "這張發票已經作廢（或正在作廢），不能再送折讓單——"
+                        "同一張發票不可以既作廢又折讓。這筆折讓保留紀錄不再重送。"
+                    )
         item.status = UploadStatus.PENDING
         item.attempts += 1
         item.last_error = None
@@ -1056,14 +1068,16 @@ class EInvoiceService:
                 return True
         return False
 
-    async def has_inflight_allowance(self, store_id: int, invoice_id: int) -> bool:
-        """該發票是否有折讓**在途或結果未知**（佇列 PENDING＝待送或已送出但回執未到）。
+    async def has_open_allowance(self, store_id: int, invoice_id: int) -> bool:
+        """該發票是否有**尚未收斂**的折讓：在途（PENDING）或失敗但仍可重送（FAILED）。
 
+        FAILED 必須算數（Codex 對抗審查 #1）：那張 G0401 隨時可能被店員重送成功，若不算作
+        「既有折讓」，後續累計全退會誤走作廢，最終同時存在 G0401 與 F0501。
         分次退貨本來就會有多張 G0401 同時在途（系統已能正確收斂），故此旗標**只用來擋作廢**，
         不擋再開折讓。
         """
         return any(
-            item.status is UploadStatus.PENDING
+            item.status in (UploadStatus.PENDING, UploadStatus.FAILED)
             for item in await self._repo.list_allowance_queue_items_for_invoice(
                 store_id, invoice_id
             )

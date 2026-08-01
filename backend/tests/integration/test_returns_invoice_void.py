@@ -40,7 +40,12 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
-from app.shared.exceptions import ReturnConflict, SignatureContentMismatch
+from app.shared.exceptions import (
+    EInvoiceQueueNotRetryable,
+    ReturnConflict,
+    SignatureContentMismatch,
+)
+from tests.integration.customer_display_helpers import return_consent_content
 from tests.integration.test_sales_einvoice import _FakeSerializer
 
 
@@ -126,12 +131,9 @@ async def _signed_consent(
         store_id=store_id,
         kind=SignatureTaskKind.RETURN_INVOICE_CONSENT,
         contact_id=_CONTACTS[store_id],
-        content={
-            "return_lines": [
-                {"sale_line_id": line_id, "qty": qty}
-                for line_id, qty in sorted(return_lines.items())
-            ]
-        },
+        content=await return_consent_content(
+            session, store_id=store_id, sale_id=sale_id, return_lines=return_lines
+        ),
         content_sha256="c" * 64,
         signature_sha256="s" * 64,
         evidence_hash="e" * 64,  # DB 約束：SIGNED 必有簽署時間與三組 hash
@@ -523,3 +525,203 @@ async def test_preview_reports_action_without_writing(
         if q.action is EInvoiceAction.VOID
     ]
     assert voids == []
+
+
+async def test_failed_allowance_still_forbids_voiding_the_invoice(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """G0401 送出失敗（FAILED）後退完剩餘 → 仍折讓、**不得作廢**（Codex 對抗審查 #1）。
+
+    FAILED 的折讓隨時可能被店員重送成功。若因為「不算既有折讓」而讓後續全退走作廢，
+    最終會對同一張發票同時送出 G0401 與 F0501，帳目自相矛盾且無法判斷孰先孰後。
+    """
+    store_id, clerk_id, code = await _seed(db_session, price="500")
+    sales = SalesService(db_session)
+    second = await InventoryService(db_session).create_serialized_item(
+        store_id,
+        item_code=f"RV-{store_id}-fail",
+        name="第二件",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal("500"),
+        acquisition_cost=Decimal("200"),
+    )
+    await db_session.flush()
+    sale = await sales.create_sale(
+        store_id,
+        clerk_id,
+        lines=[
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code),
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=second.item_code),
+        ],
+    )
+    einvoice = EInvoiceService(db_session)
+    invoice = await einvoice.get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    await _issue_invoice(db_session, einvoice, store_id, invoice, tmp_path)
+    lines_of_sale = await sales.get_lines(sale.id)
+    returns = ReturnsService(db_session)
+
+    await returns.create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(lines_of_sale[0].id, 1)],
+        reason="部分退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="failed-alw-1",
+        consent_signature_task_id=await _signed_consent(
+            db_session,
+            store_id,
+            sale.id,
+            created_by=clerk_id,
+            return_lines={lines_of_sale[0].id: 1},
+        ),
+    )
+    g0401 = next(
+        q for q in await einvoice.list_queue(store_id) if q.action is EInvoiceAction.ALLOWANCE
+    )
+    await einvoice.drop_pending(
+        store_id, g0401.id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await einvoice.record_result(store_id, g0401.id, success=False, message="平台拒絕")
+    failed = next(q for q in await einvoice.list_queue(store_id) if q.id == g0401.id)
+    assert failed.status is UploadStatus.FAILED
+
+    await returns.create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(lines_of_sale[1].id, 1)],
+        reason="退完剩餘",
+        actor_user_id=clerk_id,
+        idempotency_key="failed-alw-2",
+        invoice_recalled=True,
+        consent_signature_task_id=await _signed_consent(
+            db_session,
+            store_id,
+            sale.id,
+            created_by=clerk_id,
+            return_lines={lines_of_sale[1].id: 1},
+        ),
+    )
+
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.ISSUED  # 未被作廢
+    assert invoice.void_reason is None
+
+
+async def test_failed_allowance_cannot_be_resent_onto_a_voided_invoice(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """原發票已進入作廢流程時，FAILED 的折讓不可重送（Codex 對抗審查 #1 的第二道牆）。"""
+    store_id, _clerk_id, sale_id, invoice = await _sale_with_issued_invoice(
+        db_session, tmp_path
+    )
+    einvoice = EInvoiceService(db_session)
+    sale_lines = await SalesService(db_session).get_lines(sale_id)
+    # 先造一張折讓並讓它 FAILED（以部分退貨產生；此單只有一行，故直接用 record_allowance）
+    await einvoice.record_allowance(
+        store_id, invoice_id=invoice.id, total=Decimal("100"), return_id=None
+    )
+    g0401 = next(
+        q for q in await einvoice.list_queue(store_id) if q.action is EInvoiceAction.ALLOWANCE
+    )
+    await einvoice.drop_pending(
+        store_id, g0401.id, serializer=_FakeSerializer(), dropper=EInvoiceDropper(tmp_path)
+    )
+    await einvoice.record_result(store_id, g0401.id, success=False, message="平台拒絕")
+    # 再讓原發票進入作廢流程
+    await einvoice.void_invoice_for_sale(store_id, sale_id, reason=InvoiceVoidReason.SALE_VOID)
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID_PENDING
+
+    with pytest.raises(EInvoiceQueueNotRetryable, match="作廢"):
+        await einvoice.retry(store_id, g0401.id)
+    assert sale_lines  # 該單確有明細（此測試以 record_allowance 直接造折讓）
+
+
+async def test_consent_is_rejected_when_the_disposition_drifts_after_signing(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """簽的是「同意作廢」，送出前處置卻變成折讓 → 拒絕（Codex 對抗審查 #3）。
+
+    真實觸發路徑：簽名與送出之間跨過台北月界線，或期間另一張折讓落地。客人簽的那張紙
+    寫的是作廢，系統就不能拿它去做折讓——同意書必須對得上真正執行的事。
+    """
+    store_id, clerk_id, sale_id, invoice = await _sale_with_issued_invoice(db_session, tmp_path)
+    sale_lines = await SalesService(db_session).get_lines(sale_id)
+    consent = await _signed_consent(
+        db_session,
+        store_id,
+        sale_id,
+        created_by=clerk_id,
+        return_lines={sale_lines[0].id: sale_lines[0].qty},
+    )
+    signed_task = await db_session.get(SignatureTask, consent)
+    assert signed_task is not None and signed_task.content["invoice_action"] == "VOID"
+
+    # 簽完之後才發現原發票是上個月開的（＝跨月）→ 同一份簽名此刻應判折讓
+    invoice.invoice_date = (datetime.now(UTC) - timedelta(days=45)).date()
+    await db_session.flush()
+
+    with pytest.raises(SignatureContentMismatch, match="處置方式"):
+        await ReturnsService(db_session).create_return(
+            store_id,
+            sale_id=sale_id,
+            lines=[ReturnLineInput(sale_lines[0].id, sale_lines[0].qty)],
+            reason="跨月後才送出",
+            actor_user_id=clerk_id,
+            idempotency_key="drift-1",
+            invoice_recalled=True,
+            consent_signature_task_id=consent,
+        )
+
+
+async def test_consent_is_rejected_when_the_refund_amount_drifts(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """簽的金額與實際退款金額不符 → 拒絕（同意書上的數字必須是客人真正拿到的）。"""
+    store_id, clerk_id, code = await _seed(db_session, price="500")
+    sales = SalesService(db_session)
+    second = await InventoryService(db_session).create_serialized_item(
+        store_id,
+        item_code=f"RV-{store_id}-drift",
+        name="第二件",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal("500"),
+        acquisition_cost=Decimal("200"),
+    )
+    await db_session.flush()
+    sale = await sales.create_sale(
+        store_id,
+        clerk_id,
+        lines=[
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code),
+            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=second.item_code),
+        ],
+    )
+    einvoice = EInvoiceService(db_session)
+    invoice = await einvoice.get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    await _issue_invoice(db_session, einvoice, store_id, invoice, tmp_path)
+    lines_of_sale = await sales.get_lines(sale.id)
+
+    # 客人簽的是「退第一件（$500）」
+    consent = await _signed_consent(
+        db_session,
+        store_id,
+        sale.id,
+        created_by=clerk_id,
+        return_lines={lines_of_sale[0].id: 1},
+    )
+    # 店員卻拿去退第二件（金額相同、但範圍不同）→ 範圍守衛先擋下
+    with pytest.raises(SignatureContentMismatch, match="品項"):
+        await ReturnsService(db_session).create_return(
+            store_id,
+            sale_id=sale.id,
+            lines=[ReturnLineInput(lines_of_sale[1].id, 1)],
+            reason="換一件退",
+            actor_user_id=clerk_id,
+            idempotency_key="drift-2",
+            consent_signature_task_id=consent,
+        )

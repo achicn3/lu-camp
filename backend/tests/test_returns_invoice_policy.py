@@ -19,7 +19,7 @@ def _facts(**overrides: object) -> InvoiceFacts:
         "is_issued": True,
         "issued_at": datetime(2026, 8, 1, 2, 0, tzinfo=UTC),  # 台北 8/1 10:00
         "has_settled_allowance": False,
-        "has_inflight_allowance": False,
+        "has_open_allowance": False,
         "has_inflight_void": False,
         "print_mark": True,
         "carrier_type": None,
@@ -83,22 +83,22 @@ def test_inflight_void_blocks_everything() -> None:
     assert d.action is ReturnInvoiceAction.REVIEW_REQUIRED
 
 
-def test_inflight_allowance_keeps_using_allowance_never_voids() -> None:
+def test_open_allowance_keeps_using_allowance_never_voids() -> None:
     """折讓在途（尚未回執）→ 仍走折讓、絕不作廢；**不得因此擋下退款**。
 
     分次退貨會有多張 G0401 同時在途是正常操作，系統已能正確收斂。若在此轉人工，等於
     因為前一張折讓還沒回執就拒絕客人退款。
     """
-    full = decide(_facts(has_inflight_allowance=True), is_full_return=True, now=_NOW)
+    full = decide(_facts(has_open_allowance=True), is_full_return=True, now=_NOW)
     assert full.action is ReturnInvoiceAction.ALLOWANCE
-    partial = decide(_facts(has_inflight_allowance=True), is_full_return=False, now=_NOW)
+    partial = decide(_facts(has_open_allowance=True), is_full_return=False, now=_NOW)
     assert partial.action is ReturnInvoiceAction.ALLOWANCE
 
 
-def test_settled_allowance_wins_over_inflight_allowance() -> None:
+def test_settled_allowance_wins_over_open_allowance() -> None:
     """已有成功折讓 → 本來就走折讓，不受在途折讓影響（都不會作廢）。"""
     d = decide(
-        _facts(has_settled_allowance=True, has_inflight_allowance=True),
+        _facts(has_settled_allowance=True, has_open_allowance=True),
         is_full_return=True,
         now=_NOW,
     )

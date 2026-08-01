@@ -1378,9 +1378,16 @@ function ContentSnapshot({
   // 錯誤生產者），仍以一般欄位 renderValue 列出，絕不靜默丟棄客人所簽內容（Codex K3 高）。
   // store_credit_premium 於撥款按鈕另外呈現，不列入通用明細。
   // （綁定用身分指紋已移至後端內部欄，不在 content，故此處不再需要遮蔽。）
-  // return_lines 與上方品項明細**同一份資料**（系統比對「同意範圍＝實際退貨範圍」用的
-  // 機器格式），客人看到的內容不因隱藏而少一分；沿 store_credit_premium 的既有做法排除。
-  const hidden = new Set(["store_credit_premium", "content_version", "return_lines"]);
+  // 機器比對用的欄位（退貨同意）：都與上方已呈現的內容同一份資料——return_lines 對應品項
+  // 明細、invoice_id 對應原發票號碼、invoice_action 對應處置方式的中文說明。客人看到的
+  // 內容不因隱藏而少一分；沿 store_credit_premium 的既有做法排除。
+  const hidden = new Set([
+    "store_credit_premium",
+    "content_version",
+    "return_lines",
+    "invoice_id",
+    "invoice_action",
+  ]);
   const rest = Object.entries(content).filter(
     ([key]) => !hidden.has(key) && (key !== "items" || !itemsIsArray),
   );

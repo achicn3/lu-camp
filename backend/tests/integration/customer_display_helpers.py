@@ -193,6 +193,46 @@ async def prepare_signed_store_credit_cart(
     )
 
 
+async def return_consent_content(
+    session: AsyncSession,
+    *,
+    store_id: int,
+    sale_id: int,
+    return_lines: dict[int, int],
+) -> dict[str, object]:
+    """依當下狀態組出「退貨同意」快照中**機器可比對**的欄位。
+
+    與 `SigningService._canonical_return_consent_content` 同源推導（範圍、哪張發票、處置
+    方式、退款金額），讓測試夾具不會偽造出真實流程不可能產生的同意內容。
+    """
+    from decimal import Decimal
+
+    from app.modules.einvoice.service import EInvoiceService
+    from app.modules.returns.service import ReturnLineInput, ReturnsService
+    from app.modules.sales.service import SalesService
+
+    preview = await ReturnsService(session).preview_return(
+        store_id,
+        sale_id=sale_id,
+        lines=[ReturnLineInput(line_id, qty) for line_id, qty in return_lines.items()],
+    )
+    invoice = await EInvoiceService(session).get_invoice_for_sale(store_id, sale_id)
+    lines_by_id = {line.id: line for line in await SalesService(session).get_lines(sale_id)}
+    refund_total = sum(
+        (lines_by_id[line_id].unit_price * qty for line_id, qty in return_lines.items()),
+        Decimal(0),
+    )
+    return {
+        "return_lines": [
+            {"sale_line_id": line_id, "qty": qty}
+            for line_id, qty in sorted(return_lines.items())
+        ],
+        "invoice_id": invoice.id if invoice is not None else None,
+        "invoice_action": preview["invoice_action"],
+        "refund_total": str(refund_total),
+    }
+
+
 async def signed_return_consent(
     session: AsyncSession,
     *,
@@ -214,12 +254,9 @@ async def signed_return_consent(
         store_id=store_id,
         kind=SignatureTaskKind.RETURN_INVOICE_CONSENT,
         contact_id=contact_id,
-        content={
-            "return_lines": [
-                {"sale_line_id": line_id, "qty": qty}
-                for line_id, qty in sorted(return_lines.items())
-            ]
-        },
+        content=await return_consent_content(
+            session, store_id=store_id, sale_id=sale_id, return_lines=return_lines
+        ),
         content_sha256="c" * 64,
         signature_sha256="s" * 64,
         evidence_hash="e" * 64,

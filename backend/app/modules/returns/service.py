@@ -152,7 +152,7 @@ class ReturnsService:
                     is_issued=False,
                     issued_at=None,
                     has_settled_allowance=False,
-                    has_inflight_allowance=False,
+                    has_open_allowance=False,
                     has_inflight_void=False,
                     print_mark=False,
                     carrier_type=None,
@@ -172,9 +172,7 @@ class ReturnsService:
             is_issued=invoice.status is InvoiceStatus.ISSUED,
             issued_at=issued_at,
             has_settled_allowance=await self._einvoice.has_settled_allowance(store_id, invoice.id),
-            has_inflight_allowance=await self._einvoice.has_inflight_allowance(
-                store_id, invoice.id
-            ),
+            has_open_allowance=await self._einvoice.has_open_allowance(store_id, invoice.id),
             has_inflight_void=await self._einvoice.has_inflight_void(store_id, invoice.id),
             print_mark=invoice.print_mark,
             carrier_type=invoice.carrier_type,
@@ -190,6 +188,8 @@ class ReturnsService:
         signature_task_id: int | None,
         action: ReturnInvoiceAction,
         return_lines: dict[int, int],
+        invoice_id: int | None,
+        refund_total: Decimal,
     ) -> None:
         """買受人同意（電子發票實施作業要點第 9 點）：折讓與作廢皆須客人簽名確認。
 
@@ -205,7 +205,13 @@ class ReturnsService:
         from app.modules.signing.service import SigningService
 
         await SigningService(self._session).consume_return_consent(
-            store_id, signature_task_id, sale_id=sale_id, return_lines=return_lines
+            store_id,
+            signature_task_id,
+            sale_id=sale_id,
+            return_lines=return_lines,
+            invoice_id=invoice_id,
+            invoice_action=action.value,
+            refund_total=refund_total,
         )
 
     async def margin_adjustments(
@@ -327,6 +333,8 @@ class ReturnsService:
         invoice_decision = await self._decide_invoice_action(
             store_id, sale.id, is_full_return=will_be_full_return
         )
+        decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
+        decided_invoice_id = decided_invoice.id if decided_invoice is not None else None
         if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
             raise ReturnConflict(invoice_decision.reason)
         if invoice_decision.requires_paper_recall and not invoice_recalled:
@@ -342,6 +350,8 @@ class ReturnsService:
                 signature_task_id=consent_signature_task_id,
                 action=invoice_decision.action,
                 return_lines=requested,
+                invoice_id=decided_invoice_id,
+                refund_total=refund_amount,
             )
 
         sale_tenders = await self._sales.list_tenders(sale.id)

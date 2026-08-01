@@ -505,6 +505,14 @@ class SigningService:
             raise SignatureTaskConflict(f"找不到銷售 {data.ref_id}")
         if sale.status is SaleStatus.VOIDED:
             raise SignatureTaskConflict("已作廢的銷售不可再退貨")
+        # 簽署人由**銷售單**決定，不採信客端（Codex 對抗審查 #4）：有買方會員時必須正是那位，
+        # 只有原銷售本身就是匿名交易才可無會員。否則能把甲的同意掛到乙的單，或把已知買受人的
+        # 證據降級成匿名。
+        if data.contact_id != sale.buyer_contact_id:
+            raise SignatureTaskConflict(
+                "退貨同意的簽署人必須是原交易的買方"
+                + ("（本筆為匿名交易，不可指定會員）" if sale.buyer_contact_id is None else "")
+            )
 
         preview = await ReturnsService(self._session).preview_return(
             store_id,
@@ -531,11 +539,17 @@ class SigningService:
                 {"name": line.description, "qty": qty, "line_total": str(line_total)}
             )
         invoice = await EInvoiceService(self._session).get_invoice_for_sale(store_id, sale.id)
+        if invoice is None:  # action 非 NONE 已保證有發票；此處只為型別收斂
+            raise SignatureTaskConflict("原交易沒有發票，毋須請客人簽署同意")
         return {
             "sale_ref": f"#{sale.id}",
             "purchased_at": sale.created_at.isoformat(timespec="minutes"),
-            "invoice_no": invoice.invoice_no if invoice is not None else None,
-            # 簽署範圍（機器可比對）：退貨成立時用來確認客人同意的正是這批品項與數量。
+            "invoice_no": invoice.invoice_no,
+            # 以下四欄是**機器可比對的簽署範圍與承諾內容**（Codex 對抗審查 #3）：退貨成立時逐項
+            # 與當下重新判定的結果比對，任一項漂移（跨月改判、期間冒出別的折讓…）即拒絕，
+            # 要求重新請客人確認——否則客人簽的是「同意作廢」，系統卻做了折讓。
+            "invoice_id": invoice.id,
+            "invoice_action": action,
             "return_lines": [
                 {"sale_line_id": line_id, "qty": qty} for line_id, qty in sorted(requested.items())
             ],
@@ -1033,11 +1047,16 @@ class SigningService:
         *,
         sale_id: int,
         return_lines: dict[int, int] | None = None,
+        invoice_id: int | None = None,
+        invoice_action: str | None = None,
+        refund_total: Decimal | None = None,
     ) -> SignatureTask:
         """退貨的發票處置同意：驗證並於同一交易內一次性轉 CONSUMED。
 
         守衛：須存在、屬本店、為 RETURN_INVOICE_CONSENT、狀態 SIGNED、綁定的正是這筆銷售，
-        且**簽署範圍與實際退貨範圍相同**——否則客人簽「退一件」卻被拿去退三件，同意書失去意義。
+        且**簽署當下承諾的內容與此刻真正要做的事完全一致**——範圍（退哪些、幾件）、哪一張
+        發票、處置方式（作廢／折讓）、退款金額，任一項漂移都拒絕（Codex 對抗審查 #3）。
+        否則客人簽的是「同意作廢」，系統卻在跨月後改做折讓；或客人簽「退一件」被拿去退三件。
         以 FOR UPDATE 鎖任務列與作廢路徑序列化（同 K5）。一份同意只能用於一次退貨。
         """
         task = await self._repo.get_for_update(store_id, task_id)
@@ -1058,6 +1077,19 @@ class SigningService:
                 raise SignatureContentMismatch(
                     "客人簽署同意的退貨品項/數量與本次退貨不符，請重新請客人確認簽名"
                 )
+        if invoice_id is not None and task.content.get("invoice_id") != invoice_id:
+            raise SignatureContentMismatch(
+                "客人簽署同意的是另一張發票，請重新請客人確認簽名"
+            )
+        if invoice_action is not None and task.content.get("invoice_action") != invoice_action:
+            raise SignatureContentMismatch(
+                "發票處置方式在簽署後已改變（例如已跨月或期間出現其他折讓），"
+                "請重新請客人確認簽名"
+            )
+        if refund_total is not None and task.content.get("refund_total") != str(refund_total):
+            raise SignatureContentMismatch(
+                "退款金額與客人簽署同意的金額不符，請重新請客人確認簽名"
+            )
         return await self.consume_task(
             task, reason_code="RETURN_INVOICE_CONSENT", sale_id=sale_id
         )

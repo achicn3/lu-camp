@@ -67,13 +67,19 @@ async def _seed(session: AsyncSession) -> tuple[int, int, str]:
 
 
 async def _anonymous_sale_with_issued_invoice(
-    session: AsyncSession, store_id: int, clerk_id: int, code: str
+    session: AsyncSession,
+    store_id: int,
+    clerk_id: int,
+    code: str,
+    *,
+    buyer_contact_id: int | None = None,
 ) -> int:
-    """建立一筆**無會員**（匿名）銷售，並讓其發票處於已開立狀態。"""
+    """建立一筆銷售（預設**無會員**＝匿名）並讓其發票處於已開立狀態。"""
     sale = await SalesService(session).create_sale(
         store_id,
         clerk_id,
         lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code)],
+        buyer_contact_id=buyer_contact_id,
     )
     invoice = await session.scalar(
         text("SELECT id FROM invoices WHERE sale_id = :sid").bindparams(sid=sale.id)
@@ -302,12 +308,14 @@ async def test_anonymous_full_return_completes_end_to_end(db_session: AsyncSessi
 
 
 async def test_member_sale_still_records_the_signer(db_session: AsyncSession) -> None:
-    """有會員時仍應記下簽署人（證據要能指出是誰簽的）。"""
+    """有會員的交易：同意必須記在**該買方**名下（證據要能指出是誰簽的）。"""
     store_id, clerk_id, code = await _seed(db_session)
     member = Contact(store_id=store_id, name="王小明", roles=["MEMBER"], phone="0912345678")
     db_session.add(member)
     await db_session.flush()
-    sale_id = await _anonymous_sale_with_issued_invoice(db_session, store_id, clerk_id, code)
+    sale_id = await _anonymous_sale_with_issued_invoice(
+        db_session, store_id, clerk_id, code, buyer_contact_id=member.id
+    )
     lines = await SalesService(db_session).get_lines(sale_id)
     task_id = await _create_consent_task(
         db_session,
@@ -319,3 +327,61 @@ async def test_member_sale_still_records_the_signer(db_session: AsyncSession) ->
     )
     task = await SigningService(db_session).get_task(store_id, task_id)
     assert task is not None and task.contact_id == member.id
+
+
+async def test_signer_must_be_the_buyer_of_that_sale(db_session: AsyncSession) -> None:
+    """簽署人由銷售單決定，不採信客端（Codex 對抗審查 #4）。
+
+    否則能把甲的同意掛到乙的單上，或把有會員買受人的證據降級成匿名——兩者都讓同意書
+    指不出「是誰同意的」。
+    """
+    store_id, clerk_id, code = await _seed(db_session)
+    buyer = Contact(store_id=store_id, name="買方", roles=["MEMBER"], phone="0911111111")
+    other = Contact(store_id=store_id, name="路人", roles=["MEMBER"], phone="0922222222")
+    db_session.add_all([buyer, other])
+    await db_session.flush()
+    sale_id = await _anonymous_sale_with_issued_invoice(
+        db_session, store_id, clerk_id, code, buyer_contact_id=buyer.id
+    )
+    lines = await SalesService(db_session).get_lines(sale_id)
+    scope = [{"sale_line_id": lines[0].id, "qty": 1}]
+
+    # 掛到別的會員 → 拒絕
+    with pytest.raises(SignatureTaskConflict, match="買方"):
+        await _create_consent_task(
+            db_session,
+            store_id=store_id,
+            clerk_id=clerk_id,
+            sale_id=sale_id,
+            lines=scope,
+            contact_id=other.id,
+        )
+    # 有買方卻降級成匿名 → 拒絕
+    with pytest.raises(SignatureTaskConflict, match="買方"):
+        await _create_consent_task(
+            db_session,
+            store_id=store_id,
+            clerk_id=clerk_id,
+            sale_id=sale_id,
+            lines=scope,
+            contact_id=None,
+        )
+
+
+async def test_anonymous_sale_cannot_name_a_member_as_signer(db_session: AsyncSession) -> None:
+    """匿名交易不可硬指一位會員當簽署人（會捏造出「某會員同意過」的證據）。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    member = Contact(store_id=store_id, name="無關會員", roles=["MEMBER"], phone="0933333333")
+    db_session.add(member)
+    await db_session.flush()
+    sale_id = await _anonymous_sale_with_issued_invoice(db_session, store_id, clerk_id, code)
+    lines = await SalesService(db_session).get_lines(sale_id)
+    with pytest.raises(SignatureTaskConflict, match="匿名"):
+        await _create_consent_task(
+            db_session,
+            store_id=store_id,
+            clerk_id=clerk_id,
+            sale_id=sale_id,
+            lines=[{"sale_line_id": lines[0].id, "qty": 1}],
+            contact_id=member.id,
+        )

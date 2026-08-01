@@ -86,6 +86,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     # 還原：VOIDED 的銷售改回以 invoice_status 表達，再收回 CHECK 約束。
+    # 註：回滾會失去「作廢原因」這個區分（FULL_RETURN 的發票在舊模型下看起來就像銷售作廢）。
+    # 系統尚未上線、沒有需要保全的既有資料，故不在此設攔截；真要回滾就重建資料庫。
     op.execute(
         sa.text("UPDATE sales SET invoice_status = 'VOID' WHERE status = 'VOIDED'")
     )

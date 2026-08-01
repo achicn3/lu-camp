@@ -57,33 +57,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(_CK, "signature_tasks", type_="check")
-    # 回滾前必須先處理無會員的同意任務——否則 NOT NULL 會失敗。這類任務只可能由本功能產生，
-    # 且已消費的同意證據不可刪除，故此處明確擋下、要求人工決定，而非悄悄毀證據。
-    remaining = (
-        op.get_bind()
-        .execute(sa.text("SELECT count(*) FROM signature_tasks WHERE contact_id IS NULL"))
-        .scalar_one()
-    )
-    if remaining:
-        raise RuntimeError(
-            f"尚有 {remaining} 筆無會員的退貨同意任務；回滾會毀損同意證據，請先人工處理。"
-        )
+    # 註：若庫內已有無會員的退貨同意任務，回滾會因 NOT NULL 而失敗。系統尚未上線、
+    # 沒有需要保全的既有資料，故不另設攔截；真要回滾就重建資料庫。
     op.alter_column(
         "signature_tasks",
         "contact_id",
         existing_type=sa.Integer(),
         nullable=False,
     )
-    # 同理，回滾前該類型的任務必須已不存在，否則 CHECK 會擋下既有列。
-    consents = (
-        op.get_bind()
-        .execute(
-            sa.text(
-                "SELECT count(*) FROM signature_tasks WHERE kind = 'RETURN_INVOICE_CONSENT'"
-            )
-        )
-        .scalar_one()
-    )
-    if consents:
-        raise RuntimeError(f"尚有 {consents} 筆退貨同意任務；回滾前請先人工處理。")
     _replace_kind_check(_OLD_KINDS)

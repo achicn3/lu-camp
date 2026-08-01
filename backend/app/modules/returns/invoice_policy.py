@@ -10,8 +10,8 @@
 關鍵不變量：
 1. **原發票只要已有任何折讓，後續一律繼續折讓，不得再作廢原發票**——否則會同時存在
    「已作廢的原發票」與「先前開出的折讓單」，帳目自相矛盾。
-2. 只要原發票已有折讓（**已核可或在途**）→ 一律繼續折讓、不作廢。作廢在途或結果未知 →
-   任何稅務動作都不得疊加，轉人工（REVIEW_REQUIRED）。
+2. 只要原發票已有折讓（**已核可、在途、或失敗但可重送**）→ 一律繼續折讓、不作廢。
+   作廢在途或結果未知 → 任何稅務動作都不得疊加，轉人工（REVIEW_REQUIRED）。
 3. 需要收回紙本卻未收回時，**不執行 F0501**；是否連帶擋下退貨由呼叫端依店主政策決定
    （本店裁示：累計全退且需收回紙本而未收回 → 拒絕退貨）。
 """
@@ -46,12 +46,14 @@ class InvoiceFacts:
     """發票開立時間（UTC）；判定同月時換算為台北時區。"""
     has_settled_allowance: bool
     """已有**成功**的折讓紀錄。"""
-    has_inflight_allowance: bool
-    """有折讓在途或結果未知（尚未與平台收斂）。
+    has_open_allowance: bool
+    """有折讓**尚未收斂**——在途（PENDING）或失敗但仍可重送（FAILED）。
 
-    與 `has_settled_allowance` 同等對待：**只要有折讓（在途或已核可）就一律繼續折讓、
-    不作廢原發票**。不擋下退貨本身——分次退貨會有多張 G0401 同時在途是正常操作，系統已能
-    正確收斂（見 test_multiple_inflight_allowances_transition_only_when_all_accepted）；
+    與 `has_settled_allowance` 同等對待：**只要這張發票沾過折讓就一律繼續折讓、不作廢**。
+    FAILED 也算數（Codex 對抗審查 #1）：失敗的 G0401 仍可被店員重送，若此時因為「不算既有
+    折讓」而讓後續全退走作廢，最終會同時送出 G0401 與 F0501，帳目自相矛盾。
+    不擋下退貨本身——分次退貨會有多張 G0401 同時在途是正常操作，系統已能正確收斂
+    （見 test_multiple_inflight_allowances_transition_only_when_all_accepted）；
     若在此擋下，等於因為前一張折讓還沒回執就拒絕客人退款。
     """
 
@@ -105,7 +107,7 @@ def decide(
     `is_full_return`＝**本次退貨後累計**是否所有可退品項都退完（由呼叫端計算，含餐飲的
     混合單因餐飲不可退而永遠不成立）。
     """
-    if not facts.exists or not facts.is_issued:
+    if not facts.exists:
         return ReturnInvoiceDecision(
             action=ReturnInvoiceAction.NONE,
             requires_paper_recall=False,
@@ -114,6 +116,8 @@ def decide(
         )
 
     consent = True  # 折讓與作廢皆須買受人同意
+    # 作廢在途要**先於**「是否已開立」判斷（Codex 對抗審查 #2）：VOID_PENDING 的 is_issued
+    # 為假，若照舊順序會被當成「沒有發票」而放行，等於在作廢未收斂時默默再疊一次稅務動作。
     if facts.has_inflight_void:
         return ReturnInvoiceDecision(
             action=ReturnInvoiceAction.REVIEW_REQUIRED,
@@ -121,7 +125,14 @@ def decide(
             requires_customer_consent=consent,
             reason="原發票的作廢尚在處理中（結果未確認），不可再疊加稅務動作，請轉人工處理。",
         )
-    if facts.has_settled_allowance or facts.has_inflight_allowance:
+    if not facts.is_issued:
+        return ReturnInvoiceDecision(
+            action=ReturnInvoiceAction.NONE,
+            requires_paper_recall=False,
+            requires_customer_consent=False,
+            reason="原交易的發票尚未開立成功，本次退貨不涉及發票處置。",
+        )
+    if facts.has_settled_allowance or facts.has_open_allowance:
         # 只要這張發票**已經有折讓**（已核可或在途），後續退貨一律繼續折讓、絕不作廢原發票
         # ——否則會同時存在「已作廢的原發票」與折讓單。在途也算數：那張折讓可能隨時核可。
         return ReturnInvoiceDecision(

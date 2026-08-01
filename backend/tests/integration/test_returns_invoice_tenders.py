@@ -51,7 +51,10 @@ from app.shared.enums import (
     UserRole,
 )
 from app.shared.exceptions import LinePayChargeFailed, ReturnConflict
-from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
+from tests.integration.customer_display_helpers import (
+    prepare_signed_store_credit_cart,
+    return_consent_content,
+)
 from tests.integration.test_sales_einvoice import _FakeSerializer
 from tests.integration.test_sales_linepay import _REFUND_SUCCESS, RefundTransport, _client
 
@@ -147,11 +150,9 @@ async def _consent(
         store_id=store_id,
         kind=SignatureTaskKind.RETURN_INVOICE_CONSENT,
         contact_id=contact_id,
-        content={
-            "return_lines": [
-                {"sale_line_id": lid, "qty": q} for lid, q in sorted(return_lines.items())
-            ]
-        },
+        content=await return_consent_content(
+            session, store_id=store_id, sale_id=sale_id, return_lines=return_lines
+        ),
         content_sha256="c" * 64,
         signature_sha256="s" * 64,
         evidence_hash="e" * 64,
