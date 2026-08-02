@@ -13,6 +13,7 @@ commit/rollback 由呼叫端控制），不留「庫存扣了但現金沒進」�
 """
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -42,12 +43,20 @@ from app.modules.sales.linepay import (
     linepay_order_id,
 )
 from app.modules.sales.models import (
+    DiscountReason,
     GiftReason,
     LinePayRefundAttempt,
     LinePayTransaction,
     Sale,
+    SaleAdjustment,
+    SaleAdjustmentAllocation,
     SaleLine,
     SaleTender,
+)
+from app.modules.sales.pricing import (
+    DiscountRequest,
+    PricingLine,
+    apply_discounts,
 )
 from app.modules.sales.repository import SalesRepository
 from app.modules.settings.models import StoreSettings
@@ -78,6 +87,7 @@ from app.shared.exceptions import (
     EInvoiceSettingsChanged,
     EmptySale,
     IdempotencyKeyConflict,
+    InvalidDiscount,
     InvalidSaleTender,
     InvalidStateTransition,
     LinePayChargeFailed,
@@ -235,11 +245,15 @@ def _cart_fingerprint(
     buyer_contact_id: int | None,
     tenders: list[TenderInput] | None = None,
     invoice_info: InvoiceInfoInput | None = None,
+    adjustments: Sequence[DiscountRequest] | None = None,
 ) -> str:
-    """購物車＋收款＋發票資訊組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
+    """購物車＋收款＋發票資訊＋折扣組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
 
     tenders 納入指紋：同 key 但收款組成不同（影響現金/帳本副作用）→ 視為不同請求。
     invoice_info 納入指紋（docs/24）：同 key 但統編/載具/捐贈不同（影響發票內容）→ 不同請求。
+    **贈品與折扣納入指紋**：兩者直接改變金額與庫存，同 key 但折扣不同若被當成重放，
+    第二次的折扣會靜默消失、客人卻以為打了折。折扣**不排序**——套用有先後之分
+    （先單品後整單，分攤基礎不同），順序不同就是不同的請求。
     """
     canonical = {
         "invoice_info": (
@@ -265,6 +279,9 @@ def _cart_fingerprint(
                     "bulk_lot_id": line.bulk_lot_id,
                     "menu_item_id": line.menu_item_id,
                     "qty": line.qty,
+                    "line_kind": line.line_kind.value,
+                    "gift_reason_id": line.gift_reason_id,
+                    "gift_note": line.gift_note,
                 }
                 for line in lines
             ),
@@ -284,6 +301,21 @@ def _cart_fingerprint(
                 ),
                 key=lambda d: d["tender_type"],
             )
+        ),
+        # 折扣**不排序**：套用有先後（先單品後整單，分攤基礎不同），順序不同即不同請求。
+        "adjustments": (
+            None
+            if not adjustments
+            else [
+                {
+                    "scope": a.scope.value,
+                    "method": a.method.value,
+                    "value": format(a.value, "f"),
+                    "target_key": a.target_key,
+                    "reason_id": a.reason_id,
+                }
+                for a in adjustments
+            ]
         ),
     }
     return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
@@ -566,6 +598,7 @@ class SalesService:
         signature_task_id: int | None = None,
         cart_session_id: int | None = None,
         cart_revision: int | None = None,
+        adjustments: Sequence[DiscountRequest] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         expected_einvoice_enabled: bool | None = None,
         require_einvoice_confirmation: bool = False,
@@ -587,7 +620,9 @@ class SalesService:
             raise EmptySale("銷售單必須至少有一筆明細")
 
         normalized_tenders = self._normalize_tenders(tenders)
-        fingerprint = _cart_fingerprint(lines, buyer_contact_id, normalized_tenders, invoice_info)
+        fingerprint = _cart_fingerprint(
+            lines, buyer_contact_id, normalized_tenders, invoice_info, adjustments
+        )
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
         # 內容不同則拒絕（避免誤用/重用 key 把不同購物車的結帳靜默丟掉）。
@@ -599,6 +634,7 @@ class SalesService:
                 buyer_contact_id=buyer_contact_id,
                 tenders=normalized_tenders,
                 invoice_info=invoice_info,
+                adjustments=adjustments,
             )
             if replay is not None:
                 return replay
@@ -619,6 +655,7 @@ class SalesService:
                     buyer_contact_id=buyer_contact_id,
                     tenders=normalized_tenders,
                     invoice_info=invoice_info,
+                    adjustments=adjustments,
                 )
 
         has_cash = normalized_tenders is None or any(
@@ -775,13 +812,26 @@ class SalesService:
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
 
         food_subtotal = Decimal(0)  # 餐飲（內用）小計：購物金折抵上限與會員點數都要扣掉它
+        discountable_flags: list[bool] = []
         for line in lines:
             line_total = await self._process_line(
-                store_id, sale.id, line, consignment_sales, campaign
+                store_id, sale.id, line, consignment_sales, campaign, discountable_flags
             )
             total += line_total
             if line.line_type == SaleLineType.MENU:
                 food_subtotal += line_total
+
+        # 臨時折扣：折扣**必須落到明細**（Σ net_amount 要等於 sale.total）——發票的品項
+        # 小計合計不等於發票總額會被平台拒送且永遠卡住，退貨也依 net_amount 退實付。
+        if adjustments:
+            total = await self._apply_manual_adjustments(
+                store_id,
+                sale.id,
+                actor_user_id=clerk_user_id,
+                lines=lines,
+                discountable=discountable_flags,
+                requests=adjustments,
+            )
 
         # 零元單只允許「整單都是贈品」（店主裁示：門市活動可能單獨送小物）。
         # 一般銷售仍須 > 0：折到 0 元＝變相贈品，要免費請用贈品，否則贈品的數量與成本
@@ -1458,6 +1508,7 @@ class SalesService:
         buyer_contact_id: int | None,
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
+        adjustments: Sequence[DiscountRequest] | None = None,
     ) -> Sale | None:
         """同 key 且購物車＋收款相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
@@ -1471,7 +1522,7 @@ class SalesService:
         if existing is None:
             return None
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info
+            lines, buyer_contact_id, tenders, invoice_info, adjustments
         ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
@@ -1491,6 +1542,7 @@ class SalesService:
         buyer_contact_id: int | None,
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
+        adjustments: Sequence[DiscountRequest] | None = None,
     ) -> Sale:
         """簽署綁定的「回應遺失重試」回放（docs/23 K5，Codex 第一輪；同 K4 第九/十/十三/十五輪）。
 
@@ -1509,7 +1561,7 @@ class SalesService:
                 "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
             )
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info
+            lines, buyer_contact_id, tenders, invoice_info, adjustments
         ):
             raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing
@@ -2076,6 +2128,130 @@ class SalesService:
             raise SaleLineInvalid(f"贈送原因「{reason.name}」必須填寫備註")
         return _GiftContext(reason.id, reason.name, (line.gift_note or "").strip() or None)
 
+    async def _resolve_discount_reason(
+        self, store_id: int, request: DiscountRequest
+    ) -> DiscountRequest:
+        """折扣原因的前置驗證與名稱快照（比照贈品原因）。
+
+        原因非必填——但填了就必須有效；設定「必填備註」的原因則強制備註。
+        """
+        if request.reason_id is None:
+            return request
+        reason = await self._session.get(DiscountReason, request.reason_id)
+        if reason is None or reason.store_id != store_id or not reason.is_active:
+            raise InvalidDiscount("折扣原因不存在、不屬本店或已停用")
+        if reason.requires_note and not (request.note or "").strip():
+            raise InvalidDiscount(f"折扣原因「{reason.name}」必須填寫備註")
+        return replace(
+            request, reason_name=reason.name, note=(request.note or "").strip() or None
+        )
+
+    async def _apply_manual_adjustments(
+        self,
+        store_id: int,
+        sale_id: int,
+        *,
+        actor_user_id: int,
+        lines: Sequence[SaleLineInput],
+        discountable: Sequence[bool],
+        requests: Sequence[DiscountRequest],
+    ) -> Decimal:
+        """套用臨時折扣：回寫各行的實付、落盤折扣與分攤紀錄、寫稽核；回傳新的應付總額。
+
+        **分攤結果必須落盤**：退貨時要知道「這一行當初實際被折了多少」，不能依當下商品
+        狀態重算——商品價格、活動、甚至商品本身都可能已經變了。
+
+        折扣以**明細順序索引**（"0"、"1"…）為目標鍵：成交前 sale_line 還沒有 id，
+        而客端與後端共用同一份明細順序。
+        """
+        persisted = await self._repo.list_lines(sale_id)
+        if len(persisted) != len(lines) or len(discountable) != len(lines):
+            raise InvalidDiscount("明細與折扣目標對不上，無法套用折扣")
+
+        pricing_lines = [
+            PricingLine(
+                key=str(index),
+                kind=row.line_kind,
+                line_total=row.line_total,
+                discountable=flag,
+                gift_retail_value=(
+                    (row.original_unit_price or Decimal(0)) * row.qty
+                    if row.line_kind is SaleLineKind.GIFT
+                    else Decimal(0)
+                ),
+            )
+            for index, (row, flag) in enumerate(zip(persisted, discountable, strict=True))
+        ]
+        resolved = [await self._resolve_discount_reason(store_id, r) for r in requests]
+        result = apply_discounts(pricing_lines, resolved)
+
+        for index, row in enumerate(persisted):
+            discount = result.manual_discount_by_line.get(str(index), Decimal(0))
+            if discount:
+                row.manual_discount_amount = discount
+                row.net_amount = row.line_total - discount
+        await self._session.flush()
+
+        for applied in result.applied:
+            request = applied.request
+            target_index = request.target_key
+            adjustment = SaleAdjustment(
+                store_id=store_id,
+                sale_id=sale_id,
+                sale_line_id=(
+                    persisted[int(target_index)].id if target_index is not None else None
+                ),
+                scope=request.scope,
+                calculation_method=request.method,
+                requested_value=request.value,
+                applied_amount=applied.applied_amount,
+                reason_id=request.reason_id,
+                reason_name=request.reason_name,
+                note=request.note,
+                created_by=actor_user_id,
+            )
+            self._session.add(adjustment)
+            await self._session.flush()
+            for key, amount in applied.allocations:
+                self._session.add(
+                    SaleAdjustmentAllocation(
+                        store_id=store_id,
+                        adjustment_id=adjustment.id,
+                        sale_line_id=persisted[int(key)].id,
+                        allocated_amount=amount,
+                    )
+                )
+        await self._session.flush()
+
+        # 裁量性的價格變動必須留痕——本系統沒有主管核准機制（店主裁示），
+        # 稽核是唯一能事後追究的東西。
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="SALE_MANUAL_ADJUSTMENT",
+            entity_type="sale",
+            entity_id=str(sale_id),
+            after={
+                "item_discount_amount": str(result.item_discount_amount),
+                "order_discount_amount": str(result.order_discount_amount),
+                "total_discount_amount": str(result.total_discount_amount),
+                "net_amount": str(result.net_amount),
+                "adjustments": [
+                    {
+                        "scope": a.request.scope.value,
+                        "method": a.request.method.value,
+                        "requested_value": str(a.request.value),
+                        "applied_amount": str(a.applied_amount),
+                        "reason": a.request.reason_name,
+                    }
+                    for a in result.applied
+                ],
+            },
+            is_sensitive=True,
+        )
+        return result.net_amount
+
     async def _process_line(
         self,
         store_id: int,
@@ -2083,22 +2259,26 @@ class SalesService:
         line: SaleLineInput,
         consignment_sales: list[tuple[int, Decimal, int]],
         campaign: Campaign | None,
-        gift: _GiftContext | None = None,
+        discountable_out: list[bool] | None = None,
     ) -> Decimal:
         """解析單行、原子扣庫存、寫 stock_movement(OUT)、建 sale_line；回傳該行含稅小計（折後）。
 
         贈品同樣走這條路（照扣庫存），只是成交 0 元、庫存異動原因為 GIFT。
+
+        `discountable_out`：依序收集「這一行可否套用臨時折扣」。寄售與否只有處理器手上有
+        （得先解析到品項），所以由處理器回報，沿用 `consignment_sales` 的收集器慣例。
         """
         gift = await self._resolve_gift(store_id, line)
+        flags = discountable_out if discountable_out is not None else []
         if line.line_type == SaleLineType.SERIALIZED:
             return await self._process_serialized(
-                store_id, sale_id, line, consignment_sales, campaign, gift
+                store_id, sale_id, line, consignment_sales, campaign, gift, flags
             )
         if line.line_type == SaleLineType.CATALOG:
-            return await self._process_catalog(store_id, sale_id, line, campaign, gift)
+            return await self._process_catalog(store_id, sale_id, line, campaign, gift, flags)
         if line.line_type == SaleLineType.MENU:
-            return await self._process_menu(store_id, sale_id, line, gift)
-        return await self._process_bulk(store_id, sale_id, line, campaign, gift)
+            return await self._process_menu(store_id, sale_id, line, gift, flags)
+        return await self._process_bulk(store_id, sale_id, line, campaign, gift, flags)
 
     async def _resolve_menu_item(self, store_id: int, line: SaleLineInput) -> MenuItem:
         """解析餐飲明細：驗 menu_item_id/qty、取本店未封存且可售的品項。"""
@@ -2119,9 +2299,12 @@ class SalesService:
         sale_id: int,
         line: SaleLineInput,
         gift: _GiftContext | None = None,
+        discountable_out: list[bool] | None = None,
     ) -> Decimal:
         """餐飲明細：不扣庫存、不套活動折扣、原價成交；建 sale_line（line_type=MENU）。"""
         item = await self._resolve_menu_item(store_id, line)
+        if discountable_out is not None:
+            discountable_out.append(False)  # 餐飲不折（沿用活動折扣的既有排除口徑）
         if gift is not None:
             # 餐飲現做、不扣庫存，「贈送」在庫存與成本上都留不下痕跡，統計不到。
             raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
@@ -2147,6 +2330,7 @@ class SalesService:
         consignment_sales: list[tuple[int, Decimal, int]],
         campaign: Campaign | None,
         gift: _GiftContext | None = None,
+        discountable_out: list[bool] | None = None,
     ) -> Decimal:
         if line.item_code is None:
             raise SaleLineInvalid("SERIALIZED 明細必須帶 item_code")
@@ -2156,6 +2340,8 @@ class SalesService:
         if item is None:
             raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
         is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
+        if discountable_out is not None:
+            discountable_out.append(gift is None and not is_consignment)
         if gift is not None and is_consignment:
             # 寄售分潤按成交價計，送出去等於寄售人拿 0——拿別人的貨做人情。
             raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
@@ -2247,6 +2433,7 @@ class SalesService:
         line: SaleLineInput,
         campaign: Campaign | None,
         gift: _GiftContext | None = None,
+        discountable_out: list[bool] | None = None,
     ) -> Decimal:
         if line.catalog_product_id is None:
             raise SaleLineInvalid("CATALOG 明細必須帶 catalog_product_id")
@@ -2256,6 +2443,8 @@ class SalesService:
         if product is None:
             raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
         applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
+        if discountable_out is not None:
+            discountable_out.append(gift is None)
         disc = (
             self._gift_discount(product.unit_price)
             if gift is not None
@@ -2296,6 +2485,7 @@ class SalesService:
         line: SaleLineInput,
         campaign: Campaign | None,
         gift: _GiftContext | None = None,
+        discountable_out: list[bool] | None = None,
     ) -> Decimal:
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
@@ -2308,6 +2498,8 @@ class SalesService:
         applies = _campaign_applies(
             campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
         )
+        if discountable_out is not None:
+            discountable_out.append(gift is None and lot.consignor_id is None)
         if gift is not None and lot.consignor_id is not None:
             raise SaleLineInvalid("寄售散裝批不可作為贈品（分潤依售價計）")
         disc = (

@@ -54,6 +54,11 @@ class DiscountRequest:
     value: Decimal
     target_key: str | None = None
     """ITEM 時必填；ORDER 時必須為 None。"""
+    reason_id: int | None = None
+    reason_name: str | None = None
+    note: str | None = None
+    """折扣原因與備註：**本模組不使用**，純粹隨請求帶到落盤與稽核。
+    放在同一個 DTO 是為了避免 API→定價→落盤之間再多一組幾乎相同的型別。"""
 
 
 @dataclass(frozen=True)
