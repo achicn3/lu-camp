@@ -958,6 +958,14 @@ body {
 .return-blocker {
   margin-top: var(--sp-1);
 }
+/* 原因代碼管理的新增列：欄位橫排、視窗窄時自動換行。 */
+.reason-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
 /* 贈品未一併退回：擋下送出並要求說明，說明會寫入稽核。 */
 .return-gift-notice {
   display: flex;

@@ -441,3 +441,113 @@ async def test_default_reasons_do_not_overwrite_a_renamed_reason(
     assert kept is not None
     assert kept.name == "我自己的名字"
     assert kept.is_active is False
+
+
+# ── 原因代碼管理（後台） ────────────────────────────────────────────────────
+
+
+async def test_manager_can_add_a_reason_and_clerks_see_it_immediately(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, _a, _b, _gift = await _seed(db_session)
+    manager = User(
+        store_id=store_id, username="gd-mgr", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    mgr_token = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store_id)
+
+    created = await client.post(
+        "/api/v1/gift-reasons",
+        json={"code": "SAMPLE", "name": "試用品", "requires_note": True, "sort_order": 5},
+        headers=_auth(mgr_token),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["requires_note"] is True
+
+    menu = await client.get("/api/v1/gift-reasons", headers=_auth(token))
+    assert "試用品" in [r["name"] for r in menu.json()]
+
+
+async def test_duplicate_reason_code_is_refused_with_a_useful_message(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停用的也算佔用 code——直接說「請改為重新啟用」，不然店員會困惑。"""
+    _token, store_id, _a, _b, _gift = await _seed(db_session)
+    manager = User(
+        store_id=store_id, username="gd-mgr2", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    mgr_token = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store_id)
+
+    duplicate = await client.post(
+        "/api/v1/gift-reasons",
+        json={"code": "PROMO", "name": "重複的", "requires_note": False, "sort_order": 0},
+        headers=_auth(mgr_token),
+    )
+    assert duplicate.status_code == 409, duplicate.text
+    assert "重新啟用" in duplicate.json()["detail"]
+
+
+async def test_disabling_a_reason_hides_it_from_pos_but_keeps_it_for_history(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停用不實刪：POS 選單看不到，管理頁仍列得出來（歷史單據還引用著）。"""
+    token, store_id, _a, _b, gift_reason = await _seed(db_session)
+    manager = User(
+        store_id=store_id, username="gd-mgr3", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    mgr_token = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store_id)
+
+    disabled = await client.patch(
+        f"/api/v1/gift-reasons/{gift_reason}",
+        json={"is_active": False},
+        headers=_auth(mgr_token),
+    )
+    assert disabled.status_code == 200, disabled.text
+
+    pos_menu = await client.get("/api/v1/gift-reasons", headers=_auth(token))
+    assert pos_menu.json() == []
+    admin_list = await client.get(
+        "/api/v1/gift-reasons?include_inactive=true", headers=_auth(mgr_token)
+    )
+    assert [(r["name"], r["is_active"]) for r in admin_list.json()] == [("活動贈品", False)]
+
+
+async def test_clerks_may_not_manage_reasons(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, _store_id, _a, _b, gift_reason = await _seed(db_session)
+    created = await client.post(
+        "/api/v1/gift-reasons",
+        json={"code": "NOPE", "name": "不該成功", "requires_note": False, "sort_order": 0},
+        headers=_auth(token),
+    )
+    assert created.status_code == 403, created.text
+    patched = await client.patch(
+        f"/api/v1/gift-reasons/{gift_reason}",
+        json={"name": "不該成功"},
+        headers=_auth(token),
+    )
+    assert patched.status_code == 403, patched.text
+
+
+async def test_updating_a_missing_reason_is_a_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _token, store_id, _a, _b, _gift = await _seed(db_session)
+    manager = User(
+        store_id=store_id, username="gd-mgr4", password_hash="h", role=UserRole.MANAGER
+    )
+    db_session.add(manager)
+    await db_session.flush()
+    mgr_token = encode_access_token(user_id=manager.id, role="MANAGER", store_id=store_id)
+    missing = await client.patch(
+        "/api/v1/discount-reasons/999999",
+        json={"name": "不存在"},
+        headers=_auth(mgr_token),
+    )
+    assert missing.status_code == 404, missing.text

@@ -3517,6 +3517,149 @@
         "title": "DailySummaryReport",
         "type": "object"
       },
+      "DiscountClerkRow": {
+        "description": "一位店員在期間內打出的折扣（無核准機制 → 事後稽核靠這個看得出異常）。",
+        "properties": {
+          "adjustment_count": {
+            "title": "Adjustment Count",
+            "type": "integer"
+          },
+          "clerk_user_id": {
+            "title": "Clerk User Id",
+            "type": "integer"
+          },
+          "clerk_username": {
+            "title": "Clerk Username",
+            "type": "string"
+          },
+          "discount_total": {
+            "title": "Discount Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clerk_user_id",
+          "clerk_username",
+          "adjustment_count",
+          "discount_total"
+        ],
+        "title": "DiscountClerkRow",
+        "type": "object"
+      },
+      "DiscountReasonRow": {
+        "description": "一個折扣原因在期間內的使用情形。",
+        "properties": {
+          "adjustment_count": {
+            "title": "Adjustment Count",
+            "type": "integer"
+          },
+          "discount_total": {
+            "title": "Discount Total",
+            "type": "string"
+          },
+          "item_discount_total": {
+            "title": "Item Discount Total",
+            "type": "string"
+          },
+          "order_discount_total": {
+            "title": "Order Discount Total",
+            "type": "string"
+          },
+          "reason_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Id"
+          },
+          "reason_name": {
+            "title": "Reason Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_id",
+          "reason_name",
+          "adjustment_count",
+          "item_discount_total",
+          "order_discount_total",
+          "discount_total"
+        ],
+        "title": "DiscountReasonRow",
+        "type": "object"
+      },
+      "DiscountReport": {
+        "description": "臨時折扣報表：誰在什麼原因下折了多少。\n\n金額一律取落盤的 `applied_amount`，**不事後重算**——商品價格與活動日後都會變，\n重算會讓歷史折扣跟著漂。無主管核准機制，這份報表是事後稽核的主要依據。",
+        "properties": {
+          "adjustment_count": {
+            "title": "Adjustment Count",
+            "type": "integer"
+          },
+          "by_clerk": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountClerkRow"
+            },
+            "title": "By Clerk",
+            "type": "array"
+          },
+          "by_reason": {
+            "items": {
+              "$ref": "#/components/schemas/DiscountReasonRow"
+            },
+            "title": "By Reason",
+            "type": "array"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "discount_total": {
+            "title": "Discount Total",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "item_discount_total": {
+            "title": "Item Discount Total",
+            "type": "string"
+          },
+          "order_discount_total": {
+            "title": "Order Discount Total",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "discount_total",
+          "item_discount_total",
+          "order_discount_total",
+          "adjustment_count",
+          "by_reason",
+          "by_clerk"
+        ],
+        "title": "DiscountReport",
+        "type": "object"
+      },
       "EInvoiceAction": {
         "description": "電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。",
         "enum": [
@@ -4004,6 +4147,144 @@
           "rows"
         ],
         "title": "FlowsReport",
+        "type": "object"
+      },
+      "GiftProductRow": {
+        "description": "被當成贈品送出去最多的品項。",
+        "properties": {
+          "cost": {
+            "title": "Cost",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "gift_qty": {
+            "title": "Gift Qty",
+            "type": "integer"
+          },
+          "retail_value": {
+            "title": "Retail Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "gift_qty",
+          "retail_value",
+          "cost"
+        ],
+        "title": "GiftProductRow",
+        "type": "object"
+      },
+      "GiftReasonRow": {
+        "description": "一個贈送原因在期間內送出的數量、原價價值與成本。",
+        "properties": {
+          "cost": {
+            "title": "Cost",
+            "type": "string"
+          },
+          "gift_count": {
+            "title": "Gift Count",
+            "type": "integer"
+          },
+          "gift_qty": {
+            "title": "Gift Qty",
+            "type": "integer"
+          },
+          "reason_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Id"
+          },
+          "reason_name": {
+            "title": "Reason Name",
+            "type": "string"
+          },
+          "retail_value": {
+            "title": "Retail Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_id",
+          "reason_name",
+          "gift_count",
+          "gift_qty",
+          "retail_value",
+          "cost"
+        ],
+        "title": "GiftReasonRow",
+        "type": "object"
+      },
+      "GiftReport": {
+        "description": "贈品報表：送了什麼、送了多少、成本多少。\n\n贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利\n（營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動\n`GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。",
+        "properties": {
+          "by_product": {
+            "items": {
+              "$ref": "#/components/schemas/GiftProductRow"
+            },
+            "title": "By Product",
+            "type": "array"
+          },
+          "by_reason": {
+            "items": {
+              "$ref": "#/components/schemas/GiftReasonRow"
+            },
+            "title": "By Reason",
+            "type": "array"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "string"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "gift_qty": {
+            "title": "Gift Qty",
+            "type": "integer"
+          },
+          "retail_value": {
+            "title": "Retail Value",
+            "type": "string"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "gift_qty",
+          "retail_value",
+          "cost",
+          "by_reason",
+          "by_product"
+        ],
+        "title": "GiftReport",
         "type": "object"
       },
       "GoodsReceiptRead": {
@@ -6543,8 +6824,44 @@
         "title": "PurchaseOrderStatus",
         "type": "string"
       },
+      "ReasonCreateRequest": {
+        "description": "新增原因代碼。`code` 在同店內唯一，且**不可事後修改**——歷史單據存的是名稱快照，\n但報表以 code 對照分類，改 code 會讓同一件事在報表上斷成兩段。",
+        "properties": {
+          "code": {
+            "maxLength": 30,
+            "minLength": 1,
+            "pattern": "^[A-Z0-9_]+$",
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_note": {
+            "default": false,
+            "title": "Requires Note",
+            "type": "boolean"
+          },
+          "sort_order": {
+            "default": 0,
+            "maximum": 999.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "ReasonCreateRequest",
+        "type": "object"
+      },
       "ReasonRead": {
-        "description": "贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。",
+        "description": "贈品／折扣原因代碼。`requires_note` 為真時 POS 必須逼店員填備註。\n\nPOS 選單只拿得到啟用中的；管理頁會連停用的一起列出（停用不實刪）。",
         "properties": {
           "code": {
             "title": "Code",
@@ -6553,6 +6870,10 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
           },
           "name": {
             "title": "Name",
@@ -6572,9 +6893,65 @@
           "code",
           "name",
           "requires_note",
-          "sort_order"
+          "sort_order",
+          "is_active"
         ],
         "title": "ReasonRead",
+        "type": "object"
+      },
+      "ReasonUpdateRequest": {
+        "description": "修改原因代碼。停用不實刪：歷史單據引用過的原因不能因為後台刪掉就消失。",
+        "properties": {
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "requires_note": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Note"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "title": "ReasonUpdateRequest",
         "type": "object"
       },
       "ReceiptHeaderRead": {
@@ -8079,6 +8456,11 @@
             "title": "Consignment Commission Income",
             "type": "string"
           },
+          "contribution_margin": {
+            "default": "0",
+            "title": "Contribution Margin",
+            "type": "string"
+          },
           "date_from": {
             "format": "date-time",
             "title": "Date From",
@@ -8098,6 +8480,16 @@
             "title": "Generated At",
             "type": "string"
           },
+          "gift_cost": {
+            "default": "0",
+            "title": "Gift Cost",
+            "type": "string"
+          },
+          "gift_retail_value": {
+            "default": "0",
+            "title": "Gift Retail Value",
+            "type": "string"
+          },
           "gross_margin": {
             "title": "Gross Margin",
             "type": "string"
@@ -8115,6 +8507,11 @@
           },
           "gross_turnover": {
             "title": "Gross Turnover",
+            "type": "string"
+          },
+          "manual_discount_total": {
+            "default": "0",
+            "title": "Manual Discount Total",
             "type": "string"
           },
           "net_margin": {
@@ -13924,6 +14321,20 @@
     "/api/v1/discount-reasons": {
       "get": {
         "operationId": "listDiscountReasons",
+        "parameters": [
+          {
+            "description": "連停用的原因一起列出（管理頁用；POS 選單不需要）",
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "連停用的原因一起列出（管理頁用；POS 選單不需要）",
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13938,6 +14349,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -13946,6 +14367,107 @@
           }
         ],
         "summary": "List Discount Reasons",
+        "tags": [
+          "sales"
+        ]
+      },
+      "post": {
+        "operationId": "createDiscountReason",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Discount Reason",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/discount-reasons/{reason_id}": {
+      "patch": {
+        "operationId": "updateDiscountReason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reason_id",
+            "required": true,
+            "schema": {
+              "title": "Reason Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Discount Reason",
         "tags": [
           "sales"
         ]
@@ -14234,6 +14756,20 @@
     "/api/v1/gift-reasons": {
       "get": {
         "operationId": "listGiftReasons",
+        "parameters": [
+          {
+            "description": "連停用的原因一起列出（管理頁用；POS 選單不需要）",
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "連停用的原因一起列出（管理頁用；POS 選單不需要）",
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14248,6 +14784,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -14256,6 +14802,107 @@
           }
         ],
         "summary": "List Gift Reasons",
+        "tags": [
+          "sales"
+        ]
+      },
+      "post": {
+        "operationId": "createGiftReason",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Gift Reason",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
+    "/api/v1/gift-reasons/{reason_id}": {
+      "patch": {
+        "operationId": "updateGiftReason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reason_id",
+            "required": true,
+            "schema": {
+              "title": "Reason Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasonUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Gift Reason",
         "tags": [
           "sales"
         ]
@@ -16101,6 +16748,146 @@
           }
         ],
         "summary": "Daily Summary",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/discounts": {
+      "get": {
+        "description": "臨時折扣報表：依原因與店員彙總。半開區間 [from, to)；to<=from → 422。\n\n無主管核准機制（店主裁示不設上限），這份報表是事後稽核的主要依據。",
+        "operationId": "discountReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscountReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Discounts",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/gifts": {
+      "get": {
+        "description": "贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。\n\n贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。",
+        "operationId": "giftReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GiftReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Gifts",
         "tags": [
           "reports"
         ]

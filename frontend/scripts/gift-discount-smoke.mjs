@@ -242,6 +242,32 @@ try {
   await page.waitForSelector("text=退貨完成", { timeout: 20_000 });
   ok("退貨完成（退款依實付）", true, String(refundLabel).trim());
   await page.screenshot({ path: `${SHOTS}/09-return-done.png`, fullPage: true });
+  // 9) 報表：折扣與贈品各自看得到數字
+  await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
+  await page.locator('button:has-text("臨時折扣")').click();
+  await page.waitForSelector("text=折扣總額", { timeout: 15_000 });
+  ok(
+    "折扣報表有數字",
+    await page.locator(".rpt-summary").first().isVisible(),
+    (await page.locator(".rpt-summary").first().innerText()).replace(/\n/g, " "),
+  );
+  await page.screenshot({ path: `${SHOTS}/10-report-discounts.png`, fullPage: true });
+
+  await page.locator('button:has-text("贈品")').first().click();
+  await page.waitForSelector("text=原價價值", { timeout: 15_000 });
+  ok(
+    "贈品報表有數字",
+    await page.locator(".rpt-summary").first().isVisible(),
+    (await page.locator(".rpt-summary").first().innerText()).replace(/\n/g, " "),
+  );
+  await page.screenshot({ path: `${SHOTS}/11-report-gifts.png`, fullPage: true });
+
+  // 10) 設定頁可管理原因代碼（停用不實刪）
+  await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
+  await page.waitForSelector("text=贈品原因代碼", { timeout: 15_000 });
+  const giftReasonCard = page.locator(".card", { hasText: "贈品原因代碼" }).first();
+  ok("設定頁列出贈品原因代碼", await giftReasonCard.isVisible());
+  await page.screenshot({ path: `${SHOTS}/12-settings-reasons.png`, fullPage: true });
 } catch (error) {
   ok("煙霧測試", false, String(error));
 } finally {

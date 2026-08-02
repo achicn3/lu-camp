@@ -20,6 +20,8 @@ from app.modules.reports.schemas import (
     ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
+    DiscountReport,
+    GiftReport,
     InsightsReport,
     InventoryValueReport,
     SalesMarginReport,
@@ -475,6 +477,128 @@ async def sales_margin(
             ["現金收款", str(report.cash_received)],
             ["購物金收款", str(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
+            ["臨時折扣", str(report.manual_discount_total)],
+            ["贈品原價價值", str(report.gift_retail_value)],
+            ["贈品成本", str(report.gift_cost)],
+            ["貢獻毛利（扣贈品成本）", str(report.contribution_margin)],
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get("/discounts", response_model=DiscountReport, operation_id="discountReport")
+async def discounts(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> DiscountReport | Response:
+    """臨時折扣報表：依原因與店員彙總。半開區間 [from, to)；to<=from → 422。
+
+    無主管核准機制（店主裁示不設上限），這份報表是事後稽核的主要依據。
+    """
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    report = await ReportsService(session).discount_report(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", store_datetime_iso(report.generated_at)),
+        ("店別", str(report.store_id)),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
+        ("折扣總額", str(report.discount_total)),
+    ]
+    exp = TabularExport(
+        sheet="臨時折扣",
+        filename_stem=f"discounts-{report.store_id}",
+        meta=meta,
+        headers=["分類", "名稱", "筆數", "單品折扣", "整單折扣", "合計"],
+        rows=[
+            [
+                "原因",
+                row.reason_name,
+                str(row.adjustment_count),
+                str(row.item_discount_total),
+                str(row.order_discount_total),
+                str(row.discount_total),
+            ]
+            for row in report.by_reason
+        ]
+        + [
+            [
+                "店員",
+                row.clerk_username,
+                str(row.adjustment_count),
+                "",
+                "",
+                str(row.discount_total),
+            ]
+            for row in report.by_clerk
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get("/gifts", response_model=GiftReport, operation_id="giftReport")
+async def gifts(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> GiftReport | Response:
+    """贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
+
+    贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
+    """
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    report = await ReportsService(session).gift_report(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", store_datetime_iso(report.generated_at)),
+        ("店別", str(report.store_id)),
+        ("起", store_datetime_iso(report.date_from)),
+        ("迄", store_datetime_iso(report.date_to)),
+        ("贈品件數", str(report.gift_qty)),
+        ("原價價值", str(report.retail_value)),
+        ("成本", str(report.cost)),
+    ]
+    exp = TabularExport(
+        sheet="贈品",
+        filename_stem=f"gifts-{report.store_id}",
+        meta=meta,
+        headers=["分類", "名稱", "件數", "原價價值", "成本"],
+        rows=[
+            [
+                "原因",
+                row.reason_name,
+                str(row.gift_qty),
+                str(row.retail_value),
+                str(row.cost),
+            ]
+            for row in report.by_reason
+        ]
+        + [
+            [
+                "品項",
+                row.description,
+                str(row.gift_qty),
+                str(row.retail_value),
+                str(row.cost),
+            ]
+            for row in report.by_product
         ],
     )
     return export_response(exp, fmt)

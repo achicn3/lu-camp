@@ -21,6 +21,14 @@ class InvalidDiscount(DomainError):
     """臨時折扣不合法（數值非正、超過可折金額、折到 0 元、目標不可折…）。"""
 
 
+class ReasonNotFound(DomainError):
+    """贈品／折扣原因代碼不存在或不屬本店。"""
+
+
+class ReasonConflict(DomainError):
+    """原因代碼衝突（同店同 code 已存在）。"""
+
+
 class CampaignConflict(DomainError):
     """門市活動衝突（同店已有生效活動、非法狀態轉移、區間/欄位不合法）。"""
 

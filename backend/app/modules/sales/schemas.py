@@ -165,7 +165,10 @@ class SaleInvoiceInfoRequest(BaseModel):
 
 
 class ReasonRead(BaseModel):
-    """贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。"""
+    """贈品／折扣原因代碼。`requires_note` 為真時 POS 必須逼店員填備註。
+
+    POS 選單只拿得到啟用中的；管理頁會連停用的一起列出（停用不實刪）。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -174,6 +177,26 @@ class ReasonRead(BaseModel):
     name: str
     requires_note: bool
     sort_order: int
+    is_active: bool
+
+
+class ReasonCreateRequest(BaseModel):
+    """新增原因代碼。`code` 在同店內唯一，且**不可事後修改**——歷史單據存的是名稱快照，
+    但報表以 code 對照分類，改 code 會讓同一件事在報表上斷成兩段。"""
+
+    code: str = Field(min_length=1, max_length=30, pattern=r"^[A-Z0-9_]+$")
+    name: str = Field(min_length=1, max_length=50)
+    requires_note: bool = False
+    sort_order: int = Field(default=0, ge=0, le=999)
+
+
+class ReasonUpdateRequest(BaseModel):
+    """修改原因代碼。停用不實刪：歷史單據引用過的原因不能因為後台刪掉就消失。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    requires_note: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=999)
+    is_active: bool | None = None
 
 
 class SaleAdjustmentRequest(BaseModel):

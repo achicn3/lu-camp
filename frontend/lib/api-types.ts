@@ -1051,11 +1051,29 @@ export interface paths {
         /** List Discount Reasons */
         get: operations["listDiscountReasons"];
         put?: never;
-        post?: never;
+        /** Create Discount Reason */
+        post: operations["createDiscountReason"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discount-reasons/{reason_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Discount Reason */
+        patch: operations["updateDiscountReason"];
         trace?: never;
     };
     "/api/v1/einvoice/queue": {
@@ -1177,11 +1195,29 @@ export interface paths {
         /** List Gift Reasons */
         get: operations["listGiftReasons"];
         put?: never;
-        post?: never;
+        /** Create Gift Reason */
+        post: operations["createGiftReason"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gift-reasons/{reason_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Gift Reason */
+        patch: operations["updateGiftReason"];
         trace?: never;
     };
     "/api/v1/health": {
@@ -1689,6 +1725,50 @@ export interface paths {
          * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。
          */
         get: operations["dailySummaryReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/discounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discounts
+         * @description 臨時折扣報表：依原因與店員彙總。半開區間 [from, to)；to<=from → 422。
+         *
+         *     無主管核准機制（店主裁示不設上限），這份報表是事後稽核的主要依據。
+         */
+        get: operations["discountReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/gifts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gifts
+         * @description 贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
+         *
+         *     贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
+         */
+        get: operations["giftReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3701,6 +3781,76 @@ export interface components {
             unknown_cost_sales: string;
         };
         /**
+         * DiscountClerkRow
+         * @description 一位店員在期間內打出的折扣（無核准機制 → 事後稽核靠這個看得出異常）。
+         */
+        DiscountClerkRow: {
+            /** Adjustment Count */
+            adjustment_count: number;
+            /** Clerk User Id */
+            clerk_user_id: number;
+            /** Clerk Username */
+            clerk_username: string;
+            /** Discount Total */
+            discount_total: string;
+        };
+        /**
+         * DiscountReasonRow
+         * @description 一個折扣原因在期間內的使用情形。
+         */
+        DiscountReasonRow: {
+            /** Adjustment Count */
+            adjustment_count: number;
+            /** Discount Total */
+            discount_total: string;
+            /** Item Discount Total */
+            item_discount_total: string;
+            /** Order Discount Total */
+            order_discount_total: string;
+            /** Reason Id */
+            reason_id: number | null;
+            /** Reason Name */
+            reason_name: string;
+        };
+        /**
+         * DiscountReport
+         * @description 臨時折扣報表：誰在什麼原因下折了多少。
+         *
+         *     金額一律取落盤的 `applied_amount`，**不事後重算**——商品價格與活動日後都會變，
+         *     重算會讓歷史折扣跟著漂。無主管核准機制，這份報表是事後稽核的主要依據。
+         */
+        DiscountReport: {
+            /** Adjustment Count */
+            adjustment_count: number;
+            /** By Clerk */
+            by_clerk: components["schemas"]["DiscountClerkRow"][];
+            /** By Reason */
+            by_reason: components["schemas"]["DiscountReasonRow"][];
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /** Discount Total */
+            discount_total: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Item Discount Total */
+            item_discount_total: string;
+            /** Order Discount Total */
+            order_discount_total: string;
+            /** Store Id */
+            store_id: number;
+        };
+        /**
          * EInvoiceAction
          * @description 電子發票上傳佇列的動作類型（einvoice_upload_queue.action）。
          * @enum {string}
@@ -3883,6 +4033,75 @@ export interface components {
             granularity: string;
             /** Rows */
             rows: components["schemas"]["FlowRow"][];
+            /** Store Id */
+            store_id: number;
+        };
+        /**
+         * GiftProductRow
+         * @description 被當成贈品送出去最多的品項。
+         */
+        GiftProductRow: {
+            /** Cost */
+            cost: string;
+            /** Description */
+            description: string;
+            /** Gift Qty */
+            gift_qty: number;
+            /** Retail Value */
+            retail_value: string;
+        };
+        /**
+         * GiftReasonRow
+         * @description 一個贈送原因在期間內送出的數量、原價價值與成本。
+         */
+        GiftReasonRow: {
+            /** Cost */
+            cost: string;
+            /** Gift Count */
+            gift_count: number;
+            /** Gift Qty */
+            gift_qty: number;
+            /** Reason Id */
+            reason_id: number | null;
+            /** Reason Name */
+            reason_name: string;
+            /** Retail Value */
+            retail_value: string;
+        };
+        /**
+         * GiftReport
+         * @description 贈品報表：送了什麼、送了多少、成本多少。
+         *
+         *     贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利
+         *     （營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動
+         *     `GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。
+         */
+        GiftReport: {
+            /** By Product */
+            by_product: components["schemas"]["GiftProductRow"][];
+            /** By Reason */
+            by_reason: components["schemas"]["GiftReasonRow"][];
+            /** Cost */
+            cost: string;
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gift Qty */
+            gift_qty: number;
+            /** Retail Value */
+            retail_value: string;
             /** Store Id */
             store_id: number;
         };
@@ -4864,20 +5083,59 @@ export interface components {
          */
         PurchaseOrderStatus: "DRAFT" | "ORDERED" | "PARTIAL" | "RECEIVED" | "CANCELLED";
         /**
+         * ReasonCreateRequest
+         * @description 新增原因代碼。`code` 在同店內唯一，且**不可事後修改**——歷史單據存的是名稱快照，
+         *     但報表以 code 對照分類，改 code 會讓同一件事在報表上斷成兩段。
+         */
+        ReasonCreateRequest: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /**
+             * Requires Note
+             * @default false
+             */
+            requires_note: boolean;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+        };
+        /**
          * ReasonRead
-         * @description 贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。
+         * @description 贈品／折扣原因代碼。`requires_note` 為真時 POS 必須逼店員填備註。
+         *
+         *     POS 選單只拿得到啟用中的；管理頁會連停用的一起列出（停用不實刪）。
          */
         ReasonRead: {
             /** Code */
             code: string;
             /** Id */
             id: number;
+            /** Is Active */
+            is_active: boolean;
             /** Name */
             name: string;
             /** Requires Note */
             requires_note: boolean;
             /** Sort Order */
             sort_order: number;
+        };
+        /**
+         * ReasonUpdateRequest
+         * @description 修改原因代碼。停用不實刪：歷史單據引用過的原因不能因為後台刪掉就消失。
+         */
+        ReasonUpdateRequest: {
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Requires Note */
+            requires_note?: boolean | null;
+            /** Sort Order */
+            sort_order?: number | null;
         };
         /**
          * ReceiptHeaderRead
@@ -5474,6 +5732,11 @@ export interface components {
             /** Consignment Commission Income */
             consignment_commission_income: string;
             /**
+             * Contribution Margin
+             * @default 0
+             */
+            contribution_margin: string;
+            /**
              * Date From
              * Format: date-time
              */
@@ -5490,12 +5753,27 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            /**
+             * Gift Cost
+             * @default 0
+             */
+            gift_cost: string;
+            /**
+             * Gift Retail Value
+             * @default 0
+             */
+            gift_retail_value: string;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
             gross_margin_rate: string | null;
             /** Gross Turnover */
             gross_turnover: string;
+            /**
+             * Manual Discount Total
+             * @default 0
+             */
+            manual_discount_total: string;
             /** Net Margin */
             net_margin: string;
             /** Owned Cogs */
@@ -8249,7 +8527,10 @@ export interface operations {
     };
     listDiscountReasons: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
+                include_inactive?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8263,6 +8544,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReasonRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createDiscountReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateDiscountReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reason_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8430,7 +8788,10 @@ export interface operations {
     };
     listGiftReasons: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
+                include_inactive?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8444,6 +8805,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReasonRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createGiftReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateGiftReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reason_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9456,6 +9894,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailySummaryReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discountReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    giftReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GiftReport"];
                 };
             };
             /** @description Validation Error */

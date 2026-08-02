@@ -527,6 +527,182 @@ function PremiumRateCard({
 }
 
 /** 區塊載入失敗時用：明確顯示「讀取失敗」，避免把錯誤狀態誤呈現為「無資料/空」。 */
+// 贈品／折扣原因代碼管理。**停用不實刪**：歷史單據引用過的原因不能因為後台刪掉就消失
+// （單據另存名稱快照），停用只是讓它不再出現在 POS 選單。code 建立後不可改——報表以它
+// 對照分類，改了會讓同一件事在報表上斷成兩段。
+function ReasonCard({
+  title,
+  kind,
+}: {
+  title: string;
+  kind: "gift-reasons" | "discount-reasons";
+}) {
+  const queryClient = useQueryClient();
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [requiresNote, setRequiresNote] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const listQuery = useQuery({
+    queryKey: ["reasons", kind],
+    queryFn: async () => {
+      const { data, error: apiError } = await api.GET(
+        kind === "gift-reasons" ? "/api/v1/gift-reasons" : "/api/v1/discount-reasons",
+        { params: { query: { include_inactive: true } } },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取原因代碼失敗");
+      return data;
+    },
+  });
+
+  function refresh() {
+    void queryClient.invalidateQueries({ queryKey: ["reasons", kind] });
+  }
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const { data, error: apiError } = await api.POST(
+        kind === "gift-reasons" ? "/api/v1/gift-reasons" : "/api/v1/discount-reasons",
+        {
+          body: {
+            code: code.trim().toUpperCase(),
+            name: name.trim(),
+            requires_note: requiresNote,
+            sort_order: 0,
+          },
+        },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "新增原因失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setCode("");
+      setName("");
+      setRequiresNote(false);
+      setError(null);
+      refresh();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const toggle = useMutation({
+    mutationFn: async (row: { id: number; is_active: boolean }) => {
+      const { data, error: apiError } = await api.PATCH(
+        kind === "gift-reasons"
+          ? "/api/v1/gift-reasons/{reason_id}"
+          : "/api/v1/discount-reasons/{reason_id}",
+        {
+          params: { path: { reason_id: row.id } },
+          body: { is_active: !row.is_active },
+        },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "更新原因失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      refresh();
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const rows = listQuery.data ?? [];
+
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      <p className="hint">
+        停用的原因不再出現在 POS 選單，但歷史單據仍保留當初的名稱。代碼建立後不可修改。
+      </p>
+      {listQuery.isError && (
+        <p role="alert" className="form-error">
+          {listQuery.error.message}
+        </p>
+      )}
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>代碼</th>
+            <th>名稱</th>
+            <th>備註必填</th>
+            <th>狀態</th>
+            <th aria-label="操作" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="hint">
+                尚未建立原因代碼。
+              </td>
+            </tr>
+          ) : (
+            rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.code}</td>
+                <td>{row.name}</td>
+                <td>{row.requires_note ? "是" : "否"}</td>
+                <td>{row.is_active ? "啟用中" : "已停用"}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={toggle.isPending}
+                    onClick={() => toggle.mutate(row)}
+                  >
+                    {row.is_active ? "停用" : "重新啟用"}
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+      <div className="reason-add">
+        <label className="field">
+          <span>代碼（英數大寫）</span>
+          <input
+            value={code}
+            maxLength={30}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="例：SAMPLE"
+          />
+        </label>
+        <label className="field">
+          <span>名稱</span>
+          <input
+            value={name}
+            maxLength={50}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="例：試用品"
+          />
+        </label>
+        <label className="field field-toggle">
+          <input
+            type="checkbox"
+            checked={requiresNote}
+            onChange={(e) => setRequiresNote(e.target.checked)}
+          />
+          <span>選用時必須填備註</span>
+        </label>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={create.isPending || code.trim() === "" || name.trim() === ""}
+          onClick={() => create.mutate()}
+        >
+          新增原因
+        </button>
+      </div>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ErrorCard({ title, message }: { title: string; message: string }) {
   return (
     <div className="card">
@@ -717,6 +893,8 @@ export default function SettingsPage() {
         ) : (
           <PremiumHistoryCard history={historyQuery.data ?? []} />
         )}
+        <ReasonCard title="贈品原因代碼" kind="gift-reasons" />
+        <ReasonCard title="折扣原因代碼" kind="discount-reasons" />
         {retentionReportQuery.isError ? (
           <ErrorCard title="簽名 PNG 待清理報表" message="讀取待清理報表失敗，請稍後再試" />
         ) : (

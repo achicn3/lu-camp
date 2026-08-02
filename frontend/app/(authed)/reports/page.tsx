@@ -37,6 +37,8 @@ type InsightsReport = components["schemas"]["InsightsReport"];
 type InsightsBreakdownRow = components["schemas"]["InsightsBreakdownRow"];
 type DailyCashReport = components["schemas"]["DailyCashReport"];
 type SalesMarginReport = components["schemas"]["SalesMarginReport"];
+type DiscountReport = components["schemas"]["DiscountReport"];
+type GiftReport = components["schemas"]["GiftReport"];
 type InventoryValueReport = components["schemas"]["InventoryValueReport"];
 type ConsignmentPayablesReport = components["schemas"]["ConsignmentPayablesReport"];
 type CampaignPerformanceReport = components["schemas"]["CampaignPerformanceReport"];
@@ -47,6 +49,8 @@ type Tab =
   | "trends"
   | "daily-cash"
   | "sales-margin"
+  | "discounts"
+  | "gifts"
   | "campaign-performance"
   | "inventory-value"
   | "consignment-payables"
@@ -61,6 +65,8 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "trends", label: "趨勢" },
   { key: "daily-cash", label: "現金對帳" },
   { key: "sales-margin", label: "銷售毛利" },
+  { key: "discounts", label: "臨時折扣" },
+  { key: "gifts", label: "贈品" },
   { key: "campaign-performance", label: "活動成效" },
   { key: "inventory-value", label: "庫存價值" },
   { key: "consignment-payables", label: "寄售應付" },
@@ -1225,6 +1231,260 @@ function ConsignmentPayablesPanel() {
 
 // -- Campaign Performance Panel (C4，docs/21) --
 
+// 臨時折扣報表：沒有主管核准機制（店主裁示不設上限），這份是事後稽核的主要依據，
+// 所以「依店員」那一段與依原因同樣重要。
+function DiscountPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+
+  const query = useQuery({
+    queryKey: ["reports", "discounts", { from, to }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/discounts", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to) } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取折扣報表失敗");
+    },
+  });
+  const report: DiscountReport | undefined = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/discounts", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+    });
+    void downloadReport(url, `discounts-${from}-${to}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && (
+        <>
+          <dl className="rpt-summary">
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>折扣總額</dt>
+              <dd><MoneyText value={report.discount_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>單品折扣</dt>
+              <dd><MoneyText value={report.item_discount_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>整單折扣</dt>
+              <dd><MoneyText value={report.order_discount_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>折扣筆數</dt>
+              <dd>{report.adjustment_count}</dd>
+            </div>
+          </dl>
+
+          <h3 className="rpt-subtitle">依折扣原因</h3>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>原因</th>
+                  <th>筆數</th>
+                  <th>單品折扣</th>
+                  <th>整單折扣</th>
+                  <th>合計</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.by_reason.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="hint">期間內沒有臨時折扣。</td>
+                  </tr>
+                ) : (
+                  report.by_reason.map((row) => (
+                    <tr key={row.reason_id ?? "none"}>
+                      <td>{row.reason_name}</td>
+                      <td>{row.adjustment_count}</td>
+                      <td><MoneyText value={row.item_discount_total} /></td>
+                      <td><MoneyText value={row.order_discount_total} /></td>
+                      <td><MoneyText value={row.discount_total} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="rpt-subtitle">依店員</h3>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>店員</th>
+                  <th>筆數</th>
+                  <th>折扣金額</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.by_clerk.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="hint">期間內沒有臨時折扣。</td>
+                  </tr>
+                ) : (
+                  report.by_clerk.map((row) => (
+                    <tr key={row.clerk_user_id}>
+                      <td>{row.clerk_username}</td>
+                      <td>{row.adjustment_count}</td>
+                      <td><MoneyText value={row.discount_total} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <DownloadButtons onDownload={handleDownload} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// 贈品報表：原價價值不計入營業額、成本不混入商品毛利，兩者在此獨立呈現。
+function GiftPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+
+  const query = useQuery({
+    queryKey: ["reports", "gifts", { from, to }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/gifts", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to) } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取贈品報表失敗");
+    },
+  });
+  const report: GiftReport | undefined = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/gifts", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+    });
+    void downloadReport(url, `gifts-${from}-${to}.${fmt}`);
+  }
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && (
+        <>
+          <dl className="rpt-summary">
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>贈品件數</dt>
+              <dd>{report.gift_qty}</dd>
+            </div>
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>原價價值</dt>
+              <dd><MoneyText value={report.retail_value} /></dd>
+            </div>
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>贈品成本</dt>
+              <dd><MoneyText value={report.cost} /></dd>
+            </div>
+          </dl>
+          <p className="hint">
+            贈品原價不計入營業額、成本不混入商品毛利；退回的贈品不在此扣除（見庫存異動）。
+          </p>
+
+          <h3 className="rpt-subtitle">依贈送原因</h3>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>原因</th>
+                  <th>件數</th>
+                  <th>原價價值</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.by_reason.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="hint">期間內沒有贈品。</td>
+                  </tr>
+                ) : (
+                  report.by_reason.map((row) => (
+                    <tr key={row.reason_id ?? "none"}>
+                      <td>{row.reason_name}</td>
+                      <td>{row.gift_qty}</td>
+                      <td><MoneyText value={row.retail_value} /></td>
+                      <td><MoneyText value={row.cost} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="rpt-subtitle">依品項</h3>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>品項</th>
+                  <th>件數</th>
+                  <th>原價價值</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.by_product.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="hint">期間內沒有贈品。</td>
+                  </tr>
+                ) : (
+                  report.by_product.map((row) => (
+                    <tr key={row.description}>
+                      <td>{row.description}</td>
+                      <td>{row.gift_qty}</td>
+                      <td><MoneyText value={row.retail_value} /></td>
+                      <td><MoneyText value={row.cost} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <DownloadButtons onDownload={handleDownload} />
+        </>
+      )}
+    </div>
+  );
+}
+
 function CampaignPerformancePanel() {
   const query = useQuery({
     queryKey: ["reports", "campaign-performance"],
@@ -1756,6 +2016,10 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
       return <InventoryValuePanel />;
     case "consignment-payables":
       return <ConsignmentPayablesPanel />;
+    case "discounts":
+      return <DiscountPanel />;
+    case "gifts":
+      return <GiftPanel />;
     case "campaign-performance":
       return <CampaignPerformancePanel />;
     case "liability":

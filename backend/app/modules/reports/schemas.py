@@ -152,6 +152,12 @@ class SalesMarginReport(BaseModel):
     payment_fee_total: NTDAmount
     net_margin: NTDAmount
     payment_methods: list[PaymentMethodTotal]
+    # 臨時折扣（少收的錢）與贈品（送出去的成本）各自分列，不混進毛利也不互相混：
+    # 贈品成本若計入 gross_margin，營收 0 加全額成本會讓毛利率失真。
+    manual_discount_total: NTDAmount = Decimal(0)
+    gift_retail_value: NTDAmount = Decimal(0)
+    gift_cost: NTDAmount = Decimal(0)
+    contribution_margin: NTDAmount = Decimal(0)  # 淨毛利 − 贈品成本
 
 
 class DailySummaryReport(BaseModel):
@@ -358,6 +364,84 @@ class CampaignPerformanceRow(BaseModel):
     gross_margin: NTDAmount
     gross_margin_rate: NTDAmountOpt
     transaction_count: int
+
+
+class DiscountReasonRow(BaseModel):
+    """一個折扣原因在期間內的使用情形。"""
+
+    reason_id: int | None  # 未指定原因的折扣歸為 null 一列
+    reason_name: str
+    adjustment_count: int
+    item_discount_total: NTDAmount
+    order_discount_total: NTDAmount
+    discount_total: NTDAmount
+
+
+class DiscountReport(BaseModel):
+    """臨時折扣報表：誰在什麼原因下折了多少。
+
+    金額一律取落盤的 `applied_amount`，**不事後重算**——商品價格與活動日後都會變，
+    重算會讓歷史折扣跟著漂。無主管核准機制，這份報表是事後稽核的主要依據。
+    """
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    discount_total: NTDAmount
+    item_discount_total: NTDAmount
+    order_discount_total: NTDAmount
+    adjustment_count: int
+    by_reason: list[DiscountReasonRow]
+    by_clerk: list["DiscountClerkRow"]
+
+
+class DiscountClerkRow(BaseModel):
+    """一位店員在期間內打出的折扣（無核准機制 → 事後稽核靠這個看得出異常）。"""
+
+    clerk_user_id: int
+    clerk_username: str
+    adjustment_count: int
+    discount_total: NTDAmount
+
+
+class GiftReasonRow(BaseModel):
+    """一個贈送原因在期間內送出的數量、原價價值與成本。"""
+
+    reason_id: int | None
+    reason_name: str
+    gift_count: int  # 贈品明細筆數
+    gift_qty: int  # 件數
+    retail_value: NTDAmount
+    cost: NTDAmount
+
+
+class GiftReport(BaseModel):
+    """贈品報表：送了什麼、送了多少、成本多少。
+
+    贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利
+    （營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動
+    `GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。
+    """
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    gift_qty: int
+    retail_value: NTDAmount
+    cost: NTDAmount
+    by_reason: list[GiftReasonRow]
+    by_product: list["GiftProductRow"]
+
+
+class GiftProductRow(BaseModel):
+    """被當成贈品送出去最多的品項。"""
+
+    description: str
+    gift_qty: int
+    retail_value: NTDAmount
+    cost: NTDAmount
 
 
 class CampaignPerformanceReport(BaseModel):

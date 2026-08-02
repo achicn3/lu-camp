@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
@@ -20,12 +20,15 @@ from app.modules.sales.models import (
     LinePayRefundAttempt,
     LinePayTransaction,
     Sale,
+    SaleAdjustment,
     SaleLine,
     SaleTender,
 )
 from app.shared.enums import (
+    AdjustmentScope,
     LinePayRefundStatus,
     OwnershipType,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
     TenderType,
@@ -83,6 +86,12 @@ class SalesMarginComponents:
     # payment_fee_total＝所有方式手續費合計；payment_methods＝(方法, 收款額, 手續費) 逐列。
     payment_fee_total: Decimal
     payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
+    # 臨時折扣總額（Σ 各行 manual_discount_amount，不含贈品行——贈品不參與折扣）。
+    manual_discount_total: Decimal = Decimal(0)
+    # 贈品：原價價值與成本各自獨立成桶。**贈品成本絕不混進商品毛利**——營收 0 加全額成本
+    # 會讓毛利率失真；贈品的代價要單獨看見，不是把毛利拉成負的。
+    gift_retail_value: Decimal = Decimal(0)
+    gift_cost: Decimal = Decimal(0)
 
 
 class SalesRepository:
@@ -111,6 +120,41 @@ class SalesRepository:
             .order_by(GiftReason.sort_order, GiftReason.id)
         )
         return list(await self._session.scalars(stmt))
+
+    async def list_all_gift_reasons(self, store_id: int) -> list[GiftReason]:
+        """管理頁用：連停用的一起列（停用不實刪，歷史單據仍引用著）。"""
+        stmt = (
+            select(GiftReason)
+            .where(GiftReason.store_id == store_id)
+            .order_by(GiftReason.is_active.desc(), GiftReason.sort_order, GiftReason.id)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def list_all_discount_reasons(self, store_id: int) -> list[DiscountReason]:
+        stmt = (
+            select(DiscountReason)
+            .where(DiscountReason.store_id == store_id)
+            .order_by(
+                DiscountReason.is_active.desc(), DiscountReason.sort_order, DiscountReason.id
+            )
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def get_gift_reason(self, store_id: int, reason_id: int) -> GiftReason | None:
+        stmt = select(GiftReason).where(
+            GiftReason.id == reason_id, GiftReason.store_id == store_id
+        )
+        return (await self._session.scalars(stmt)).one_or_none()
+
+    async def get_discount_reason(self, store_id: int, reason_id: int) -> DiscountReason | None:
+        stmt = select(DiscountReason).where(
+            DiscountReason.id == reason_id, DiscountReason.store_id == store_id
+        )
+        return (await self._session.scalars(stmt)).one_or_none()
+
+    async def add_reason(self, reason: GiftReason | DiscountReason) -> None:
+        self._session.add(reason)
+        await self._session.flush()
 
     async def list_active_discount_reasons(self, store_id: int) -> list[DiscountReason]:
         stmt = (
@@ -469,6 +513,139 @@ class SalesRepository:
                 buyout_margin += line_total - cost
         return buyout_margin, goods_revenue
 
+    async def discount_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[list[tuple[int | None, str, int, Decimal, Decimal]], list[tuple[int, int, Decimal]]]:
+        """期間內的臨時折扣：依原因、依店員各彙總一份。
+
+        金額取落盤的 `applied_amount`，**不重算**——商品價格與活動日後都會變。
+        作廢的折扣（`voided_at` 有值）不計入。
+        """
+        by_reason = list(
+            await self._session.execute(
+                select(
+                    SaleAdjustment.reason_id,
+                    func.coalesce(SaleAdjustment.reason_name, "未指定原因"),
+                    func.count(SaleAdjustment.id),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    SaleAdjustment.scope == AdjustmentScope.ITEM,
+                                    SaleAdjustment.applied_amount,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    SaleAdjustment.scope == AdjustmentScope.ORDER,
+                                    SaleAdjustment.applied_amount,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                )
+                .join(Sale, SaleAdjustment.sale_id == Sale.id)
+                .where(
+                    SaleAdjustment.store_id == store_id,
+                    SaleAdjustment.voided_at.is_(None),
+                    Sale.status != SaleStatus.VOIDED,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                )
+                .group_by(SaleAdjustment.reason_id, SaleAdjustment.reason_name)
+                .order_by(func.sum(SaleAdjustment.applied_amount).desc())
+            )
+        )
+        by_clerk = list(
+            await self._session.execute(
+                select(
+                    SaleAdjustment.created_by,
+                    func.count(SaleAdjustment.id),
+                    func.coalesce(func.sum(SaleAdjustment.applied_amount), 0),
+                )
+                .join(Sale, SaleAdjustment.sale_id == Sale.id)
+                .where(
+                    SaleAdjustment.store_id == store_id,
+                    SaleAdjustment.voided_at.is_(None),
+                    Sale.status != SaleStatus.VOIDED,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                )
+                .group_by(SaleAdjustment.created_by)
+                .order_by(func.sum(SaleAdjustment.applied_amount).desc())
+            )
+        )
+        return (
+            [(r[0], str(r[1]), int(r[2]), Decimal(r[3]), Decimal(r[4])) for r in by_reason],
+            [(int(r[0]), int(r[1]), Decimal(r[2])) for r in by_clerk],
+        )
+
+    async def gift_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[
+        list[tuple[int | None, str, int, int, Decimal, Decimal]],
+        list[tuple[str, int, Decimal, Decimal]],
+    ]:
+        """期間內送出的贈品：依原因、依品項各彙總一份。
+
+        原價價值＝`original_unit_price × qty`（贈品的 CHECK 保證它不為 NULL）；
+        成本取成交當下的快照，未知則為 0（不假造）。
+        """
+        base = (
+            select(SaleLine)
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                SaleLine.line_kind == SaleLineKind.GIFT,
+            )
+        )
+        retail = func.coalesce(func.sum(SaleLine.original_unit_price * SaleLine.qty), 0)
+        cost = func.coalesce(func.sum(SaleLine.cost_snapshot), 0)
+        by_reason = list(
+            await self._session.execute(
+                base.with_only_columns(
+                    SaleLine.gift_reason_id,
+                    func.coalesce(SaleLine.gift_reason_name, "未指定原因"),
+                    func.count(SaleLine.id),
+                    func.coalesce(func.sum(SaleLine.qty), 0),
+                    retail,
+                    cost,
+                )
+                .group_by(SaleLine.gift_reason_id, SaleLine.gift_reason_name)
+                .order_by(retail.desc())
+            )
+        )
+        by_product = list(
+            await self._session.execute(
+                base.with_only_columns(
+                    SaleLine.description,
+                    func.coalesce(func.sum(SaleLine.qty), 0),
+                    retail,
+                    cost,
+                )
+                .group_by(SaleLine.description)
+                .order_by(retail.desc())
+            )
+        )
+        return (
+            [
+                (r[0], str(r[1]), int(r[2]), int(r[3]), Decimal(r[4]), Decimal(r[5]))
+                for r in by_reason
+            ],
+            [(str(r[0]), int(r[1]), Decimal(r[2]), Decimal(r[3])) for r in by_product],
+        )
+
     async def margin_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> SalesMarginComponents:
@@ -481,8 +658,10 @@ class SalesRepository:
         serialized = await self._session.execute(
             select(
                 SerializedItem.ownership_type,
-                SerializedItem.acquisition_cost,
-                SaleLine.line_total,
+                # 成本一律優先取**成交當下的快照**：日後調整商品成本不得回頭改寫歷史毛利。
+                # 舊資料無快照才回退即時 join（回填後兩者相同，見 b5d7f9a1c3e2）。
+                func.coalesce(SaleLine.cost_snapshot, SerializedItem.acquisition_cost),
+                SaleLine.net_amount,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
@@ -492,16 +671,17 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
-        for ownership, cost, line_total in serialized:
+        for ownership, cost, net_amount in serialized:
             if ownership == OwnershipType.CONSIGNMENT:
-                consignment_serialized_revenue += line_total
+                consignment_serialized_revenue += net_amount
             elif cost is not None:  # 自有且有成本 → 認列營收與成本
-                owned_serialized_revenue += line_total
+                owned_serialized_revenue += net_amount
                 owned_serialized_cogs += cost
             else:  # 自有但缺成本：營收認列、成本未知（不假造毛利）
-                unknown_cost_revenue += line_total
+                unknown_cost_revenue += net_amount
 
         owned_bulk_revenue = Decimal(0)
         owned_bulk_cogs = Decimal(0)
@@ -512,7 +692,8 @@ class SalesRepository:
                 BulkLot.acquisition_cost,
                 BulkLot.total_qty,
                 SaleLine.qty,
-                SaleLine.line_total,
+                SaleLine.net_amount,
+                SaleLine.cost_snapshot,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
@@ -522,20 +703,23 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
-        for consignor_id, acquisition_cost, total_qty, qty, line_total in bulk:
+        for consignor_id, acquisition_cost, total_qty, qty, net_amount, cost_snapshot in bulk:
             if consignor_id is not None:  # 寄售散裝：全額計流水，無抽成基礎、不認自有成本
-                consignment_bulk_revenue += line_total
+                consignment_bulk_revenue += net_amount
                 continue
-            owned_bulk_revenue += line_total
-            if total_qty and total_qty > 0:
+            owned_bulk_revenue += net_amount
+            if cost_snapshot is not None:
+                owned_bulk_cogs += cost_snapshot
+            elif total_qty and total_qty > 0:
                 owned_bulk_cogs += round_ntd(acquisition_cost * Decimal(qty) / Decimal(total_qty))
 
         catalog_revenue = Decimal(
             (
                 await self._session.execute(
-                    select(func.coalesce(func.sum(SaleLine.line_total), 0))
+                    select(func.coalesce(func.sum(SaleLine.net_amount), 0))
                     .join(Sale, SaleLine.sale_id == Sale.id)
                     .where(
                         Sale.store_id == store_id,
@@ -543,6 +727,7 @@ class SalesRepository:
                         Sale.created_at >= date_from,
                         Sale.created_at < date_to,
                         SaleLine.line_type == SaleLineType.CATALOG,
+                        SaleLine.line_kind != SaleLineKind.GIFT,
                     )
                 )
             ).scalar_one()
@@ -552,7 +737,7 @@ class SalesRepository:
         menu_revenue = Decimal(
             (
                 await self._session.execute(
-                    select(func.coalesce(func.sum(SaleLine.line_total), 0))
+                    select(func.coalesce(func.sum(SaleLine.net_amount), 0))
                     .join(Sale, SaleLine.sale_id == Sale.id)
                     .where(
                         Sale.store_id == store_id,
@@ -560,6 +745,7 @@ class SalesRepository:
                         Sale.created_at >= date_from,
                         Sale.created_at < date_to,
                         SaleLine.line_type == SaleLineType.MENU,
+                        SaleLine.line_kind != SaleLineKind.GIFT,
                     )
                 )
             ).scalar_one()
@@ -611,8 +797,46 @@ class SalesRepository:
             ).scalar_one()
         )
 
+        # 臨時折扣與贈品各自成桶：折扣是「少收的錢」，贈品是「送出去的成本」，兩者性質不同，
+        # 混在一起就再也拆不開（活動報表直接 SUM 折扣欄位）。
+        manual_discount_total = Decimal(
+            (
+                await self._session.execute(
+                    select(func.coalesce(func.sum(SaleLine.manual_discount_amount), 0))
+                    .join(Sale, SaleLine.sale_id == Sale.id)
+                    .where(
+                        Sale.store_id == store_id,
+                        Sale.status != SaleStatus.VOIDED,
+                        Sale.created_at >= date_from,
+                        Sale.created_at < date_to,
+                    )
+                )
+            ).scalar_one()
+        )
+        gift_row = (
+            await self._session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(SaleLine.original_unit_price * SaleLine.qty), 0
+                    ),
+                    func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
+                )
+                .join(Sale, SaleLine.sale_id == Sale.id)
+                .where(
+                    Sale.store_id == store_id,
+                    Sale.status != SaleStatus.VOIDED,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                    SaleLine.line_kind == SaleLineKind.GIFT,
+                )
+            )
+        ).one()
+
         unknown_cost_revenue += catalog_revenue + menu_revenue
         return SalesMarginComponents(
+            manual_discount_total=manual_discount_total,
+            gift_retail_value=Decimal(gift_row[0]),
+            gift_cost=Decimal(gift_row[1]),
             owned_serialized_revenue=owned_serialized_revenue,
             owned_serialized_cogs=owned_serialized_cogs,
             owned_bulk_revenue=owned_bulk_revenue,

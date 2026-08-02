@@ -96,6 +96,8 @@ from app.shared.exceptions import (
     MenuItemNotFound,
     MenuItemUnavailable,
     NoOpenCashSession,
+    ReasonConflict,
+    ReasonNotFound,
     SaleAlreadyVoid,
     SaleHasReturns,
     SaleItemNotFound,
@@ -151,6 +153,13 @@ class MarginBreakdown:
     payment_fee_total: Decimal
     net_margin: Decimal
     payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
+    # 臨時折扣（少收的錢）與贈品（送出去的成本）性質不同，各自成桶、不互相混。
+    manual_discount_total: Decimal = Decimal(0)
+    gift_retail_value: Decimal = Decimal(0)
+    gift_cost: Decimal = Decimal(0)
+    # 貢獻毛利＝淨毛利 − 贈品成本：贈品成本不進 gross_margin（營收 0 加全額成本會讓
+    # 毛利率失真），但店家真正賺到多少要看得見。
+    contribution_margin: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -1753,6 +1762,12 @@ class SalesService:
             payment_fee_total=comp.payment_fee_total,
             net_margin=gross_margin - comp.payment_fee_total,
             payment_methods=comp.payment_methods,
+            manual_discount_total=comp.manual_discount_total,
+            gift_retail_value=comp.gift_retail_value,
+            gift_cost=comp.gift_cost,
+            # 扣掉贈品成本後的實際貢獻。贈品成本**不進 gross_margin**——營收 0 加全額成本
+            # 會讓毛利率失真；它的代價要單獨看見。
+            contribution_margin=gross_margin - comp.payment_fee_total - comp.gift_cost,
         )
 
     async def serialized_sold_rows(
@@ -2020,13 +2035,195 @@ class SalesService:
             entity_id=str(sale.id),
         )
 
-    async def list_gift_reasons(self, store_id: int) -> list[GiftReason]:
-        """POS 贈品對話框的選單。只回啟用中的——停用的原因不再能被選用，但歷史單據仍留名稱快照。"""
+    async def discount_report_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[list[tuple[int | None, str, int, Decimal, Decimal]], list[tuple[int, int, Decimal]]]:
+        """臨時折扣的期間彙總（依原因、依店員）。金額取落盤值，不重算。"""
+        return await self._repo.discount_rows(store_id, date_from, date_to)
+
+    async def gift_report_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[
+        list[tuple[int | None, str, int, int, Decimal, Decimal]],
+        list[tuple[str, int, Decimal, Decimal]],
+    ]:
+        """贈品的期間彙總（依原因、依品項）。"""
+        return await self._repo.gift_rows(store_id, date_from, date_to)
+
+    async def list_gift_reasons(
+        self, store_id: int, *, include_inactive: bool = False
+    ) -> list[GiftReason]:
+        """贈品原因。POS 選單只要啟用中的；管理頁要連停用的一起看（停用不實刪）。"""
+        if include_inactive:
+            return await self._repo.list_all_gift_reasons(store_id)
         return await self._repo.list_active_gift_reasons(store_id)
 
-    async def list_discount_reasons(self, store_id: int) -> list[DiscountReason]:
-        """POS 折扣對話框的選單。只回啟用中的，理由同 `list_gift_reasons`。"""
+    async def list_discount_reasons(
+        self, store_id: int, *, include_inactive: bool = False
+    ) -> list[DiscountReason]:
+        """折扣原因，理由同 `list_gift_reasons`。"""
+        if include_inactive:
+            return await self._repo.list_all_discount_reasons(store_id)
         return await self._repo.list_active_discount_reasons(store_id)
+
+    async def create_gift_reason(
+        self,
+        store_id: int,
+        *,
+        code: str,
+        name: str,
+        requires_note: bool,
+        sort_order: int,
+        actor_user_id: int,
+    ) -> GiftReason:
+        reason = GiftReason(
+            store_id=store_id,
+            code=code,
+            name=name,
+            requires_note=requires_note,
+            sort_order=sort_order,
+        )
+        await self._add_reason(reason, actor_user_id=actor_user_id, entity_type="gift_reason")
+        return reason
+
+    async def create_discount_reason(
+        self,
+        store_id: int,
+        *,
+        code: str,
+        name: str,
+        requires_note: bool,
+        sort_order: int,
+        actor_user_id: int,
+    ) -> DiscountReason:
+        reason = DiscountReason(
+            store_id=store_id,
+            code=code,
+            name=name,
+            requires_note=requires_note,
+            sort_order=sort_order,
+        )
+        await self._add_reason(reason, actor_user_id=actor_user_id, entity_type="discount_reason")
+        return reason
+
+    async def _add_reason(
+        self,
+        reason: GiftReason | DiscountReason,
+        *,
+        actor_user_id: int,
+        entity_type: str,
+    ) -> None:
+        existing = (
+            await self._repo.list_all_gift_reasons(reason.store_id)
+            if isinstance(reason, GiftReason)
+            else await self._repo.list_all_discount_reasons(reason.store_id)
+        )
+        if any(row.code == reason.code for row in existing):
+            raise ReasonConflict(f"原因代碼 {reason.code} 已存在（停用的也算，請改為重新啟用）")
+        await self._repo.add_reason(reason)
+        await write_audit_log(
+            self._session,
+            store_id=reason.store_id,
+            actor_user_id=actor_user_id,
+            action="CREATE_REASON",
+            entity_type=entity_type,
+            entity_id=str(reason.id),
+            after={"code": reason.code, "name": reason.name},
+        )
+
+    async def update_gift_reason(
+        self,
+        store_id: int,
+        reason_id: int,
+        *,
+        actor_user_id: int,
+        name: str | None = None,
+        requires_note: bool | None = None,
+        sort_order: int | None = None,
+        is_active: bool | None = None,
+    ) -> GiftReason:
+        reason = await self._repo.get_gift_reason(store_id, reason_id)
+        if reason is None:
+            raise ReasonNotFound(f"找不到贈品原因 {reason_id}")
+        await self._apply_reason_update(
+            reason,
+            actor_user_id=actor_user_id,
+            entity_type="gift_reason",
+            name=name,
+            requires_note=requires_note,
+            sort_order=sort_order,
+            is_active=is_active,
+        )
+        return reason
+
+    async def update_discount_reason(
+        self,
+        store_id: int,
+        reason_id: int,
+        *,
+        actor_user_id: int,
+        name: str | None = None,
+        requires_note: bool | None = None,
+        sort_order: int | None = None,
+        is_active: bool | None = None,
+    ) -> DiscountReason:
+        reason = await self._repo.get_discount_reason(store_id, reason_id)
+        if reason is None:
+            raise ReasonNotFound(f"找不到折扣原因 {reason_id}")
+        await self._apply_reason_update(
+            reason,
+            actor_user_id=actor_user_id,
+            entity_type="discount_reason",
+            name=name,
+            requires_note=requires_note,
+            sort_order=sort_order,
+            is_active=is_active,
+        )
+        return reason
+
+    async def _apply_reason_update(
+        self,
+        reason: GiftReason | DiscountReason,
+        *,
+        actor_user_id: int,
+        entity_type: str,
+        name: str | None,
+        requires_note: bool | None,
+        sort_order: int | None,
+        is_active: bool | None,
+    ) -> None:
+        """改名／停用一律留痕。**code 不可改**——歷史單據存的是名稱快照，但報表以 code
+        對照分類，改 code 會讓同一件事在報表上斷成兩段。"""
+        before = {
+            "name": reason.name,
+            "requires_note": reason.requires_note,
+            "sort_order": reason.sort_order,
+            "is_active": reason.is_active,
+        }
+        if name is not None:
+            reason.name = name
+        if requires_note is not None:
+            reason.requires_note = requires_note
+        if sort_order is not None:
+            reason.sort_order = sort_order
+        if is_active is not None:
+            reason.is_active = is_active
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=reason.store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_REASON",
+            entity_type=entity_type,
+            entity_id=str(reason.id),
+            before=before,
+            after={
+                "name": reason.name,
+                "requires_note": reason.requires_note,
+                "sort_order": reason.sort_order,
+                "is_active": reason.is_active,
+            },
+        )
 
     async def quote_sale(
         self,

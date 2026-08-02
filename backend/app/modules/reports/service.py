@@ -32,9 +32,15 @@ from app.modules.reports.schemas import (
     DailyCashReport,
     DailyCashSessionRow,
     DailySummaryReport,
+    DiscountClerkRow,
+    DiscountReasonRow,
+    DiscountReport,
     EffectivenessReport,
     FlowRow,
     FlowsReport,
+    GiftProductRow,
+    GiftReasonRow,
+    GiftReport,
     InsightsBreakdownRow,
     InsightsReport,
     InsightsRevenueMix,
@@ -52,6 +58,7 @@ from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
+from app.modules.user.service import UserService
 from app.shared.enums import CampaignStatus, OwnershipType
 from app.shared.exceptions import DomainError
 
@@ -122,6 +129,7 @@ class ReportsService:
         self._inventory = InventoryService(session)
         self._consignment = ConsignmentService(session)
         self._campaigns = CampaignService(session)
+        self._users = UserService(session)
 
     async def consignment_payables(
         self, store_id: int, *, status_filter: str
@@ -260,6 +268,92 @@ class ReportsService:
             ),
         )
 
+    async def discount_report(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> DiscountReport:
+        """臨時折扣報表：誰在什麼原因下折了多少。半開區間 [from, to)。
+
+        無主管核准機制（店主裁示），事後稽核就靠這份——所以「依店員」那一段是重點，
+        異常的折扣量會在這裡露出來。
+        """
+        by_reason, by_clerk = await self._sales.discount_report_rows(
+            store_id, date_from, date_to
+        )
+        reason_rows = [
+            DiscountReasonRow(
+                reason_id=reason_id,
+                reason_name=reason_name,
+                adjustment_count=count,
+                item_discount_total=item_total,
+                order_discount_total=order_total,
+                discount_total=item_total + order_total,
+            )
+            for reason_id, reason_name, count, item_total, order_total in by_reason
+        ]
+        clerk_rows = []
+        for clerk_id, count, total in by_clerk:
+            user = await self._users.get_user_in_store(store_id, clerk_id)
+            clerk_rows.append(
+                DiscountClerkRow(
+                    clerk_user_id=clerk_id,
+                    clerk_username=user.username if user is not None else f"#{clerk_id}",
+                    adjustment_count=count,
+                    discount_total=total,
+                )
+            )
+        return DiscountReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            discount_total=sum((row.discount_total for row in reason_rows), Decimal(0)),
+            item_discount_total=sum(
+                (row.item_discount_total for row in reason_rows), Decimal(0)
+            ),
+            order_discount_total=sum(
+                (row.order_discount_total for row in reason_rows), Decimal(0)
+            ),
+            adjustment_count=sum(row.adjustment_count for row in reason_rows),
+            by_reason=reason_rows,
+            by_clerk=clerk_rows,
+        )
+
+    async def gift_report(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> GiftReport:
+        """贈品報表：送了什麼、幾件、原價價值與成本。半開區間 [from, to)。"""
+        by_reason, by_product = await self._sales.gift_report_rows(
+            store_id, date_from, date_to
+        )
+        reason_rows = [
+            GiftReasonRow(
+                reason_id=reason_id,
+                reason_name=reason_name,
+                gift_count=count,
+                gift_qty=qty,
+                retail_value=retail,
+                cost=cost,
+            )
+            for reason_id, reason_name, count, qty, retail, cost in by_reason
+        ]
+        product_rows = [
+            GiftProductRow(
+                description=description, gift_qty=qty, retail_value=retail, cost=cost
+            )
+            for description, qty, retail, cost in by_product
+        ]
+        return GiftReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            gift_qty=sum(row.gift_qty for row in reason_rows),
+            retail_value=sum((row.retail_value for row in reason_rows), Decimal(0)),
+            cost=sum((row.cost for row in reason_rows), Decimal(0)),
+            by_reason=reason_rows,
+            by_product=product_rows,
+        )
+
     async def sales_margin(
         self, store_id: int, *, date_from: datetime, date_to: datetime
     ) -> SalesMarginReport:
@@ -289,6 +383,10 @@ class ReportsService:
                 PaymentMethodTotal(method=m, received=received, fee=fee)
                 for m, received, fee in bd.payment_methods
             ],
+            manual_discount_total=bd.manual_discount_total,
+            gift_retail_value=bd.gift_retail_value,
+            gift_cost=bd.gift_cost,
+            contribution_margin=bd.contribution_margin,
         )
 
     @staticmethod
