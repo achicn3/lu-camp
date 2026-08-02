@@ -61,6 +61,64 @@ _DEFAULT_DISCOUNT_REASONS = (
 )
 
 
+_TENDER_GUARD_NEW = """
+CREATE OR REPLACE FUNCTION sales_verify_tender_total(p_sale_id BIGINT) RETURNS void AS $$
+DECLARE
+  sale_total NUMERIC;
+  tender_sum NUMERIC;
+BEGIN
+  SELECT total INTO sale_total FROM sales WHERE id = p_sale_id;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  IF sale_total < 0 THEN
+    RAISE EXCEPTION '銷售總額不可為負';
+  END IF;
+  SELECT COALESCE(SUM(amount), 0) INTO tender_sum FROM sale_tenders WHERE sale_id = p_sale_id;
+  IF sale_total = 0 THEN
+    IF tender_sum <> 0 THEN
+      RAISE EXCEPTION '零元銷售不得有收款明細';
+    END IF;
+    -- 必須「有明細，且全部是贈品」。少了「有明細」這一半，一張沒有任何明細的
+    -- 零元單就會被放行（raw DML 建空單）。
+    IF NOT EXISTS (SELECT 1 FROM sale_lines WHERE sale_id = p_sale_id)
+       OR EXISTS (
+            SELECT 1 FROM sale_lines
+            WHERE sale_id = p_sale_id AND line_kind <> 'GIFT'
+          ) THEN
+      RAISE EXCEPTION '零元銷售必須整單都是贈品（一般商品折到 0 元請改開贈品）';
+    END IF;
+    RETURN;
+  END IF;
+  IF tender_sum <> sale_total THEN
+    RAISE EXCEPTION '收款明細加總必須等於銷售總額（sale_tenders 與 sales.total 不對平）';
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+"""
+
+_TENDER_GUARD_OLD = """
+CREATE OR REPLACE FUNCTION sales_verify_tender_total(p_sale_id BIGINT) RETURNS void AS $$
+DECLARE
+  sale_total NUMERIC;
+  tender_sum NUMERIC;
+BEGIN
+  SELECT total INTO sale_total FROM sales WHERE id = p_sale_id;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+  IF sale_total <= 0 THEN
+    RAISE EXCEPTION '銷售總額必須大於 0';
+  END IF;
+  SELECT COALESCE(SUM(amount), 0) INTO tender_sum FROM sale_tenders WHERE sale_id = p_sale_id;
+  IF tender_sum <> sale_total THEN
+    RAISE EXCEPTION '收款明細加總必須等於銷售總額（sale_tenders 與 sales.total 不對平）';
+  END IF;
+END;
+$$ LANGUAGE plpgsql
+"""
+
+
 def _replace_stock_reason_check(values: tuple[str, ...]) -> None:
     op.drop_constraint(_STOCK_REASON_CK, "stock_movements", type_="check")
     allowed = ", ".join(f"'{v}'" for v in values)
@@ -252,8 +310,12 @@ def upgrade() -> None:
     op.create_index("ix_sale_adjustment_allocations_sale_line_id", "sale_adjustment_allocations",
                     ["sale_line_id"])
 
+    # ── M6 放寬零元守衛（零元＝整單贈品，且不得有收款明細）─────────────────────
+    op.execute(sa.text(_TENDER_GUARD_NEW))
+
 
 def downgrade() -> None:
+    op.execute(sa.text(_TENDER_GUARD_OLD))
     op.drop_table("sale_adjustment_allocations")
     op.drop_table("sale_adjustments")
     for name in (

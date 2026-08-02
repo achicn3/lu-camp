@@ -6,7 +6,7 @@ T11 為領域層，尚無對外 API；service 直接收這些輸入。對外 Pyd
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.shared.enums import SaleLineType, TenderType
+from app.shared.enums import SaleLineKind, SaleLineType, TenderType
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,9 @@ class SaleLineInput:
 
     SERIALIZED → item_code（qty 固定 1）；CATALOG → catalog_product_id + qty；
     BULK_LOT → bulk_lot_id + qty；MENU → menu_item_id + qty（餐飲，不扣庫存）。
+
+    `line_kind` 是**商業性質**（一般銷售／贈品），與品項種類正交：贈品照樣扣庫存，
+    只是成交 0 元、原價與成本另外留痕。贈品必須帶 `gift_reason_id`。
     """
 
     line_type: SaleLineType
@@ -23,6 +26,9 @@ class SaleLineInput:
     bulk_lot_id: int | None = None
     menu_item_id: int | None = None
     qty: int = 1
+    line_kind: SaleLineKind = SaleLineKind.NORMAL
+    gift_reason_id: int | None = None
+    gift_note: str | None = None
 
 
 @dataclass(frozen=True)

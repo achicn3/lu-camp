@@ -42,6 +42,7 @@ from app.modules.sales.linepay import (
     linepay_order_id,
 )
 from app.modules.sales.models import (
+    GiftReason,
     LinePayRefundAttempt,
     LinePayTransaction,
     Sale,
@@ -65,6 +66,7 @@ from app.shared.enums import (
     OwnershipType,
     PaymentMethod,
     SaleInvoiceStatus,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
     StockReason,
@@ -149,6 +151,15 @@ class _AppliedDiscount:
     original_unit_price: Decimal | None  # 折前單價（無折扣→None，sale_line 留痕）
     discount_per_unit: Decimal  # 每件折讓（無折扣＝0）
     campaign_id: int | None
+
+
+@dataclass(frozen=True)
+class _GiftContext:
+    """一行贈品的來歷（原因由 DB 解析並快照名稱，避免日後停用/改名影響歷史）。"""
+
+    reason_id: int
+    reason_name: str
+    note: str | None
 
 
 def _compute_discount(
@@ -329,7 +340,15 @@ class SalesService:
 
     @staticmethod
     def _resolve_tenders(total: Decimal, tenders: list[TenderInput] | None) -> list[TenderInput]:
-        """把收款計畫對齊 total：省略 → 單一 CASH 全額；提供 → Σ amount 必須等於 total。"""
+        """把收款計畫對齊 total：省略 → 單一 CASH 全額；提供 → Σ amount 必須等於 total。
+
+        零元單（整單贈品）**不產生任何收款明細**：`sale_tenders.amount > 0` 是 DB CHECK，
+        硬塞一筆 0 元會被擋；語意上也沒有收款這回事。
+        """
+        if total == 0:
+            if tenders:
+                raise InvalidSaleTender("整單贈品不需要收款，請移除收款明細")
+            return []
         if tenders is None:
             return [TenderInput(tender_type=TenderType.CASH, amount=total)]
         paid = sum((t.amount for t in tenders), Decimal(0))
@@ -339,7 +358,12 @@ class SalesService:
 
     @staticmethod
     def _summary_payment_method(plan: list[TenderInput]) -> PaymentMethod:
-        """sales.payment_method 摘要：單一 tender → 該型別、多 tender → MIXED。"""
+        """sales.payment_method 摘要：單一 tender → 該型別、多 tender → MIXED。
+
+        零元單無收款明細——摘要維持 CASH（欄位 NOT NULL），實際收款以 sale_tenders 為準。
+        """
+        if not plan:
+            return PaymentMethod.CASH
         if len(plan) == 1:
             return PaymentMethod(plan[0].tender_type.value)
         return PaymentMethod.MIXED
@@ -759,10 +783,14 @@ class SalesService:
             if line.line_type == SaleLineType.MENU:
                 food_subtotal += line_total
 
-        # 零/負總額拒（§6 金額為正整數元）：每筆 tender 金額須 >0（DB CHECK），零總額會
-        # 落到「無收款腿或 amount=0」的不合法狀態；免費出貨應走獨立流程，不借道銷售。
-        if total <= 0:
-            raise InvalidSaleTender("銷售總額必須大於 0（免費出貨請走獨立流程）")
+        # 零元單只允許「整單都是贈品」（店主裁示：門市活動可能單獨送小物）。
+        # 一般銷售仍須 > 0：折到 0 元＝變相贈品，要免費請用贈品，否則贈品的數量與成本
+        # 在報表上統計不到（pricing 那層也擋著同一條線）。
+        gift_only = bool(lines) and all(
+            line.line_kind is SaleLineKind.GIFT for line in lines
+        )
+        if total < 0 or (total == 0 and not gift_only):
+            raise InvalidSaleTender("銷售總額必須大於 0（整單免費請全部以贈品開立）")
 
         # 收款計畫對齊 total（Σ tenders 必須 = total，否則 422）。
         plan = self._resolve_tenders(total, normalized_tenders)
@@ -891,7 +919,9 @@ class SalesService:
         # 關閉時維持 NOT_ISSUED（銷售仍完整記錄、可日後補開）。買方統編未於 POS 收集 → 一律 B2C。
         # create_pending_invoice 以 sale_id 冪等；冪等重送於上方已回原單、不會重複開立。
         # 發票資訊（docs/24）：帶統編＝B2B；有載具或捐贈 → 不印證明聯（print_mark=False）。
-        if settings.einvoice_enabled:
+        # 零元單（整單贈品）不開發票：發票總額有 `total > 0` 的 DB CHECK，且沒有銷售額
+        # 就沒有可開立的憑證。銷售本身仍完整記錄，invoice_status 維持 NOT_ISSUED。
+        if settings.einvoice_enabled and total > 0:
             info = invoice_info if invoice_info is not None else InvoiceInfoInput()
             is_b2b = info.buyer_tax_id is not None
             donate = info.npoban is not None
@@ -2030,6 +2060,22 @@ class SalesService:
             discount_amount=disc.discount_per_unit * line.qty,
         )
 
+    async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:
+        """贈品的前置驗證：必須帶原因、原因必須屬本店且啟用。
+
+        名稱在此快照到明細上——原因日後停用或改名，歷史單據仍看得到當初寫的是什麼。
+        """
+        if line.line_kind is not SaleLineKind.GIFT:
+            return None
+        if line.gift_reason_id is None:
+            raise SaleLineInvalid("贈品必須選擇贈送原因")
+        reason = await self._session.get(GiftReason, line.gift_reason_id)
+        if reason is None or reason.store_id != store_id or not reason.is_active:
+            raise SaleLineInvalid("贈送原因不存在、不屬本店或已停用")
+        if reason.requires_note and not (line.gift_note or "").strip():
+            raise SaleLineInvalid(f"贈送原因「{reason.name}」必須填寫備註")
+        return _GiftContext(reason.id, reason.name, (line.gift_note or "").strip() or None)
+
     async def _process_line(
         self,
         store_id: int,
@@ -2037,17 +2083,22 @@ class SalesService:
         line: SaleLineInput,
         consignment_sales: list[tuple[int, Decimal, int]],
         campaign: Campaign | None,
+        gift: _GiftContext | None = None,
     ) -> Decimal:
-        """解析單行、原子扣庫存、寫 stock_movement(OUT)、建 sale_line；回傳該行含稅小計（折後）。"""
+        """解析單行、原子扣庫存、寫 stock_movement(OUT)、建 sale_line；回傳該行含稅小計（折後）。
+
+        贈品同樣走這條路（照扣庫存），只是成交 0 元、庫存異動原因為 GIFT。
+        """
+        gift = await self._resolve_gift(store_id, line)
         if line.line_type == SaleLineType.SERIALIZED:
             return await self._process_serialized(
-                store_id, sale_id, line, consignment_sales, campaign
+                store_id, sale_id, line, consignment_sales, campaign, gift
             )
         if line.line_type == SaleLineType.CATALOG:
-            return await self._process_catalog(store_id, sale_id, line, campaign)
+            return await self._process_catalog(store_id, sale_id, line, campaign, gift)
         if line.line_type == SaleLineType.MENU:
-            return await self._process_menu(store_id, sale_id, line)
-        return await self._process_bulk(store_id, sale_id, line, campaign)
+            return await self._process_menu(store_id, sale_id, line, gift)
+        return await self._process_bulk(store_id, sale_id, line, campaign, gift)
 
     async def _resolve_menu_item(self, store_id: int, line: SaleLineInput) -> MenuItem:
         """解析餐飲明細：驗 menu_item_id/qty、取本店未封存且可售的品項。"""
@@ -2062,9 +2113,18 @@ class SalesService:
             raise MenuItemUnavailable(f"餐飲品項 {item.name} 目前停售")
         return item
 
-    async def _process_menu(self, store_id: int, sale_id: int, line: SaleLineInput) -> Decimal:
+    async def _process_menu(
+        self,
+        store_id: int,
+        sale_id: int,
+        line: SaleLineInput,
+        gift: _GiftContext | None = None,
+    ) -> Decimal:
         """餐飲明細：不扣庫存、不套活動折扣、原價成交；建 sale_line（line_type=MENU）。"""
         item = await self._resolve_menu_item(store_id, line)
+        if gift is not None:
+            # 餐飲現做、不扣庫存，「贈送」在庫存與成本上都留不下痕跡，統計不到。
+            raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
         disc = _AppliedDiscount(item.unit_price, None, Decimal(0), None)
         await self._repo.add_line(
             SaleLine(
@@ -2086,6 +2146,7 @@ class SalesService:
         line: SaleLineInput,
         consignment_sales: list[tuple[int, Decimal, int]],
         campaign: Campaign | None,
+        gift: _GiftContext | None = None,
     ) -> Decimal:
         if line.item_code is None:
             raise SaleLineInvalid("SERIALIZED 明細必須帶 item_code")
@@ -2095,17 +2156,24 @@ class SalesService:
         if item is None:
             raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
         is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
+        if gift is not None and is_consignment:
+            # 寄售分潤按成交價計，送出去等於寄售人拿 0——拿別人的貨做人情。
+            raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
         applies = _campaign_applies(
             campaign, line_type=SaleLineType.SERIALIZED, is_consignment=is_consignment
         )
-        disc = _compute_discount(campaign, item.listed_price, applies=applies)  # qty 固定 1
+        disc = (
+            self._gift_discount(item.listed_price)
+            if gift is not None
+            else _compute_discount(campaign, item.listed_price, applies=applies)
+        )  # qty 固定 1
         # 原子轉移 IN_STOCK→SOLD（已售出/併發競態 → 拋 InvalidStateTransition）。
         await self._inventory.sell_serialized_item(item.id)
         await self._inventory.record_stock_out(
             store_id,
             ItemKind.SERIALIZED,
             qty=1,
-            reason=StockReason.SALE,
+            reason=StockReason.GIFT if gift is not None else StockReason.SALE,
             ref_type="sale",
             ref_id=sale_id,
             serialized_item_id=item.id,
@@ -2118,7 +2186,7 @@ class SalesService:
                 serialized_item_id=item.id,
                 description=item.name,
                 qty=1,
-                **self._line_amounts(disc, qty=1, cost=item.acquisition_cost),
+                **self._line_amounts(disc, qty=1, cost=item.acquisition_cost, gift=gift),
             )
         )
         if is_consignment:
@@ -2131,8 +2199,21 @@ class SalesService:
         return disc.unit_price
 
     @staticmethod
+    def _gift_discount(retail_unit_price: Decimal) -> _AppliedDiscount:
+        """贈品的「定價」：成交 0 元，牌價留在 original_unit_price。
+
+        **刻意不寫進 discount_per_unit**——那會讓 discount_amount 帶到贈品原價，
+        活動報表就會把「送出去的東西」算成「打折」（DB CHECK 也會擋）。
+        """
+        return _AppliedDiscount(Decimal(0), retail_unit_price, Decimal(0), None)
+
+    @staticmethod
     def _line_amounts(
-        disc: _AppliedDiscount, *, qty: int, cost: Decimal | None = None
+        disc: _AppliedDiscount,
+        *,
+        qty: int,
+        cost: Decimal | None = None,
+        gift: _GiftContext | None = None,
     ) -> dict[str, object]:
         """sale_line 的金額欄（折後實際成交＋折扣留痕＋成本快照）。
 
@@ -2141,7 +2222,7 @@ class SalesService:
         `cost`＝成交當下的成本（本行合計），凍結於此——日後調整商品成本不會回頭改寫歷史毛利。
         """
         line_total = disc.unit_price * qty
-        return {
+        fields: dict[str, object] = {
             "unit_price": disc.unit_price,
             "line_total": line_total,
             "net_amount": line_total,
@@ -2150,9 +2231,22 @@ class SalesService:
             "campaign_id": disc.campaign_id,
             "cost_snapshot": cost,
         }
+        if gift is not None:
+            fields.update(
+                line_kind=SaleLineKind.GIFT,
+                gift_reason_id=gift.reason_id,
+                gift_reason_name=gift.reason_name,
+                gift_note=gift.note,
+            )
+        return fields
 
     async def _process_catalog(
-        self, store_id: int, sale_id: int, line: SaleLineInput, campaign: Campaign | None
+        self,
+        store_id: int,
+        sale_id: int,
+        line: SaleLineInput,
+        campaign: Campaign | None,
+        gift: _GiftContext | None = None,
     ) -> Decimal:
         if line.catalog_product_id is None:
             raise SaleLineInvalid("CATALOG 明細必須帶 catalog_product_id")
@@ -2162,13 +2256,17 @@ class SalesService:
         if product is None:
             raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
         applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
-        disc = _compute_discount(campaign, product.unit_price, applies=applies)
+        disc = (
+            self._gift_discount(product.unit_price)
+            if gift is not None
+            else _compute_discount(campaign, product.unit_price, applies=applies)
+        )
         await self._inventory.sell_catalog_items(product.id, line.qty)
         await self._inventory.record_stock_out(
             store_id,
             ItemKind.CATALOG,
             qty=line.qty,
-            reason=StockReason.SALE,
+            reason=StockReason.GIFT if gift is not None else StockReason.SALE,
             ref_type="sale",
             ref_id=sale_id,
             catalog_product_id=product.id,
@@ -2185,13 +2283,19 @@ class SalesService:
                     disc,
                     qty=line.qty,
                     cost=None if product.unit_cost is None else product.unit_cost * line.qty,
+                    gift=gift,
                 ),
             )
         )
         return disc.unit_price * line.qty
 
     async def _process_bulk(
-        self, store_id: int, sale_id: int, line: SaleLineInput, campaign: Campaign | None
+        self,
+        store_id: int,
+        sale_id: int,
+        line: SaleLineInput,
+        campaign: Campaign | None,
+        gift: _GiftContext | None = None,
     ) -> Decimal:
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
@@ -2204,14 +2308,20 @@ class SalesService:
         applies = _campaign_applies(
             campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
         )
-        disc = _compute_discount(campaign, lot.unit_price, applies=applies)
+        if gift is not None and lot.consignor_id is not None:
+            raise SaleLineInvalid("寄售散裝批不可作為贈品（分潤依售價計）")
+        disc = (
+            self._gift_discount(lot.unit_price)
+            if gift is not None
+            else _compute_discount(campaign, lot.unit_price, applies=applies)
+        )
         # 原子扣減 remaining_qty（不足 → InsufficientStock；歸零自動轉 SOLD_OUT）。
         await self._inventory.sell_bulk_lot_items(lot.id, line.qty)
         await self._inventory.record_stock_out(
             store_id,
             ItemKind.BULK_LOT,
             qty=line.qty,
-            reason=StockReason.SALE,
+            reason=StockReason.GIFT if gift is not None else StockReason.SALE,
             ref_type="sale",
             ref_id=sale_id,
             bulk_lot_id=lot.id,
@@ -2228,6 +2338,7 @@ class SalesService:
                     disc,
                     qty=line.qty,
                     cost=InventoryService.per_piece_cost(lot) * line.qty,
+                    gift=gift,
                 ),
             )
         )

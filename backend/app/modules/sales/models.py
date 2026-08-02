@@ -401,12 +401,28 @@ BEGIN
   IF NOT FOUND THEN
     RETURN;  -- sale 已不存在（如刪除）：交由 FK 處理
   END IF;
-  -- 總額必為正（SC-3 第三輪 P3）：CHECK 不可 deferred、且建單先插 total=0 placeholder，
-  -- 故以延遲守衛於 COMMIT 驗——與 service 零總額拒一致，擋 raw DML 建零元單。
-  IF sale_total <= 0 THEN
-    RAISE EXCEPTION '銷售總額必須大於 0';
+  -- CHECK 不可 deferred、且建單先插 total=0 placeholder，故以延遲守衛於 COMMIT 驗。
+  -- 負數一律拒。**零元單只允許整單贈品**（店主裁示：門市活動可能單獨送小物），
+  -- 且此時不得有任何收款明細——沒有銷售額就沒有收款這回事。
+  IF sale_total < 0 THEN
+    RAISE EXCEPTION '銷售總額不可為負';
   END IF;
   SELECT COALESCE(SUM(amount), 0) INTO tender_sum FROM sale_tenders WHERE sale_id = p_sale_id;
+  IF sale_total = 0 THEN
+    IF tender_sum <> 0 THEN
+      RAISE EXCEPTION '零元銷售不得有收款明細';
+    END IF;
+    -- 必須「有明細，且全部是贈品」。少了「有明細」這一半，一張沒有任何明細的
+    -- 零元單就會被放行（raw DML 建空單）。
+    IF NOT EXISTS (SELECT 1 FROM sale_lines WHERE sale_id = p_sale_id)
+       OR EXISTS (
+            SELECT 1 FROM sale_lines
+            WHERE sale_id = p_sale_id AND line_kind <> 'GIFT'
+          ) THEN
+      RAISE EXCEPTION '零元銷售必須整單都是贈品（一般商品折到 0 元請改開贈品）';
+    END IF;
+    RETURN;
+  END IF;
   IF tender_sum <> sale_total THEN
     RAISE EXCEPTION '收款明細加總必須等於銷售總額（sale_tenders 與 sales.total 不對平）';
   END IF;
