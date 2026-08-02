@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import httpx
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -20,6 +21,12 @@ from app.modules.customerdisplay.schemas import CartUpsertRequest
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct
 from app.modules.sales.models import DiscountReason, GiftReason
+from app.modules.sales.reasons import (
+    DEFAULT_DISCOUNT_REASONS,
+    DEFAULT_GIFT_REASONS,
+    ensure_default_reasons,
+)
+from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
@@ -394,3 +401,43 @@ async def test_checkout_without_the_carts_discount_is_refused(
         headers=_auth(token, idem="gd-cart-2"),
     )
     assert resp.status_code == 422, resp.text
+
+
+async def test_a_new_store_gets_default_reasons_so_gifting_is_possible(
+    db_session: AsyncSession,
+) -> None:
+    """沒有原因代碼的門市根本送不出贈品——建店時必須佈建預設值，且重跑不重複。"""
+    store = Store(name="新開的店")
+    db_session.add(store)
+    await db_session.flush()
+
+    first = await ensure_default_reasons(db_session, store.id)
+    assert first == len(DEFAULT_GIFT_REASONS) + len(DEFAULT_DISCOUNT_REASONS)
+    assert await ensure_default_reasons(db_session, store.id) == 0  # 冪等
+
+    gifts = await SalesService(db_session).list_gift_reasons(store.id)
+    assert [r.code for r in gifts] == [code for code, _n, _rn in DEFAULT_GIFT_REASONS]
+
+
+async def test_default_reasons_do_not_overwrite_a_renamed_reason(
+    db_session: AsyncSession,
+) -> None:
+    """店家改過的名稱／停用狀態不得被重跑蓋掉。"""
+    store = Store(name="改過名字的店")
+    db_session.add(store)
+    await db_session.flush()
+    db_session.add(
+        GiftReason(store_id=store.id, code="PROMOTION", name="我自己的名字", is_active=False)
+    )
+    await db_session.flush()
+
+    await ensure_default_reasons(db_session, store.id)
+
+    kept = await db_session.scalar(
+        select(GiftReason).where(
+            GiftReason.store_id == store.id, GiftReason.code == "PROMOTION"
+        )
+    )
+    assert kept is not None
+    assert kept.name == "我自己的名字"
+    assert kept.is_active is False

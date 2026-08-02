@@ -11,6 +11,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 
 type SaleLine = components["schemas"]["SaleLineCreateRequest"];
 type Tender = components["schemas"]["CartTenderRequest"];
+type Adjustment = components["schemas"]["SaleAdjustmentRequest"];
 type StaffCart = components["schemas"]["StaffCartSessionRead"];
 type CartSession = components["schemas"]["CartSessionRead"];
 type CartItem = components["schemas"]["CartItemRead"];
@@ -76,6 +77,8 @@ interface PosCustomerDisplayProps {
   lines: SaleLine[];
   buyerContactId: number | null;
   tenders: Tender[];
+  /** 臨時折扣：客顯是權威購物車，折扣不經它，客人螢幕上的金額就會與實際扣款不同。 */
+  adjustments: Adjustment[];
   ready: boolean;
   onRestore: (cart: StaffCart) => void | Promise<void>;
   onTerminalChange?: (terminal: Terminal | null) => void;
@@ -88,6 +91,7 @@ type PendingSync =
       lines: SaleLine[];
       buyerContactId: number | null;
       tenders: Tender[];
+      adjustments: Adjustment[];
     }
   | { kind: "CANCEL" };
 
@@ -95,6 +99,7 @@ export function PosCustomerDisplay({
   lines,
   buyerContactId,
   tenders,
+  adjustments,
   ready,
   onRestore,
   onTerminalChange,
@@ -105,8 +110,13 @@ export function PosCustomerDisplay({
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [syncedRevision, setSyncedRevision] = useState<number | null>(null);
-  const payloadFingerprint = JSON.stringify({ lines, buyerContactId, tenders });
-  const payload = useRef({ lines, buyerContactId, tenders });
+  const payloadFingerprint = JSON.stringify({
+    lines,
+    buyerContactId,
+    tenders,
+    adjustments,
+  });
+  const payload = useRef({ lines, buyerContactId, tenders, adjustments });
   const revision = useRef<number | null>(null);
   const pending = useRef<PendingSync | null>(null);
   const draining = useRef(false);
@@ -157,8 +167,8 @@ export function PosCustomerDisplay({
   }, [current.data, current.isSuccess, onCartChange]);
 
   useEffect(() => {
-    payload.current = { lines, buyerContactId, tenders };
-  }, [buyerContactId, lines, tenders]);
+    payload.current = { lines, buyerContactId, tenders, adjustments };
+  }, [adjustments, buyerContactId, lines, tenders]);
 
   useEffect(() => {
     const terminalId = terminal.data?.id ?? null;
@@ -212,6 +222,8 @@ export function PosCustomerDisplay({
                 lines: next.lines,
                 buyer_contact_id: next.buyerContactId,
                 tenders: next.tenders.length > 0 ? next.tenders : null,
+                adjustments:
+                  next.adjustments.length > 0 ? next.adjustments : null,
               },
             },
           );
@@ -270,6 +282,7 @@ export function PosCustomerDisplay({
               lines: latest.lines,
               buyerContactId: latest.buyerContactId,
               tenders: latest.tenders,
+              adjustments: latest.adjustments,
             }
           : { kind: "CANCEL" };
       void drain(terminalRow);

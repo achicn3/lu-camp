@@ -22,11 +22,20 @@ import {
   type CartLine,
   addLine,
   cartTotal,
+  isGift,
   lineTotal,
+  markAsGift,
   removeLine,
   setQty,
   toSaleLines,
+  unmarkGift,
 } from "@/features/pos/cart";
+import {
+  type DiscountDraft,
+  describeDiscount,
+  pruneDiscounts,
+  toAdjustmentRequests,
+} from "@/features/pos/discounts";
 import {
   type MixedRemainderMethod,
   type TenderMode,
@@ -786,6 +795,243 @@ function QuantityDialog({
   );
 }
 
+// 贈品對話框：選原因（必要時填備註）→ 該列改為贈品（成交 0 元，但照樣出庫）。
+// 送東西一定要說明為什麼——沒有主管核准機制，原因與備註是事後唯一能追的東西。
+function GiftDialog({
+  lineDescription,
+  onConfirm,
+  onCancel,
+}: {
+  lineDescription: string;
+  onConfirm: (reasonId: number, note: string) => void;
+  onCancel: () => void;
+}) {
+  const [reasonId, setReasonId] = useState<number | null>(null);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["gift-reasons"],
+    queryFn: async () => {
+      const { data, error: err } = await api.GET("/api/v1/gift-reasons");
+      if (!data) throw new Error(extractDetail(err) ?? "讀取贈送原因失敗");
+      return data;
+    },
+  });
+  const reasons = query.data ?? [];
+  const chosen = reasons.find((r) => r.id === reasonId) ?? null;
+
+  function confirm() {
+    if (reasonId === null) {
+      setError("請選擇贈送原因");
+      return;
+    }
+    if (chosen?.requires_note && note.trim() === "") {
+      setError(`「${chosen.name}」必須填寫備註`);
+      return;
+    }
+    onConfirm(reasonId, note.trim());
+  }
+
+  return (
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="改為贈品"
+    >
+      <div className="card pos-dialog">
+        <h2>改為贈品</h2>
+        <p className="hint">
+          {lineDescription} 將以 NT$0 成交，但仍會扣庫存並列入贈品報表。
+        </p>
+        {query.isError && (
+          <p role="alert" className="form-error">
+            {(query.error as Error).message}
+          </p>
+        )}
+        {query.isSuccess && reasons.length === 0 && (
+          <p role="alert" className="form-error">
+            尚未建立贈送原因，請先到設定頁新增。
+          </p>
+        )}
+        <label className="field">
+          <span>贈送原因</span>
+          <select
+            value={reasonId ?? ""}
+            onChange={(e) =>
+              setReasonId(e.target.value === "" ? null : Number(e.target.value))
+            }
+          >
+            <option value="">請選擇</option>
+            {reasons.map((reason) => (
+              <option key={reason.id} value={reason.id}>
+                {reason.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>備註{chosen?.requires_note ? "（必填）" : "（選填）"}</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={200}
+          />
+        </label>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button type="button" className="btn-primary" onClick={confirm}>
+            確認贈送
+          </button>
+          <button type="button" className="btn-ghost" onClick={onCancel}>
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 折扣對話框：固定金額或百分比 × 整單或單品。金額預覽一律來自後端試算（加入後即重算）。
+function DiscountDialog({
+  scopeLabel,
+  onConfirm,
+  onCancel,
+}: {
+  scopeLabel: string;
+  onConfirm: (draft: {
+    method: "FIXED_AMOUNT" | "PERCENTAGE";
+    value: number;
+    reasonId: number | null;
+    note: string | null;
+  }) => void;
+  onCancel: () => void;
+}) {
+  const [method, setMethod] = useState<"FIXED_AMOUNT" | "PERCENTAGE">(
+    "FIXED_AMOUNT",
+  );
+  const [value, setValue] = useState("");
+  const [reasonId, setReasonId] = useState<number | null>(null);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ["discount-reasons"],
+    queryFn: async () => {
+      const { data, error: err } = await api.GET("/api/v1/discount-reasons");
+      if (!data) throw new Error(extractDetail(err) ?? "讀取折扣原因失敗");
+      return data;
+    },
+  });
+  const reasons = query.data ?? [];
+  const chosen = reasons.find((r) => r.id === reasonId) ?? null;
+
+  function confirm() {
+    const amount = parseNtd(value);
+    if (amount === null || amount <= 0) {
+      setError("請輸入大於 0 的數字");
+      return;
+    }
+    if (method === "PERCENTAGE" && amount >= 100) {
+      setError("折扣百分比必須小於 100；要免費請改用贈品");
+      return;
+    }
+    if (chosen?.requires_note && note.trim() === "") {
+      setError(`「${chosen.name}」必須填寫備註`);
+      return;
+    }
+    onConfirm({
+      method,
+      value: amount,
+      reasonId,
+      note: note.trim() === "" ? null : note.trim(),
+    });
+  }
+
+  return (
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="新增折扣"
+    >
+      <div className="card pos-dialog">
+        <h2>{scopeLabel}</h2>
+        <div className="pos-discount-methods">
+          <label>
+            <input
+              type="radio"
+              name="discount-method"
+              checked={method === "FIXED_AMOUNT"}
+              onChange={() => setMethod("FIXED_AMOUNT")}
+            />
+            折抵金額（元）
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="discount-method"
+              checked={method === "PERCENTAGE"}
+              onChange={() => setMethod("PERCENTAGE")}
+            />
+            打折（%）
+          </label>
+        </div>
+        <label className="field">
+          <span>{method === "FIXED_AMOUNT" ? "折抵金額" : "折扣百分比"}</span>
+          <input
+            inputMode="numeric"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            aria-label="折扣數值"
+          />
+        </label>
+        <label className="field">
+          <span>折扣原因（選填）</span>
+          <select
+            value={reasonId ?? ""}
+            onChange={(e) =>
+              setReasonId(e.target.value === "" ? null : Number(e.target.value))
+            }
+          >
+            <option value="">不指定</option>
+            {reasons.map((reason) => (
+              <option key={reason.id} value={reason.id}>
+                {reason.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>備註{chosen?.requires_note ? "（必填）" : "（選填）"}</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={200}
+          />
+        </label>
+        <p className="hint">折後金額由系統重新試算後顯示於右側金額摘要。</p>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button type="button" className="btn-primary" onClick={confirm}>
+            套用折扣
+          </button>
+          <button type="button" className="btn-ghost" onClick={onCancel}>
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 餐飲菜單磚：可售品項一格一格圓角方塊；點磚開數量彈窗。
 function MenuPanel({
   onAdd,
@@ -850,6 +1096,12 @@ function MenuPanel({
 export default function PosPage() {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<CartLine[]>([]);
+  // 臨時折扣以購物車列的 key 記錄（不是索引）：移除商品時索引會位移，折扣會默默跑到別的商品上。
+  const [discountDrafts, setDiscountDrafts] = useState<DiscountDraft[]>([]);
+  // 開著的對話框：贈品（要把哪一列改成贈品）／折扣（整單或某一列）。
+  const [giftTargetKey, setGiftTargetKey] = useState<string | null>(null);
+  const [discountTargetKey, setDiscountTargetKey] = useState<string | null>(null);
+  const [discountScopeIsOrder, setDiscountScopeIsOrder] = useState(false);
   const [member, setMember] = useState<ContactRead | null>(null);
   const [mode, setMode] = useState<TenderMode>("CASH");
   const [storeCreditInput, setStoreCreditInput] = useState("");
@@ -1025,13 +1277,26 @@ export default function PosPage() {
   });
 
   const saleLines = toSaleLines(lines);
+  // 目標商品已被移除的折扣自動失效；送出時才把 key 換算成後端要的明細索引。
+  const activeDiscounts = pruneDiscounts(discountDrafts, lines);
+  const adjustments = toAdjustmentRequests(activeDiscounts, lines);
   // 結帳前向後端試算折後總額（docs/21 C2b）：活動生效時 total=折後，收款據此對齊（否則 422）。
+  // 贈品與臨時折扣也在此算——畫面上的每個數字都由後端給，前端不自算。
   const quote = useQuery({
-    queryKey: ["sale-quote", JSON.stringify(saleLines), member?.id ?? null],
+    queryKey: [
+      "sale-quote",
+      JSON.stringify(saleLines),
+      JSON.stringify(adjustments),
+      member?.id ?? null,
+    ],
     enabled: lines.length > 0,
     queryFn: async () => {
       const { data, error } = await api.POST("/api/v1/sales/quote", {
-        body: { lines: saleLines, buyer_contact_id: member?.id ?? null },
+        body: {
+          lines: saleLines,
+          buyer_contact_id: member?.id ?? null,
+          adjustments: adjustments.length > 0 ? adjustments : null,
+        },
       });
       if (!data) throw new Error(extractDetail(error) ?? "試算失敗");
       return data;
@@ -1046,6 +1311,11 @@ export default function PosPage() {
   // 試算中（refetch）暫無 → 退回折前估計。
   const quotedLines = quoteReady && quote.data ? quote.data.lines : null;
   const campaignNote = quote.data?.campaign_name ?? null;
+  // 金額摘要的三個數字一律取自後端試算，前端不自算（同 total 的既有慣例）。
+  const itemDiscountTotal = parseNtd(quote.data?.item_discount_amount ?? "") ?? 0;
+  const orderDiscountTotal =
+    parseNtd(quote.data?.order_discount_amount ?? "") ?? 0;
+  const giftRetailValue = parseNtd(quote.data?.gift_retail_value ?? "") ?? 0;
   const memberBalance =
     member !== null && balanceQuery.data
       ? (parseNtd(balanceQuery.data.balance) ?? 0)
@@ -1436,6 +1706,8 @@ export default function PosPage() {
       const body = {
         lines: toSaleLines(lines),
         buyer_contact_id: member?.id ?? null,
+        // 折扣入冪等指紋（body 全量納入簽章）：兩張金額不同的單不得被當成同一張重放。
+        adjustments: adjustments.length > 0 ? adjustments : null,
         tenders: toTenders(plan, { linePayKey }) ?? null,
         // 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
         signature_task_id: signed && !signMismatch ? signTaskId : null,
@@ -1565,6 +1837,9 @@ export default function PosPage() {
 
   function resetSale() {
     setLines([]);
+    setDiscountDrafts([]);
+    setGiftTargetKey(null);
+    setDiscountTargetKey(null);
     setMember(null);
     setMode("CASH");
     setStoreCreditInput("");
@@ -1686,6 +1961,7 @@ export default function PosPage() {
       <h1 className="page-title">POS 結帳</h1>
       <PosCustomerDisplay
         lines={saleLines}
+        adjustments={adjustments}
         buyerContactId={member?.id ?? null}
         tenders={customerDisplayTenders}
         ready={quoteReady}
@@ -1727,6 +2003,7 @@ export default function PosPage() {
                   {lines.map((line, i) => {
                     // 逐行折後：試算就緒時用 quote 同序行的折後單價/小計；有折扣則加顯原價刪除線。
                     const ql = quotedLines?.[i];
+                    const giftLine = ql ? ql.line_kind === "GIFT" : isGift(line);
                     const discounted =
                       ql != null &&
                       ql.discount_amount !== "0" &&
@@ -1734,16 +2011,23 @@ export default function PosPage() {
                     const unitVal = ql
                       ? (parseNtd(ql.unit_price) ?? line.unitPrice)
                       : line.unitPrice;
+                    // 小計認**實付**（net_amount）：臨時折扣落在這裡，line_total 仍是活動折後牌價。
                     const subtotalVal = ql
-                      ? (parseNtd(ql.line_total) ?? lineTotal(line))
+                      ? (parseNtd(ql.net_amount) ?? lineTotal(line))
                       : lineTotal(line);
+                    // 贈品也顯示原價刪除線——讓客人與店員都看得到「送了多少價值」。
                     const originalUnit =
-                      discounted && ql?.original_unit_price != null
+                      (discounted || giftLine) && ql?.original_unit_price != null
                         ? (parseNtd(ql.original_unit_price) ?? line.unitPrice)
                         : null;
                     return (
                       <tr key={line.key}>
-                        <td>{line.description}</td>
+                        <td>
+                          {line.description}
+                          {isGift(line) && (
+                            <span className="pos-gift-badge">贈品</span>
+                          )}
+                        </td>
                         <td>
                           {originalUnit !== null ? (
                             <span className="pos-price-discounted">
@@ -1781,7 +2065,44 @@ export default function PosPage() {
                         <td>
                           <Money value={subtotalVal} />
                         </td>
-                        <td>
+                        <td className="pos-line-actions">
+                          {isGift(line) ? (
+                            <button
+                              type="button"
+                              className="btn-ghost"
+                              aria-label={`取消贈品 ${line.description}`}
+                              disabled={cartMutationLocked}
+                              onClick={() =>
+                                setLines(unmarkGift(lines, line.key))
+                              }
+                            >
+                              取消贈品
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                aria-label={`折扣 ${line.description}`}
+                                disabled={cartMutationLocked}
+                                onClick={() => {
+                                  setDiscountScopeIsOrder(false);
+                                  setDiscountTargetKey(line.key);
+                                }}
+                              >
+                                折扣
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                aria-label={`改為贈品 ${line.description}`}
+                                disabled={cartMutationLocked}
+                                onClick={() => setGiftTargetKey(line.key)}
+                              >
+                                改為贈品
+                              </button>
+                            </>
+                          )}
                           <button
                             type="button"
                             className="btn-ghost"
@@ -1801,8 +2122,89 @@ export default function PosPage() {
           )}
           <MenuPanel onAdd={addToCart} disabled={cartMutationLocked} />
         </div>
+        {giftTargetKey !== null && (
+          <GiftDialog
+            lineDescription={
+              lines.find((l) => l.key === giftTargetKey)?.description ?? ""
+            }
+            onCancel={() => setGiftTargetKey(null)}
+            onConfirm={(reasonId, note) => {
+              setLines(
+                markAsGift(lines, giftTargetKey, {
+                  reasonId,
+                  note: note === "" ? undefined : note,
+                }),
+              );
+              // 改成贈品的那一列 key 會換前綴，指向它的單品折扣一併失效（贈品不參與折扣）。
+              setDiscountDrafts((prev) =>
+                prev.filter((d) => d.targetKey !== giftTargetKey),
+              );
+              setGiftTargetKey(null);
+            }}
+          />
+        )}
+        {(discountTargetKey !== null || discountScopeIsOrder) && (
+          <DiscountDialog
+            scopeLabel={
+              discountScopeIsOrder
+                ? "整單折扣"
+                : `折扣：${lines.find((l) => l.key === discountTargetKey)?.description ?? ""}`
+            }
+            onCancel={() => {
+              setDiscountTargetKey(null);
+              setDiscountScopeIsOrder(false);
+            }}
+            onConfirm={(draft) => {
+              setDiscountDrafts((prev) => [
+                ...prev,
+                {
+                  id: `${Date.now()}-${prev.length}`,
+                  scope: discountScopeIsOrder ? "ORDER" : "ITEM",
+                  targetKey: discountScopeIsOrder ? null : discountTargetKey,
+                  method: draft.method,
+                  value: draft.value,
+                  reasonId: draft.reasonId,
+                  note: draft.note,
+                },
+              ]);
+              setDiscountTargetKey(null);
+              setDiscountScopeIsOrder(false);
+            }}
+          />
+        )}
 
         <aside className="pos-right card">
+          {/* 金額摘要：贈品價值單獨列出，**不加進應付再折掉**——它不是折扣，
+              報表也各走各的欄位。 */}
+          {lines.length > 0 && quoteReady && quote.data && (
+            <dl className="pos-summary">
+              {itemDiscountTotal > 0 && (
+                <div>
+                  <dt>商品折扣</dt>
+                  <dd>
+                    −<Money value={itemDiscountTotal} />
+                  </dd>
+                </div>
+              )}
+              {orderDiscountTotal > 0 && (
+                <div>
+                  <dt>整單折扣</dt>
+                  <dd>
+                    −<Money value={orderDiscountTotal} />
+                  </dd>
+                </div>
+              )}
+              {giftRetailValue > 0 && (
+                <div>
+                  <dt>贈品價值</dt>
+                  <dd>
+                    <Money value={giftRetailValue} />
+                    <span className="hint">（僅供參考，不計入應付）</span>
+                  </dd>
+                </div>
+              )}
+            </dl>
+          )}
           <div className="pos-total">
             <span>應付總額</span>
             <strong>
@@ -1812,6 +2214,41 @@ export default function PosPage() {
           {campaignNote && (
             <p className="hint pos-campaign-note">已套用活動折扣：{campaignNote}</p>
           )}
+          <div className="pos-discount-panel">
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={cartMutationLocked || lines.length === 0}
+              onClick={() => {
+                setDiscountScopeIsOrder(true);
+                setDiscountTargetKey(null);
+              }}
+            >
+              整單折扣
+            </button>
+            {activeDiscounts.length > 0 && (
+              <ul className="pos-discount-list">
+                {activeDiscounts.map((draft) => (
+                  <li key={draft.id}>
+                    <span>{describeDiscount(draft, lines)}</span>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      aria-label={`移除折扣 ${describeDiscount(draft, lines)}`}
+                      disabled={cartMutationLocked}
+                      onClick={() =>
+                        setDiscountDrafts((prev) =>
+                          prev.filter((d) => d.id !== draft.id),
+                        )
+                      }
+                    >
+                      移除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {lines.length > 0 && quote.isError && (
             <p role="alert" className="form-error">
               試算失敗：{(quote.error as Error).message}

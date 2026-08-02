@@ -162,6 +162,7 @@ describe("POS 顧客螢幕同步", () => {
       <PosCustomerDisplay
         lines={[]}
         buyerContactId={null}
+        adjustments={[]}
         tenders={[]}
         ready
         onRestore={onRestore}
@@ -174,6 +175,7 @@ describe("POS 顧客螢幕同步", () => {
       <PosCustomerDisplay
         lines={[LINE]}
         buyerContactId={null}
+        adjustments={[]}
         tenders={TENDERS}
         ready
         onRestore={onRestore}
@@ -186,6 +188,7 @@ describe("POS 顧客螢幕同步", () => {
       lines: [LINE],
       buyer_contact_id: null,
       tenders: TENDERS,
+      adjustments: null,
     });
   });
 
@@ -255,6 +258,7 @@ describe("POS 顧客螢幕同步", () => {
       <PosCustomerDisplay
         lines={[]}
         buyerContactId={null}
+        adjustments={[]}
         tenders={[]}
         ready
         onRestore={vi.fn()}
@@ -266,6 +270,7 @@ describe("POS 顧客螢幕同步", () => {
       <PosCustomerDisplay
         lines={[LINE]}
         buyerContactId={null}
+        adjustments={[]}
         tenders={TENDERS}
         ready
         onRestore={vi.fn()}
@@ -283,6 +288,7 @@ describe("POS 顧客螢幕同步", () => {
       <PosCustomerDisplay
         lines={[LINE]}
         buyerContactId={null}
+        adjustments={[]}
         tenders={[{ tender_type: "TAIWAN_PAY", amount: "240" }]}
         ready
         onRestore={vi.fn()}

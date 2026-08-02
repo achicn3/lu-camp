@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_sessionmaker
+from app.modules.sales.reasons import ensure_default_reasons
 from app.modules.store.models import Store
 
 
@@ -76,6 +77,9 @@ async def upsert_dev_store(session: AsyncSession, seed: DevStoreSeed) -> Store:
     await session.execute(
         text("SELECT setval(pg_get_serial_sequence('stores', 'id'), (SELECT MAX(id) FROM stores))")
     )
+    # 贈品原因是贈品的必填欄位：沒有原因代碼的門市根本送不出贈品（POS 選單會是空的）。
+    # migration 只補了「當時已存在」的門市，新開的店要在這裡補。
+    await ensure_default_reasons(session, store.id)
     return store
 
 

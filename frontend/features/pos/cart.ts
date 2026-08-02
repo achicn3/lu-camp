@@ -91,3 +91,42 @@ export function toSaleLines(
     gift_note: l.giftNote ?? null,
   }));
 }
+
+/** 贈品列的 key 前綴：同一商品「買 2 ＋ 送 1」是兩列，共用 key 會被合併成一列。 */
+const GIFT_KEY_PREFIX = "G:";
+
+export function isGift(line: CartLine): boolean {
+  return line.lineKind === "GIFT";
+}
+
+/** 把某一列改成贈品（成交 0 元，但照樣出庫）。已是贈品則原樣回傳。 */
+export function markAsGift(
+  lines: CartLine[],
+  key: string,
+  gift: { reasonId: number; note?: string },
+): CartLine[] {
+  return lines.map((line) => {
+    if (line.key !== key || isGift(line)) return line;
+    return {
+      ...line,
+      key: `${GIFT_KEY_PREFIX}${line.key}`,
+      lineKind: "GIFT",
+      giftReasonId: gift.reasonId,
+      giftNote: gift.note,
+    };
+  });
+}
+
+/** 取消贈品，改回一般銷售。 */
+export function unmarkGift(lines: CartLine[], key: string): CartLine[] {
+  return lines.map((line) => {
+    if (line.key !== key || !isGift(line)) return line;
+    return {
+      ...line,
+      key: line.key.slice(GIFT_KEY_PREFIX.length),
+      lineKind: "NORMAL",
+      giftReasonId: undefined,
+      giftNote: undefined,
+    };
+  });
+}

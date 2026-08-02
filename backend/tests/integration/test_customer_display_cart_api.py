@@ -236,12 +236,16 @@ async def test_first_item_creates_server_priced_cart_visible_only_to_paired_kios
         {
             "item_key": f"CATALOG:{seeded.product_id}",
             "line_type": "CATALOG",
+            # 商業性質與實付：客人螢幕要分得出贈品（0 元但仍出庫）與被折到的商品。
+            "line_kind": "NORMAL",
             "name": "營釘補充包",
             "qty": 2,
             "unit_price": "120",
             "original_unit_price": None,
             "discount_amount": "0",
+            "manual_discount_amount": "0",
             "line_total": "240",
+            "net_amount": "240",
         }
     ]
     assert cart["snapshot"]["member"] == {"display_name": "王○明"}
