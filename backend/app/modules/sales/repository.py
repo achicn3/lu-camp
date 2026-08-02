@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.sales.models import (
+    DiscountReason,
+    GiftReason,
     LinePayRefundAttempt,
     LinePayTransaction,
     Sale,
@@ -101,6 +103,22 @@ class SalesRepository:
         self._session.add(tender)
         await self._session.flush()
         return tender
+
+    async def list_active_gift_reasons(self, store_id: int) -> list[GiftReason]:
+        stmt = (
+            select(GiftReason)
+            .where(GiftReason.store_id == store_id, GiftReason.is_active.is_(True))
+            .order_by(GiftReason.sort_order, GiftReason.id)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def list_active_discount_reasons(self, store_id: int) -> list[DiscountReason]:
+        stmt = (
+            select(DiscountReason)
+            .where(DiscountReason.store_id == store_id, DiscountReason.is_active.is_(True))
+            .order_by(DiscountReason.sort_order, DiscountReason.id)
+        )
+        return list(await self._session.scalars(stmt))
 
     async def list_tenders(self, sale_id: int) -> list[SaleTender]:
         stmt = select(SaleTender).where(SaleTender.sale_id == sale_id).order_by(SaleTender.id)

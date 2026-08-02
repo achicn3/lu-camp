@@ -11,10 +11,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import CatalogProduct
 from app.modules.sales.inputs import SaleLineInput, TenderInput
-from app.modules.sales.models import SaleAdjustment, SaleAdjustmentAllocation, SaleLine
+from app.modules.sales.models import (
+    GiftReason,
+    SaleAdjustment,
+    SaleAdjustmentAllocation,
+    SaleLine,
+)
 from app.modules.sales.pricing import DiscountRequest
 from app.modules.sales.service import SalesService
 from app.modules.settings.models import StoreSettings
@@ -23,11 +29,12 @@ from app.modules.user.models import User
 from app.shared.enums import (
     AdjustmentScope,
     CalculationMethod,
+    SaleLineKind,
     SaleLineType,
     TenderType,
     UserRole,
 )
-from app.shared.exceptions import InvalidDiscount
+from app.shared.exceptions import IdempotencyKeyConflict, InvalidDiscount
 
 
 async def _seed(session: AsyncSession) -> tuple[int, int, int, int]:
@@ -155,8 +162,6 @@ async def test_gifts_are_excluded_from_order_discount_allocation(
     db_session: AsyncSession,
 ) -> None:
     store_id, clerk_id, a_id, b_id = await _seed(db_session)
-    from app.modules.sales.models import GiftReason
-
     reason = GiftReason(store_id=store_id, code="PROMO", name="活動贈品")
     db_session.add(reason)
     await db_session.flush()
@@ -170,9 +175,7 @@ async def test_gifts_are_excluded_from_order_discount_allocation(
                 line_type=SaleLineType.CATALOG,
                 catalog_product_id=b_id,
                 qty=1,
-                line_kind=__import__(
-                    "app.shared.enums", fromlist=["SaleLineKind"]
-                ).SaleLineKind.GIFT,
+                line_kind=SaleLineKind.GIFT,
                 gift_reason_id=reason.id,
             ),
         ],
@@ -206,8 +209,6 @@ async def test_same_key_with_different_discount_is_not_replayed(
     db_session: AsyncSession,
 ) -> None:
     """冪等指紋必須含折扣：否則兩張金額不同的單會被當成同一張重放。"""
-    from app.shared.exceptions import IdempotencyKeyConflict
-
     store_id, clerk_id, a_id, _b_id = await _seed(db_session)
     sales = SalesService(db_session)
     await sales.create_sale(
@@ -240,8 +241,6 @@ async def test_same_key_with_different_discount_is_not_replayed(
 
 async def test_discount_and_gift_are_audited(db_session: AsyncSession) -> None:
     """裁量性的價格變動必須留痕——這是唯一能事後追究的東西（無主管核准機制）。"""
-    from app.core.audit import AuditLog
-
     store_id, clerk_id, a_id, _b_id = await _seed(db_session)
     sale = await SalesService(db_session).create_sale(
         store_id,

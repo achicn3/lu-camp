@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.modules.sales.inputs import SaleLineInput
+from app.modules.sales.pricing import DiscountRequest
+from app.modules.sales.schemas import SaleAdjustmentRequest
 from app.shared.enums import (
     CartSessionStatus,
     SaleLineKind,
@@ -142,6 +144,22 @@ class CartUpsertRequest(BaseModel):
     lines: list[CartLineRequest] = Field(min_length=1)
     buyer_contact_id: int | None = Field(default=None, ge=1)
     tenders: list[CartTenderRequest] | None = Field(default=None, min_length=1, max_length=2)
+    # 臨時折扣：客顯購物車是權威購物車，折扣必須經同一條路徑進來，否則客人螢幕上看到的
+    # 金額與實際結帳不同，且結帳時的快照比對會直接失敗。
+    adjustments: list[SaleAdjustmentRequest] | None = None
+
+    @model_validator(mode="after")
+    def _check_adjustment_targets(self) -> "CartUpsertRequest":
+        for adjustment in self.adjustments or []:
+            index = adjustment.target_line_index
+            if index is not None and index >= len(self.lines):
+                raise ValueError(f"要折扣的商品不在購物車內（第 {index + 1} 項）")
+        return self
+
+    def to_adjustments(self) -> list[DiscountRequest] | None:
+        if self.adjustments is None:
+            return None
+        return [adjustment.to_request() for adjustment in self.adjustments]
 
 
 class CartCancelRequest(BaseModel):
@@ -161,12 +179,16 @@ class CartBeginCheckoutRequest(BaseModel):
 class CartItemRead(BaseModel):
     item_key: str
     line_type: SaleLineType
+    # 贈品在客人螢幕上要看得出來是贈品（成交 0 元），不是被折到 0 的商品。
+    line_kind: SaleLineKind
     name: str
     qty: int
     unit_price: str
     original_unit_price: str | None
     discount_amount: str
+    manual_discount_amount: str
     line_total: str
+    net_amount: str
 
 
 class MaskedMemberRead(BaseModel):
@@ -183,6 +205,9 @@ class CartSnapshotRead(BaseModel):
     items: list[CartItemRead]
     total: str
     discount_total: str
+    # 贈品原價價值僅供顯示參考：不加進應付、也不算折扣。
+    gift_retail_value: str
+    manual_discount_total: str
     campaign_name: str | None
     member: MaskedMemberRead | None
     tenders: list[CartTenderRead]

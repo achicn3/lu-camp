@@ -1041,6 +1041,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/discount-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Discount Reasons */
+        get: operations["listDiscountReasons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/einvoice/queue": {
         parameters: {
             query?: never;
@@ -1144,6 +1161,23 @@ export interface paths {
          *     傳輸中斷（結果未知）→ 502（已認領，下次呼叫自動對帳）；未設定憑證 → 409。
          */
         post: operations["issueEInvoiceForSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gift-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gift Reasons */
+        get: operations["listGiftReasons"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2545,6 +2579,12 @@ export interface components {
             voided_at: string;
         };
         /**
+         * AdjustmentScope
+         * @description 臨時折扣的作用範圍。
+         * @enum {string}
+         */
+        AdjustmentScope: "ORDER" | "ITEM";
+        /**
          * AgingBuckets
          * @description 未兌付負債帳齡分桶（依發出時間）。
          */
@@ -2728,6 +2768,13 @@ export interface components {
          * @enum {string}
          */
         BulkLotStatus: "ON_SALE" | "SOLD_OUT" | "WRITTEN_OFF";
+        /**
+         * CalculationMethod
+         * @description 折扣的計算方式。店員輸入的原始值記在 requested_value，
+         *     系統實際套用的金額記在 applied_amount——報表一律用後者，不重算。
+         * @enum {string}
+         */
+        CalculationMethod: "FIXED_AMOUNT" | "PERCENTAGE";
         /**
          * CampaignCreateRequest
          * @description 建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。
@@ -2914,11 +2961,16 @@ export interface components {
             discount_amount: string;
             /** Item Key */
             item_key: string;
+            line_kind: components["schemas"]["SaleLineKind"];
             /** Line Total */
             line_total: string;
             line_type: components["schemas"]["SaleLineType"];
+            /** Manual Discount Amount */
+            manual_discount_amount: string;
             /** Name */
             name: string;
+            /** Net Amount */
+            net_amount: string;
             /** Original Unit Price */
             original_unit_price: string | null;
             /** Qty */
@@ -2988,8 +3040,12 @@ export interface components {
             content_version: string;
             /** Discount Total */
             discount_total: string;
+            /** Gift Retail Value */
+            gift_retail_value: string;
             /** Items */
             items: components["schemas"]["CartItemRead"][];
+            /** Manual Discount Total */
+            manual_discount_total: string;
             member: components["schemas"]["MaskedMemberRead"] | null;
             /** Tenders */
             tenders: components["schemas"]["CartTenderRead"][];
@@ -3010,6 +3066,8 @@ export interface components {
         };
         /** CartUpsertRequest */
         CartUpsertRequest: {
+            /** Adjustments */
+            adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
             /** Expected Revision */
@@ -4806,6 +4864,22 @@ export interface components {
          */
         PurchaseOrderStatus: "DRAFT" | "ORDERED" | "PARTIAL" | "RECEIVED" | "CANCELLED";
         /**
+         * ReasonRead
+         * @description 贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。
+         */
+        ReasonRead: {
+            /** Code */
+            code: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Requires Note */
+            requires_note: boolean;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
          */
@@ -5018,6 +5092,25 @@ export interface components {
             tender_type: components["schemas"]["TenderType"];
         };
         /**
+         * SaleAdjustmentRequest
+         * @description 店員在結帳畫面輸入的一筆臨時折扣。
+         *
+         *     目標以**明細順序索引**指定（0、1…）：成交前 sale_line 還沒有 id，而前後端共用
+         *     同一份明細順序。ITEM 必須指定索引，ORDER 不得指定。
+         */
+        SaleAdjustmentRequest: {
+            method: components["schemas"]["CalculationMethod"];
+            /** Note */
+            note?: string | null;
+            /** Reason Id */
+            reason_id?: number | null;
+            scope: components["schemas"]["AdjustmentScope"];
+            /** Target Line Index */
+            target_line_index?: number | null;
+            /** Value */
+            value: number | string;
+        };
+        /**
          * SaleCreateRequest
          * @description 結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
          *
@@ -5025,6 +5118,8 @@ export interface components {
          *     伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。
          */
         SaleCreateRequest: {
+            /** Adjustments */
+            adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
             /** Cart Revision */
@@ -5129,13 +5224,29 @@ export interface components {
              * @default 0
              */
             discount_amount: string;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Name */
+            gift_reason_name?: string | null;
             /** Id */
             id: number;
+            /** @default NORMAL */
+            line_kind: components["schemas"]["SaleLineKind"];
             /** Line Total */
             line_total: string;
             line_type: components["schemas"]["SaleLineType"];
+            /**
+             * Manual Discount Amount
+             * @default 0
+             */
+            manual_discount_amount: string;
             /** Menu Item Id */
             menu_item_id: number | null;
+            /**
+             * Net Amount
+             * @default 0
+             */
+            net_amount: string;
             /** Original Unit Price */
             original_unit_price?: string | null;
             /** Qty */
@@ -5165,9 +5276,14 @@ export interface components {
             description: string;
             /** Discount Amount */
             discount_amount: string;
+            line_kind: components["schemas"]["SaleLineKind"];
             /** Line Total */
             line_total: string;
             line_type: components["schemas"]["SaleLineType"];
+            /** Manual Discount Amount */
+            manual_discount_amount: string;
+            /** Net Amount */
+            net_amount: string;
             /** Original Unit Price */
             original_unit_price: string | null;
             /** Qty */
@@ -5180,6 +5296,8 @@ export interface components {
          * @description 結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。
          */
         SaleQuoteRequest: {
+            /** Adjustments */
+            adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             /** Buyer Contact Id */
             buyer_contact_id?: number | null;
             /** Lines */
@@ -5196,8 +5314,14 @@ export interface components {
             campaign_name: string | null;
             /** Food Subtotal */
             food_subtotal: string;
+            /** Gift Retail Value */
+            gift_retail_value: string;
+            /** Item Discount Amount */
+            item_discount_amount: string;
             /** Lines */
             lines: components["schemas"]["SaleQuoteLineRead"][];
+            /** Order Discount Amount */
+            order_discount_amount: string;
             /** Store Credit Max */
             store_credit_max: string;
             /** Store Credit Min Spend */
@@ -8090,6 +8214,26 @@ export interface operations {
             };
         };
     };
+    listDiscountReasons: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"][];
+                };
+            };
+        };
+    };
     listEInvoiceQueue: {
         parameters: {
             query?: {
@@ -8247,6 +8391,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listGiftReasons: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"][];
                 };
             };
         };

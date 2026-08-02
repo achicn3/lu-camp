@@ -74,6 +74,9 @@ describe("POS 顧客螢幕同步", () => {
           original_unit_price: null,
           discount_amount: "0",
           line_total: "1800",
+          line_kind: "NORMAL",
+          manual_discount_amount: "0",
+          net_amount: "1800",
         },
         {
           item_key: "CATALOG:6",
@@ -84,6 +87,9 @@ describe("POS 顧客螢幕同步", () => {
           original_unit_price: null,
           discount_amount: "0",
           line_total: "240",
+          line_kind: "NORMAL",
+          manual_discount_amount: "0",
+          net_amount: "240",
         },
       ]),
     ).toEqual([

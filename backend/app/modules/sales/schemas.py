@@ -11,7 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_valida
 
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
+from app.modules.sales.pricing import DiscountRequest
 from app.shared.enums import (
+    AdjustmentScope,
+    CalculationMethod,
     LinePayRefundStatus,
     PaymentMethod,
     SaleInvoiceStatus,
@@ -161,6 +164,65 @@ class SaleInvoiceInfoRequest(BaseModel):
         )
 
 
+class ReasonRead(BaseModel):
+    """贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    name: str
+    requires_note: bool
+    sort_order: int
+
+
+class SaleAdjustmentRequest(BaseModel):
+    """店員在結帳畫面輸入的一筆臨時折扣。
+
+    目標以**明細順序索引**指定（0、1…）：成交前 sale_line 還沒有 id，而前後端共用
+    同一份明細順序。ITEM 必須指定索引，ORDER 不得指定。
+    """
+
+    scope: AdjustmentScope
+    method: CalculationMethod
+    value: Decimal = Field(gt=0)
+    target_line_index: int | None = Field(default=None, ge=0)
+    reason_id: int | None = Field(default=None, ge=1)
+    note: str | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _check_target(self) -> "SaleAdjustmentRequest":
+        if self.scope is AdjustmentScope.ITEM and self.target_line_index is None:
+            raise ValueError("單品折扣必須指定要折哪一個商品")
+        if self.scope is AdjustmentScope.ORDER and self.target_line_index is not None:
+            raise ValueError("整單折扣不可指定單一商品")
+        if self.method is CalculationMethod.PERCENTAGE and self.value >= 100:
+            raise ValueError("折扣百分比必須小於 100；免費請改用贈品")
+        return self
+
+    def to_request(self) -> DiscountRequest:
+        return DiscountRequest(
+            scope=self.scope,
+            method=self.method,
+            value=self.value,
+            target_key=(
+                None if self.target_line_index is None else str(self.target_line_index)
+            ),
+            reason_id=self.reason_id,
+            note=self.note,
+        )
+
+
+def _validate_adjustment_targets(
+    adjustments: list[SaleAdjustmentRequest] | None, line_count: int
+) -> None:
+    """索引必須落在本次明細範圍內——越界在定價層只會得到「商品不存在」的模糊訊息。"""
+    for adjustment in adjustments or []:
+        index = adjustment.target_line_index
+        if index is not None and index >= line_count:
+            raise ValueError(f"要折扣的商品不在本次交易明細內（第 {index + 1} 項）")
+
+
 class SaleCreateRequest(BaseModel):
     """結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。
 
@@ -181,9 +243,21 @@ class SaleCreateRequest(BaseModel):
     # 結帳當下 POS 觀察到的 einvoice_enabled（Codex 第二十二輪）：後端於結帳交易內
     # 與現值比對，不符 → 409（他端切換設定的 TOCTOU 防護）。舊客戶端可省略。
     expected_einvoice_enabled: bool | None = None
+    # 結帳當下套用的臨時折扣（贈品走 lines[].line_kind，不是折扣）。
+    adjustments: list[SaleAdjustmentRequest] | None = None
+
+    @model_validator(mode="after")
+    def _check_adjustment_targets(self) -> "SaleCreateRequest":
+        _validate_adjustment_targets(self.adjustments, len(self.lines))
+        return self
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]
+
+    def to_adjustments(self) -> list[DiscountRequest] | None:
+        if self.adjustments is None:
+            return None
+        return [adjustment.to_request() for adjustment in self.adjustments]
 
     def to_tender_inputs(self) -> list[TenderInput] | None:
         return None if self.tenders is None else [t.to_input() for t in self.tenders]
@@ -202,9 +276,20 @@ class SaleQuoteRequest(BaseModel):
 
     lines: list[SaleLineCreateRequest] = Field(min_length=1)
     buyer_contact_id: int | None = None
+    adjustments: list[SaleAdjustmentRequest] | None = None
+
+    @model_validator(mode="after")
+    def _check_adjustment_targets(self) -> "SaleQuoteRequest":
+        _validate_adjustment_targets(self.adjustments, len(self.lines))
+        return self
 
     def to_inputs(self) -> list[SaleLineInput]:
         return [line.to_input() for line in self.lines]
+
+    def to_adjustments(self) -> list[DiscountRequest] | None:
+        if self.adjustments is None:
+            return None
+        return [adjustment.to_request() for adjustment in self.adjustments]
 
 
 class SaleQuoteLineRead(BaseModel):
@@ -217,6 +302,10 @@ class SaleQuoteLineRead(BaseModel):
     line_total: NTDAmount
     original_unit_price: NTDAmountOpt
     discount_amount: NTDAmount
+    # 商業性質與實付：贈品成交 0 元但仍出庫，臨時折扣則落在 manual_discount_amount。
+    line_kind: SaleLineKind
+    manual_discount_amount: NTDAmount
+    net_amount: NTDAmount
 
 
 class SaleQuoteResponse(BaseModel):
@@ -231,6 +320,10 @@ class SaleQuoteResponse(BaseModel):
     store_credit_max: NTDAmount
     # 購物金低消門檻（整數元，0＝不限）：非餐飲消費未達此值則完全不可用購物金。
     store_credit_min_spend: NTDAmount
+    # 金額摘要：贈品價值**僅供顯示**，不加進應付也不算折扣（活動報表直接 SUM 折扣欄位）。
+    gift_retail_value: NTDAmount
+    item_discount_amount: NTDAmount
+    order_discount_amount: NTDAmount
 
 
 class SaleLineRead(BaseModel):
@@ -251,6 +344,13 @@ class SaleLineRead(BaseModel):
     # 門市活動折扣留痕（docs/21）：供明細聯/收據顯示原價與折讓。
     original_unit_price: NTDAmountOpt = None
     discount_amount: NTDAmount = Decimal(0)
+    # 商業性質與實付：**退款、發票品項、毛利都認 net_amount**，不是 line_total
+    # （line_total 是活動折後的牌價小計，臨時折扣另計在 manual_discount_amount）。
+    line_kind: SaleLineKind = SaleLineKind.NORMAL
+    manual_discount_amount: NTDAmount = Decimal(0)
+    net_amount: NTDAmount = Decimal(0)
+    gift_reason_name: str | None = None
+    gift_note: str | None = None
     # 已退貨數（退貨頁限額用：可退餘量＝qty−returned_qty；僅 get_sale 端點回填，預設 0）
     returned_qty: int = 0
 

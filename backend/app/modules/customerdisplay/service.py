@@ -214,7 +214,9 @@ def _cart_changes(
                     "to_qty": None,
                 }
             )
-    if old_snapshot.get("discount_total") != new_snapshot.get("discount_total"):
+    if old_snapshot.get("discount_total") != new_snapshot.get("discount_total") or old_snapshot.get(
+        "manual_discount_total"
+    ) != new_snapshot.get("manual_discount_total"):
         changes.append(
             {
                 "type": "DISCOUNT_CHANGED",
@@ -619,11 +621,14 @@ class CustomerDisplayService:
             store_id,
             lines=lines,
             buyer_contact_id=data.buyer_contact_id,
+            adjustments=data.to_adjustments(),
         )
         items: list[dict[str, object]] = []
         discount_total = Decimal(0)
+        manual_discount_total = Decimal(0)
         for source, quoted in zip(lines, quote.lines, strict=True):
             discount_total += quoted.discount_amount
+            manual_discount_total += quoted.manual_discount_amount
             items.append(
                 {
                     "item_key": _line_key_with_kind(source, quoted.line_kind.value),
@@ -657,6 +662,8 @@ class CustomerDisplayService:
             "items": items,
             "total": _ntd(quote.total),
             "discount_total": _ntd(discount_total),
+            "manual_discount_total": _ntd(manual_discount_total),
+            "gift_retail_value": _ntd(quote.gift_retail_value),
             "campaign_name": quote.campaign_name,
             "member": member,
             "tenders": self._validate_cart_tenders(

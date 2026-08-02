@@ -528,6 +528,15 @@
         "title": "AcquisitionVoidResult",
         "type": "object"
       },
+      "AdjustmentScope": {
+        "description": "臨時折扣的作用範圍。",
+        "enum": [
+          "ORDER",
+          "ITEM"
+        ],
+        "title": "AdjustmentScope",
+        "type": "string"
+      },
       "AgingBuckets": {
         "description": "未兌付負債帳齡分桶（依發出時間）。",
         "properties": {
@@ -1040,6 +1049,15 @@
         "title": "BulkLotStatus",
         "type": "string"
       },
+      "CalculationMethod": {
+        "description": "折扣的計算方式。店員輸入的原始值記在 requested_value，\n系統實際套用的金額記在 applied_amount——報表一律用後者，不重算。",
+        "enum": [
+          "FIXED_AMOUNT",
+          "PERCENTAGE"
+        ],
+        "title": "CalculationMethod",
+        "type": "string"
+      },
       "CampaignCreateRequest": {
         "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。\n\n寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。",
         "properties": {
@@ -1431,6 +1449,9 @@
             "title": "Item Key",
             "type": "string"
           },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind"
+          },
           "line_total": {
             "title": "Line Total",
             "type": "string"
@@ -1438,8 +1459,16 @@
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
           },
+          "manual_discount_amount": {
+            "title": "Manual Discount Amount",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
+            "type": "string"
+          },
+          "net_amount": {
+            "title": "Net Amount",
             "type": "string"
           },
           "original_unit_price": {
@@ -1465,12 +1494,15 @@
         "required": [
           "item_key",
           "line_type",
+          "line_kind",
           "name",
           "qty",
           "unit_price",
           "original_unit_price",
           "discount_amount",
-          "line_total"
+          "manual_discount_amount",
+          "line_total",
+          "net_amount"
         ],
         "title": "CartItemRead",
         "type": "object"
@@ -1661,12 +1693,20 @@
             "title": "Discount Total",
             "type": "string"
           },
+          "gift_retail_value": {
+            "title": "Gift Retail Value",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/CartItemRead"
             },
             "title": "Items",
             "type": "array"
+          },
+          "manual_discount_total": {
+            "title": "Manual Discount Total",
+            "type": "string"
           },
           "member": {
             "anyOf": [
@@ -1695,6 +1735,8 @@
           "items",
           "total",
           "discount_total",
+          "gift_retail_value",
+          "manual_discount_total",
           "campaign_name",
           "member",
           "tenders"
@@ -1747,6 +1789,20 @@
       },
       "CartUpsertRequest": {
         "properties": {
+          "adjustments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleAdjustmentRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustments"
+          },
           "buyer_contact_id": {
             "anyOf": [
               {
@@ -6487,6 +6543,40 @@
         "title": "PurchaseOrderStatus",
         "type": "string"
       },
+      "ReasonRead": {
+        "description": "贈品／折扣原因代碼（只回啟用中的）。`requires_note` 為真時 POS 必須逼店員填備註。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_note": {
+            "title": "Requires Note",
+            "type": "boolean"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name",
+          "requires_note",
+          "sort_order"
+        ],
+        "title": "ReasonRead",
+        "type": "object"
+      },
       "ReceiptHeaderRead": {
         "description": "收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。",
         "properties": {
@@ -7009,9 +7099,90 @@
         "title": "ReturnTenderRead",
         "type": "object"
       },
+      "SaleAdjustmentRequest": {
+        "description": "店員在結帳畫面輸入的一筆臨時折扣。\n\n目標以**明細順序索引**指定（0、1…）：成交前 sale_line 還沒有 id，而前後端共用\n同一份明細順序。ITEM 必須指定索引，ORDER 不得指定。",
+        "properties": {
+          "method": {
+            "$ref": "#/components/schemas/CalculationMethod"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AdjustmentScope"
+          },
+          "target_line_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Line Index"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "scope",
+          "method",
+          "value"
+        ],
+        "title": "SaleAdjustmentRequest",
+        "type": "object"
+      },
       "SaleCreateRequest": {
         "description": "結帳請求。idempotency key 走 HTTP 標頭 Idempotency-Key，不在 body。\n\ntenders 省略 → service 預設單一 CASH 全額（向後相容）；提供時 Σ amount 必須等於\n伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。",
         "properties": {
+          "adjustments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleAdjustmentRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustments"
+          },
           "buyer_contact_id": {
             "anyOf": [
               {
@@ -7312,9 +7483,35 @@
             "title": "Discount Amount",
             "type": "string"
           },
+          "gift_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Note"
+          },
+          "gift_reason_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Reason Name"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind",
+            "default": "NORMAL"
           },
           "line_total": {
             "title": "Line Total",
@@ -7322,6 +7519,11 @@
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
+          },
+          "manual_discount_amount": {
+            "default": "0",
+            "title": "Manual Discount Amount",
+            "type": "string"
           },
           "menu_item_id": {
             "anyOf": [
@@ -7333,6 +7535,11 @@
               }
             ],
             "title": "Menu Item Id"
+          },
+          "net_amount": {
+            "default": "0",
+            "title": "Net Amount",
+            "type": "string"
           },
           "original_unit_price": {
             "anyOf": [
@@ -7407,12 +7614,23 @@
             "title": "Discount Amount",
             "type": "string"
           },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind"
+          },
           "line_total": {
             "title": "Line Total",
             "type": "string"
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
+          },
+          "manual_discount_amount": {
+            "title": "Manual Discount Amount",
+            "type": "string"
+          },
+          "net_amount": {
+            "title": "Net Amount",
+            "type": "string"
           },
           "original_unit_price": {
             "anyOf": [
@@ -7441,7 +7659,10 @@
           "unit_price",
           "line_total",
           "original_unit_price",
-          "discount_amount"
+          "discount_amount",
+          "line_kind",
+          "manual_discount_amount",
+          "net_amount"
         ],
         "title": "SaleQuoteLineRead",
         "type": "object"
@@ -7449,6 +7670,20 @@
       "SaleQuoteRequest": {
         "description": "結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。",
         "properties": {
+          "adjustments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SaleAdjustmentRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustments"
+          },
           "buyer_contact_id": {
             "anyOf": [
               {
@@ -7504,12 +7739,24 @@
             "title": "Food Subtotal",
             "type": "string"
           },
+          "gift_retail_value": {
+            "title": "Gift Retail Value",
+            "type": "string"
+          },
+          "item_discount_amount": {
+            "title": "Item Discount Amount",
+            "type": "string"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/SaleQuoteLineRead"
             },
             "title": "Lines",
             "type": "array"
+          },
+          "order_discount_amount": {
+            "title": "Order Discount Amount",
+            "type": "string"
           },
           "store_credit_max": {
             "title": "Store Credit Max",
@@ -7531,7 +7778,10 @@
           "lines",
           "food_subtotal",
           "store_credit_max",
-          "store_credit_min_spend"
+          "store_credit_min_spend",
+          "gift_retail_value",
+          "item_discount_amount",
+          "order_discount_amount"
         ],
         "title": "SaleQuoteResponse",
         "type": "object"
@@ -13607,6 +13857,36 @@
         ]
       }
     },
+    "/api/v1/discount-reasons": {
+      "get": {
+        "operationId": "listDiscountReasons",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReasonRead"
+                  },
+                  "title": "Response Listdiscountreasons",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Discount Reasons",
+        "tags": [
+          "sales"
+        ]
+      }
+    },
     "/api/v1/einvoice/queue": {
       "get": {
         "description": "上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。",
@@ -13884,6 +14164,36 @@
         "summary": "Issue Invoice For Sale",
         "tags": [
           "einvoice"
+        ]
+      }
+    },
+    "/api/v1/gift-reasons": {
+      "get": {
+        "operationId": "listGiftReasons",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReasonRead"
+                  },
+                  "title": "Response Listgiftreasons",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Gift Reasons",
+        "tags": [
+          "sales"
         ]
       }
     },

@@ -40,6 +40,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InsufficientStock,
     InsufficientStoreCredit,
+    InvalidDiscount,
     InvalidSaleTender,
     InvalidStateTransition,
     LinePayChargeFailed,
@@ -88,6 +89,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     MenuItemUnavailable: status.HTTP_409_CONFLICT,
     CrossStoreReference: status.HTTP_422_UNPROCESSABLE_CONTENT,
     SaleLineInvalid: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 折扣不合法與明細不合法同一性質：內容可讀但語意不成立 → 422（讓 POS 一致地顯示訊息）。
+    InvalidDiscount: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidSaleTender: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     EmptySale: status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -226,6 +229,7 @@ async def create_sale(
             cart_revision=payload.cart_revision,
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
+            adjustments=payload.to_adjustments(),
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
             linepay_client=_linepay_client(),
             linepay_attempt=linepay_attempt,
@@ -402,6 +406,7 @@ async def quote_sale(
             user.store_id,
             lines=payload.to_inputs(),
             buyer_contact_id=payload.buyer_contact_id,
+            adjustments=payload.to_adjustments(),
         )
     except DomainError as exc:
         raise HTTPException(status_code=_http_status_for(exc), detail=str(exc)) from exc
@@ -418,12 +423,18 @@ async def quote_sale(
                 line_total=ql.line_total,
                 original_unit_price=ql.original_unit_price,
                 discount_amount=ql.discount_amount,
+                line_kind=ql.line_kind,
+                manual_discount_amount=ql.manual_discount_amount,
+                net_amount=ql.net_amount,
             )
             for ql in quote.lines
         ],
         food_subtotal=quote.food_subtotal,
         store_credit_max=quote.store_credit_max,
         store_credit_min_spend=quote.store_credit_min_spend,
+        gift_retail_value=quote.gift_retail_value,
+        item_discount_amount=quote.item_discount_amount,
+        order_discount_amount=quote.order_discount_amount,
     )
 
 

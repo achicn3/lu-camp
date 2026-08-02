@@ -2020,6 +2020,14 @@ class SalesService:
             entity_id=str(sale.id),
         )
 
+    async def list_gift_reasons(self, store_id: int) -> list[GiftReason]:
+        """POS 贈品對話框的選單。只回啟用中的——停用的原因不再能被選用，但歷史單據仍留名稱快照。"""
+        return await self._repo.list_active_gift_reasons(store_id)
+
+    async def list_discount_reasons(self, store_id: int) -> list[DiscountReason]:
+        """POS 折扣對話框的選單。只回啟用中的，理由同 `list_gift_reasons`。"""
+        return await self._repo.list_active_discount_reasons(store_id)
+
     async def quote_sale(
         self,
         store_id: int,
