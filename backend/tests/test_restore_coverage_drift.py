@@ -27,19 +27,12 @@ _EXEMPT: dict[str, str] = {
     # 短效/可重建：還原後重新產生即可正常運作。
     "kiosk_pairing_codes": "配對碼短效一次性，過期即失效",
     "kiosk_device_sessions": "裝置連線階段，重新連線即重建",
-    # 由主體表涵蓋的附屬明細（主體對得上，明細就在同一份 dump 裡）。
+    # 由主體表涵蓋的附屬事件流（主體對得上，事件就在同一份 dump 裡）。
     "cart_session_events": "購物車事件流，主體由 cart_sessions 涵蓋",
     "pos_terminals": "配對狀態由 terminal_kiosk_pairings 與 kiosk_devices 涵蓋",
-    "purchase_order_lines": "採購明細，主體由 purchase_orders 與 goods_receipts 涵蓋",
-    "linepay_refund_attempts": "LINE Pay 退款嘗試，結果由 linepay_transactions 涵蓋",
+    # 可由既有資料重算，本身不是事實來源。
     "store_credit_suggestion_log": "購物金建議值的計算日誌，可由帳本重算",
-    "premium_rate_history": "溢價率異動史，現值在 settings，已涵蓋",
-    "agreement_versions": "切結書條款文本，隨程式碼版本重建",
-    # 主檔類：資料量小、變動少，且損毀會立刻在上面的功能檢查中顯現（品項查不到）。
-    "brands": "商品主檔附屬（品牌）",
-    "categories": "商品主檔附屬（分類）",
-    "category_pricing_rules": "分類定價規則",
-    "product_models": "商品型號主檔",
+    "category_pricing_rules": "分類定價規則；現行定價由 catalog_products 現值涵蓋",
 }
 
 

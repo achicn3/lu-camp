@@ -1,12 +1,15 @@
 """還原服務狀態機＋四驗（docs/31 §6）。外部程序以假 RestoreBackend/Verifier 替身;
 另以真 SqlRestoreVerifier 對測試庫實跑四驗，證明檢查會執行。"""
 
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.modules.backup import restore as restore_mod
 from app.modules.backup.models import RestoreRun
 from app.modules.backup.restore import (
     RestoreBackend,
@@ -317,10 +320,6 @@ async def test_one_broken_table_does_not_poison_the_other_verifications() -> Non
     `_check_tables` 失敗後又不 rollback，於是一張表缺損會讓其餘 14 張表與簽名／可用性檢查
     全部變成假的失敗——災難當下看到「全滅」卻找不到真因，正是最不該發生的事。
     """
-    from unittest.mock import patch
-
-    from app.modules.backup import restore as restore_mod
-
     base = get_settings().database_url
     target_db = make_url(base).database
     assert target_db is not None

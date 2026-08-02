@@ -52,6 +52,10 @@ def _replace_check(table: str, name: str, values: tuple[str, ...], column: str) 
     op.drop_constraint(name, table, type_="check")
     allowed = ", ".join(f"'{v}'" for v in values)
     op.create_check_constraint(name, table, sa.text(f"{column} IN ({allowed})"))
+    # 還原 deferred 模式：SET CONSTRAINTS 的效力及於整個交易，而 alembic 預設把整條鏈包在
+    # 同一個交易裡——不還原的話，後續每一支 migration 都會靜默失去延遲約束的保護。
+    # （全庫的 deferrable 約束皆為 INITIALLY DEFERRED，故 ALL DEFERRED 正好還原原狀。）
+    op.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
 
 
 def upgrade() -> None:

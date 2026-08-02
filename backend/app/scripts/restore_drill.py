@@ -4,7 +4,7 @@
   1) 對來源庫（預設 lucamp_sim）跑一次真備份（pg_dump→AES→R2，走 app 的 SubprocessR2Backend）。
   2) 下載→解密→還原到 throwaway 庫（走 app 的 SubprocessR2RestoreBackend）。
   3) 對「來源庫 vs 還原庫」逐功能執行同一批查詢（交易/現金/會員PII/庫存/簽署/購物金/盤點/
-     寄售/採購/發票/報表/稽核），**每個功能的結果都必須一致**才算通過。
+     寄售/採購/發票/稽核），**每個功能的結果都必須一致**才算通過。
   4) 印出逐功能 before/after 對照表；全部一致 exit 0，否則 exit 1。
 
 不改任何正式資料；throwaway 庫用畢即刪。需 .env（金鑰）＋ .env.r2（R2/口令）＋ docker。
@@ -63,10 +63,20 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("收購-單數", "SELECT count(*) FROM acquisitions"),
     ("收購-付現合計", "SELECT COALESCE(SUM(total_cash_paid),0) FROM acquisitions"),
     ("收購-作廢筆數", "SELECT count(*) FROM acquisitions WHERE voided_at IS NOT NULL"),
+    ("庫存-品牌數", "SELECT count(*) FROM brands"),
+    ("庫存-分類數", "SELECT count(*) FROM categories"),
+    ("庫存-型號數", "SELECT count(*) FROM product_models"),
     ("庫存-序號品數", "SELECT count(*) FROM serialized_items"),
     ("庫存-一般商品現量合計", "SELECT COALESCE(SUM(quantity_on_hand),0) FROM catalog_products"),
     ("庫存-異動筆數", "SELECT count(*) FROM stock_movements"),
     ("庫存-散裝餘量合計", "SELECT COALESCE(SUM(remaining_qty),0) FROM bulk_lots"),
+    # 切結書條款全文：不可變、舊簽名永遠指向舊版全文，程式碼重跑 seeder 只會有當前版 → 救不回來。
+    ("簽署-條款版本數", "SELECT count(*) FROM agreement_versions"),
+    (
+        "簽署-條款全文雜湊",
+        "SELECT md5(COALESCE(string_agg(version || ':' || md5(body), ',' ORDER BY id),''))"
+        " FROM agreement_versions",
+    ),
     ("簽署-任務數", "SELECT count(*) FROM signature_tasks"),
     ("簽署-事件鏈筆數", "SELECT count(*) FROM signature_task_events"),
     (
@@ -79,6 +89,7 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT md5(COALESCE(string_agg(md5(signature_image), ',' ORDER BY id),''))"
         " FROM signature_tasks WHERE signature_image IS NOT NULL",
     ),
+    ("設定-溢價率異動史筆數", "SELECT count(*) FROM premium_rate_history"),
     ("購物金-帳戶數", "SELECT count(*) FROM store_credit_accounts"),
     (
         "購物金-各會員餘額雜湊",
@@ -92,10 +103,18 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("寄售-結算數", "SELECT count(*) FROM consignment_settlements"),
     ("採購-單數", "SELECT count(*) FROM purchase_orders"),
     ("採購-收貨數", "SELECT count(*) FROM goods_receipts"),
+    ("採購-明細筆數", "SELECT count(*) FROM purchase_order_lines"),
     ("採購-供應商數", "SELECT count(*) FROM suppliers"),
     ("活動-檔數", "SELECT count(*) FROM campaigns"),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
     ("LINE Pay-交易筆數", "SELECT count(*) FROM linepay_transactions"),
+    # 防重複退款的唯一依據：崩潰/回應遺失後靠它判斷「這筆是否已退過」，弄丟＝可能多退真的錢。
+    ("LINE Pay-退款嘗試筆數", "SELECT count(*) FROM linepay_refund_attempts"),
+    (
+        "LINE Pay-退款嘗試狀態雜湊",
+        "SELECT md5(COALESCE(string_agg(refund_key || ':' || status, ',' ORDER BY id),''))"
+        " FROM linepay_refund_attempts",
+    ),
     ("發票-筆數", "SELECT count(*) FROM invoices"),
     ("發票-折讓數", "SELECT count(*) FROM invoice_allowances"),
     (
