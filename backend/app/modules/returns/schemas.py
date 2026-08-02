@@ -26,6 +26,8 @@ class ReturnCreateRequest(BaseModel):
     invoice_recalled: bool = False
     # 買受人同意（作業要點第 9 點）：折讓與作廢皆須客人於顧客螢幕簽名，帶已簽任務 id。
     consent_signature_task_id: int | None = None
+    # 贈品不一併收回時的原因（本單有未退贈品且退了主商品時必填；系統不自行假設）。
+    unreturned_gift_note: str | None = Field(default=None, max_length=500)
 
 
 class ReturnPreviewRequest(BaseModel):
@@ -38,6 +40,15 @@ class ReturnPreviewRequest(BaseModel):
     lines: list[ReturnLineRequest] = Field(min_length=1)
 
 
+class UnreturnedGiftRead(BaseModel):
+    """本單尚未退回的贈品。退主商品卻不收回贈品，店員必須明確說明原因。"""
+
+    sale_line_id: int
+    description: str
+    qty: int
+    retail_value: NTDAmount
+
+
 class ReturnPreviewRead(BaseModel):
     """預覽結果。**僅供畫面提示**，送出時後端會以當下狀態重新判斷一次（條件可能已變）。"""
 
@@ -46,6 +57,9 @@ class ReturnPreviewRead(BaseModel):
     requires_paper_recall: bool
     requires_customer_consent: bool
     reason: str
+    # 本次退款金額（與實際送出同一套差額法）：畫面不必自己算，也不會算錯。
+    refund_total: NTDAmount
+    unreturned_gifts: list[UnreturnedGiftRead] = []
 
 
 class ReturnLineRead(BaseModel):

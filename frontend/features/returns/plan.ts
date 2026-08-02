@@ -21,14 +21,36 @@ export function remainingQty(line: SaleLine): number {
   return Math.max(0, line.qty - (line.returned_qty ?? 0));
 }
 
-/** 預估退款額 = Σ 折後單價 × 退貨數（與後端 refund_amount 同式）。 */
+/** 退到第 x 件時客人累計應拿回的金額（與後端 refund_entitlement 同式）。 */
+function refundEntitlement(line: SaleLine, returnedQty: number): number {
+  const net = Number(line.net_amount);
+  if (returnedQty >= line.qty) return net; // 全退恰好等於原實付，不經四捨五入
+  return Math.round((net * returnedQty) / line.qty);
+}
+
+/** 預估退款額（差額法，與後端 refund_amount 同式）。
+ *
+ * 認**實付**（net_amount）不是單價：臨時折扣落在實付上，用單價會退多。
+ * 差額法讓分次退貨的加總恰好等於原實付；每次各自四捨五入則會差幾元。
+ * 這只是送出前的預估——實際金額以後端預覽／回應為準。
+ */
 export function computeRefund(lines: SaleLine[], qtys: Record<number, number>): number {
   let total = 0;
   for (const line of lines) {
     const qty = qtys[line.id] ?? 0;
-    if (qty > 0) total += Number(line.unit_price) * qty;
+    if (qty <= 0) continue;
+    const already = line.returned_qty ?? 0;
+    total += refundEntitlement(line, already + qty) - refundEntitlement(line, already);
   }
   return total;
+}
+
+/** 這張單先前已退的累計金額（退款渠道拆帳的基準）。 */
+export function computePreviousRefund(lines: SaleLine[]): number {
+  return lines.reduce(
+    (sum, line) => sum + refundEntitlement(line, line.returned_qty ?? 0),
+    0,
+  );
 }
 
 /** 送出前防呆（後端仍是最終防線）：回錯誤訊息或 null。 */

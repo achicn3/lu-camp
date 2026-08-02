@@ -217,6 +217,31 @@ try {
     after.quantity_on_hand === beforeB - 1,
     `${beforeB} → ${after.quantity_on_hand}`,
   );
+
+  // 7) 退貨：只退主商品時，畫面必須擋下並要求說明贈品為何不收回
+  await page.goto(`${BASE}/sales`, { waitUntil: "networkidle" });
+  await page.locator("table tbody tr").first().locator('button:has-text("退貨")').click();
+  const dialog = page.locator('[role="dialog"]');
+  await dialog.waitFor({ state: "visible" });
+  // 只退主商品（第一列），贈品不退
+  await dialog.locator(".return-qty-input").first().fill("1");
+  await dialog.locator('input[type="text"]').first().fill("尺寸不合");
+  const giftNotice = dialog.locator(".return-gift-notice");
+  await giftNotice.waitFor({ state: "visible", timeout: 15_000 });
+  ok("退主商品未退贈品：畫面提示並要求說明", true, await giftNotice.innerText());
+  const submitButton = dialog.locator('button:has-text("確認退貨")');
+  ok("未填說明時不得送出", await submitButton.isDisabled());
+  await page.screenshot({ path: `${SHOTS}/08-return-gift-notice.png`, fullPage: true });
+
+  // 8) 填了說明就能送出，且退款只退實付（不是牌價）
+  await dialog.locator('input[aria-label="贈品不收回的原因"]').fill("已拆封無法回售");
+  await submitButton.waitFor({ state: "visible" });
+  ok("填了說明後可送出", !(await submitButton.isDisabled()));
+  const refundLabel = await submitButton.textContent();
+  await submitButton.click();
+  await page.waitForSelector("text=退貨完成", { timeout: 20_000 });
+  ok("退貨完成（退款依實付）", true, String(refundLabel).trim());
+  await page.screenshot({ path: `${SHOTS}/09-return-done.png`, fullPage: true });
 } catch (error) {
   ok("煙霧測試", false, String(error));
 } finally {

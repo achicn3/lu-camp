@@ -222,6 +222,8 @@ describe("/sales 交易紀錄頁", () => {
           requires_paper_recall: false,
           requires_customer_consent: false,
           reason: "原交易沒有已開立的發票，本次退貨不涉及發票處置。",
+          refund_total: "200",
+          unreturned_gifts: [],
         });
       }
       if (url.includes("/api/v1/returns") && method === "POST") {
@@ -256,6 +258,9 @@ describe("/sales 交易紀錄頁", () => {
               returned_qty: 1,
               unit_price: "200",
               line_total: "400",
+              net_amount: "400",
+              manual_discount_amount: "0",
+              line_kind: "NORMAL",
             },
           ],
           tenders: [
@@ -309,6 +314,9 @@ describe("/sales 交易紀錄頁", () => {
               returned_qty: 0,
               unit_price: "800",
               line_total: "800",
+              net_amount: "800",
+              manual_discount_amount: "0",
+              line_kind: "NORMAL",
             },
             {
               id: 72,
@@ -318,6 +326,9 @@ describe("/sales 交易紀錄頁", () => {
               returned_qty: 0,
               unit_price: "200",
               line_total: "200",
+              net_amount: "200",
+              manual_discount_amount: "0",
+              line_kind: "NORMAL",
             },
           ],
           tenders: [

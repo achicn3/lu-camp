@@ -19,6 +19,10 @@ function line(overrides: Partial<SaleLine>): SaleLine {
     unit_price: "100",
     line_total: "300",
     discount_amount: "0",
+    // 退款認實付：net_amount 才是差額法的基礎（line_total 是活動折後的牌價小計）。
+    net_amount: "300",
+    manual_discount_amount: "0",
+    line_kind: "NORMAL",
     catalog_product_id: 1,
     serialized_item_id: null,
     bulk_lot_id: null,
@@ -35,10 +39,25 @@ describe("returns plan", () => {
     }
   });
 
-  it("退款預估＝折後單價×數量（多行加總）", () => {
-    const lines = [line({ id: 1, unit_price: "100" }), line({ id: 2, unit_price: "250", qty: 2 })];
-    expect(computeRefund(lines, { 1: 2, 2: 1 })).toBe(450);
+  it("退款預估認實付、按比例分攤（差額法）", () => {
+    // 認 net_amount 不是單價：臨時折扣落在實付上，用單價會退多。
+    const lines = [
+      line({ id: 1, qty: 3, unit_price: "100", net_amount: "300" }),
+      line({ id: 2, qty: 2, unit_price: "250", net_amount: "500" }),
+    ];
+    expect(computeRefund(lines, { 1: 2, 2: 1 })).toBe(450); // 200 + 250
     expect(computeRefund(lines, {})).toBe(0);
+  });
+
+  it("打折後分次退，加總恰好等於原實付", () => {
+    // 500 除以 3 除不盡：每次各自四捨五入會與原實付差幾元，差額法不會。
+    const discounted = line({ id: 1, qty: 3, unit_price: "200", net_amount: "500" });
+    const first = computeRefund([discounted], { 1: 1 });
+    const afterOne = { ...discounted, returned_qty: 1 };
+    const second = computeRefund([afterOne], { 1: 1 });
+    const afterTwo = { ...discounted, returned_qty: 2 };
+    const third = computeRefund([afterTwo], { 1: 1 });
+    expect(first + second + third).toBe(500);
   });
 
   it("可退餘量＝購買數−已退數", () => {

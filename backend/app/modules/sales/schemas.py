@@ -385,7 +385,12 @@ class SaleRead(BaseModel):
     lines: list[SaleLineRead] = []
     tenders: list[SaleTenderRead] = []
     # 本單活動折讓總額（docs/21）＝Σ 各行 discount_amount；供明細聯/收據顯示。
+    # **只含活動折扣**——臨時折扣與贈品價值另計，混在一起會讓活動報表與收據互相打架。
     total_discount: NTDAmount = Decimal(0)
+    # 本單臨時折扣總額＝Σ 各行 manual_discount_amount。
+    total_manual_discount: NTDAmount = Decimal(0)
+    # 本單贈品原價價值＝Σ 贈品行 original_unit_price × qty；僅供顯示，不計入應付也不算折扣。
+    gift_retail_value: NTDAmount = Decimal(0)
 
     @classmethod
     def build(
@@ -403,11 +408,24 @@ class SaleRead(BaseModel):
             for line in lines
         ]
         total_discount = sum((line.discount_amount for line in line_reads), Decimal(0))
+        total_manual_discount = sum(
+            (line.manual_discount_amount for line in line_reads), Decimal(0)
+        )
+        gift_retail_value = sum(
+            (
+                (line.original_unit_price or Decimal(0)) * line.qty
+                for line in line_reads
+                if line.line_kind is SaleLineKind.GIFT
+            ),
+            Decimal(0),
+        )
         return data.model_copy(
             update={
                 "lines": line_reads,
                 "tenders": [SaleTenderRead.model_validate(t) for t in (tenders or [])],
                 "total_discount": total_discount,
+                "total_manual_discount": total_manual_discount,
+                "gift_retail_value": gift_retail_value,
             }
         )
 

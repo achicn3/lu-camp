@@ -78,6 +78,7 @@ async def create_return(
             taiwan_pay_refund_confirmed=payload.taiwan_pay_refund_confirmed,
             invoice_recalled=payload.invoice_recalled,
             consent_signature_task_id=payload.consent_signature_task_id,
+            unreturned_gift_note=payload.unreturned_gift_note,
         )
     except IntegrityError as exc:
         await session.rollback()

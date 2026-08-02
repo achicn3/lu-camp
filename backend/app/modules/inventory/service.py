@@ -832,8 +832,9 @@ class InventoryService:
         *,
         ref_type: str,
         ref_id: int,
+        reason: StockReason = StockReason.RETURN,
     ) -> None:
-        """銷售退貨回補序號品：SOLD → IN_STOCK，清 sold_date，寫 RETURN 入庫帳。"""
+        """銷售退貨回補序號品：SOLD → IN_STOCK，清 sold_date，寫入庫帳（贈品走 GIFT_RETURN）。"""
         ok = await self._repo.return_serialized_to_stock(store_id, item_id)
         if not ok:
             raise InvalidStateTransition(f"序號品 {item_id} 非 SOLD，無法退貨回庫")
@@ -841,7 +842,7 @@ class InventoryService:
             store_id,
             ItemKind.SERIALIZED,
             qty=1,
-            reason=StockReason.RETURN,
+            reason=reason,
             ref_type=ref_type,
             ref_id=ref_id,
             serialized_item_id=item_id,
@@ -986,8 +987,9 @@ class InventoryService:
         *,
         ref_type: str,
         ref_id: int,
+        reason: StockReason = StockReason.RETURN,
     ) -> None:
-        """銷售退貨回補散裝批：加回 remaining_qty，必要時 SOLD_OUT → ON_SALE，寫 RETURN 入庫帳。"""
+        """銷售退貨回補散裝批：加回 remaining_qty，必要時 SOLD_OUT → ON_SALE，寫入庫帳。"""
         if qty <= 0:
             raise InsufficientStock("退貨數量必須 > 0")
         ok = await self._repo.increment_bulk_lot(store_id, lot_id, qty)
@@ -997,7 +999,7 @@ class InventoryService:
             store_id,
             ItemKind.BULK_LOT,
             qty=qty,
-            reason=StockReason.RETURN,
+            reason=reason,
             ref_type=ref_type,
             ref_id=ref_id,
             bulk_lot_id=lot_id,
@@ -1052,8 +1054,12 @@ class InventoryService:
         *,
         ref_type: str,
         ref_id: int,
+        reason: StockReason = StockReason.RETURN,
     ) -> None:
-        """銷售退貨回補一般商品：加回現量並寫 RETURN stock_movement（同一交易）。"""
+        """銷售退貨回補一般商品：加回現量並寫 stock_movement（同一交易）。
+
+        `reason` 讓贈品退回走 `GIFT_RETURN`——與一般退貨分開，贈品報表才算得出退回幾件。
+        """
         if qty <= 0:
             raise OwnershipValidationError("退貨數量必須 > 0")
         ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
@@ -1063,7 +1069,7 @@ class InventoryService:
             store_id,
             ItemKind.CATALOG,
             qty=qty,
-            reason=StockReason.RETURN,
+            reason=reason,
             ref_type=ref_type,
             ref_id=ref_id,
             catalog_product_id=catalog_id,

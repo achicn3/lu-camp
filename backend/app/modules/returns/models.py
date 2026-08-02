@@ -48,7 +48,8 @@ class CustomerReturn(Base, TimestampMixin):
             ["sales.id", "sales.store_id"],
             name="fk_returns_sale_store",
         ),
-        CheckConstraint("refund_amount > 0", name="ck_returns_refund_amount_positive"),
+        # 退款金額可為 0：純贈品退貨要回補庫存，但沒有錢可退（負數仍然不合法）。
+        CheckConstraint("refund_amount >= 0", name="ck_returns_refund_amount_positive"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

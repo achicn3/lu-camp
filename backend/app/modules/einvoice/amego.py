@@ -24,7 +24,7 @@ import httpx
 from app.core.money import round_ntd
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
-from app.shared.enums import InvoiceType
+from app.shared.enums import InvoiceType, SaleLineKind
 from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError
 
 # MIG 課稅別（doc：1 應稅／2 零稅率／3 免稅）。本店僅應稅品項。
@@ -72,23 +72,28 @@ def build_f0401_data(
     以活 settings 稅率重算（結帳後改稅率會讓申報與本地帳不一致，Codex 第九輪）。
     TaxRate 同用發票的 tax_rate 快照。Σ小計必須等於發票總額，不等即程式錯誤拒送。
     """
-    if not lines:
+    # 贈品行排除於發票品項之外：它實收 0，排除後 Σ 仍等於發票總額，
+    # 且不必假設平台接受 0 元品項行（本 repo 對此無任何佐證）。
+    billable = [line for line in lines if line.line_kind is not SaleLineKind.GIFT]
+    if not billable:
         raise ValueError("發票沒有品項行，不可送開立")
     line_sum = Decimal(0)
     items: list[dict[str, object]] = []
-    for line in lines:
-        if line.qty <= 0 or line.line_total < 0:
-            raise ValueError(f"品項行不合法（qty={line.qty}, line_total={line.line_total}）")
-        line_sum += Decimal(line.line_total)
+    for line in billable:
+        # 品項金額認**實付**（net_amount）：Σ net_amount == sale.total == invoice.total。
+        # line_total 只是活動折後的牌價小計，臨時折扣不在其中。
+        if line.qty <= 0 or line.net_amount < 0:
+            raise ValueError(f"品項行不合法（qty={line.qty}, net_amount={line.net_amount}）")
+        line_sum += Decimal(line.net_amount)
         # Amount（實收小計）為權威；折扣行的 UnitPrice 以小計÷數量表示（兩者一致，
         # 避免平台以 Quantity×UnitPrice 驗算時對不上）。
-        effective_unit = Decimal(line.line_total) / Decimal(line.qty)
+        effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
         items.append(
             {
                 "Description": line.description[:_DESCRIPTION_MAX],
                 "Quantity": line.qty,
                 "UnitPrice": _decimal_str(effective_unit),
-                "Amount": _decimal_str(Decimal(line.line_total)),
+                "Amount": _decimal_str(Decimal(line.net_amount)),
                 "TaxType": _TAX_TYPE_TAXABLE,
             }
         )

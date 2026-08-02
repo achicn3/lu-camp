@@ -6903,6 +6903,18 @@
             "default": false,
             "title": "Taiwan Pay Refund Confirmed",
             "type": "boolean"
+          },
+          "unreturned_gift_note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unreturned Gift Note"
           }
         },
         "required": [
@@ -6975,6 +6987,10 @@
             "title": "Reason",
             "type": "string"
           },
+          "refund_total": {
+            "title": "Refund Total",
+            "type": "string"
+          },
           "requires_customer_consent": {
             "title": "Requires Customer Consent",
             "type": "boolean"
@@ -6982,6 +6998,14 @@
           "requires_paper_recall": {
             "title": "Requires Paper Recall",
             "type": "boolean"
+          },
+          "unreturned_gifts": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UnreturnedGiftRead"
+            },
+            "title": "Unreturned Gifts",
+            "type": "array"
           }
         },
         "required": [
@@ -6989,7 +7013,8 @@
           "invoice_action",
           "requires_paper_recall",
           "requires_customer_consent",
-          "reason"
+          "reason",
+          "refund_total"
         ],
         "title": "ReturnPreviewRead",
         "type": "object"
@@ -7809,6 +7834,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "gift_retail_value": {
+            "default": "0",
+            "title": "Gift Retail Value",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -7857,6 +7887,11 @@
           "total_discount": {
             "default": "0",
             "title": "Total Discount",
+            "type": "string"
+          },
+          "total_manual_discount": {
+            "default": "0",
+            "title": "Total Manual Discount",
             "type": "string"
           }
         },
@@ -10167,6 +10202,35 @@
           "rows"
         ],
         "title": "TrendsReport",
+        "type": "object"
+      },
+      "UnreturnedGiftRead": {
+        "description": "本單尚未退回的贈品。退主商品卻不收回贈品，店員必須明確說明原因。",
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "retail_value": {
+            "title": "Retail Value",
+            "type": "string"
+          },
+          "sale_line_id": {
+            "title": "Sale Line Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sale_line_id",
+          "description",
+          "qty",
+          "retail_value"
+        ],
+        "title": "UnreturnedGiftRead",
         "type": "object"
       },
       "UploadStatus": {

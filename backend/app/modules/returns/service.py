@@ -22,6 +22,7 @@ from app.modules.returns.invoice_policy import (
     decide,
 )
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
+from app.modules.returns.refund import line_refund_amount, refund_entitlement
 from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
 from app.modules.sales.linepay import LinePayClient
 from app.modules.sales.models import SaleLine, SaleTender
@@ -35,8 +36,10 @@ from app.shared.enums import (
     InvoiceVoidReason,
     PaymentMethod,
     SaleInvoiceStatus,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
+    StockReason,
     TenderType,
 )
 from app.shared.exceptions import (
@@ -132,12 +135,39 @@ class ReturnsService:
         decision = await self._decide_invoice_action(
             store_id, sale_id, is_full_return=is_full_return
         )
+        # 本次退款金額（與實際送出同一套差額法算出），讓畫面不必自己算、也不會算錯。
+        refund_total = sum(
+            (
+                line_refund_amount(
+                    lines_by_id[sale_line_id].net_amount,
+                    lines_by_id[sale_line_id].qty,
+                    previous.get(sale_line_id, 0),
+                    qty,
+                )
+                for sale_line_id, qty in requested.items()
+            ),
+            Decimal(0),
+        )
         return {
             "is_full_return": is_full_return,
             "invoice_action": decision.action.value,
             "requires_paper_recall": decision.requires_paper_recall,
             "requires_customer_consent": decision.requires_customer_consent,
             "reason": decision.reason,
+            "refund_total": refund_total,
+            # 本單還沒退回的贈品：主商品退了、贈品沒退時，店員必須明確決定要不要收回。
+            # 只給名稱／數量／原價價值——成本是內部數字，不是店員做這個決定需要的資訊。
+            "unreturned_gifts": [
+                {
+                    "sale_line_id": line.id,
+                    "description": line.description,
+                    "qty": line.qty - after.get(line.id, 0),
+                    "retail_value": (line.original_unit_price or Decimal(0))
+                    * (line.qty - after.get(line.id, 0)),
+                }
+                for line in sale_lines
+                if line.line_kind is SaleLineKind.GIFT and after.get(line.id, 0) < line.qty
+            ],
         }
 
     async def _decide_invoice_action(
@@ -266,6 +296,7 @@ class ReturnsService:
         taiwan_pay_refund_confirmed: bool = False,
         invoice_recalled: bool = False,
         consent_signature_task_id: int | None = None,
+        unreturned_gift_note: str | None = None,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
@@ -317,7 +348,9 @@ class ReturnsService:
                 raise ReturnLineInvalid(
                     f"銷售明細 {sale_line_id} 可退數量不足（已退 {already_returned}）"
                 )
-            line_refund = line.unit_price * qty
+            # 退款認**實付**（net_amount）並用差額法：line_total 是活動折後的牌價小計，
+            # 臨時折扣另計；每次各自四捨五入會讓分次退貨的加總對不平原實付。
+            line_refund = line_refund_amount(line.net_amount, line.qty, already_returned, qty)
             refund_amount += line_refund
             selected.append((line, qty, line_refund))
 
@@ -355,15 +388,45 @@ class ReturnsService:
                 refund_total=refund_amount,
             )
 
+        # 主商品退了、贈品沒退：系統**不自行假設**。店員必須明確說明為什麼贈品不收回，
+        # 並留下稽核——這是事後唯一能追的東西（無主管核准機制）。
+        unreturned_gifts = [
+            line
+            for line in sale_lines
+            if line.line_kind is SaleLineKind.GIFT
+            and previous.get(line.id, 0) + requested.get(line.id, 0) < line.qty
+        ]
+        returning_non_gift = any(
+            lines_by_id[sale_line_id].line_kind is not SaleLineKind.GIFT
+            for sale_line_id in requested
+        )
+        clean_gift_note = (unreturned_gift_note or "").strip()
+        if unreturned_gifts and returning_non_gift and clean_gift_note == "":
+            names = "、".join(f"{line.description} × {line.qty}" for line in unreturned_gifts)
+            raise ReturnConflict(
+                f"本單有贈品未一併退回（{names}）：請一併勾選退回，"
+                "或說明不收回的原因後再送出。"
+            )
+
         sale_tenders = await self._sales.list_tenders(sale.id)
         previous_refund = sum(
-            (line.unit_price * previous.get(line.id, 0) for line in sale_lines), Decimal(0)
+            (
+                refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
+                for line in sale_lines
+            ),
+            Decimal(0),
         )
-        refund_allocations = self._refund_allocations(
-            sale.payment_method,
-            sale_tenders,
-            previous_refund=previous_refund,
-            refund_amount=refund_amount,
+        # 純贈品退貨（實付 0）沒有錢可退：不產生任何退款渠道明細。
+        # deferred 對平守衛看的是加總，0 == 0 仍成立。
+        refund_allocations = (
+            self._refund_allocations(
+                sale.payment_method,
+                sale_tenders,
+                previous_refund=previous_refund,
+                refund_amount=refund_amount,
+            )
+            if refund_amount > 0
+            else []
         )
         if any(kind == TenderType.TAIWAN_PAY for kind, _ in refund_allocations):
             if not taiwan_pay_refund_confirmed:
@@ -478,14 +541,16 @@ class ReturnsService:
         #   本次沖點 = entitlement(含本次) − entitlement(本次前)
         # 全退時 entitlement=awarded、逐次差額加總=awarded，餐飲混單也不會少沖。
         # 點數可能已被會員用掉 → clamp 至現有餘額、不阻擋退貨（退款本身必須成立）。
+        # 分母認**實付**（net_amount）：點數當初就是按實付（total = Σ net_amount）發的。
+        # 用 line_total 會讓打過折的單沖回比例偏低（分母偏大），少沖給客人。
         non_menu_subtotal = sum(
-            (line.line_total for line in sale_lines if line.line_type != SaleLineType.MENU),
+            (line.net_amount for line in sale_lines if line.line_type != SaleLineType.MENU),
             Decimal(0),
         )
         if sale.buyer_contact_id is not None and sale.awarded_points > 0 and non_menu_subtotal > 0:
             prior_refund = sum(
                 (
-                    previous.get(line.id, 0) * line.unit_price
+                    refund_entitlement(line.net_amount, line.qty, previous.get(line.id, 0))
                     for line in sale_lines
                     if line.line_type != SaleLineType.MENU
                 ),
@@ -571,6 +636,16 @@ class ReturnsService:
                 "invoice_action": invoice_decision.action.value,
                 "invoice_recalled": invoice_recalled,
                 "consent_signature_task_id": consent_signature_task_id,
+                # 贈品沒收回時，記下是哪些、店員說了什麼——事後唯一追得到的線索。
+                "unreturned_gifts": [
+                    {
+                        "sale_line_id": line.id,
+                        "description": line.description,
+                        "qty": line.qty - previous.get(line.id, 0) - requested.get(line.id, 0),
+                    }
+                    for line in unreturned_gifts
+                ],
+                "unreturned_gift_note": clean_gift_note or None,
             },
         )
         await self._session.flush()
@@ -691,6 +766,12 @@ class ReturnsService:
     async def _return_inventory_line(
         self, store_id: int, return_id: int, line: SaleLine, qty: int
     ) -> None:
+        # 贈品退回要能與一般退貨分辨，否則贈品報表算不出「送出去又退回來」幾件。
+        reason = (
+            StockReason.GIFT_RETURN
+            if line.line_kind is SaleLineKind.GIFT
+            else StockReason.RETURN
+        )
         if line.line_type == SaleLineType.CATALOG:
             assert line.catalog_product_id is not None
             await self._inventory.return_catalog_items(
@@ -699,6 +780,7 @@ class ReturnsService:
                 qty,
                 ref_type="return",
                 ref_id=return_id,
+                reason=reason,
             )
         elif line.line_type == SaleLineType.SERIALIZED:
             assert line.serialized_item_id is not None
@@ -709,6 +791,7 @@ class ReturnsService:
                 line.serialized_item_id,
                 ref_type="return",
                 ref_id=return_id,
+                reason=reason,
             )
         else:
             assert line.bulk_lot_id is not None
@@ -718,4 +801,5 @@ class ReturnsService:
                 qty,
                 ref_type="return",
                 ref_id=return_id,
+                reason=reason,
             )

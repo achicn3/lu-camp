@@ -13,6 +13,8 @@ function preview(overrides: Partial<ReturnInvoicePreview> = {}): ReturnInvoicePr
     requires_paper_recall: true,
     requires_customer_consent: true,
     reason: "整筆退貨且原發票為本月開立：作廢原發票。需先向客人收回紙本證明聯。",
+    refund_total: "500",
+    unreturned_gifts: [],
     ...overrides,
   };
 }

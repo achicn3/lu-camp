@@ -5012,6 +5012,8 @@ export interface components {
              * @default false
              */
             taiwan_pay_refund_confirmed: boolean;
+            /** Unreturned Gift Note */
+            unreturned_gift_note?: string | null;
         };
         /** ReturnLineRead */
         ReturnLineRead: {
@@ -5042,10 +5044,17 @@ export interface components {
             is_full_return: boolean;
             /** Reason */
             reason: string;
+            /** Refund Total */
+            refund_total: string;
             /** Requires Customer Consent */
             requires_customer_consent: boolean;
             /** Requires Paper Recall */
             requires_paper_recall: boolean;
+            /**
+             * Unreturned Gifts
+             * @default []
+             */
+            unreturned_gifts: components["schemas"]["UnreturnedGiftRead"][];
         };
         /**
          * ReturnPreviewRequest
@@ -5343,6 +5352,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Gift Retail Value
+             * @default 0
+             */
+            gift_retail_value: string;
             /** Id */
             id: number;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
@@ -5371,6 +5385,11 @@ export interface components {
              * @default 0
              */
             total_discount: string;
+            /**
+             * Total Manual Discount
+             * @default 0
+             */
+            total_manual_discount: string;
         };
         /**
          * SaleStatus
@@ -6144,6 +6163,20 @@ export interface components {
             rows: components["schemas"]["TrendRow"][];
             /** Store Id */
             store_id: number;
+        };
+        /**
+         * UnreturnedGiftRead
+         * @description 本單尚未退回的贈品。退主商品卻不收回贈品，店員必須明確說明原因。
+         */
+        UnreturnedGiftRead: {
+            /** Description */
+            description: string;
+            /** Qty */
+            qty: number;
+            /** Retail Value */
+            retail_value: string;
+            /** Sale Line Id */
+            sale_line_id: number;
         };
         /**
          * UploadStatus

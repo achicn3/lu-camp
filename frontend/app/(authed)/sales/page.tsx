@@ -23,6 +23,7 @@ import {
   getOrCreatePersistedIdemKey,
 } from "@/lib/idempotency";
 import {
+  computePreviousRefund,
   computeRefund,
   isReturnable,
   remainingQty,
@@ -210,6 +211,8 @@ function ReturnDialog({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [taiwanPayRefundConfirmed, setTaiwanPayRefundConfirmed] = useState(false);
+  // 贈品不一併收回時的說明（有未退贈品且退了主商品時必填；後端亦擋，雙重防線）。
+  const [unreturnedGiftNote, setUnreturnedGiftNote] = useState("");
   // 發票處置（作廢／折讓）的兩道前置：收回紙本證明聯、買受人簽名同意。兩者都綁定當下的
   // 退貨計畫——改了要退什麼，先前的確認/同意即失效（以計畫指紋比對，不另用 effect 清狀態）。
   const [paperRecalledPlanKey, setPaperRecalledPlanKey] = useState<string | null>(null);
@@ -236,22 +239,15 @@ function ReturnDialog({
   const lines = detail.data?.lines ?? [];
   // 只列還有可退餘量的行（全退的不再出現，避免可選卻被後端 409）
   const returnable = lines.filter((l) => isReturnable(l) && remainingQty(l) > 0);
-  const refund = computeRefund(lines, qtys);
+  // 預估值（送出前先顯示）；後端預覽回來後一律改用它的 refund_total——金額只有一個權威來源。
+  const estimatedRefund = computeRefund(lines, qtys);
   const tenders = detail.data?.tenders ?? [];
   const tenderTypes = new Set(tenders.map((tender) => tender.tender_type));
   const refundPolicy = tenderTypes.has("STORE_CREDIT")
     ? "退款會先回補購物金，再退回原本的現金、LINE Pay 或台灣Pay；"
     : "退款會退回原付款方式；";
-  const previousRefund = lines.reduce(
-    (sum, line) =>
-      sum + (parseNtd(line.unit_price) ?? 0) * (line.returned_qty ?? 0),
-    0,
-  );
-  const predictedRefund = refundPlan(tenders, previousRefund, refund);
+  const previousRefund = computePreviousRefund(lines);
   const refundSupported = detail.isSuccess && supportsRefund(tenders);
-  const hasTaiwanPayRefund = predictedRefund.some(
-    (leg) => leg.tender_type === "TAIWAN_PAY",
-  );
 
   // 本次要退的明細（送預覽、建同意任務、送出退貨三處同一份，避免三邊不一致）。
   const returnLines = Object.entries(qtys)
@@ -274,6 +270,21 @@ function ReturnDialog({
     },
   });
   const previewData = returnLines.length > 0 ? (preview.data ?? null) : null;
+  // 退款金額的權威來源是後端預覽；預覽尚未回來時先顯示本機預估（送出仍以後端為準）。
+  const refund =
+    previewData !== null
+      ? (parseNtd(previewData.refund_total) ?? estimatedRefund)
+      : estimatedRefund;
+  // 本單還沒收回的贈品：退了主商品卻不收回贈品，店員必須明確說明原因（系統不自行假設）。
+  const unreturnedGifts = previewData?.unreturned_gifts ?? [];
+  const returningNonGift = lines.some(
+    (line) => (qtys[line.id] ?? 0) > 0 && line.line_kind !== "GIFT",
+  );
+  const needsGiftDecision = unreturnedGifts.length > 0 && returningNonGift;
+  const predictedRefund = refundPlan(tenders, previousRefund, refund);
+  const hasTaiwanPayRefund = predictedRefund.some(
+    (leg) => leg.tender_type === "TAIWAN_PAY",
+  );
 
   const consentTask = useQuery({
     queryKey: ["signing-task", consentTaskId],
@@ -346,6 +357,8 @@ function ReturnDialog({
           taiwan_pay_refund_confirmed: taiwanPayRefundConfirmed,
           invoice_recalled: paperRecalled,
           consent_signature_task_id: consentSigned ? consentTaskId : null,
+          unreturned_gift_note:
+            unreturnedGiftNote.trim() === "" ? null : unreturnedGiftNote.trim(),
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "退貨失敗");
@@ -400,6 +413,8 @@ function ReturnDialog({
               <tr>
                 <th>品項</th>
                 <th>單價</th>
+                {/* 退款依**實付**計算，牌價不等於實付時要讓店員一眼看見差別。 */}
+                <th>本行實付</th>
                 <th>可退餘量</th>
                 <th>退貨數</th>
               </tr>
@@ -409,8 +424,14 @@ function ReturnDialog({
                 const remaining = remainingQty(line);
                 return (
                   <tr key={line.id}>
-                    <td>{line.description}</td>
+                    <td>
+                      {line.description}
+                      {line.line_kind === "GIFT" && (
+                        <span className="pos-gift-badge">贈品</span>
+                      )}
+                    </td>
                     <td>${formatNtd(parseNtd(line.unit_price) ?? 0)}</td>
+                    <td>${formatNtd(parseNtd(line.net_amount) ?? 0)}</td>
                     <td>
                       {remaining}
                       {line.returned_qty ? `（原 ${line.qty}、已退 ${line.returned_qty}）` : ""}
@@ -458,6 +479,36 @@ function ReturnDialog({
         <p style={{ marginTop: 8 }}>
           預估退款 <span className="money">${formatNtd(refund)}</span>
         </p>
+        {needsGiftDecision && (
+          <div className="return-gift-notice">
+            <p role="alert" className="form-error">
+              本單有贈品未一併退回：
+              {unreturnedGifts
+                .map((gift) => `${gift.description} × ${gift.qty}`)
+                .join("、")}
+              （原價 $
+              {formatNtd(
+                unreturnedGifts.reduce(
+                  (sum, gift) => sum + (parseNtd(gift.retail_value) ?? 0),
+                  0,
+                ),
+              )}
+              ）
+            </p>
+            <p className="hint">
+              請一併勾選退回，或說明不收回的原因（會寫入稽核紀錄）。
+            </p>
+            <input
+              type="text"
+              value={unreturnedGiftNote}
+              maxLength={500}
+              style={{ width: "100%" }}
+              aria-label="贈品不收回的原因"
+              onChange={(e) => setUnreturnedGiftNote(e.target.value)}
+              placeholder="例：贈品已拆封無法回售，經客人同意不收回"
+            />
+          </div>
+        )}
         {predictedRefund.length > 0 && (
           <div className="return-refund-preview" aria-label="預估退款去向">
             {predictedRefund.map((leg) => (
@@ -553,7 +604,9 @@ function ReturnDialog({
             className="btn-danger"
             disabled={
               submit.isPending ||
-              refund <= 0 ||
+              // 退款 0 元是合法的（純贈品退回），所以擋的是「什麼都沒選」而不是金額。
+              returnLines.length === 0 ||
+              (needsGiftDecision && unreturnedGiftNote.trim() === "") ||
               !refundSupported ||
               (hasTaiwanPayRefund && !taiwanPayRefundConfirmed) ||
               preview.isFetching ||

@@ -27,11 +27,18 @@ from app.modules.einvoice.amego import (
 )
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
-from app.shared.enums import InvoiceStatus, InvoiceType, SaleLineType
+from app.shared.enums import InvoiceStatus, InvoiceType, SaleLineKind, SaleLineType
 from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError
 
 
-def _line(description: str, qty: int, unit_price: str, line_total: str) -> SaleLine:
+def _line(
+    description: str,
+    qty: int,
+    unit_price: str,
+    line_total: str,
+    net_amount: str | None = None,
+) -> SaleLine:
+    """一般銷售行。`net_amount`（實付）才是發票品項金額的來源；省略時等於 line_total。"""
     return SaleLine(
         store_id=1,
         sale_id=7,
@@ -40,6 +47,23 @@ def _line(description: str, qty: int, unit_price: str, line_total: str) -> SaleL
         qty=qty,
         unit_price=Decimal(unit_price),
         line_total=Decimal(line_total),
+        net_amount=Decimal(net_amount if net_amount is not None else line_total),
+    )
+
+
+def _gift_line(description: str, qty: int, retail: str) -> SaleLine:
+    """贈品行：成交 0 元、留原價。發票品項必須排除它。"""
+    return SaleLine(
+        store_id=1,
+        sale_id=7,
+        line_type=SaleLineType.CATALOG,
+        description=description,
+        qty=qty,
+        unit_price=Decimal(0),
+        line_total=Decimal(0),
+        net_amount=Decimal(0),
+        line_kind=SaleLineKind.GIFT,
+        original_unit_price=Decimal(retail),
     )
 
 
@@ -158,6 +182,40 @@ def test_f0401_rejects_line_total_mismatch_with_invoice_total() -> None:
             [_line("帳篷", 1, "600", "600")],
             order_id="S1-7",
         )
+
+
+def test_f0401_uses_net_amount_so_manual_discounts_reach_the_invoice() -> None:
+    """臨時折扣落在 net_amount：發票品項若讀 line_total，Σ 就會超出發票總額而永遠送不出。"""
+    inv = _invoice(net=Decimal(762), tax=Decimal(38), total=Decimal(800))
+    data = build_f0401_data(
+        inv,
+        [_line("帳篷", 2, "500", "1000", net_amount="800")],
+        order_id="S1-7",
+    )
+    item = cast("list[dict[str, object]]", data["ProductItem"])[0]
+    assert item["Amount"] == "800"
+    assert item["UnitPrice"] == "400"
+    assert data["SalesAmount"] == 800
+
+
+def test_f0401_excludes_gift_lines_and_still_balances() -> None:
+    """贈品實付 0：排除後 Σ 仍等於發票總額，也不必假設平台接受 0 元品項行。"""
+    inv = _invoice(net=Decimal(476), tax=Decimal(24), total=Decimal(500))
+    data = build_f0401_data(
+        inv,
+        [_line("露營燈", 1, "500", "500"), _gift_line("小物", 1, "120")],
+        order_id="S1-7",
+    )
+    items = cast("list[dict[str, object]]", data["ProductItem"])
+    assert [item["Description"] for item in items] == ["露營燈"]
+    assert data["SalesAmount"] == 500
+
+
+def test_f0401_rejects_a_gift_only_invoice() -> None:
+    """整單都是贈品就不該有發票（總額 0）；真的走到這裡是程式錯誤，拒建 payload。"""
+    inv = _invoice(net=Decimal(476), tax=Decimal(24), total=Decimal(500))
+    with pytest.raises(ValueError, match="沒有品項行"):
+        build_f0401_data(inv, [_gift_line("小物", 1, "120")], order_id="S1-7")
 
 
 def test_f0501_data_is_array_of_cancel_numbers() -> None:

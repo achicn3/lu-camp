@@ -958,6 +958,13 @@ body {
 .return-blocker {
   margin-top: var(--sp-1);
 }
+/* 贈品未一併退回：擋下送出並要求說明，說明會寫入稽核。 */
+.return-gift-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+}
 @media (max-width: 560px) {
   .pos-mixed-input-row,
   .pos-payment-split {

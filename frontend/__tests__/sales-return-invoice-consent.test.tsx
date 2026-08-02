@@ -53,6 +53,9 @@ const SALE_DETAIL = {
       returned_qty: 0,
       unit_price: "1000",
       line_total: "1000",
+      net_amount: "1000",
+      manual_discount_amount: "0",
+      line_kind: "NORMAL",
     },
   ],
   tenders: [{ id: 81, tender_type: "CASH", amount: "1000", fee_amount: "0" }],
@@ -135,6 +138,8 @@ const VOID_PREVIEW = {
   requires_paper_recall: true,
   requires_customer_consent: true,
   reason: "整筆退貨且原發票為本月開立：作廢原發票。需先向客人收回紙本證明聯。",
+  refund_total: "1000",
+  unreturned_gifts: [],
 };
 
 async function openDialogWithFullReturn(user: ReturnType<typeof userEvent.setup>) {
@@ -239,6 +244,8 @@ describe("退貨對話框的發票處置把關", () => {
         requires_paper_recall: false,
         requires_customer_consent: true,
         reason: "部分退貨：原發票對未退商品仍有效，開立折讓單。",
+        refund_total: "1000",
+        unreturned_gifts: [],
       },
       taskStatuses: ["PENDING"],
     });
@@ -258,6 +265,8 @@ describe("退貨對話框的發票處置把關", () => {
         requires_paper_recall: false,
         requires_customer_consent: true,
         reason: "原發票的作廢尚在處理中（結果未確認），不可再疊加稅務動作，請轉人工處理。",
+        refund_total: "1000",
+        unreturned_gifts: [],
       },
     });
     const user = userEvent.setup();
@@ -279,6 +288,8 @@ describe("退貨對話框的發票處置把關", () => {
         requires_paper_recall: false,
         requires_customer_consent: false,
         reason: "原交易沒有已開立的發票，本次退貨不涉及發票處置。",
+        refund_total: "1000",
+        unreturned_gifts: [],
       },
     });
     const user = userEvent.setup();
