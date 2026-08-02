@@ -17,6 +17,10 @@ class InvalidDiscountPct(DomainError):
     """活動折扣 discount_pct 超出合法範圍（1-99）。"""
 
 
+class InvalidDiscount(DomainError):
+    """臨時折扣不合法（數值非正、超過可折金額、折到 0 元、目標不可折…）。"""
+
+
 class CampaignConflict(DomainError):
     """門市活動衝突（同店已有生效活動、非法狀態轉移、區間/欄位不合法）。"""
 
