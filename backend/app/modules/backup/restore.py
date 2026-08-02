@@ -276,9 +276,15 @@ class SqlRestoreVerifier:
         engine = create_async_engine(self._target_url(target_db))
         results: list[VerificationResult] = [alembic_result]
         try:
+            # **每項各自一條連線**：Postgres 交易內只要一句失敗，後續每一句都會被拒
+            # （current transaction is aborted）。共用連線時，一張表缺欄位會讓其餘 14 張表
+            # 與簽名／可用性檢查全部變成假失敗，而這份 detail 會寫進 restore_runs 並顯示在
+            # 儀表板——災難當下看到「全滅」卻不知真因，正是最不該發生的事。
             async with engine.connect() as conn:
                 results.append(await self._check_tables(conn, expected_manifest))
+            async with engine.connect() as conn:
                 results.append(await self._check_signatures(conn))
+            async with engine.connect() as conn:
                 results.append(await self._check_usable(conn))
         except Exception as exc:  # 連不上還原庫本身即整體失敗
             results.append(VerificationResult("connect", False, f"{exc.__class__.__name__}"))
@@ -343,6 +349,8 @@ class SqlRestoreVerifier:
             except Exception:
                 ok = False
                 counts[tbl] = -1  # -1＝該表查詢失敗（schema 缺損）
+                # 結清中止的交易，否則其後每一張表都會被拒而變成假的 -1。
+                await conn.rollback()  # type: ignore[attr-defined]
                 continue
             if expected_manifest and expected_manifest.get(tbl, 0) > 0 and counts[tbl] == 0:
                 ok = False  # 備份時有資料、還原後卻空 → 資料掉了

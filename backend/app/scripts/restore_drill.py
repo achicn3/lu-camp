@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.modules.backup.restore import alembic_head
 from app.modules.backup.restore_service import default_restore_db_name
 from app.modules.backup.scheduler import build_backup_backend, build_restore_backend
 
@@ -33,7 +34,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("交易-明細筆數", "SELECT count(*) FROM sale_lines"),
     ("交易-收款筆數", "SELECT count(*) FROM sale_tenders"),
     ("交易-作廢筆數", "SELECT count(*) FROM sales WHERE status = 'VOIDED'"),
+    (
+        "交易-狀態與發票狀態雜湊",
+        "SELECT md5(COALESCE(string_agg(status || ':' || invoice_status, ',' ORDER BY id),''))"
+        " FROM sales",
+    ),
     ("退貨-單數", "SELECT count(*) FROM returns"),
+    ("退貨-明細筆數", "SELECT count(*) FROM return_lines"),
     ("退貨-退款去向筆數", "SELECT count(*) FROM return_tenders"),
     (
         "退貨-退款去向金額",
@@ -53,7 +60,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT md5(COALESCE(string_agg(national_id_blind_index, ',' ORDER BY id),''))"
         " FROM contacts",
     ),
+    ("收購-單數", "SELECT count(*) FROM acquisitions"),
+    ("收購-付現合計", "SELECT COALESCE(SUM(total_cash_paid),0) FROM acquisitions"),
+    ("收購-作廢筆數", "SELECT count(*) FROM acquisitions WHERE voided_at IS NOT NULL"),
     ("庫存-序號品數", "SELECT count(*) FROM serialized_items"),
+    ("庫存-一般商品現量合計", "SELECT COALESCE(SUM(quantity_on_hand),0) FROM catalog_products"),
+    ("庫存-異動筆數", "SELECT count(*) FROM stock_movements"),
     ("庫存-散裝餘量合計", "SELECT COALESCE(SUM(remaining_qty),0) FROM bulk_lots"),
     ("簽署-任務數", "SELECT count(*) FROM signature_tasks"),
     ("簽署-事件鏈筆數", "SELECT count(*) FROM signature_task_events"),
@@ -67,6 +79,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
         "SELECT md5(COALESCE(string_agg(md5(signature_image), ',' ORDER BY id),''))"
         " FROM signature_tasks WHERE signature_image IS NOT NULL",
     ),
+    ("購物金-帳戶數", "SELECT count(*) FROM store_credit_accounts"),
+    (
+        "購物金-各會員餘額雜湊",
+        "SELECT md5(COALESCE(string_agg(contact_id || ':' || balance, ',' ORDER BY id),''))"
+        " FROM store_credit_accounts",
+    ),
     ("購物金-帳本筆數", "SELECT count(*) FROM store_credit_ledger"),
     ("購物金-淨額合計", "SELECT COALESCE(SUM(signed_amount),0) FROM store_credit_ledger"),
     ("盤點-單數", "SELECT count(*) FROM stocktakes"),
@@ -74,14 +92,21 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("寄售-結算數", "SELECT count(*) FROM consignment_settlements"),
     ("採購-單數", "SELECT count(*) FROM purchase_orders"),
     ("採購-收貨數", "SELECT count(*) FROM goods_receipts"),
+    ("採購-供應商數", "SELECT count(*) FROM suppliers"),
+    ("活動-檔數", "SELECT count(*) FROM campaigns"),
+    ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
+    ("LINE Pay-交易筆數", "SELECT count(*) FROM linepay_transactions"),
     ("發票-筆數", "SELECT count(*) FROM invoices"),
     ("發票-折讓數", "SELECT count(*) FROM invoice_allowances"),
     (
-        "發票-作廢原因分佈",
+        "發票-狀態與作廢原因雜湊",
         "SELECT md5(COALESCE(string_agg(status || ':' || COALESCE(void_reason,'-'),"
         " ',' ORDER BY id),'')) FROM invoices",
     ),
+    ("發票-上傳佇列筆數", "SELECT count(*) FROM einvoice_upload_queue"),
+    ("發票-回執事件筆數", "SELECT count(*) FROM einvoice_result_events"),
     ("顧客螢幕-購物車階段數", "SELECT count(*) FROM cart_sessions"),
+    ("顧客螢幕-配對紀錄數", "SELECT count(*) FROM terminal_kiosk_pairings"),
     ("顧客螢幕-裝置數", "SELECT count(*) FROM kiosk_devices"),
     ("稽核-筆數", "SELECT count(*) FROM audit_log"),
 ]
@@ -115,18 +140,26 @@ async def _snapshot(db_name: str) -> dict[str, str]:
 async def _assert_source_at_head(db_name: str) -> None:
     """來源庫必須已在 alembic head：否則等於拿一份**過期 schema** 去驗還原，
     新功能的資料完全不在檢查範圍內，卻會得到一片綠燈。"""
-    from app.modules.backup.restore import alembic_head
-
     engine = create_async_engine(_url_for(db_name))
     try:
         async with engine.connect() as conn:
-            current = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+            # 取**全部**列：多 head（分支）時 scalar() 會無序取任一列，可能剛好抽中等於 head
+            # 的那一列而誤放行。缺表＝根本沒跑過 migration，訊息要講人話而不是丟 traceback。
+            try:
+                rows = (await conn.execute(text("SELECT version_num FROM alembic_version"))).all()
+            except Exception:
+                raise SystemExit(
+                    f"來源庫 {db_name} 沒有 alembic_version 表——這個庫沒跑過 migration，"
+                    f"不能拿來演練還原。"
+                ) from None
     finally:
         await engine.dispose()
-    head = alembic_head()
+    current = {r[0] for r in rows}
+    head = {alembic_head()}
     if current != head:
         raise SystemExit(
-            f"來源庫 {db_name} 的 schema 版本是 {current}，不是最新的 {head}。\n"
+            f"來源庫 {db_name} 的 schema 版本是 {sorted(current) or '（空）'}，"
+            f"不是最新的 {sorted(head)}。\n"
             f"請先跑 alembic upgrade head 再演練——否則新功能的資料不會被驗到，"
             f"卻會看到全綠而誤以為都救得回來。"
         )
@@ -186,4 +219,5 @@ async def main() -> int:
     return 0 if all_ok else 1
 
 
-raise SystemExit(asyncio.run(main()))
+if __name__ == "__main__":  # 匯入本模組不得執行演練（會真的備份、上傳 R2、建庫）
+    raise SystemExit(asyncio.run(main()))

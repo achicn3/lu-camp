@@ -308,3 +308,33 @@ def test_is_ancestor_recognizes_head_and_parent() -> None:
     assert _is_ancestor(head, head) is True  # head 本身
     assert _is_ancestor("e2a9c4b7f1d3", head) is True  # 前一版（backup migration 的 down_revision）
     assert _is_ancestor("not_a_real_revision", head) is False
+
+
+async def test_one_broken_table_does_not_poison_the_other_verifications() -> None:
+    """一張表查不到時，其餘檢查必須照常給出真實結果（不得連鎖假失敗）。
+
+    回歸測試：Postgres 交易內只要一句失敗，後續每一句都會被拒。原本四驗共用一條連線、
+    `_check_tables` 失敗後又不 rollback，於是一張表缺損會讓其餘 14 張表與簽名／可用性檢查
+    全部變成假的失敗——災難當下看到「全滅」卻找不到真因，正是最不該發生的事。
+    """
+    from unittest.mock import patch
+
+    from app.modules.backup import restore as restore_mod
+
+    base = get_settings().database_url
+    target_db = make_url(base).database
+    assert target_db is not None
+
+    # 在關鍵表清單最前面插一張不存在的表，模擬 schema 缺損。
+    broken = ("__no_such_table__", *restore_mod._KEY_TABLES)
+    with patch.object(restore_mod, "_KEY_TABLES", broken):
+        results = await SqlRestoreVerifier(base_url=base).verify(target_db=target_db)
+
+    by_name = {r.name: r for r in results}
+    # 該項確實失敗，且只有那一張表是 -1——其餘表仍查得到真實筆數。
+    assert by_name["table_counts"].ok is False
+    assert "__no_such_table__=-1" in by_name["table_counts"].detail
+    assert by_name["table_counts"].detail.count("=-1") == 1, by_name["table_counts"].detail
+    # 其餘兩項不受污染。
+    assert by_name["signature_bytea"].ok is True
+    assert by_name["backend_usable"].ok is True

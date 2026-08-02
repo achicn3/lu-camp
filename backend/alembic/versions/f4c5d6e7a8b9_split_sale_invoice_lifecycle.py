@@ -41,7 +41,14 @@ _VOID_REASONS = ("SALE_VOID", "FULL_RETURN", "CORRECTION")
 
 
 def _replace_check(table: str, name: str, values: tuple[str, ...], column: str) -> None:
-    """重建列舉值的 CHECK 約束（VARCHAR + CHECK 儲存法）。"""
+    """重建列舉值的 CHECK 約束（VARCHAR + CHECK 儲存法）。
+
+    先結清延遲的約束觸發事件：`sales` 上有 deferrable constraint trigger
+    （trg_sales_tender_total），本 migration 的 downgrade 會先 UPDATE sales 再走到這裡，
+    ALTER TABLE 會被 Postgres 以「has pending trigger events」拒絕。空庫不會踩到，
+    有資料的庫（逐步 downgrade、或日後改成 transaction_per_migration）才會炸。
+    """
+    op.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
     op.drop_constraint(name, table, type_="check")
     allowed = ", ".join(f"'{v}'" for v in values)
     op.create_check_constraint(name, table, sa.text(f"{column} IN ({allowed})"))
