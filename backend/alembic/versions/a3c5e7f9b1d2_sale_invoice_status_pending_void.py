@@ -41,6 +41,11 @@ _NEW = (*_OLD, "PENDING_VOID")
 
 
 def _replace_check(values: tuple[str, ...]) -> None:
+    # 先把延遲的約束觸發事件結清（sales 上有 deferrable constraint trigger
+    # trg_sales_tender_total）。同一個 `alembic upgrade head` 交易裡，前面的 migration 若
+    # UPDATE 過 sales，這裡的 ALTER TABLE 會被 Postgres 以「has pending trigger events」拒絕
+    # ——空庫不會踩到（沒有列就沒有事件），有資料的舊庫升級才會炸，例如新機部署或還原舊備份。
+    op.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
     op.drop_constraint(_CK, "sales", type_="check")
     allowed = ", ".join(f"'{v}'" for v in values)
     op.create_check_constraint(_CK, "sales", sa.text(f"invoice_status IN ({allowed})"))

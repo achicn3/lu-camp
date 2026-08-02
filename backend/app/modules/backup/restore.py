@@ -35,15 +35,22 @@ _SUBPROC_TIMEOUT = 600  # 掛住的 docker/openssl/pg_restore 逾時即失敗,�
 _MIGRATE_LOCK = asyncio.Lock()
 # throwaway 還原庫名安全樣式（防命令注入;只允許小寫英數底線,≤63＝PG 識別上限）。
 _SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
-# 關鍵表：涵蓋交易/現金/會員PII/庫存/簽署/購物金/稽核/租戶/使用者/設定——schema 完整性抽驗。
+# 關鍵表：涵蓋交易/退款/現金/會員PII/庫存/簽署(含事件鏈)/購物金/稽核/顧客螢幕/租戶/使用者/設定
+# ——schema 完整性抽驗。新增功能若帶來新表，請一併補進此處與 scripts/restore_drill.py，
+# 否則「還原已驗證」的綠燈會比實際涵蓋範圍樂觀。
 _KEY_TABLES = (
     "sales",
+    "return_tenders",
     "contacts",
     "signature_tasks",
+    "signature_task_events",
     "serialized_items",
     "cash_sessions",
     "store_credit_ledger",
     "audit_log",
+    "invoices",
+    "cart_sessions",
+    "kiosk_devices",
     "stores",
     "users",
     "settings",

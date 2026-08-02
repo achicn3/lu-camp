@@ -32,6 +32,14 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("交易-銷售額合計", "SELECT COALESCE(SUM(total),0) FROM sales"),
     ("交易-明細筆數", "SELECT count(*) FROM sale_lines"),
     ("交易-收款筆數", "SELECT count(*) FROM sale_tenders"),
+    ("交易-作廢筆數", "SELECT count(*) FROM sales WHERE status = 'VOIDED'"),
+    ("退貨-單數", "SELECT count(*) FROM returns"),
+    ("退貨-退款去向筆數", "SELECT count(*) FROM return_tenders"),
+    (
+        "退貨-退款去向金額",
+        "SELECT md5(COALESCE(string_agg(tender_type || ':' || amount, ',' ORDER BY id),''))"
+        " FROM return_tenders",
+    ),
     ("現金-班別數", "SELECT count(*) FROM cash_sessions"),
     ("現金-異動筆數", "SELECT count(*) FROM cash_movements"),
     ("會員-筆數", "SELECT count(*) FROM contacts"),
@@ -48,6 +56,12 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("庫存-序號品數", "SELECT count(*) FROM serialized_items"),
     ("庫存-散裝餘量合計", "SELECT COALESCE(SUM(remaining_qty),0) FROM bulk_lots"),
     ("簽署-任務數", "SELECT count(*) FROM signature_tasks"),
+    ("簽署-事件鏈筆數", "SELECT count(*) FROM signature_task_events"),
+    (
+        "簽署-事件鏈雜湊",
+        "SELECT md5(COALESCE(string_agg(to_status || ':' || COALESCE(reason_code,''),"
+        " ',' ORDER BY id),'')) FROM signature_task_events",
+    ),
     (
         "簽署-簽名BYTEA雜湊",
         "SELECT md5(COALESCE(string_agg(md5(signature_image), ',' ORDER BY id),''))"
@@ -62,6 +76,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("採購-收貨數", "SELECT count(*) FROM goods_receipts"),
     ("發票-筆數", "SELECT count(*) FROM invoices"),
     ("發票-折讓數", "SELECT count(*) FROM invoice_allowances"),
+    (
+        "發票-作廢原因分佈",
+        "SELECT md5(COALESCE(string_agg(status || ':' || COALESCE(void_reason,'-'),"
+        " ',' ORDER BY id),'')) FROM invoices",
+    ),
+    ("顧客螢幕-購物車階段數", "SELECT count(*) FROM cart_sessions"),
+    ("顧客螢幕-裝置數", "SELECT count(*) FROM kiosk_devices"),
     ("稽核-筆數", "SELECT count(*) FROM audit_log"),
 ]
 
@@ -72,19 +93,43 @@ def _url_for(db_name: str) -> str:
 
 
 async def _snapshot(db_name: str) -> dict[str, str]:
+    """逐項取快照。**每項各自成一個交易**：Postgres 在同一交易內只要有一句失敗，
+    後續每一句都會被拒（current transaction is aborted），若共用連線，一個缺損的欄位
+    會讓它後面所有檢查一起變成假的 ERR，報告因此完全失真（實測踩過）。"""
     engine = create_async_engine(_url_for(db_name))
     out: dict[str, str] = {}
     try:
-        async with engine.connect() as conn:
-            for label, sql in FEATURE_CHECKS:
+        for label, sql in FEATURE_CHECKS:
+            async with engine.connect() as conn:
                 try:
                     val = await conn.scalar(text(sql))
                     out[label] = str(val)
-                except Exception as exc:  # 該功能表缺損＝該項失敗
+                except Exception as exc:  # 該功能表/欄位缺損＝該項失敗，但不影響其餘項目
                     out[label] = f"ERR:{exc.__class__.__name__}"
+                    await conn.rollback()
     finally:
         await engine.dispose()
     return out
+
+
+async def _assert_source_at_head(db_name: str) -> None:
+    """來源庫必須已在 alembic head：否則等於拿一份**過期 schema** 去驗還原，
+    新功能的資料完全不在檢查範圍內，卻會得到一片綠燈。"""
+    from app.modules.backup.restore import alembic_head
+
+    engine = create_async_engine(_url_for(db_name))
+    try:
+        async with engine.connect() as conn:
+            current = await conn.scalar(text("SELECT version_num FROM alembic_version"))
+    finally:
+        await engine.dispose()
+    head = alembic_head()
+    if current != head:
+        raise SystemExit(
+            f"來源庫 {db_name} 的 schema 版本是 {current}，不是最新的 {head}。\n"
+            f"請先跑 alembic upgrade head 再演練——否則新功能的資料不會被驗到，"
+            f"卻會看到全綠而誤以為都救得回來。"
+        )
 
 
 async def _drop_db(db_name: str) -> None:
@@ -103,6 +148,9 @@ async def main() -> int:
     if backup_backend is None or restore_backend is None:
         print("R2 未設定（需 source .env.r2）")
         return 2
+
+    # 先擋在最前面：schema 過期就不必上傳（R2 成本紀律：每次演練都是一次真實上傳）。
+    await _assert_source_at_head(SOURCE_DB)
 
     print(f"[1/4] 備份來源庫 {SOURCE_DB} → R2 …")
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
