@@ -34,6 +34,27 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("交易-明細筆數", "SELECT count(*) FROM sale_lines"),
     ("交易-收款筆數", "SELECT count(*) FROM sale_tenders"),
     ("交易-作廢筆數", "SELECT count(*) FROM sales WHERE status = 'VOIDED'"),
+    ("交易-贈品行數", "SELECT count(*) FROM sale_lines WHERE line_kind = 'GIFT'"),
+    (
+        "交易-贈品原價與成本雜湊",
+        "SELECT md5(COALESCE(string_agg("
+        "COALESCE(original_unit_price::text,'-') || ':' || COALESCE(cost_snapshot::text,'-'),"
+        " ',' ORDER BY id),'')) FROM sale_lines WHERE line_kind = 'GIFT'",
+    ),
+    ("折扣-筆數", "SELECT count(*) FROM sale_adjustments"),
+    (
+        "折扣-套用金額雜湊",
+        "SELECT md5(COALESCE(string_agg(scope || ':' || applied_amount || ':'"
+        " || COALESCE(voided_at::text,'-'), ',' ORDER BY id),'')) FROM sale_adjustments",
+    ),
+    ("折扣-分攤筆數", "SELECT count(*) FROM sale_adjustment_allocations"),
+    (
+        "折扣-分攤金額雜湊",
+        "SELECT md5(COALESCE(string_agg(sale_line_id || ':' || allocated_amount,"
+        " ',' ORDER BY id),'')) FROM sale_adjustment_allocations",
+    ),
+    ("原因-贈品原因數", "SELECT count(*) FROM gift_reasons"),
+    ("原因-折扣原因數", "SELECT count(*) FROM discount_reasons"),
     (
         "交易-狀態與發票狀態雜湊",
         "SELECT md5(COALESCE(string_agg(status || ':' || invoice_status, ',' ORDER BY id),''))"

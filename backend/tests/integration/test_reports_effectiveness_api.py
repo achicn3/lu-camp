@@ -232,8 +232,8 @@ async def test_gross_margin_and_excess_spend(
     await db_session.execute(
         text(
             "INSERT INTO sale_lines (store_id, sale_id, line_type, serialized_item_id,"
-            " description, qty, unit_price, line_total, created_at, updated_at)"
-            " VALUES (:sid, :sale, 'SERIALIZED', :item, '帳篷', 1, 1000, 1000, now(), now())"
+            " description, qty, unit_price, line_total, net_amount, created_at, updated_at)"
+            " VALUES (:sid, :sale, 'SERIALIZED', :item, '帳篷', 1, 1000, 1000, 1000, now(), now())"
         ),
         {"sid": store_id, "sale": sale_id, "item": item_id},
     )
@@ -287,8 +287,8 @@ async def test_margin_includes_bulk_and_consignment(
     await db_session.execute(
         text(
             "INSERT INTO sale_lines (store_id, sale_id, line_type, bulk_lot_id, description,"
-            " qty, unit_price, line_total, created_at, updated_at)"
-            " VALUES (:sid, :sale, 'BULK_LOT', :lot, '雜物', 5, 100, 500, now(), now())"
+            " qty, unit_price, line_total, net_amount, created_at, updated_at)"
+            " VALUES (:sid, :sale, 'BULK_LOT', :lot, '雜物', 5, 100, 500, 500, now(), now())"
         ),
         {"sid": store_id, "sale": sale_id, "lot": lot_id},
     )
@@ -305,8 +305,8 @@ async def test_margin_includes_bulk_and_consignment(
     await db_session.execute(
         text(
             "INSERT INTO sale_lines (store_id, sale_id, line_type, serialized_item_id,"
-            " description, qty, unit_price, line_total, created_at, updated_at)"
-            " VALUES (:sid, :sale, 'SERIALIZED', :item, '寄售帳篷', 1, 500, 500, now(), now())"
+            " description, qty, unit_price, line_total, net_amount, created_at, updated_at)"
+            " VALUES (:sid, :sale, 'SERIALIZED', :item, '寄售帳篷', 1, 500, 500, 500, now(), now())"
         ),
         {"sid": store_id, "sale": sale_id, "item": item_id},
     )

@@ -2074,7 +2074,7 @@ class SalesService:
                 menu_item_id=item.id,
                 description=item.name,
                 qty=line.qty,
-                **self._line_amounts(disc, qty=line.qty),
+                **self._line_amounts(disc, qty=line.qty),  # 餐飲無成本模型 → cost 留 NULL
             )
         )
         return item.unit_price * line.qty
@@ -2118,7 +2118,7 @@ class SalesService:
                 serialized_item_id=item.id,
                 description=item.name,
                 qty=1,
-                **self._line_amounts(disc, qty=1),
+                **self._line_amounts(disc, qty=1, cost=item.acquisition_cost),
             )
         )
         if is_consignment:
@@ -2131,14 +2131,24 @@ class SalesService:
         return disc.unit_price
 
     @staticmethod
-    def _line_amounts(disc: _AppliedDiscount, *, qty: int) -> dict[str, object]:
-        """sale_line 的金額欄（折後實際成交＋折扣留痕）。"""
+    def _line_amounts(
+        disc: _AppliedDiscount, *, qty: int, cost: Decimal | None = None
+    ) -> dict[str, object]:
+        """sale_line 的金額欄（折後實際成交＋折扣留痕＋成本快照）。
+
+        `net_amount`＝本行實付。此階段尚無臨時折扣，故等於 `line_total`；P2 接上折扣後
+        會扣掉 `manual_discount_amount`（DB CHECK 會盯住這條等式）。
+        `cost`＝成交當下的成本（本行合計），凍結於此——日後調整商品成本不會回頭改寫歷史毛利。
+        """
+        line_total = disc.unit_price * qty
         return {
             "unit_price": disc.unit_price,
-            "line_total": disc.unit_price * qty,
+            "line_total": line_total,
+            "net_amount": line_total,
             "original_unit_price": disc.original_unit_price,
             "discount_amount": disc.discount_per_unit * qty,
             "campaign_id": disc.campaign_id,
+            "cost_snapshot": cost,
         }
 
     async def _process_catalog(
@@ -2171,7 +2181,11 @@ class SalesService:
                 catalog_product_id=product.id,
                 description=product.name,
                 qty=line.qty,
-                **self._line_amounts(disc, qty=line.qty),
+                **self._line_amounts(
+                    disc,
+                    qty=line.qty,
+                    cost=None if product.unit_cost is None else product.unit_cost * line.qty,
+                ),
             )
         )
         return disc.unit_price * line.qty
@@ -2210,7 +2224,11 @@ class SalesService:
                 bulk_lot_id=lot.id,
                 description=lot.name,
                 qty=line.qty,
-                **self._line_amounts(disc, qty=line.qty),
+                **self._line_amounts(
+                    disc,
+                    qty=line.qty,
+                    cost=InventoryService.per_piece_cost(lot) * line.qty,
+                ),
             )
         )
         return disc.unit_price * line.qty

@@ -116,6 +116,9 @@ class CatalogProduct(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 進貨成本（可空）。先前完全沒有此欄位，導致一般商品的營收只能歸入「成本未知」、
+    # 報表不假造毛利。填了之後，成交當下會快照到 sale_lines.cost_snapshot。
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     quantity_on_hand: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     reorder_point: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     # 建檔冪等：回應遺失後以同 key 重送，依原始請求指紋回放同一商品，不重複產生自動 SKU。

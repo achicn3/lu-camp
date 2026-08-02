@@ -125,6 +125,8 @@ class StockReason(StrEnum):
     SALE = "SALE"
     RETURN = "RETURN"
     CONSIGN_RETURN = "CONSIGN_RETURN"
+    GIFT = "GIFT"  # 贈品出庫：實際離庫但無營收，須與一般銷售分辨才統計得出贈品數量
+    GIFT_RETURN = "GIFT_RETURN"  # 贈品退回入庫（退款 0 元）
     WRITE_OFF = "WRITE_OFF"
     STOCKTAKE = "STOCKTAKE"
 
@@ -173,6 +175,42 @@ class SaleLineType(StrEnum):
     CATALOG = "CATALOG"
     BULK_LOT = "BULK_LOT"
     MENU = "MENU"  # 餐飲/內用菜單品項（現做、不扣庫存、不折活動、不可購物金折抵）
+
+
+class SaleLineKind(StrEnum):
+    """銷售明細行的**商業性質**——與 `SaleLineType`（品項種類）正交。
+
+    兩者必須分開：「贈送一件序號品」要同時表達「是序號品」與「是贈品」，
+    塞進同一個欄位就表達不了。
+
+    NORMAL：一般銷售，實付 = 活動折後金額 − 臨時折扣。
+    GIFT：贈品，實際出庫但實付 0；原價價值記在 `original_unit_price`，
+      **絕不寫進 `discount_amount`**（那是活動折扣專用，報表直接 SUM 它）。
+    """
+
+    NORMAL = "NORMAL"
+    GIFT = "GIFT"
+
+
+class AdjustmentScope(StrEnum):
+    """臨時折扣的作用範圍。"""
+
+    ORDER = "ORDER"  # 整單折扣，須依規則分攤至各可折行
+    ITEM = "ITEM"  # 單一明細行折扣
+
+
+class AdjustmentType(StrEnum):
+    """調整的來源類型（目前只有手動折扣；其餘為日後擴充預留）。"""
+
+    MANUAL_DISCOUNT = "MANUAL_DISCOUNT"
+
+
+class CalculationMethod(StrEnum):
+    """折扣的計算方式。店員輸入的原始值記在 requested_value，
+    系統實際套用的金額記在 applied_amount——報表一律用後者，不重算。"""
+
+    FIXED_AMOUNT = "FIXED_AMOUNT"
+    PERCENTAGE = "PERCENTAGE"
 
 
 class PaymentMethod(StrEnum):

@@ -5,11 +5,13 @@ total=含稅總額（= Σ 明細 line_total）。invoice_id 待 T13（einvoice�
 列舉以 native_enum=False + CHECK 儲存。
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     DDL,
     CheckConstraint,
+    DateTime,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
@@ -25,10 +27,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base, TimestampMixin
 from app.modules.storecredit.models import StoreCreditLedger
 from app.shared.enums import (
+    AdjustmentScope,
+    AdjustmentType,
+    CalculationMethod,
     LinePayRefundStatus,
     LinePayStatus,
     PaymentMethod,
     SaleInvoiceStatus,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
     TenderType,
@@ -95,6 +101,26 @@ class SaleLine(Base, TimestampMixin):
     __table_args__ = (
         # 複合租戶鍵：供 return_lines 的 (sale_line_id, store_id) 複合 FK 綁定（退貨租戶完整性）。
         UniqueConstraint("id", "store_id", name="uq_sale_lines_id_store"),
+        # 贈品的定義就是實付 0 且不佔折扣欄位——靠應用層自律不夠，這裡是最後一道牆。
+        # `original_unit_price` 記牌價（贈品原價價值 = 它 × qty），`discount_amount` 保持
+        # 純活動折扣，兩者混用會讓活動報表把「送出去的東西」算成「打折」。
+        CheckConstraint(
+            "line_kind <> 'GIFT' OR ("
+            " unit_price = 0 AND line_total = 0 AND net_amount = 0"
+            " AND discount_amount = 0 AND manual_discount_amount = 0"
+            " AND original_unit_price IS NOT NULL AND gift_reason_id IS NOT NULL)",
+            name="ck_sale_lines_gift_shape",
+        ),
+        # 一般行：實付 = 活動折後金額 − 臨時折扣。三個數字不得各說各話。
+        CheckConstraint(
+            "line_kind <> 'NORMAL' OR net_amount = line_total - manual_discount_amount",
+            name="ck_sale_lines_net_amount_consistent",
+        ),
+        # 折扣不得把一行折成負數（等於倒貼給客人）。
+        CheckConstraint(
+            "net_amount >= 0 AND manual_discount_amount >= 0",
+            name="ck_sale_lines_amounts_nonneg",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -117,6 +143,152 @@ class SaleLine(Base, TimestampMixin):
         Numeric(12, 0), default=Decimal(0), server_default=text("0")
     )
     campaign_id: Mapped[int | None] = mapped_column(ForeignKey("campaigns.id"))
+    # 商業性質（一般銷售／贈品）——與 line_type（品項種類）正交，見 SaleLineKind。
+    line_kind: Mapped[SaleLineKind] = mapped_column(
+        _enum_col(SaleLineKind),
+        default=SaleLineKind.NORMAL,
+        server_default=SaleLineKind.NORMAL.value,
+    )
+    # 本行分攤到的**臨時折扣**（單品折扣＋整單折扣的分攤額）。與 campaign 的
+    # discount_amount 分開存，否則活動報表會把手動折扣算成活動成效。
+    manual_discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 0), default=Decimal(0), server_default=text("0")
+    )
+    # **本行實付**＝line_total − manual_discount_amount。退貨退款、發票品項一律以此為準；
+    # line_total 維持既有語意（活動折後 = unit_price × qty），既有讀它的地方不受影響。
+    # 未指定時預設為 line_total（＝無臨時折扣的情形）。這不是放水：一旦有折扣卻忘了扣，
+    # ck_sale_lines_net_amount_consistent 會當場擋下。
+    net_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 0),
+        default=lambda ctx: ctx.get_current_parameters()["line_total"],
+    )
+    # 成交當下的成本（本行合計）。凍結於此，日後調整商品成本不會回頭改寫歷史毛利。
+    # NULL＝無成本可知（餐飲、或未填成本的商品），報表沿用既有「成本未知」口徑。
+    cost_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    gift_reason_id: Mapped[int | None] = mapped_column(ForeignKey("gift_reasons.id"))
+    # 原因名稱快照：原因日後停用或改名，歷史單據仍看得到當初寫的是什麼
+    # （沿用 purchase_orders.supplier_name 的既有慣例）。
+    gift_reason_name: Mapped[str | None] = mapped_column(String(50))
+    gift_note: Mapped[str | None] = mapped_column(String(200))
+    # 因哪一行而贈（買 A 送 B）。純供追溯，不參與任何金額計算。
+    parent_sale_line_id: Mapped[int | None] = mapped_column(ForeignKey("sale_lines.id"))
+
+
+class GiftReason(Base, TimestampMixin):
+    """贈品原因代碼（店家可管理）。
+
+    **不實刪、只停用**（沿用 suppliers 的既有慣例）：歷史單據引用過的原因不能因為後台
+    刪掉就消失；停用只是讓它不再出現在選單。單據另存 `gift_reason_name` 快照，
+    改名也不回溯改寫歷史。
+    """
+
+    __tablename__ = "gift_reasons"
+    __table_args__ = (
+        UniqueConstraint("store_id", "code", name="uq_gift_reasons_store_code"),
+        UniqueConstraint("id", "store_id", name="uq_gift_reasons_id_store"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    code: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(50))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    requires_note: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class DiscountReason(Base, TimestampMixin):
+    """臨時折扣原因代碼（店家可管理）。停用不實刪，理由同 GiftReason。"""
+
+    __tablename__ = "discount_reasons"
+    __table_args__ = (
+        UniqueConstraint("store_id", "code", name="uq_discount_reasons_store_code"),
+        UniqueConstraint("id", "store_id", name="uq_discount_reasons_id_store"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    code: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(50))
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    requires_note: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    sort_order: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+
+
+class SaleAdjustment(Base, TimestampMixin):
+    """一筆臨時折扣的**意圖與來歷**（金額結果則分攤到 sale_lines）。
+
+    `requested_value` 是店員輸入的數字（固定金額或百分比），`applied_amount` 是系統實際
+    套用的折扣金額——**報表一律用 applied_amount，不得事後重算**，否則商品價格變動後
+    歷史折扣就會跟著漂。
+
+    折扣紀錄**不可實刪，只能作廢**：作廢要留下誰、何時、為什麼，並重新計算訂單金額。
+    """
+
+    __tablename__ = "sale_adjustments"
+    __table_args__ = (
+        UniqueConstraint("id", "store_id", name="uq_sale_adjustments_id_store"),
+        ForeignKeyConstraint(
+            ["sale_id", "store_id"], ["sales.id", "sales.store_id"],
+            name="fk_sale_adjustments_sale_store",
+        ),
+        # 單品折扣必指向某一行；整單折扣不得指定行（分攤結果另存於 allocations）。
+        CheckConstraint(
+            "(scope = 'ITEM' AND sale_line_id IS NOT NULL)"
+            " OR (scope = 'ORDER' AND sale_line_id IS NULL)",
+            name="ck_sale_adjustments_scope_shape",
+        ),
+        CheckConstraint("applied_amount >= 0", name="ck_sale_adjustments_applied_nonneg"),
+        # 作廢的三個欄位同進同出，避免出現「作廢了但不知道是誰、為什麼」的半殘紀錄。
+        CheckConstraint(
+            "(voided_at IS NULL AND voided_by IS NULL AND void_reason IS NULL)"
+            " OR (voided_at IS NOT NULL AND voided_by IS NOT NULL AND void_reason IS NOT NULL)",
+            name="ck_sale_adjustments_void_shape",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_id: Mapped[int] = mapped_column(index=True)
+    sale_line_id: Mapped[int | None] = mapped_column(ForeignKey("sale_lines.id"))
+    scope: Mapped[AdjustmentScope] = mapped_column(_enum_col(AdjustmentScope))
+    adjustment_type: Mapped[AdjustmentType] = mapped_column(
+        _enum_col(AdjustmentType),
+        default=AdjustmentType.MANUAL_DISCOUNT,
+        server_default=AdjustmentType.MANUAL_DISCOUNT.value,
+    )
+    calculation_method: Mapped[CalculationMethod] = mapped_column(_enum_col(CalculationMethod))
+    requested_value: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    applied_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    reason_id: Mapped[int | None] = mapped_column(ForeignKey("discount_reasons.id"))
+    reason_name: Mapped[str | None] = mapped_column(String(50))
+    note: Mapped[str | None] = mapped_column(String(200))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    voided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    void_reason: Mapped[str | None] = mapped_column(String(200))
+
+
+class SaleAdjustmentAllocation(Base, TimestampMixin):
+    """整單折扣分攤到各行的結果。
+
+    **必須落盤**：退貨時要知道「這一行當初實際被折了多少」，不能依當下商品狀態重算——
+    商品價格、活動、甚至商品本身都可能已經變了。
+    """
+
+    __tablename__ = "sale_adjustment_allocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "adjustment_id", "sale_line_id", name="uq_sale_adjustment_alloc_pair"
+        ),
+        CheckConstraint("allocated_amount >= 0", name="ck_sale_adjustment_alloc_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    adjustment_id: Mapped[int] = mapped_column(ForeignKey("sale_adjustments.id"), index=True)
+    sale_line_id: Mapped[int] = mapped_column(ForeignKey("sale_lines.id"), index=True)
+    allocated_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
 
 
 class SaleTender(Base, TimestampMixin):
