@@ -212,6 +212,10 @@ class QuoteLine:
     line_total: Decimal
     original_unit_price: Decimal | None
     discount_amount: Decimal
+    line_kind: SaleLineKind = SaleLineKind.NORMAL
+    manual_discount_amount: Decimal = Decimal(0)
+    net_amount: Decimal = Decimal(0)
+    """本行實付＝line_total − manual_discount_amount（贈品恆為 0）。"""
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,10 @@ class SaleQuote:
     food_subtotal: Decimal
     store_credit_max: Decimal
     store_credit_min_spend: Decimal
+    gift_retail_value: Decimal = Decimal(0)
+    """贈品原價價值——**僅供顯示參考**，不加進應付、也不算折扣。"""
+    item_discount_amount: Decimal = Decimal(0)
+    order_discount_amount: Decimal = Decimal(0)
 
 
 def _member_points_for(total: Decimal) -> int:
@@ -439,13 +447,19 @@ class SalesService:
 
     @staticmethod
     def _cart_item_key(line: SaleLineInput) -> str:
+        """必須與 customerdisplay 的 `_line_key_with_kind` 完全一致（兩份實作、同一個規則）。
+
+        含商業性質：「買 2 個 A ＋ 送 1 個 A」是兩個項目，共用同一個鍵會被差異比對吃掉一筆。
+        """
         if line.line_type is SaleLineType.SERIALIZED:
-            return f"SERIALIZED:{line.item_code}"
-        if line.line_type is SaleLineType.CATALOG:
-            return f"CATALOG:{line.catalog_product_id}"
-        if line.line_type is SaleLineType.BULK_LOT:
-            return f"BULK_LOT:{line.bulk_lot_id}"
-        return f"MENU:{line.menu_item_id}"
+            base = f"SERIALIZED:{line.item_code}"
+        elif line.line_type is SaleLineType.CATALOG:
+            base = f"CATALOG:{line.catalog_product_id}"
+        elif line.line_type is SaleLineType.BULK_LOT:
+            base = f"BULK_LOT:{line.bulk_lot_id}"
+        else:
+            base = f"MENU:{line.menu_item_id}"
+        return base if line.line_kind is SaleLineKind.NORMAL else f"GIFT:{base}"
 
     async def _validate_display_cart_checkout(
         self,
@@ -462,9 +476,12 @@ class SalesService:
         actual_items: list[dict[str, object]] = []
         signed_items: list[dict[str, object]] = []
         for source, persisted in zip(lines, persisted_lines, strict=True):
+            # 欄位須與 customerdisplay 的 _cart_snapshot／signed_items **逐一對齊**：
+            # 這是 byte-exact 比對，任一邊少一個欄位，每筆購物金結帳都會失敗。
             visible = {
                 "name": persisted.description,
                 "qty": persisted.qty,
+                "line_kind": persisted.line_kind.value,
                 "unit_price": format(persisted.unit_price, "f"),
                 "original_unit_price": (
                     format(persisted.original_unit_price, "f")
@@ -472,7 +489,9 @@ class SalesService:
                     else None
                 ),
                 "discount_amount": format(persisted.discount_amount, "f"),
+                "manual_discount_amount": format(persisted.manual_discount_amount, "f"),
                 "line_total": format(persisted.line_total, "f"),
+                "net_amount": format(persisted.net_amount, "f"),
             }
             actual_items.append(
                 {
@@ -553,6 +572,7 @@ class SalesService:
                 {
                     "name": persisted.description,
                     "qty": persisted.qty,
+                    "line_kind": persisted.line_kind.value,
                     "unit_price": format(persisted.unit_price, "f"),
                     "original_unit_price": (
                         format(persisted.original_unit_price, "f")
@@ -560,7 +580,9 @@ class SalesService:
                         else None
                     ),
                     "discount_amount": format(persisted.discount_amount, "f"),
+                    "manual_discount_amount": format(persisted.manual_discount_amount, "f"),
                     "line_total": format(persisted.line_total, "f"),
+                    "net_amount": format(persisted.net_amount, "f"),
                 }
             )
         if expected_lines != actual_lines:
@@ -2004,6 +2026,7 @@ class SalesService:
         *,
         lines: list[SaleLineInput],
         buyer_contact_id: int | None = None,
+        adjustments: Sequence[DiscountRequest] | None = None,
     ) -> SaleQuote:
         """結帳前試算（docs/21 C2b）：套生效活動後的折後總額與各行折讓。唯讀——不扣庫存、不收款、
         不建單。供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額、收款不對齊 → 422）。
@@ -2017,14 +2040,66 @@ class SalesService:
         quoted: list[QuoteLine] = []
         total = Decimal(0)
         food_subtotal = Decimal(0)
+        discountable: list[bool] = []
         for line in lines:
-            ql = await self._quote_line(store_id, line, campaign)
+            ql = await self._quote_line(store_id, line, campaign, discountable)
             quoted.append(ql)
-            total += ql.line_total
+            total += ql.net_amount
             if ql.line_type == SaleLineType.MENU:
-                food_subtotal += ql.line_total
+                food_subtotal += ql.net_amount
+
+        # 試算必須與成交走**同一套定價**，否則客顯快照與實際成交對不起來，
+        # 結帳時的逐欄位比對會直接失敗。
+        item_discount = Decimal(0)
+        order_discount = Decimal(0)
+        if adjustments:
+            resolved = [await self._resolve_discount_reason(store_id, r) for r in adjustments]
+            result = apply_discounts(
+                [
+                    PricingLine(
+                        key=str(index),
+                        kind=ql.line_kind,
+                        line_total=ql.line_total,
+                        discountable=flag,
+                        gift_retail_value=(
+                            (ql.original_unit_price or Decimal(0)) * ql.qty
+                            if ql.line_kind is SaleLineKind.GIFT
+                            else Decimal(0)
+                        ),
+                    )
+                    for index, (ql, flag) in enumerate(zip(quoted, discountable, strict=True))
+                ],
+                resolved,
+            )
+            quoted = [
+                replace(
+                    ql,
+                    manual_discount_amount=result.manual_discount_by_line.get(
+                        str(index), Decimal(0)
+                    ),
+                    net_amount=result.net_by_line[str(index)],
+                )
+                for index, ql in enumerate(quoted)
+            ]
+            total = result.net_amount
+            food_subtotal = sum(
+                (ql.net_amount for ql in quoted if ql.line_type == SaleLineType.MENU), Decimal(0)
+            )
+            item_discount = result.item_discount_amount
+            order_discount = result.order_discount_amount
+
         min_spend = (await self._settings.get_effective_settings(store_id)).store_credit_min_spend
         return SaleQuote(
+            gift_retail_value=sum(
+                (
+                    (ql.original_unit_price or Decimal(0)) * ql.qty
+                    for ql in quoted
+                    if ql.line_kind is SaleLineKind.GIFT
+                ),
+                Decimal(0),
+            ),
+            item_discount_amount=item_discount,
+            order_discount_amount=order_discount,
             total=total,
             campaign_id=campaign.id if campaign is not None else None,
             campaign_name=campaign.name if campaign is not None else None,
@@ -2035,9 +2110,18 @@ class SalesService:
         )
 
     async def _quote_line(
-        self, store_id: int, line: SaleLineInput, campaign: Campaign | None
+        self,
+        store_id: int,
+        line: SaleLineInput,
+        campaign: Campaign | None,
+        discountable_out: list[bool] | None = None,
     ) -> QuoteLine:
-        """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。"""
+        """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。
+
+        必須與 `_process_line` 得出**完全相同**的金額——客顯購物車快照由此建立，
+        結帳時會與實際成交明細逐欄位比對，兩邊不一致就會整筆結帳失敗。
+        """
+        gift = await self._resolve_gift(store_id, line)
         if line.line_type == SaleLineType.SERIALIZED:
             if line.item_code is None:
                 raise SaleLineInvalid("SERIALIZED 明細必須帶 item_code")
@@ -2049,7 +2133,16 @@ class SalesService:
                 line_type=SaleLineType.SERIALIZED,
                 is_consignment=item.ownership_type == OwnershipType.CONSIGNMENT,
             )
-            disc = _compute_discount(campaign, item.listed_price, applies=applies)
+            is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
+            if gift is not None and is_consignment:
+                raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
+            if discountable_out is not None:
+                discountable_out.append(gift is None and not is_consignment)
+            disc = (
+                self._gift_discount(item.listed_price)
+                if gift is not None
+                else _compute_discount(campaign, item.listed_price, applies=applies)
+            )
             return QuoteLine(
                 line_type=SaleLineType.SERIALIZED,
                 description=item.name,
@@ -2058,6 +2151,8 @@ class SalesService:
                 line_total=disc.unit_price,
                 original_unit_price=disc.original_unit_price,
                 discount_amount=disc.discount_per_unit,
+                line_kind=line.line_kind,
+                net_amount=disc.unit_price,
             )
         if line.line_type == SaleLineType.CATALOG:
             if line.catalog_product_id is None:
@@ -2070,7 +2165,13 @@ class SalesService:
             applies = _campaign_applies(
                 campaign, line_type=SaleLineType.CATALOG, is_consignment=False
             )
-            disc = _compute_discount(campaign, product.unit_price, applies=applies)
+            if discountable_out is not None:
+                discountable_out.append(gift is None)
+            disc = (
+                self._gift_discount(product.unit_price)
+                if gift is not None
+                else _compute_discount(campaign, product.unit_price, applies=applies)
+            )
             return QuoteLine(
                 line_type=SaleLineType.CATALOG,
                 description=product.name,
@@ -2079,9 +2180,15 @@ class SalesService:
                 line_total=disc.unit_price * line.qty,
                 original_unit_price=disc.original_unit_price,
                 discount_amount=disc.discount_per_unit * line.qty,
+                line_kind=line.line_kind,
+                net_amount=disc.unit_price * line.qty,
             )
         if line.line_type == SaleLineType.MENU:
             menu_item = await self._resolve_menu_item(store_id, line)
+            if gift is not None:
+                raise SaleLineInvalid("餐飲品項不可作為贈品（現做、不進庫存，無從統計）")
+            if discountable_out is not None:
+                discountable_out.append(False)
             return QuoteLine(
                 line_type=SaleLineType.MENU,
                 description=menu_item.name,
@@ -2090,6 +2197,7 @@ class SalesService:
                 line_total=menu_item.unit_price * line.qty,
                 original_unit_price=None,
                 discount_amount=Decimal(0),
+                net_amount=menu_item.unit_price * line.qty,
             )
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
@@ -2101,7 +2209,15 @@ class SalesService:
         applies = _campaign_applies(
             campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
         )
-        disc = _compute_discount(campaign, lot.unit_price, applies=applies)
+        if gift is not None and lot.consignor_id is not None:
+            raise SaleLineInvalid("寄售散裝批不可作為贈品（分潤依售價計）")
+        if discountable_out is not None:
+            discountable_out.append(gift is None and lot.consignor_id is None)
+        disc = (
+            self._gift_discount(lot.unit_price)
+            if gift is not None
+            else _compute_discount(campaign, lot.unit_price, applies=applies)
+        )
         return QuoteLine(
             line_type=SaleLineType.BULK_LOT,
             description=lot.name,
@@ -2110,6 +2226,8 @@ class SalesService:
             line_total=disc.unit_price * line.qty,
             original_unit_price=disc.original_unit_price,
             discount_amount=disc.discount_per_unit * line.qty,
+            line_kind=line.line_kind,
+            net_amount=disc.unit_price * line.qty,
         )
 
     async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:

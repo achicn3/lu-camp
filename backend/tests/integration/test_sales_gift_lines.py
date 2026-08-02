@@ -242,3 +242,37 @@ async def test_gift_only_sale_does_not_create_an_invoice(db_session: AsyncSessio
 
     invoice = await EInvoiceService(db_session).get_invoice_for_sale(store_id, sale.id)
     assert invoice is None
+
+
+async def test_buying_and_gifting_the_same_product_are_two_separate_lines(
+    db_session: AsyncSession,
+) -> None:
+    """同一商品「買 2 ＋ 送 1」必須是兩筆，不可被合併。
+
+    客顯購物車的差異比對以 item_key 當字典鍵、前端也用它合併同款商品——鍵若不含
+    商業性質，其中一筆會被靜默吃掉（買的變成送的，或反之）。
+    """
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    sales = SalesService(db_session)
+    normal = SaleLineInput(
+        line_type=SaleLineType.CATALOG, catalog_product_id=product_id, qty=2
+    )
+    sale = await sales.create_sale(
+        store_id, clerk_id, lines=[normal, _gift(product_id, reason_id, qty=1)]
+    )
+    lines = await _lines(db_session, sale.id)
+    assert len(lines) == 2
+    assert [line.line_kind for line in lines] == [SaleLineKind.NORMAL, SaleLineKind.GIFT]
+    # 兩筆的購物車鍵必須不同，否則差異比對會把它們當成同一個項目
+    keys = {sales._cart_item_key(normal), sales._cart_item_key(_gift(product_id, reason_id))}
+    assert len(keys) == 2
+
+
+async def _lines(session: AsyncSession, sale_id: int) -> list[SaleLine]:
+    return list(
+        (
+            await session.scalars(
+                select(SaleLine).where(SaleLine.sale_id == sale_id).order_by(SaleLine.id)
+            )
+        ).all()
+    )

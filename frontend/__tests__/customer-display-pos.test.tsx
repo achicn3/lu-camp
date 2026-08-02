@@ -51,6 +51,7 @@ const LINE: SaleLine = {
   bulk_lot_id: null,
   menu_item_id: null,
   qty: 2,
+  line_kind: "NORMAL",
 };
 const TENDERS: Tender[] = [{ tender_type: "CASH", amount: "240" }];
 

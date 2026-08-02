@@ -126,6 +126,17 @@ def _mask_member_name(name: str) -> str:
     return " ".join(f"{field[0]}***" for field in fields if field)
 
 
+_CART_SNAPSHOT_VERSION = "cart-v2"
+"""購物車快照格式版本。新增／移除快照欄位時必須改版，舊快照才會被明確擋下而非缺鍵爆掉。"""
+
+
+def _line_key_with_kind(source: "SaleLineInput", kind: str) -> str:
+    """購物車項目鍵。**必須含商業性質**：「買 2 個 A ＋ 送 1 個 A」是兩個項目，
+    共用同一個鍵會讓差異比對（以鍵為 dict key）與前端合併邏輯吃掉其中一筆。"""
+    base = _line_key(source)
+    return base if kind == "NORMAL" else f"GIFT:{base}"
+
+
 def _line_key(line: SaleLineInput) -> str:
     if line.line_type is SaleLineType.SERIALIZED:
         return f"SERIALIZED:{line.item_code}"
@@ -615,8 +626,9 @@ class CustomerDisplayService:
             discount_total += quoted.discount_amount
             items.append(
                 {
-                    "item_key": _line_key(source),
+                    "item_key": _line_key_with_kind(source, quoted.line_kind.value),
                     "line_type": quoted.line_type.value,
+                    "line_kind": quoted.line_kind.value,
                     "name": unicodedata.normalize("NFC", quoted.description),
                     "qty": quoted.qty,
                     "unit_price": _ntd(quoted.unit_price),
@@ -626,7 +638,9 @@ class CustomerDisplayService:
                         else None
                     ),
                     "discount_amount": _ntd(quoted.discount_amount),
+                    "manual_discount_amount": _ntd(quoted.manual_discount_amount),
                     "line_total": _ntd(quoted.line_total),
+                    "net_amount": _ntd(quoted.net_amount),
                 }
             )
         member: dict[str, str] | None = None
@@ -639,7 +653,7 @@ class CustomerDisplayService:
                 raise CartSessionInvalid("會員不存在或不屬本店")
             member = {"display_name": _mask_member_name(contact.name)}
         return {
-            "content_version": "cart-v1",
+            "content_version": _CART_SNAPSHOT_VERSION,
             "items": items,
             "total": _ntd(quote.total),
             "discount_total": _ntd(discount_total),
@@ -818,20 +832,29 @@ class CustomerDisplayService:
         raw_items = cart.snapshot.get("items")
         if not isinstance(raw_items, list):
             raise CartSessionInvalid("購物車商品快照格式錯誤")
+        if cart.snapshot.get("content_version") != _CART_SNAPSHOT_VERSION:
+            # 升版前就開著的購物車少了贈品／折扣欄位。與其讓它在下面缺鍵爆掉，
+            # 不如給店員一句看得懂的話：重新整理購物車即可。
+            raise CartSessionInvalid("購物車內容格式已更新，請重新整理購物車後再送簽")
+        # 客人簽的是「這一車的內容與金額」——贈品與臨時折扣直接改變金額，必須入簽署內容，
+        # 否則客人簽的與實際扣款對不起來。欄位須與 sales 的比對端逐一對齊。
         signed_items = [
             {
                 "name": item["name"],
                 "qty": item["qty"],
+                "line_kind": item["line_kind"],
                 "unit_price": item["unit_price"],
                 "original_unit_price": item["original_unit_price"],
                 "discount_amount": item["discount_amount"],
+                "manual_discount_amount": item["manual_discount_amount"],
                 "line_total": item["line_total"],
+                "net_amount": item["net_amount"],
             }
             for item in raw_items
             if isinstance(item, dict)
         ]
         content: dict[str, object] = {
-            "content_version": "store-credit-signature-v1",
+            "content_version": "store-credit-signature-v2",
             "items": signed_items,
             "total": str(cart.snapshot["total"]),
             "discount_total": str(cart.snapshot["discount_total"]),

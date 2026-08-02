@@ -15,6 +15,7 @@ from app.shared.enums import (
     LinePayRefundStatus,
     PaymentMethod,
     SaleInvoiceStatus,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
     TenderType,
@@ -32,6 +33,11 @@ class SaleLineCreateRequest(BaseModel):
     bulk_lot_id: int | None = None
     menu_item_id: int | None = None
     qty: int = Field(default=1, ge=1)
+    # 商業性質與贈品來歷。與客顯購物車的 CartLineRequest 一致——兩條路徑最終都變成
+    # 同一個 SaleLineInput，欄位若有落差，購物車快照與實際成交就會對不起來。
+    line_kind: SaleLineKind = SaleLineKind.NORMAL
+    gift_reason_id: int | None = Field(default=None, ge=1)
+    gift_note: str | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def _check_shape(self) -> "SaleLineCreateRequest":
@@ -84,6 +90,9 @@ class SaleLineCreateRequest(BaseModel):
             bulk_lot_id=self.bulk_lot_id,
             menu_item_id=self.menu_item_id,
             qty=self.qty,
+            line_kind=self.line_kind,
+            gift_reason_id=self.gift_reason_id,
+            gift_note=self.gift_note,
         )
 
 

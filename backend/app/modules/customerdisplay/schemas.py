@@ -7,7 +7,13 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.modules.sales.inputs import SaleLineInput
-from app.shared.enums import CartSessionStatus, SaleLineType, SignatureTaskStatus, TenderType
+from app.shared.enums import (
+    CartSessionStatus,
+    SaleLineKind,
+    SaleLineType,
+    SignatureTaskStatus,
+    TenderType,
+)
 
 
 class KioskDeviceLoginRequest(BaseModel):
@@ -85,6 +91,11 @@ class CartLineRequest(BaseModel):
     bulk_lot_id: int | None = Field(default=None, ge=1)
     menu_item_id: int | None = Field(default=None, ge=1)
     qty: int = Field(default=1, ge=1)
+    # 商業性質與贈品來歷：客顯購物車是權威購物車，贈品必須經同一條路徑進來，
+    # 否則快照與實際成交會對不起來（結帳時逐欄位比對會失敗）。
+    line_kind: SaleLineKind = SaleLineKind.NORMAL
+    gift_reason_id: int | None = Field(default=None, ge=1)
+    gift_note: str | None = Field(default=None, max_length=200)
 
     @model_validator(mode="after")
     def _matching_reference(self) -> "CartLineRequest":
@@ -108,6 +119,9 @@ class CartLineRequest(BaseModel):
             bulk_lot_id=self.bulk_lot_id,
             menu_item_id=self.menu_item_id,
             qty=self.qty,
+            line_kind=self.line_kind,
+            gift_reason_id=self.gift_reason_id,
+            gift_note=self.gift_note,
         )
 
 

@@ -2932,8 +2932,14 @@ export interface components {
             bulk_lot_id?: number | null;
             /** Catalog Product Id */
             catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
             /** Item Code */
             item_code?: string | null;
+            /** @default NORMAL */
+            line_kind: components["schemas"]["SaleLineKind"];
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
@@ -5077,8 +5083,14 @@ export interface components {
             bulk_lot_id?: number | null;
             /** Catalog Product Id */
             catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
             /** Item Code */
             item_code?: string | null;
+            /** @default NORMAL */
+            line_kind: components["schemas"]["SaleLineKind"];
             line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
@@ -5088,6 +5100,19 @@ export interface components {
              */
             qty: number;
         };
+        /**
+         * SaleLineKind
+         * @description 銷售明細行的**商業性質**——與 `SaleLineType`（品項種類）正交。
+         *
+         *     兩者必須分開：「贈送一件序號品」要同時表達「是序號品」與「是贈品」，
+         *     塞進同一個欄位就表達不了。
+         *
+         *     NORMAL：一般銷售，實付 = 活動折後金額 − 臨時折扣。
+         *     GIFT：贈品，實際出庫但實付 0；原價價值記在 `original_unit_price`，
+         *       **絕不寫進 `discount_amount`**（那是活動折扣專用，報表直接 SUM 它）。
+         * @enum {string}
+         */
+        SaleLineKind: "NORMAL" | "GIFT";
         /**
          * SaleLineRead
          * @description 銷售明細輸出。

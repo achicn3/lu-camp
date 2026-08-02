@@ -19,6 +19,10 @@ export interface CartLine {
   menuItemId?: number;
   /** bulk 可售上限（remaining_qty），用於數量上限提示；serialized 為 1。 */
   maxQty?: number;
+  /** 商業性質：一般銷售或贈品（贈品成交 0 元但照樣扣庫存）。 */
+  lineKind?: "NORMAL" | "GIFT";
+  giftReasonId?: number;
+  giftNote?: string;
 }
 
 export function lineTotal(line: CartLine): number {
@@ -80,5 +84,10 @@ export function toSaleLines(
     bulk_lot_id: l.bulkLotId ?? null,
     menu_item_id: l.menuItemId ?? null,
     qty: l.qty,
+    // 商業性質（一般銷售／贈品）。贈品 UI 於 P4 加入，這裡先明確送出一般銷售——
+    // 後端與客顯購物車以此區分項目，漏送會讓兩邊的項目鍵對不起來。
+    line_kind: l.lineKind ?? "NORMAL",
+    gift_reason_id: l.giftReasonId ?? null,
+    gift_note: l.giftNote ?? null,
   }));
 }

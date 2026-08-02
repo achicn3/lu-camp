@@ -1501,6 +1501,30 @@
             ],
             "title": "Catalog Product Id"
           },
+          "gift_note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Note"
+          },
+          "gift_reason_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Reason Id"
+          },
           "item_code": {
             "anyOf": [
               {
@@ -1513,6 +1537,10 @@
               }
             ],
             "title": "Item Code"
+          },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind",
+            "default": "NORMAL"
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
@@ -7175,6 +7203,30 @@
             ],
             "title": "Catalog Product Id"
           },
+          "gift_note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Note"
+          },
+          "gift_reason_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Reason Id"
+          },
           "item_code": {
             "anyOf": [
               {
@@ -7185,6 +7237,10 @@
               }
             ],
             "title": "Item Code"
+          },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind",
+            "default": "NORMAL"
           },
           "line_type": {
             "$ref": "#/components/schemas/SaleLineType"
@@ -7212,6 +7268,15 @@
         ],
         "title": "SaleLineCreateRequest",
         "type": "object"
+      },
+      "SaleLineKind": {
+        "description": "銷售明細行的**商業性質**——與 `SaleLineType`（品項種類）正交。\n\n兩者必須分開：「贈送一件序號品」要同時表達「是序號品」與「是贈品」，\n塞進同一個欄位就表達不了。\n\nNORMAL：一般銷售，實付 = 活動折後金額 − 臨時折扣。\nGIFT：贈品，實際出庫但實付 0；原價價值記在 `original_unit_price`，\n  **絕不寫進 `discount_amount`**（那是活動折扣專用，報表直接 SUM 它）。",
+        "enum": [
+          "NORMAL",
+          "GIFT"
+        ],
+        "title": "SaleLineKind",
+        "type": "string"
       },
       "SaleLineRead": {
         "description": "銷售明細輸出。",

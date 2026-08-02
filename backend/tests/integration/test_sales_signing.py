@@ -399,9 +399,13 @@ async def test_signed_content_is_customer_visible_canonical_snapshot(
             "name": "露營燈",
             "unit_price": "300",
             "qty": 1,
+            # 贈品與臨時折扣直接改變金額，必須入簽署內容——客人簽的要跟實際扣款一致。
+            "line_kind": "NORMAL",
             "original_unit_price": None,
             "discount_amount": "0",
+            "manual_discount_amount": "0",
             "line_total": "300",
+            "net_amount": "300",
         }
     ]
     assert "phone" not in task.content
