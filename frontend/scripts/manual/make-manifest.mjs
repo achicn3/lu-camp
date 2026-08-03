@@ -32,6 +32,8 @@ const PICK = {
   "15-settings": ["01-page", "02-general-card", "03-general-saved", "04-mobile-pay-card", "05-premium-card", "01-premium-confirm", "02-premium-saved", "03-premium-history", "04-signature-retention"],
   "16-backup": ["01-backup-503", "02-settings-saved"],
   "17-einvoice": ["01-settings-einvoice-on", "02-settings-linepay-on", "03-pos-invoice-fields", "04-pos-tender-linepay", "05-invoice-taxid-error", "06-invoice-b2b", "07-checkout-invoice-result"],
+  // Amego 加值中心後台的核對畫面（官方公開測試帳號；非本店憑證）
+  "17-einvoice-amego": ["01-issued-list", "02-issued-detail", "03-void-fullreturn-list", "04-void-fullreturn-detail", "05-void-salevoid-list", "06-void-salevoid-detail"],
 };
 
 const manifest = [];
