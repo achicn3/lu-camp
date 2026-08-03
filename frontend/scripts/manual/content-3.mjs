@@ -105,7 +105,7 @@ ${steps([
 ])}
 ${figs(
   fig("08-pos-mixed/01-mixed-panel", "圖 7-13：混合付款面板：購物金金額、使用可用上限、拆分顯示與剩餘款項付款方式。"),
-  fig("08-pos-mixed/01-mixed-split-taiwanpay", "圖 7-14：折抵 539 元、剩餘 1 元以台灣Pay 支付的拆分結果。"),
+  fig("08-pos-mixed/04-mixed-split-taiwanpay", "圖 7-14：折抵 539 元、剩餘 1 元以台灣Pay 支付的拆分結果。"),
 )}
 ${box("warn", "購物金不能折抵到 0 元", "<p>「使用可用上限」計算的是 <b>應付總額 − 1 元</b>、購物金餘額、與可折抵上限三者取小。也就是說<b>至少要留 1 元</b>用其他方式支付。內用餐飲金額一律不列入可折抵範圍。</p>")}
 
@@ -119,7 +119,7 @@ ${steps([
   "按<b>結帳</b>完成交易。",
 ])}
 ${figs(
-  fig("08-pos-mixed/02-sign-pushed", "圖 7-15：已推送簽署、等待客人的狀態。"),
+  fig("08-pos-mixed/05-sign-pushed", "圖 7-15：已推送簽署、等待客人的狀態。"),
   fig("08-pos-mixed/08-kiosk-credit-task", "圖 7-16：客人在平板上看到的購物金使用確認畫面。", { width: 460 }),
 )}
 ${fig("08-pos-mixed/03-sign-done", "圖 7-17：客人完成簽名後，POS 顯示綠字確認與折抵金額。")}
@@ -269,7 +269,7 @@ ${figs(
   fig("08-pos/13-print-dialog-done", "圖 7-24：送出列印後顯示綠字「已送出列印。」，按鈕變成「再印一次」。"),
 )}
 ${fig("08-pos/14-complete-screen", "圖 7-25：完成畫面。可按「列印商品明細」再開對話框，或按「開始下一筆」。")}
-${fig("08-pos-mixed/03-complete-mixed", "圖 7-26：混合付款完成的畫面，收款方式顯示為「購物金 $539＋台灣Pay $1」。")}
+${fig("08-pos-mixed/06-complete-mixed", "圖 7-26：混合付款完成的畫面，收款方式顯示為「購物金 $539＋台灣Pay $1」。")}
 <h3>賣出寄售品</h3>
 <p>寄售品的操作與一般商品完全相同（掃碼→收款→結帳），差別在於系統會在結帳後自動產生一筆<b>寄售待付款</b>。</p>
 ${figs(
@@ -400,8 +400,8 @@ ${steps([
 ])}
 ${fig("09-sales/03-push-ack", "圖 8-7a：按下「推送簽收」後的交易紀錄畫面。")}
 ${figs(
-  fig("09-sales/03b-kiosk-ack-task", "圖 8-8：平板上的交易簽收畫面。", { width: 420 }),
-  fig("09-sales/03c-kiosk-ack-done", "圖 8-9：客人完成簽收。", { width: 420 }),
+  fig("09-sales/04-kiosk-ack-task", "圖 8-8：平板上的交易簽收畫面。", { width: 420 }),
+  fig("09-sales/05-kiosk-ack-done", "圖 8-9：客人完成簽收。", { width: 420 }),
 )}
 
 <h2 id="sl-sig">操作四：查看簽名</h2>

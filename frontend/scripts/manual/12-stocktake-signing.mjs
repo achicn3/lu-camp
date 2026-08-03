@@ -46,7 +46,7 @@ const shot2 = makeShot(dir2);
 await page.goto(`${BASE}/signing`, { waitUntil: "networkidle" });
 await page.waitForTimeout(1800);
 await shot2(page, "list", { content: true });
-await shot2(page, "filters", { locator: ".rpt-filters, form" });
+await shot2(page, "filters", { locator: ".signing-filters" });
 
 // 依狀態篩選
 const statusSelect = page.locator("select").first();

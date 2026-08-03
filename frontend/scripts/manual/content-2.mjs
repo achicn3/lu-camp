@@ -247,7 +247,7 @@ ${steps([
   "畫面顯示「已完成簽署／感謝您」，接著回到待機或購物明細。",
 ])}
 ${figs(
-  fig("05-acquisition/14b-kiosk-affidavit-full", "圖 5-7：收購切結完整畫面（收購資料、切結條款、收款方式、簽名區）。", { width: 460 }),
+  fig("05-acquisition/18-kiosk-affidavit-full", "圖 5-7：收購切結完整畫面（收購資料、切結條款、收款方式、簽名區）。", { width: 460 }),
   fig("05-acquisition/15-kiosk-payout-choice", "圖 5-8：收款方式選擇。選「購物金」時會顯示可多得的溢價金額。", { width: 460 }),
 )}
 ${figs(

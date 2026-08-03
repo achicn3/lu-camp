@@ -20,6 +20,19 @@ if (!allowEInvoiceIssue("開啟電子發票、建立兩筆交易並退貨/作廢
   process.exit(0);
 }
 
+async function signOnKiosk() {
+  await kiosk.waitForSelector("canvas.kiosk-sign-canvas", { timeout: 30000 });
+  const canvas = kiosk.locator("canvas.kiosk-sign-canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  await kiosk.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.6);
+  await kiosk.mouse.down();
+  for (const [fx, fy] of [[0.35, 0.35], [0.5, 0.7], [0.65, 0.3], [0.8, 0.6]]) {
+    await kiosk.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 14 });
+  }
+  await kiosk.mouse.up();
+}
+
 async function saleState(id) {
   const r = await apiJson(await apiLogin(), "GET", `/api/v1/sales/${id}`);
   return { status: r.json?.status, invoice_status: r.json?.invoice_status };
@@ -96,6 +109,16 @@ await withSettings(["einvoice_enabled"], async () => {
   await page.fill('.pos-dialog input[placeholder^="例：尺寸不合"]', "操作手冊示範：開票後退貨");
   await page.waitForTimeout(500);
   await shot(page, "return-dialog-invoiced", { locator: ".pos-dialog" });
+  // 同月整筆退貨會作廢原發票：必須先收回紙本證明聯並請客人於顧客螢幕簽名同意，
+  // 否則「確認退貨」保持停用（見 09d-invoice-disposition 的完整示範）。
+  const returnDialog = page.locator('[role="dialog"][aria-label="退貨"]');
+  await returnDialog.getByLabel("已向客人收回發票證明聯（紙本）").check();
+  await returnDialog.locator('button:has-text("請客人於顧客螢幕簽名同意")').click();
+  await kiosk.waitForSelector(".kiosk-snapshot", { timeout: 30000 });
+  await kiosk.waitForTimeout(800);
+  await signOnKiosk();
+  await kiosk.locator('button:has-text("確認並送出")').click();
+  await returnDialog.locator("text=客人已簽名同意").waitFor({ timeout: 25000 });
   await page.click(".pos-dialog button.btn-danger");
   await page.waitForTimeout(5000);
   const afterReturn = await saleState(saleA);
