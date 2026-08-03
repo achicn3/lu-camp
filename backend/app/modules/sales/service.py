@@ -257,6 +257,26 @@ def _member_points_for(total: Decimal) -> int:
     return int(total // _POINTS_DIVISOR)
 
 
+def _adjustment_target_identity(
+    target_key: str | None, lines: Sequence[SaleLineInput]
+) -> str | None:
+    """把折扣的明細索引換成該行的穩定商品身分，供冪等指紋使用。
+
+    索引在排序後的明細裡沒有意義；用商品身分才能讓「同一籃、同樣折在同一件商品上」
+    得到同指紋，而「折在不同商品上」得到不同指紋。索引越界（理應已被邊界擋下）
+    原樣保留，讓它自然成為不同的指紋而非靜默相等。
+    """
+    if target_key is None:
+        return None
+    try:
+        index = int(target_key)
+    except ValueError:
+        return target_key
+    if not 0 <= index < len(lines):
+        return target_key
+    return SalesService._cart_item_key(lines[index])
+
+
 def _cart_fingerprint(
     lines: list[SaleLineInput],
     buyer_contact_id: int | None,
@@ -320,6 +340,10 @@ def _cart_fingerprint(
             )
         ),
         # 折扣**不排序**：套用有先後（先單品後整單，分攤基礎不同），順序不同即不同請求。
+        #
+        # `target_key` 是**明細順序索引**，但上面的明細已為了忽略掃描順序而排序過——
+        # 兩籃相同商品換個順序、折扣都指向 index 0，實際折到的是不同商品，指紋卻會相同。
+        # 同鍵重送就會靜默回放另一種分攤。故此處把索引解析成該行的**穩定商品身分**。
         "adjustments": (
             None
             if not adjustments
@@ -328,7 +352,7 @@ def _cart_fingerprint(
                     "scope": a.scope.value,
                     "method": a.method.value,
                     "value": format(a.value, "f"),
-                    "target_key": a.target_key,
+                    "target_key": _adjustment_target_identity(a.target_key, lines),
                     "reason_id": a.reason_id,
                 }
                 for a in adjustments

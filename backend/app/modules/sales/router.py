@@ -282,6 +282,9 @@ async def create_sale(
                 buyer_contact_id=payload.buyer_contact_id,
                 tenders=payload.to_tender_inputs(),
                 invoice_info=payload.to_invoice_info(),
+                # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
+                # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
+                adjustments=payload.to_adjustments(),
             )
         except IdempotencyKeyConflict as conflict:
             raise HTTPException(
@@ -336,6 +339,9 @@ async def create_sale(
                 buyer_contact_id=payload.buyer_contact_id,
                 tenders=payload.to_tender_inputs(),
                 invoice_info=payload.to_invoice_info(),
+                # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
+                # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
+                adjustments=payload.to_adjustments(),
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)
@@ -370,6 +376,9 @@ async def create_sale(
                 buyer_contact_id=payload.buyer_contact_id,
                 tenders=payload.to_tender_inputs(),
                 invoice_info=payload.to_invoice_info(),
+                # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
+                # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
+                adjustments=payload.to_adjustments(),
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)

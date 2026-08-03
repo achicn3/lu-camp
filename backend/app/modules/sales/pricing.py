@@ -119,6 +119,35 @@ def _guard_remaining(key: str, remaining: Decimal, discount: Decimal) -> None:
     assert key  # 僅為訊息可讀性保留參數
 
 
+def _allocate_largest_remainder(
+    amount: Decimal, weights: Sequence[tuple[str, Decimal]]
+) -> list[tuple[str, Decimal]]:
+    """把 `amount` 依權重分攤成整數元，**每筆必為非負**且總和精確等於 `amount`。
+
+    先各自取整數部分（無條件捨去），再把剩下的元數依「小數部分大到小」逐一發放
+    （最大餘數法）。同分時以原順序決定，分攤才可重現——退貨要依當初的分攤金額退款。
+
+    **為什麼不能「前 N−1 筆四捨五入、最後一筆吃差額」**：各自進位後可能超發，
+    最後一筆就會拿到**負數**分攤，反而把該行的實付金額推高到原價之上。
+    實例：51、51、51、47 分攤 2 元 → 1、1、1、−1，最後一行 47 變成 48。
+    """
+    base = sum((w for _, w in weights), Decimal(0))
+    if base <= 0:
+        raise InvalidDiscount("沒有可分攤的金額")
+    floors: list[tuple[str, Decimal, Decimal]] = []
+    for key, weight in weights:
+        exact = amount * weight / base
+        whole = Decimal(int(exact))  # 無條件捨去；exact 必為非負
+        floors.append((key, whole, exact - whole))
+    leftover = int(amount - sum(whole for _, whole, _ in floors))
+    # 小數部分大者優先；同分以原順序（穩定、可重現）。
+    order = sorted(range(len(floors)), key=lambda i: (-floors[i][2], i))
+    shares = {key: whole for key, whole, _ in floors}
+    for index in order[:leftover]:
+        shares[floors[index][0]] += 1
+    return [(key, shares[key]) for key, _ in weights]
+
+
 def apply_discounts(
     lines: Sequence[PricingLine], requests: Sequence[DiscountRequest]
 ) -> PricingResult:
@@ -167,14 +196,7 @@ def apply_discounts(
                 "折扣後金額為 0：免費請改用贈品，這樣才統計得到贈品的數量與成本"
             )
 
-        allocations: list[tuple[str, Decimal]] = []
-        allocated = Decimal(0)
-        # 尾差固定落在**最後一筆**可折行：分攤必須可重現，否則退貨時對不上當初的金額。
-        for key in eligible[:-1]:
-            share = Decimal(round_ntd(amount * remaining[key] / base))
-            allocations.append((key, share))
-            allocated += share
-        allocations.append((eligible[-1], amount - allocated))
+        allocations = _allocate_largest_remainder(amount, [(k, remaining[k]) for k in eligible])
 
         for key, share in allocations:
             _guard_remaining(key, remaining[key], share)

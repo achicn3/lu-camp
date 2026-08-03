@@ -113,8 +113,8 @@ def test_order_discount_is_allocated_in_proportion_to_line_amounts() -> None:
     assert result.net_amount == Decimal(900)
 
 
-def test_rounding_remainder_goes_to_the_last_eligible_line() -> None:
-    """三行各 100，整單折 10：10×100/300 = 3.33 → 3, 3, 尾差 4 落在最後一行。
+def test_rounding_remainder_is_distributed_by_largest_remainder() -> None:
+    """三行各 100，整單折 10：各得 3.33 → 3,3,3，剩下的 1 元發給小數最大者（同分取前者）。
 
     尾差必須有**固定歸屬**，否則同一筆訂單重算兩次可能得到不同分攤，退貨就會對不上。
     """
@@ -122,9 +122,45 @@ def test_rounding_remainder_goes_to_the_last_eligible_line() -> None:
         [_normal("a", "100"), _normal("b", "100"), _normal("c", "100")],
         [_order(CalculationMethod.FIXED_AMOUNT, "10")],
     )
-    assert result.manual_discount_by_line == {"a": Decimal(3), "b": Decimal(3), "c": Decimal(4)}
+    assert result.manual_discount_by_line == {"a": Decimal(4), "b": Decimal(3), "c": Decimal(3)}
     assert sum(result.manual_discount_by_line.values()) == Decimal(10)
     assert result.net_amount == Decimal(290)
+
+
+def test_allocation_is_never_negative_and_never_raises_a_line_above_its_amount() -> None:
+    """Codex 對抗審查（2026-08-03，high）：先四捨五入再讓最後一行吃差額會超發。
+
+    51、51、51、47 分攤 2 元，舊寫法得到 1、1、1、**−1**——最後一行的實付從 47 變成 48，
+    比原價還高。分攤必須每筆非負、總和精確等於折扣。
+    """
+    result = apply_discounts(
+        [_normal("a", "51"), _normal("b", "51"), _normal("c", "51"), _normal("d", "47")],
+        [_order(CalculationMethod.FIXED_AMOUNT, "2")],
+    )
+    shares = result.manual_discount_by_line
+    assert all(share >= 0 for share in shares.values()), shares
+    assert sum(shares.values()) == Decimal(2)
+    # 沒有任何一行的實付被推高到原金額之上
+    assert result.net_by_line["d"] <= Decimal(47)
+    assert result.net_amount == Decimal(200 - 2)
+
+
+def test_allocation_stays_non_negative_across_many_small_lines() -> None:
+    """性質測試：各種「多筆小額 × 小折扣」組合都不得出現負分攤或總和不符。"""
+    for amounts in (
+        ["51", "51", "51", "47"],
+        ["33", "33", "33", "1"],
+        ["7", "7", "7", "7", "7"],
+        ["999", "1", "1"],
+    ):
+        for discount in ("1", "2", "3", "7"):
+            lines = [_normal(str(i), value) for i, value in enumerate(amounts)]
+            result = apply_discounts(lines, [_order(CalculationMethod.FIXED_AMOUNT, discount)])
+            shares = result.manual_discount_by_line
+            assert all(share >= 0 for share in shares.values()), (amounts, discount, shares)
+            assert sum(shares.values()) == Decimal(discount), (amounts, discount, shares)
+            for key, line in zip([str(i) for i in range(len(amounts))], lines, strict=True):
+                assert result.net_by_line[key] <= line.line_total
 
 
 def test_order_discount_excludes_gifts() -> None:

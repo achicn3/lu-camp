@@ -4,6 +4,7 @@
 店員必須明確說明原因。這幾條錯了就是真的多退或少退客人的錢。
 """
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -336,3 +337,130 @@ async def test_preview_reports_the_refund_and_the_gifts_still_out_there(
             "retail_value": Decimal(500),
         }
     ]
+
+
+# ── Codex 對抗審查（2026-08-03）的回歸 ──────────────────────────────────────
+
+
+async def test_returning_a_discounted_item_does_not_reverse_more_revenue_than_it_earned(
+    db_session: AsyncSession,
+) -> None:
+    """折後實收 400 的商品退貨，報表必須扣回 400，不是牌價 500。
+
+    正向營收已改認 net_amount；反轉若仍用 unit_price × qty，會 +400 再 −500，
+    整段期間顯示 −100 元營收（憑空生出的虧損）。
+    """
+    from app.modules.reports.service import ReportsService
+
+    store_id, clerk_id, product_id, _reason = await _seed(db_session)
+    sales = SalesService(db_session)
+    sale = await sales.create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(400))],
+        adjustments=[
+            DiscountRequest(
+                AdjustmentScope.ITEM, CalculationMethod.FIXED_AMOUNT, Decimal(100), target_key="0"
+            )
+        ],
+    )
+    (line,) = await _lines_of(db_session, sale.id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(line.id, 1)],
+        reason="不合用",
+        actor_user_id=clerk_id,
+        idempotency_key="rg-margin-1",
+    )
+
+    now = datetime.now(UTC)
+    report = await ReportsService(db_session).sales_margin(
+        store_id, date_from=now - timedelta(days=1), date_to=now + timedelta(days=1)
+    )
+    # 賣 400、退 400 → 這段期間淨營收為 0，不得變成負數
+    assert report.gross_turnover == Decimal(0)
+    assert report.recognized_revenue == Decimal(0)
+
+
+async def test_returning_only_the_gift_of_an_invoiced_sale_succeeds(
+    db_session: AsyncSession,
+) -> None:
+    """已開立發票的混合單只退贈品：退款 0，不得嘗試開零元折讓（折讓的 total 必須 > 0）。"""
+    from app.modules.einvoice.service import EInvoiceService
+    from app.shared.enums import InvoiceStatus
+
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    settings = await db_session.scalar(
+        select(StoreSettings).where(StoreSettings.store_id == store_id)
+    )
+    assert settings is not None
+    settings.einvoice_enabled = True
+    await db_session.flush()
+
+    sales = SalesService(db_session)
+    sale = await sales.create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id), _gift(product_id, reason_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+        expected_einvoice_enabled=True,
+    )
+    einvoice = EInvoiceService(db_session)
+    invoice = await einvoice.get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    invoice.status = InvoiceStatus.ISSUED
+    invoice.invoice_no = "ZZ00000001"
+    await db_session.flush()
+
+    _normal_line, gift_line = await _lines_of(db_session, sale.id)
+    customer_return = await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(gift_line.id, 1)],
+        reason="贈品瑕疵收回",
+        actor_user_id=clerk_id,
+        idempotency_key="rg-gift-invoiced",
+    )
+    assert customer_return.refund_amount == Decimal(0)
+    # 沒有折讓單被建立（零元折讓會違反 DB CHECK 而整筆回滾）
+    assert await einvoice.get_allowance_for_return(store_id, customer_return.id) is None
+
+
+async def test_preview_of_a_gift_only_return_asks_for_no_signature(
+    db_session: AsyncSession,
+) -> None:
+    """退款 0 不涉及發票處置，畫面就不該要求收回紙本或請客人簽名。"""
+    from app.modules.einvoice.service import EInvoiceService
+    from app.shared.enums import InvoiceStatus
+
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    settings = await db_session.scalar(
+        select(StoreSettings).where(StoreSettings.store_id == store_id)
+    )
+    assert settings is not None
+    settings.einvoice_enabled = True
+    await db_session.flush()
+
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id), _gift(product_id, reason_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+        expected_einvoice_enabled=True,
+    )
+    invoice = await EInvoiceService(db_session).get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    invoice.status = InvoiceStatus.ISSUED
+    invoice.invoice_no = "ZZ00000002"
+    await db_session.flush()
+
+    _normal_line, gift_line = await _lines_of(db_session, sale.id)
+    preview = await ReturnsService(db_session).preview_return(
+        store_id, sale_id=sale.id, lines=[ReturnLineInput(gift_line.id, 1)]
+    )
+    assert preview["refund_total"] == Decimal(0)
+    assert preview["invoice_action"] == "NONE"
+    assert preview["requires_customer_consent"] is False
+    assert preview["requires_paper_recall"] is False

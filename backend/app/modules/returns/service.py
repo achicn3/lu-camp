@@ -3,7 +3,7 @@
 import hashlib
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -148,6 +148,15 @@ class ReturnsService:
             ),
             Decimal(0),
         )
+        if refund_total == 0:
+            # 與實際送出同一條規則：零元退貨不處置發票，畫面就不該要求收回紙本或簽名。
+            decision = replace(
+                decision,
+                action=ReturnInvoiceAction.NONE,
+                requires_paper_recall=False,
+                requires_customer_consent=False,
+                reason="本次退貨金額為 0（僅退回贈品），發票不需處置。",
+            )
         return {
             "is_full_return": is_full_return,
             "invoice_action": decision.action.value,
@@ -366,6 +375,17 @@ class ReturnsService:
         invoice_decision = await self._decide_invoice_action(
             store_id, sale.id, is_full_return=will_be_full_return
         )
+        if refund_amount == 0:
+            # 純贈品退貨沒有金額可折讓，也沒有發票需要作廢（贈品本來就不在發票品項裡）。
+            # 折讓單的 DB CHECK 要求 total > 0——硬走下去會在同意流程都跑完之後才 flush 失敗
+            # 並回滾，客人已經簽完名了。
+            invoice_decision = replace(
+                invoice_decision,
+                action=ReturnInvoiceAction.NONE,
+                requires_paper_recall=False,
+                requires_customer_consent=False,
+                reason="本次退貨金額為 0（僅退回贈品），發票不需處置。",
+            )
         decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
         if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
             raise ReturnConflict(invoice_decision.reason)
@@ -592,7 +612,13 @@ class ReturnsService:
             # 銷售本身有效（status=RETURNED），只是那張發票正在作廢。
             # 停在 PENDING_VOID，等 F0501 平台確認才由回呼轉 VOID（Codex 第三輪 #2）。
             sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
-        elif invoice is not None and invoice.status == InvoiceStatus.ISSUED:
+        elif (
+            invoice is not None
+            and invoice.status == InvoiceStatus.ISSUED
+            # 退款 0（僅退回贈品）沒有金額可折讓：折讓單的 total 必須 > 0，
+            # 硬走下去會在同意流程都跑完後才 flush 失敗並整筆回滾。
+            and refund_amount > 0
+        ):
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,
@@ -673,6 +699,8 @@ class ReturnsService:
             existing = await self._einvoice.get_allowance_for_return(store_id, customer_return.id)
             if existing is not None:
                 continue
+            if customer_return.refund_amount == 0:
+                continue  # 零元退貨（僅退贈品）沒有折讓可開；折讓單的 total 必須 > 0
             # 稅拆分由 einvoice 以**原發票稅率快照**計（Codex 第十輪），不傳活 settings。
             await self._einvoice.record_allowance(
                 store_id,

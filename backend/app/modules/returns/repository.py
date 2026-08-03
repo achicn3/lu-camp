@@ -110,7 +110,10 @@ class ReturnsRepository:
         )
 
         base = (
-            select(SaleLine, ReturnLine.qty, CustomerReturn.created_at, ReturnLine.id)
+            # refund_amount 是**當初實際退給客人的錢**（差額法算出、已落盤）。
+            # 正向營收認 net_amount，反轉就必須認同一筆金額——用 unit_price × qty 會以
+            # 牌價扣回：折後實收 400 的商品退貨，報表會 +400 再 −500，變成 −100 元營收。
+            select(SaleLine, ReturnLine.qty, ReturnLine.refund_amount)
             .join(ReturnLine, ReturnLine.sale_line_id == SaleLine.id)
             .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
             .join(Sale, Sale.id == SaleLine.sale_id)
@@ -121,7 +124,7 @@ class ReturnsRepository:
                 Sale.status != SaleStatus.VOIDED,
             )
         )
-        rows = [(r[0], r[1]) for r in (await self._session.execute(base)).all()]
+        rows = [(r[0], r[1], Decimal(r[2])) for r in (await self._session.execute(base)).all()]
         # 無退貨窗口（如 trends 逐桶大量呼叫）：即早返回零調整，避免 IN(0) 空查詢
         # 每桶多打兩趟 DB（365 天報表 = 730 次無謂往返；Codex 波次二第三輪 P2）。
         if not rows:
@@ -149,7 +152,7 @@ class ReturnsRepository:
             prior_returned = {int(lid): int(q) for lid, q in prior_rows}
         # 本期各散裝 sale_line 的退貨總量（同期多次退貨合併，才能對整段套差額）
         period_returned: dict[int, int] = {}
-        for line, rqty in rows:
+        for line, rqty, _refund in rows:
             if line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id:
                 period_returned[line.id] = period_returned.get(line.id, 0) + rqty
         ser_ids = [
@@ -185,8 +188,7 @@ class ReturnsRepository:
             else {}
         )
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
-        for line, rqty in rows:
-            refund = line.unit_price * rqty
+        for line, _rqty, refund in rows:
             if line.line_type == SaleLineType.CATALOG:
                 cat_rev += refund
             elif line.line_type == SaleLineType.BULK_LOT:
@@ -208,11 +210,17 @@ class ReturnsRepository:
                 item = items.get(line.serialized_item_id or 0)
                 if item is not None and item.ownership_type == OwnershipType.CONSIGNMENT:
                     c_ser_rev += refund
-                elif item is not None and item.acquisition_cost is not None:
-                    o_ser_rev += refund
-                    o_ser_cogs += item.acquisition_cost
                 else:
-                    nocost_rev += refund
+                    # 成本反轉認**成交當下的快照**；舊資料無快照才回退即時 join，
+                    # 與正向 margin_components 同一口徑。
+                    ser_cost = line.cost_snapshot
+                    if ser_cost is None and item is not None:
+                        ser_cost = item.acquisition_cost
+                    if ser_cost is None:  # 成本未知：營收認列、不假造毛利
+                        nocost_rev += refund
+                    else:
+                        o_ser_rev += refund
+                        o_ser_cogs += ser_cost
         return ReturnsMarginAdjustments(
             owned_serialized_revenue=o_ser_rev,
             owned_serialized_cogs=o_ser_cogs,

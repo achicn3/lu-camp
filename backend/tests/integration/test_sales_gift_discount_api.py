@@ -551,3 +551,64 @@ async def test_updating_a_missing_reason_is_a_404(
         headers=_auth(mgr_token),
     )
     assert missing.status_code == 404, missing.text
+
+
+# ── Codex 對抗審查（2026-08-03）的回歸 ──────────────────────────────────────
+
+
+async def test_replaying_a_discounted_sale_with_the_same_key_returns_the_original(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同鍵、同內容重送必須回原單。
+
+    replay 查詢若漏帶 adjustments，指紋就會以「沒有折扣」重算而與原單不符 → 誤回 409，
+    店員會以為沒成交而重打一次單。
+    """
+    token, _store_id, a_id, b_id, _gift = await _seed(db_session)
+    body = {
+        "lines": [_line(a_id), _line(b_id)],
+        "adjustments": [{"scope": "ORDER", "method": "FIXED_AMOUNT", "value": "100"}],
+        "tenders": [{"tender_type": "CASH", "amount": "900"}],
+    }
+    first = await client.post("/api/v1/sales", json=body, headers=_auth(token, idem="gd-replay"))
+    assert first.status_code == 201, first.text
+    again = await client.post("/api/v1/sales", json=body, headers=_auth(token, idem="gd-replay"))
+    assert again.status_code == 201, again.text
+    assert again.json()["id"] == first.json()["id"]
+
+
+async def test_same_key_with_the_discount_on_a_different_product_is_not_replayed(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """指紋把明細排序以忽略掃描順序，但折扣目標是**位置索引**。
+
+    兩籃相同商品換個順序、折扣都指向第 1 項，實際折到的是不同商品；若指紋沒把索引解析成
+    商品身分，兩者會碰撞成同一指紋，同鍵重送就靜默回放另一種分攤。
+    """
+    token, _store_id, a_id, b_id, _gift = await _seed(db_session)
+    item_discount = [
+        {"scope": "ITEM", "method": "FIXED_AMOUNT", "value": "100", "target_line_index": 0}
+    ]
+    first = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_line(a_id), _line(b_id)],
+            "adjustments": item_discount,
+            "tenders": [{"tender_type": "CASH", "amount": "900"}],
+        },
+        headers=_auth(token, idem="gd-collide"),
+    )
+    assert first.status_code == 201, first.text
+    assert [line["net_amount"] for line in first.json()["lines"]] == ["500", "400"]
+
+    # 同樣兩件商品、同樣「折第 1 項 100 元」、同樣總額 900——但換了順序，折的是另一件。
+    collided = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_line(b_id), _line(a_id)],
+            "adjustments": item_discount,
+            "tenders": [{"tender_type": "CASH", "amount": "900"}],
+        },
+        headers=_auth(token, idem="gd-collide"),
+    )
+    assert collided.status_code == 409, collided.text
