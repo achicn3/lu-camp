@@ -100,22 +100,26 @@ def _item_row(line: SaleLinePayload) -> str:
     總價印**實付**（`net_amount`）：`line_total` 不含臨時折扣，印它會讓客人手上的明細
     加總大於底下的應付總額。舊版呼叫端沒帶 → 退回 line_total。
     """
-    name = line.description if line.line_kind != "GIFT" else f"{line.description}(贈)"
     return (
-        _pad_left_field(name, _NAME_W)
+        _pad_left_field(line.description, _NAME_W)
         + _pad_right_field(line.unit_price, _UNIT_W)
         + _pad_right_field(str(line.qty), _QTY_W)
         + _pad_right_field(line.net_amount or line.line_total, _TOTAL_W)
     )
 
 
-def _discount_sub_rows(line: SaleLinePayload) -> bytes:
-    """有活動折扣的品項，於下方加一列「原價{單價} x{數量} 折-{整行折讓}」（代理只印、不算）。
+def _item_sub_rows(line: SaleLinePayload) -> bytes:
+    """品項下方的補充列：贈品標記、活動折扣、店家折扣（代理只印、不算）。
+
+    **都放子列、不接在品名後面**：品名欄是固定寬度，接上去只要品名長一點就會連標記
+    一起被截掉——實測 EPSON 上「反光營繩 4mm(贈)」的 (贈) 就是這樣消失的。
 
     discount_amount 為**整行**折讓（後端＝每件折讓×數量），故連同數量一起印，讓
     「原價×數量 − 折讓 = 總價」對得起來；qty>1 不會被誤讀成每件折讓。無折扣 → 空。
     """
     out = bytearray()
+    if line.line_kind == "GIFT":
+        out += _line("  ★ 贈品")
     if line.discount_amount not in ("", "0") and line.original_unit_price is not None:
         out += _line(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
     # 店家臨時折扣也要印：金額已改認實付，紙上若只有活動折扣，客人會看到
@@ -236,7 +240,7 @@ class EscposReceiptPrinter:
         out += _line(_SEP)
         for line in sale.lines:
             out += _line(_item_row(line))
-            out += _discount_sub_rows(line)
+            out += _item_sub_rows(line)
         out += _totals_block(sale)
         out += _store_credit_signature_block(sale)
         out += _EXIT_CHINESE
