@@ -56,6 +56,10 @@
 **`Σ net_amount == sale.total == Σ tenders`** 是本設計的核心等式。它成立，發票才送得出去、
 退款才退得對、毛利才算得準。
 
+> **由誰守著**：定價純函式與 service。**資料庫層沒有守 `Σ net_amount`**（裁示不做，
+> 見 §9 的取捨表）；DB 只以 deferred trigger 守 `Σ tenders = sales.total`。
+> 也就是說，繞過應用層的 raw DML 仍可能落下不一致的單——不要以為 DB 有這道保險。
+
 DB CHECK 守護：
 
 ```sql

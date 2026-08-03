@@ -97,3 +97,14 @@
   T11（SALE_IN）的現金寫入都經 `record_movement` 這一處，故一次修好三處。**
 - **測試**：`tests/integration/test_cashdrawer_close_movement_race.py` 真並行（asyncio.gather）關帳
   與插入 SALE_IN，斷言最終一致：SALE_IN 落地則 expected 必含它、否則被拒，不會落進已關閉 session。
+
+## 贈品與臨時折扣（docs/32）合併後待辦
+
+- **舊版購物車快照的相容轉換**（下次改版前必做）。本批把客顯快照的欄位改為必填；
+  正式上線是全新資料庫、裡面沒有舊快照，所以這次無影響。但**第二次以後的升級**，
+  店已在營業，升級當下可能有 DRAFT／FROZEN／PAYMENT_UNCERTAIN 的購物車在途——
+  尤其 PAYMENT_UNCERTAIN 可能已完成外部扣款，讀不回來就失去 POS 的對帳入口。
+  修法：讀取前依 `content_version` 做相容轉換，為 v1 快照補安全預設值。
+- **退貨同意書以兩個時間點的狀態組內容**：逐行金額與總額分別查詢，若同一張單同時有
+  另一筆退貨成立，兩者可能來自不同快照。單店單機實際碰不到，故未處理。
+- **庫存價值匯出的其餘欄位**仍為舊口徑。

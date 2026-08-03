@@ -25,10 +25,14 @@
      `cost_snapshot`。其原價價值**絕不寫入 `discount_amount`**。
   2. **臨時折扣必須落到明細。** 新增 `manual_discount_amount` 與 `net_amount`
      （＝`line_total − manual_discount_amount`），並維持 `line_total` 的原語意不變。
-     **`Σ net_amount == sale.total == Σ tenders`** 為核心等式，以 DB CHECK 與 deferred
-     trigger 守護。所有「該用實付」的地方（退款、發票品項、毛利）明確改讀 `net_amount`。
+     **`Σ net_amount == sale.total == Σ tenders`** 為核心等式，由**定價純函式與 service**
+     守護；逐行的 `net_amount = line_total − manual_discount_amount` 另有 DB CHECK。
+     **`Σ net_amount` 本身沒有 DB 守衛**（2026-08-03 裁示不做：既有 deferred trigger 已守
+     `Σ tenders = total`，而補上它需要同時整理 6 個「沒有明細的合成銷售」測試夾具，
+     改動面大於它擋的風險）。所有「該用實付」的地方（退款、發票品項、毛利）明確改讀 `net_amount`。
   3. **一般行的實付不得為 0。** 折到 0 元＝變相贈品；要免費一律開贈品，否則贈品的數量與
-     成本在報表上統計不到。定價純函式與 DB CHECK 兩層都擋。
+     成本在報表上統計不到。由**定價純函式**擋（不加 DB CHECK：0 元的一般商品本來就賣得
+     出去，加了會把清楚的「銷售總額必須大於 0」422 變成看不懂的資料庫錯誤）。
   4. **贈品成本自成一桶，不進 `gross_margin`。** 另計 `contribution_margin`
      ＝淨毛利 − 贈品成本。
   5. **不建立主管核准機制、不設任何上限**（店主裁示）。事後稽核靠折扣報表的「依店員」段

@@ -261,7 +261,17 @@ function PurchaseDetail({ contactId, saleId }: { contactId: number; saleId: numb
         <tbody>
           {d.lines.map((line, i) => (
             <tr key={i}>
-              <td>{line.description}</td>
+              <td>
+                {line.description}
+                {line.line_kind === "GIFT" && (
+                  <span className="pos-gift-badge">贈品</span>
+                )}
+                {line.manual_discount_amount !== "0" && (
+                  <span className="hint">
+                    {" "}店家折扣 −<Money value={line.manual_discount_amount} />
+                  </span>
+                )}
+              </td>
               <td>{line.qty}</td>
               <td>
                 <Money value={line.unit_price} />

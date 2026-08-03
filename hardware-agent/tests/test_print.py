@@ -21,6 +21,7 @@ from agent.drivers.escpos_receipt import (
     _UNIT_W,
     _WIDTH,
     EscposReceiptPrinter,
+    _discount_sub_rows,
     _disp_width,
     _item_row,
 )
@@ -511,3 +512,18 @@ def test_detail_receipt_falls_back_for_older_callers() -> None:
         line_type="CATALOG", description="帳篷", qty=1, unit_price="1000", line_total="1000"
     )
     assert "1000" in _item_row(line)
+
+
+def test_detail_receipt_explains_the_manual_discount() -> None:
+    """金額對了還不夠：紙上要說得出「單價×數量 為什麼不等於總價」。"""
+    line = SaleLinePayload(
+        line_type="CATALOG",
+        description="露營燈",
+        qty=2,
+        unit_price="500",
+        line_total="1000",
+        net_amount="900",
+        manual_discount_amount="100",
+    )
+    rendered = _discount_sub_rows(line).decode("big5", errors="ignore")
+    assert "100" in rendered

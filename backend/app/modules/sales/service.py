@@ -64,6 +64,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
+    AdjustmentScope,
     CartSessionStatus,
     CashMovementType,
     InvoiceStatus,
@@ -349,7 +350,9 @@ def _cart_fingerprint(
                 key=lambda d: d["tender_type"],
             )
         ),
-        # 折扣**不排序**：套用有先後（先單品後整單，分攤基礎不同），順序不同即不同請求。
+        # 折扣依**套用順序**正規化：定價已固定「先全部單品、再整單」（組內維持原相對次序），
+        # 所以兩種輸入順序算出的金額完全相同——指紋若還依輸入順序而不同，同一張單重送就會
+        # 誤判成「同鍵不同內容」而回 409，而不是冪等回放原單。
         #
         # `target_key` 是**明細順序索引**，但上面的明細已為了忽略掃描順序而排序過——
         # 兩籃相同商品換個順序、折扣都指向 index 0，實際折到的是不同商品，指紋卻會相同。
@@ -365,7 +368,9 @@ def _cart_fingerprint(
                     "target_key": _adjustment_target_identity(a.target_key, lines),
                     "reason_id": a.reason_id,
                 }
-                for a in adjustments
+                for a in sorted(
+                    adjustments, key=lambda a: a.scope is not AdjustmentScope.ITEM
+                )
             ]
         ),
     }

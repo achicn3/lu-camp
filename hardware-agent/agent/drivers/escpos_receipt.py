@@ -115,9 +115,14 @@ def _discount_sub_rows(line: SaleLinePayload) -> bytes:
     discount_amount 為**整行**折讓（後端＝每件折讓×數量），故連同數量一起印，讓
     「原價×數量 − 折讓 = 總價」對得起來；qty>1 不會被誤讀成每件折讓。無折扣 → 空。
     """
-    if line.discount_amount in ("", "0") or line.original_unit_price is None:
-        return b""
-    return _line(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
+    out = bytearray()
+    if line.discount_amount not in ("", "0") and line.original_unit_price is not None:
+        out += _line(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
+    # 店家臨時折扣也要印：金額已改認實付，紙上若只有活動折扣，客人會看到
+    # 「單價 × 數量」對不上總價卻找不到原因。
+    if line.manual_discount_amount not in ("", "0"):
+        out += _line(f"  店家折扣 -{line.manual_discount_amount}")
+    return bytes(out)
 
 
 _ITEM_HEADER = (

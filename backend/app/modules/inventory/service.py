@@ -394,18 +394,25 @@ class InventoryService:
             sale_line = await SalesService(self._session).get_serialized_sale_line(
                 store_id, item_id
             )
+        sold_cost: Decimal | None = None
+        if item.status == SerializedItemStatus.SOLD:
             if sale_line is not None:
                 line, sale = sale_line
-                sold_price = line.unit_price
+                # 成交價認**實付**（net_amount）：unit_price 不含臨時折扣，
+                # 打過折的商品在這頁會顯示得比實收高，毛利也跟著虛增、與報表對不起來。
+                sold_price = line.net_amount
+                # 成本同樣優先取成交當下的快照（與毛利報表同口徑）。
+                sold_cost = line.cost_snapshot
                 sale_id = sale.id
 
         margin: Decimal | None = None
+        cost_basis = sold_cost if sold_cost is not None else item.acquisition_cost
         if (
             item.ownership_type == OwnershipType.OWNED
             and sold_price is not None
-            and item.acquisition_cost is not None
+            and cost_basis is not None
         ):
-            margin = sold_price - item.acquisition_cost
+            margin = sold_price - cost_basis
 
         history = _build_history(await self._repo.movements_for_serialized(store_id, item_id))
 

@@ -658,7 +658,10 @@ class ReturnsService:
         elif (
             invoice is not None
             and invoice.status == InvoiceStatus.PENDING
-            and sale.status == SaleStatus.RETURNED
+            # 與 ISSUED 那條路共用**同一份**判斷：sale.status 要求連贈品都退光才成立，
+            # 用它的話「付費商品全退、贈品依允許流程不收回」在這個空檔會被跳過——
+            # F0401 之後核可就變成全額發票＋補開折讓，而不是取消或續送作廢。
+            and will_be_full_return
         ):
             # 發票尚未平台核可期間即「全數退貨」：比照作廢收斂，不可放任 F0401 之後以全額核可
             # 卻無折讓（買了馬上退是門市真實場景）。void_invoice_for_sale 分流：F0401 未拋檔 →
