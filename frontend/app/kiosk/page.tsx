@@ -1438,9 +1438,23 @@ function ContentSnapshot({
           {items.map((raw, i) => {
             const item = (raw ?? {}) as Record<string, unknown>;
             // name/amount 以外的品項欄位一併呈現，避免遺漏客人所簽內容。
+            // 主要金額認**實付**：購物金簽署的 items 同時有 line_total 與 net_amount，
+            // 拿 line_total 當金額會讓客人看到「商品 500、整單 400」卻沒有說明。
+            // 退貨同意的 line_total 本身就是退款額（無 net_amount），沿用即可。
+            const primaryAmount = item.net_amount ?? item.line_total ?? item.amount;
+            const isGift = item.line_kind === "GIFT";
+            const manualDiscount = item.manual_discount_amount;
             const extra = orderEntries(
               Object.entries(item).filter(
-                ([k]) => k !== "name" && k !== "amount" && k !== "line_total",
+                ([k]) =>
+                  ![
+                    "name",
+                    "amount",
+                    "line_total",
+                    "net_amount",
+                    "line_kind",
+                    "manual_discount_amount",
+                  ].includes(k),
               ),
               ITEM_EXTRA_ORDER,
             );
@@ -1448,6 +1462,12 @@ function ContentSnapshot({
               <tr key={i}>
                 <td>
                   {String(item.name ?? "—")}
+                  {isGift && <span className="kiosk-cart-gift">贈品</span>}
+                  {manualDiscount != null && String(manualDiscount) !== "0" && (
+                    <span className="kiosk-item-extra">
+                      店家折扣 −{formatAmount(manualDiscount)}
+                    </span>
+                  )}
                   {extra.length > 0 && (
                     <span className="kiosk-item-extra">
                       {extra
@@ -1461,9 +1481,7 @@ function ContentSnapshot({
                     </span>
                   )}
                 </td>
-                <td className="kiosk-items-amount">
-                  {formatAmount(item.line_total ?? item.amount)}
-                </td>
+                <td className="kiosk-items-amount">{formatAmount(primaryAmount)}</td>
               </tr>
             );
           })}

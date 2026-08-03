@@ -318,7 +318,12 @@ async def inventory_value(
         ("自有在庫成本", str(report.total_owned_cost_value)),
         ("自有在庫售價", str(report.total_owned_retail_value)),
         ("寄售在庫售價(非自有資產)", str(report.consignment_inventory_gross)),
-        ("一般商品成本", "N/A"),
+        # 收貨會帶入進價（docs/32），所以這裡不再固定 N/A：真的沒有已知成本才顯示 N/A。
+        (
+            "一般商品成本",
+            "N/A" if report.catalog_cost_value is None else str(report.catalog_cost_value),
+        ),
+        ("一般商品成本未知件數", str(report.catalog_unknown_cost_qty)),
         ("庫齡<30天", str(report.owned_cost_aging.lt_30d)),
         ("庫齡30-90天", str(report.owned_cost_aging.d30_90)),
         ("庫齡90-180天", str(report.owned_cost_aging.d90_180)),
@@ -358,7 +363,9 @@ async def inventory_value(
             [
                 "一般商品",
                 str(report.catalog_total_qty),
-                "N/A",
+                "N/A"
+                if report.catalog_cost_value is None
+                else str(report.catalog_cost_value),
                 str(report.catalog_retail_value),
             ],
         ],

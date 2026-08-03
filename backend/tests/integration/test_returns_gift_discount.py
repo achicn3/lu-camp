@@ -30,7 +30,7 @@ from app.shared.enums import (
     TenderType,
     UserRole,
 )
-from app.shared.exceptions import ReturnConflict
+from app.shared.exceptions import ReturnConflict, ReturnLineInvalid
 
 
 async def _seed(session: AsyncSession) -> tuple[int, int, int, int]:
@@ -519,3 +519,44 @@ async def test_trends_and_daily_summary_include_catalog_cost(
     # 商品成本 200（_seed 的 unit_cost）→ 日報的 COGS 必須認列，毛利 = 500 − 200
     assert summary.cogs == Decimal(200)
     assert summary.gross_margin == Decimal(300)
+
+
+async def test_returning_every_paid_item_voids_the_invoice_even_if_a_gift_stays(
+    db_session: AsyncSession,
+) -> None:
+    """贈品不在發票品項裡，所以「付費商品全退、贈品依流程不收回」在稅務上就是整筆退貨。
+
+    若把贈品也算進 is_full_return，系統會開全額折讓而不是作廢原發票——
+    **折讓一旦建立，政策禁止後續作廢，錯的稅務路徑收不回來**（Codex 第五輪 high）。
+    """
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id), _gift(product_id, reason_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+    )
+    normal_line, _gift_line = await _lines_of(db_session, sale.id)
+
+    preview = await ReturnsService(db_session).preview_return(
+        store_id, sale_id=sale.id, lines=[ReturnLineInput(normal_line.id, 1)]
+    )
+    assert preview["is_full_return"] is True
+
+
+async def test_preview_rejects_more_than_the_remaining_quantity(
+    db_session: AsyncSession,
+) -> None:
+    """畫面載入後別台先退掉、或選了超過可退量 → 必須是可讀的錯誤，不是 500。"""
+    store_id, clerk_id, product_id, _reason = await _seed(db_session)
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+    )
+    (line,) = await _lines_of(db_session, sale.id)
+    with pytest.raises(ReturnLineInvalid):
+        await ReturnsService(db_session).preview_return(
+            store_id, sale_id=sale.id, lines=[ReturnLineInput(line.id, 2)]
+        )

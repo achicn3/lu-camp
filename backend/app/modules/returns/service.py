@@ -96,6 +96,22 @@ def _refund_identity(
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
+def _invoice_lines_fully_returned(
+    sale_lines: Sequence[SaleLine], returned_after: dict[int, int]
+) -> bool:
+    """**發票上的品項**是否已全數退回（決定該作廢還是開折讓）。
+
+    贈品不在發票品項裡（實付 0，開票時就排除了），所以「客人退回全部付費商品、
+    但依允許的流程說明不收回贈品」在稅務上就是整筆退貨。若把贈品也算進來，系統會開
+    全額折讓而不是作廢原發票——**而折讓一旦建立，政策禁止後續作廢，錯的稅務路徑收不回來**。
+    """
+    return all(
+        returned_after.get(line.id, 0) >= line.qty
+        for line in sale_lines
+        if line.line_kind is not SaleLineKind.GIFT
+    )
+
+
 class ReturnsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -138,7 +154,14 @@ class ReturnsService:
         after = dict(previous)
         for sale_line_id, qty in requested.items():
             after[sale_line_id] = after.get(sale_line_id, 0) + qty
-        is_full_return = all(after.get(line.id, 0) >= line.qty for line in sale_lines)
+            # 與 create_return 同一道檢查：畫面載入後別台先退掉、或選了超過可退量時，
+            # 差額法會拋 ValueError；沒有這道就變成未處理的 500 而不是可讀的 422。
+            line = lines_by_id[sale_line_id]
+            if after[sale_line_id] > line.qty:
+                raise ReturnLineInvalid(
+                    f"銷售明細 {sale_line_id} 可退數量不足（已退 {previous.get(sale_line_id, 0)}）"
+                )
+        is_full_return = _invoice_lines_fully_returned(sale_lines, after)
         decision = await self._decide_invoice_action(
             store_id, sale_id, is_full_return=is_full_return
         )
@@ -376,9 +399,7 @@ class ReturnsService:
         returned_after_preview = dict(previous)
         for sale_line_id, qty in requested.items():
             returned_after_preview[sale_line_id] = returned_after_preview.get(sale_line_id, 0) + qty
-        will_be_full_return = all(
-            returned_after_preview.get(line.id, 0) >= line.qty for line in sale_lines
-        )
+        will_be_full_return = _invoice_lines_fully_returned(sale_lines, returned_after_preview)
         invoice_decision = await self._decide_invoice_action(
             store_id, sale.id, is_full_return=will_be_full_return
         )

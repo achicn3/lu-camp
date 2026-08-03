@@ -250,7 +250,11 @@ class ReportsService:
                     product.quantity_on_hand
                 )
 
-        total_owned_cost = owned_ser_cost + owned_bulk_cost + (catalog_cost or Decimal(0))
+        # 一般商品成本**不併入** total_owned_cost_value：既有說明是 Σ 庫齡桶 = 總成本，
+        # 而一般商品沒有入庫時間、進不了庫齡桶；併進總成本卻不進庫齡與總售價，兩個並列的
+        # 總計就變成不同範圍，管理者反而無法判讀。一般商品的成本以 catalog_cost_value
+        # 單獨呈現（含未知件數）。
+        total_owned_cost = owned_ser_cost + owned_bulk_cost
         total_owned_retail = owned_ser_retail + owned_bulk_retail
         return InventoryValueReport(
             generated_at=now,
