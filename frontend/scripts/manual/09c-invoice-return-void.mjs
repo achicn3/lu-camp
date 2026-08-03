@@ -1,5 +1,6 @@
 // 手冊 09c：開立發票的交易在「退貨」與「作廢」時，發票狀態如何變化（實機觀察）。
-// 本機無 Amego 憑證，發票停在「發票開立中」；仍可如實驗證退貨/作廢時系統對發票的處置與畫面顯示。
+// 備妥 Amego 測試憑證時，發票會真的開立，退貨/作廢會走完整的收回紙本＋簽名同意關卡；
+// 未設定憑證時發票停在「發票開立中」，該關卡不會出現（見情境 A 的分支），仍可驗證處置與畫面顯示。
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -111,14 +112,22 @@ await withSettings(["einvoice_enabled"], async () => {
   await shot(page, "return-dialog-invoiced", { locator: ".pos-dialog" });
   // 同月整筆退貨會作廢原發票：必須先收回紙本證明聯並請客人於顧客螢幕簽名同意，
   // 否則「確認退貨」保持停用（見 09d-invoice-disposition 的完整示範）。
+  // **只有發票真的開立成功才會有這道關卡**：後端 invoice_policy 在發票未開立時
+  // 回 NONE（兩個旗標皆 false），畫面不會出現勾選框與簽名按鈕——沒有憑證的環境
+  // 走的是這條路，硬等會逾時。故依實際發票狀態決定要不要做同意流程。
   const returnDialog = page.locator('[role="dialog"][aria-label="退貨"]');
-  await returnDialog.getByLabel("已向客人收回發票證明聯（紙本）").check();
-  await returnDialog.locator('button:has-text("請客人於顧客螢幕簽名同意")').click();
-  await kiosk.waitForSelector(".kiosk-snapshot", { timeout: 30000 });
-  await kiosk.waitForTimeout(800);
-  await signOnKiosk();
-  await kiosk.locator('button:has-text("確認並送出")').click();
-  await returnDialog.locator("text=客人已簽名同意").waitFor({ timeout: 25000 });
+  const paperCheckbox = returnDialog.getByLabel("已向客人收回發票證明聯（紙本）");
+  if (await paperCheckbox.count()) {
+    await paperCheckbox.check();
+    await returnDialog.locator('button:has-text("請客人於顧客螢幕簽名同意")').click();
+    await kiosk.waitForSelector(".kiosk-snapshot", { timeout: 30000 });
+    await kiosk.waitForTimeout(800);
+    await signOnKiosk();
+    await kiosk.locator('button:has-text("確認並送出")').click();
+    await returnDialog.locator("text=客人已簽名同意").waitFor({ timeout: 25000 });
+  } else {
+    note("本次發票未開立成功 → 退貨不涉及發票處置，略過收回紙本與簽名同意");
+  }
   await page.click(".pos-dialog button.btn-danger");
   await page.waitForTimeout(5000);
   const afterReturn = await saleState(saleA);
