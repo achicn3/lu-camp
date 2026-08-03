@@ -824,9 +824,21 @@ function CartScreen({
             key={item.item_key}
           >
             <div>
-              <h2>{item.name}</h2>
+              <h2>
+                {item.name}
+                {item.line_kind === "GIFT" && (
+                  <span className="kiosk-cart-gift">贈品</span>
+                )}
+              </h2>
               <p className="kiosk-cart-price-detail">
-                {item.original_unit_price !== null ? (
+                {item.line_kind === "GIFT" ? (
+                  <>
+                    <span className="kiosk-cart-original-price">
+                      原價 ${formatNtd(parseNtd(item.original_unit_price ?? "0") ?? 0)}
+                    </span>
+                    <span>本次贈送，不收費</span>
+                  </>
+                ) : item.original_unit_price !== null ? (
                   <>
                     <span className="kiosk-cart-original-price">
                       原價 ${formatNtd(parseNtd(item.original_unit_price) ?? 0)}
@@ -839,10 +851,18 @@ function CartScreen({
                 ) : (
                   <span>單價 ${formatNtd(parseNtd(item.unit_price) ?? 0)}</span>
                 )}
+                {/* 臨時折扣：客顯是客人**核對金額**的地方，只顯示活動折扣的話，
+                    客人會看到列出 500 卻收 400，卻沒有任何說明。 */}
+                {parseNtd(item.manual_discount_amount) !== 0 && (
+                  <span className="kiosk-cart-line-discount">
+                    店家折扣 −${formatNtd(parseNtd(item.manual_discount_amount) ?? 0)}
+                  </span>
+                )}
               </p>
             </div>
             <span className="kiosk-cart-qty">× {item.qty}</span>
-            <strong>${formatNtd(parseNtd(item.line_total) ?? 0)}</strong>
+            {/* 小計認**實付**：line_total 是活動折後的牌價小計，不含臨時折扣。 */}
+            <strong>${formatNtd(parseNtd(item.net_amount) ?? 0)}</strong>
           </article>
         ))}
       </section>
@@ -873,9 +893,20 @@ function CartScreen({
             </p>
           )}
         </div>
-        {snapshot.discount_total !== "0" && (
+        {(parseNtd(snapshot.discount_total) ?? 0) +
+          (parseNtd(snapshot.manual_discount_total) ?? 0) >
+          0 && (
           <p className="kiosk-cart-discount">
-            本次共折扣 ${formatNtd(parseNtd(snapshot.discount_total) ?? 0)}
+            本次共折扣 $
+            {formatNtd(
+              (parseNtd(snapshot.discount_total) ?? 0) +
+                (parseNtd(snapshot.manual_discount_total) ?? 0),
+            )}
+          </p>
+        )}
+        {(parseNtd(snapshot.gift_retail_value) ?? 0) > 0 && (
+          <p className="kiosk-cart-discount">
+            贈品價值 ${formatNtd(parseNtd(snapshot.gift_retail_value) ?? 0)}（不計入應付）
           </p>
         )}
         <div className="kiosk-cart-grand-total">

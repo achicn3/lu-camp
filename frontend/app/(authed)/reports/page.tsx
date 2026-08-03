@@ -934,6 +934,26 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.bulk_cogs} /></td>
                 </tr>
                 <tr>
+                  <td>一般商品成本</td>
+                  <td><MoneyText value={report.catalog_cogs} /></td>
+                </tr>
+                <tr>
+                  <td>臨時折扣</td>
+                  <td><MoneyText value={report.manual_discount_total} /></td>
+                </tr>
+                <tr>
+                  <td>贈品原價價值（不計入營業額）</td>
+                  <td><MoneyText value={report.gift_retail_value} /></td>
+                </tr>
+                <tr>
+                  <td>贈品成本（不計入毛利）</td>
+                  <td><MoneyText value={report.gift_cost} /></td>
+                </tr>
+                <tr>
+                  <td>貢獻毛利（淨毛利扣贈品成本）</td>
+                  <td><MoneyText value={report.contribution_margin} /></td>
+                </tr>
+                <tr>
                   <td>寄售抽成收入</td>
                   <td><MoneyText value={report.consignment_commission_income} /></td>
                 </tr>

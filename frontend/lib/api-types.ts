@@ -4270,6 +4270,11 @@ export interface components {
             catalog_retail_value: string;
             /** Catalog Total Qty */
             catalog_total_qty: number;
+            /**
+             * Catalog Unknown Cost Qty
+             * @default 0
+             */
+            catalog_unknown_cost_qty: number;
             /** Consignment Bulk Remaining Qty */
             consignment_bulk_remaining_qty: number;
             /** Consignment Inventory Gross */
@@ -4697,10 +4702,25 @@ export interface components {
         MemberPurchaseLineRead: {
             /** Description */
             description: string;
+            /**
+             * Line Kind
+             * @default NORMAL
+             */
+            line_kind: string;
             /** Line Total */
             line_total: string;
             /** Line Type */
             line_type: string;
+            /**
+             * Manual Discount Amount
+             * @default 0
+             */
+            manual_discount_amount: string;
+            /**
+             * Net Amount
+             * @default 0
+             */
+            net_amount: string;
             /** Qty */
             qty: number;
             /** Unit Price */

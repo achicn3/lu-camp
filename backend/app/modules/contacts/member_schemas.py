@@ -37,6 +37,11 @@ class MemberPurchaseLineRead(BaseModel):
     qty: int
     unit_price: NTDAmount
     line_total: NTDAmount
+    # 實付與贈品標示：line_total 是活動折後的牌價小計，臨時折扣不在其中——
+    # 只給它的話，各行加總會高於銷售總額。
+    net_amount: NTDAmount = Decimal(0)
+    manual_discount_amount: NTDAmount = Decimal(0)
+    line_kind: str = "NORMAL"
 
 
 class MemberPurchaseTenderRead(BaseModel):

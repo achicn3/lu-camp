@@ -110,6 +110,13 @@ class ReturnsService:
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
 
+    async def returned_qty_by_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
+        """該銷售各明細**目前為止**的累計退貨量。差額法退款要以它為基準。"""
+        lines = await self._sales.list_lines(sale_id)
+        return await self._repo.returned_qty_by_sale_line_ids(
+            store_id, [line.id for line in lines]
+        )
+
     async def preview_return(
         self,
         store_id: int,

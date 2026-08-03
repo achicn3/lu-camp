@@ -138,6 +138,11 @@ class MemberService:
                     qty=line.qty,
                     unit_price=line.unit_price,
                     line_total=line.line_total,
+                    # 小計認**實付**：各行 line_total 加總會高於銷售總額，
+                    # 客人拿著明細對帳會看到自相矛盾的數字。
+                    net_amount=line.net_amount,
+                    manual_discount_amount=line.manual_discount_amount,
+                    line_kind=line.line_kind.value,
                 )
                 for line in lines
             ],

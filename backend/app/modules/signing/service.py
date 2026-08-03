@@ -492,6 +492,7 @@ class SigningService:
         若本次退貨根本不涉及發票處置（無發票／尚未開立），拒絕建立：不讓客人簽一份空同意。
         """
         from app.modules.einvoice.service import EInvoiceService
+        from app.modules.returns.refund import line_refund_amount
         from app.modules.returns.service import ReturnLineInput, ReturnsService
         from app.modules.sales.service import SalesService
 
@@ -520,6 +521,9 @@ class SigningService:
             lines=[ReturnLineInput(line_id, qty) for line_id, qty in requested.items()],
         )
         action = str(preview["invoice_action"])
+        returned_before = await ReturnsService(self._session).returned_qty_by_sale(
+            store_id, sale.id
+        )
         if action == ReturnInvoiceAction.NONE.value:
             raise SignatureTaskConflict("本次退貨不涉及發票處置，毋須請客人簽署同意")
         if action == ReturnInvoiceAction.REVIEW_REQUIRED.value:
@@ -528,16 +532,29 @@ class SigningService:
 
         lines_by_id = {line.id: line for line in await sales.get_lines(sale.id)}
         items: list[dict[str, object]] = []
-        refund_total = Decimal(0)
         for sale_line_id, qty in requested.items():
             line = lines_by_id.get(sale_line_id)
             if line is None:
                 raise SignatureTaskConflict(f"銷售明細 {sale_line_id} 不屬於銷售單 {sale.id}")
-            line_total = line.unit_price * qty
-            refund_total += line_total
+            # 逐行金額認**實付**（net_amount）並用與退貨相同的差額法：用 unit_price × qty
+            # 算出來的是折前金額，客人簽完之後會在成立退貨時被「退款金額不符」擋下，
+            # 而且重簽也一樣不會過（比對是精確相等）。
             items.append(
-                {"name": line.description, "qty": qty, "line_total": str(line_total)}
+                {
+                    "name": line.description,
+                    "qty": qty,
+                    "line_total": str(
+                        line_refund_amount(
+                            line.net_amount,
+                            line.qty,
+                            returned_before.get(sale_line_id, 0),
+                            qty,
+                        )
+                    ),
+                }
             )
+        # 總額直接取用預覽算出的結果——同一套差額法只算一次，不在此模組重算。
+        refund_total = Decimal(str(preview["refund_total"]))
         invoice = await EInvoiceService(self._session).get_invoice_for_sale(store_id, sale.id)
         if invoice is None:  # action 非 NONE 已保證有發票；此處只為型別收斂
             raise SignatureTaskConflict("原交易沒有發票，毋須請客人簽署同意")

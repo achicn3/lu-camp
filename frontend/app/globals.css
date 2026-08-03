@@ -958,6 +958,16 @@ body {
 .return-blocker {
   margin-top: var(--sp-1);
 }
+/* 客顯的贈品標記：客人要一眼看出這項不收錢。 */
+.kiosk-cart-gift {
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-2);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  vertical-align: middle;
+}
 /* 原因代碼管理的新增列：欄位橫排、視窗窄時自動換行。 */
 .reason-add {
   display: flex;

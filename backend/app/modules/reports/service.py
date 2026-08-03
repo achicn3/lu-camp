@@ -236,11 +236,21 @@ class ReportsService:
 
         catalog_qty = 0
         catalog_retail = Decimal(0)
+        catalog_cost: Decimal | None = None
+        catalog_unknown_cost_qty = 0
         for product in await self._inventory.catalog_for_valuation(store_id):
             catalog_qty += product.quantity_on_hand
             catalog_retail += product.unit_price * Decimal(product.quantity_on_hand)
+            # 成本來自採購收貨帶入的最新進價；沒收過貨的商品仍是未知，另外揭露件數，
+            # 不因為有幾件未知就把整個類別的成本回成 null。
+            if product.unit_cost is None:
+                catalog_unknown_cost_qty += product.quantity_on_hand
+            else:
+                catalog_cost = (catalog_cost or Decimal(0)) + product.unit_cost * Decimal(
+                    product.quantity_on_hand
+                )
 
-        total_owned_cost = owned_ser_cost + owned_bulk_cost
+        total_owned_cost = owned_ser_cost + owned_bulk_cost + (catalog_cost or Decimal(0))
         total_owned_retail = owned_ser_retail + owned_bulk_retail
         return InventoryValueReport(
             generated_at=now,
@@ -258,7 +268,8 @@ class ReportsService:
             consignment_inventory_gross=consign_gross,
             catalog_total_qty=catalog_qty,
             catalog_retail_value=catalog_retail,
-            catalog_cost_value=None,
+            catalog_cost_value=catalog_cost,
+            catalog_unknown_cost_qty=catalog_unknown_cost_qty,
             owned_cost_aging=AgingBuckets(
                 lt_30d=aging["lt_30d"],
                 d30_90=aging["d30_90"],

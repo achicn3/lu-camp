@@ -4647,6 +4647,11 @@
             "title": "Catalog Total Qty",
             "type": "integer"
           },
+          "catalog_unknown_cost_qty": {
+            "default": 0,
+            "title": "Catalog Unknown Cost Qty",
+            "type": "integer"
+          },
           "consignment_bulk_remaining_qty": {
             "title": "Consignment Bulk Remaining Qty",
             "type": "integer"
@@ -5869,12 +5874,27 @@
             "title": "Description",
             "type": "string"
           },
+          "line_kind": {
+            "default": "NORMAL",
+            "title": "Line Kind",
+            "type": "string"
+          },
           "line_total": {
             "title": "Line Total",
             "type": "string"
           },
           "line_type": {
             "title": "Line Type",
+            "type": "string"
+          },
+          "manual_discount_amount": {
+            "default": "0",
+            "title": "Manual Discount Amount",
+            "type": "string"
+          },
+          "net_amount": {
+            "default": "0",
+            "title": "Net Amount",
             "type": "string"
           },
           "qty": {

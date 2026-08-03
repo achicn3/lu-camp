@@ -263,7 +263,9 @@ class InventoryValueReport(BaseModel):
     # 一般商品（成本未建模 → cost N/A）
     catalog_total_qty: int
     catalog_retail_value: NTDAmount
-    catalog_cost_value: NTDAmountOpt  # 恆 null（成本未建模）
+    catalog_cost_value: NTDAmountOpt
+    # 成本未知（從未收過貨）的一般商品件數：有幾件未知要說出來，不是整個類別回 null。
+    catalog_unknown_cost_qty: int = 0  # 恆 null（成本未建模）
     # 庫齡：自有在庫成本價值按入庫時間分桶（Σ = total_owned_cost_value）
     owned_cost_aging: AgingBuckets
 
