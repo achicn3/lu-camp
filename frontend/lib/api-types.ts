@@ -6108,8 +6108,60 @@ export interface components {
             reason_code: "STAFF_WITHDRAWN" | "CONTENT_CHANGED" | "KIOSK_FAILURE_CASH_FALLBACK" | "OTHER";
         };
         /**
+         * StaffCartAdjustmentRead
+         * @description 還原用的折扣意圖。
+         */
+        StaffCartAdjustmentRead: {
+            method: components["schemas"]["CalculationMethod"];
+            /** Note */
+            note?: string | null;
+            /** Reason Id */
+            reason_id?: number | null;
+            scope: components["schemas"]["AdjustmentScope"];
+            /** Target Line Index */
+            target_line_index?: number | null;
+            /** Value */
+            value: string;
+        };
+        /**
+         * StaffCartLineRead
+         * @description 還原用的明細（含贈品來歷）。**刻意與 `CartLineRequest` 分開**：請求模型若同時出現在
+         *     回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。
+         */
+        StaffCartLineRead: {
+            /** Bulk Lot Id */
+            bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            line_kind: components["schemas"]["SaleLineKind"];
+            line_type: components["schemas"]["SaleLineType"];
+            /** Menu Item Id */
+            menu_item_id?: number | null;
+            /** Qty */
+            qty: number;
+        };
+        /**
+         * StaffCartPayloadRead
+         * @description POS 還原購物車所需的原始請求內容。
+         */
+        StaffCartPayloadRead: {
+            /**
+             * Adjustments
+             * @default []
+             */
+            adjustments: components["schemas"]["StaffCartAdjustmentRead"][];
+            /** Lines */
+            lines: components["schemas"]["StaffCartLineRead"][];
+        };
+        /**
          * StaffCartSessionRead
-         * @description POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。
+         * @description POS 恢復工作階段所需的內部資料；客顯 response model 絕不包含這些欄位。
          */
         StaffCartSessionRead: {
             /** Active Signature Task Id */
@@ -6140,6 +6192,7 @@ export interface components {
             /** Sale Id */
             sale_id: number | null;
             snapshot: components["schemas"]["CartSnapshotRead"];
+            staff_payload?: components["schemas"]["StaffCartPayloadRead"] | null;
             status: components["schemas"]["CartSessionStatus"];
             /**
              * Updated At

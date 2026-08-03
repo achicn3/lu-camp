@@ -279,6 +279,8 @@ async def test_first_item_creates_server_priced_cart_visible_only_to_paired_kios
         for key, value in staff_restore.json().items()
         if key
         not in {
+            # 店員端還原用的原始請求（贈品原因、折扣意圖）：客顯 response 不含此欄。
+            "staff_payload",
             "buyer_contact_id",
             "payment_order_id",
             "payment_uncertain_at",

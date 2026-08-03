@@ -122,29 +122,50 @@ def _guard_remaining(key: str, remaining: Decimal, discount: Decimal) -> None:
 def _allocate_largest_remainder(
     amount: Decimal, weights: Sequence[tuple[str, Decimal]]
 ) -> list[tuple[str, Decimal]]:
-    """把 `amount` 依權重分攤成整數元，**每筆必為非負**且總和精確等於 `amount`。
+    """把 `amount` 依權重分攤成整數元：**每筆非負、每行至少留 1 元實付**、總和恰為 `amount`。
 
-    先各自取整數部分（無條件捨去），再把剩下的元數依「小數部分大到小」逐一發放
-    （最大餘數法）。同分時以原順序決定，分攤才可重現——退貨要依當初的分攤金額退款。
+    先各自取整數部分（無條件捨去、並夾在該行的可折上限內），再把剩下的元數依
+    「小數部分大到小」逐一發放給**還沒到上限**的行；同分時以原順序決定，分攤才可重現
+    ——退貨要依當初的分攤金額退款。
 
-    **為什麼不能「前 N−1 筆四捨五入、最後一筆吃差額」**：各自進位後可能超發，
-    最後一筆就會拿到**負數**分攤，反而把該行的實付金額推高到原價之上。
-    實例：51、51、51、47 分攤 2 元 → 1、1、1、−1，最後一行 47 變成 48。
+    **兩個都踩過的坑**：
+
+    1. 「前 N−1 筆四捨五入、最後一筆吃差額」：各自進位後會超發，最後一筆拿到**負數**分攤，
+       把該行實付推到原價之上。實例：51、51、51、47 分攤 2 元 → 1、1、1、−1（末行 47→48）。
+    2. 發放尾差時不看每行上限：金額 1、3 分攤 2 元，順序 [1,3] 會把首行折成 0 元而被拒、
+       反序卻成功——**同一籃商品能不能結帳竟取決於掃描順序**。故此處明確以
+       「每行最多折到剩 1 元」為容量，容量不足才整筆拒絕（訊息指向贈品）。
     """
     base = sum((w for _, w in weights), Decimal(0))
     if base <= 0:
         raise InvalidDiscount("沒有可分攤的金額")
+    # 每行至少要留 1 元實付：折到 0 元＝變相贈品（見模組說明的兩條紅線）。
+    caps = {key: max(Decimal(0), weight - 1) for key, weight in weights}
+    if amount > sum(caps.values(), Decimal(0)):
+        raise InvalidDiscount(
+            "折扣後會有商品變成 0 元：免費請改用贈品，這樣才統計得到贈品的數量與成本"
+        )
     floors: list[tuple[str, Decimal, Decimal]] = []
     for key, weight in weights:
         exact = amount * weight / base
-        whole = Decimal(int(exact))  # 無條件捨去；exact 必為非負
-        floors.append((key, whole, exact - whole))
-    leftover = int(amount - sum(whole for _, whole, _ in floors))
-    # 小數部分大者優先；同分以原順序（穩定、可重現）。
-    order = sorted(range(len(floors)), key=lambda i: (-floors[i][2], i))
+        whole = min(Decimal(int(exact)), caps[key])  # 無條件捨去後夾在容量內
+        floors.append((key, whole, exact - Decimal(int(exact))))
     shares = {key: whole for key, whole, _ in floors}
-    for index in order[:leftover]:
-        shares[floors[index][0]] += 1
+    leftover = int(amount - sum(shares.values(), Decimal(0)))
+    # 小數部分大者優先；同分以原順序。已達上限者跳過，剩餘元數往下一個可收的行走。
+    order = sorted(range(len(floors)), key=lambda i: (-floors[i][2], i))
+    while leftover > 0:
+        progressed = False
+        for index in order:
+            if leftover == 0:
+                break
+            key = floors[index][0]
+            if shares[key] < caps[key]:
+                shares[key] += 1
+                leftover -= 1
+                progressed = True
+        if not progressed:  # 容量已於上方檢查過，理論上不可達；防呆避免無限迴圈。
+            raise InvalidDiscount("折扣無法分攤（可折金額不足）")
     return [(key, shares[key]) for key, _ in weights]
 
 

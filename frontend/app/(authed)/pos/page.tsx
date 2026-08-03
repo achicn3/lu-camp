@@ -32,6 +32,7 @@ import {
 } from "@/features/pos/cart";
 import {
   type DiscountDraft,
+  canonicalAdjustments,
   describeDiscount,
   pruneDiscounts,
   toAdjustmentRequests,
@@ -1132,7 +1133,69 @@ export default function PosPage() {
 
   const restoreCustomerDisplayCart = useCallback(
     async (cart: components["schemas"]["StaffCartSessionRead"]) => {
-      setLines(restoreLines(cart.snapshot.items));
+      // 優先用店員端保存的原始請求還原：客顯快照沒有贈品原因、備註與折扣意圖，
+      // 只靠它重建會把贈品與折扣整個弄丟，接著同步 effect 又會把殘缺狀態寫回伺服器。
+      const payload = cart.staff_payload ?? null;
+      if (payload) {
+        setLines(
+          payload.lines.map((line, index) => {
+            const gift = line.line_kind === "GIFT";
+            const snapshot = cart.snapshot.items[index];
+            const base =
+              line.line_type === "SERIALIZED"
+                ? `S:${line.item_code}`
+                : line.line_type === "CATALOG"
+                  ? `C:${line.catalog_product_id}`
+                  : line.line_type === "BULK_LOT"
+                    ? `B:${line.bulk_lot_id}`
+                    : `MENU-${line.menu_item_id}`;
+            return {
+              key: gift ? `G:${base}` : base,
+              lineType: line.line_type,
+              description: snapshot?.name ?? "",
+              unitPrice: parseNtd(snapshot?.unit_price ?? "0") ?? 0,
+              qty: line.qty,
+              itemCode: line.item_code ?? undefined,
+              catalogProductId: line.catalog_product_id ?? undefined,
+              bulkLotId: line.bulk_lot_id ?? undefined,
+              menuItemId: line.menu_item_id ?? undefined,
+              lineKind: gift ? "GIFT" : "NORMAL",
+              giftReasonId: line.gift_reason_id ?? undefined,
+              giftNote: line.gift_note ?? undefined,
+            };
+          }),
+        );
+        setDiscountDrafts(
+          (payload.adjustments ?? []).map((adjustment, index) => ({
+            id: `restored-${index}`,
+            scope: adjustment.scope,
+            targetKey:
+              adjustment.target_line_index == null
+                ? null
+                : (() => {
+                    const line = payload.lines[adjustment.target_line_index];
+                    if (!line) return null;
+                    const base =
+                      line.line_type === "SERIALIZED"
+                        ? `S:${line.item_code}`
+                        : line.line_type === "CATALOG"
+                          ? `C:${line.catalog_product_id}`
+                          : line.line_type === "BULK_LOT"
+                            ? `B:${line.bulk_lot_id}`
+                            : `MENU-${line.menu_item_id}`;
+                    return line.line_kind === "GIFT" ? `G:${base}` : base;
+                  })(),
+            method: adjustment.method,
+            value: parseNtd(adjustment.value) ?? 0,
+            reasonId: adjustment.reason_id ?? null,
+            note: adjustment.note ?? null,
+          })),
+        );
+      } else {
+        // 升級前建立的舊購物車沒有這份資料：只能以快照重建（贈品原因與折扣無從得知）。
+        setLines(restoreLines(cart.snapshot.items));
+        setDiscountDrafts([]);
+      }
       setSignTaskId(cart.active_signature_task_id ?? null);
       const storeCredit = cart.snapshot.tenders.find(
         (tender) => tender.tender_type === "STORE_CREDIT",
@@ -1759,6 +1822,9 @@ export default function PosPage() {
         cart_revision: null,
         lines: canonLines,
         tenders: canonTenders,
+        // 折扣目標改用購物車列的**穩定 key**：lines 已排序，目標若留位置索引，
+        // 換序重掃就會換出新的冪等鍵與 LINE Pay orderId（已扣款卻找不回原單 → 可能重扣）。
+        adjustments: canonicalAdjustments(activeDiscounts, lines),
       };
       const sig = JSON.stringify(sigBody);
       // 冪等鍵**持久化**（Codex 第二輪 #2）：以購物車指紋（不含一次性付款碼）為界存 localStorage，

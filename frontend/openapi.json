@@ -9737,8 +9737,176 @@
         "title": "SignatureTaskVoidRequest",
         "type": "object"
       },
+      "StaffCartAdjustmentRead": {
+        "description": "還原用的折扣意圖。",
+        "properties": {
+          "method": {
+            "$ref": "#/components/schemas/CalculationMethod"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reason_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Id"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AdjustmentScope"
+          },
+          "target_line_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Line Index"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "method",
+          "value"
+        ],
+        "title": "StaffCartAdjustmentRead",
+        "type": "object"
+      },
+      "StaffCartLineRead": {
+        "description": "還原用的明細（含贈品來歷）。**刻意與 `CartLineRequest` 分開**：請求模型若同時出現在\n回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。",
+        "properties": {
+          "bulk_lot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Lot Id"
+          },
+          "catalog_product_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Product Id"
+          },
+          "gift_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Note"
+          },
+          "gift_reason_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Reason Id"
+          },
+          "item_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Code"
+          },
+          "line_kind": {
+            "$ref": "#/components/schemas/SaleLineKind"
+          },
+          "line_type": {
+            "$ref": "#/components/schemas/SaleLineType"
+          },
+          "menu_item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Item Id"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line_type",
+          "qty",
+          "line_kind"
+        ],
+        "title": "StaffCartLineRead",
+        "type": "object"
+      },
+      "StaffCartPayloadRead": {
+        "description": "POS 還原購物車所需的原始請求內容。",
+        "properties": {
+          "adjustments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StaffCartAdjustmentRead"
+            },
+            "title": "Adjustments",
+            "type": "array"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/StaffCartLineRead"
+            },
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "StaffCartPayloadRead",
+        "type": "object"
+      },
       "StaffCartSessionRead": {
-        "description": "POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。",
+        "description": "POS 恢復工作階段所需的內部資料；客顯 response model 絕不包含這些欄位。",
         "properties": {
           "active_signature_task_id": {
             "anyOf": [
@@ -9837,6 +10005,16 @@
           },
           "snapshot": {
             "$ref": "#/components/schemas/CartSnapshotRead"
+          },
+          "staff_payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StaffCartPayloadRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "$ref": "#/components/schemas/CartSessionStatus"

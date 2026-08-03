@@ -34,7 +34,8 @@ from app.shared.enums import (
     TenderType,
 )
 
-# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
+# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, net_amount)
+# 成本取成交快照、成交額取實付，且排除贈品——與 margin_breakdown 同口徑。
 _SoldRowDB = tuple[
     int | None,
     int | None,
@@ -46,7 +47,7 @@ _SoldRowDB = tuple[
     Decimal,
 ]
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
-#            intake, sold, line_total)
+#            intake, sold, net_amount)
 _BulkSoldRowDB = tuple[
     int | None,
     int | None,
@@ -87,6 +88,9 @@ class SalesMarginComponents:
     payment_fee_total: Decimal
     payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
     # 臨時折扣總額（Σ 各行 manual_discount_amount，不含贈品行——贈品不參與折扣）。
+    # 有成本快照的一般商品（收貨帶入進價後才有）：營收與成本認列進毛利。
+    catalog_known_revenue: Decimal = Decimal(0)
+    catalog_cogs: Decimal = Decimal(0)
     manual_discount_total: Decimal = Decimal(0)
     # 贈品：原價價值與成本各自獨立成桶。**贈品成本絕不混進商品毛利**——營收 0 加全額成本
     # 會讓毛利率失真；贈品的代價要單獨看見，不是把毛利拉成負的。
@@ -355,13 +359,16 @@ class SalesRepository:
                 SerializedItem.brand_id,
                 SerializedItem.category_id,
                 SerializedItem.ownership_type,
-                SerializedItem.acquisition_cost,
+                # 成本取**成交當下的快照**，與 margin_breakdown 同口徑；日後調整商品成本
+                # 不得回頭改寫歷史洞察。舊資料無快照才回退即時 join。
+                func.coalesce(SaleLine.cost_snapshot, SerializedItem.acquisition_cost),
                 SerializedItem.commission_pct,
                 SerializedItem.intake_date,
                 # 售出時間取「該銷售」的時間（Sale.created_at），而非 item.sold_date——
                 # 後者是可變狀態（退貨清空、再售覆寫），會讓歷史期間的在庫天數算錯（Codex P2）。
                 Sale.created_at,
-                SaleLine.line_total,
+                # 成交額認**實付**（net_amount）：用 line_total 會以折前金額高估營收與毛利。
+                SaleLine.net_amount,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
@@ -371,6 +378,8 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
+                # 贈品成交 0 元：算進「售出」會虛增銷量、又以零營收減成本拉低毛利。
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
         return [tuple(r) for r in rows]
@@ -393,7 +402,8 @@ class SalesRepository:
                 SaleLine.qty,
                 BulkLot.intake_date,
                 Sale.created_at,
-                SaleLine.line_total,
+                # 成交額認實付；贈品另於 where 排除（同序號品洞察）。
+                SaleLine.net_amount,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
@@ -403,6 +413,7 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
         return [tuple(r) for r in rows]
@@ -470,8 +481,8 @@ class SalesRepository:
         serialized = await self._session.execute(
             select(
                 SerializedItem.ownership_type,
-                SerializedItem.acquisition_cost,
-                SaleLine.line_total,
+                func.coalesce(SaleLine.cost_snapshot, SerializedItem.acquisition_cost),
+                SaleLine.net_amount,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
@@ -481,19 +492,20 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.SERIALIZED,
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
-        for ownership, cost, line_total in serialized:
-            goods_revenue += line_total
+        for ownership, cost, net_amount in serialized:
+            goods_revenue += net_amount
             if ownership == OwnershipType.OWNED and cost is not None:
-                buyout_margin += line_total - cost
+                buyout_margin += net_amount - cost
 
         bulk = await self._session.execute(
             select(
                 BulkLot.acquisition_cost,
                 BulkLot.total_qty,
                 SaleLine.qty,
-                SaleLine.line_total,
+                SaleLine.net_amount,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
@@ -503,14 +515,15 @@ class SalesRepository:
                 Sale.created_at >= date_from,
                 Sale.created_at < date_to,
                 SaleLine.line_type == SaleLineType.BULK_LOT,
+                SaleLine.line_kind != SaleLineKind.GIFT,
                 BulkLot.consignor_id.is_(None),  # 自有散裝才認買斷毛利
             )
         )
-        for acquisition_cost, total_qty, qty, line_total in bulk:
-            goods_revenue += line_total
+        for acquisition_cost, total_qty, qty, net_amount in bulk:
+            goods_revenue += net_amount
             if total_qty and total_qty > 0:
                 cost = acquisition_cost * Decimal(qty) / Decimal(total_qty)
-                buyout_margin += line_total - cost
+                buyout_margin += net_amount - cost
         return buyout_margin, goods_revenue
 
     async def discount_rows(
@@ -716,22 +729,46 @@ class SalesRepository:
             elif total_qty and total_qty > 0:
                 owned_bulk_cogs += round_ntd(acquisition_cost * Decimal(qty) / Decimal(total_qty))
 
-        catalog_revenue = Decimal(
-            (
-                await self._session.execute(
-                    select(func.coalesce(func.sum(SaleLine.net_amount), 0))
-                    .join(Sale, SaleLine.sale_id == Sale.id)
-                    .where(
-                        Sale.store_id == store_id,
-                        Sale.status != SaleStatus.VOIDED,
-                        Sale.created_at >= date_from,
-                        Sale.created_at < date_to,
-                        SaleLine.line_type == SaleLineType.CATALOG,
-                        SaleLine.line_kind != SaleLineKind.GIFT,
-                    )
+        # 一般商品依「有沒有成本快照」分成兩桶：有成本的認列毛利，沒有的走既有的
+        # 「成本未知不假造」口徑。收貨已把進價帶進 catalog_products.unit_cost、成交時落成
+        # cost_snapshot——這裡若不讀它，那條路徑對財務報表就等於沒有效果。
+        catalog_row = (
+            await self._session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (SaleLine.cost_snapshot.is_(None), SaleLine.net_amount),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (SaleLine.cost_snapshot.is_not(None), SaleLine.net_amount),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
                 )
-            ).scalar_one()
-        )
+                .join(Sale, SaleLine.sale_id == Sale.id)
+                .where(
+                    Sale.store_id == store_id,
+                    Sale.status != SaleStatus.VOIDED,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                    SaleLine.line_type == SaleLineType.CATALOG,
+                    SaleLine.line_kind != SaleLineKind.GIFT,
+                )
+            )
+        ).one()
+        catalog_revenue = Decimal(catalog_row[0])  # 成本未知的一般商品（沿用舊口徑）
+        catalog_known_revenue = Decimal(catalog_row[1])
+        catalog_cogs = Decimal(catalog_row[2])
 
         # 餐飲/內用營收：全額認列但成本未建模（同 catalog，計入 unknown_cost、不灌毛利率）。
         menu_revenue = Decimal(
@@ -844,6 +881,8 @@ class SalesRepository:
             consignment_serialized_revenue=consignment_serialized_revenue,
             consignment_bulk_revenue=consignment_bulk_revenue,
             catalog_revenue=catalog_revenue,
+            catalog_known_revenue=catalog_known_revenue,
+            catalog_cogs=catalog_cogs,
             menu_revenue=menu_revenue,
             unknown_cost_revenue=unknown_cost_revenue,
             cash_received=cash_received,

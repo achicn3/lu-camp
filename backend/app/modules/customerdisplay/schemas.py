@@ -10,6 +10,8 @@ from app.modules.sales.inputs import SaleLineInput
 from app.modules.sales.pricing import DiscountRequest
 from app.modules.sales.schemas import SaleAdjustmentRequest
 from app.shared.enums import (
+    AdjustmentScope,
+    CalculationMethod,
     CartSessionStatus,
     SaleLineKind,
     SaleLineType,
@@ -244,9 +246,45 @@ class KioskCartSessionRead(BaseModel):
     updated_at: datetime
 
 
-class StaffCartSessionRead(CartSessionRead):
-    """POS 恢復工作階段所需的內部會員識別；客顯 response model 絕不包含此欄。"""
+class StaffCartLineRead(BaseModel):
+    """還原用的明細（含贈品來歷）。**刻意與 `CartLineRequest` 分開**：請求模型若同時出現在
+    回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。"""
 
+    line_type: SaleLineType
+    item_code: str | None = None
+    catalog_product_id: int | None = None
+    bulk_lot_id: int | None = None
+    menu_item_id: int | None = None
+    qty: int
+    line_kind: SaleLineKind
+    gift_reason_id: int | None = None
+    gift_note: str | None = None
+
+
+class StaffCartAdjustmentRead(BaseModel):
+    """還原用的折扣意圖。"""
+
+    scope: AdjustmentScope
+    method: CalculationMethod
+    value: str
+    target_line_index: int | None = None
+    reason_id: int | None = None
+    note: str | None = None
+
+
+class StaffCartPayloadRead(BaseModel):
+    """POS 還原購物車所需的原始請求內容。"""
+
+    lines: list[StaffCartLineRead]
+    adjustments: list[StaffCartAdjustmentRead] = []
+
+
+class StaffCartSessionRead(CartSessionRead):
+    """POS 恢復工作階段所需的內部資料；客顯 response model 絕不包含這些欄位。"""
+
+    # 還原用的原始請求（贈品原因／備註、折扣意圖都在這裡；客顯快照沒有）。
+    # 舊購物車沒有這份資料 → null，POS 退回只以快照重建（會少掉贈品與折扣，故不得回寫）。
+    staff_payload: StaffCartPayloadRead | None = None
     buyer_contact_id: int | None
     active_signature_task_id: int | None
     payment_order_id: str | None

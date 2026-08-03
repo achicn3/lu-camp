@@ -713,6 +713,7 @@ class CustomerDisplayService:
                 buyer_contact_id=data.buyer_contact_id,
                 snapshot=snapshot,
                 snapshot_fingerprint=fingerprint,
+                staff_payload=data.model_dump(mode="json"),
                 last_changes=changes,
                 last_activity_at=now,
             )
@@ -744,6 +745,7 @@ class CustomerDisplayService:
         current.buyer_contact_id = data.buyer_contact_id
         current.snapshot = snapshot
         current.snapshot_fingerprint = fingerprint
+        current.staff_payload = data.model_dump(mode="json")
         current.last_changes = changes
         current.payment_order_id = None
         current.payment_uncertain_at = None
@@ -1334,6 +1336,10 @@ class CustomerDisplayService:
                 lines=request.to_inputs(),
                 buyer_contact_id=request.buyer_contact_id,
                 tenders=request.to_tender_inputs(),
+                # 折扣**必須**一起帶：這裡是從保存的原始請求重建已扣款的交易，漏帶會讓它
+                # 按折前金額重新定價 → tender 加總與快照都對不上 → 回滾，購物車永遠卡在
+                # PAYMENT_UNCERTAIN，之後每次重試都必然失敗。
+                adjustments=request.to_adjustments(),
                 idempotency_key=idempotency_key,
                 signature_task_id=request.signature_task_id,
                 cart_session_id=cart.id,

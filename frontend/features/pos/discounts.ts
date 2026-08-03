@@ -52,6 +52,25 @@ export function toAdjustmentRequests(
   }));
 }
 
+/** 供**冪等指紋**使用的折扣正規化：目標由位置索引換成該列的穩定 key。
+ *
+ * 指紋會把明細排序以忽略掃描順序；折扣目標若仍是位置索引，換序重掃就會得到不同指紋 →
+ * 換出新的持久化冪等鍵 → LINE Pay 的 orderId 跟著變。前次已扣款但回應遺失時就再也
+ * check-first 找不回原單，**存在重複扣款風險**。後端指紋也是換成同一種穩定身分。
+ */
+export function canonicalAdjustments(
+  drafts: DiscountDraft[],
+  lines: CartLine[],
+): { scope: string; method: string; value: string; target: string | null; reasonId: number | null }[] {
+  return pruneDiscounts(drafts, lines).map((draft) => ({
+    scope: draft.scope,
+    method: draft.method,
+    value: String(draft.value),
+    target: draft.targetKey,
+    reasonId: draft.reasonId,
+  }));
+}
+
 /** 畫面上的折扣說明（例：「整單折扣 10%」「甲 −100 元」）。 */
 export function describeDiscount(
   draft: DiscountDraft,

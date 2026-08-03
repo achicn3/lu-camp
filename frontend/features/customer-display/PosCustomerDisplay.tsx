@@ -28,28 +28,34 @@ export function terminalInstallationId(): string {
 }
 
 function itemIdentity(item: CartItem): Partial<CartLine> | null {
-  const separator = item.item_key.indexOf(":");
+  // 贈品的 item_key 帶 GIFT: 前綴（GIFT:CATALOG:12）。以第一個冒號切會得到 "CATALOG:12"，
+  // Number() 解析失敗就把整行丟掉——重整後贈品直接消失。先剝掉前綴再切。
+  const withoutKind = item.item_key.startsWith("GIFT:")
+    ? item.item_key.slice("GIFT:".length)
+    : item.item_key;
+  const separator = withoutKind.indexOf(":");
   if (separator < 1) return null;
-  const raw = item.item_key.slice(separator + 1);
+  const raw = withoutKind.slice(separator + 1);
+  const giftPrefix = item.line_kind === "GIFT" ? "G:" : "";
   switch (item.line_type) {
     case "SERIALIZED":
-      return { key: `S:${raw}`, itemCode: raw, maxQty: 1 };
+      return { key: `${giftPrefix}S:${raw}`, itemCode: raw, maxQty: 1 };
     case "CATALOG": {
       const id = Number(raw);
       return Number.isInteger(id) && id > 0
-        ? { key: `C:${id}`, catalogProductId: id }
+        ? { key: `${giftPrefix}C:${id}`, catalogProductId: id }
         : null;
     }
     case "BULK_LOT": {
       const id = Number(raw);
       return Number.isInteger(id) && id > 0
-        ? { key: `B:${id}`, bulkLotId: id }
+        ? { key: `${giftPrefix}B:${id}`, bulkLotId: id }
         : null;
     }
     case "MENU": {
       const id = Number(raw);
       return Number.isInteger(id) && id > 0
-        ? { key: `M:${id}`, menuItemId: id }
+        ? { key: `${giftPrefix}M:${id}`, menuItemId: id }
         : null;
     }
   }
@@ -68,6 +74,7 @@ export function restoreLines(items: CartItem[]): CartLine[] {
         description: item.name,
         unitPrice: parseNtd(item.unit_price) ?? 0,
         qty: item.qty,
+        lineKind: item.line_kind,
       },
     ];
   });

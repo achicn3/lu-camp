@@ -29,7 +29,10 @@ class ReturnsMarginAdjustments:
     consignment_serialized_revenue: Decimal
     consignment_bulk_revenue: Decimal
     catalog_revenue: Decimal
-    no_cost_serialized_revenue: Decimal  # 缺成本自有序號（unknown 桶）
+    no_cost_serialized_revenue: Decimal
+    # 有成本快照的一般商品：營收與成本要一起反轉，否則毛利只退了收入沒退成本。
+    catalog_known_revenue: Decimal = Decimal(0)
+    catalog_cogs: Decimal = Decimal(0)  # 缺成本自有序號（unknown 桶）
 
 
 class ReturnsRepository:
@@ -98,6 +101,7 @@ class ReturnsRepository:
         o_ser_rev = o_ser_cogs = Decimal(0)
         o_bulk_rev = o_bulk_cogs = Decimal(0)
         c_ser_rev = c_bulk_rev = cat_rev = nocost_rev = Decimal(0)
+        cat_known_rev = cat_cogs = Decimal(0)
         _zero = ReturnsMarginAdjustments(
             owned_serialized_revenue=Decimal(0),
             owned_serialized_cogs=Decimal(0),
@@ -188,9 +192,14 @@ class ReturnsRepository:
             else {}
         )
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
-        for line, _rqty, refund in rows:
+        for line, rqty, refund in rows:
             if line.line_type == SaleLineType.CATALOG:
-                cat_rev += refund
+                if line.cost_snapshot is None:
+                    cat_rev += refund  # 成本未知：只反轉營收（沿用舊口徑）
+                else:
+                    cat_known_rev += refund
+                    # 成本按**退貨比例**反轉：cost_snapshot 是整行的成本合計。
+                    cat_cogs += round_ntd(line.cost_snapshot * Decimal(rqty) / Decimal(line.qty))
             elif line.line_type == SaleLineType.BULK_LOT:
                 lot = lots.get(line.bulk_lot_id or 0)
                 if lot is not None and lot.consignor_id is not None:
@@ -230,6 +239,8 @@ class ReturnsRepository:
             consignment_bulk_revenue=c_bulk_rev,
             catalog_revenue=cat_rev,
             no_cost_serialized_revenue=nocost_rev,
+            catalog_known_revenue=cat_known_rev,
+            catalog_cogs=cat_cogs,
         )
 
     async def returned_qty_by_sale_line_ids(

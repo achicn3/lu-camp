@@ -242,6 +242,10 @@ class CartSession(Base, TimestampMixin):
     buyer_contact_id: Mapped[int | None] = mapped_column(index=True)
     snapshot: Mapped[dict[str, object]] = mapped_column(JSONB)
     snapshot_fingerprint: Mapped[str] = mapped_column(String(64))
+    # 店員端還原用的**原始請求**：客顯快照只放客人看得到的東西，沒有贈品原因、備註與折扣意圖。
+    # POS 重整後若只靠快照重建，贈品與折扣會整個掉光，而 hydration 後的同步又會把這份殘缺
+    # 狀態寫回伺服器——混合單刪掉贈品與折扣、純贈品單直接取消整張購物車。
+    staff_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     last_changes: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB,
         default=list,

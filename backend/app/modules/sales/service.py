@@ -154,6 +154,7 @@ class MarginBreakdown:
     net_margin: Decimal
     payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
     # 臨時折扣（少收的錢）與贈品（送出去的成本）性質不同，各自成桶、不互相混。
+    catalog_cogs: Decimal = Decimal(0)  # 一般商品成本（有成本快照者）
     manual_discount_total: Decimal = Decimal(0)
     gift_retail_value: Decimal = Decimal(0)
     gift_cost: Decimal = Decimal(0)
@@ -1740,6 +1741,8 @@ class SalesService:
             - adj.consignment_serialized_revenue,
             consignment_bulk_revenue=comp.consignment_bulk_revenue - adj.consignment_bulk_revenue,
             catalog_revenue=comp.catalog_revenue - adj.catalog_revenue,
+            catalog_known_revenue=comp.catalog_known_revenue - adj.catalog_known_revenue,
+            catalog_cogs=comp.catalog_cogs - adj.catalog_cogs,
             unknown_cost_revenue=comp.unknown_cost_revenue
             - adj.catalog_revenue
             - adj.no_cost_serialized_revenue,
@@ -1753,17 +1756,26 @@ class SalesService:
             + comp.consignment_serialized_revenue
             + comp.consignment_bulk_revenue
             + comp.unknown_cost_revenue
+            + comp.catalog_known_revenue
         )
         recognized_revenue = (
             comp.owned_serialized_revenue
             + comp.owned_bulk_revenue
             + comp.unknown_cost_revenue
+            + comp.catalog_known_revenue
             + commission
         )
         owned_margin = comp.owned_serialized_revenue - comp.owned_serialized_cogs
         bulk_margin = comp.owned_bulk_revenue - comp.owned_bulk_cogs
-        gross_margin = owned_margin + bulk_margin + commission
-        known_cost_revenue = comp.owned_serialized_revenue + comp.owned_bulk_revenue + commission
+        # 有成本快照的一般商品也認列毛利（收貨帶入進價後才有；沒有的仍走「成本未知」桶）。
+        catalog_margin = comp.catalog_known_revenue - comp.catalog_cogs
+        gross_margin = owned_margin + bulk_margin + catalog_margin + commission
+        known_cost_revenue = (
+            comp.owned_serialized_revenue
+            + comp.owned_bulk_revenue
+            + comp.catalog_known_revenue
+            + commission
+        )
         rate: Decimal | None = (
             (gross_margin / known_cost_revenue).quantize(Decimal("0.0001"))
             if known_cost_revenue > 0
@@ -1774,6 +1786,7 @@ class SalesService:
             recognized_revenue=recognized_revenue,
             owned_cogs=comp.owned_serialized_cogs,
             bulk_cogs=comp.owned_bulk_cogs,
+            catalog_cogs=comp.catalog_cogs,
             consignment_commission_income=commission,
             gross_margin=gross_margin,
             gross_margin_rate=rate,
