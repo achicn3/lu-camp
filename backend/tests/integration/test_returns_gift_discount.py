@@ -560,3 +560,84 @@ async def test_preview_rejects_more_than_the_remaining_quantity(
         await ReturnsService(db_session).preview_return(
             store_id, sale_id=sale.id, lines=[ReturnLineInput(line.id, 2)]
         )
+
+
+async def test_full_return_of_paid_items_actually_voids_the_invoice(
+    db_session: AsyncSession,
+) -> None:
+    """端到端釘住**實際的稅務路徑**，不只是 preview 的判斷（Codex 第六輪 high）。
+
+    只斷言 `is_full_return` 的話，就算實際退貨仍去開折讓、沒排 F0501，測試照樣會過——
+    而折讓一旦建立，政策禁止後續作廢，錯的稅務路徑收不回來。
+    這裡驗的是：同月已開立發票的混合單，退回全部付費商品（贈品依允許流程不收回）時，
+    發票確實走**作廢**、且**沒有**建立任何折讓。
+    """
+    from app.modules.einvoice.service import EInvoiceService
+    from app.shared.enums import InvoiceStatus, SaleInvoiceStatus
+    from tests.integration.customer_display_helpers import signed_return_consent
+
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    settings = await db_session.scalar(
+        select(StoreSettings).where(StoreSettings.store_id == store_id)
+    )
+    assert settings is not None
+    settings.einvoice_enabled = True
+    await db_session.flush()
+
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id), _gift(product_id, reason_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+        expected_einvoice_enabled=True,
+    )
+    einvoice = EInvoiceService(db_session)
+    invoice = await einvoice.get_invoice_for_sale(store_id, sale.id)
+    assert invoice is not None
+    invoice.status = InvoiceStatus.ISSUED  # 本月已開立（同月 → 政策為作廢）
+    invoice.invoice_no = "ZZ00000003"
+    await db_session.flush()
+
+    normal_line, gift_line = await _lines_of(db_session, sale.id)
+    returns = ReturnsService(db_session)
+
+    # 預覽：付費商品全退（贈品留著）→ 必須判定為整筆退貨且走作廢，並要求買受人同意
+    preview = await returns.preview_return(
+        store_id, sale_id=sale.id, lines=[ReturnLineInput(normal_line.id, 1)]
+    )
+    assert preview["is_full_return"] is True
+    assert preview["invoice_action"] == "VOID"
+    assert preview["requires_customer_consent"] is True
+    unreturned = preview["unreturned_gifts"]
+    assert isinstance(unreturned, list)
+    assert [g["sale_line_id"] for g in unreturned] == [gift_line.id]
+
+    consent_task_id = await signed_return_consent(
+        db_session,
+        store_id=store_id,
+        sale_id=sale.id,
+        contact_id=None,
+        created_by=clerk_id,
+        return_lines={normal_line.id: 1},
+    )
+    customer_return = await returns.create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(normal_line.id, 1)],
+        reason="尺寸不合",
+        actor_user_id=clerk_id,
+        idempotency_key="rg-void-e2e",
+        invoice_recalled=True,
+        consent_signature_task_id=consent_task_id,
+        unreturned_gift_note="贈品已拆封無法回售，經客人同意不收回",
+    )
+
+    # 實際走的是作廢，不是折讓
+    assert await einvoice.get_allowance_for_return(store_id, customer_return.id) is None
+    await db_session.refresh(invoice)
+    assert invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING)
+    await db_session.refresh(sale)
+    assert sale.invoice_status in (
+        SaleInvoiceStatus.PENDING_VOID,
+        SaleInvoiceStatus.NOT_ISSUED,
+    )
