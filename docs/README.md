@@ -34,6 +34,7 @@
 - [Kiosk 簽署](./23-kiosk-signing-spec.md)
 - [AMEGO 電子發票](./24-amego-einvoice.md)
 - [贈品與臨時折扣](./32-gift-and-manual-discount.md)
+- [贈品與臨時折扣：審查交接筆記](./33-gift-discount-handover.md)
 
 ## 評估與後續實作
 
