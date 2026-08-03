@@ -33,6 +33,7 @@
 - [備份與還原](./22-backup-restore.md)
 - [Kiosk 簽署](./23-kiosk-signing-spec.md)
 - [AMEGO 電子發票](./24-amego-einvoice.md)
+- [贈品與臨時折扣](./32-gift-and-manual-discount.md)
 
 ## 評估與後續實作
 

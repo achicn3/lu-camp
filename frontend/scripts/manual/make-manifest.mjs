@@ -17,6 +17,8 @@ const PICK = {
   "08-pos-mixed": ["01-mixed-panel", "03-sign-done", "01-mixed-split-taiwanpay", "02-sign-pushed", "08-kiosk-credit-task", "03-complete-mixed"],
   "08-pos-mixed-cash": ["01-mixed-cash-split", "02-mixed-cash-signed", "03-mixed-cash-complete"],
   "08-pos-mixed-linepay": ["01-tender-modes-with-linepay", "02-mixed-linepay-panel", "03-checkout-result"],
+  "08-pos-gift-discount": ["01-cart", "02-item-discount-dialog", "03-item-discount-applied", "04-order-discount-dialog", "05-discount-list", "06-gift-dialog", "07-gift-cart", "08-summary", "09-completed", "10-return-gift-notice"],
+  "14-reports-gift-discount": ["01-discounts", "02-gifts", "03-reason-cards"],
   "08-pos-consignment": ["01-cart-consignment-item", "02-cash-change", "03-invoice-off-hint", "04-complete"],
   "09-sales": ["01-list", "02-signature-evidence", "03-push-ack", "03b-kiosk-ack-task", "03c-kiosk-ack-done", "04-return-dialog", "05-return-filled", "06-return-done", "07-void-dialog", "08-void-done"],
   "09-invoice-return-void": ["02-return-dialog-invoiced", "03-after-return", "04-void-dialog-invoiced", "05-after-void"],

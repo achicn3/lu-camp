@@ -87,7 +87,10 @@ POST   /api/v1/acquisitions/{id}/print-labels   # 入庫批次列印條碼/堆�
 ## Sales / POS
 ```
 POST   /api/v1/sales
-       body: { lines:[{line_type(SERIALIZED|CATALOG|BULK_LOT|MENU), item_code?|catalog_product_id?|bulk_lot_id?|menu_item_id?, qty}],
+       body: { lines:[{line_type(SERIALIZED|CATALOG|BULK_LOT|MENU), item_code?|catalog_product_id?|bulk_lot_id?|menu_item_id?, qty,
+                       line_kind(NORMAL|GIFT)?, gift_reason_id?, gift_note?}],
+               adjustments:[{scope(ORDER|ITEM), method(FIXED_AMOUNT|PERCENTAGE), value,
+                             target_line_index?, reason_id?, note?}]?,
                buyer_contact_id?, tenders:[{tender_type, amount, line_pay_one_time_key?}]?,
                signature_task_id?, expected_einvoice_enabled?,
                invoice:{buyer_tax_id?, buyer_name?, mobile_carrier?, npoban?}? }
@@ -99,13 +102,23 @@ GET    /api/v1/sales?from=&to=
 GET    /api/v1/sales/{id}
 POST   /api/v1/sales/{id}/print-detail   # 補印商品明細聯(經硬體代理; 留稽核)
 POST   /api/v1/sales/{id}/void        # 權限+稽核; 已開票 -> 作廢發票流程
+
+# 贈品與臨時折扣（docs/32）：贈品照樣扣庫存但成交 0 元；折扣落到明細的 net_amount，
+# 折扣目標以「明細順序索引」指定（成交前 sale_line 還沒有 id）。
+GET    /api/v1/gift-reasons?include_inactive=       # 任何登入者；POS 選單只取啟用中的
+POST   /api/v1/gift-reasons                         # MANAGER；code 建立後不可改
+PATCH  /api/v1/gift-reasons/{id}                    # MANAGER；停用不實刪
+GET    /api/v1/discount-reasons?include_inactive=
+POST   /api/v1/discount-reasons
+PATCH  /api/v1/discount-reasons/{id}
 ```
 
 ## Returns
 ```
 POST   /api/v1/returns
        body: { sale_id, lines:[{sale_line_id, qty}], reason,
-               taiwan_pay_refund_confirmed?: bool }
+               taiwan_pay_refund_confirmed?: bool, invoice_recalled?: bool,
+               consent_signature_task_id?, unreturned_gift_note? }
        回傳: refund_amount、refund_tenders:[{tender_type, amount}]
        效果: 依累計退貨金額建立 return_tenders；購物金混合單採「購物金優先、再退原外部渠道」；
              不含購物金的多外部付款組合在結帳時拒絕。購物金寫 REFUND/SALE_RETURN 帳本、
@@ -115,7 +128,12 @@ POST   /api/v1/returns
              已售寄售品 -> 反轉 consignment_settlement(未付 CANCELLED / 已付 reclaim_needed)、
              已開票 -> 依本次商品退款全額建 invoice_allowance + 排 upload queue
 GET    /api/v1/returns/{id}
+POST   /api/v1/returns/preview   # 唯讀：本次退款金額、發票處置、尚未退回的贈品清單
 ```
+
+> 退款認**實付**（`net_amount`）並用差額法（docs/32 §5.1）：分次退貨的加總恆等於原實付。
+> 贈品退回退款 0、寫 `GIFT_RETURN` 異動；主商品退了而贈品沒退，必須填 `unreturned_gift_note`
+> （寫入稽核），系統不自行假設。
 
 ## Consignment
 ```
@@ -167,6 +185,8 @@ GET    /api/v1/reports/sales-margin?from=&to=&group_by=category|item
 GET    /api/v1/reports/inventory-value?aging=true
 GET    /api/v1/reports/consignment?status=
 GET    /api/v1/reports/export?type=&format=csv|xlsx
+GET    /api/v1/reports/discounts?from=&to=&format=  # 臨時折扣：依原因、依店員（docs/32 §6）
+GET    /api/v1/reports/gifts?from=&to=&format=      # 贈品：依原因、依品項
 ```
 
 ## Settings (MANAGER)
