@@ -1,5 +1,5 @@
 // 手冊 12：盤點（建立盤點單／輸入實點／確認調整）＋ 簽署紀錄（篩選／查看簽名證據）。
-import { BASE, login, makeShot, newBrowser, shotsDir } from "./_lib.mjs";
+import { BASE, login, makeShot, newBrowser, note, shotsDir } from "./_lib.mjs";
 
 const dir = shotsDir("12-stocktake");
 const shot = makeShot(dir);
@@ -15,9 +15,21 @@ await page.waitForSelector(".st-detail", { timeout: 15000 });
 await page.waitForTimeout(1200);
 await shot(page, "draft-detail", { content: true });
 
-// 輸入實點數（故意少 1 件，示範盤虧）
+// 輸入實點數（故意少 1 件，示範盤虧）。
+// **不可寫死數字**：系統現量隨前面章節的銷售/收貨而變，寫死就會出現「實點＝現量、差異 0」
+// 的截圖，和手冊圖說「差異 −1、盤虧 1」對不上（2026-08-03 重跑就發生過）。
+// 改為讀出該列的系統現量再填 現量−1，讓盤虧永遠成立。
+const firstRow = page.locator(".st-detail tbody tr").first();
+const systemQty = Number(
+  ((await firstRow.locator("td").nth(1).textContent()) ?? "").replace(/[^\d]/g, ""),
+);
+if (!Number.isInteger(systemQty) || systemQty < 1) {
+  throw new Error(`讀不到可用的系統現量（得到 ${systemQty}），無法示範盤虧`);
+}
+const counted = systemQty - 1;
+note(`盤點示範：系統現量 ${systemQty} → 實點 ${counted}（差異 −1）`);
 const input = page.locator(".st-count").first();
-await input.fill("23");
+await input.fill(String(counted));
 await page.waitForTimeout(800);
 await shot(page, "counted", { locator: ".st-detail" });
 

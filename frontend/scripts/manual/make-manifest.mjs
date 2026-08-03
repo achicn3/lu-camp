@@ -49,6 +49,11 @@ function resolveFile(dir, name) {
   // 完整檔名優先：同一個截圖目錄可能由兩支腳本共用（例如 02-cash 由 02 與 02b 寫入、
   // 13-signing 由 12 與 13 寫入），各自從 01 起編，於是**合法**存在同 slug 的不同截圖。
   // 這些條目靠完整檔名就命中，不會走到下面的 slug 比對。
+  // 註：完整檔名命中**不保證是本批拍的**——腳本重新編號而舊檔還留在磁碟上時，
+  // 舊的 04-x.png 會贏過本批的 07-x.png。這無法在此處靠啟發式判斷：同一目錄由兩支
+  // 腳本共用時（02/02b、12/13），同 slug 不同編號本來就是**合法**的不同截圖，
+  // 用 mtime 比較會把它們一律誤判成陳舊。真正的解法是**每輪從空的截圖目錄開始**
+  // （見 docs/34 §4），另有 MANUAL_STALE_HOURS 陳舊偵測作為第二道防線。
   const exact = join(SHOTS_ROOT, dir, `${name}.png`);
   if (existsSync(exact)) return exact;
   let entries;

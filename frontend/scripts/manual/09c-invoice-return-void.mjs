@@ -1,6 +1,7 @@
 // 手冊 09c：開立發票的交易在「退貨」與「作廢」時，發票狀態如何變化（實機觀察）。
-// 備妥 Amego 測試憑證時，發票會真的開立，退貨/作廢會走完整的收回紙本＋簽名同意關卡；
-// 未設定憑證時發票停在「發票開立中」，該關卡不會出現（見情境 A 的分支），仍可驗證處置與畫面顯示。
+// **需要 Amego 測試憑證且發票真的開立成功**（以 MANUAL_ALLOW_EINVOICE_ISSUE 明確 opt-in）：
+// 情境 A 會斷言發票為 ISSUED 並走完收回紙本＋顧客簽名同意的關卡，關卡缺席即視為失敗，
+// 不會靜默略過——那是稅務關卡，寧可讓重跑紅燈也不該放行。
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -112,22 +113,29 @@ await withSettings(["einvoice_enabled"], async () => {
   await shot(page, "return-dialog-invoiced", { locator: ".pos-dialog" });
   // 同月整筆退貨會作廢原發票：必須先收回紙本證明聯並請客人於顧客螢幕簽名同意，
   // 否則「確認退貨」保持停用（見 09d-invoice-disposition 的完整示範）。
-  // **只有發票真的開立成功才會有這道關卡**：後端 invoice_policy 在發票未開立時
-  // 回 NONE（兩個旗標皆 false），畫面不會出現勾選框與簽名按鈕——沒有憑證的環境
-  // 走的是這條路，硬等會逾時。故依實際發票狀態決定要不要做同意流程。
+  //
+  // **這道關卡是稅務關卡，不可以「找不到就跳過」**：後端 invoice_policy 只在發票未開立時
+  // 回 NONE（兩旗標皆 false）而不顯示關卡。若因為憑證失效、平台拒收或前端誤刪而讓關卡消失，
+  // 靜默略過會讓整輪重跑照樣全綠、把高風險迴歸蓋掉。所以先斷言發票確實是 ISSUED，
+  // 再要求關卡一定存在；本腳本是以 MANUAL_ALLOW_EINVOICE_ISSUE 明確 opt-in 真的開票的，
+  // 沒開成功就是環境或系統有問題，應該失敗而不是放行。
+  const stateBeforeReturn = await saleState(saleA);
+  if (stateBeforeReturn.invoice_status !== "ISSUED") {
+    throw new Error(
+      `#${saleA} 的發票未進入 ISSUED（實際：${JSON.stringify(stateBeforeReturn)}）；` +
+        "本節需要真的開立成功的發票才能驗證作廢流程，請確認 Amego 測試憑證與佇列送出狀態。",
+    );
+  }
   const returnDialog = page.locator('[role="dialog"][aria-label="退貨"]');
   const paperCheckbox = returnDialog.getByLabel("已向客人收回發票證明聯（紙本）");
-  if (await paperCheckbox.count()) {
-    await paperCheckbox.check();
-    await returnDialog.locator('button:has-text("請客人於顧客螢幕簽名同意")').click();
-    await kiosk.waitForSelector(".kiosk-snapshot", { timeout: 30000 });
-    await kiosk.waitForTimeout(800);
-    await signOnKiosk();
-    await kiosk.locator('button:has-text("確認並送出")').click();
-    await returnDialog.locator("text=客人已簽名同意").waitFor({ timeout: 25000 });
-  } else {
-    note("本次發票未開立成功 → 退貨不涉及發票處置，略過收回紙本與簽名同意");
-  }
+  await paperCheckbox.waitFor({ timeout: 15000 });
+  await paperCheckbox.check();
+  await returnDialog.locator('button:has-text("請客人於顧客螢幕簽名同意")').click();
+  await kiosk.waitForSelector(".kiosk-snapshot", { timeout: 30000 });
+  await kiosk.waitForTimeout(800);
+  await signOnKiosk();
+  await kiosk.locator('button:has-text("確認並送出")').click();
+  await returnDialog.locator("text=客人已簽名同意").waitFor({ timeout: 25000 });
   await page.click(".pos-dialog button.btn-danger");
   await page.waitForTimeout(5000);
   const afterReturn = await saleState(saleA);

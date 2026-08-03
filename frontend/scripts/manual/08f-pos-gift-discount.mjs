@@ -28,42 +28,77 @@ const token = await apiLogin();
 // 因此不足時就自己補：走正規的「上架 → 建採購單 → 送出 → 收貨入庫」，資料與店員手動操作
 // 產生的完全一樣（手冊仍是照真實資料截圖），並非塞假庫存。
 const stamp = "manual08f";
+const SUPPLIER_NAME = "手冊測試補貨商";
+
 async function listUsable() {
   return ((await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")).json ?? []).filter(
     (p) => p.quantity_on_hand >= 3 && Number(p.unit_price) > 0,
   );
 }
 
+// 每個 mutation 都檢查 HTTP 狀態：中途失敗要當場停下，否則會留下半套資料
+// （建好供應商/採購單卻沒收貨），重跑時又疊一組，污染 11-purchasing 與報表。
+async function must(label, promise) {
+  const res = await promise;
+  if (res.status >= 400) {
+    throw new Error(`${label} 失敗（HTTP ${res.status}）：${JSON.stringify(res.json)}`);
+  }
+  return res.json;
+}
+
 async function ensureTwoStockedProducts() {
   if ((await listUsable()).length >= 2) return;
   const all = (await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")).json ?? [];
-  const pick = (name, unitPrice, reorder) =>
+  const pick = async (name, unitPrice, reorder) =>
     all.find((p) => p.name === name) ??
-    apiJson(token, "POST", "/api/v1/catalog-products", { name, unit_price: unitPrice, reorder_point: reorder }, { "Idempotency-Key": `${stamp}-${name}` }).then((r) => r.json);
+    (await must(
+      `建立一般商品 ${name}`,
+      apiJson(
+        token,
+        "POST",
+        "/api/v1/catalog-products",
+        { name, unit_price: unitPrice, reorder_point: reorder },
+        { "Idempotency-Key": `${stamp}-${name}` },
+      ),
+    ));
 
   const gas = await pick("高山瓦斯罐 230g", "180", 10);
   const battery = await pick("營燈電池 3號 4入", "120", 6);
-  const supplier = (
-    await apiJson(token, "POST", "/api/v1/suppliers", { name: "手冊測試補貨商" })
-  ).json;
-  const po = (
-    await apiJson(token, "POST", "/api/v1/purchase-orders", {
-      supplier_id: supplier.id,
-      submit: true,
-      lines: [
-        { catalog_product_id: gas.id, qty: 24, unit_cost: "120" },
-        { catalog_product_id: battery.id, qty: 12, unit_cost: "80" },
-      ],
-    })
-  ).json;
-  await apiJson(
-    token,
-    "POST",
-    `/api/v1/purchase-orders/${po.id}/receive`,
-    { lines: po.lines.map((l) => ({ line_id: l.id, qty: l.qty })) },
-    { "Idempotency-Key": `${stamp}-recv-${po.id}` },
+
+  // 供應商沿用既有的同名那家，不要每次重跑都長一家新的。
+  const suppliers = (await apiJson(token, "GET", "/api/v1/suppliers?limit=100")).json ?? [];
+  const supplier =
+    suppliers.find((s) => s.name === SUPPLIER_NAME) ??
+    (await must("建立供應商", apiJson(token, "POST", "/api/v1/suppliers", { name: SUPPLIER_NAME })));
+
+  // 若上次在「建了採購單但還沒收貨」時中斷，先把那張撿回來收掉，不要另建一張。
+  const pending = ((await apiJson(token, "GET", "/api/v1/purchase-orders?limit=100")).json ?? [])
+    .filter((p) => p.supplier_id === supplier.id && p.status === "ORDERED");
+  const po =
+    pending[0] ??
+    (await must(
+      "建立採購單",
+      apiJson(token, "POST", "/api/v1/purchase-orders", {
+        supplier_id: supplier.id,
+        submit: true,
+        lines: [
+          { catalog_product_id: gas.id, qty: 24, unit_cost: "120" },
+          { catalog_product_id: battery.id, qty: 12, unit_cost: "80" },
+        ],
+      }),
+    ));
+
+  await must(
+    "收貨入庫",
+    apiJson(
+      token,
+      "POST",
+      `/api/v1/purchase-orders/${po.id}/receive`,
+      { lines: po.lines.map((l) => ({ line_id: l.id, qty: l.qty - (l.received_qty ?? 0) })) },
+      { "Idempotency-Key": `${stamp}-recv-${po.id}` },
+    ),
   );
-  note("一般商品庫存不足 → 已依採購/收貨流程補足兩項");
+  note(`一般商品庫存不足 → 已依採購/收貨流程補足（採購單 #${po.id}）`);
 }
 
 await ensureTwoStockedProducts();

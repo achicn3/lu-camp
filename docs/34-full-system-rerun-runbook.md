@@ -109,11 +109,20 @@ curl -s http://127.0.0.1:8787/devices/status | python3 -m json.tool | grep -E '"
 
 ## 4. 跑 30 支手冊腳本
 
+**先把截圖目錄清空**（重要）：截圖檔名含流水號，腳本增刪情境時會位移。舊檔留著會讓
+`make-manifest` 以完整檔名命中**上一輪的舊圖**，手冊就把過期畫面當本次結果出貨——
+2026-08-03 那輪的 6 張缺圖之所以拖到清空目錄才暴露，就是這個原因。
+
+```bash
+mv ~/tmp/lu-camp-manual ~/tmp/lu-camp-manual.prev-$(date +%H%M%S) 2>/dev/null || true
+```
+
 ```bash
 cd /home/test/lu-camp/frontend
 export LD_LIBRARY_PATH="$LU_CAMP_PW_LDPATH:$LD_LIBRARY_PATH"
 export MANUAL_ALLOW_EINVOICE_ISSUE=true   # ← 真的開發票（本次為 Amego 測試憑證，裁示允許）
 
+mkdir -p /tmp/manual-logs
 for s in 01-shell 02-cash-open 02b-cash-validation 03-contacts 04-kiosk-pair \
          05-acquisition 06-inventory 07-menu-campaigns \
          08-pos 08b-pos-mixed 08c-pos-consignment 08d-pos-mixed-cash \
@@ -124,7 +133,16 @@ for s in 01-shell 02-cash-open 02b-cash-validation 03-contacts 04-kiosk-pair \
          15-settings-backup 15b-settings-premium 16b-backup-error \
          17-einvoice-linepay 18-cash-close; do
   echo "=== $s"
-  node scripts/manual/$s.mjs 2>&1 | tail -5
+  # **不要寫成 `node ... | tail -5`**：管線的結束狀態取自 tail（幾乎必然成功），
+  # node 非零離開會被吞掉，於是失敗的章節照樣往下跑，最後用缺圖／舊圖產出「看似完整」的手冊。
+  # 先把輸出寫進 log、判斷 node 自己的 exit code，失敗就立刻停。
+  if node scripts/manual/$s.mjs > "/tmp/manual-logs/$s.log" 2>&1; then
+    tail -5 "/tmp/manual-logs/$s.log"
+  else
+    echo "❌ $s 失敗（完整輸出見 /tmp/manual-logs/$s.log）"
+    tail -20 "/tmp/manual-logs/$s.log"
+    break
+  fi
 done
 ```
 

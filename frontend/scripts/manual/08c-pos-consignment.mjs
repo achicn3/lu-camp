@@ -17,6 +17,8 @@ const shot = makeShot(dir);
 // 隨手撿一件在庫寄售品（例如 6,800 的帳篷）會讓找零算不出來、圖文對不上。
 const ITEM_NAME = "露營桌 蛋捲桌";
 const ITEM_PRICE = "1800";
+// 本次執行的識別碼：讓 fixture 的冪等鍵在同一次執行內穩定、跨次執行不相撞。
+const RUN_ID = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 
 async function ensureConsignmentItem() {
   const token = await apiLogin();
@@ -42,6 +44,9 @@ async function ensureConsignmentItem() {
     throw new Error("找不到具身分證字號的寄售人（寄售收購必填），請先跑 03-contacts");
   }
 
+  // 冪等鍵**不可固定**：本節跑完那件就被賣掉，下次重跑又找不到在庫品而走到這裡；
+  // 若沿用同一把鍵，後端會重播上一張收購、不會產生新庫存，於是再查仍是空 → 必然失敗。
+  // 以時間戳成鍵：同一次執行內重試仍冪等，跨次執行則各自建立自己的 fixture。
   const created = await apiJson(
     token,
     "POST",
@@ -51,7 +56,7 @@ async function ensureConsignmentItem() {
       contact_id: consignor.id,
       items: [{ name: ITEM_NAME, grade: "A", listed_price: ITEM_PRICE, commission_pct: 50 }],
     },
-    { "Idempotency-Key": "manual-08c-consignment" },
+    { "Idempotency-Key": `manual-08c-consignment-${RUN_ID}` },
   );
   if (created.status >= 400) {
     throw new Error(`補建寄售品失敗（HTTP ${created.status}）：${JSON.stringify(created.json)}`);
