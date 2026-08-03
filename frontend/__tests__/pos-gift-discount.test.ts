@@ -10,6 +10,7 @@ import {
   unmarkGift,
 } from "@/features/pos/cart";
 import {
+  canonicalAdjustments,
   describeDiscount,
   type DiscountDraft,
   pruneDiscounts,
@@ -132,6 +133,20 @@ describe("臨時折扣草稿", () => {
     ).toBe("甲 15%");
     expect(describeDiscount(draft({ value: 100 }), lines)).toBe(
       "整單折扣 −100 元",
+    );
+  });
+});
+
+describe("冪等指紋的折扣正規化", () => {
+  it("點擊順序不同不得換出不同指紋", () => {
+    // 後端定價固定「先單品、後整單」，兩種順序金額相同；前端指紋若還依點擊順序而異，
+    // 就會換出新的冪等鍵與 LINE Pay orderId，繞過 check-first 的重複扣款保護。
+    const lines = [line("C:1", "甲", 1), line("C:2", "乙", 2)];
+    const item = draft({ id: "a", scope: "ITEM", targetKey: "C:1", value: 100 });
+    const order = draft({ id: "b", scope: "ORDER", value: 10, method: "PERCENTAGE" });
+
+    expect(JSON.stringify(canonicalAdjustments([item, order], lines))).toBe(
+      JSON.stringify(canonicalAdjustments([order, item], lines)),
     );
   });
 });

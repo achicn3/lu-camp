@@ -62,7 +62,14 @@ export function canonicalAdjustments(
   drafts: DiscountDraft[],
   lines: CartLine[],
 ): { scope: string; method: string; value: string; target: string | null; reasonId: number | null }[] {
-  return pruneDiscounts(drafts, lines).map((draft) => ({
+  // 依**套用順序**正規化（單品先於整單，組內維持原相對次序）——後端定價與指紋都這樣做。
+  // 前端不跟著做的話，同樣兩筆折扣只要點擊順序不同就換出新的冪等鍵，LINE Pay 的 orderId
+  // 跟著變，等於繞過後端剛做的修正與 check-first 復原保護。
+  const ordered = [
+    ...pruneDiscounts(drafts, lines).filter((d) => d.scope === "ITEM"),
+    ...pruneDiscounts(drafts, lines).filter((d) => d.scope !== "ITEM"),
+  ];
+  return ordered.map((draft) => ({
     scope: draft.scope,
     method: draft.method,
     value: String(draft.value),

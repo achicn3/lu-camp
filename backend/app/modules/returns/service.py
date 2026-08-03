@@ -668,10 +668,20 @@ class ReturnsService:
             # 發票 VOID＋佇列 CANCELLED（平台從未收過）；已拋檔 → VOID_PENDING，由 F0401 回執
             # 決定（成功→續 F0501 作廢、失敗→VOID），最終由 einvoice 回呼收斂 sale 狀態。
             voided = await self._einvoice.void_invoice_for_sale(
-                store_id, sale.id, actor_user_id=actor_user_id
+                store_id,
+                sale.id,
+                # 不傳的話會套用預設的 SALE_VOID，把「整筆退貨」記成「銷售作廢」，
+                # 發票稽核分類就不準了。
+                reason=InvoiceVoidReason.FULL_RETURN,
+                actor_user_id=actor_user_id,
             )
-            if voided is not None and voided.status == InvoiceStatus.VOID:
-                sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED  # 未拋檔即取消：無有效發票
+            if voided is not None:
+                if voided.status == InvoiceStatus.VOID:
+                    sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED  # 未拋檔即取消
+                elif voided.status == InvoiceStatus.VOID_PENDING:
+                    # F0401 已被平台認領：作廢還在跑。不標的話銷售會**永遠顯示「開立中」**，
+                    # 把「平台上仍有效、但作廢失敗」的發票藏起來，店家不會知道要處理。
+                    sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
         # 部分退貨且發票仍 PENDING：不動——F0401 核可（發票成立）時由 einvoice 回呼
         # backfill_allowances_for_issued_sale 補開 G0401。
 

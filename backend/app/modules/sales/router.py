@@ -262,6 +262,9 @@ async def create_sale(
                     buyer_contact_id=payload.buyer_contact_id,
                     tenders=payload.to_tender_inputs(),
                     invoice_info=payload.to_invoice_info(),
+                    # 漏帶的話，輸家會以「無折扣」重算指紋 → 必然 409：錢已被贏家扣掉、
+                    # 單也成立了，POS 卻說簽署不能重用。
+                    adjustments=payload.to_adjustments(),
                 )
             except SignatureTaskConflict as conflict:
                 raise HTTPException(
