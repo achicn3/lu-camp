@@ -1029,13 +1029,25 @@ class InventoryService:
         *,
         ref_type: str,
         ref_id: int,
+        unit_cost: Decimal | None = None,
     ) -> None:
-        """一般商品補貨入庫：加庫存並寫 PURCHASE stock_movement（同一交易）。"""
+        """一般商品補貨入庫：加庫存並寫 PURCHASE stock_movement（同一交易）。
+
+        `unit_cost`（本次進貨單價）帶入時**更新商品成本為最新進價**（裁示 2026-08-03）。
+        沒有這條路徑的話 `catalog_products.unit_cost` 永遠是 NULL——贈品成本與貢獻毛利
+        就系統性顯示為 0，即使採購單上早就有真實進價。
+
+        成本只影響**日後**的成交：已成交的明細存有 `cost_snapshot`，不會被回頭改寫。
+        """
         if qty <= 0:
             raise OwnershipValidationError("入庫數量必須 > 0")
         ok = await self._repo.increment_catalog(store_id, catalog_id, qty)
         if not ok:
             raise CrossStoreReference(f"一般商品 {catalog_id} 不屬於 store {store_id}")
+        if unit_cost is not None:
+            product = await self._repo.get_catalog_for_update(store_id, catalog_id)
+            if product is not None:
+                product.unit_cost = unit_cost
         await self.record_stock_in(
             store_id,
             ItemKind.CATALOG,

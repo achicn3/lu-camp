@@ -20,6 +20,9 @@ from app.shared.enums import (
 )
 
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmountOpt = Annotated[
+    Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
+]
 
 
 class BrandRead(BaseModel):
@@ -204,6 +207,9 @@ class CatalogProductDetailRead(BaseModel):
     name: str
     brand_id: int | None
     unit_price: NTDAmount
+    # 成本＝最近一次收貨的進價（裁示 2026-08-03：採購收貨自動帶入）。從未收貨過則為 null，
+    # 報表沿用「成本未知不假造毛利」的口徑。已成交的明細存有成本快照，不受日後變動影響。
+    unit_cost: NTDAmountOpt = None
     quantity_on_hand: int
     reorder_point: int
     purchases: list[CatalogPurchaseRead]

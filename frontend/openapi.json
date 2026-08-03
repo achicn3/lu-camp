@@ -2238,6 +2238,17 @@
             "title": "Sku",
             "type": "string"
           },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
+          },
           "unit_price": {
             "title": "Unit Price",
             "type": "string"

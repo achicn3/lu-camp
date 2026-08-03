@@ -3299,6 +3299,8 @@ export interface components {
             reorder_point: number;
             /** Sku */
             sku: string;
+            /** Unit Cost */
+            unit_cost?: string | null;
             /** Unit Price */
             unit_price: string;
         };

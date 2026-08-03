@@ -1048,3 +1048,91 @@ async def test_duplicate_invoice_number_rejected_across_pos(
         headers=_auth(token),
     )
     assert ok3.status_code == 200, ok3.text
+
+
+async def test_receiving_sets_the_catalog_cost_to_the_latest_purchase_price(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收貨時把商品成本更新為本次進價（裁示 2026-08-03：最新進價）。
+
+    這是 `catalog_products.unit_cost` **唯一**的來源。沒有它，即使採購單上早有真實進價，
+    贈品成本與貢獻毛利仍會系統性顯示為 0（Codex 對抗審查 medium）。
+    """
+    token, store_id, _clerk_id = await _seed_store(db_session, name="成本帶入店")
+    catalog_id = await _seed_catalog(db_session, store_id, sku="COST-1")
+    product = await db_session.get(CatalogProduct, catalog_id)
+    assert product is not None and product.unit_cost is None  # 建檔時沒有成本
+
+    supplier_id = await _create_supplier(client, token, name="成本供應商")
+    po_id = await _create_po(
+        client,
+        token,
+        supplier_id=supplier_id,
+        catalog_product_id=catalog_id,
+        qty=10,
+        unit_cost="120",
+    )
+    assert (await _receive_all(client, token, po_id)).status_code == 200
+
+    await db_session.refresh(product)
+    assert product.unit_cost == Decimal(120)
+
+    # 再進一批較貴的貨 → 成本更新為最新進價
+    second_po = await _create_po(
+        client,
+        token,
+        supplier_id=supplier_id,
+        catalog_product_id=catalog_id,
+        qty=5,
+        unit_cost="150",
+    )
+    assert (await _receive_all(client, token, second_po, key="cost-2")).status_code == 200
+    await db_session.refresh(product)
+    assert product.unit_cost == Decimal(150)
+
+
+async def test_cost_changes_do_not_rewrite_the_cost_of_past_sales(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """成本只影響**日後**的成交：已成交的明細存有成本快照，進價變動不得回頭改寫歷史毛利。"""
+    from app.modules.cashdrawer.service import CashDrawerService
+    from app.modules.sales.inputs import SaleLineInput, TenderInput
+    from app.modules.sales.models import SaleLine
+    from app.modules.sales.service import SalesService
+    from app.shared.enums import SaleLineType, TenderType
+
+    token, store_id, clerk_id = await _seed_store(db_session, name="快照店")
+    catalog_id = await _seed_catalog(db_session, store_id, sku="SNAP-1", qty=50)
+    supplier_id = await _create_supplier(client, token, name="快照供應商")
+    po_id = await _create_po(
+        client,
+        token,
+        supplier_id=supplier_id,
+        catalog_product_id=catalog_id,
+        qty=10,
+        unit_cost="100",
+    )
+    assert (await _receive_all(client, token, po_id, key="snap-1")).status_code == 200
+
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=catalog_id, qty=1)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(180))],
+    )
+    line = await db_session.scalar(select(SaleLine).where(SaleLine.sale_id == sale.id))
+    assert line is not None and line.cost_snapshot == Decimal(100)
+
+    later_po = await _create_po(
+        client,
+        token,
+        supplier_id=supplier_id,
+        catalog_product_id=catalog_id,
+        qty=5,
+        unit_cost="300",
+    )
+    assert (await _receive_all(client, token, later_po, key="snap-2")).status_code == 200
+
+    await db_session.refresh(line)
+    assert line.cost_snapshot == Decimal(100)  # 歷史成本不變

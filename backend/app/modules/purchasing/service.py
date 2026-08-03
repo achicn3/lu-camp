@@ -421,6 +421,9 @@ class PurchasingService:
                 qty,
                 ref_type="goods_receipt",
                 ref_id=receipt.id,
+                # 收貨時把商品成本更新為**本次進價**（裁示：最新進價）。
+                # 這是 catalog 成本唯一的來源；沒有它，贈品成本與貢獻毛利永遠是 0。
+                unit_cost=po_line.unit_cost,
             )
             ok = await self._repo.increment_received_qty(store_id, po_line.id, qty)
             if not ok:  # 併發下另一交易先收了；主列列鎖下不應發生，防禦性守衛。
