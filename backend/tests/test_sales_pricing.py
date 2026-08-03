@@ -288,3 +288,23 @@ def test_gift_only_order_nets_to_zero_without_any_discount() -> None:
     assert result.net_amount == Decimal(0)
     assert result.gift_retail_value == Decimal(500)
     assert result.gross_amount == Decimal(0)  # 牌價小計只算一般銷售
+
+
+def test_result_does_not_depend_on_the_order_the_clerk_applied_the_discounts() -> None:
+    """規格 §4：套用順序固定為「先單品、後整單」，不依呼叫端給的陣列順序。
+
+    依陣列順序執行的話，店員先點整單再點單品 vs 反過來，同樣兩筆折扣會算出不同的應付
+    金額（600/400 兩行，單品折 200 + 整單 10% → 720 或 700）。**客人付多少不該取決於
+    店員的點擊順序**（Codex 第七輪）。
+    """
+    lines = [_normal("a", "600"), _normal("b", "400")]
+    item = _item("a", CalculationMethod.FIXED_AMOUNT, "200")
+    order = _order(CalculationMethod.PERCENTAGE, "10")
+
+    item_first = apply_discounts(lines, [item, order])
+    order_first = apply_discounts(lines, [order, item])
+
+    assert item_first.net_amount == order_first.net_amount == Decimal(720)
+    assert item_first.manual_discount_by_line == order_first.manual_discount_by_line
+    # 且確實是「以單品折後餘額為基礎」算整單折扣（800 的 10% = 80，不是 1000 的 100）
+    assert item_first.order_discount_amount == Decimal(80)

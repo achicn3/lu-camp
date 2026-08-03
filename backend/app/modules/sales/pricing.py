@@ -186,7 +186,14 @@ def apply_discounts(
     item_total = Decimal(0)
     order_total = Decimal(0)
 
-    for request in requests:
+    # **套用順序固定：先全部單品折扣，再整單折扣**（見模組說明）。
+    # 依呼叫端給的陣列順序執行的話，店員先點整單再點單品 vs 反過來，同樣兩筆折扣會算出
+    # 不同的應付金額（例：600/400 兩行，單品折 200 + 整單 10% → 720 或 700）。
+    # 客人付多少不該取決於店員的點擊順序。組內維持原相對次序，分攤仍可重現。
+    ordered_requests = [r for r in requests if r.scope is AdjustmentScope.ITEM] + [
+        r for r in requests if r.scope is not AdjustmentScope.ITEM
+    ]
+    for request in ordered_requests:
         _validate_request(request)
         if request.scope is AdjustmentScope.ITEM:
             key = request.target_key
