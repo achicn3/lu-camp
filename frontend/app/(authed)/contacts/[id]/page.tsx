@@ -267,7 +267,8 @@ function PurchaseDetail({ contactId, saleId }: { contactId: number; saleId: numb
                 <Money value={line.unit_price} />
               </td>
               <td>
-                <Money value={line.line_total} />
+                {/* 小計認實付：line_total 不含臨時折扣，加總會大於這筆交易的總額。 */}
+                <Money value={line.net_amount} />
               </td>
             </tr>
           ))}

@@ -473,3 +473,41 @@ def test_einvoice_platform_content_required() -> None:
             InvoicePayload.model_validate(stripped)
 
 
+
+
+def test_detail_receipt_prints_what_the_customer_actually_paid() -> None:
+    """客人拿走的是這張紙：小計必須印實付，否則明細加總會大於底下的應付總額。"""
+    line = SaleLinePayload(
+        line_type="CATALOG",
+        description="露營燈",
+        qty=1,
+        unit_price="500",
+        line_total="500",
+        net_amount="400",
+        manual_discount_amount="100",
+    )
+    rendered = _item_row(line)
+    assert "400" in rendered
+    assert "500" in rendered  # 單價仍印牌價（牌價與實付分開留痕）
+
+
+def test_detail_receipt_marks_gift_lines() -> None:
+    """贈品要看得出是贈品，而不是「賣 0 元」。"""
+    line = SaleLinePayload(
+        line_type="CATALOG",
+        description="小物",
+        qty=1,
+        unit_price="0",
+        line_total="0",
+        net_amount="0",
+        line_kind="GIFT",
+    )
+    assert "(贈)" in _item_row(line)
+
+
+def test_detail_receipt_falls_back_for_older_callers() -> None:
+    """舊版呼叫端沒有 net_amount：退回 line_total，不可印成空白。"""
+    line = SaleLinePayload(
+        line_type="CATALOG", description="帳篷", qty=1, unit_price="1000", line_total="1000"
+    )
+    assert "1000" in _item_row(line)

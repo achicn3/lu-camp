@@ -58,6 +58,11 @@ class SaleLinePayload(BaseModel):
     line_total: str
     original_unit_price: str | None = None
     discount_amount: str = "0"
+    # 實付與商業性質（贈品／臨時折扣，docs/32）。**客人拿走的是這張紙**——印折前小計
+    # 而底下總額是折後，客人會對不起來。舊版呼叫端沒有這兩欄 → 退回 line_total 與一般銷售。
+    net_amount: str | None = None
+    manual_discount_amount: str = "0"
+    line_kind: str = "NORMAL"
 
 
 class SaleTenderPayload(BaseModel):

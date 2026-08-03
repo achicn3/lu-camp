@@ -95,12 +95,17 @@ def _pad_right_field(text: str, width: int) -> str:
 
 
 def _item_row(line: SaleLinePayload) -> str:
-    """一列品項：品名靠左（過長截斷），單價／數量／總價靠右，固定欄寬對齊。"""
+    """一列品項：品名靠左（過長截斷），單價／數量／總價靠右，固定欄寬對齊。
+
+    總價印**實付**（`net_amount`）：`line_total` 不含臨時折扣，印它會讓客人手上的明細
+    加總大於底下的應付總額。舊版呼叫端沒帶 → 退回 line_total。
+    """
+    name = line.description if line.line_kind != "GIFT" else f"{line.description}(贈)"
     return (
-        _pad_left_field(line.description, _NAME_W)
+        _pad_left_field(name, _NAME_W)
         + _pad_right_field(line.unit_price, _UNIT_W)
         + _pad_right_field(str(line.qty), _QTY_W)
-        + _pad_right_field(line.line_total, _TOTAL_W)
+        + _pad_right_field(line.net_amount or line.line_total, _TOTAL_W)
     )
 
 
