@@ -368,6 +368,7 @@ class ReportsService:
             recognized_revenue=bd.recognized_revenue,
             owned_cogs=bd.owned_cogs,
             bulk_cogs=bd.bulk_cogs,
+            catalog_cogs=bd.catalog_cogs,
             consignment_commission_income=bd.consignment_commission_income,
             gross_margin=bd.gross_margin,
             gross_margin_rate=bd.gross_margin_rate,
@@ -683,7 +684,8 @@ class ReportsService:
                     secondhand_revenue=margin.secondhand_revenue,
                     gross_margin=margin.gross_margin,
                     gross_margin_rate=margin.gross_margin_rate,
-                    cogs=margin.owned_cogs + margin.bulk_cogs,
+                    # 一般商品成本也要算進來，否則同一份報表裡成本與毛利互相矛盾。
+                    cogs=margin.owned_cogs + margin.bulk_cogs + margin.catalog_cogs,
                     total_cash_out=cash_out,
                     store_credit_issued=issued,
                     store_credit_redeemed=redeemed,
@@ -724,7 +726,7 @@ class ReportsService:
             sc_redeemed += redeemed
 
         net_ex_tax, tax = split_tax_inclusive(margin.recognized_revenue, settings.tax_rate)
-        cogs = margin.owned_cogs + margin.bulk_cogs
+        cogs = margin.owned_cogs + margin.bulk_cogs + margin.catalog_cogs
         total_cash_out = cash.total_buyout_out + cash.total_consignment_payout_out
         avg_ticket: Decimal | None = (
             Decimal(round_ntd(margin.gross_turnover / Decimal(margin.transaction_count)))

@@ -8463,6 +8463,11 @@
             "title": "Cash Received",
             "type": "string"
           },
+          "catalog_cogs": {
+            "default": "0",
+            "title": "Catalog Cogs",
+            "type": "string"
+          },
           "consignment_commission_income": {
             "title": "Consignment Commission Income",
             "type": "string"

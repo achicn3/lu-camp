@@ -612,3 +612,122 @@ async def test_same_key_with_the_discount_on_a_different_product_is_not_replayed
         headers=_auth(token, idem="gd-collide"),
     )
     assert collided.status_code == 409, collided.text
+
+
+async def test_cart_read_returns_the_payload_needed_to_restore_gifts_and_discounts(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """寫進 DB 還不夠——API 要真的把還原資料回出來（Codex 第三輪 high）。
+
+    沒回傳的話 POS 重整會退回舊路徑、清掉折扣草稿，再把降級後的內容同步回伺服器：
+    混合單刪掉贈品與折扣、純贈品單直接取消整張購物車。
+    """
+    from app.modules.customerdisplay.schemas import CartUpsertRequest
+    from app.modules.customerdisplay.service import CustomerDisplayService
+
+    token, store_id, a_id, b_id, gift_reason = await _seed(db_session)
+    clerk_id = int(decode_access_token(token)["sub"])
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=store_id, actor_user_id=clerk_id
+    )
+    await CustomerDisplayService(db_session).upsert_cart(
+        store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "expected_revision": None,
+                "lines": [
+                    {"line_type": "CATALOG", "catalog_product_id": a_id, "qty": 1},
+                    {
+                        "line_type": "CATALOG",
+                        "catalog_product_id": b_id,
+                        "qty": 1,
+                        "line_kind": "GIFT",
+                        "gift_reason_id": gift_reason,
+                        "gift_note": "週年慶",
+                    },
+                ],
+                "adjustments": [
+                    {"scope": "ORDER", "method": "FIXED_AMOUNT", "value": "100"}
+                ],
+            }
+        ),
+        actor_user_id=clerk_id,
+    )
+
+    resp = await client.get(
+        f"/api/v1/customer-display/terminals/{terminal.id}/cart/current",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()["staff_payload"]
+    assert payload is not None, "還原資料沒回傳，POS 重整就會弄丟贈品與折扣"
+    assert payload["lines"][1]["gift_reason_id"] == gift_reason
+    assert payload["lines"][1]["gift_note"] == "週年慶"
+    assert payload["adjustments"][0]["value"] == "100"
+
+
+async def test_cart_without_discounts_still_reads_back(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """沒有折扣時落盤的是 adjustments: null——讀取端要接得住，否則整個回應驗證失敗。"""
+    from app.modules.customerdisplay.schemas import CartUpsertRequest
+    from app.modules.customerdisplay.service import CustomerDisplayService
+
+    token, store_id, a_id, _b_id, _gift = await _seed(db_session)
+    clerk_id = int(decode_access_token(token)["sub"])
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=store_id, actor_user_id=clerk_id
+    )
+    await CustomerDisplayService(db_session).upsert_cart(
+        store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "expected_revision": None,
+                "lines": [{"line_type": "CATALOG", "catalog_product_id": a_id, "qty": 1}],
+            }
+        ),
+        actor_user_id=clerk_id,
+    )
+    resp = await client.get(
+        f"/api/v1/customer-display/terminals/{terminal.id}/cart/current",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["staff_payload"]["adjustments"] == []
+
+
+async def test_same_products_in_a_different_order_do_not_share_a_fingerprint(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同一商品分兩列（數量不同）時，換序後折扣落在不同數量的那一列 → 必須是不同的單。
+
+    身分只用商品鍵的話兩者指紋相同，同鍵重送會靜默回放錯誤的分攤（Codex 第三輪 high）。
+    """
+    token, _store_id, a_id, _b_id, _gift = await _seed(db_session)
+    item_discount = [
+        {"scope": "ITEM", "method": "FIXED_AMOUNT", "value": "100", "target_line_index": 0}
+    ]
+    first = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_line(a_id, qty=1), _line(a_id, qty=2)],
+            "adjustments": item_discount,
+            "tenders": [{"tender_type": "CASH", "amount": "1700"}],
+        },
+        headers=_auth(token, idem="gd-dup"),
+    )
+    assert first.status_code == 201, first.text
+
+    # 換序：折扣改落在數量 2 的那一列，總額同樣是 1700
+    collided = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [_line(a_id, qty=2), _line(a_id, qty=1)],
+            "adjustments": item_discount,
+            "tenders": [{"tender_type": "CASH", "amount": "1700"}],
+        },
+        headers=_auth(token, idem="gd-dup"),
+    )
+    assert collided.status_code == 409, collided.text

@@ -5731,6 +5731,11 @@ export interface components {
             bulk_cogs: string;
             /** Cash Received */
             cash_received: string;
+            /**
+             * Catalog Cogs
+             * @default 0
+             */
+            catalog_cogs: string;
             /** Consignment Commission Income */
             consignment_commission_income: string;
             /**

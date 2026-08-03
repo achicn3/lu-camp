@@ -171,6 +171,9 @@ def _kiosk_cart_read(cart: CartSession) -> KioskCartSessionRead:
 def _staff_cart_read(cart: CartSession) -> StaffCartSessionRead:
     return StaffCartSessionRead(
         **_cart_read(cart).model_dump(),
+        # 沒帶這個欄位的話，寫進 DB 的還原資料永遠讀不出來——POS 會退回舊路徑、
+        # 清掉折扣草稿，再把降級後的內容同步回伺服器。
+        staff_payload=cart.staff_payload,
         buyer_contact_id=cart.buyer_contact_id,
         active_signature_task_id=cart.active_signature_task_id,
         payment_order_id=cart.payment_order_id,

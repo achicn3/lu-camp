@@ -464,3 +464,58 @@ async def test_preview_of_a_gift_only_return_asks_for_no_signature(
     assert preview["invoice_action"] == "NONE"
     assert preview["requires_customer_consent"] is False
     assert preview["requires_paper_recall"] is False
+
+
+async def test_returning_a_gift_does_not_invent_margin_in_the_report(
+    db_session: AsyncSession,
+) -> None:
+    """贈品退回不得反轉一般商品成本（Codex 第三輪 high）。
+
+    贈品成本在正向報表就獨立於毛利之外；反轉時若算進 catalog_cogs，退回一件成本 200 的
+    贈品會讓當期 COGS 變成 −200，憑空生出 200 元毛利。
+    """
+    from app.modules.reports.service import ReportsService
+
+    store_id, clerk_id, product_id, reason_id = await _seed(db_session)
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_gift(product_id, reason_id)],
+    )
+    (gift_line,) = await _lines_of(db_session, sale.id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale.id,
+        lines=[ReturnLineInput(gift_line.id, 1)],
+        reason="客人不要",
+        actor_user_id=clerk_id,
+        idempotency_key="rg-gift-margin",
+    )
+
+    now = datetime.now(UTC)
+    report = await ReportsService(db_session).sales_margin(
+        store_id, date_from=now - timedelta(days=1), date_to=now + timedelta(days=1)
+    )
+    # 全程沒有一般商品銷售：成本與毛利都必須是 0，不得因為退了贈品而變成負成本／正毛利
+    assert report.catalog_cogs == Decimal(0)
+    assert report.gross_margin == Decimal(0)
+
+
+async def test_trends_and_daily_summary_include_catalog_cost(
+    db_session: AsyncSession,
+) -> None:
+    """趨勢與日報的 COGS 必須含一般商品成本，否則同一份報表裡成本與毛利互相矛盾。"""
+    from app.modules.reports.service import ReportsService
+
+    store_id, clerk_id, product_id, _reason = await _seed(db_session)
+    await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=[_line(product_id)],
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
+    )
+    now = datetime.now(UTC)
+    summary = await ReportsService(db_session).daily_summary(store_id, now.date())
+    # 商品成本 200（_seed 的 unit_cost）→ 日報的 COGS 必須認列，毛利 = 500 − 200
+    assert summary.cogs == Decimal(200)
+    assert summary.gross_margin == Decimal(300)

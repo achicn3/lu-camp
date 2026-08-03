@@ -11,7 +11,7 @@ from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.sales.models import Sale, SaleLine
-from app.shared.enums import OwnershipType, SaleLineType, SaleStatus
+from app.shared.enums import OwnershipType, SaleLineKind, SaleLineType, SaleStatus
 
 
 @dataclass(frozen=True)
@@ -126,6 +126,10 @@ class ReturnsRepository:
                 CustomerReturn.created_at >= date_from,
                 CustomerReturn.created_at < date_to,
                 Sale.status != SaleStatus.VOIDED,
+                # 贈品的成本在正向報表就獨立於毛利之外（gift_cost 自成一桶）；
+                # 反轉時若把它算進 catalog_cogs，退回一件成本 100 的贈品會讓當期
+                # 一般商品 COGS 變成 −100，憑空生出 100 元毛利。
+                SaleLine.line_kind != SaleLineKind.GIFT,
             )
         )
         rows = [(r[0], r[1], Decimal(r[2])) for r in (await self._session.execute(base)).all()]

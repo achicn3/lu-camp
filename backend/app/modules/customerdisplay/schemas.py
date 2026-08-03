@@ -278,6 +278,13 @@ class StaffCartPayloadRead(BaseModel):
     lines: list[StaffCartLineRead]
     adjustments: list[StaffCartAdjustmentRead] = []
 
+    @field_validator("adjustments", mode="before")
+    @classmethod
+    def _null_adjustments_is_empty(cls, value: object) -> object:
+        """落盤的請求在沒有折扣時是 `adjustments: null`；讀取端要接得住，
+        否則整個回應會驗證失敗（購物車就再也讀不出來了）。"""
+        return [] if value is None else value
+
 
 class StaffCartSessionRead(CartSessionRead):
     """POS 恢復工作階段所需的內部資料；客顯 response model 絕不包含這些欄位。"""

@@ -137,6 +137,7 @@ class SalesMarginReport(BaseModel):
     recognized_revenue: NTDAmount  # 認列營收（自有全額 + 寄售抽成）
     owned_cogs: NTDAmount  # 自有序號成本
     bulk_cogs: NTDAmount  # 自有散裝成本
+    catalog_cogs: NTDAmount = Decimal(0)  # 一般商品成本（有成交成本快照者）
     consignment_commission_income: NTDAmount
     gross_margin: NTDAmount
     gross_margin_rate: NTDAmountOpt  # 毛利 ÷ 已知成本營收；分母 0 → null

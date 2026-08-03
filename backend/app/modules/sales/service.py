@@ -266,6 +266,10 @@ def _adjustment_target_identity(
     索引在排序後的明細裡沒有意義；用商品身分才能讓「同一籃、同樣折在同一件商品上」
     得到同指紋，而「折在不同商品上」得到不同指紋。索引越界（理應已被邊界擋下）
     原樣保留，讓它自然成為不同的指紋而非靜默相等。
+
+    **身分還要帶上「同商品的第幾次出現」與數量**：同一商品可以在同一張單出現兩列
+    （例如刻意分兩列賣不同數量），只用商品鍵的話，兩張明細集合相同但順序互換的購物車
+    會得到相同指紋，實際折扣卻落在數量不同的那一列上——同鍵重送就靜默回放錯誤的分攤。
     """
     if target_key is None:
         return None
@@ -275,7 +279,12 @@ def _adjustment_target_identity(
         return target_key
     if not 0 <= index < len(lines):
         return target_key
-    return SalesService._cart_item_key(lines[index])
+    target = lines[index]
+    item_key = SalesService._cart_item_key(target)
+    occurrence = sum(
+        1 for line in lines[:index] if SalesService._cart_item_key(line) == item_key
+    )
+    return f"{item_key}#{occurrence}x{target.qty}"
 
 
 def _cart_fingerprint(

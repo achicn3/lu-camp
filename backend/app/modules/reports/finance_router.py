@@ -468,6 +468,7 @@ async def sales_margin(
             ["認列營收", str(report.recognized_revenue)],
             ["自有序號成本", str(report.owned_cogs)],
             ["自有散裝成本", str(report.bulk_cogs)],
+            ["一般商品成本", str(report.catalog_cogs)],
             ["寄售抽成收入", str(report.consignment_commission_income)],
             ["毛利", str(report.gross_margin)],
             ["毛利率", rate],
