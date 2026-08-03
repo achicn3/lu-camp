@@ -22,12 +22,54 @@ const dir = shotsDir("08-pos-gift-discount");
 const shot = makeShot(dir);
 
 const token = await apiLogin();
-// 用手冊既有的一般商品；沒有的話直接停下，不自行造資料（手冊要照真實資料截圖）。
-const products = (
-  await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")
-).json.filter((p) => p.quantity_on_hand >= 3 && Number(p.unit_price) > 0);
+
+// 本節需要**兩個**有庫存的一般商品（單品折扣一個、改為贈品一個）。
+// 06-inventory 只上架一個且庫存 0，11-purchasing 只補同一個且順序在後——乾淨資料庫必然不足。
+// 因此不足時就自己補：走正規的「上架 → 建採購單 → 送出 → 收貨入庫」，資料與店員手動操作
+// 產生的完全一樣（手冊仍是照真實資料截圖），並非塞假庫存。
+const stamp = "manual08f";
+async function listUsable() {
+  return ((await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")).json ?? []).filter(
+    (p) => p.quantity_on_hand >= 3 && Number(p.unit_price) > 0,
+  );
+}
+
+async function ensureTwoStockedProducts() {
+  if ((await listUsable()).length >= 2) return;
+  const all = (await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")).json ?? [];
+  const pick = (name, unitPrice, reorder) =>
+    all.find((p) => p.name === name) ??
+    apiJson(token, "POST", "/api/v1/catalog-products", { name, unit_price: unitPrice, reorder_point: reorder }, { "Idempotency-Key": `${stamp}-${name}` }).then((r) => r.json);
+
+  const gas = await pick("高山瓦斯罐 230g", "180", 10);
+  const battery = await pick("營燈電池 3號 4入", "120", 6);
+  const supplier = (
+    await apiJson(token, "POST", "/api/v1/suppliers", { name: "手冊測試補貨商" })
+  ).json;
+  const po = (
+    await apiJson(token, "POST", "/api/v1/purchase-orders", {
+      supplier_id: supplier.id,
+      submit: true,
+      lines: [
+        { catalog_product_id: gas.id, qty: 24, unit_cost: "120" },
+        { catalog_product_id: battery.id, qty: 12, unit_cost: "80" },
+      ],
+    })
+  ).json;
+  await apiJson(
+    token,
+    "POST",
+    `/api/v1/purchase-orders/${po.id}/receive`,
+    { lines: po.lines.map((l) => ({ line_id: l.id, qty: l.qty })) },
+    { "Idempotency-Key": `${stamp}-recv-${po.id}` },
+  );
+  note("一般商品庫存不足 → 已依採購/收貨流程補足兩項");
+}
+
+await ensureTwoStockedProducts();
+const products = await listUsable();
 if (products.length < 2) {
-  throw new Error("需要至少兩個有庫存的一般商品，請先跑 06-inventory");
+  throw new Error("補貨後仍湊不到兩個有庫存的一般商品，請檢查採購/收貨流程");
 }
 const [productA, productB] = products;
 note(`使用商品：${productA.name} / ${productB.name}`);
@@ -48,10 +90,25 @@ if (!hasState) await login(page);
 page.on("pageerror", (e) => console.log(`⚠ POS JS 錯誤 ${e}`));
 
 async function clearCart() {
+  // POS 會從既有的購物車 session 還原**收款方式**。若前一支腳本（08e）停在
+  // 「購物金＋其他付款」，只移除品項會留著該模式，本節結帳鈕就會被混合付款驗證卡住。
+  // 注意：這種情況下購物車仍是 DRAFT，畫面上**沒有**「開始下一筆」可按（那顆只在
+  // 交易完成後出現），所以必須直接把收款方式切回現金——實測點一下就會恢復。
+  const cash = page.locator('.pos-tender-mode:has-text("現金")').first();
+  if ((await cash.count()) > 0) {
+    await cash.click();
+    await page.waitForTimeout(1200);
+  }
   const removeButtons = page.locator('.pos-cart button:has-text("移除")');
   while ((await removeButtons.count()) > 0) {
     await removeButtons.first().click();
     await page.waitForTimeout(700);
+  }
+  // 會員歸戶也會跟著還原；取消掉才不會把上一筆的購物金餘額帶進本節畫面。
+  const cancelMember = page.locator('button:has-text("取消歸戶")');
+  if ((await cancelMember.count()) > 0) {
+    await cancelMember.click();
+    await page.waitForTimeout(1200);
   }
   await page.waitForTimeout(1200);
 }

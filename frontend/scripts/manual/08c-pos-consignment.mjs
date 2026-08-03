@@ -1,14 +1,68 @@
 // 手冊 08c：POS 售出寄售品（現金收款＋找零輔助）→ 產生寄售結算（待付款）。
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
 
-import { BASE, makeShot, note, SHOTS_ROOT, shotsDir, statePath } from "./_lib.mjs";
+import { apiJson, apiLogin, BASE, makeShot, note, shotsDir, statePath } from "./_lib.mjs";
 
 const dir = shotsDir("08-pos-consignment");
 const shot = makeShot(dir);
-const acq = JSON.parse(readFileSync(join(SHOTS_ROOT, "05-acquisition", "data.json"), "utf8"));
+
+// 05-acquisition 建的那件寄售品，會被 08-pos 的交易 C 先賣掉（台灣Pay），
+// 到這裡已是 SOLD、掃了會顯示「非在庫（不可售）」。本節需要一件在庫的寄售品，
+// 因此比照 09d 的做法自行以收購 API 補一件（冪等鍵固定，重跑不會長出第二件）。
+//
+// **必須是這個品名與售價**：手冊圖說寫死了「實收 2,000、應付 1,800 → 找零 $200」，
+// 隨手撿一件在庫寄售品（例如 6,800 的帳篷）會讓找零算不出來、圖文對不上。
+const ITEM_NAME = "露營桌 蛋捲桌";
+const ITEM_PRICE = "1800";
+
+async function ensureConsignmentItem() {
+  const token = await apiLogin();
+  const match = (items) =>
+    items.find(
+      (i) =>
+        i.ownership_type === "CONSIGNMENT" &&
+        i.status === "IN_STOCK" &&
+        i.name === ITEM_NAME &&
+        String(i.listed_price) === ITEM_PRICE,
+    );
+
+  const existing = match((await apiJson(token, "GET", "/api/v1/serialized-items?limit=200")).json ?? []);
+  if (existing) return existing.item_code;
+
+  // 收購/寄售對象**必須有 national_id**（後端 422）。seed 出來的寄售人沒有，
+  // 只有 03-contacts 建的那位有，所以用 has_national_id 篩，不能隨手取第一個 CONSIGNOR。
+  const contacts = (await apiJson(token, "GET", "/api/v1/contacts?limit=50")).json ?? [];
+  const consignor = contacts.find(
+    (c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id,
+  );
+  if (!consignor) {
+    throw new Error("找不到具身分證字號的寄售人（寄售收購必填），請先跑 03-contacts");
+  }
+
+  const created = await apiJson(
+    token,
+    "POST",
+    "/api/v1/acquisitions",
+    {
+      type: "CONSIGNMENT",
+      contact_id: consignor.id,
+      items: [{ name: ITEM_NAME, grade: "A", listed_price: ITEM_PRICE, commission_pct: 50 }],
+    },
+    { "Idempotency-Key": "manual-08c-consignment" },
+  );
+  if (created.status >= 400) {
+    throw new Error(`補建寄售品失敗（HTTP ${created.status}）：${JSON.stringify(created.json)}`);
+  }
+  const fresh = match((await apiJson(token, "GET", "/api/v1/serialized-items?limit=200")).json ?? []);
+  if (!fresh) throw new Error(`補建寄售品後仍找不到在庫的「${ITEM_NAME}」`);
+  return fresh.item_code;
+}
+
+const consignmentCode = await ensureConsignmentItem();
+note(`本節使用的寄售品：${consignmentCode}（05 建的那件已被 08-pos 交易 C 售出）`);
 
 const browser = await chromium.launch();
 const staffCtx = await browser.newContext({
@@ -47,7 +101,7 @@ if ((await page.locator('button:has-text("取消歸戶")').count()) > 0) {
 }
 await page.waitForTimeout(2000);
 
-await page.fill(".pos-scan-input", acq.code3); // 寄售的露營桌
+await page.fill(".pos-scan-input", consignmentCode); // 寄售的露營桌
 await page.keyboard.press("Enter");
 await page.waitForTimeout(2500);
 await shot(page, "cart-consignment-item", { locator: ".pos-left" });

@@ -1,5 +1,5 @@
 // 產生要內嵌的截圖清單（id → 檔案），供 convert-images.mjs 使用。
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { SHOTS_ROOT } from "./_lib.mjs";
@@ -36,13 +36,44 @@ const PICK = {
   "17-einvoice-amego": ["01-issued-list", "02-issued-detail", "03-void-fullreturn-list", "04-void-fullreturn-detail", "05-void-salevoid-list", "06-void-salevoid-detail"],
 };
 
+// PICK 條目同時是**識別碼**（content-*.mjs 以 `fig("<dir>/<name>")` 引用）與檔案線索。
+// 但 makeShot 是依呼叫順序編號，而且有些 shot() 在條件式裡——情境一增減，整段編號就位移，
+// 以完整檔名比對會讓清單無聲失準（2026-08-03 重跑即因此缺 6 張，先前只是被舊版遺留的
+// 同名檔擋住沒發現）。因此**數字前綴不參與比對**：先試完整檔名，再退回以 slug
+// （去掉 `NN-` / `NNx-` 前綴後的部分）在該目錄下找唯一相符者。id 維持 PICK 寫法不變，
+// 所以腳本重新編號時，這裡與 content-*.mjs 都不需要跟著改。
+const slugOf = (name) => name.replace(/^\d+[a-z]?-/, "");
+
+const ambiguous = [];
+function resolveFile(dir, name) {
+  // 完整檔名優先：同一個截圖目錄可能由兩支腳本共用（例如 02-cash 由 02 與 02b 寫入、
+  // 13-signing 由 12 與 13 寫入），各自從 01 起編，於是**合法**存在同 slug 的不同截圖。
+  // 這些條目靠完整檔名就命中，不會走到下面的 slug 比對。
+  const exact = join(SHOTS_ROOT, dir, `${name}.png`);
+  if (existsSync(exact)) return exact;
+  let entries;
+  try {
+    entries = readdirSync(join(SHOTS_ROOT, dir));
+  } catch {
+    return null; // 目錄不存在 → 當成缺檔
+  }
+  const slug = slugOf(name);
+  const hits = entries.filter((f) => f.endsWith(".png") && slugOf(f.slice(0, -4)) === slug);
+  if (hits.length === 1) return join(SHOTS_ROOT, dir, hits[0]);
+  if (hits.length > 1) {
+    // 同一 slug 對到多個檔：無法判斷該收哪張，寧可報錯也不要隨機挑一張出貨。
+    ambiguous.push(`${dir}/${name} → ${hits.join(", ")}`);
+  }
+  return null;
+}
+
 const manifest = [];
 const missing = [];
 for (const [dir, files] of Object.entries(PICK)) {
   for (const name of files) {
-    const file = join(SHOTS_ROOT, dir, `${name}.png`);
+    const file = resolveFile(dir, name);
     const id = `${dir}/${name}`;
-    if (!existsSync(file)) {
+    if (file === null) {
       missing.push(id);
       continue;
     }
@@ -70,6 +101,12 @@ writeFileSync(
 );
 console.log(`清單 ${manifest.length} 張；缺檔 ${missing.length}；最新截圖 ${new Date(newest).toISOString()}`);
 if (missing.length) console.log(missing.join("\n"));
+if (ambiguous.length > 0) {
+  console.error(`\n⚠ 有 ${ambiguous.length} 個 PICK 條目的 slug 對到多個檔案，無法判斷該收哪張：`);
+  for (const line of ambiguous) console.error(`   ${line}`);
+  console.error("\n請改用完整檔名（含數字前綴）指定，或把重複的舊截圖清掉。");
+  process.exit(1);
+}
 if (stale.length > 0) {
   console.error(
     `\n⚠ 有 ${stale.length} 張截圖比本批最新的舊超過 ${STALE_HOURS} 小時，可能是被跳過的情境沿用舊圖：`,
