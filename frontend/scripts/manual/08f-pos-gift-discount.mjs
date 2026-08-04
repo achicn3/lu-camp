@@ -49,7 +49,9 @@ async function must(label, promise) {
 async function ensureTwoStockedProducts() {
   if ((await listUsable()).length >= 2) return;
   const all = (await apiJson(token, "GET", "/api/v1/catalog-products?limit=100")).json ?? [];
-  const pick = async (name, unitPrice, reorder) =>
+  // 冪等鍵走 HTTP header，**只能是 latin-1**：直接把中文品名塞進去會讓 fetch 丟
+  // 「Cannot convert argument to a ByteString」。因此每個 fixture 另給一個 ASCII 代號。
+  const pick = async (key, name, unitPrice, reorder) =>
     all.find((p) => p.name === name) ??
     (await must(
       `建立一般商品 ${name}`,
@@ -58,12 +60,12 @@ async function ensureTwoStockedProducts() {
         "POST",
         "/api/v1/catalog-products",
         { name, unit_price: unitPrice, reorder_point: reorder },
-        { "Idempotency-Key": `${stamp}-${name}` },
+        { "Idempotency-Key": `${stamp}-${key}` },
       ),
     ));
 
-  const gas = await pick("高山瓦斯罐 230g", "180", 10);
-  const battery = await pick("營燈電池 3號 4入", "120", 6);
+  const gas = await pick("gas230", "高山瓦斯罐 230g", "180", 10);
+  const battery = await pick("battery3a", "營燈電池 3號 4入", "120", 6);
 
   // 供應商沿用既有的同名那家，不要每次重跑都長一家新的。
   const suppliers = (await apiJson(token, "GET", "/api/v1/suppliers?limit=100")).json ?? [];

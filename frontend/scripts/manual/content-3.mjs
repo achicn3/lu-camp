@@ -303,7 +303,7 @@ ${box("info", "驗證到哪裡", `
 <b>重試開立</b>按鈕，可日後補開。</p>
 <p>要自行驗證，請使用本專案已備的 <b>Amego 測試統編與 App Key</b>（見 <code>docs/24</code>）在測試環境進行；
 <b>切勿</b>為了驗證而使用正式憑證——那會開出真發票並消耗字軌。</p>`)}
-${fig("17-einvoice/07-checkout-invoice-result", "圖 7-27：交易完成、發票已開立（號碼 ZA10028317）且證明聯已送印的實際畫面。")}
+${fig("17-einvoice/07-checkout-invoice-result", "圖 7-27：交易完成、發票已開立並顯示發票號碼、證明聯已送印的實際畫面。")}
 `;
 
 export const sales = `
