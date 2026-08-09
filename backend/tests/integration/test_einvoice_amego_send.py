@@ -320,6 +320,7 @@ async def test_transport_error_leaves_claimed_pending_then_query_reconciles(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "total_amount": 1050,
                 "invoice_status": 99,
                 "create_date": _now_epoch(),
@@ -684,6 +685,7 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "total_amount": 1050,
                 "invoice_status": 99,
                 "create_date": _now_epoch(),
@@ -1189,6 +1191,7 @@ async def test_reconcile_rejects_collided_record_instead_of_marking_success(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -1227,6 +1230,7 @@ async def test_reconcile_rejects_same_amount_collision_by_create_time(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",

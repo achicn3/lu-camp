@@ -27,6 +27,7 @@ from app.shared.exceptions import (
     AmegoIssueFailed,
     AmegoNotConfigured,
     AmegoTransportError,
+    EInvoiceDropError,
     EInvoiceQueueItemNotFound,
     EInvoiceQueueNotDroppable,
     EInvoiceQueueNotRetryable,
@@ -116,6 +117,10 @@ async def issue_invoice_for_sale(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except (EInvoiceQueueNotDroppable, EInvoiceQueueItemNotFound, EInvoiceQueueNotRetryable) as exc:
         await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except EInvoiceDropError as exc:
+        # 本地驗證失敗、不可安全重送（凍結 payload 損壞/不相容）：明確回 409 而非 500，
+        # 佇列維持 PENDING 且 last_error 已落庫，供人工對帳。
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (AmegoIssueFailed, AmegoTransportError) as exc:
         # send_via_amego 自管交易：認領/FAILED 已 commit，此處僅回報（不 rollback 已存事實）。

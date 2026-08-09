@@ -178,6 +178,7 @@ class _QueryFoundTransport:
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "total_amount": 1050,
                 "invoice_status": 99,
                 "create_date": int(datetime.now(tz=UTC).timestamp()),

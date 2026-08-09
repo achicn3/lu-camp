@@ -414,6 +414,17 @@ def parse_query_issued(
     )
     _assert_created_after(data, expect_not_before, ctx="invoice_query")
     _assert_platform_status_ok(data, ctx="invoice_query")
+    # **頂層動作型別必須是開立**：C0501（已作廢）／C0701（已註銷）代表原發票已不成立，
+    # 補記成 ISSUED 會讓本地與平台直接矛盾（重現：兩者原本都會被當成已開立）。
+    # 這種「查得到但狀態相斥」屬曖昧，一律待人工對帳。
+    found_type = str(data.get("invoice_type") or "")
+    if found_type not in _INVOICE_TYPE_ISSUED:
+        raise AmegoTransportError(
+            f"invoice_query 查到的紀錄型別為「{found_type}」（非開立態），不得補記為已開立，待對帳"
+        )
+    # wait 僅驗形狀／型別合法性（未知型別會拋）。此處**不阻擋待作廢**：F0401 確實已成立，
+    # 作廢由各自的 VOID 佇列列處理；在這裡擋反而會卡住合法的「開立成功、隨後作廢」流程。
+    _wait_entries(data, ctx="invoice_query")
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,
@@ -431,6 +442,15 @@ _INVOICE_TYPE_VOIDED = frozenset({"C0501", "A0501"})
 # allowance_query data.invoice_type：存證折讓開立/作廢。
 _ALLOWANCE_TYPE_ISSUED = frozenset({"D0401", "B0401"})
 _ALLOWANCE_TYPE_VOIDED = frozenset({"D0501", "B0501"})
+# 註銷（沖銷重開）——與作廢同屬「原發票已不成立」的動作。
+_INVOICE_TYPE_CANCELLED = frozenset({"C0701", "A0701"})
+# `wait[]` 可能出現的已知待處理型別。**未知型別一律拋**：無法判斷它與本次動作是否相斥。
+_KNOWN_WAIT_TYPES = (
+    _INVOICE_TYPE_VOIDED
+    | _INVOICE_TYPE_CANCELLED
+    | _ALLOWANCE_TYPE_ISSUED
+    | _ALLOWANCE_TYPE_VOIDED
+)
 
 
 def _wait_entries(data: dict[str, object], *, ctx: str) -> list[dict[str, object]]:
@@ -438,15 +458,22 @@ def _wait_entries(data: dict[str, object], *, ctx: str) -> list[dict[str, object
 
     寬鬆解讀會 fail open：wait 若是非 list 或含非 dict 元素而被當成空，作廢就會被重送。
     """
-    waiting = data.get("wait")
-    if waiting is None:
-        return []
+    if "wait" not in data:
+        return []  # 欄位不存在＝該回應不帶待處理清單
+    waiting = data["wait"]
+    # 明示 null 與「沒有這個欄位」不同：實測平台無待處理時回 `[]`，出現 null 代表
+    # 序列化異常，不可解讀成「沒有待處理項目」而放行相斥動作。
     if not isinstance(waiting, list):
         raise AmegoTransportError(f"{ctx} 的 wait 形狀不明（回應不可信），待對帳")
     entries: list[dict[str, object]] = []
     for item in waiting:
-        if not isinstance(item, dict) or not str(item.get("invoice_type") or ""):
-            raise AmegoTransportError(f"{ctx} 的 wait 含不明元素（回應不可信），待對帳")
+        if not isinstance(item, dict):
+            raise AmegoTransportError(f"{ctx} 的 wait 含非物件元素（回應不可信），待對帳")
+        kind = str(item.get("invoice_type") or "")
+        if kind not in _KNOWN_WAIT_TYPES:
+            raise AmegoTransportError(
+                f"{ctx} 的 wait 含未知型別「{kind}」——無法判斷是否與本次動作相斥，待人工對帳"
+            )
         entries.append(item)
     return entries
 
@@ -497,8 +524,12 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
         # 實測：送出 f0501 後 invoice_type=C0401、status=1、wait=[{"invoice_type":"C0501"}]）。
         # 只看頂層會回 False → 對已受理的作廢再送一次 F0501，被拒後記 FAILED、發票卡在
         # VOID_PENDING，正是 crash 窗口最需要救的情境（Codex 第二輪）。
-        if _has_pending(data, _INVOICE_TYPE_VOIDED, ctx=_ctx):
+        if _has_pending(data, _INVOICE_TYPE_VOIDED | _INVOICE_TYPE_CANCELLED, ctx=_ctx):
             return True
+        # 掛著其他待處理動作（例如待折讓）時再送 F0501 會疊加相斥的稅務動作
+        _assert_no_pending_entries(
+            data, _ALLOWANCE_TYPE_ISSUED | _ALLOWANCE_TYPE_VOIDED, ctx=_ctx
+        )
     if invoice_type in _INVOICE_TYPE_VOIDED:
         return True
     if invoice_type in _INVOICE_TYPE_ISSUED:

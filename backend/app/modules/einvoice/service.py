@@ -581,12 +581,16 @@ class EInvoiceService:
             raise EInvoiceDropError(
                 f"佇列 {queue_id} 認領 payload 遺失或與 sha 不符，拒絕重送（需人工對帳）"
             )
-        payload = json.loads(frozen)
-
-        # 對帳先行若因**無法確認身分**而中止（金額/原發票不符、回應曖昧），把原因寫進
-        # last_error：狀態維持 PENDING（不誤記成功、不盲目重送），但佇列上看得到卡住原因，
-        # 供人工對帳判讀——否則只回 502、列上一片空白，等於靜默卡死。
+        # 凍結 payload 的解碼與身分抽取都納入**同一個受控錯誤邊界**：
+        # 舊版／還原後 schema 不相容但 checksum 相符的 payload 會在這裡失敗，
+        # 若留在 try 外就會變成空白 500 且 last_error 未落庫（Codex 第四輪）。
         try:
+            try:
+                payload = json.loads(frozen)
+            except ValueError as exc:
+                raise EInvoiceDropError(
+                    f"佇列 {queue_id} 凍結 payload 無法解析（需人工對帳）"
+                ) from exc
             # **一律對帳先行**（Codex 第三/七輪）：本地「是否已認領」快照可能過期——同列的另一
             # 呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過這則
             # 訊息。每次上送前先查平台實態：已套用 → 補記成功、絕不重送；**明確未套用**才送
@@ -687,9 +691,10 @@ class EInvoiceService:
             issue_result: AmegoIssueResult | None = None
             if success and locked.action is EInvoiceAction.ISSUE:
                 issue_result = parse_f0401_success(resp)  # 欄位不合法 → 不可信，維持已認領
-        except AmegoTransportError as exc:
-            # 涵蓋**整條結果未知路徑**（對帳查詢／實際 POST／回應解析）：狀態維持 PENDING，
-            # 但把原因寫進 last_error，否則只回 502、佇列上看不到卡住原因（Codex 第二輪）。
+        except (AmegoTransportError, EInvoiceDropError) as exc:
+            # 涵蓋**整條結果未知／無法安全重送的路徑**（payload 解碼、身分抽取、對帳查詢、
+            # 實際 POST、回應解析）：狀態維持 PENDING，但把原因寫進 last_error，
+            # 否則只回 500/502、佇列上看不到卡住原因（Codex 第二/四輪）。
             await self._note_blocked(store_id, queue_id, str(exc))
             raise
         return await self._record_amego_outcome(

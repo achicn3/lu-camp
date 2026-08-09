@@ -256,6 +256,7 @@ def test_parse_query_three_states() -> None:
         "msg": "",
         "data": {
             "invoice_number": "AB00001111",
+            "invoice_type": "C0401",
             "invoice_date": "20260711",
             "invoice_time": "12:34:56",
             "random_number": "5975",
@@ -359,6 +360,7 @@ def test_parse_query_issued_verifies_amount_identity() -> None:
     resp: dict[str, dict[str, object]] = {
         "data": {
             "invoice_number": "AB00001111",
+            "invoice_type": "C0401",
             "invoice_date": "20260711",
             "invoice_time": "12:34:56",
             "random_number": "5975",
@@ -584,6 +586,7 @@ def test_create_date_bounds_never_escape_as_non_amego_error() -> None:
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "invoice_type": "C0401",
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -641,6 +644,7 @@ def test_platform_error_status_is_never_treated_as_applied() -> None:
         "msg": "",
         "data": {
             "invoice_number": "AB00001111",
+            "invoice_type": "C0401",
             "invoice_date": "20260711",
             "invoice_time": "12:34:56",
             "random_number": "5975",
@@ -698,3 +702,73 @@ def test_f0401_success_rejects_absurd_invoice_time() -> None:
     for bad in (10**20, int((datetime.now(tz=UTC) + timedelta(days=1)).timestamp())):
         with pytest.raises(AmegoTransportError):
             parse_f0401_success({**base, "invoice_time": bad})
+
+
+def test_query_issued_requires_issued_type_and_known_wait() -> None:
+    """對帳補開立只接受**開立態**；C0501（已作廢）／C0701（已註銷）不得補記為 ISSUED。
+
+    重現過：兩者在身分、金額、時間、狀態都相符時都會回 AmegoIssueResult，
+    使本地與平台直接矛盾。
+    """
+    def _resp(**over: object) -> dict[str, object]:
+        data: dict[str, object] = {
+            "invoice_number": "AB00001111",
+            "invoice_type": "C0401",
+            "invoice_date": "20260711",
+            "invoice_time": "12:34:56",
+            "random_number": "5975",
+            "total_amount": 1050,
+            "invoice_status": 99,
+            "create_date": _epoch_now(),
+        }
+        data.update(over)
+        return {"code": 0, "msg": "", "data": data}
+
+    assert (
+        parse_query_issued(_resp(), expect_total=Decimal("1050"), expect_not_before=_recent())
+        is not None
+    )
+    for bad_type in ("C0501", "C0701", "", "??"):
+        with pytest.raises(AmegoTransportError):
+            parse_query_issued(
+                _resp(invoice_type=bad_type),
+                expect_total=Decimal("1050"),
+                expect_not_before=_recent(),
+            )
+    # wait 形狀／型別同樣要驗（明示 null、未知型別都不可信）
+    for bad_wait in (None, [{"invoice_type": "X9999"}], "?"):
+        with pytest.raises(AmegoTransportError):
+            parse_query_issued(
+                _resp(wait=bad_wait),
+                expect_total=Decimal("1050"),
+                expect_not_before=_recent(),
+            )
+    # 開立成功、隨後另有待作廢：F0401 確實已成立，不可在此卡住（作廢由 VOID 佇列處理）
+    assert (
+        parse_query_issued(
+            _resp(wait=[{"invoice_type": "C0501", "create_date": _epoch_now()}]),
+            expect_total=Decimal("1050"),
+            expect_not_before=_recent(),
+        )
+        is not None
+    )
+
+
+def test_void_blocks_on_conflicting_pending_actions() -> None:
+    """作廢前若平台掛著相斥的待處理動作（待折讓），不可逕自再送 F0501。"""
+    def _resp(wait: object) -> dict[str, object]:
+        return {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_type": "C0401",
+                "invoice_status": 99,
+                "total_amount": 1050,
+                "wait": wait,
+            },
+        }
+
+    with pytest.raises(AmegoTransportError):
+        parse_query_invoice_voided(_resp([{"invoice_type": "D0401"}]), expect_total=Decimal("1050"))
+    # 無待處理 → 仍開立，可送 F0501
+    assert parse_query_invoice_voided(_resp([]), expect_total=Decimal("1050")) is False
