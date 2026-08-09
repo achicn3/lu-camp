@@ -82,12 +82,37 @@ _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 def _payload_first(payload: object, *, ctx: str) -> dict[str, object]:
-    """取凍結 payload 的第一筆（Amego 各訊息皆為陣列，本系統一次只送一筆）。"""
-    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+    """取凍結 payload 的**唯一**一筆（Amego 各訊息皆為陣列，本系統一次只送一筆）。
+
+    多筆一律拒絕：只驗第一筆卻把整個陣列送出去，等於對未驗證的其餘筆放行。
+    """
+    if isinstance(payload, list):
+        if len(payload) != 1 or not isinstance(payload[0], dict):
+            raise EInvoiceDropError(
+                f"{ctx}：凍結 payload 應恰含一筆訊息，實得 {len(payload)} 筆（需人工對帳）"
+            )
         return payload[0]
     if isinstance(payload, dict):
         return payload
     raise EInvoiceDropError(f"{ctx}：凍結 payload 形狀不明，拒絕上送（需人工對帳）")
+
+
+def _assert_payload_targets(
+    payload: object, field: str, expected: str, *, ctx: str
+) -> None:
+    """凍結 payload 的**外部識別碼**必須等於本佇列列的目標。
+
+    對帳查的是本地推導出來的識別碼，真正 POST 出去的卻是 frozen payload。兩者若不一致
+    （舊版／還原後的 payload、或自洽 checksum 的損壞內容），就會「查本筆得到查無 → 送出
+    別筆 → 把本列標成功」，且 crash 重試時仍查錯對象、永遠無法可靠對帳（Codex 第六輪）。
+    """
+    head = _payload_first(payload, ctx=ctx)
+    actual = str(head.get(field) or "")
+    if actual != expected:
+        raise EInvoiceDropError(
+            f"{ctx}：凍結 payload 的 {field}「{actual}」與本佇列目標「{expected}」不符"
+            "，拒絕上送（需人工對帳）"
+        )
 
 
 def _payload_int(data: dict[str, object], field: str, *, ctx: str) -> Decimal:
@@ -586,7 +611,7 @@ class EInvoiceService:
                 )
             try:
                 payload = json.loads(frozen)
-            except ValueError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise EInvoiceDropError(
                     f"佇列 {queue_id} 凍結 payload 無法解析（需人工對帳）"
                 ) from exc
@@ -596,6 +621,7 @@ class EInvoiceService:
             # （曖昧查詢回應由解析層拋 AmegoTransportError 擋下）。多一次查詢換確定性（單店）。
             if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
                 order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
+                _assert_payload_targets(payload, "OrderId", order_id, ctx="f0401")
                 query_resp = await client.call(
                     "/json/invoice_query", build_invoice_query_data(order_id=order_id)
                 )
@@ -638,6 +664,9 @@ class EInvoiceService:
             elif locked.action is EInvoiceAction.VOID and locked.invoice_id is not None:
                 void_target = await self._repo.get_invoice(store_id, locked.invoice_id)
                 if void_target is not None and void_target.invoice_no:
+                    _assert_payload_targets(
+                        payload, "CancelInvoiceNumber", void_target.invoice_no, ctx="f0501"
+                    )
                     query_resp = await client.call(
                         "/json/invoice_query",
                         build_invoice_query_by_number_data(invoice_number=void_target.invoice_no),
@@ -653,6 +682,12 @@ class EInvoiceService:
                             issue_result=None,
                         )
             elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
+                _assert_payload_targets(
+                    payload,
+                    "AllowanceNumber",
+                    allowance_number(store_id=store_id, allowance_id=locked.allowance_id),
+                    ctx="g0401",
+                )
                 query_resp = await client.call(
                     "/json/allowance_query",
                     build_allowance_query_data(

@@ -623,8 +623,20 @@ def parse_query_allowance_exists(
         _assert_allowance_original_invoice(data, expect_original_invoice_no)
         _assert_created_after(data, expect_not_before, ctx="allowance_query")
         _assert_platform_status_ok(data, ctx="allowance_query")
-        # 折讓若同時掛著待作廢（D0501/B0501），狀態自相矛盾——不可當成「已有本筆折讓」
-        _assert_no_pending_entries(data, _ALLOWANCE_TYPE_VOIDED, ctx="allowance_query")
+        # 與作廢 parser 對稱：**先蒐集全部 wait 事實再決策**。除了本折讓的待作廢
+        # （D0501/B0501），**原發票的待作廢／註銷（C0501/A0501、C0701/A0701）同樣相斥**
+        # ——原發票若被作廢，掛在它底下的折讓就不成立，本地卻會永久留著 ALLOWANCE。
+        pending = {
+            str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx="allowance_query")
+        }
+        conflicting = pending & (
+            _ALLOWANCE_TYPE_VOIDED | _INVOICE_TYPE_VOIDED | _INVOICE_TYPE_CANCELLED
+        )
+        if conflicting:
+            raise AmegoTransportError(
+                f"allowance_query 查到的紀錄另掛待處理的 {sorted(conflicting)}"
+                "——與本次折讓相斥，待人工對帳"
+            )
         return True
     raise AmegoTransportError(
         f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
@@ -648,8 +660,10 @@ class HttpxAmegoTransport:
                 payload = resp.json()
         except httpx.HTTPError as exc:
             raise AmegoTransportError(f"Amego API 呼叫失敗：{exc.__class__.__name__}") from exc
-        except ValueError as exc:
-            raise AmegoTransportError("Amego API 回應非 JSON") from exc
+        except (ValueError, RecursionError) as exc:
+            # RecursionError：極深巢狀的合法 JSON 會讓 stdlib 解析器爆堆疊。若發生在 POST
+            # 回應上，平台可能已收件，卻因例外越過受控邊界而讓佇列空白卡死（Codex 第六輪）。
+            raise AmegoTransportError("Amego API 回應無法解析（非 JSON 或巢狀過深）") from exc
         if not isinstance(payload, dict):
             raise AmegoTransportError("Amego API 回應非 JSON 物件")
         return payload

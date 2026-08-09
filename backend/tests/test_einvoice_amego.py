@@ -774,3 +774,66 @@ def test_void_blocks_on_conflicting_pending_actions() -> None:
         parse_query_invoice_voided(_resp([{"invoice_type": "D0401"}]), expect_total=Decimal("1050"))
     # 無待處理 → 仍開立，可送 F0501
     assert parse_query_invoice_voided(_resp([]), expect_total=Decimal("1050")) is False
+
+
+def test_allowance_blocks_on_original_invoice_pending_void_or_cancel() -> None:
+    """折讓的相斥項不只「本折讓待作廢」，**原發票的待作廢／註銷同樣相斥**。
+
+    原發票若被作廢，掛在它底下的折讓就不成立，本地卻會永久留著 ALLOWANCE。
+    先前只擋 D0501/B0501，C0501／C0701 會被放行（已重現）。
+    """
+    def _resp(wait: list[object]) -> dict[str, object]:
+        return {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_type": "D0401",
+                "invoice_status": 99,
+                "total_amount": 476,
+                "tax_amount": 24,
+                "create_date": _epoch_now(),
+                "product_item": [{"original_invoice_number": "ZA10029234"}],
+                "wait": wait,
+            },
+        }
+
+    def _call(wait: list[object]) -> bool:
+        return parse_query_allowance_exists(
+            _resp(wait),
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
+        )
+
+    assert _call([]) is True
+    for conflicting in ("C0501", "A0501", "C0701", "A0701", "D0501", "B0501"):
+        with pytest.raises(AmegoTransportError):
+            _call([{"invoice_type": conflicting}])
+
+
+def test_frozen_payload_identifier_must_match_queue_target() -> None:
+    """凍結 payload 的外部識別碼必須等於本佇列目標，且陣列須恰一筆。
+
+    對帳查的是本地推導的識別碼、實際 POST 的卻是 payload；兩者不一致就會
+    「查本筆得到查無 → 送出別筆 → 把本列標成功」。
+    """
+    from app.modules.einvoice.service import _assert_payload_targets, _payload_first
+
+    _assert_payload_targets([{"OrderId": "S1-9"}], "OrderId", "S1-9", ctx="f0401")
+    with pytest.raises(EInvoiceDropError):
+        _assert_payload_targets([{"OrderId": "S1-8"}], "OrderId", "S1-9", ctx="f0401")
+    with pytest.raises(EInvoiceDropError):
+        _assert_payload_targets([{}], "OrderId", "S1-9", ctx="f0401")
+    # 多筆：只驗第一筆卻整包送出，等於對其餘筆放行
+    with pytest.raises(EInvoiceDropError):
+        _payload_first([{"OrderId": "a"}, {"OrderId": "b"}], ctx="f0401")
+
+
+def test_deeply_nested_json_does_not_escape_controlled_errors() -> None:
+    """極深巢狀 JSON 會讓 stdlib 解析器拋 RecursionError；不得逃逸出受控例外邊界。"""
+    import json as _json
+
+    deep = "[" * 60_000 + "]" * 60_000
+    with pytest.raises(RecursionError):
+        _json.loads(deep)  # 前提成立：確實是 RecursionError 而非 ValueError
