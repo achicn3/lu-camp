@@ -104,12 +104,12 @@ def _now_epoch() -> int:
 _QUERY_INVOICE_OPEN = {
     "code": 0,
     "msg": "",
-    "data": {"invoice_type": "C0401", "total_amount": 1050},
+    "data": {"invoice_type": "C0401", "total_amount": 1050, "invoice_status": 99},
 }
 _QUERY_INVOICE_VOIDED = {
     "code": 0,
     "msg": "",
-    "data": {"invoice_type": "C0501", "total_amount": 1050},
+    "data": {"invoice_type": "C0501", "total_amount": 1050, "invoice_status": 99},
 }
 _QUERY_ALLOWANCE_NOT_FOUND = {"code": 71, "msg": "查無資料"}
 _QUERY_ALLOWANCE_EXISTS: dict[str, object] = {
@@ -117,6 +117,7 @@ _QUERY_ALLOWANCE_EXISTS: dict[str, object] = {
     "msg": "",
     "data": {
         "invoice_type": "D0401",
+        "invoice_status": 99,
         "total_amount": 1000,  # 折讓的平台 total_amount 為未稅
         "tax_amount": 50,
         "product_item": [{"original_invoice_number": "AB00001111"}],
@@ -320,6 +321,7 @@ async def test_transport_error_leaves_claimed_pending_then_query_reconciles(
             "data": {
                 "invoice_number": "AB00001111",
                 "total_amount": 1050,
+                "invoice_status": 99,
                 "create_date": _now_epoch(),
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
@@ -683,6 +685,7 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
             "data": {
                 "invoice_number": "AB00001111",
                 "total_amount": 1050,
+                "invoice_status": 99,
                 "create_date": _now_epoch(),
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
@@ -1189,6 +1192,7 @@ async def test_reconcile_rejects_collided_record_instead_of_marking_success(
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
+                "invoice_status": 99,
                 "total_amount": 270,  # ← 前一輪資料庫的舊交易
             },
         }
@@ -1226,6 +1230,7 @@ async def test_reconcile_rejects_same_amount_collision_by_create_time(
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
+                "invoice_status": 99,
                 "total_amount": 1050,  # ← 與本地**完全同額**，金額比對擋不住
                 "create_date": int((datetime.now(tz=UTC) - timedelta(days=3)).timestamp()),
             },

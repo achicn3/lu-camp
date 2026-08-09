@@ -260,6 +260,7 @@ def test_parse_query_three_states() -> None:
             "invoice_time": "12:34:56",
             "random_number": "5975",
             "total_amount": 1050,
+            "invoice_status": 99,
             "create_date": _epoch_now(),
         },
     }
@@ -362,6 +363,7 @@ def test_parse_query_issued_verifies_amount_identity() -> None:
             "invoice_time": "12:34:56",
             "random_number": "5975",
             "total_amount": 1500,
+            "invoice_status": 99,
             "order_id": "S1-9001",
             "create_date": _epoch_now(),
         },
@@ -396,7 +398,7 @@ def test_parse_query_invoice_voided_verifies_amount_identity() -> None:
     voided = {
         "code": 0,
         "msg": "",
-        "data": {"invoice_type": "C0501", "total_amount": 1500},
+        "data": {"invoice_type": "C0501", "total_amount": 1500, "invoice_status": 99},
     }
     assert parse_query_invoice_voided(voided, expect_total=Decimal("1500")) is True
     with pytest.raises(AmegoTransportError):
@@ -412,6 +414,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             "invoice_type": "D0401",
             "total_amount": 476,  # 平台的折讓 total_amount 是未稅
             "tax_amount": 24,
+            "invoice_status": 99,
             "create_date": _epoch_now(),
             "product_item": [{"original_invoice_number": "ZA10029234"}],
         },
@@ -521,7 +524,12 @@ def test_parse_query_invoice_voided_accepts_pending_void_in_wait() -> None:
     still_open = {
         "code": 0,
         "msg": "",
-        "data": {"invoice_type": "C0401", "total_amount": 1050, "wait": []},
+        "data": {
+            "invoice_type": "C0401",
+            "invoice_status": 99,
+            "total_amount": 1050,
+            "wait": [],
+        },
     }
     assert parse_query_invoice_voided(still_open, expect_total=Decimal("1050")) is False
 
@@ -534,6 +542,7 @@ def test_allowance_original_invoice_check_fails_closed_on_unknown_items() -> Non
             "msg": "",
             "data": {
                 "invoice_type": "D0401",
+                "invoice_status": 99,
                 "total_amount": 476,
                 "tax_amount": 24,
                 "create_date": _epoch_now(),
@@ -579,6 +588,7 @@ def test_create_date_bounds_never_escape_as_non_amego_error() -> None:
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
                 "total_amount": 1050,
+                "invoice_status": 99,
                 "create_date": create_date,
             },
         }
@@ -594,3 +604,97 @@ def test_create_date_bounds_never_escape_as_non_amego_error() -> None:
         expect_not_before=now,
     )
     assert ok is not None
+
+
+def test_pending_void_never_bypasses_identity_and_status_checks() -> None:
+    """wait[] 判讀**必須在身分／狀態驗證之後**，否則等於在身分驗證上開後門。
+
+    上一輪把 wait 檢查放最前面，導致金額不符的撞號紀錄只要掛著待作廢就被判定已作廢。
+    """
+    def _resp(**over: object) -> dict[str, object]:
+        data: dict[str, object] = {
+            "invoice_type": "C0401",
+            "invoice_status": 1,
+            "total_amount": 1050,
+            "wait": [{"invoice_type": "C0501", "create_date": _epoch_now()}],
+        }
+        data.update(over)
+        return {"code": 0, "msg": "", "data": data}
+
+    assert parse_query_invoice_voided(_resp(), expect_total=Decimal("1050")) is True
+    # 金額不符（撞號）→ 即便掛著待作廢也不得判定已作廢
+    with pytest.raises(AmegoTransportError):
+        parse_query_invoice_voided(_resp(), expect_total=Decimal("270"))
+    # 平台錯誤態
+    with pytest.raises(AmegoTransportError):
+        parse_query_invoice_voided(_resp(invoice_status=91), expect_total=Decimal("1050"))
+    # wait 形狀不明 → **不可**當成「沒有待作廢」而放行重送
+    for bad_wait in ([None], "?", [{"create_date": 1}]):
+        with pytest.raises(AmegoTransportError):
+            parse_query_invoice_voided(_resp(wait=bad_wait), expect_total=Decimal("1050"))
+
+
+def test_platform_error_status_is_never_treated_as_applied() -> None:
+    """invoice_status=91（平台錯誤）與未知值不得驅動 UPLOADED/ISSUED/VOID/ALLOWANCE。"""
+    issued = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "invoice_number": "AB00001111",
+            "invoice_date": "20260711",
+            "invoice_time": "12:34:56",
+            "random_number": "5975",
+            "total_amount": 1050,
+            "create_date": _epoch_now(),
+            "invoice_status": 91,
+        },
+    }
+    with pytest.raises(AmegoTransportError):
+        parse_query_issued(issued, expect_total=Decimal("1050"), expect_not_before=_recent())
+
+    allowance: dict[str, object] = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "invoice_type": "D0401",
+            "total_amount": 476,
+            "tax_amount": 24,
+            "create_date": _epoch_now(),
+            "invoice_status": 91,
+            "product_item": [{"original_invoice_number": "ZA10029234"}],
+        },
+    }
+    with pytest.raises(AmegoTransportError):
+        parse_query_allowance_exists(
+            allowance,
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
+        )
+    # 折讓同時掛著待作廢 → 狀態矛盾，同樣阻擋
+    contradictory = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            **allowance["data"],  # type: ignore[dict-item]
+            "invoice_status": 99,
+            "wait": [{"invoice_type": "D0501"}],
+        },
+    }
+    with pytest.raises(AmegoTransportError):
+        parse_query_allowance_exists(
+            contradictory,
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
+        )
+
+
+def test_f0401_success_rejects_absurd_invoice_time() -> None:
+    """f0401 的 invoice_time 也要擋上界，否則 fromtimestamp 溢位會變 500、last_error 空白。"""
+    base = {"code": 0, "invoice_number": "AB00001111", "random_number": "5975"}
+    for bad in (10**20, int((datetime.now(tz=UTC) + timedelta(days=1)).timestamp())):
+        with pytest.raises(AmegoTransportError):
+            parse_f0401_success({**base, "invoice_time": bad})

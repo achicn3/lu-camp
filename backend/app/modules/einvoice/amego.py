@@ -270,7 +270,13 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
     if not _INVOICE_NO_RE.match(number) or not _RANDOM_RE.match(random_number):
         raise AmegoTransportError("Amego f0401 回應欄位不合法（字軌/隨機碼）")
     # type() 嚴格檢查：Python bool 是 int 子類，JSON true 不得被記成 epoch 附近的開立時間。
-    if type(raw_time) is not int or raw_time < _MIN_PLAUSIBLE_UNIX:
+    # 上界同樣要擋：只驗下界時 invoice_time=10**20 會通過守衛，再由 fromtimestamp 拋
+    # OverflowError（非 AmegoTransportError）→ 請求變 500 且 last_error 空白（Codex 第三輪）。
+    if (
+        type(raw_time) is not int
+        or raw_time < _MIN_PLAUSIBLE_UNIX
+        or raw_time > int(datetime.now(tz=UTC).timestamp()) + _CLOCK_TOLERANCE_SECONDS
+    ):
         raise AmegoTransportError("Amego f0401 回應欄位不合法（invoice_time）")
     issued_at = datetime.fromtimestamp(raw_time, tz=_TAIPEI_TZ)
     barcode = str(resp.get("barcode") or "") or None
@@ -320,6 +326,23 @@ def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx:
     if raw > upper:
         raise AmegoTransportError(
             f"{ctx} 回應的 create_date {raw} 超前本機時鐘逾容忍值（回應不可信），待對帳"
+        )
+
+
+# 平台 invoice_status（docs/24 §2）：1 待處理、2 上傳中、3 已上傳、31 處理中、
+# 32 處理完成／待確認、91 錯誤、99 完成。**91 是錯誤，不得當成已套用**；未知值同樣不可信。
+# 其餘「在途」狀態視同已受理——與直接送出得到 code=0 的語意一致（都只代表平台收下）。
+_ACCEPTED_PLATFORM_STATUS = frozenset({1, 2, 3, 31, 32, 99})
+
+
+def _assert_platform_status_ok(data: dict[str, object], *, ctx: str) -> None:
+    """平台紀錄本身必須不是錯誤態，否則不可據以判定「已套用」。"""
+    status = data.get("invoice_status")
+    if type(status) is not int:
+        raise AmegoTransportError(f"{ctx} 回應缺 invoice_status 或型別不明（不可信），待對帳")
+    if status not in _ACCEPTED_PLATFORM_STATUS:
+        raise AmegoTransportError(
+            f"{ctx} 平台紀錄 invoice_status={status}（錯誤或未知狀態，不得視為已套用），待對帳"
         )
 
 
@@ -390,6 +413,7 @@ def parse_query_issued(
         label="含稅總額",
     )
     _assert_created_after(data, expect_not_before, ctx="invoice_query")
+    _assert_platform_status_ok(data, ctx="invoice_query")
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,
@@ -406,20 +430,38 @@ _INVOICE_TYPE_ISSUED = frozenset({"C0401", "A0401"})
 _INVOICE_TYPE_VOIDED = frozenset({"C0501", "A0501"})
 # allowance_query data.invoice_type：存證折讓開立/作廢。
 _ALLOWANCE_TYPE_ISSUED = frozenset({"D0401", "B0401"})
+_ALLOWANCE_TYPE_VOIDED = frozenset({"D0501", "B0501"})
 
 
-def _has_pending_void(data: dict[str, object]) -> bool:
-    """平台是否已受理本張發票的作廢、僅尚未收斂（`wait[]` 內含 C0501/A0501）。
+def _wait_entries(data: dict[str, object], *, ctx: str) -> list[dict[str, object]]:
+    """嚴格取出 `wait[]`。形狀不明一律拋——**不可當成「沒有待處理項目」**。
 
-    受理即等同本系統的「已上送」語意——直接 f0501 回 code=0 時同樣只代表受理。
+    寬鬆解讀會 fail open：wait 若是非 list 或含非 dict 元素而被當成空，作廢就會被重送。
     """
     waiting = data.get("wait")
+    if waiting is None:
+        return []
     if not isinstance(waiting, list):
-        return False
-    return any(
-        isinstance(w, dict) and str(w.get("invoice_type") or "") in _INVOICE_TYPE_VOIDED
-        for w in waiting
-    )
+        raise AmegoTransportError(f"{ctx} 的 wait 形狀不明（回應不可信），待對帳")
+    entries: list[dict[str, object]] = []
+    for item in waiting:
+        if not isinstance(item, dict) or not str(item.get("invoice_type") or ""):
+            raise AmegoTransportError(f"{ctx} 的 wait 含不明元素（回應不可信），待對帳")
+        entries.append(item)
+    return entries
+
+
+def _has_pending(data: dict[str, object], kinds: frozenset[str], *, ctx: str) -> bool:
+    """`wait[]` 內是否有指定型別的待處理項目（平台已受理、尚未收斂）。"""
+    return any(str(w.get("invoice_type") or "") in kinds for w in _wait_entries(data, ctx=ctx))
+
+
+def _assert_no_pending_entries(
+    data: dict[str, object], kinds: frozenset[str], *, ctx: str
+) -> None:
+    """狀態自相矛盾（例如折讓同時掛著待作廢）→ 阻擋，要求人工對帳。"""
+    if _has_pending(data, kinds, ctx=ctx):
+        raise AmegoTransportError(f"{ctx} 查到的紀錄另掛待處理的作廢（狀態矛盾），待人工對帳")
 
 
 def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal) -> bool:
@@ -438,14 +480,10 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
         )
     data = resp.get("data")
     invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
-    # **平台受理但尚在處理的作廢，頂層仍是 C0401**，待作廢掛在 `wait[]`（對真 Amego 實測：
-    # 送出 f0501 後 invoice_type=C0401、status=1、wait=[{"invoice_type":"C0501",...}]）。
-    # 只看頂層會回 False → 對平台已受理的作廢再送一次 F0501，被拒後記 FAILED、發票卡在
-    # VOID_PENDING，正是 crash 窗口最需要救的情境（Codex 第二輪）。
-    if isinstance(data, dict) and _has_pending_void(data):
-        return True
     if invoice_type in _INVOICE_TYPE_VOIDED or invoice_type in _INVOICE_TYPE_ISSUED:
-        # 兩個分支都會決定後續動作，故先確認查到的確實是本筆
+        # **身分與狀態驗證一律先於任何「已套用」判定**（Codex 第三輪）：先前把 wait 判讀
+        # 放在金額比對之前，導致金額不符的撞號紀錄只要掛著待作廢就被回 True，等於在剛修好的
+        # 身分驗證上開後門。
         _ctx = "invoice_query（作廢確認）"
         assert isinstance(data, dict)  # invoice_type 非空即代表 data 是 dict
         _assert_same_record(
@@ -454,6 +492,13 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
             ctx=_ctx,
             label="含稅總額",
         )
+        _assert_platform_status_ok(data, ctx=_ctx)
+        # **平台受理但尚在處理的作廢，頂層仍是 C0401**，待作廢掛在 `wait[]`（對真 Amego
+        # 實測：送出 f0501 後 invoice_type=C0401、status=1、wait=[{"invoice_type":"C0501"}]）。
+        # 只看頂層會回 False → 對已受理的作廢再送一次 F0501，被拒後記 FAILED、發票卡在
+        # VOID_PENDING，正是 crash 窗口最需要救的情境（Codex 第二輪）。
+        if _has_pending(data, _INVOICE_TYPE_VOIDED, ctx=_ctx):
+            return True
     if invoice_type in _INVOICE_TYPE_VOIDED:
         return True
     if invoice_type in _INVOICE_TYPE_ISSUED:
@@ -530,6 +575,9 @@ def parse_query_allowance_exists(
         )
         _assert_allowance_original_invoice(data, expect_original_invoice_no)
         _assert_created_after(data, expect_not_before, ctx="allowance_query")
+        _assert_platform_status_ok(data, ctx="allowance_query")
+        # 折讓若同時掛著待作廢（D0501/B0501），狀態自相矛盾——不可當成「已有本筆折讓」
+        _assert_no_pending_entries(data, _ALLOWANCE_TYPE_VOIDED, ctx="allowance_query")
         return True
     raise AmegoTransportError(
         f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"
