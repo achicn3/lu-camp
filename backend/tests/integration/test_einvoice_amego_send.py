@@ -93,10 +93,29 @@ def _client(transport: AmegoTransport) -> AmegoClient:
 _QUERY_NOT_FOUND = {"code": 71, "msg": "查無資料"}  # 官方明載的查無碼
 
 
-_QUERY_INVOICE_OPEN = {"code": 0, "msg": "", "data": {"invoice_type": "C0401"}}
-_QUERY_INVOICE_VOIDED = {"code": 0, "msg": "", "data": {"invoice_type": "C0501"}}
+# 對帳查詢回應**必須帶金額**（真實 Amego 回應如此）：查到的紀錄要能證明是本筆，
+# 否則識別碼跨資料庫還原重號時會把別人的紀錄當成自己的。種子發票總額 1050（未稅 1000／稅 50）。
+_QUERY_INVOICE_OPEN = {
+    "code": 0,
+    "msg": "",
+    "data": {"invoice_type": "C0401", "total_amount": 1050},
+}
+_QUERY_INVOICE_VOIDED = {
+    "code": 0,
+    "msg": "",
+    "data": {"invoice_type": "C0501", "total_amount": 1050},
+}
 _QUERY_ALLOWANCE_NOT_FOUND = {"code": 71, "msg": "查無資料"}
-_QUERY_ALLOWANCE_EXISTS = {"code": 0, "msg": "", "data": {"invoice_type": "D0401"}}
+_QUERY_ALLOWANCE_EXISTS = {
+    "code": 0,
+    "msg": "",
+    "data": {
+        "invoice_type": "D0401",
+        "total_amount": 1000,  # 折讓的平台 total_amount 為未稅
+        "tax_amount": 50,
+        "product_item": [{"original_invoice_number": "AB00001111"}],
+    },
+}
 
 
 def test_allowance_number_stays_unique_within_amego_16_char_limit() -> None:
@@ -282,6 +301,7 @@ async def test_transport_error_leaves_claimed_pending_then_query_reconciles(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "total_amount": 1050,
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -643,6 +663,7 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "total_amount": 1050,
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -1122,3 +1143,40 @@ async def test_send_rejects_non_pending(db_session: AsyncSession) -> None:
 
     with pytest.raises(EInvoiceQueueNotDroppable):
         await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+
+
+async def test_reconcile_rejects_collided_record_instead_of_marking_success(
+    db_session: AsyncSession,
+) -> None:
+    """識別碼重號（資料庫自備份還原→id 倒退）時，對帳**不得**把別筆紀錄當成本筆。
+
+    實際踩過：`order_id` 只由 (store_id, sale_id) 推導，重置後 sale_id 從 1 重來，
+    invoice_query 查到平台上的舊紀錄 → 舊實作直接補記 UPLOADED，而 F0401 從未送出，
+    稅務帳目失真。現在金額不符即拋 AmegoTransportError，佇列維持 PENDING 待人工對帳。
+    """
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+
+    # 平台回的是「同 order_id 但金額不同」的舊紀錄（本地為 1050）
+    collided = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_number": "AB00001111",
+                "invoice_date": "20260711",
+                "invoice_time": "12:34:56",
+                "random_number": "5975",
+                "total_amount": 270,  # ← 前一輪資料庫的舊交易
+            },
+        }
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(collided))
+
+    item = next(i for i in await svc.list_queue(store_id) if i.id == queue_id)
+    assert item.status is UploadStatus.PENDING  # 不得記成 UPLOADED
+    assert len(collided.calls) == 1  # 只查詢、未送出 F0401（也不得盲目重送）
+    assert sale_id > 0

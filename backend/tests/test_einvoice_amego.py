@@ -22,13 +22,15 @@ from app.modules.einvoice.amego import (
     build_f0501_data,
     build_invoice_query_data,
     parse_f0401_success,
+    parse_query_allowance_exists,
+    parse_query_invoice_voided,
     parse_query_issued,
     sign_form,
 )
 from app.modules.einvoice.models import Invoice
 from app.modules.sales.models import SaleLine
 from app.shared.enums import InvoiceStatus, InvoiceType, SaleLineKind, SaleLineType
-from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError
+from app.shared.exceptions import AmegoNotConfigured, AmegoTransportError, EInvoiceDropError
 
 
 def _line(
@@ -257,11 +259,14 @@ def test_parse_query_three_states() -> None:
             "invoice_date": "20260711",
             "invoice_time": "12:34:56",
             "random_number": "5975",
+            "total_amount": 1050,
         },
     }
-    result = parse_query_issued(found)
+    result = parse_query_issued(found, expect_total=Decimal("1050"))
     assert result is not None and result.barcode_text is None  # 查詢不回條碼內容
-    assert parse_query_issued({"code": 71, "msg": "查無資料"}) is None  # 官方查無碼
+    assert (
+        parse_query_issued({"code": 71, "msg": "查無資料"}, expect_total=Decimal("1050")) is None
+    )  # 官方查無碼
     ambiguous_responses: tuple[dict[str, object], ...] = (
         {"msg": "??"},
         {"code": "0", "msg": ""},
@@ -274,7 +279,7 @@ def test_parse_query_three_states() -> None:
     )
     for ambiguous in ambiguous_responses:
         with pytest.raises(AmegoTransportError):
-            parse_query_issued(ambiguous)
+            parse_query_issued(ambiguous, expect_total=Decimal("1050"))
 
 
 class _RecordingTransport:
@@ -327,3 +332,138 @@ async def test_client_requires_credentials() -> None:
             transport=transport,
             base_url="https://invoice-api.amego.tw",
         )
+
+
+def test_parse_query_issued_verifies_amount_identity() -> None:
+    """對帳查到的紀錄必須**確實是本筆**：金額不符即拒（不得補記成功）。
+
+    `order_id` 僅由 (store_id, sale_id) 推導，資料庫還原造成 id 倒退時會與平台上的
+    歷史紀錄重號；只憑「查得到」就判定已開立，會把從未送出的 F0401 記成成功。
+    """
+    resp: dict[str, dict[str, object]] = {
+        "data": {
+            "invoice_number": "AB00001111",
+            "invoice_date": "20260711",
+            "invoice_time": "12:34:56",
+            "random_number": "5975",
+            "total_amount": 1500,
+            "order_id": "S1-9001",
+        },
+    }
+    full: dict[str, object] = {"code": 0, "msg": "", **resp}
+    ours = parse_query_issued(full, expect_total=Decimal("1500"))
+    assert ours is not None and ours.invoice_no == "AB00001111"
+
+    # 別人的（或還原前的）紀錄：金額對不上 → 結果不可信，維持待對帳
+    with pytest.raises(AmegoTransportError):
+        parse_query_issued(full, expect_total=Decimal("270"))
+
+    # 平台沒回金額 → 無從驗證身分，同樣不可判定成功
+    data_no_amount = {k: v for k, v in resp["data"].items() if k != "total_amount"}
+    no_amount: dict[str, object] = {"code": 0, "msg": "", "data": data_no_amount}
+    with pytest.raises(AmegoTransportError):
+        parse_query_issued(no_amount, expect_total=Decimal("1500"))
+
+    # 查無仍是查無（可重送），與金額驗證無關
+    assert parse_query_issued({"code": 71, "msg": "查無資料"}, expect_total=Decimal("1500")) is None
+
+
+def test_parse_query_invoice_voided_verifies_amount_identity() -> None:
+    """F0501 對帳：字軌查到的發票金額須與本地一致，否則不可據以補記已作廢。"""
+    voided = {
+        "code": 0,
+        "msg": "",
+        "data": {"invoice_type": "C0501", "total_amount": 1500},
+    }
+    assert parse_query_invoice_voided(voided, expect_total=Decimal("1500")) is True
+    with pytest.raises(AmegoTransportError):
+        parse_query_invoice_voided(voided, expect_total=Decimal("270"))
+
+
+def test_parse_query_allowance_exists_verifies_identity() -> None:
+    """G0401 對帳：折讓單號同樣會跨還原重號，須比對原發票號與金額。"""
+    resp = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "invoice_type": "D0401",
+            "total_amount": 476,  # 平台的折讓 total_amount 是未稅
+            "tax_amount": 24,
+            "product_item": [{"original_invoice_number": "ZA10029234"}],
+        },
+    }
+    assert (
+        parse_query_allowance_exists(
+            resp,
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+        )
+        is True
+    )
+    # 撞號：查到的是別張原發票的折讓
+    with pytest.raises(AmegoTransportError):
+        parse_query_allowance_exists(
+            resp,
+            expect_original_invoice_no="ZA10018786",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+        )
+    # 金額不符
+    with pytest.raises(AmegoTransportError):
+        parse_query_allowance_exists(
+            resp,
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("190"),
+            expect_tax=Decimal("10"),
+        )
+    # 明確查無仍可重送
+    assert (
+        parse_query_allowance_exists(
+            {"code": 71, "msg": "查無資料"},
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+        )
+        is False
+    )
+
+
+def test_frozen_payload_identity_extractors_fail_closed() -> None:
+    """對帳基準取自**凍結 payload**（我們實際送出的內容），讀不出即拒絕上送。
+
+    寧可卡住等人工，也不可在無法驗證身分的情況下把平台上的別筆紀錄當成本筆。
+    """
+    from app.modules.einvoice.service import _payload_allowance_identity, _payload_total
+
+    assert _payload_total([{"TotalAmount": 1050}]) == Decimal("1050")
+    net, tax, original = _payload_allowance_identity(
+        [
+            {
+                "TotalAmount": 1000,
+                "TaxAmount": 50,
+                "ProductItem": [{"OriginalInvoiceNumber": "AB00001111"}],
+            }
+        ]
+    )
+    assert (net, tax, original) == (Decimal("1000"), Decimal("50"), "AB00001111")
+
+    bad_totals: tuple[object, ...] = (
+        [{}],
+        [{"TotalAmount": True}],
+        [{"TotalAmount": "x"}],
+        "?",
+        [],
+    )
+    for bad_total in bad_totals:
+        with pytest.raises(EInvoiceDropError):
+            _payload_total(bad_total)
+
+    bad_allowances: tuple[object, ...] = (
+        [{"TotalAmount": 1000, "TaxAmount": 50}],  # 缺 ProductItem
+        [{"TotalAmount": 1000, "TaxAmount": 50, "ProductItem": [{}]}],  # 缺原發票字軌
+        [{"TaxAmount": 50, "ProductItem": [{"OriginalInvoiceNumber": "AB00001111"}]}],  # 缺未稅
+    )
+    for bad_allowance in bad_allowances:
+        with pytest.raises(EInvoiceDropError):
+            _payload_allowance_identity(bad_allowance)

@@ -287,7 +287,37 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
     )
 
 
-def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
+def _platform_amount(data: dict[str, object], field: str, *, ctx: str) -> Decimal:
+    """取平台回傳的金額欄（整數元）。缺欄或型別不明 → 無從驗證身分，一律拋。
+
+    bool 是 int 子類，JSON true/false 不得矇混成金額。
+    """
+    raw = data.get(field)
+    if type(raw) is int:
+        return Decimal(raw)
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return Decimal(raw.strip())
+    raise AmegoTransportError(f"{ctx} 回應缺 {field} 或型別不明（無從確認是否為本筆，待對帳）")
+
+
+def _assert_same_record(actual: Decimal, expected: Decimal, *, ctx: str, label: str) -> None:
+    """對帳身分驗證：查到的紀錄金額須與本地一致，否則**不是本筆**。
+
+    `order_id`／折讓單號只由 (store_id, sale_id/allowance_id) 推導，資料庫自備份還原
+    造成 id 倒退時會與平台既有紀錄重號。只憑「查得到」就補記成功，會把從未送出的
+    F0401/F0501/G0401 記為已上傳——稅務帳目就此失真。金額不符一律拋，維持待人工對帳
+    （寧可卡住也不可誤記，亦不可貿然重送而產生重複稅務憑證）。
+    """
+    if actual != expected:
+        raise AmegoTransportError(
+            f"{ctx} 查到的{label} {actual} 與本地 {expected} 不符"
+            "——該紀錄可能不是本筆（識別碼重號），待人工對帳"
+        )
+
+
+def parse_query_issued(
+    resp: dict[str, object], *, expect_total: Decimal
+) -> AmegoIssueResult | None:
     """invoice_query 回應三態（Codex 第三輪）：
 
     - 成功（code=0 且欄位齊備）→ 開立欄位（條碼/QR 查詢不回傳 → None，證明聯不可印）。
@@ -317,6 +347,12 @@ def parse_query_issued(resp: dict[str, object]) -> AmegoIssueResult | None:
         issued_time = datetime.strptime(raw_time, "%H:%M:%S").strftime("%H:%M:%S")
     except ValueError as exc:
         raise AmegoTransportError("invoice_query 回應欄位不合法（日期/時間），待對帳") from exc
+    _assert_same_record(
+        _platform_amount(data, "total_amount", ctx="invoice_query"),
+        expect_total,
+        ctx="invoice_query",
+        label="含稅總額",
+    )
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,
@@ -335,7 +371,7 @@ _INVOICE_TYPE_VOIDED = frozenset({"C0501", "A0501"})
 _ALLOWANCE_TYPE_ISSUED = frozenset({"D0401", "B0401"})
 
 
-def parse_query_invoice_voided(resp: dict[str, object]) -> bool:
+def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal) -> bool:
     """invoice_query（以字軌查）→ 平台是否已作廢此發票（F0501 對帳，Codex 第七輪）。
 
     True＝已作廢（invoice_type C0501/A0501）→ 本地補記成功、不重送；
@@ -351,6 +387,16 @@ def parse_query_invoice_voided(resp: dict[str, object]) -> bool:
         )
     data = resp.get("data")
     invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
+    if invoice_type in _INVOICE_TYPE_VOIDED or invoice_type in _INVOICE_TYPE_ISSUED:
+        # 兩個分支都會決定後續動作，故先確認查到的確實是本筆
+        _ctx = "invoice_query（作廢確認）"
+        assert isinstance(data, dict)  # invoice_type 非空即代表 data 是 dict
+        _assert_same_record(
+            _platform_amount(data, "total_amount", ctx=_ctx),
+            expect_total,
+            ctx=_ctx,
+            label="含稅總額",
+        )
     if invoice_type in _INVOICE_TYPE_VOIDED:
         return True
     if invoice_type in _INVOICE_TYPE_ISSUED:
@@ -360,7 +406,28 @@ def parse_query_invoice_voided(resp: dict[str, object]) -> bool:
     )
 
 
-def parse_query_allowance_exists(resp: dict[str, object]) -> bool:
+def _assert_allowance_original_invoice(data: dict[str, object], expected: str) -> None:
+    """折讓明細的原發票號須全部指向本地那張原發票（否則是別筆折讓撞號）。"""
+    items = data.get("product_item")
+    if not isinstance(items, list) or not items:
+        raise AmegoTransportError("allowance_query 缺 product_item（無從確認原發票，待對帳）")
+    found = {
+        str(item.get("original_invoice_number") or "") for item in items if isinstance(item, dict)
+    }
+    if found != {expected}:
+        raise AmegoTransportError(
+            f"allowance_query 查到的原發票 {sorted(found)} 與本地 {expected} 不符"
+            "——該折讓可能不是本筆（單號重號），待人工對帳"
+        )
+
+
+def parse_query_allowance_exists(
+    resp: dict[str, object],
+    *,
+    expect_original_invoice_no: str,
+    expect_net: Decimal,
+    expect_tax: Decimal,
+) -> bool:
     """allowance_query → 平台是否已有此折讓單（G0401 對帳，Codex 第七輪）。
 
     True＝已開立（D0401/B0401）→ 補記成功、不重送；False＝明確查無（code=71）→ 可送；
@@ -379,6 +446,21 @@ def parse_query_allowance_exists(resp: dict[str, object]) -> bool:
     data = resp.get("data")
     invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
     if invoice_type in _ALLOWANCE_TYPE_ISSUED:
+        assert isinstance(data, dict)  # invoice_type 非空即代表 data 是 dict
+        # 折讓的平台 total_amount 為**未稅**、tax_amount 為稅額（對真 Amego 實測確認）
+        _assert_same_record(
+            _platform_amount(data, "total_amount", ctx="allowance_query"),
+            expect_net,
+            ctx="allowance_query",
+            label="未稅金額",
+        )
+        _assert_same_record(
+            _platform_amount(data, "tax_amount", ctx="allowance_query"),
+            expect_tax,
+            ctx="allowance_query",
+            label="稅額",
+        )
+        _assert_allowance_original_invoice(data, expect_original_invoice_no)
         return True
     raise AmegoTransportError(
         f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"

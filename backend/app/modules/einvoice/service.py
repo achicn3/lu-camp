@@ -81,6 +81,44 @@ RESULT_KIND_SUMMARY = "SUMMARY"
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
+def _payload_first(payload: object, *, ctx: str) -> dict[str, object]:
+    """取凍結 payload 的第一筆（Amego 各訊息皆為陣列，本系統一次只送一筆）。"""
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[0]
+    if isinstance(payload, dict):
+        return payload
+    raise EInvoiceDropError(f"{ctx}：凍結 payload 形狀不明，拒絕上送（需人工對帳）")
+
+
+def _payload_int(data: dict[str, object], field: str, *, ctx: str) -> Decimal:
+    """取凍結 payload 的整數元金額欄。bool 是 int 子類，不得矇混。"""
+    raw = data.get(field)
+    if type(raw) is int:
+        return Decimal(raw)
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return Decimal(raw.strip())
+    raise EInvoiceDropError(f"{ctx}：凍結 payload 缺 {field}，無從驗證身分（需人工對帳）")
+
+
+def _payload_total(payload: object) -> Decimal:
+    """F0401 對帳基準＝**我們實際送出**的 TotalAmount（非當下 DB 值，避免事後漂移）。"""
+    return _payload_int(_payload_first(payload, ctx="f0401"), "TotalAmount", ctx="f0401")
+
+
+def _payload_allowance_identity(payload: object) -> tuple[Decimal, Decimal, str]:
+    """G0401 對帳基準：送出的未稅/稅額與原發票字軌（皆取自凍結 payload）。"""
+    head = _payload_first(payload, ctx="g0401")
+    net = _payload_int(head, "TotalAmount", ctx="g0401")  # g0401 的 TotalAmount 為未稅
+    tax = _payload_int(head, "TaxAmount", ctx="g0401")
+    items = head.get("ProductItem")
+    original = ""
+    if isinstance(items, list) and items and isinstance(items[0], dict):
+        original = str(items[0].get("OriginalInvoiceNumber") or "")
+    if not original:
+        raise EInvoiceDropError("g0401：凍結 payload 缺原發票字軌，無從驗證身分（需人工對帳）")
+    return net, tax, original
+
+
 class EInvoiceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -554,7 +592,7 @@ class EInvoiceService:
             query_resp = await client.call(
                 "/json/invoice_query", build_invoice_query_data(order_id=order_id)
             )
-            recovered = parse_query_issued(query_resp)
+            recovered = parse_query_issued(query_resp, expect_total=_payload_total(payload))
             if recovered is not None:
                 return await self._record_amego_outcome(
                     store_id,
@@ -593,7 +631,7 @@ class EInvoiceService:
                     "/json/invoice_query",
                     build_invoice_query_by_number_data(invoice_number=void_target.invoice_no),
                 )
-                if parse_query_invoice_voided(query_resp):
+                if parse_query_invoice_voided(query_resp, expect_total=void_target.total):
                     return await self._record_amego_outcome(
                         store_id,
                         queue_id,
@@ -612,7 +650,13 @@ class EInvoiceService:
                     )
                 ),
             )
-            if parse_query_allowance_exists(query_resp):
+            sent_net, sent_tax, sent_original_no = _payload_allowance_identity(payload)
+            if parse_query_allowance_exists(
+                query_resp,
+                expect_original_invoice_no=sent_original_no,
+                expect_net=sent_net,
+                expect_tax=sent_tax,
+            ):
                 return await self._record_amego_outcome(
                     store_id,
                     queue_id,

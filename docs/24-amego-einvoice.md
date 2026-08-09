@@ -106,6 +106,18 @@
    C0501/A0501＝已作廢）、G0401 前 allowance_query（D0401/B0401＝已有）——已套用 →
    補記成功不重送；**僅官方 code=71 視為查無**；其他錯誤碼/曖昧回應（缺 code、bool、
    欄位缺漏）→ AmegoTransportError，維持已認領 PENDING 待對帳。
+3b. **對帳必須驗證「查到的是本筆」**：`order_id`（`S{store_id}-{sale_id}`）與折讓單號
+   （`L{store_id}-{allowance_id}`）只由本地 id 推導，**資料庫自備份還原造成 id 倒退時
+   會與平台既有紀錄重號**。只憑「查得到」就補記成功，會把從未送出的 F0401/F0501/G0401
+   記成已上傳、稅務帳目失真（2026-08-04 於測試環境實際踩到：allowance_query 撞到
+   2026-07-23 的 `L1-1`，G0401 從未送出卻記為 UPLOADED）。故：
+   - invoice_query（開立/作廢對帳）→ 比對 `data.total_amount` 與本地 `invoices.total`
+   - allowance_query → 比對 `data.total_amount`（**未稅**）與 `tax_amount` 對本地折讓的
+     `net`/`tax`，並要求 `data.product_item[].original_invoice_number` 全數等於本地原發票字軌
+   - 缺金額欄或不符 → AmegoTransportError（**fail closed**）：維持 PENDING 待人工對帳，
+     既不誤記成功、也不盲目重送（重送會產生重複稅務憑證）
+   - 判讀線索：`einvoice_result_events.message` 空白＝真的送出；有「以 …_query 對帳…」
+     字樣＝走了對帳捷徑、該則訊息並未實際上送
 4. **查無＋已作廢 → 取消開立**：空窗作廢後平台查無 → 佇列 CANCELLED、發票收斂 VOID，
    不為作廢交易開發票。
 4b. **復原件＝人工補印狀態**：以 invoice_query 補開立的發票拿不到條碼/QR 內容

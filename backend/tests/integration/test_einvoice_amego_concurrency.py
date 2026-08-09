@@ -177,6 +177,7 @@ class _QueryFoundTransport:
             "msg": "",
             "data": {
                 "invoice_number": "AB00001111",
+                "total_amount": 1050,
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
