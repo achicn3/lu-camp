@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog
+from app.core.time import store_date, utc_now
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.returns.service import ReturnLineInput, ReturnsService
@@ -514,8 +515,9 @@ async def test_trends_and_daily_summary_include_catalog_cost(
         lines=[_line(product_id)],
         tenders=[TenderInput(tender_type=TenderType.CASH, amount=Decimal(500))],
     )
-    now = datetime.now(UTC)
-    summary = await ReportsService(db_session).daily_summary(store_id, now.date())
+    # 日報以**台北營業日**分桶，不可傳 UTC 日期：台北 00:00–08:00 這段時間 UTC 還是前一天，
+    # 會查到空桶（實測於台北 00:23 失敗，main 上同樣重現）。用 core.time 的正規 helper。
+    summary = await ReportsService(db_session).daily_summary(store_id, store_date(utc_now()))
     # 商品成本 200（_seed 的 unit_cost）→ 日報的 COGS 必須認列，毛利 = 500 − 200
     assert summary.cogs == Decimal(200)
     assert summary.gross_margin == Decimal(300)
