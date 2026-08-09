@@ -743,15 +743,17 @@ def test_query_issued_requires_issued_type_and_known_wait() -> None:
                 expect_total=Decimal("1050"),
                 expect_not_before=_recent(),
             )
-    # 開立成功、隨後另有待作廢：F0401 確實已成立，不可在此卡住（作廢由 VOID 佇列處理）
-    assert (
-        parse_query_issued(
-            _resp(wait=[{"invoice_type": "C0501", "create_date": _epoch_now()}]),
-            expect_total=Decimal("1050"),
-            expect_not_before=_recent(),
-        )
-        is not None
-    )
+    # 平台掛著**任何**待處理動作 → fail closed。
+    # （此處原本斷言「待作廢仍應通過」，理由是作廢會由本地 VOID 佇列接手；但沒有任何地方
+    #  證明本地真有那條佇列列——備份還原後可能只剩已認領的 F0401，於是被標成 ISSUED 而
+    #  平台其實正在作廢。該斷言編碼的是缺陷行為，現改為斷言更嚴格的正確行為。）
+    for pending in ("C0501", "C0701", "D0401", "D0501"):
+        with pytest.raises(AmegoTransportError):
+            parse_query_issued(
+                _resp(wait=[{"invoice_type": pending, "create_date": _epoch_now()}]),
+                expect_total=Decimal("1050"),
+                expect_not_before=_recent(),
+            )
 
 
 def test_void_blocks_on_conflicting_pending_actions() -> None:

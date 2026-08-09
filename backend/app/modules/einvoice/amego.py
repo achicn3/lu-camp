@@ -422,9 +422,19 @@ def parse_query_issued(
         raise AmegoTransportError(
             f"invoice_query 查到的紀錄型別為「{found_type}」（非開立態），不得補記為已開立，待對帳"
         )
-    # wait 僅驗形狀／型別合法性（未知型別會拋）。此處**不阻擋待作廢**：F0401 確實已成立，
-    # 作廢由各自的 VOID 佇列列處理；在這裡擋反而會卡住合法的「開立成功、隨後作廢」流程。
-    _wait_entries(data, ctx="invoice_query")
+    # 平台掛著任何待處理動作時**一律 fail closed**：先前只驗形狀就放行，理由是「作廢由
+    # 本地 VOID 佇列處理」——但沒有任何地方證明本地真的有那條後續流程。本分支處理的正是
+    # 備份還原情境：DB 可能保有已認領的 F0401、卻沒有備份後才發生的作廢／折讓佇列列，
+    # 於是本地被標成 ISSUED 而平台其實正在作廢，且永遠不會被修正（Codex 第五輪）。
+    # 「查無＋已在作廢流程」另有既有的空窗作廢分支處理；此處查得到卻狀態未定，交人工。
+    pending_kinds = {
+        str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx="invoice_query")
+    }
+    if pending_kinds:
+        raise AmegoTransportError(
+            f"invoice_query 查到的紀錄另掛待處理的 {sorted(pending_kinds)}"
+            "——本地是否有對應後續流程無從確認，待人工對帳"
+        )
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,
@@ -478,17 +488,15 @@ def _wait_entries(data: dict[str, object], *, ctx: str) -> list[dict[str, object
     return entries
 
 
-def _has_pending(data: dict[str, object], kinds: frozenset[str], *, ctx: str) -> bool:
-    """`wait[]` 內是否有指定型別的待處理項目（平台已受理、尚未收斂）。"""
-    return any(str(w.get("invoice_type") or "") in kinds for w in _wait_entries(data, ctx=ctx))
-
-
 def _assert_no_pending_entries(
     data: dict[str, object], kinds: frozenset[str], *, ctx: str
 ) -> None:
     """狀態自相矛盾（例如折讓同時掛著待作廢）→ 阻擋，要求人工對帳。"""
-    if _has_pending(data, kinds, ctx=ctx):
-        raise AmegoTransportError(f"{ctx} 查到的紀錄另掛待處理的作廢（狀態矛盾），待人工對帳")
+    found = {str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx=ctx)} & kinds
+    if found:
+        raise AmegoTransportError(
+            f"{ctx} 查到的紀錄另掛待處理的 {sorted(found)}（狀態矛盾），待人工對帳"
+        )
 
 
 def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal) -> bool:
@@ -524,12 +532,20 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
         # 實測：送出 f0501 後 invoice_type=C0401、status=1、wait=[{"invoice_type":"C0501"}]）。
         # 只看頂層會回 False → 對已受理的作廢再送一次 F0501，被拒後記 FAILED、發票卡在
         # VOID_PENDING，正是 crash 窗口最需要救的情境（Codex 第二輪）。
-        if _has_pending(data, _INVOICE_TYPE_VOIDED | _INVOICE_TYPE_CANCELLED, ctx=_ctx):
-            return True
-        # 掛著其他待處理動作（例如待折讓）時再送 F0501 會疊加相斥的稅務動作
-        _assert_no_pending_entries(
-            data, _ALLOWANCE_TYPE_ISSUED | _ALLOWANCE_TYPE_VOIDED, ctx=_ctx
+        # **先蒐集全部事實再決策**：早退會讓後面的衝突檢查被跳過——本輪重現過
+        # `wait=[C0501, D0401]` 直接回 True，於是平台仍掛著相斥折讓，本地卻已把發票轉 VOID。
+        pending = {str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx=_ctx)}
+        # 註銷（C0701/A0701）是**另一種動作**，不能當成本次 F0501 已被受理。
+        conflicting = pending & (
+            _ALLOWANCE_TYPE_ISSUED | _ALLOWANCE_TYPE_VOIDED | _INVOICE_TYPE_CANCELLED
         )
+        if conflicting:
+            raise AmegoTransportError(
+                f"{_ctx} 查到的紀錄另掛待處理的 {sorted(conflicting)}"
+                "——與本次作廢相斥，待人工對帳"
+            )
+        if pending & _INVOICE_TYPE_VOIDED:
+            return True
     if invoice_type in _INVOICE_TYPE_VOIDED:
         return True
     if invoice_type in _INVOICE_TYPE_ISSUED:

@@ -572,19 +572,18 @@ class EInvoiceService:
             stale_allowance = await self._session.get(InvoiceAllowance, locked.allowance_id)
             if stale_allowance is not None:
                 await self._session.refresh(stale_allowance)
-        frozen = locked.amego_payload
-        if (
-            frozen is None
-            or hashlib.sha256(frozen.encode("utf-8")).hexdigest() != locked.xml_sha256
-        ):
-            await self._session.commit()
-            raise EInvoiceDropError(
-                f"佇列 {queue_id} 認領 payload 遺失或與 sha 不符，拒絕重送（需人工對帳）"
-            )
-        # 凍結 payload 的解碼與身分抽取都納入**同一個受控錯誤邊界**：
-        # 舊版／還原後 schema 不相容但 checksum 相符的 payload 會在這裡失敗，
-        # 若留在 try 外就會變成空白 500 且 last_error 未落庫（Codex 第四輪）。
+        # 凍結 payload 的**存在性、checksum、解碼與身分抽取全部納入同一個受控錯誤邊界**：
+        # 任何一處失敗都必須先把原因寫進 last_error，否則佇列卡在 PENDING 卻一片空白
+        # （Codex 第四/五輪：sha 守衛原本在 try 外，先 commit 再拋，_note_blocked 不會執行）。
         try:
+            frozen = locked.amego_payload
+            if (
+                frozen is None
+                or hashlib.sha256(frozen.encode("utf-8")).hexdigest() != locked.xml_sha256
+            ):
+                raise EInvoiceDropError(
+                    f"佇列 {queue_id} 認領 payload 遺失或與 sha 不符，拒絕重送（需人工對帳）"
+                )
             try:
                 payload = json.loads(frozen)
             except ValueError as exc:

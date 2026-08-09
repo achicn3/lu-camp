@@ -44,6 +44,7 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import (
     AmegoTransportError,
+    EInvoiceDropError,
     EInvoiceQueueNotDroppable,
     EInvoiceResultConflict,
     EInvoiceSettingsChanged,
@@ -1331,3 +1332,71 @@ async def test_void_reconcile_treats_pending_void_as_accepted_not_resend(
     item = await svc.send_via_amego(store_id, void_queue_id, client=_client(pending_void))
     assert item.status is UploadStatus.UPLOADED  # 視為已受理
     assert len(pending_void.calls) == 1  # 只查詢，**未重送 F0501**
+
+
+async def test_corrupt_frozen_payload_blocks_with_visible_reason(
+    db_session: AsyncSession,
+) -> None:
+    """凍結 payload 損壞（checksum 不符）→ 不可安全重送：維持 PENDING 且 **last_error 落庫**。
+
+    sha 守衛原本在受控邊界之外（先 commit 再拋），_note_blocked 不會執行，
+    佇列卡住卻一片空白。
+    """
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    # 先認領（產生 frozen payload），再竄改使 checksum 不符
+    broken = _ScriptedTransport(AmegoTransportError("Amego API 呼叫失敗：ConnectTimeout"))
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(broken))
+    row = await db_session.get(EInvoiceUploadQueue, queue_id)
+    assert row is not None and row.amego_payload is not None
+    row.amego_payload = row.amego_payload + " "  # checksum 立刻不符
+    await db_session.commit()
+
+    with pytest.raises(EInvoiceDropError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(_ScriptedTransport({})))
+    item = next(i for i in await svc.list_queue(store_id) if i.id == queue_id)
+    assert item.status is UploadStatus.PENDING
+    assert item.last_error is not None and "sha" in item.last_error
+
+
+async def test_void_blocked_when_platform_has_conflicting_pending_allowance(
+    db_session: AsyncSession,
+) -> None:
+    """平台同時掛著待作廢與待折讓：不可因為看到待作廢就早退，仍須阻擋（相斥動作）。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    sales = SalesService(db_session)
+    sale = await sales.get_sale(store_id, sale_id)
+    assert sale is not None
+    await sales.void_sale(sale, clerk_id)
+    void_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.VOID and i.status is UploadStatus.PENDING
+    )
+    conflicting = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_type": "C0401",
+                "invoice_status": 99,
+                "total_amount": 1050,
+                "wait": [
+                    {"invoice_type": "C0501", "create_date": _now_epoch()},
+                    {"invoice_type": "D0401", "create_date": _now_epoch()},
+                ],
+            },
+        }
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, void_queue_id, client=_client(conflicting))
+    item = next(i for i in await svc.list_queue(store_id) if i.id == void_queue_id)
+    assert item.status is UploadStatus.PENDING
+    assert item.last_error is not None and "相斥" in item.last_error

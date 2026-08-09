@@ -151,6 +151,10 @@ async def send_queue_item(
     except AmegoNotConfigured as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except EInvoiceDropError as exc:
+        # 本地驗證失敗、不可安全重送（payload 遺失/損壞/不相容）：明確回 409 而非 500；
+        # 佇列維持 PENDING 且 last_error 已落庫，供人工對帳。
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except EInvoiceQueueItemNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
