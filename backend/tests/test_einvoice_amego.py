@@ -9,7 +9,7 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -260,12 +260,18 @@ def test_parse_query_three_states() -> None:
             "invoice_time": "12:34:56",
             "random_number": "5975",
             "total_amount": 1050,
+            "create_date": _epoch_now(),
         },
     }
-    result = parse_query_issued(found, expect_total=Decimal("1050"))
+    result = parse_query_issued(found, expect_total=Decimal("1050"), expect_not_before=_recent())
     assert result is not None and result.barcode_text is None  # 查詢不回條碼內容
     assert (
-        parse_query_issued({"code": 71, "msg": "查無資料"}, expect_total=Decimal("1050")) is None
+        parse_query_issued(
+            {"code": 71, "msg": "查無資料"},
+            expect_total=Decimal("1050"),
+            expect_not_before=_recent(),
+        )
+        is None
     )  # 官方查無碼
     ambiguous_responses: tuple[dict[str, object], ...] = (
         {"msg": "??"},
@@ -279,7 +285,7 @@ def test_parse_query_three_states() -> None:
     )
     for ambiguous in ambiguous_responses:
         with pytest.raises(AmegoTransportError):
-            parse_query_issued(ambiguous, expect_total=Decimal("1050"))
+            parse_query_issued(ambiguous, expect_total=Decimal("1050"), expect_not_before=_recent())
 
 
 class _RecordingTransport:
@@ -334,6 +340,15 @@ async def test_client_requires_credentials() -> None:
         )
 
 
+def _recent() -> datetime:
+    """本訊息誕生時點（測試中視為剛剛）。"""
+    return datetime.now(tz=UTC) - timedelta(seconds=5)
+
+
+def _epoch_now() -> int:
+    return int(datetime.now(tz=UTC).timestamp())
+
+
 def test_parse_query_issued_verifies_amount_identity() -> None:
     """對帳查到的紀錄必須**確實是本筆**：金額不符即拒（不得補記成功）。
 
@@ -348,24 +363,32 @@ def test_parse_query_issued_verifies_amount_identity() -> None:
             "random_number": "5975",
             "total_amount": 1500,
             "order_id": "S1-9001",
+            "create_date": _epoch_now(),
         },
     }
     full: dict[str, object] = {"code": 0, "msg": "", **resp}
-    ours = parse_query_issued(full, expect_total=Decimal("1500"))
+    ours = parse_query_issued(full, expect_total=Decimal("1500"), expect_not_before=_recent())
     assert ours is not None and ours.invoice_no == "AB00001111"
 
     # 別人的（或還原前的）紀錄：金額對不上 → 結果不可信，維持待對帳
     with pytest.raises(AmegoTransportError):
-        parse_query_issued(full, expect_total=Decimal("270"))
+        parse_query_issued(full, expect_total=Decimal("270"), expect_not_before=_recent())
 
     # 平台沒回金額 → 無從驗證身分，同樣不可判定成功
     data_no_amount = {k: v for k, v in resp["data"].items() if k != "total_amount"}
     no_amount: dict[str, object] = {"code": 0, "msg": "", "data": data_no_amount}
     with pytest.raises(AmegoTransportError):
-        parse_query_issued(no_amount, expect_total=Decimal("1500"))
+        parse_query_issued(no_amount, expect_total=Decimal("1500"), expect_not_before=_recent())
 
     # 查無仍是查無（可重送），與金額驗證無關
-    assert parse_query_issued({"code": 71, "msg": "查無資料"}, expect_total=Decimal("1500")) is None
+    assert (
+        parse_query_issued(
+            {"code": 71, "msg": "查無資料"},
+            expect_total=Decimal("1500"),
+            expect_not_before=_recent(),
+        )
+        is None
+    )
 
 
 def test_parse_query_invoice_voided_verifies_amount_identity() -> None:
@@ -389,6 +412,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             "invoice_type": "D0401",
             "total_amount": 476,  # 平台的折讓 total_amount 是未稅
             "tax_amount": 24,
+            "create_date": _epoch_now(),
             "product_item": [{"original_invoice_number": "ZA10029234"}],
         },
     }
@@ -398,6 +422,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             expect_original_invoice_no="ZA10029234",
             expect_net=Decimal("476"),
             expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
         )
         is True
     )
@@ -408,6 +433,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             expect_original_invoice_no="ZA10018786",
             expect_net=Decimal("476"),
             expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
         )
     # 金額不符
     with pytest.raises(AmegoTransportError):
@@ -416,6 +442,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             expect_original_invoice_no="ZA10029234",
             expect_net=Decimal("190"),
             expect_tax=Decimal("10"),
+            expect_not_before=_recent(),
         )
     # 明確查無仍可重送
     assert (
@@ -424,6 +451,7 @@ def test_parse_query_allowance_exists_verifies_identity() -> None:
             expect_original_invoice_no="ZA10029234",
             expect_net=Decimal("476"),
             expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
         )
         is False
     )

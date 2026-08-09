@@ -583,101 +583,115 @@ class EInvoiceService:
             )
         payload = json.loads(frozen)
 
-        # **一律對帳先行**（Codex 第三/七輪）：本地「是否已認領」快照可能過期——同列的另一
-        # 呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過這則
-        # 訊息。每次上送前先查平台實態：已套用 → 補記成功、絕不重送；**明確未套用**才送
-        # （曖昧查詢回應由解析層拋 AmegoTransportError 擋下）。多一次查詢換確定性（單店）。
-        if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
-            order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
-            query_resp = await client.call(
-                "/json/invoice_query", build_invoice_query_data(order_id=order_id)
-            )
-            recovered = parse_query_issued(query_resp, expect_total=_payload_total(payload))
-            if recovered is not None:
-                return await self._record_amego_outcome(
-                    store_id,
-                    queue_id,
-                    success=True,
-                    status_code="0",
-                    message="以 invoice_query 對帳補開立（前次結果未知）",
-                    delivery_attempt=claim_attempts,
-                    issue_result=recovered,
-                )
-            # 平台**明確查無**且發票已進作廢流程（空窗作廢）→ **取消開立**（Codex 第八
-            # 輪）：作廢交易不得再產生真實稅務發票、靠事後 F0501 收拾——F0401 從未生效，
-            # 佇列 CANCELLED、發票收斂 VOID、銷售同 F0401 失敗轉移（退貨觸發→NOT_ISSUED、
-            # sale-void→no-op）。
-            issue_target = await self._repo.get_invoice(store_id, locked.invoice_id or 0)
-            if issue_target is not None and issue_target.status in (
-                InvoiceStatus.VOID_PENDING,
-                InvoiceStatus.VOID,
-            ):
-                locked.status = UploadStatus.CANCELLED
-                locked.last_error = "平台查無且發票已作廢——取消開立（不重送 F0401）"
-                if issue_target.status is InvoiceStatus.VOID_PENDING:
-                    issue_target.status = InvoiceStatus.VOID
-                    from app.modules.sales.service import SalesService
-
-                    await SalesService(self._session).mark_invoice_not_issued(
-                        store_id, issue_target.sale_id
-                    )
-                await self._session.commit()
-                await self._session.refresh(locked)
-                return locked
-        elif locked.action is EInvoiceAction.VOID and locked.invoice_id is not None:
-            void_target = await self._repo.get_invoice(store_id, locked.invoice_id)
-            if void_target is not None and void_target.invoice_no:
+        # 對帳先行若因**無法確認身分**而中止（金額/原發票不符、回應曖昧），把原因寫進
+        # last_error：狀態維持 PENDING（不誤記成功、不盲目重送），但佇列上看得到卡住原因，
+        # 供人工對帳判讀——否則只回 502、列上一片空白，等於靜默卡死。
+        try:
+            # **一律對帳先行**（Codex 第三/七輪）：本地「是否已認領」快照可能過期——同列的另一
+            # 呼叫可先插隊送出且結果未知（PENDING 依舊）；認領一旦 commit，平台就可能收過這則
+            # 訊息。每次上送前先查平台實態：已套用 → 補記成功、絕不重送；**明確未套用**才送
+            # （曖昧查詢回應由解析層拋 AmegoTransportError 擋下）。多一次查詢換確定性（單店）。
+            if locked.action is EInvoiceAction.ISSUE and sale_id is not None:
+                order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
                 query_resp = await client.call(
-                    "/json/invoice_query",
-                    build_invoice_query_by_number_data(invoice_number=void_target.invoice_no),
+                    "/json/invoice_query", build_invoice_query_data(order_id=order_id)
                 )
-                if parse_query_invoice_voided(query_resp, expect_total=void_target.total):
+                recovered = parse_query_issued(
+                    query_resp,
+                    expect_total=_payload_total(payload),
+                    expect_not_before=locked.created_at,
+                )
+                if recovered is not None:
                     return await self._record_amego_outcome(
                         store_id,
                         queue_id,
                         success=True,
                         status_code="0",
-                        message="以 invoice_query 對帳確認平台已作廢（前次結果未知）",
+                        message="以 invoice_query 對帳補開立（前次結果未知）",
+                        delivery_attempt=claim_attempts,
+                        issue_result=recovered,
+                    )
+                # 平台**明確查無**且發票已進作廢流程（空窗作廢）→ **取消開立**（Codex 第八
+                # 輪）：作廢交易不得再產生真實稅務發票、靠事後 F0501 收拾——F0401 從未生效，
+                # 佇列 CANCELLED、發票收斂 VOID、銷售同 F0401 失敗轉移（退貨觸發→NOT_ISSUED、
+                # sale-void→no-op）。
+                issue_target = await self._repo.get_invoice(store_id, locked.invoice_id or 0)
+                if issue_target is not None and issue_target.status in (
+                    InvoiceStatus.VOID_PENDING,
+                    InvoiceStatus.VOID,
+                ):
+                    locked.status = UploadStatus.CANCELLED
+                    locked.last_error = "平台查無且發票已作廢——取消開立（不重送 F0401）"
+                    if issue_target.status is InvoiceStatus.VOID_PENDING:
+                        issue_target.status = InvoiceStatus.VOID
+                        from app.modules.sales.service import SalesService
+
+                        await SalesService(self._session).mark_invoice_not_issued(
+                            store_id, issue_target.sale_id
+                        )
+                    await self._session.commit()
+                    await self._session.refresh(locked)
+                    return locked
+            elif locked.action is EInvoiceAction.VOID and locked.invoice_id is not None:
+                void_target = await self._repo.get_invoice(store_id, locked.invoice_id)
+                if void_target is not None and void_target.invoice_no:
+                    query_resp = await client.call(
+                        "/json/invoice_query",
+                        build_invoice_query_by_number_data(invoice_number=void_target.invoice_no),
+                    )
+                    if parse_query_invoice_voided(query_resp, expect_total=void_target.total):
+                        return await self._record_amego_outcome(
+                            store_id,
+                            queue_id,
+                            success=True,
+                            status_code="0",
+                            message="以 invoice_query 對帳確認平台已作廢（前次結果未知）",
+                            delivery_attempt=claim_attempts,
+                            issue_result=None,
+                        )
+            elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
+                query_resp = await client.call(
+                    "/json/allowance_query",
+                    build_allowance_query_data(
+                        number=allowance_number(
+                            store_id=store_id, allowance_id=locked.allowance_id
+                        )
+                    ),
+                )
+                sent_net, sent_tax, sent_original_no = _payload_allowance_identity(payload)
+                if parse_query_allowance_exists(
+                    query_resp,
+                    expect_original_invoice_no=sent_original_no,
+                    expect_net=sent_net,
+                    expect_tax=sent_tax,
+                    expect_not_before=locked.created_at,
+                ):
+                    return await self._record_amego_outcome(
+                        store_id,
+                        queue_id,
+                        success=True,
+                        status_code="0",
+                        message="以 allowance_query 對帳確認平台已有折讓（前次結果未知）",
                         delivery_attempt=claim_attempts,
                         issue_result=None,
                     )
-        elif locked.action is EInvoiceAction.ALLOWANCE and locked.allowance_id is not None:
-            query_resp = await client.call(
-                "/json/allowance_query",
-                build_allowance_query_data(
-                    number=allowance_number(
-                        store_id=store_id, allowance_id=locked.allowance_id
-                    )
-                ),
-            )
-            sent_net, sent_tax, sent_original_no = _payload_allowance_identity(payload)
-            if parse_query_allowance_exists(
-                query_resp,
-                expect_original_invoice_no=sent_original_no,
-                expect_net=sent_net,
-                expect_tax=sent_tax,
-            ):
-                return await self._record_amego_outcome(
-                    store_id,
-                    queue_id,
-                    success=True,
-                    status_code="0",
-                    message="以 allowance_query 對帳確認平台已有折讓（前次結果未知）",
-                    delivery_attempt=claim_attempts,
-                    issue_result=None,
-                )
 
-        resp = await client.call(endpoint, payload)  # AmegoTransportError → 維持已認領 PENDING
-        code = resp.get("code")
-        # 曖昧回應不可當「平台拒絕」記 FAILED（Codex 第一/二輪）：平台可能已開立，誤標
-        # FAILED 後 retry 會清認領、重送撞重複 OrderId。缺 code／非整數／**bool**（Python
-        # bool 是 int 子類，JSON true/false 不得矇混）→ 結果未知，維持已認領待對帳。
-        if type(code) is not int:
-            raise AmegoTransportError("Amego 回應缺 code 或型別不明（結果不可信，待對帳）")
-        success = code == 0
-        issue_result: AmegoIssueResult | None = None
-        if success and locked.action is EInvoiceAction.ISSUE:
-            issue_result = parse_f0401_success(resp)  # 欄位不合法 → 不可信，維持已認領
+            resp = await client.call(endpoint, payload)  # 傳輸中斷 → 維持已認領 PENDING
+            code = resp.get("code")
+            # 曖昧回應不可當「平台拒絕」記 FAILED（Codex 第一/二輪）：平台可能已開立，誤標
+            # FAILED 後 retry 會清認領、重送撞重複 OrderId。缺 code／非整數／**bool**（Python
+            # bool 是 int 子類，JSON true/false 不得矇混）→ 結果未知，維持已認領待對帳。
+            if type(code) is not int:
+                raise AmegoTransportError("Amego 回應缺 code 或型別不明（結果不可信，待對帳）")
+            success = code == 0
+            issue_result: AmegoIssueResult | None = None
+            if success and locked.action is EInvoiceAction.ISSUE:
+                issue_result = parse_f0401_success(resp)  # 欄位不合法 → 不可信，維持已認領
+        except AmegoTransportError as exc:
+            # 涵蓋**整條結果未知路徑**（對帳查詢／實際 POST／回應解析）：狀態維持 PENDING，
+            # 但把原因寫進 last_error，否則只回 502、佇列上看不到卡住原因（Codex 第二輪）。
+            await self._note_blocked(store_id, queue_id, str(exc))
+            raise
         return await self._record_amego_outcome(
             store_id,
             queue_id,
@@ -687,6 +701,16 @@ class EInvoiceService:
             delivery_attempt=claim_attempts,
             issue_result=issue_result,
         )
+
+    async def _note_blocked(self, store_id: int, queue_id: int, reason: str) -> None:
+        """記下「本次為何不能上送」，**不改狀態**（維持 PENDING 待人工對帳）。
+
+        對帳先行擋下時原本只回 502，佇列列上看不到原因；卡住的稅務訊息必須自帶說明。
+        """
+        item = await self._repo.lock_queue_item(store_id, queue_id)
+        if item is not None:
+            item.last_error = reason[:500]
+        await self._session.commit()
 
     async def _record_amego_outcome(
         self,

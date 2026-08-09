@@ -14,7 +14,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -287,6 +287,39 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
     )
 
 
+# 平台與本機時鐘容忍（秒）：Amego 簽章要求客戶端時間誤差在 ±60 秒內，故 120 秒已涵蓋
+# 時鐘誤差與秒級截斷。**不可放寬到數分鐘**——那會把「還原後立刻重新營業」這個最危險的
+# 撞號窗口整個放行。
+_CLOCK_TOLERANCE_SECONDS = 120
+# 建檔時間離譜落在未來 → 回應不可信（非「確認是本筆」的證據）。
+_MAX_FUTURE_SECONDS = 86_400
+
+
+def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx: str) -> None:
+    """平台紀錄的建檔時間不得早於這則稅務訊息誕生的時點，否則**不可能是本筆**。
+
+    撞號的本質是「查到的是還原點之前建立的舊紀錄」，而本佇列列必然是還原之後才建立的。
+    金額相同的歷史交易在固定售價的門市並不罕見，故金額只是碰撞篩選、不是身分證明；
+    這條時間下限才是把同額撞號擋下來的關鍵。
+
+    `not_before` 應取**佇列列的 created_at**（非本次認領的 dropped_at）：同一列的前一次
+    嘗試可能已在更早時間送出，那正是對帳要救的 crash 窗口，用認領時間會誤擋合法復原。
+    """
+    raw = data.get("create_date")
+    if type(raw) is not int:  # bool 是 int 子類，但 JSON true/false 不會是合理秒數
+        raise AmegoTransportError(
+            f"{ctx} 回應缺 create_date 或型別不明（無從確認是否為本筆，待對帳）"
+        )
+    created = datetime.fromtimestamp(raw, tz=UTC)
+    if created < not_before - timedelta(seconds=_CLOCK_TOLERANCE_SECONDS):
+        raise AmegoTransportError(
+            f"{ctx} 查到的紀錄建於 {created.isoformat()}，早於本訊息的 "
+            f"{not_before.isoformat()}——該紀錄是還原前的舊資料（識別碼重號），待人工對帳"
+        )
+    if created > datetime.now(tz=UTC) + timedelta(seconds=_MAX_FUTURE_SECONDS):
+        raise AmegoTransportError(f"{ctx} 回應的 create_date 落在未來（不可信），待對帳")
+
+
 def _platform_amount(data: dict[str, object], field: str, *, ctx: str) -> Decimal:
     """取平台回傳的金額欄（整數元）。缺欄或型別不明 → 無從驗證身分，一律拋。
 
@@ -316,7 +349,7 @@ def _assert_same_record(actual: Decimal, expected: Decimal, *, ctx: str, label: 
 
 
 def parse_query_issued(
-    resp: dict[str, object], *, expect_total: Decimal
+    resp: dict[str, object], *, expect_total: Decimal, expect_not_before: datetime
 ) -> AmegoIssueResult | None:
     """invoice_query 回應三態（Codex 第三輪）：
 
@@ -353,6 +386,7 @@ def parse_query_issued(
         ctx="invoice_query",
         label="含稅總額",
     )
+    _assert_created_after(data, expect_not_before, ctx="invoice_query")
     return AmegoIssueResult(
         invoice_no=number,
         invoice_date=issued_date,
@@ -427,6 +461,7 @@ def parse_query_allowance_exists(
     expect_original_invoice_no: str,
     expect_net: Decimal,
     expect_tax: Decimal,
+    expect_not_before: datetime,
 ) -> bool:
     """allowance_query → 平台是否已有此折讓單（G0401 對帳，Codex 第七輪）。
 
@@ -461,6 +496,7 @@ def parse_query_allowance_exists(
             label="稅額",
         )
         _assert_allowance_original_invoice(data, expect_original_invoice_no)
+        _assert_created_after(data, expect_not_before, ctx="allowance_query")
         return True
     raise AmegoTransportError(
         f"allowance_query 回不明 invoice_type「{invoice_type}」（結果不可信，待對帳）"

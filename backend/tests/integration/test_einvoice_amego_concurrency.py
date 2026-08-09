@@ -7,6 +7,7 @@ VOID_PENDING（平台已開 → 續 F0501 作廢）、銷售 VOID。
 """
 
 import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -178,6 +179,7 @@ class _QueryFoundTransport:
             "data": {
                 "invoice_number": "AB00001111",
                 "total_amount": 1050,
+                "create_date": int(datetime.now(tz=UTC).timestamp()),
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",

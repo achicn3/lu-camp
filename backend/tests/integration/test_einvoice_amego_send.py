@@ -6,6 +6,7 @@
 invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 """
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import count
 from typing import cast
@@ -93,6 +94,11 @@ def _client(transport: AmegoTransport) -> AmegoClient:
 _QUERY_NOT_FOUND = {"code": 71, "msg": "查無資料"}  # 官方明載的查無碼
 
 
+def _now_epoch() -> int:
+    """平台 create_date（Unix 秒）。測試中的佇列列剛建立，故以現在為準＝確為本筆。"""
+    return int(datetime.now(tz=UTC).timestamp())
+
+
 # 對帳查詢回應**必須帶金額**（真實 Amego 回應如此）：查到的紀錄要能證明是本筆，
 # 否則識別碼跨資料庫還原重號時會把別人的紀錄當成自己的。種子發票總額 1050（未稅 1000／稅 50）。
 _QUERY_INVOICE_OPEN = {
@@ -106,7 +112,7 @@ _QUERY_INVOICE_VOIDED = {
     "data": {"invoice_type": "C0501", "total_amount": 1050},
 }
 _QUERY_ALLOWANCE_NOT_FOUND = {"code": 71, "msg": "查無資料"}
-_QUERY_ALLOWANCE_EXISTS = {
+_QUERY_ALLOWANCE_EXISTS: dict[str, object] = {
     "code": 0,
     "msg": "",
     "data": {
@@ -116,6 +122,18 @@ _QUERY_ALLOWANCE_EXISTS = {
         "product_item": [{"original_invoice_number": "AB00001111"}],
     },
 }
+
+
+def _allowance_data(*, create_date: int) -> dict[str, object]:
+    """平台已有本筆折讓的 data 區塊，建檔時間可指定（用於時間鑑別測試）。"""
+    base = _QUERY_ALLOWANCE_EXISTS["data"]
+    assert isinstance(base, dict)
+    return {**base, "create_date": create_date}
+
+
+def _allowance_exists_now() -> dict[str, object]:
+    """平台已有本筆折讓（建檔時間為現在 → 通過時間鑑別）。"""
+    return {"code": 0, "msg": "", "data": _allowance_data(create_date=_now_epoch())}
 
 
 def test_allowance_number_stays_unique_within_amego_16_char_limit() -> None:
@@ -302,6 +320,7 @@ async def test_transport_error_leaves_claimed_pending_then_query_reconciles(
             "data": {
                 "invoice_number": "AB00001111",
                 "total_amount": 1050,
+                "create_date": _now_epoch(),
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -664,6 +683,7 @@ async def test_ambiguous_response_treated_as_unknown_not_failed(
             "data": {
                 "invoice_number": "AB00001111",
                 "total_amount": 1050,
+                "create_date": _now_epoch(),
                 "invoice_date": "20260711",
                 "invoice_time": "12:34:56",
                 "random_number": "5975",
@@ -852,7 +872,7 @@ async def test_allowance_reconcile_detects_platform_already_issued(
     )
     with pytest.raises(AmegoTransportError):
         await svc.send_via_amego(store_id, allowance_queue_id, client=_client(broken))
-    reconcile = _ScriptedTransport(dict(_QUERY_ALLOWANCE_EXISTS))
+    reconcile = _ScriptedTransport(_allowance_exists_now())
     item = await svc.send_via_amego(store_id, allowance_queue_id, client=_client(reconcile))
     assert item.status is UploadStatus.UPLOADED
     assert len(reconcile.calls) == 1
@@ -1179,4 +1199,86 @@ async def test_reconcile_rejects_collided_record_instead_of_marking_success(
     item = next(i for i in await svc.list_queue(store_id) if i.id == queue_id)
     assert item.status is UploadStatus.PENDING  # 不得記成 UPLOADED
     assert len(collided.calls) == 1  # 只查詢、未送出 F0401（也不得盲目重送）
+    # 卡住的稅務訊息必須自帶原因，否則佇列上一片空白、無從人工判讀
+    assert item.last_error is not None and "不符" in item.last_error
     assert sale_id > 0
+
+
+async def test_reconcile_rejects_same_amount_collision_by_create_time(
+    db_session: AsyncSession,
+) -> None:
+    """**同額**撞號也必須擋下（Codex 對抗審查）：金額只是碰撞篩選、不是身分證明。
+
+    固定售價的門市很容易出現同額交易；還原後 sale_id 倒退重用 order_id 時，
+    平台上那筆歷史紀錄金額可能剛好相同。唯一能分辨的是「它建於本訊息誕生之前」。
+    """
+    store_id, clerk_id, code = await _seed(db_session)
+    await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+
+    stale = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_number": "AB00001111",
+                "invoice_date": "20260711",
+                "invoice_time": "12:34:56",
+                "random_number": "5975",
+                "total_amount": 1050,  # ← 與本地**完全同額**，金額比對擋不住
+                "create_date": int((datetime.now(tz=UTC) - timedelta(days=3)).timestamp()),
+            },
+        }
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, queue_id, client=_client(stale))
+
+    item = next(i for i in await svc.list_queue(store_id) if i.id == queue_id)
+    assert item.status is UploadStatus.PENDING
+    assert item.last_error is not None and "還原前的舊資料" in item.last_error
+    assert len(stale.calls) == 1  # 未送出 F0401
+
+
+async def test_allowance_reconcile_rejects_same_amount_same_invoice_collision(
+    db_session: AsyncSession,
+) -> None:
+    """同一原發票、同額的第二次部分退貨也可能撞號 → 一樣要靠建檔時間擋下。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    lines = await SalesService(db_session).get_lines(sale_id)
+    await ReturnsService(db_session).create_return(
+        store_id,
+        sale_id=sale_id,
+        lines=[ReturnLineInput(sale_line_id=lines[0].id, qty=1)],
+        reason="測試退貨",
+        actor_user_id=clerk_id,
+        idempotency_key="amego-return-same-amount",
+        invoice_recalled=True,
+        consent_signature_task_id=await _consent(
+            db_session, store_id, sale_id, clerk_id, {lines[0].id: 1}
+        ),
+    )
+    allowance_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.ALLOWANCE and i.status is UploadStatus.PENDING
+    )
+    stale = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": _allowance_data(
+                create_date=int((datetime.now(tz=UTC) - timedelta(days=3)).timestamp())
+            ),
+        }
+    )
+    with pytest.raises(AmegoTransportError):
+        await svc.send_via_amego(store_id, allowance_queue_id, client=_client(stale))
+
+    item = next(i for i in await svc.list_queue(store_id) if i.id == allowance_queue_id)
+    assert item.status is UploadStatus.PENDING
+    assert item.last_error is not None and "還原前的舊資料" in item.last_error
