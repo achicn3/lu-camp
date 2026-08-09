@@ -1282,3 +1282,43 @@ async def test_allowance_reconcile_rejects_same_amount_same_invoice_collision(
     item = next(i for i in await svc.list_queue(store_id) if i.id == allowance_queue_id)
     assert item.status is UploadStatus.PENDING
     assert item.last_error is not None and "還原前的舊資料" in item.last_error
+
+
+async def test_void_reconcile_treats_pending_void_as_accepted_not_resend(
+    db_session: AsyncSession,
+) -> None:
+    """F0501 crash 窗口：平台已受理作廢但尚在處理（頂層 C0401＋wait C0501）。
+
+    形狀取自對真 Amego 的實測。舊實作只看頂層 → 回 False → 再送一次 F0501，
+    被平台拒後記 FAILED、發票卡在 VOID_PENDING。正確行為是視為已受理、不重送。
+    """
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    sales = SalesService(db_session)
+    sale = await sales.get_sale(store_id, sale_id)
+    assert sale is not None
+    await sales.void_sale(sale, clerk_id)
+    void_queue_id = next(
+        i.id
+        for i in await svc.list_queue(store_id)
+        if i.action is EInvoiceAction.VOID and i.status is UploadStatus.PENDING
+    )
+    pending_void = _ScriptedTransport(
+        {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_type": "C0401",  # 頂層仍是開立
+                "invoice_status": 1,
+                "cancel_date": 0,
+                "total_amount": 1050,
+                "wait": [{"invoice_type": "C0501", "create_date": _now_epoch()}],
+            },
+        }
+    )
+    item = await svc.send_via_amego(store_id, void_queue_id, client=_client(pending_void))
+    assert item.status is UploadStatus.UPLOADED  # 視為已受理
+    assert len(pending_void.calls) == 1  # 只查詢，**未重送 F0501**

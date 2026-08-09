@@ -495,3 +495,102 @@ def test_frozen_payload_identity_extractors_fail_closed() -> None:
     for bad_allowance in bad_allowances:
         with pytest.raises(EInvoiceDropError):
             _payload_allowance_identity(bad_allowance)
+
+
+def test_parse_query_invoice_voided_accepts_pending_void_in_wait() -> None:
+    """平台受理但尚在處理的作廢：頂層仍 C0401、待作廢掛在 `wait[]`。
+
+    形狀取自對真 Amego 測試環境的實測（送出 f0501 後立即查詢）：
+    `invoice_type=C0401, invoice_status=1, wait=[{"invoice_type":"C0501", ...}]`。
+    只看頂層會回 False → 對已受理的作廢再送一次 F0501，被拒後記 FAILED、
+    發票卡在 VOID_PENDING。
+    """
+    pending = {
+        "code": 0,
+        "msg": "",
+        "data": {
+            "invoice_type": "C0401",
+            "invoice_status": 1,
+            "cancel_date": 0,
+            "total_amount": 1050,
+            "wait": [{"invoice_type": "C0501", "create_date": _epoch_now()}],
+        },
+    }
+    assert parse_query_invoice_voided(pending, expect_total=Decimal("1050")) is True
+    # wait[] 內若不是作廢（例如空的），仍照頂層判斷為「仍開立、可送 F0501」
+    still_open = {
+        "code": 0,
+        "msg": "",
+        "data": {"invoice_type": "C0401", "total_amount": 1050, "wait": []},
+    }
+    assert parse_query_invoice_voided(still_open, expect_total=Decimal("1050")) is False
+
+
+def test_allowance_original_invoice_check_fails_closed_on_unknown_items() -> None:
+    """product_item 含非物件/缺字軌時不得被靜默略過（否則撞號折讓會被誤記成功）。"""
+    def _resp(items: object) -> dict[str, object]:
+        return {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_type": "D0401",
+                "total_amount": 476,
+                "tax_amount": 24,
+                "create_date": _epoch_now(),
+                "product_item": items,
+            },
+        }
+
+    ok = _resp([{"original_invoice_number": "ZA10029234"}])
+    assert (
+        parse_query_allowance_exists(
+            ok,
+            expect_original_invoice_no="ZA10029234",
+            expect_net=Decimal("476"),
+            expect_tax=Decimal("24"),
+            expect_not_before=_recent(),
+        )
+        is True
+    )
+    for bad in (
+        [{"original_invoice_number": "ZA10029234"}, None],  # 混入 null → 不得放行
+        [{"original_invoice_number": "ZA10029234"}, {}],  # 缺字軌
+        [{"original_invoice_number": "bad"}],  # 字軌格式不合法
+    ):
+        with pytest.raises(AmegoTransportError):
+            parse_query_allowance_exists(
+                _resp(bad),
+                expect_original_invoice_no="ZA10029234",
+                expect_net=Decimal("476"),
+                expect_tax=Decimal("24"),
+                expect_not_before=_recent(),
+            )
+
+
+def test_create_date_bounds_never_escape_as_non_amego_error() -> None:
+    """超大 epoch 不得逃逸成 OverflowError（會變 500 且 last_error 空白）。"""
+    def _resp(create_date: object) -> dict[str, object]:
+        return {
+            "code": 0,
+            "msg": "",
+            "data": {
+                "invoice_number": "AB00001111",
+                "invoice_date": "20260711",
+                "invoice_time": "12:34:56",
+                "random_number": "5975",
+                "total_amount": 1050,
+                "create_date": create_date,
+            },
+        }
+
+    now = datetime.now(tz=UTC)
+    for bad in (10**20, -(10**20), int((now + timedelta(days=1)).timestamp())):
+        with pytest.raises(AmegoTransportError):
+            parse_query_issued(_resp(bad), expect_total=Decimal("1050"), expect_not_before=now)
+    # 容忍值內（早 60 秒）仍應通過
+    ok = parse_query_issued(
+        _resp(int((now - timedelta(seconds=60)).timestamp())),
+        expect_total=Decimal("1050"),
+        expect_not_before=now,
+    )
+    assert ok is not None

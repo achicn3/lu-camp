@@ -14,7 +14,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -291,8 +291,6 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
 # 時鐘誤差與秒級截斷。**不可放寬到數分鐘**——那會把「還原後立刻重新營業」這個最危險的
 # 撞號窗口整個放行。
 _CLOCK_TOLERANCE_SECONDS = 120
-# 建檔時間離譜落在未來 → 回應不可信（非「確認是本筆」的證據）。
-_MAX_FUTURE_SECONDS = 86_400
 
 
 def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx: str) -> None:
@@ -310,14 +308,19 @@ def _assert_created_after(data: dict[str, object], not_before: datetime, *, ctx:
         raise AmegoTransportError(
             f"{ctx} 回應缺 create_date 或型別不明（無從確認是否為本筆，待對帳）"
         )
-    created = datetime.fromtimestamp(raw, tz=UTC)
-    if created < not_before - timedelta(seconds=_CLOCK_TOLERANCE_SECONDS):
+    # **先在整數 epoch 域比較**：datetime.fromtimestamp() 對超大整數會拋 OverflowError/OSError，
+    # 那不是 AmegoTransportError，會讓請求變成 500 且 last_error 一片空白（Codex 第二輪）。
+    lower = int(not_before.timestamp()) - _CLOCK_TOLERANCE_SECONDS
+    upper = int(datetime.now(tz=UTC).timestamp()) + _CLOCK_TOLERANCE_SECONDS
+    if raw < lower:
         raise AmegoTransportError(
-            f"{ctx} 查到的紀錄建於 {created.isoformat()}，早於本訊息的 "
-            f"{not_before.isoformat()}——該紀錄是還原前的舊資料（識別碼重號），待人工對帳"
+            f"{ctx} 查到的紀錄建檔時間 {raw} 早於本訊息的 {int(not_before.timestamp())}"
+            "——該紀錄是還原前的舊資料（識別碼重號），待人工對帳"
         )
-    if created > datetime.now(tz=UTC) + timedelta(seconds=_MAX_FUTURE_SECONDS):
-        raise AmegoTransportError(f"{ctx} 回應的 create_date 落在未來（不可信），待對帳")
+    if raw > upper:
+        raise AmegoTransportError(
+            f"{ctx} 回應的 create_date {raw} 超前本機時鐘逾容忍值（回應不可信），待對帳"
+        )
 
 
 def _platform_amount(data: dict[str, object], field: str, *, ctx: str) -> Decimal:
@@ -405,6 +408,20 @@ _INVOICE_TYPE_VOIDED = frozenset({"C0501", "A0501"})
 _ALLOWANCE_TYPE_ISSUED = frozenset({"D0401", "B0401"})
 
 
+def _has_pending_void(data: dict[str, object]) -> bool:
+    """平台是否已受理本張發票的作廢、僅尚未收斂（`wait[]` 內含 C0501/A0501）。
+
+    受理即等同本系統的「已上送」語意——直接 f0501 回 code=0 時同樣只代表受理。
+    """
+    waiting = data.get("wait")
+    if not isinstance(waiting, list):
+        return False
+    return any(
+        isinstance(w, dict) and str(w.get("invoice_type") or "") in _INVOICE_TYPE_VOIDED
+        for w in waiting
+    )
+
+
 def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal) -> bool:
     """invoice_query（以字軌查）→ 平台是否已作廢此發票（F0501 對帳，Codex 第七輪）。
 
@@ -421,6 +438,12 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
         )
     data = resp.get("data")
     invoice_type = str(data.get("invoice_type") or "") if isinstance(data, dict) else ""
+    # **平台受理但尚在處理的作廢，頂層仍是 C0401**，待作廢掛在 `wait[]`（對真 Amego 實測：
+    # 送出 f0501 後 invoice_type=C0401、status=1、wait=[{"invoice_type":"C0501",...}]）。
+    # 只看頂層會回 False → 對平台已受理的作廢再送一次 F0501，被拒後記 FAILED、發票卡在
+    # VOID_PENDING，正是 crash 窗口最需要救的情境（Codex 第二輪）。
+    if isinstance(data, dict) and _has_pending_void(data):
+        return True
     if invoice_type in _INVOICE_TYPE_VOIDED or invoice_type in _INVOICE_TYPE_ISSUED:
         # 兩個分支都會決定後續動作，故先確認查到的確實是本筆
         _ctx = "invoice_query（作廢確認）"
@@ -445,14 +468,24 @@ def _assert_allowance_original_invoice(data: dict[str, object], expected: str) -
     items = data.get("product_item")
     if not isinstance(items, list) or not items:
         raise AmegoTransportError("allowance_query 缺 product_item（無從確認原發票，待對帳）")
-    found = {
-        str(item.get("original_invoice_number") or "") for item in items if isinstance(item, dict)
-    }
-    if found != {expected}:
-        raise AmegoTransportError(
-            f"allowance_query 查到的原發票 {sorted(found)} 與本地 {expected} 不符"
-            "——該折讓可能不是本筆（單號重號），待人工對帳"
-        )
+    # **每個元素都要能驗**：以推導式配 isinstance 過濾會把 null／非 dict 靜默丟掉，
+    # 於是 [{正確}, null] 仍得到 {expected} 而放行——遇平台回應損壞或 schema 漂移時，
+    # 未知品項等於被無視（Codex 第二輪）。改為逐一要求合法字軌，任何未知元素一律拋。
+    for item in items:
+        if not isinstance(item, dict):
+            raise AmegoTransportError(
+                "allowance_query 的 product_item 含非物件元素（回應不可信），待對帳"
+            )
+        number = str(item.get("original_invoice_number") or "")
+        if not _INVOICE_NO_RE.match(number):
+            raise AmegoTransportError(
+                "allowance_query 的 product_item 缺合法原發票字軌（回應不可信），待對帳"
+            )
+        if number != expected:
+            raise AmegoTransportError(
+                f"allowance_query 查到的原發票 {number} 與本地 {expected} 不符"
+                "——該折讓可能不是本筆（單號重號），待人工對帳"
+            )
 
 
 def parse_query_allowance_exists(
