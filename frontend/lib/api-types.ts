@@ -5420,8 +5420,11 @@ export interface components {
             invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
             /** Lines */
             lines: components["schemas"]["SaleLineCreateRequest"][];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Signature Task Id */
             signature_task_id?: number | null;
+            /** Table No */
+            table_no?: string | null;
             /** Tenders */
             tenders?: components["schemas"]["SaleTenderRequest"][] | null;
         };
@@ -5646,11 +5649,14 @@ export interface components {
              */
             lines: components["schemas"]["SaleLineRead"][];
             payment_method: components["schemas"]["PaymentMethod"];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
             status: components["schemas"]["SaleStatus"];
             /** Store Id */
             store_id: number;
             /** Subtotal */
             subtotal: string;
+            /** Table No */
+            table_no?: string | null;
             /** Tax */
             tax: string;
             /**
@@ -5700,6 +5706,7 @@ export interface components {
             id: number;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
             payment_method: components["schemas"]["PaymentMethod"];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Signature Task Id */
             signature_task_id: number | null;
             status: components["schemas"]["SaleStatus"];
@@ -5707,6 +5714,8 @@ export interface components {
             store_id: number;
             /** Subtotal */
             subtotal: string;
+            /** Table No */
+            table_no?: string | null;
             /** Tax */
             tax: string;
             /** Total */
@@ -5910,6 +5919,16 @@ export interface components {
          */
         SerializedItemStatus: "IN_STOCK" | "SOLD" | "RETURNED_TO_CONSIGNOR" | "WRITTEN_OFF";
         /**
+         * ServiceMode
+         * @description 餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。
+         *
+         *     只有含餐飲（`SaleLineType.MENU`）明細的銷售才有值；純二手/一般商品的銷售為 NULL。
+         *     **與折扣/點數/購物金無關**——餐飲的那三條限制綁的是 `line_type == MENU`，
+         *     外帶餐飲同樣不累點、不套活動、不可用購物金折抵。
+         * @enum {string}
+         */
+        ServiceMode: "DINE_IN" | "TAKEOUT";
+        /**
          * SettingsRead
          * @description 單店設定輸出。
          */
@@ -5928,6 +5947,8 @@ export interface components {
             default_commission_pct: number;
             /** Default Margin Pct */
             default_margin_pct: number;
+            /** Dine In Tables */
+            dine_in_tables: string[];
             /** Einvoice Enabled */
             einvoice_enabled: boolean;
             /** Linepay Enabled */
@@ -5942,6 +5963,8 @@ export interface components {
             premium_rate_max: string;
             /** Premium Rate Min */
             premium_rate_min: string;
+            /** Print Kitchen Ticket */
+            print_kitchen_ticket: boolean;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit: boolean;
             /** Signature Cleanup Enforcement Mode */
@@ -5983,6 +6006,8 @@ export interface components {
             default_commission_pct?: number | null;
             /** Default Margin Pct */
             default_margin_pct?: number | null;
+            /** Dine In Tables */
+            dine_in_tables?: string[] | null;
             /** Einvoice Enabled */
             einvoice_enabled?: boolean | null;
             /** Linepay Enabled */
@@ -5999,6 +6024,8 @@ export interface components {
             premium_rate_max?: number | string | null;
             /** Premium Rate Min */
             premium_rate_min?: number | string | null;
+            /** Print Kitchen Ticket */
+            print_kitchen_ticket?: boolean | null;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit?: boolean | null;
             /** Signature Cleanup Enforcement Mode */

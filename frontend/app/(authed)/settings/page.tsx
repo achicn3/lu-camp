@@ -6,6 +6,11 @@ import "./settings.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
+import {
+  addTable,
+  removeTable,
+  sameTables,
+} from "@/features/settings/dineInTables";
 import { clampRate, formatPct, parsePctInput, parseRateInput } from "@/features/settings/helpers";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -323,6 +328,138 @@ function MobilePaymentCard({
         儲存行動支付設定
       </button>
     </form>
+  );
+}
+
+function DineInCard({
+  settings,
+  onSaved,
+}: {
+  settings: SettingsRead;
+  onSaved: () => void;
+}) {
+  // 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）＋出餐單開關。
+  // 清單空＝尚未維護，此時 POS 不讓選內用（fail closed，不讓店員自由打字繞過）。
+  const [tables, setTables] = useState<string[]>(settings.dine_in_tables);
+  const [draft, setDraft] = useState("");
+  const [printTicket, setPrintTicket] = useState(settings.print_kitchen_ticket);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: async (body: components["schemas"]["SettingsUpdateRequest"]) => {
+      const { data, error: apiError } = await api.PATCH("/api/v1/settings", { body });
+      if (!data) throw new Error(extractDetail(apiError) ?? "儲存失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setSuccess(true);
+      setError(null);
+      onSaved();
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+      setSuccess(false);
+    },
+  });
+
+  function handleAdd() {
+    setSuccess(false);
+    const result = addTable(tables, draft);
+    setError(result.error);
+    if (result.error === null) {
+      setTables(result.tables);
+      setDraft("");
+    }
+  }
+
+  function handleSave() {
+    setError(null);
+    setSuccess(false);
+    const body: components["schemas"]["SettingsUpdateRequest"] = {};
+    if (!sameTables(tables, settings.dine_in_tables)) body.dine_in_tables = tables;
+    if (printTicket !== settings.print_kitchen_ticket) body.print_kitchen_ticket = printTicket;
+    if (Object.keys(body).length === 0) {
+      setSuccess(true);
+      return;
+    }
+    mutation.mutate(body);
+  }
+
+  return (
+    <div className="card dinein-card">
+      <h2>餐飲內用設定</h2>
+      <div className="field">
+        <span className="field-label">桌號清單</span>
+        {tables.length === 0 ? (
+          <p className="hint">尚未設定桌號——在設定之前，POS 無法選擇「內用」。</p>
+        ) : (
+          <ul className="dinein-table-list">
+            {tables.map((table) => (
+              <li key={table}>
+                <span>{table}</span>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  aria-label={`移除桌號 ${table}`}
+                  onClick={() => {
+                    setSuccess(false);
+                    setTables(removeTable(tables, table));
+                  }}
+                >
+                  移除
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="dinein-table-add">
+          <input
+            aria-label="新增桌號"
+            value={draft}
+            placeholder="例如 A1"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleAdd();
+              }
+            }}
+          />
+          <button type="button" className="btn-ghost" onClick={handleAdd}>
+            新增桌號
+          </button>
+        </div>
+        <span className="hint">
+          清單順序即 POS 的按鈕順序。移除桌號不影響已結帳的歷史交易（存的是當時的字串）。
+        </span>
+      </div>
+      <label className="field field-toggle">
+        <input
+          type="checkbox"
+          checked={printTicket}
+          onChange={(e) => {
+            setSuccess(false);
+            setPrintTicket(e.target.checked);
+          }}
+        />
+        <span className="field-label">結帳後自動列印出餐單（桌號＋餐飲品項）</span>
+      </label>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      {success && <p className="form-success">餐飲內用設定已儲存</p>}
+      <button
+        type="button"
+        className="btn-primary"
+        disabled={mutation.isPending}
+        onClick={handleSave}
+      >
+        儲存餐飲內用設定
+      </button>
+    </div>
   );
 }
 
@@ -881,6 +1018,7 @@ export default function SettingsPage() {
       <div className="card-stack">
         <GeneralSettingsCard settings={settings} onSaved={refreshSettings} />
         <MobilePaymentCard settings={settings} onSaved={refreshSettings} />
+        <DineInCard settings={settings} onSaved={refreshSettings} />
         <PremiumRateCard
           settings={settings}
           suggestion={suggestionQuery.data ?? null}

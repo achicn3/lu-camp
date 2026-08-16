@@ -38,6 +38,12 @@ import {
   toAdjustmentRequests,
 } from "@/features/pos/discounts";
 import {
+  type DineInSelection,
+  clearDineIn,
+  dineInRequestFields,
+  validateDineIn,
+} from "@/features/pos/dineIn";
+import {
   type MixedRemainderMethod,
   type TenderMode,
   changeDue,
@@ -45,7 +51,12 @@ import {
   toTenders,
   validatePlan,
 } from "@/features/pos/tender";
-import { openCashDrawer, printEInvoice, printSaleDetail } from "@/lib/agent";
+import {
+  openCashDrawer,
+  printEInvoice,
+  printKitchenTicket,
+  printSaleDetail,
+} from "@/lib/agent";
 import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
@@ -1110,12 +1121,18 @@ export default function PosPage() {
     useState<MixedRemainderMethod>("CASH");
   const [taiwanPayConfirmed, setTaiwanPayConfirmed] = useState(false);
   const [receivedInput, setReceivedInput] = useState("");
+  // 餐飲內用/外帶與桌號（docs/35）：不預設任一邊——預設哪邊都會被慣性按過去，
+  // 而桌號錯的代價是東西送錯桌。
+  const [dineIn, setDineIn] = useState<DineInSelection>(clearDineIn());
   // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
   const [linePayKey, setLinePayKey] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [completed, setCompleted] = useState<SaleRead | null>(null);
   // 開錢櫃失敗提示（docs/10 §5：交易已成立，代理離線只提示、不可擋流程）。
   const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
+  // 出餐單（docs/35）：完成單的內用/外帶快照（供重印）＋列印失敗提示。
+  const [completedDineIn, setCompletedDineIn] = useState<DineInSelection | null>(null);
+  const [kitchenNotice, setKitchenNotice] = useState<string | null>(null);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -1240,6 +1257,8 @@ export default function PosPage() {
     },
   });
   const einvoiceEnabled = settings.data?.einvoice_enabled ?? false;
+  // 出餐單開關（docs/35）：設定讀不到時視為關閉——寧可不印也不要在店家沒開這功能時噴紙。
+  const printKitchenEnabled = settings.data?.print_kitchen_ticket ?? false;
 
   // 電子發票（docs/24）：統編（=B2B）/手機載具/捐贈碼三擇一；結帳成功後自動開立，
   // 無載具且未捐贈 → 以 Amego 回傳條碼/QR 內容送 EPSON 印證明聯。
@@ -1269,6 +1288,23 @@ export default function PosPage() {
 
   // 證明聯列印（獨立 mutation，Codex 第十六輪）：發票已開立但列印失敗（代理離線/缺紙/
   // 抬頭未載入）時，完成畫面提供「重印證明聯」重試——不可只留一行提示無路可退。
+  // 出餐單重印（docs/35）：代理離線/缺紙時第一次會失敗，而交易已成立不會進 error 態
+  // ——吧台沒拿到單就不會做東西，必須有在地重試入口。
+  const reprintKitchen = useMutation({
+    mutationFn: async ({
+      sale,
+      selection,
+    }: {
+      sale: SaleRead;
+      selection: DineInSelection;
+    }) => {
+      if (selection.mode === null) throw new Error("本單沒有內用/外帶資訊，無法列印出餐單");
+      await printKitchenTicket(sale, selection.mode, selection.tableNo);
+    },
+    onSuccess: () => setKitchenNotice(null),
+    onError: (err: Error) => setKitchenNotice(err.message),
+  });
+
   const printProof = useMutation({
     mutationFn: async ({ invoice, sale }: { invoice: InvoiceRead; sale: SaleRead }) => {
       // 抬頭：優先用查詢快取；未就緒/曾失敗 → 即時補抓一次，不因慢載入放棄列印。
@@ -1433,6 +1469,11 @@ export default function PosPage() {
     linePayKey,
     taiwanPayConfirmed,
   });
+
+  // 餐飲內用/外帶與桌號（docs/35）：只在購物車有餐飲行時登場，與金額完全無關。
+  const hasMenuLine = lines.some((line) => line.lineType === "MENU");
+  const dineInTables = settings.data?.dine_in_tables ?? [];
+  const dineInValidation = validateDineIn(hasMenuLine, dineIn, dineInTables);
 
   // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
   // 改了購物車/收款即失配 → 顯示警告並要求作廢重推（後端結帳時亦精確比對，雙重防線）。
@@ -1671,7 +1712,11 @@ export default function PosPage() {
   });
 
   const checkout = useMutation({
-    mutationFn: async (): Promise<{ sale: SaleRead; sig: CompletedSignature | null }> => {
+    mutationFn: async (): Promise<{
+      sale: SaleRead;
+      sig: CompletedSignature | null;
+      dineIn: DineInSelection | null;
+    }> => {
       // 結帳當下重讀 settings（Codex 第二十一輪）：他端可能剛改 einvoice_enabled，
       // 畫面上的快取值不足採信。以**直接 GET**重讀（非 query.refetch——TanStack v5 的
       // refetch 失敗仍回舊 data，會繞過 fail-closed）：失敗 → 不送單；剛從停用變啟用 →
@@ -1790,9 +1835,14 @@ export default function PosPage() {
         // 後端 TOCTOU 防護（Codex 第二十二輪）：帶結帳當下觀察到的設定，後端於交易內
         // 與現值比對，不符 → 409（前端重讀與 POST 間仍有他端切換的殘餘空窗）。
         expected_einvoice_enabled: freshEnabled,
+        // 餐飲內用/外帶與桌號（docs/35）：沒有餐飲行時完全不帶（多帶欄位後端會 422）。
+        ...dineInRequestFields(hasMenuLine, dineIn),
       };
       // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
       // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。
+      // 與 printSig 同理（Codex K6 第二輪）：出餐單的內用/外帶與桌號也要在送出當下凍結，
+      // 否則結帳在途時店員改了選擇，印出來的會是另一桌。
+      const printDineIn: DineInSelection | null = hasMenuLine ? { ...dineIn } : null;
       const printSig: CompletedSignature | null =
         body.signature_task_id != null && signTaskId != null
           ? {
@@ -1836,9 +1886,9 @@ export default function PosPage() {
         body,
       });
       if (!data) throw new Error(extractDetail(error) ?? "結帳失敗");
-      return { sale: data, sig: printSig };
+      return { sale: data, sig: printSig, dineIn: printDineIn };
     },
-    onSuccess: ({ sale, sig }) => {
+    onSuccess: ({ sale, sig, dineIn: soldDineIn }) => {
       // 結帳成立 → 清除持久化冪等鍵（Codex 第二輪 #2），下一筆換新鍵。
       clearPersistedIdemKey("pos-checkout");
       setCompleted(sale);
@@ -1860,6 +1910,17 @@ export default function PosPage() {
       if (plan.cash > 0) {
         setDrawerNotice(null);
         openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
+      }
+      // 出餐單（docs/35）：有餐飲行且設定開啟才印，**不詢問**——這是內部作業單，
+      // 每一筆都要（與「商品明細」不同，那個是問客人要不要）。
+      // fire-and-forget：交易已寫後端，代理離線只提示、不擋流程；但提示要明顯且可重印，
+      // 吧台沒拿到單就不會做東西。
+      setCompletedDineIn(soldDineIn);
+      setKitchenNotice(null);
+      if (soldDineIn !== null && soldDineIn.mode !== null && printKitchenEnabled) {
+        printKitchenTicket(sale, soldDineIn.mode, soldDineIn.tableNo).catch((err: Error) =>
+          setKitchenNotice(err.message),
+        );
       }
     },
     onError: (err: Error) => {
@@ -1930,6 +1991,10 @@ export default function PosPage() {
     setInvNpoban("");
     setInvoiceNote(null);
     setCompletedInvoice(null);
+    setDineIn(clearDineIn());
+    setCompletedDineIn(null);
+    setKitchenNotice(null);
+    reprintKitchen.reset();
     issueInvoice.reset();
     printProof.reset();
     // 開新一筆：清除任何殘留的持久化結帳冪等鍵（Codex 第二輪 #2）。
@@ -1962,6 +2027,23 @@ export default function PosPage() {
           {drawerNotice !== null && (
             <p role="alert" className="form-error">
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
+            </p>
+          )}
+          {completedDineIn?.mode != null && (
+            <p className={kitchenNotice === null ? "hint" : "form-error"} role={kitchenNotice === null ? undefined : "alert"}>
+              {kitchenNotice === null
+                ? `出餐單已送出列印（${completedDineIn.mode === "DINE_IN" ? `內用 桌號 ${completedDineIn.tableNo ?? ""}` : "外帶"}）。`
+                : `出餐單列印失敗：${kitchenNotice}（吧台不會收到單，請重印或口頭通知）`}
+              <button
+                type="button"
+                className="btn-ghost pos-kitchen-reprint"
+                disabled={reprintKitchen.isPending}
+                onClick={() =>
+                  reprintKitchen.mutate({ sale: completed, selection: completedDineIn })
+                }
+              >
+                {reprintKitchen.isPending ? "列印中…" : "重印出餐單"}
+              </button>
             </p>
           )}
           {invoiceNote !== null && (
@@ -2174,7 +2256,16 @@ export default function PosPage() {
                             className="btn-ghost"
                             aria-label={`移除 ${line.description}`}
                             disabled={cartMutationLocked}
-                            onClick={() => setLines(removeLine(lines, line.key))}
+                            onClick={() => {
+                              const next = removeLine(lines, line.key);
+                              setLines(next);
+                              // 移除最後一筆餐飲 → 清空內用/外帶，否則純二手的單會
+                              // 帶著桌號送出（後端 422）。在這裡清而不是用 effect：
+                              // 這是唯一會讓餐飲行變少的路徑，也避免 setState-in-effect。
+                              if (!next.some((l) => l.lineType === "MENU")) {
+                                setDineIn(clearDineIn());
+                              }
+                            }}
                           >
                             移除
                           </button>
@@ -2319,6 +2410,59 @@ export default function PosPage() {
             <p role="alert" className="form-error">
               試算失敗：{(quote.error as Error).message}
             </p>
+          )}
+
+          {/* 餐飲內用/外帶（docs/35）：只在購物車有餐飲行時出現；桌號按鈕來自設定清單。 */}
+          {hasMenuLine && (
+            <div className="pos-dinein-panel">
+              <h3>內用 / 外帶</h3>
+              <div
+                className="pos-dinein-modes"
+                role="radiogroup"
+                aria-label="內用或外帶"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={dineIn.mode === "DINE_IN"}
+                  className={`pos-dinein-mode ${dineIn.mode === "DINE_IN" ? "is-active" : ""}`}
+                  disabled={cartMutationLocked || dineInValidation.tablesUnavailable}
+                  onClick={() => setDineIn({ mode: "DINE_IN", tableNo: null })}
+                >
+                  內用
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={dineIn.mode === "TAKEOUT"}
+                  className={`pos-dinein-mode ${dineIn.mode === "TAKEOUT" ? "is-active" : ""}`}
+                  disabled={cartMutationLocked}
+                  onClick={() => setDineIn({ mode: "TAKEOUT", tableNo: null })}
+                >
+                  外帶
+                </button>
+              </div>
+              {dineIn.mode === "DINE_IN" && dineInTables.length > 0 && (
+                <div className="pos-dinein-tables" role="radiogroup" aria-label="桌號">
+                  {dineInTables.map((table) => (
+                    <button
+                      key={table}
+                      type="button"
+                      role="radio"
+                      aria-checked={dineIn.tableNo === table}
+                      className={`pos-dinein-table ${dineIn.tableNo === table ? "is-active" : ""}`}
+                      disabled={cartMutationLocked}
+                      onClick={() => setDineIn({ mode: "DINE_IN", tableNo: table })}
+                    >
+                      {table}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {dineInValidation.error !== null && (
+                <p className="hint pos-dinein-error">{dineInValidation.error}</p>
+              )}
+            </div>
           )}
 
           <MemberPanel
@@ -2621,7 +2765,9 @@ export default function PosPage() {
               // 捐贈選擇。擋結帳待設定讀取成功。
               !settings.isSuccess ||
               settings.isFetching ||
-              settings.failureCount > 0
+              settings.failureCount > 0 ||
+              // 含餐飲卻沒選內用/外帶或桌號 → 先擋（後端亦有同一組守衛）。
+              !dineInValidation.ok
             }
             onClick={() => checkout.mutate()}
           >

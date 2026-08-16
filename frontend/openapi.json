@@ -7680,6 +7680,16 @@
             "title": "Lines",
             "type": "array"
           },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "signature_task_id": {
             "anyOf": [
               {
@@ -7690,6 +7700,18 @@
               }
             ],
             "title": "Signature Task Id"
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
           },
           "tenders": {
             "anyOf": [
@@ -8265,6 +8287,16 @@
           "payment_method": {
             "$ref": "#/components/schemas/PaymentMethod"
           },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "$ref": "#/components/schemas/SaleStatus"
           },
@@ -8275,6 +8307,17 @@
           "subtotal": {
             "title": "Subtotal",
             "type": "string"
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
           },
           "tax": {
             "title": "Tax",
@@ -8358,6 +8401,16 @@
           "payment_method": {
             "$ref": "#/components/schemas/PaymentMethod"
           },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "signature_task_id": {
             "anyOf": [
               {
@@ -8379,6 +8432,17 @@
           "subtotal": {
             "title": "Subtotal",
             "type": "string"
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
           },
           "tax": {
             "title": "Tax",
@@ -8942,6 +9006,15 @@
         "title": "SerializedItemStatus",
         "type": "string"
       },
+      "ServiceMode": {
+        "description": "餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。\n\n只有含餐飲（`SaleLineType.MENU`）明細的銷售才有值；純二手/一般商品的銷售為 NULL。\n**與折扣/點數/購物金無關**——餐飲的那三條限制綁的是 `line_type == MENU`，\n外帶餐飲同樣不累點、不套活動、不可用購物金折抵。",
+        "enum": [
+          "DINE_IN",
+          "TAKEOUT"
+        ],
+        "title": "ServiceMode",
+        "type": "string"
+      },
       "SettingsRead": {
         "description": "單店設定輸出。",
         "properties": {
@@ -8973,6 +9046,13 @@
             "title": "Default Margin Pct",
             "type": "integer"
           },
+          "dine_in_tables": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dine In Tables",
+            "type": "array"
+          },
           "einvoice_enabled": {
             "title": "Einvoice Enabled",
             "type": "boolean"
@@ -9000,6 +9080,10 @@
           "premium_rate_min": {
             "title": "Premium Rate Min",
             "type": "string"
+          },
+          "print_kitchen_ticket": {
+            "title": "Print Kitchen Ticket",
+            "type": "boolean"
           },
           "require_acquisition_affidavit": {
             "title": "Require Acquisition Affidavit",
@@ -9057,7 +9141,9 @@
           "backup_enabled",
           "backup_interval_hours",
           "backup_retention",
-          "backup_offpeak_hour"
+          "backup_offpeak_hour",
+          "dine_in_tables",
+          "print_kitchen_ticket"
         ],
         "title": "SettingsRead",
         "type": "object"
@@ -9151,6 +9237,20 @@
               }
             ],
             "title": "Default Margin Pct"
+          },
+          "dine_in_tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dine In Tables"
           },
           "einvoice_enabled": {
             "anyOf": [
@@ -9270,6 +9370,17 @@
               }
             ],
             "title": "Premium Rate Min"
+          },
+          "print_kitchen_ticket": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Print Kitchen Ticket"
           },
           "require_acquisition_affidavit": {
             "anyOf": [

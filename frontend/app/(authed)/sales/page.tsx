@@ -798,6 +798,7 @@ export default function SalesPage() {
               <th>時間</th>
               <th>單號</th>
               <th>總額</th>
+              <th>桌號</th>
               <th>發票狀態</th>
               <th>狀態</th>
               <th aria-label="簽收" />
@@ -816,6 +817,14 @@ export default function SalesPage() {
                   <td>#{sale.id}</td>
                   <td>
                     <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
+                  </td>
+                  {/* 餐飲內用/外帶（docs/35）：無餐飲的單顯示「—」，外帶顯示「外帶」。 */}
+                  <td>
+                    {sale.service_mode === "DINE_IN"
+                      ? (sale.table_no ?? "—")
+                      : sale.service_mode === "TAKEOUT"
+                        ? "外帶"
+                        : "—"}
                   </td>
                   <td>{labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}</td>
                   <td>{voided ? "已作廢" : labelFor(SALE_STATUS_LABELS, sale.status)}</td>

@@ -36,6 +36,9 @@ const SETTINGS = {
   store_credit_min_spend: "0",
   store_credit_engine_params: {},
   allow_clerk_manage_categories: false,
+  // 餐飲內用（docs/35）：後端一律回這兩欄；缺了會讓桌號清單卡片整張渲染不出來。
+  dine_in_tables: ["A1", "A2"],
+  print_kitchen_ticket: true,
 };
 
 const SUGGESTION = {

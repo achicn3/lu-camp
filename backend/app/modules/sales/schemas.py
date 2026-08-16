@@ -480,6 +480,9 @@ class SaleSummaryRead(BaseModel):
     buyer_contact_id: int | None
     # 購物金扣抵簽署（docs/23 K5）：交易列表據此提供一鍵調閱簽名。
     signature_task_id: int | None
+    # 餐飲內用/外帶與桌號（docs/35）：交易紀錄要看得出「5 桌點了什麼」。
+    service_mode: ServiceMode | None = None
+    table_no: str | None = None
 
 
 class LinePayRefundAttemptRead(BaseModel):

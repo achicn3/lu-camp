@@ -92,6 +92,32 @@ export async function printEInvoice(
   });
 }
 
+/**
+ * 列印出餐單（docs/35）：桌號＋餐飲品項，給吧台核對出餐。
+ * 只送 MENU 明細（二手商品不進吧台）、不送金額；沒有餐飲行就不該呼叫。
+ */
+export async function printKitchenTicket(
+  sale: SaleRead,
+  serviceMode: "DINE_IN" | "TAKEOUT",
+  tableNo: string | null,
+): Promise<void> {
+  const lines = sale.lines
+    .filter((line) => line.line_type === "MENU")
+    .map((line) => ({ description: line.description, qty: line.qty }));
+  if (lines.length === 0) {
+    throw new Error("本單沒有餐飲品項，無需出餐單");
+  }
+  await postAgent("/print/kitchen", {
+    store_id: sale.store_id,
+    sale_id: sale.id,
+    service_mode: serviceMode,
+    // 代理端 fail closed：外帶夾帶桌號會 422，故此處明確送 null 而非空字串。
+    table_no: serviceMode === "DINE_IN" ? tableNo : null,
+    created_at: sale.created_at,
+    lines,
+  });
+}
+
 export interface AcquisitionReceiptPrint {
   storeId: number;
   acquisitionId: number;

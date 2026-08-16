@@ -3355,3 +3355,68 @@ body {
 .pur-invoice-row input {
   flex: 1 1 120px;
 }
+
+/* 餐飲內用/外帶與桌號（docs/35） */
+.pos-dinein-panel {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+.pos-dinein-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+.pos-dinein-mode,
+.pos-dinein-table {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+.pos-dinein-mode.is-active,
+.pos-dinein-table.is-active {
+  border-color: var(--accent);
+  background: rgba(47, 93, 58, 0.06);
+}
+.pos-dinein-mode:disabled,
+.pos-dinein-table:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* 桌號按鈕要夠大：店員是站著、單手快點的 */
+.pos-dinein-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: var(--sp-2);
+}
+.dinein-table-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0;
+  padding: 0;
+  list-style: none;
+}
+.dinein-table-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.dinein-table-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+}
