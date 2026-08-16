@@ -42,18 +42,21 @@
 `table_no` 刻意存字串而非指向設定清單：設定頁改掉桌號後，歷史交易仍應顯示當時那一桌
 （同「供應商名快照，不改寫歷史」的既有口徑）。
 
-**DB CHECK（NULL-safe，明寫三種合法組合）**：
+**DB CHECK（明寫三種合法組合，且每個比較都 NULL-safe）**：
 
 ```sql
 CHECK (
-     (service_mode = 'DINE_IN'  AND table_no IS NOT NULL)
-  OR (service_mode = 'TAKEOUT'  AND table_no IS NULL)
-  OR (service_mode IS NULL      AND table_no IS NULL)
+     (service_mode IS NOT DISTINCT FROM 'DINE_IN' AND table_no IS NOT NULL)
+  OR (service_mode IS NOT DISTINCT FROM 'TAKEOUT' AND table_no IS NULL)
+  OR (service_mode IS NULL                        AND table_no IS NULL)
 )
 ```
 
-> 不可簡寫成 `(service_mode = 'DINE_IN') = (table_no IS NOT NULL)`：兩邊皆 NULL 時
-> 整條結果為 NULL，Postgres 的 CHECK 對 NULL 放行，等於沒守到。
+> **實作時踩到的坑（回歸測試已鎖住）**：Postgres 的 CHECK 只在結果為 `false` 時拒絕，
+> `NULL` 一律放行。第一版寫成 `service_mode = 'DINE_IN'`，看起來「三種組合都明寫了」，
+> 但 `(NULL, 'A1')` 這一列算出來是 `NULL OR false OR false` ＝ `NULL` → 照樣進得來。
+> 用 `IS NOT DISTINCT FROM`（永遠回 true/false）才真的守得住。
+> 守衛：`test_db_check_rejects_inconsistent_service_mode[None-A1]`。
 
 **跨表不變量由 service 守**（DB 看不到 `sale_lines`）：
 
