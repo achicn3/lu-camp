@@ -24,6 +24,7 @@ from agent.escpos_printer import ESC, FS, GS, SupportsWrite
 from agent.interfaces import (
     AcquisitionReceiptPayload,
     InvoicePayload,
+    KitchenTicketPayload,
     SaleLinePayload,
     SalePayload,
     StoreHeader,
@@ -62,6 +63,8 @@ _NAME_W = _WIDTH - _UNIT_W - _QTY_W - _TOTAL_W  # 15：較窄，長品名截斷�
 _SET_PRINT_AREA = GS + b"W" + bytes([PRINT_WIDTH_DOTS & 0xFF, PRINT_WIDTH_DOTS >> 8])
 _SEP = "-" * _WIDTH
 _TRUNCATE_MARK = ".."  # ASCII 截斷標記（Big5 安全、寬度確定）
+# 出餐單（docs/35）沒有金額欄，品名欄可比收據寬得多；數量欄放得下 "x9999"。
+_KITCHEN_QTY_W = 5
 
 
 def _line(text: str) -> bytes:
@@ -291,6 +294,48 @@ class EscposReceiptPrinter:
         out += _ALIGN_CENTER
         out += raster_command(signature_rows(receipt.signature_png_base64, max_width_dots=360))
         out += _ALIGN_LEFT
+        out += _EXIT_CHINESE
+        out += _FEED_BEFORE_CUT
+        out += _CUT
+        self._writer.write(bytes(out))
+
+    def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
+        """列印出餐單（docs/35）：放大的標題與桌號＋餐飲品項。
+
+        **無店家抬頭、無金額**——這是給吧台核對出餐的內部作業單，不是客人的憑證。
+        桌號放大（雙倍字）：吧台是隔著距離掃一眼，與內文同字級等於沒印。
+        """
+        out = bytearray()
+        out += _INIT
+        out += _SET_PRINT_AREA
+        out += _ENTER_CHINESE
+        out += _ALIGN_CENTER
+        out += _DOUBLE_ON + _line("出餐單") + _DOUBLE_OFF
+        out += _ALIGN_LEFT
+        out += _line(_SEP)
+        out += _ALIGN_CENTER
+        if ticket.service_mode == "DINE_IN":
+            # table_no 於 payload 已驗證為非空白（fail closed），此處不再防禦性補值。
+            out += _DOUBLE_ON + _line(f"內用 桌號 {(ticket.table_no or '').strip()}") + _DOUBLE_OFF
+        else:
+            out += _DOUBLE_ON + _line("外帶") + _DOUBLE_OFF
+        out += _ALIGN_LEFT
+        out += _line(_SEP)
+        for line in ticket.lines:
+            out += _line(
+                _pad_left_field(line.description, _WIDTH - _KITCHEN_QTY_W)
+                + _pad_right_field(f"x{line.qty}", _KITCHEN_QTY_W)
+            )
+        out += _line(_SEP)
+        local_created_at = (
+            ticket.created_at.replace(tzinfo=UTC)
+            if ticket.created_at.tzinfo is None
+            else ticket.created_at
+        ).astimezone(_STORE_TZ)
+        out += _line(
+            _pad_left_field(f"#{ticket.sale_id}", _WIDTH - 11)
+            + _pad_right_field(local_created_at.strftime("%m-%d %H:%M"), 11)
+        )
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT
         out += _CUT

@@ -150,6 +150,43 @@ class AcquisitionReceiptPayload(BaseModel):
         return self
 
 
+class KitchenTicketLine(BaseModel):
+    """出餐單品項行：只有做什麼、做幾份。**沒有金額**——出餐單不是憑證。"""
+
+    description: str = Field(min_length=1)
+    qty: int = Field(ge=1)
+
+
+class KitchenTicketPayload(BaseModel):
+    """出餐單列印輸入（docs/35）：結帳後給吧台/廚房核對出餐用的內部作業單。
+
+    刻意**不帶店家抬頭**（不需要店名/統編/地址，也少一層對後端的相依）、
+    **不帶任何金額**、`lines` 只放餐飲（MENU）品項——二手商品不進吧台。
+    """
+
+    store_id: int
+    sale_id: int
+    service_mode: Literal["DINE_IN", "TAKEOUT"]
+    table_no: str | None = Field(default=None, max_length=20)
+    created_at: datetime
+    lines: list[KitchenTicketLine] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _table_no_matches_service_mode(self) -> KitchenTicketPayload:
+        """fail closed（同 `AcquisitionReceiptPayload`）：桌號與內用/外帶必須自洽。
+
+        內用缺桌號就印出去，東西根本送不到客人手上；外帶夾帶桌號則代表呼叫端版本
+        錯配，不可默默印成內用單。兩者都寧可 422。
+        """
+        table_no = (self.table_no or "").strip()
+        if self.service_mode == "DINE_IN":
+            if not table_no:
+                raise ValueError("內用出餐單必須有桌號")
+        elif self.table_no is not None:
+            raise ValueError("外帶出餐單不得夾帶桌號（呼叫端版本錯配？）")
+        return self
+
+
 class StoreHeader(BaseModel):
     """收據／明細聯抬頭（店名/統編/地址/電話）。
 
@@ -253,6 +290,10 @@ class ReceiptPrinter(Protocol):
 
     def print_acquisition(self, receipt: AcquisitionReceiptPayload, header: StoreHeader) -> None:
         """列印收購憑證聯（docs/23 K6：切結品項/總額/撥款＋客戶簽名影像）。"""
+        ...
+
+    def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
+        """列印出餐單（docs/35：放大的桌號＋餐飲品項；無抬頭、無金額）。"""
         ...
 
 

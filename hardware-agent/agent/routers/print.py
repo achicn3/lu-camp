@@ -19,6 +19,7 @@ from agent.deps import DevicesDep, OkResponse
 from agent.interfaces import (
     AcquisitionReceiptPayload,
     InvoicePayload,
+    KitchenTicketPayload,
     SalePayload,
     StoreHeader,
 )
@@ -73,6 +74,16 @@ async def print_acquisition(
     """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名影像（存證）。"""
     header = await _fetch_header(client, receipt.store_id)
     await anyio.to_thread.run_sync(devices.receipt_printer.print_acquisition, receipt, header)
+    return OkResponse(status="ok")
+
+
+@router.post("/kitchen", response_model=OkResponse, operation_id="printKitchenTicket")
+async def print_kitchen(ticket: KitchenTicketPayload, devices: DevicesDep) -> OkResponse:
+    """列印出餐單（docs/35）：桌號＋餐飲品項，給吧台核對出餐。
+
+    **不取店家抬頭**——內部作業單不需要店名/統編，也不該因後端 `stores` 取不到就印不出來。
+    """
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_kitchen_ticket, ticket)
     return OkResponse(status="ok")
 
 
