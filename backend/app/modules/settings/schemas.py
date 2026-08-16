@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.modules.settings.defaults import MAX_DINE_IN_TABLE_LENGTH, MAX_DINE_IN_TABLES
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
 
 RateOut = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
@@ -49,6 +50,9 @@ class SettingsRead(BaseModel):
     backup_interval_hours: int
     backup_retention: int
     backup_offpeak_hour: int
+    # 餐飲內用（docs/35）
+    dine_in_tables: list[str]
+    print_kitchen_ticket: bool
 
     @classmethod
     def from_model(cls, settings: StoreSettings) -> "SettingsRead":
@@ -94,6 +98,30 @@ class SettingsUpdateRequest(BaseModel):
     backup_interval_hours: Annotated[int, Field(ge=1, le=8760)] | None = None
     backup_retention: Annotated[int, Field(ge=1, le=365)] | None = None
     backup_offpeak_hour: Annotated[int, Field(ge=0, le=23)] | None = None
+    # 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）與出餐單開關。
+    dine_in_tables: list[str] | None = None
+    print_kitchen_ticket: bool | None = None
+
+    @field_validator("dine_in_tables")
+    @classmethod
+    def _clean_tables(cls, value: list[str] | None) -> list[str] | None:
+        """桌號清單正規化：去頭尾空白、拒空白項/重複/超長/超量。
+
+        重複必須擋下：POS 會直接把清單排成按鈕，兩顆一模一樣的「A3」店員分不出差別，
+        而桌號是存成字串快照的，事後也查不出當時點的是哪一顆。
+        """
+        if value is None:
+            return None
+        cleaned = [table.strip() for table in value]
+        if any(not table for table in cleaned):
+            raise ValueError("桌號不可為空白")
+        if any(len(table) > MAX_DINE_IN_TABLE_LENGTH for table in cleaned):
+            raise ValueError(f"單一桌號最長 {MAX_DINE_IN_TABLE_LENGTH} 字")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("桌號不可重複")
+        if len(cleaned) > MAX_DINE_IN_TABLES:
+            raise ValueError(f"桌號最多 {MAX_DINE_IN_TABLES} 個")
+        return cleaned
 
     @field_validator("monthly_fixed_cash_outflow", "store_credit_min_spend")
     @classmethod

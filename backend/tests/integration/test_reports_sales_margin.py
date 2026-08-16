@@ -162,7 +162,11 @@ async def _add_menu(session: AsyncSession, store_id: int, *, name: str, price: s
 async def _sell(
     client: httpx.AsyncClient, token: str, lines: list[dict[str, object]], *, key: str
 ) -> dict[str, object]:
-    resp = await client.post("/api/v1/sales", json={"lines": lines}, headers=_auth(token, idem=key))
+    body_in: dict[str, object] = {"lines": lines}
+    # 含餐飲的結帳一律要宣告內用/外帶（docs/35）；報表只認 line_type，用免桌號的外帶即可。
+    if any(line.get("line_type") == "MENU" for line in lines):
+        body_in["service_mode"] = "TAKEOUT"
+    resp = await client.post("/api/v1/sales", json=body_in, headers=_auth(token, idem=key))
     assert resp.status_code == 201, resp.text
     body: dict[str, object] = resp.json()
     return body

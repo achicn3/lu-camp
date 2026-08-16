@@ -21,6 +21,7 @@ from app.shared.enums import (
     SaleLineKind,
     SaleLineType,
     SaleStatus,
+    ServiceMode,
     TenderType,
 )
 
@@ -268,6 +269,10 @@ class SaleCreateRequest(BaseModel):
     expected_einvoice_enabled: bool | None = None
     # 結帳當下套用的臨時折扣（贈品走 lines[].line_kind，不是折扣）。
     adjustments: list[SaleAdjustmentRequest] | None = None
+    # 餐飲內用/外帶與桌號（docs/35）：購物車含餐飲明細時必填，否則不得帶。
+    # 兩者與購物車內容的相依關係由 service 驗證（此處看不到明細是不是餐飲）。
+    service_mode: ServiceMode | None = None
+    table_no: Annotated[str, Field(max_length=20)] | None = None
 
     @model_validator(mode="after")
     def _check_adjustment_targets(self) -> "SaleCreateRequest":
@@ -405,6 +410,9 @@ class SaleRead(BaseModel):
     invoice_status: SaleInvoiceStatus
     status: SaleStatus
     created_at: datetime
+    # 餐飲內用（docs/35）：無餐飲明細的銷售兩欄皆 None。純資訊，不進入任何金額計算。
+    service_mode: ServiceMode | None = None
+    table_no: str | None = None
     lines: list[SaleLineRead] = []
     tenders: list[SaleTenderRead] = []
     # 本單活動折讓總額（docs/21）＝Σ 各行 discount_amount；供明細聯/收據顯示。

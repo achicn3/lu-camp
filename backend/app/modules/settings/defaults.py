@@ -40,3 +40,11 @@ DEFAULT_BACKUP_ENABLED = True
 DEFAULT_BACKUP_INTERVAL_HOURS = 24
 DEFAULT_BACKUP_RETENTION = 30
 DEFAULT_BACKUP_OFFPEAK_HOUR = 21  # 晚上 9 點（打烊後離峰）；過此鐘點才算到期，機器開著就晚上跑
+
+# 餐飲內用（docs/35）：桌號清單預設空＝尚未維護，此時 POS 不讓選內用（fail closed，
+# 不讓店員自由打字繞過）。出餐單預設開——會用到餐飲的店，吧台一定需要這張紙。
+DEFAULT_DINE_IN_TABLES: list[str] = []
+DEFAULT_PRINT_KITCHEN_TICKET = True
+# 桌號清單邊界：單一桌號最長 20 字（與 sales.table_no 欄寬一致）、最多 50 桌。
+MAX_DINE_IN_TABLE_LENGTH = 20
+MAX_DINE_IN_TABLES = 50

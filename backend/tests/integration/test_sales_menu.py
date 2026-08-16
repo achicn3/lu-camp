@@ -6,6 +6,11 @@
 - 會員點數只認非餐飲小計。
 - 門市活動折扣不套用餐飲。
 - quote 回 food_subtotal 與 store_credit_max。
+
+含餐飲的結帳一律要宣告內用/外帶（docs/35）；本檔關心的是金流不變量，故統一用 `TAKEOUT`
+（免桌號）。餐飲的三條限制綁的是 `line_type == MENU`，與內用/外帶無關——外帶餐飲同樣
+不累點、不套活動、不可用購物金折抵，所以這裡改用 TAKEOUT 不會改變任何被驗的行為。
+內用/外帶與桌號本身的不變量另見 `test_sales_dine_in.py`。
 """
 
 from collections.abc import AsyncGenerator
@@ -142,7 +147,9 @@ async def test_menu_only_sale(client: httpx.AsyncClient, db_session: AsyncSessio
     token, store_id, _ = await _seed(db_session)
     coffee = await _menu_item(db_session, store_id, name="手沖-耶加", price="180")
     resp = await client.post(
-        "/api/v1/sales", json={"lines": [_menu_line(coffee, 2)]}, headers=_auth(token, "m1")
+        "/api/v1/sales",
+        json={"lines": [_menu_line(coffee, 2)], "service_mode": "TAKEOUT"},
+        headers=_auth(token, "m1"),
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -165,7 +172,8 @@ async def test_mixed_secondhand_and_menu(
             "lines": [
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
-            ]
+            ],
+            "service_mode": "TAKEOUT",
         },
         headers=_auth(token, "mix1"),
     )
@@ -190,6 +198,7 @@ async def test_store_credit_cannot_cover_menu(
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
             ],
+            "service_mode": "TAKEOUT",
             "buyer_contact_id": member,
             "tenders": [
                 {"tender_type": "STORE_CREDIT", "amount": "300"},
@@ -217,6 +226,7 @@ async def test_store_credit_up_to_nonfood_ok(
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
             ],
+            "service_mode": "TAKEOUT",
             "buyer_contact_id": member,
             "tenders": [
                 {"tender_type": "STORE_CREDIT", "amount": "200"},
@@ -244,6 +254,7 @@ async def test_member_points_exclude_menu(
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
             ],
+            "service_mode": "TAKEOUT",
             "buyer_contact_id": member,
         },
         headers=_auth(token, "pts1"),
@@ -276,7 +287,9 @@ async def test_campaign_discount_not_applied_to_menu(
     await camp_svc.activate(store_id, camp.id, actor_user_id=clerk_id)
     await db_session.flush()
     resp = await client.post(
-        "/api/v1/sales", json={"lines": [_menu_line(coffee, 1)]}, headers=_auth(token, "camp1")
+        "/api/v1/sales",
+        json={"lines": [_menu_line(coffee, 1)], "service_mode": "TAKEOUT"},
+        headers=_auth(token, "camp1"),
     )
     assert resp.status_code == 201
     # 餐飲不折：仍為原價 200、無折讓、無 campaign 留痕。
@@ -299,7 +312,8 @@ async def test_quote_returns_food_subtotal_and_credit_max(
             "lines": [
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
-            ]
+            ],
+            "service_mode": "TAKEOUT",
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -351,6 +365,7 @@ async def test_store_credit_ok_at_min_spend(
                 {"line_type": "CATALOG", "catalog_product_id": cat, "qty": 1},
                 _menu_line(coffee, 1),
             ],
+            "service_mode": "TAKEOUT",
             "buyer_contact_id": member,
             "tenders": [
                 {"tender_type": "STORE_CREDIT", "amount": "200"},

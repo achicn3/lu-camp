@@ -79,6 +79,7 @@ from app.shared.enums import (
     SaleLineKind,
     SaleLineType,
     SaleStatus,
+    ServiceMode,
     StockReason,
     StoreCreditSourceType,
     TenderType,
@@ -90,6 +91,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InvalidDiscount,
     InvalidSaleTender,
+    InvalidServiceMode,
     InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
@@ -257,6 +259,36 @@ class SaleQuote:
 def _member_points_for(total: Decimal) -> int:
     """該筆銷售累積的會員點數（floor；total 為含稅整數元，與 tender 組成無關）。"""
     return int(total // _POINTS_DIVISOR)
+
+
+def _validate_service_mode_shape(
+    lines: Sequence[SaleLineInput],
+    service_mode: ServiceMode | None,
+    table_no: str | None,
+) -> str | None:
+    """驗證內用/外帶與桌號的形狀，回傳正規化（去頭尾空白）後的桌號（docs/35）。
+
+    「有餐飲明細 ⇔ 必須宣告內用/外帶」是**跨表**不變量（DB 的 CHECK 看不到 `sale_lines`），
+    只能在此守——口徑同 docs/32 §9：DB 只守單列自洽，需要看別張表的規則放 service。
+
+    沒有餐飲卻帶了 service_mode 也要擋：純二手的單標成「內用」會讓出餐單印出根本
+    不存在的餐點，也污染日後依 service_mode 做的統計。
+    """
+    has_menu = any(line.line_type == SaleLineType.MENU for line in lines)
+    normalized = (table_no or "").strip() or None
+    if not has_menu:
+        if service_mode is not None or normalized is not None:
+            raise InvalidServiceMode("本單沒有餐飲明細，不可指定內用/外帶或桌號")
+        return None
+    if service_mode is None:
+        raise InvalidServiceMode("本單含餐飲明細，請先選擇內用或外帶")
+    if service_mode is ServiceMode.DINE_IN:
+        if normalized is None:
+            raise InvalidServiceMode("內用必須指定桌號")
+        return normalized
+    if normalized is not None:
+        raise InvalidServiceMode("外帶不可指定桌號")
+    return None
 
 
 def _adjustment_target_identity(
@@ -669,6 +701,8 @@ class SalesService:
         cart_session_id: int | None = None,
         cart_revision: int | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        service_mode: ServiceMode | None = None,
+        table_no: str | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         expected_einvoice_enabled: bool | None = None,
         require_einvoice_confirmation: bool = False,
@@ -688,6 +722,10 @@ class SalesService:
         """
         if not lines:
             raise EmptySale("銷售單必須至少有一筆明細")
+
+        # 內用/外帶的**形狀**檢查（純輸入、無 I/O）放最前面：不合法就不該碰任何 DB。
+        # 桌號是否存在於設定清單另需 settings，於取得設定後再驗（見下方）。
+        normalized_table_no = _validate_service_mode_shape(lines, service_mode, table_no)
 
         normalized_tenders = self._normalize_tenders(tenders)
         fingerprint = _cart_fingerprint(
@@ -851,6 +889,15 @@ class SalesService:
                 "本店未啟用電子發票，但結帳帶了發票欄位（統編/載具/捐贈）；請確認發票設定後再結帳"
             )
 
+        # 桌號必須是設定頁維護過的那幾桌（docs/35）：自由字串會長出「5」「5桌」「五」
+        # 三種寫法指同一桌，而桌號存的是字串快照，事後再也對不起來。
+        if service_mode is ServiceMode.DINE_IN and normalized_table_no not in (
+            settings.dine_in_tables or []
+        ):
+            raise InvalidServiceMode(
+                f"桌號「{normalized_table_no}」不在設定的桌號清單中，請至設定頁維護後再結帳"
+            )
+
         sale = await self._repo.add_sale(
             Sale(
                 store_id=store_id,
@@ -861,6 +908,8 @@ class SalesService:
                 subtotal=Decimal(0),
                 tax=Decimal(0),
                 total=Decimal(0),
+                service_mode=service_mode,
+                table_no=normalized_table_no,
             )
         )
 

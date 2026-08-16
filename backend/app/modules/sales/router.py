@@ -42,6 +42,7 @@ from app.shared.exceptions import (
     InsufficientStoreCredit,
     InvalidDiscount,
     InvalidSaleTender,
+    InvalidServiceMode,
     InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
@@ -92,6 +93,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     # 折扣不合法與明細不合法同一性質：內容可讀但語意不成立 → 422（讓 POS 一致地顯示訊息）。
     InvalidDiscount: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidSaleTender: status.HTTP_422_UNPROCESSABLE_CONTENT,
+    # 內用/外帶與桌號不合法（docs/35）：內容可讀但語意不成立，同折扣/收款口徑 → 422。
+    InvalidServiceMode: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StoreCreditMemberRequired: status.HTTP_422_UNPROCESSABLE_CONTENT,
     EmptySale: status.HTTP_422_UNPROCESSABLE_CONTENT,
     # 購物金扣抵手持簽署（docs/23 K5）
@@ -230,6 +233,8 @@ async def create_sale(
             invoice_info=payload.to_invoice_info(),
             expected_einvoice_enabled=payload.expected_einvoice_enabled,
             adjustments=payload.to_adjustments(),
+            service_mode=payload.service_mode,
+            table_no=payload.table_no,
             require_einvoice_confirmation=True,  # HTTP 邊界強制宣告發票設定狀態（docs/24）
             linepay_client=_linepay_client(),
             linepay_attempt=linepay_attempt,

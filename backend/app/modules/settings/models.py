@@ -126,6 +126,15 @@ class StoreSettings(Base, TimestampMixin):
     backup_offpeak_hour: Mapped[int] = mapped_column(
         Integer, default=21, server_default=text("21"), nullable=False
     )
+    # 餐飲內用（docs/35）：桌號清單（順序即 POS 按鈕順序）與是否自動列印出餐單。
+    # 清單放 JSONB 而非另立 tables 表——現階段桌號沒有任何附加屬性（座位數/區域/狀態），
+    # 建表是過度建模；settings 每店一列，多分店天然隔離（§4）。
+    dine_in_tables: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    print_kitchen_ticket: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
 
 
 class PremiumRateHistory(Base):

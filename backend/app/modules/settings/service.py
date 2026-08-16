@@ -19,12 +19,14 @@ from app.modules.settings.defaults import (
     DEFAULT_BACKUP_OFFPEAK_HOUR,
     DEFAULT_BACKUP_RETENTION,
     DEFAULT_COMMISSION_PCT,
+    DEFAULT_DINE_IN_TABLES,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
     DEFAULT_MONTHLY_FIXED_CASH_OUTFLOW,
     DEFAULT_PREMIUM_RATE,
     DEFAULT_PREMIUM_RATE_MAX,
     DEFAULT_PREMIUM_RATE_MIN,
+    DEFAULT_PRINT_KITCHEN_TICKET,
     DEFAULT_REQUIRE_ACQUISITION_AFFIDAVIT,
     DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE,
     DEFAULT_SIGNATURE_PNG_RETENTION_DAYS,
@@ -71,6 +73,9 @@ def _new_settings(store_id: int) -> StoreSettings:
         backup_interval_hours=DEFAULT_BACKUP_INTERVAL_HOURS,
         backup_retention=DEFAULT_BACKUP_RETENTION,
         backup_offpeak_hour=DEFAULT_BACKUP_OFFPEAK_HOUR,
+        # 餐飲內用（docs/35）：暫態預設同上理；清單複製一份，避免共用模組層 list。
+        dine_in_tables=list(DEFAULT_DINE_IN_TABLES),
+        print_kitchen_ticket=DEFAULT_PRINT_KITCHEN_TICKET,
     )
 
 

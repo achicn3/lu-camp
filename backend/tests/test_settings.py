@@ -10,8 +10,10 @@ from app.core.audit import AuditLog
 from app.modules.settings.defaults import (
     DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES,
     DEFAULT_COMMISSION_PCT,
+    DEFAULT_DINE_IN_TABLES,
     DEFAULT_EINVOICE_ENABLED,
     DEFAULT_MARGIN_PCT,
+    DEFAULT_PRINT_KITCHEN_TICKET,
     DEFAULT_SIGNATURE_CLEANUP_ENFORCEMENT_MODE,
     DEFAULT_SIGNATURE_PNG_RETENTION_DAYS,
     DEFAULT_TAX_RATE,
@@ -201,3 +203,32 @@ def test_removed_store_credit_signing_flag_is_ignored_not_applied() -> None:
     """舊版收銀端可能仍送此欄：靜默忽略（不 500、不落庫），維持向後相容。"""
     patch = SettingsUpdateRequest(require_store_credit_signing=True)
     assert patch.model_dump(exclude_unset=True) == {}
+
+
+# ── 餐飲內用桌號清單（docs/35） ──
+
+
+def test_dine_in_tables_are_stripped() -> None:
+    patch = SettingsUpdateRequest(dine_in_tables=[" A1 ", "A2"])
+    assert patch.dine_in_tables == ["A1", "A2"]
+
+
+def test_dine_in_tables_default_to_empty_and_ticket_printing_on() -> None:
+    """預設沒有桌號（＝尚未維護，POS 會擋內用），但出餐單預設開。"""
+    assert DEFAULT_DINE_IN_TABLES == []
+    assert DEFAULT_PRINT_KITCHEN_TICKET is True
+
+
+@pytest.mark.parametrize(
+    "tables",
+    [
+        ["A1", "A1"],  # 重複：POS 會排出兩顆一模一樣的按鈕，店員分不出，事後也查不出點了哪顆
+        ["A1", " A1 "],  # 去空白後才看得出重複
+        ["A1", "  "],  # 空白桌號
+        ["A" * 21],  # 超過 sales.table_no 欄寬
+        [f"T{i}" for i in range(51)],  # 超量
+    ],
+)
+def test_dine_in_tables_reject_invalid_lists(tables: list[str]) -> None:
+    with pytest.raises(ValueError):
+        SettingsUpdateRequest(dine_in_tables=tables)

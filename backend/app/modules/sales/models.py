@@ -37,6 +37,7 @@ from app.shared.enums import (
     SaleLineKind,
     SaleLineType,
     SaleStatus,
+    ServiceMode,
     TenderType,
 )
 
@@ -62,6 +63,18 @@ class Sale(Base, TimestampMixin):
         # 一份購物金扣抵簽署至多綁一筆銷售（docs/23 K5，D3 單次使用）；顯式命名供 IntegrityError
         # 轉衝突（同 K4 acquisition）。
         UniqueConstraint("signature_task_id", name="uq_sales_signature_task"),
+        # 內用/外帶與桌號自洽（docs/35）。三種合法組合逐一明寫，且**每個比較都必須 NULL-safe**
+        # ——Postgres 的 CHECK 只在結果為 false 時拒絕，NULL 一律放行。
+        # 寫成 `service_mode = 'DINE_IN'` 不行：service_mode 為 NULL 時該項是 NULL，
+        # 整條 `NULL OR false OR false` 也是 NULL，於是 (NULL, 'A1') 這種髒列照樣進得來
+        # （回歸測試：test_db_check_rejects_inconsistent_service_mode[None-A1]）。
+        # `IS NOT DISTINCT FROM` 永遠回 true/false，才真的守得住。
+        CheckConstraint(
+            "(service_mode IS NOT DISTINCT FROM 'DINE_IN' AND table_no IS NOT NULL)"
+            " OR (service_mode IS NOT DISTINCT FROM 'TAKEOUT' AND table_no IS NULL)"
+            " OR (service_mode IS NULL AND table_no IS NULL)",
+            name="ck_sales_service_mode_table_no",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -92,6 +105,12 @@ class Sale(Base, TimestampMixin):
         default=SaleStatus.COMPLETED,
         server_default=SaleStatus.COMPLETED.value,
     )
+    # 餐飲供應方式與桌號（docs/35）：純資訊欄位，不進入任何金額/稅/折扣/點數計算。
+    # 無餐飲明細的銷售兩欄皆 NULL；DINE_IN 必有桌號、TAKEOUT 必無（見 __table_args__）。
+    service_mode: Mapped[ServiceMode | None] = mapped_column(_enum_col(ServiceMode), nullable=True)
+    # 桌號存**字串快照**而非指向設定清單：設定頁日後改掉桌號，歷史交易仍應顯示當時那一桌
+    # （同「供應商名快照，不改寫歷史」的既有口徑）。
+    table_no: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class SaleLine(Base, TimestampMixin):

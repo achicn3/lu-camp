@@ -295,6 +295,8 @@ async def test_return_clawback_uses_non_menu_subtotal_and_cumulative(
                 {"line_type": "CATALOG", "catalog_product_id": catalog_id, "qty": 10},
                 {"line_type": "MENU", "menu_item_id": menu_id, "qty": 1},
             ],
+            # 含餐飲的結帳一律要宣告內用/外帶（docs/35）；本檔驗的是金流，用免桌號的外帶。
+            "service_mode": "TAKEOUT",
             "buyer_contact_id": member_id,
         },
         headers=_auth(token, idem="d8-mix-sale"),

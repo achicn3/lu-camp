@@ -153,6 +153,14 @@ class InvalidSaleTender(DomainError):
     """銷售收款明細不合法（Σ tenders ≠ total、金額非正、重複型別、購物金缺會員）。"""
 
 
+class InvalidServiceMode(DomainError):
+    """內用/外帶與桌號不合法（docs/35）。
+
+    涵蓋：有餐飲明細卻沒宣告內用/外帶、沒有餐飲明細卻帶了、內用缺桌號、外帶夾帶桌號、
+    桌號不在 `settings.dine_in_tables` 之內。
+    """
+
+
 class InvalidPremiumRate(DomainError):
     """溢價率設定不合法（min>max、或 premium 不在 [min, max]，docs/16 §6.1）。"""
 
