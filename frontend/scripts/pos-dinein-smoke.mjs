@@ -174,6 +174,12 @@ try {
   ok("交易紀錄顯示桌號", firstRow.includes(TABLES[1]), firstRow.slice(0, 80));
   await page.screenshot({ path: `${SHOTS}/07-sales-table-no.png` });
 
+  // docs/35 §3.2 的第二個重印入口：離開 POS 後吧台沒收到單，這裡是唯一補得回來的地方。
+  await page.locator('button[aria-label^="重印銷售"]').first().click();
+  await page.waitForSelector("text=的出餐單。", { timeout: 20000 });
+  ok("交易紀錄可重印出餐單", true);
+  await page.screenshot({ path: `${SHOTS}/07b-sales-reprint.png` });
+
   // ── 5. 外帶：不需桌號 ──
   await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
   await page.waitForSelector(".pos-menu-tiles");

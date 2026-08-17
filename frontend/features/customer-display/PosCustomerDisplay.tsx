@@ -86,6 +86,9 @@ interface PosCustomerDisplayProps {
   tenders: Tender[];
   /** 臨時折扣：客顯是權威購物車，折扣不經它，客人螢幕上的金額就會與實際扣款不同。 */
   adjustments: Adjustment[];
+  /** 餐飲內用/外帶與桌號（docs/35）：跟著購物車保存，POS 重掛/還原時才不會遺失選擇。 */
+  serviceMode: "DINE_IN" | "TAKEOUT" | null;
+  tableNo: string | null;
   ready: boolean;
   onRestore: (cart: StaffCart) => void | Promise<void>;
   onTerminalChange?: (terminal: Terminal | null) => void;
@@ -99,6 +102,8 @@ type PendingSync =
       buyerContactId: number | null;
       tenders: Tender[];
       adjustments: Adjustment[];
+      serviceMode: "DINE_IN" | "TAKEOUT" | null;
+      tableNo: string | null;
     }
   | { kind: "CANCEL" };
 
@@ -107,6 +112,8 @@ export function PosCustomerDisplay({
   buyerContactId,
   tenders,
   adjustments,
+  serviceMode,
+  tableNo,
   ready,
   onRestore,
   onTerminalChange,
@@ -122,8 +129,17 @@ export function PosCustomerDisplay({
     buyerContactId,
     tenders,
     adjustments,
+    serviceMode,
+    tableNo,
   });
-  const payload = useRef({ lines, buyerContactId, tenders, adjustments });
+  const payload = useRef({
+    lines,
+    buyerContactId,
+    tenders,
+    adjustments,
+    serviceMode,
+    tableNo,
+  });
   const revision = useRef<number | null>(null);
   const pending = useRef<PendingSync | null>(null);
   const draining = useRef(false);
@@ -174,8 +190,15 @@ export function PosCustomerDisplay({
   }, [current.data, current.isSuccess, onCartChange]);
 
   useEffect(() => {
-    payload.current = { lines, buyerContactId, tenders, adjustments };
-  }, [adjustments, buyerContactId, lines, tenders]);
+    payload.current = {
+      lines,
+      buyerContactId,
+      tenders,
+      adjustments,
+      serviceMode,
+      tableNo,
+    };
+  }, [adjustments, buyerContactId, lines, serviceMode, tableNo, tenders]);
 
   useEffect(() => {
     const terminalId = terminal.data?.id ?? null;
@@ -231,6 +254,8 @@ export function PosCustomerDisplay({
                 tenders: next.tenders.length > 0 ? next.tenders : null,
                 adjustments:
                   next.adjustments.length > 0 ? next.adjustments : null,
+                service_mode: next.serviceMode,
+                table_no: next.tableNo,
               },
             },
           );
@@ -290,6 +315,8 @@ export function PosCustomerDisplay({
               buyerContactId: latest.buyerContactId,
               tenders: latest.tenders,
               adjustments: latest.adjustments,
+              serviceMode: latest.serviceMode,
+              tableNo: latest.tableNo,
             }
           : { kind: "CANCEL" };
       void drain(terminalRow);

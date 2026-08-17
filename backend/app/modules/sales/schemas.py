@@ -274,6 +274,18 @@ class SaleCreateRequest(BaseModel):
     service_mode: ServiceMode | None = None
     table_no: Annotated[str, Field(max_length=20)] | None = None
 
+    @field_validator("table_no")
+    @classmethod
+    def _normalize_table_no(cls, value: str | None) -> str | None:
+        """桌號在**邊界**就去空白（空字串視同未填）。
+
+        service 也會正規化，但指紋是 router（重播路徑）與 service（首次）各算一次的：
+        兩邊拿到的字串必須完全相同，否則「  A1  」重送會被誤判成同鍵不同內容而 409。
+        """
+        if value is None:
+            return None
+        return value.strip() or None
+
     @model_validator(mode="after")
     def _check_adjustment_targets(self) -> "SaleCreateRequest":
         _validate_adjustment_targets(self.adjustments, len(self.lines))

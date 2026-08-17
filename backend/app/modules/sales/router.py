@@ -293,6 +293,10 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
+                # 誤判成「同鍵不同內容」而回 409。
+                service_mode=payload.service_mode,
+                table_no=payload.table_no,
             )
         except IdempotencyKeyConflict as conflict:
             raise HTTPException(
@@ -350,6 +354,10 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
+                # 誤判成「同鍵不同內容」而回 409。
+                service_mode=payload.service_mode,
+                table_no=payload.table_no,
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)
@@ -387,6 +395,10 @@ async def create_sale(
                 # 折扣**必須**一起帶：指紋含 adjustments，漏帶會讓已成交的折扣單被誤判成
                 # 「同 key 不同內容」而回 409；LINE Pay 路徑更會認不出已扣款且已落盤的交易。
                 adjustments=payload.to_adjustments(),
+                # 同理（docs/35）：指紋含內用/外帶與桌號，漏帶會把已成交的餐飲單
+                # 誤判成「同鍵不同內容」而回 409。
+                service_mode=payload.service_mode,
+                table_no=payload.table_no,
             )
             if replay is not None:
                 replay_lines = await svc.get_lines(replay.id)

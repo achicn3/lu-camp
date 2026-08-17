@@ -39,6 +39,7 @@ import {
 } from "@/features/pos/discounts";
 import {
   type DineInSelection,
+  type ServiceMode,
   clearDineIn,
   dineInRequestFields,
   validateDineIn,
@@ -727,6 +728,14 @@ function PrintDialog({
   );
 }
 
+/** 出餐單提示裡的目標描述：內用帶桌號、外帶不帶。 */
+function describeKitchenTarget(kitchen: {
+  mode: ServiceMode;
+  tableNo: string | null;
+}): string {
+  return kitchen.mode === "DINE_IN" ? `內用 桌號 ${kitchen.tableNo ?? ""}` : "外帶";
+}
+
 // -- 生效活動橫幅（純顯示，不算折扣） --
 function ActiveCampaignBanner() {
   const query = useQuery({
@@ -1130,9 +1139,16 @@ export default function PosPage() {
   const [completed, setCompleted] = useState<SaleRead | null>(null);
   // 開錢櫃失敗提示（docs/10 §5：交易已成立，代理離線只提示、不可擋流程）。
   const [drawerNotice, setDrawerNotice] = useState<string | null>(null);
-  // 出餐單（docs/35）：完成單的內用/外帶快照（供重印）＋列印失敗提示。
-  const [completedDineIn, setCompletedDineIn] = useState<DineInSelection | null>(null);
-  const [kitchenNotice, setKitchenNotice] = useState<string | null>(null);
+  // 出餐單（docs/35）。**三態**：真的送出、因設定關閉而略過、送出失敗——三者不可混為一談，
+  // 說「已送出」但其實沒印，店員會以為吧台收到單了。
+  // 內用/外帶與桌號一律取自**後端回傳的 sale**，不用送出前的本地快照：sale 才是權威值，
+  // 而且補救路徑（回應遺失/付款對帳後補單）根本沒有本地快照可用。
+  const [kitchen, setKitchen] = useState<{
+    mode: ServiceMode;
+    tableNo: string | null;
+    outcome: "SENT" | "SKIPPED" | "FAILED";
+    error: string | null;
+  } | null>(null);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -1213,6 +1229,12 @@ export default function PosPage() {
         setLines(restoreLines(cart.snapshot.items));
         setDiscountDrafts([]);
       }
+      // 內用/外帶與桌號（docs/35）：一併還原。少了它，被凍結的餐飲購物車重掛後會卡死——
+      // 驗證要求選擇，但凍結中兩顆模式鍵都是停用的，只能作廢重簽。
+      setDineIn({
+        mode: payload?.service_mode ?? null,
+        tableNo: payload?.table_no ?? null,
+      });
       setSignTaskId(cart.active_signature_task_id ?? null);
       const storeCredit = cart.snapshot.tenders.find(
         (tender) => tender.tender_type === "STORE_CREDIT",
@@ -1288,21 +1310,47 @@ export default function PosPage() {
 
   // 證明聯列印（獨立 mutation，Codex 第十六輪）：發票已開立但列印失敗（代理離線/缺紙/
   // 抬頭未載入）時，完成畫面提供「重印證明聯」重試——不可只留一行提示無路可退。
+  // 出餐單（docs/35）：有餐飲行且設定開啟才印，**不詢問**——這是內部作業單，每一筆都要
+  // （與「商品明細」不同，那個是問客人要不要）。fire-and-forget：交易已寫後端，代理離線
+  // 只提示、不擋流程；但提示要明顯且可重印，吧台沒拿到單就不會做東西。
+  // 正常完成與**補救完成**（回應遺失、付款對帳後補單）共用這一支，否則補救出來的餐飲單
+  // 不會自動出單、完成頁也沒有重印鍵。
+  const startKitchenTicket = useCallback(
+    (sale: SaleRead) => {
+      const mode = sale.service_mode;
+      if (mode == null) {
+        setKitchen(null);
+        return;
+      }
+      const tableNo = sale.table_no ?? null;
+      if (!printKitchenEnabled) {
+        setKitchen({ mode, tableNo, outcome: "SKIPPED", error: null });
+        return;
+      }
+      setKitchen({ mode, tableNo, outcome: "SENT", error: null });
+      printKitchenTicket(sale, mode, tableNo).catch((err: Error) =>
+        setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message }),
+      );
+    },
+    [printKitchenEnabled],
+  );
+
   // 出餐單重印（docs/35）：代理離線/缺紙時第一次會失敗，而交易已成立不會進 error 態
   // ——吧台沒拿到單就不會做東西，必須有在地重試入口。
   const reprintKitchen = useMutation({
-    mutationFn: async ({
-      sale,
-      selection,
-    }: {
-      sale: SaleRead;
-      selection: DineInSelection;
-    }) => {
-      if (selection.mode === null) throw new Error("本單沒有內用/外帶資訊，無法列印出餐單");
-      await printKitchenTicket(sale, selection.mode, selection.tableNo);
+    mutationFn: async ({ sale }: { sale: SaleRead }) => {
+      if (sale.service_mode == null) {
+        throw new Error("本單沒有餐飲品項，無需出餐單");
+      }
+      await printKitchenTicket(sale, sale.service_mode, sale.table_no ?? null);
+      return { mode: sale.service_mode, tableNo: sale.table_no ?? null };
     },
-    onSuccess: () => setKitchenNotice(null),
-    onError: (err: Error) => setKitchenNotice(err.message),
+    onSuccess: ({ mode, tableNo }) =>
+      setKitchen({ mode, tableNo, outcome: "SENT", error: null }),
+    onError: (err: Error) =>
+      setKitchen((prev) =>
+        prev === null ? prev : { ...prev, outcome: "FAILED", error: err.message },
+      ),
   });
 
   const printProof = useMutation({
@@ -1657,6 +1705,8 @@ export default function PosPage() {
     setInvoiceNote(null);
     setShowDialog(true);
     setNotice(successNotice);
+    // 補救完成（回應遺失後恢復、或付款對帳後補單）同樣要出餐單並提供重印入口。
+    startKitchenTicket(sale);
     if (sale.invoice_status === "PENDING_ISSUE") {
       setInvoiceNote("發票開立中…");
       issueInvoice.mutate(sale);
@@ -1715,7 +1765,6 @@ export default function PosPage() {
     mutationFn: async (): Promise<{
       sale: SaleRead;
       sig: CompletedSignature | null;
-      dineIn: DineInSelection | null;
     }> => {
       // 結帳當下重讀 settings（Codex 第二十一輪）：他端可能剛改 einvoice_enabled，
       // 畫面上的快取值不足採信。以**直接 GET**重讀（非 query.refetch——TanStack v5 的
@@ -1840,9 +1889,6 @@ export default function PosPage() {
       };
       // 列印快照於 **await 之前**、與送出 body 同一時點擷取（Codex K6 第二輪）：結帳在途時
       // 店員改動購物車/收款不會污染已提交那筆的簽署證據值（值即後端行鎖驗證的簽署快照）。
-      // 與 printSig 同理（Codex K6 第二輪）：出餐單的內用/外帶與桌號也要在送出當下凍結，
-      // 否則結帳在途時店員改了選擇，印出來的會是另一桌。
-      const printDineIn: DineInSelection | null = hasMenuLine ? { ...dineIn } : null;
       const printSig: CompletedSignature | null =
         body.signature_task_id != null && signTaskId != null
           ? {
@@ -1886,9 +1932,9 @@ export default function PosPage() {
         body,
       });
       if (!data) throw new Error(extractDetail(error) ?? "結帳失敗");
-      return { sale: data, sig: printSig, dineIn: printDineIn };
+      return { sale: data, sig: printSig };
     },
-    onSuccess: ({ sale, sig, dineIn: soldDineIn }) => {
+    onSuccess: ({ sale, sig }) => {
       // 結帳成立 → 清除持久化冪等鍵（Codex 第二輪 #2），下一筆換新鍵。
       clearPersistedIdemKey("pos-checkout");
       setCompleted(sale);
@@ -1911,17 +1957,7 @@ export default function PosPage() {
         setDrawerNotice(null);
         openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
       }
-      // 出餐單（docs/35）：有餐飲行且設定開啟才印，**不詢問**——這是內部作業單，
-      // 每一筆都要（與「商品明細」不同，那個是問客人要不要）。
-      // fire-and-forget：交易已寫後端，代理離線只提示、不擋流程；但提示要明顯且可重印，
-      // 吧台沒拿到單就不會做東西。
-      setCompletedDineIn(soldDineIn);
-      setKitchenNotice(null);
-      if (soldDineIn !== null && soldDineIn.mode !== null && printKitchenEnabled) {
-        printKitchenTicket(sale, soldDineIn.mode, soldDineIn.tableNo).catch((err: Error) =>
-          setKitchenNotice(err.message),
-        );
-      }
+      startKitchenTicket(sale);
     },
     onError: (err: Error) => {
       setNotice(err.message);
@@ -1992,8 +2028,7 @@ export default function PosPage() {
     setInvoiceNote(null);
     setCompletedInvoice(null);
     setDineIn(clearDineIn());
-    setCompletedDineIn(null);
-    setKitchenNotice(null);
+    setKitchen(null);
     reprintKitchen.reset();
     issueInvoice.reset();
     printProof.reset();
@@ -2029,20 +2064,27 @@ export default function PosPage() {
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
             </p>
           )}
-          {completedDineIn?.mode != null && (
-            <p className={kitchenNotice === null ? "hint" : "form-error"} role={kitchenNotice === null ? undefined : "alert"}>
-              {kitchenNotice === null
-                ? `出餐單已送出列印（${completedDineIn.mode === "DINE_IN" ? `內用 桌號 ${completedDineIn.tableNo ?? ""}` : "外帶"}）。`
-                : `出餐單列印失敗：${kitchenNotice}（吧台不會收到單，請重印或口頭通知）`}
+          {kitchen !== null && (
+            <p
+              className={kitchen.outcome === "FAILED" ? "form-error" : "hint"}
+              role={kitchen.outcome === "FAILED" ? "alert" : undefined}
+            >
+              {kitchen.outcome === "FAILED"
+                ? `出餐單列印失敗：${kitchen.error}（吧台不會收到單，請重印或口頭通知）`
+                : kitchen.outcome === "SKIPPED"
+                  ? `${describeKitchenTarget(kitchen)}：本店已關閉自動列印出餐單，需要時可手動列印。`
+                  : `出餐單已送出列印（${describeKitchenTarget(kitchen)}）。`}
               <button
                 type="button"
                 className="btn-ghost pos-kitchen-reprint"
                 disabled={reprintKitchen.isPending}
-                onClick={() =>
-                  reprintKitchen.mutate({ sale: completed, selection: completedDineIn })
-                }
+                onClick={() => reprintKitchen.mutate({ sale: completed })}
               >
-                {reprintKitchen.isPending ? "列印中…" : "重印出餐單"}
+                {reprintKitchen.isPending
+                  ? "列印中…"
+                  : kitchen.outcome === "SKIPPED"
+                    ? "列印出餐單"
+                    : "重印出餐單"}
               </button>
             </p>
           )}
@@ -2113,6 +2155,8 @@ export default function PosPage() {
         buyerContactId={member?.id ?? null}
         tenders={customerDisplayTenders}
         ready={quoteReady}
+        serviceMode={dineIn.mode}
+        tableNo={dineIn.tableNo}
         onRestore={restoreCustomerDisplayCart}
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}

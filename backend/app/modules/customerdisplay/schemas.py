@@ -15,6 +15,7 @@ from app.shared.enums import (
     CartSessionStatus,
     SaleLineKind,
     SaleLineType,
+    ServiceMode,
     SignatureTaskStatus,
     TenderType,
 )
@@ -149,6 +150,18 @@ class CartUpsertRequest(BaseModel):
     # 臨時折扣：客顯購物車是權威購物車，折扣必須經同一條路徑進來，否則客人螢幕上看到的
     # 金額與實際結帳不同，且結帳時的快照比對會直接失敗。
     adjustments: list[SaleAdjustmentRequest] | None = None
+    # 餐飲內用/外帶與桌號（docs/35）：**必須跟著購物車保存**，否則 POS 重新載入被凍結的
+    # 購物車時選擇會遺失；而凍結中兩顆模式鍵都是停用的，已簽名的交易就只能作廢重簽。
+    service_mode: ServiceMode | None = None
+    table_no: str | None = Field(default=None, max_length=20)
+
+    @field_validator("table_no")
+    @classmethod
+    def _normalize_table_no(cls, value: str | None) -> str | None:
+        """與 `SaleCreateRequest` 同一條正規化規則（去空白、空字串視同未填）。"""
+        if value is None:
+            return None
+        return value.strip() or None
 
     @model_validator(mode="after")
     def _check_adjustment_targets(self) -> "CartUpsertRequest":
@@ -277,6 +290,9 @@ class StaffCartPayloadRead(BaseModel):
 
     lines: list[StaffCartLineRead]
     adjustments: list[StaffCartAdjustmentRead] = []
+    # 餐飲內用/外帶與桌號（docs/35）；舊購物車沒有這兩欄 → None。
+    service_mode: ServiceMode | None = None
+    table_no: str | None = None
 
     @field_validator("adjustments", mode="before")
     @classmethod

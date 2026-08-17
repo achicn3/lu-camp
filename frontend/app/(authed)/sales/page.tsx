@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
+import { printKitchenTicket } from "@/lib/agent";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -727,6 +728,24 @@ export default function SalesPage() {
   const [signatureTaskId, setSignatureTaskId] = useState<number | null>(null);
   // 交易紀錄簽收（docs/23 K5b）：推 TRANSACTION_ACK 至手持裝置，客人核對後簽名留存（不擋流程）。
   const [ackNote, setAckNote] = useState<string | null>(null);
+  // 出餐單重印（docs/35 §3.2 要求的第二個入口）：店員離開 POS 完成頁後，吧台若沒收到單
+  // ——代理離線、缺紙、單子被丟掉——這裡是唯一補得回來的地方。
+  // 列表只有摘要（無明細），故先抓完整銷售再送代理。
+  const [kitchenNote, setKitchenNote] = useState<string | null>(null);
+  const reprintKitchen = useMutation({
+    mutationFn: async (sale: SaleSummary) => {
+      if (sale.service_mode == null) throw new Error("此單沒有餐飲品項，無需出餐單");
+      const { data, error } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取銷售明細失敗");
+      await printKitchenTicket(data, sale.service_mode, sale.table_no ?? null);
+      return sale.id;
+    },
+    onSuccess: (saleId) => setKitchenNote(`已送出 #${saleId} 的出餐單。`),
+    onError: (err: Error) => setKitchenNote(err.message),
+  });
+
   const pushAck = useMutation({
     mutationFn: async (sale: SaleSummary) => {
       if (sale.buyer_contact_id == null) throw new Error("此單無買方會員，無法推送簽收");
@@ -783,6 +802,9 @@ export default function SalesPage() {
       </p>
       {voidedNote !== null && <p className="form-success">{voidedNote}</p>}
       {ackNote !== null && <p className="hint">{ackNote}</p>}
+      {kitchenNote !== null && (
+        <p className={reprintKitchen.isError ? "form-error" : "hint"}>{kitchenNote}</p>
+      )}
       {isManager && <LinePayReconcilePanel />}
       {sales.isError && (
         <p role="alert" className="form-error">
@@ -854,6 +876,20 @@ export default function SalesPage() {
                         }}
                       >
                         推送簽收
+                      </button>
+                    )}
+                    {sale.service_mode != null && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`重印銷售 ${sale.id} 出餐單`}
+                        disabled={reprintKitchen.isPending}
+                        onClick={() => {
+                          setKitchenNote(null);
+                          reprintKitchen.mutate(sale);
+                        }}
+                      >
+                        重印出餐單
                       </button>
                     )}
                     {sale.signature_task_id != null && (

@@ -165,6 +165,8 @@ describe("POS 顧客螢幕同步", () => {
         adjustments={[]}
         tenders={[]}
         ready
+        serviceMode={null}
+        tableNo={null}
         onRestore={onRestore}
       />,
       { wrapper: wrapper() },
@@ -178,6 +180,8 @@ describe("POS 顧客螢幕同步", () => {
         adjustments={[]}
         tenders={TENDERS}
         ready
+        serviceMode={null}
+        tableNo={null}
         onRestore={onRestore}
       />,
     );
@@ -189,6 +193,9 @@ describe("POS 顧客螢幕同步", () => {
       buyer_contact_id: null,
       tenders: TENDERS,
       adjustments: null,
+      // 餐飲內用/外帶與桌號（docs/35）：跟著購物車一起保存，POS 重掛才還原得回來。
+      service_mode: null,
+      table_no: null,
     });
   });
 
@@ -261,6 +268,8 @@ describe("POS 顧客螢幕同步", () => {
         adjustments={[]}
         tenders={[]}
         ready
+        serviceMode={null}
+        tableNo={null}
         onRestore={vi.fn()}
       />,
       { wrapper: Wrapper },
@@ -273,6 +282,8 @@ describe("POS 顧客螢幕同步", () => {
         adjustments={[]}
         tenders={TENDERS}
         ready
+        serviceMode={null}
+        tableNo={null}
         onRestore={vi.fn()}
       />,
     );
@@ -291,6 +302,8 @@ describe("POS 顧客螢幕同步", () => {
         adjustments={[]}
         tenders={[{ tender_type: "TAIWAN_PAY", amount: "240" }]}
         ready
+        serviceMode={null}
+        tableNo={null}
         onRestore={vi.fn()}
       />,
     );

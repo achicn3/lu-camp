@@ -326,6 +326,8 @@ def _cart_fingerprint(
     tenders: list[TenderInput] | None = None,
     invoice_info: InvoiceInfoInput | None = None,
     adjustments: Sequence[DiscountRequest] | None = None,
+    service_mode: ServiceMode | None = None,
+    table_no: str | None = None,
 ) -> str:
     """購物車＋收款＋發票資訊＋折扣組成的穩定 sha256；供 idempotency 重播時比對請求是否相同。
 
@@ -334,6 +336,9 @@ def _cart_fingerprint(
     **贈品與折扣納入指紋**：兩者直接改變金額與庫存，同 key 但折扣不同若被當成重放，
     第二次的折扣會靜默消失、客人卻以為打了折。折扣**不排序**——套用有先後之分
     （先單品後整單，分攤基礎不同），順序不同就是不同的請求。
+
+    內用/外帶與桌號納入指紋（docs/35）：兩者雖不影響金額，卻決定出餐單印到哪一桌——
+    不納入的話，A1 的單會被當成 A2 的重放，第二桌的餐點掛在第一桌名下。
     """
     canonical = {
         "invoice_info": (
@@ -348,6 +353,8 @@ def _cart_fingerprint(
             }
         ),
         "buyer_contact_id": buyer_contact_id,
+        "service_mode": None if service_mode is None else service_mode.value,
+        "table_no": table_no,
         # 明細對「掃描順序」正規化排序（Codex 第四輪 #3）：與前端持久化冪等鍵的排序語意一致——
         # 同一籃商品以不同順序重掃，指紋須相同，回應遺失後同鍵重送才會冪等重放原單、不誤回 409。
         "lines": sorted(
@@ -729,7 +736,13 @@ class SalesService:
 
         normalized_tenders = self._normalize_tenders(tenders)
         fingerprint = _cart_fingerprint(
-            lines, buyer_contact_id, normalized_tenders, invoice_info, adjustments
+            lines,
+            buyer_contact_id,
+            normalized_tenders,
+            invoice_info,
+            adjustments,
+            service_mode,
+            normalized_table_no,  # 用正規化值：落庫的是它，重算才對得上
         )
 
         # idempotent replay：已存在同 key 的銷售 → 內容相同回原單、不再產生副作用；
@@ -743,6 +756,8 @@ class SalesService:
                 tenders=normalized_tenders,
                 invoice_info=invoice_info,
                 adjustments=adjustments,
+                service_mode=service_mode,
+                table_no=normalized_table_no,
             )
             if replay is not None:
                 return replay
@@ -764,6 +779,8 @@ class SalesService:
                     tenders=normalized_tenders,
                     invoice_info=invoice_info,
                     adjustments=adjustments,
+                    service_mode=service_mode,
+                    table_no=normalized_table_no,
                 )
 
         has_cash = normalized_tenders is None or any(
@@ -1628,6 +1645,8 @@ class SalesService:
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        service_mode: ServiceMode | None = None,
+        table_no: str | None = None,
     ) -> Sale | None:
         """同 key 且購物車＋收款相符 → 回原單；內容不符 → IdempotencyKeyConflict；不存在 → None。
 
@@ -1641,7 +1660,7 @@ class SalesService:
         if existing is None:
             return None
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info, adjustments
+            lines, buyer_contact_id, tenders, invoice_info, adjustments, service_mode, table_no
         ):
             raise IdempotencyKeyConflict(
                 f"idempotency key 已用於不同的購物車內容（sale {existing.id}）"
@@ -1662,6 +1681,8 @@ class SalesService:
         tenders: list[TenderInput] | None = None,
         invoice_info: InvoiceInfoInput | None = None,
         adjustments: Sequence[DiscountRequest] | None = None,
+        service_mode: ServiceMode | None = None,
+        table_no: str | None = None,
     ) -> Sale:
         """簽署綁定的「回應遺失重試」回放（docs/23 K5，Codex 第一輪；同 K4 第九/十/十三/十五輪）。
 
@@ -1680,7 +1701,7 @@ class SalesService:
                 "此扣抵簽署綁定的銷售已作廢，不可重放或重用；請重新推送簽署"
             )
         if existing.idempotency_fingerprint != _cart_fingerprint(
-            lines, buyer_contact_id, tenders, invoice_info, adjustments
+            lines, buyer_contact_id, tenders, invoice_info, adjustments, service_mode, table_no
         ):
             raise SignatureTaskConflict("此購物金扣抵簽署已綁定另一筆結帳，不可重複使用")
         return existing

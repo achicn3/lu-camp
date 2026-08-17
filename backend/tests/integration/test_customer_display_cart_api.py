@@ -27,6 +27,7 @@ from app.modules.contacts.models import Contact
 from app.modules.customerdisplay.models import CartSession, CartSessionEvent, KioskDevice
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct
+from app.modules.menu.models import MenuItem
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
 from app.modules.sales.models import LinePayTransaction, Sale
 from app.modules.settings.schemas import SettingsUpdateRequest
@@ -36,7 +37,7 @@ from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
-from app.shared.enums import UserRole
+from app.shared.enums import ServiceMode, UserRole
 from app.shared.exceptions import LinePayTransportError
 
 ORIGIN = "http://localhost:3000"
@@ -1345,3 +1346,92 @@ async def test_stale_processing_cart_recovers_to_draft(
     )
     assert event is not None
     assert event.event_type == "PAYMENT_PROCESSING_RECOVERED"
+
+
+async def test_uncertain_menu_checkout_reconciles_with_service_mode(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """付款不明的**餐飲**結帳補單時，內用/外帶與桌號必須一起帶回（docs/35）。
+
+    回歸測試：`reconcile_payment` 是從保存的原始請求重建交易，漏帶 service_mode 會讓
+    `create_sale` 丟 InvalidServiceMode——LINE Pay 已確認扣款卻補不出本機銷售，
+    購物車永遠卡在 PAYMENT_UNCERTAIN。與先前「漏帶折扣」是同一類錯。
+    """
+    seeded = await _seed(db_session, "35")
+    terminal_id, _, _csrf = await _pair(client, seeded, suffix="35")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-35"))
+    assert manager is not None
+    await StoreSettingsService(db_session).update_settings(
+        manager.store_id,
+        actor_user_id=manager.id,
+        patch=SettingsUpdateRequest(linepay_enabled=True, dine_in_tables=["A1"]),
+    )
+    menu_item = MenuItem(store_id=manager.store_id, name="手沖-耶加", unit_price=Decimal("180"))
+    db_session.add(menu_item)
+    await db_session.flush()
+    await db_session.commit()
+
+    cart_payload: dict[str, object] = {
+        "expected_revision": None,
+        "lines": [{"line_type": "MENU", "menu_item_id": menu_item.id, "qty": 1}],
+        "tenders": [
+            {
+                "tender_type": "LINE_PAY",
+                "amount": "180",
+                "line_pay_one_time_key": "OTK-menu-uncertain",
+            }
+        ],
+    }
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=cart_payload,
+    )
+    assert created.status_code == 200, created.text
+
+    transport = _UncertainLinePayTransport()
+    linepay_client = _uncertain_linepay_client(transport)
+    monkeypatch.setattr("app.modules.sales.router._linepay_client", lambda: linepay_client)
+    monkeypatch.setattr(
+        "app.modules.sales.linepay.linepay_client_from_config",
+        lambda: linepay_client,
+    )
+    uncertain = await client.post(
+        "/api/v1/sales",
+        headers={**_auth(seeded.manager_token), "Idempotency-Key": "uncertain-menu-order"},
+        json={
+            "lines": [{"line_type": "MENU", "menu_item_id": menu_item.id, "qty": 1}],
+            "tenders": cart_payload["tenders"],
+            "cart_session_id": created.json()["id"],
+            "cart_revision": created.json()["revision"],
+            "expected_einvoice_enabled": False,
+            "service_mode": "DINE_IN",
+            "table_no": "A1",
+        },
+    )
+    assert uncertain.status_code == 409, uncertain.text
+    assert "PAYMENT_UNCERTAIN" in uncertain.text
+
+    transport.check_response = {
+        "returnCode": "0000",
+        "returnMessage": "Success.",
+        "info": {
+            "transactionId": 2026081700000000001,
+            "status": "COMPLETE",
+            "payInfo": [{"method": "LINE_PAY", "amount": 180}],
+        },
+    }
+    reconciled = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
+        headers=_auth(seeded.manager_token),
+        json={"action": "QUERY_PROVIDER"},
+    )
+    assert reconciled.status_code == 200, reconciled.text
+    assert reconciled.json()["outcome"] == "SUCCESS_CONFIRMED"
+
+    sale = await db_session.scalar(select(Sale))
+    assert sale is not None
+    assert sale.service_mode is ServiceMode.DINE_IN
+    assert sale.table_no == "A1"

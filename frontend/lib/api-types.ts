@@ -3154,6 +3154,9 @@ export interface components {
             expected_revision?: number | null;
             /** Lines */
             lines: components["schemas"]["CartLineRequest"][];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
+            /** Table No */
+            table_no?: string | null;
             /** Tenders */
             tenders?: components["schemas"]["CartTenderRequest"][] | null;
         };
@@ -6210,6 +6213,9 @@ export interface components {
             adjustments: components["schemas"]["StaffCartAdjustmentRead"][];
             /** Lines */
             lines: components["schemas"]["StaffCartLineRead"][];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
+            /** Table No */
+            table_no?: string | null;
         };
         /**
          * StaffCartSessionRead

@@ -1340,6 +1340,11 @@ class CustomerDisplayService:
                 # 按折前金額重新定價 → tender 加總與快照都對不上 → 回滾，購物車永遠卡在
                 # PAYMENT_UNCERTAIN，之後每次重試都必然失敗。
                 adjustments=request.to_adjustments(),
+                # 內用/外帶與桌號同理**必須**一起帶（docs/35）：含餐飲的單少了它們，
+                # create_sale 會丟 InvalidServiceMode → LINE Pay 已確認扣款卻補不出本機
+                # 銷售，購物車永遠卡在 PAYMENT_UNCERTAIN。與上面漏帶折扣是同一類錯。
+                service_mode=request.service_mode,
+                table_no=request.table_no,
                 idempotency_key=idempotency_key,
                 signature_task_id=request.signature_task_id,
                 cart_session_id=cart.id,

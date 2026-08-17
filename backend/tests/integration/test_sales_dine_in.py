@@ -22,6 +22,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.customerdisplay.schemas import CartUpsertRequest, StaffCartPayloadRead
 from app.modules.inventory.models import CatalogProduct
 from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale
@@ -261,3 +262,69 @@ async def test_db_check_accepts_valid_combinations(
     _, store_id, clerk_id = await _seed(db_session)
     await _insert_sale_raw(db_session, store_id, clerk_id, mode, table_no)
     await db_session.flush()
+
+
+# ── 冪等指紋 ──
+
+
+async def test_same_key_different_table_is_a_conflict_not_a_replay(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同 key、同品項、換一桌 → 409 而非靜默回放原單。
+
+    桌號雖不影響金額，卻決定出餐單印到哪一桌；若不納入指紋，A1 的單會被當成 A2 的重放，
+    第二桌的餐點就掛在第一桌名下。
+    """
+    token, store_id, _ = await _seed(db_session)
+    item = await _menu_item(db_session, store_id)
+    first = await _post_menu_sale(
+        client, token, item, "dup1", service_mode="DINE_IN", table_no="A1"
+    )
+    assert first.status_code == 201, first.text
+    again = await _post_menu_sale(
+        client, token, item, "dup1", service_mode="DINE_IN", table_no="A2"
+    )
+    assert again.status_code == 409, again.text
+
+
+async def test_same_key_same_table_still_replays(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """真正的網路重試（內容完全相同）仍須冪等回放原單，不可因新欄位而誤判衝突。"""
+    token, store_id, _ = await _seed(db_session)
+    item = await _menu_item(db_session, store_id)
+    first = await _post_menu_sale(
+        client, token, item, "same1", service_mode="DINE_IN", table_no="A1"
+    )
+    assert first.status_code == 201, first.text
+    again = await _post_menu_sale(
+        client, token, item, "same1", service_mode="DINE_IN", table_no="A1"
+    )
+    assert again.status_code in (200, 201), again.text
+    assert again.json()["id"] == first.json()["id"]
+
+
+async def test_cart_upsert_round_trips_service_mode(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """購物車必須保存內用/外帶與桌號（docs/35）。
+
+    回歸測試：POS 重新載入被凍結的購物車時是從 `staff_payload` 還原的；少了這兩欄，
+    選擇會遺失，而凍結中兩顆模式鍵都停用 → 已簽名的交易只能作廢重簽。
+    """
+    payload = CartUpsertRequest.model_validate(
+        {
+            "lines": [{"line_type": "MENU", "menu_item_id": 1, "qty": 1}],
+            "service_mode": "DINE_IN",
+            "table_no": "  A1  ",
+        }
+    )
+    assert payload.service_mode is ServiceMode.DINE_IN
+    assert payload.table_no == "A1"  # 與 SaleCreateRequest 同一條正規化規則
+    dumped = payload.model_dump(mode="json")
+    assert dumped["service_mode"] == "DINE_IN"
+    assert dumped["table_no"] == "A1"
+    # 還原端（POS 讀 staff_payload 用的 schema）必須看得到這兩欄
+    restored = StaffCartPayloadRead.model_validate(dumped)
+    assert restored.service_mode is ServiceMode.DINE_IN
+    assert restored.table_no == "A1"

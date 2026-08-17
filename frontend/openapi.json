@@ -1835,6 +1835,28 @@
             "title": "Lines",
             "type": "array"
           },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
+          },
           "tenders": {
             "anyOf": [
               {
@@ -10033,6 +10055,27 @@
             },
             "title": "Lines",
             "type": "array"
+          },
+          "service_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ServiceMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "table_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table No"
           }
         },
         "required": [
