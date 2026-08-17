@@ -1143,6 +1143,8 @@ export default function PosPage() {
   // 說「已送出」但其實沒印，店員會以為吧台收到單了。
   // 內用/外帶與桌號一律取自**後端回傳的 sale**，不用送出前的本地快照：sale 才是權威值，
   // 而且補救路徑（回應遺失/付款對帳後補單）根本沒有本地快照可用。
+  // 出餐單列印請求的身分（單號）：慢回應回來時用來判斷自己是否已經過期。
+  const kitchenRequestSaleId = useRef<number | null>(null);
   const [kitchen, setKitchen] = useState<{
     mode: ServiceMode;
     tableNo: string | null;
@@ -1317,6 +1319,11 @@ export default function PosPage() {
   // 不會自動出單、完成頁也沒有重印鍵。
   const startKitchenTicket = useCallback(
     (sale: SaleRead) => {
+      // 代理端若卡在死掉的印表機，這個 promise 可能拖上數十秒；那段期間店員已經結完
+      // 下一筆了。回來的失敗必須認得出自己已經過期，否則會把**別桌**的錯誤蓋到現在
+      // 這張完成頁上（而重印鍵印的又是現在這筆）。以單號認身分。
+      kitchenRequestSaleId.current = sale.id;
+      const isCurrent = () => kitchenRequestSaleId.current === sale.id;
       const mode = sale.service_mode;
       if (mode == null) {
         setKitchen(null);
@@ -1328,9 +1335,10 @@ export default function PosPage() {
         return;
       }
       setKitchen({ mode, tableNo, outcome: "SENT", error: null });
-      printKitchenTicket(sale, mode, tableNo).catch((err: Error) =>
-        setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message }),
-      );
+      printKitchenTicket(sale, mode, tableNo).catch((err: Error) => {
+        if (!isCurrent()) return;
+        setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message });
+      });
     },
     [printKitchenEnabled],
   );
@@ -1342,11 +1350,14 @@ export default function PosPage() {
       if (sale.service_mode == null) {
         throw new Error("本單沒有餐飲品項，無需出餐單");
       }
+      kitchenRequestSaleId.current = sale.id;
       await printKitchenTicket(sale, sale.service_mode, sale.table_no ?? null);
-      return { mode: sale.service_mode, tableNo: sale.table_no ?? null };
+      return { saleId: sale.id, mode: sale.service_mode, tableNo: sale.table_no ?? null };
     },
-    onSuccess: ({ mode, tableNo }) =>
-      setKitchen({ mode, tableNo, outcome: "SENT", error: null }),
+    onSuccess: ({ saleId, mode, tableNo }) => {
+      if (kitchenRequestSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
+      setKitchen({ mode, tableNo, outcome: "SENT", error: null });
+    },
     onError: (err: Error) =>
       setKitchen((prev) =>
         prev === null ? prev : { ...prev, outcome: "FAILED", error: err.message },

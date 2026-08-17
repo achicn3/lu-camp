@@ -270,6 +270,10 @@ async def create_sale(
                     # 漏帶的話，輸家會以「無折扣」重算指紋 → 必然 409：錢已被贏家扣掉、
                     # 單也成立了，POS 卻說簽署不能重用。
                     adjustments=payload.to_adjustments(),
+                    # 內用/外帶與桌號同理（docs/35）：指紋含這兩欄，漏帶會讓「購物金＋餐飲」
+                    # 的並發重送必然 409。
+                    service_mode=payload.service_mode,
+                    table_no=payload.table_no,
                 )
             except SignatureTaskConflict as conflict:
                 raise HTTPException(
