@@ -190,6 +190,13 @@ try {
   ok("取消篩選後兩筆都回來", backCount >= 2, `${backCount} 筆`);
   await page.screenshot({ path: `${SHOTS}/05-after-register.png` });
 
+  const issued = await api(token, "GET", `/api/v1/sales/${saleId}`);
+  ok(
+    "銷售的發票狀態轉為已開立",
+    issued.json?.invoice_status === "ISSUED",
+    String(issued.json?.invoice_status),
+  );
+
   // ── 登記後按作廢：必須**當場**說紙本程序，絕不可先叫店員去退款 ──
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector("table tbody tr");
@@ -201,21 +208,33 @@ try {
     "作廢對話框直接說紙本程序",
     voidText.includes("手開紙本發票") && voidText.includes("國稅局"),
   );
+  // 判準是「**不得出現退款指示**」——紙本對話框本身有「確認作廢（不送平台）」是正確的，
+  // 不可拿它當失敗條件（改斷言前一版誤把它列為不該出現）。
   ok(
-    "不會先要求店員去退款（台灣Pay 指示/確認框都不該出現）",
-    !voidText.includes("手動退款") && !voidText.includes("確認作廢"),
+    "不會先要求店員去退款（台灣Pay 退款指示不該出現）",
+    !voidText.includes("手動退款") && !voidText.includes("已於台灣Pay"),
     voidText.includes("手動退款") ? "仍出現退款指示" : "",
   );
+  const confirmBtn = voidDialog.getByRole("button", { name: /確認作廢/ });
+  ok("未勾確認前不可作廢", await confirmBtn.isDisabled());
   await page.screenshot({ path: `${SHOTS}/06-void-blocked.png` });
-  await voidDialog.getByRole("button", { name: "知道了" }).click();
+
+  // 完成紙本程序後必須有路徑收斂，否則庫存/點數/現金永遠不反轉
+  await voidDialog.getByLabel(/已依國稅局程序作廢紙本/).check();
+  await page.waitForTimeout(300);
+  ok("勾了紙本已作廢後可送出", !(await confirmBtn.isDisabled()));
+  await confirmBtn.click();
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: `${SHOTS}/07-void-done.png` });
+
+  const voided = await api(token, "GET", `/api/v1/sales/${saleId}`);
+  ok("銷售已作廢", voided.json?.status === "VOIDED", String(voided.json?.status));
+  const q2 = await api(token, "GET", "/api/v1/einvoice/queue?limit=200");
+  const voidMsgs = (q2.json?.items ?? []).filter((i) => i.action === "VOID");
+  ok("不得排 F0501（平台上沒有這張發票）", voidMsgs.length === 0, `${voidMsgs.length} 筆`);
 
   // ── 後端事實查核：來源、佇列取消 ──
-  const invoice = await api(token, "GET", `/api/v1/sales/${saleId}`);
-  ok(
-    "銷售的發票狀態轉為已開立",
-    invoice.json?.invoice_status === "ISSUED",
-    String(invoice.json?.invoice_status),
-  );
+  // 作廢後發票狀態不再是 ISSUED；改在作廢前就查核（見上方登記段）。
   // 現在有兩筆：登記過的那筆必須從待送佇列消失，**未登記的第二筆本來就該還在**。
   // 只斷言「完全沒有待送」會誤判——那反而代表把別人的佇列也取消了。
   const queue = await api(token, "GET", "/api/v1/einvoice/queue?status=PENDING&limit=200");

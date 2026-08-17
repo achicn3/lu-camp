@@ -92,18 +92,15 @@ def _may_have_reached_platform(item: EInvoiceUploadQueue) -> bool:
     並 commit，**先於**對帳查詢與實際 POST。若查詢因斷網失敗，F0401 其實從未送出——
     以痕跡判定會在平台/網路故障時把手開登記鎖死，而那正是本功能存在的理由。
 
-    真正的證據有三種：
+    真正的證據有兩種：
     - `posted_at`：Amego 送出端點呼叫前寫入。
     - `attempts > 0`：只有 `retry()` 會加，而 retry 僅適用 FAILED，代表平台答覆過。
-    - Turnkey outbox：檔案一落地就是曝光，`dropped_at` 即證據（以 xml_path 前綴區分路徑）。
+
+    舊 Turnkey outbox 的列不在此判斷——那條路正式環境走不到（`drop_pending` 已無呼叫端、
+    序列化器是刻意拋錯的樁），真的出現就是狀態不明，由呼叫端 fail closed 轉人工，
+    不在這裡模擬一條死路的語意。
     """
-    if item.posted_at is not None or item.attempts > 0:
-        return True
-    return (
-        item.xml_path is not None
-        and not item.xml_path.startswith("amego:")
-        and item.dropped_at is not None
-    )
+    return item.posted_at is not None or item.attempts > 0
 
 
 def _payload_first(payload: object, *, ctx: str) -> dict[str, object]:
@@ -302,6 +299,16 @@ class EInvoiceService:
             raise ManualInvoiceNotRegisterable(
                 "找不到本筆發票的開立佇列紀錄，無法確認是否曾送出平台；請人工對帳後再處理。"
             )
+        # 舊 Turnkey outbox 認領（非 amego: 前綴）：檔案可能已落到 SRC 被撿走，而 Amego
+        # 查詢對它毫無意義 → 一律轉人工，不由系統自行判斷（同 send_via_amego 的既有口徑）。
+        if any(
+            item.xml_path is not None and not item.xml_path.startswith("amego:")
+            for item in issue_items
+        ):
+            raise ManualInvoiceNotRegisterable(
+                "本筆的開立訊息由非 Amego 路徑認領（舊 Turnkey outbox），"
+                "無法自動確認平台狀態；請人工對帳後再處理。"
+            )
         if any(_may_have_reached_platform(item) for item in issue_items):
             # **延遲取得客戶端**：從未送出過的單（例如電子發票剛啟用就故障）不必被憑證卡住。
             client = await client_factory()
@@ -388,7 +395,9 @@ class EInvoiceService:
             store_id, limit=limit, offset=offset
         )
 
-    async def assert_platform_voidable(self, store_id: int, sale_id: int) -> None:
+    async def assert_platform_voidable(
+        self, store_id: int, sale_id: int, *, manual_paper_disposed: bool = False
+    ) -> None:
         """作廢前置檢查（docs/36）：紙本發票不可走平台作廢——**必須在任何副作用之前呼叫**。
 
         `void_invoice_for_sale` 裡也有同一道守衛（防直接呼叫），但那裡已經在現金/購物金
@@ -397,10 +406,15 @@ class EInvoiceService:
         純讀、無副作用，安全地放在最前面。
         """
         invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
-        if invoice is not None and invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+        if (
+            invoice is not None
+            and invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+            and not manual_paper_disposed
+        ):
             raise ManualPaperInvoiceOperation(
                 "本筆為手開紙本發票，系統不代管作廢；"
-                "請依國稅局程序作廢紙本並保留收回聯後，再作廢本銷售。"
+                "請依國稅局程序作廢紙本並保留收回聯後，"
+                "再以「紙本已作廢」確認完成本筆銷售的作廢。"
             )
 
     async def void_invoice_for_sale(
@@ -410,6 +424,7 @@ class EInvoiceService:
         *,
         reason: InvoiceVoidReason = InvoiceVoidReason.SALE_VOID,
         actor_user_id: int | None,
+        manual_paper_disposed: bool = False,
     ) -> Invoice | None:
         """銷售作廢時中止其電子發票（由 sales.void_sale 呼叫；跨模組經 service，§2）。
 
@@ -425,11 +440,29 @@ class EInvoiceService:
         if invoice is None:
             return None
         if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
-            # 手開紙本（docs/36）：平台上沒有這張發票，F0501 沒有對象可作廢。
-            raise ManualPaperInvoiceOperation(
-                "本筆為手開紙本發票，系統不代管作廢；"
-                "請依國稅局程序作廢紙本並保留收回聯後，再作廢本銷售。"
+            if not manual_paper_disposed:
+                # 手開紙本（docs/36）：平台上沒有這張發票，F0501 沒有對象可作廢。
+                raise ManualPaperInvoiceOperation(
+                    "本筆為手開紙本發票，系統不代管作廢；"
+                    "請依國稅局程序作廢紙本並保留收回聯後，"
+                    "再以「紙本已作廢」確認完成本筆銷售的作廢。"
+                )
+            # 店長已確認紙本作廢完成：**只做本地作廢**（發票 VOID、銷售反轉），
+            # 絕不排 F0501——平台上沒有這張發票可作廢。
+            if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
+                return invoice
+            status_before_paper = invoice.status
+            invoice.status = InvoiceStatus.VOID
+            invoice.void_reason = reason
+            await self._audit_invoice_void_transition(
+                store_id,
+                invoice,
+                status_before=status_before_paper,
+                reason=reason,
+                actor_user_id=actor_user_id,
+                source="manual_paper_disposed",
             )
+            return invoice
         if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
             return invoice
         status_before = invoice.status

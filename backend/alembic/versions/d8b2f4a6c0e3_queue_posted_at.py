@@ -31,6 +31,17 @@ def upgrade() -> None:
         "einvoice_upload_queue",
         sa.Column("posted_at", sa.DateTime(timezone=True), nullable=True),
     )
+    # **保守回填**：升級前的 sender 認領後會直接 POST 卻不寫 posted_at。若舊版在 POST 後、
+    # 落結果前崩潰，資料形狀是「PENDING + amego: 認領 + attempts=0」——升級後會被當成
+    # 從未送出而允許直接登記手開紙本，儘管平台可能已有電子發票（Codex 對抗審查第六輪）。
+    # 既有 amego: 認領列一律視為可能已送出，強制先對帳。
+    op.execute(
+        sa.text(
+            "UPDATE einvoice_upload_queue"
+            " SET posted_at = COALESCE(dropped_at, created_at)"
+            " WHERE xml_path LIKE 'amego:%' AND posted_at IS NULL"
+        )
+    )
 
 
 def downgrade() -> None:

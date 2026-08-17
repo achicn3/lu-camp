@@ -1977,6 +1977,7 @@ class SalesService:
         *,
         linepay_client: LinePayClient | None = None,
         manual_refund_ack: bool = False,
+        manual_paper_disposed: bool = False,
     ) -> Sale:
         """作廢銷售：反轉原收款與庫存、標記 **sale.status=VOIDED** 並寫稽核；不刪除。
 
@@ -2006,7 +2007,9 @@ class SalesService:
         # 排在台灣Pay 的人工退款提示之後不夠——那道提示會先叫店員去 App 把錢退給客人，
         # 店員照做（錢真的出去、收不回來）再作廢才被擋，等於重現「已退款卻沒作廢」
         # （Codex 對抗審查第二輪 critical #2）。einvoice 內另有同一道守衛防直接呼叫。
-        await self._einvoice.assert_platform_voidable(sale.store_id, sale.id)
+        await self._einvoice.assert_platform_voidable(
+            sale.store_id, sale.id, manual_paper_disposed=manual_paper_disposed
+        )
         # 台灣Pay 無 API 退款（店員於其 App 手動退）：作廢不得靜默完成而讓客人仍被扣款（Codex
         # adversarial finding #3）。含 TAIWAN_PAY tender 者，須店員先手動退款、帶 manual_refund_ack
         # 確認才反轉。純 LINE Pay 由下方 refund API 自動退、無需此確認；現金於錢櫃取出（既有口徑）。
@@ -2076,6 +2079,7 @@ class SalesService:
             sale.id,
             reason=InvoiceVoidReason.SALE_VOID,
             actor_user_id=actor_user_id,
+            manual_paper_disposed=manual_paper_disposed,
         )
         # 顯示用的反正規化欄位要跟上實際發票狀態（Codex 第二／三輪）：
         # - 沒有發票（電子發票關閉）→ 不動，維持 NOT_ISSUED

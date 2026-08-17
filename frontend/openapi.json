@@ -18522,6 +18522,16 @@
               "title": "Manual Refund Ack",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "manual_paper_disposed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Manual Paper Disposed",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

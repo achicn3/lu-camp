@@ -806,3 +806,104 @@ async def test_registration_still_requires_platform_check_once_posted(
     client, transport = _amego({"code": 71, "msg": "查無資料"})
     await _register(db_session, store_id, sale_id, client)
     assert [c.split("amego.tw")[-1] for c in transport.calls] == ["/json/invoice_query"]
+
+
+# ── 手開紙本後仍要能完成本地作廢（否則庫存/點數/現金永遠不反轉） ──
+
+
+async def test_manual_paper_sale_can_be_voided_after_paper_disposition(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """店長依國稅局程序把紙本作廢後，**必須有路徑完成本地反轉**（docs/36）。
+
+    原本守衛無條件拒絕 MANUAL_PAPER 作廢，等於：紙本已作廢，但系統裡那筆單永遠有效
+    ——庫存不回補、點數不沖回、現金不退、寄售結算不反轉，且沒有任何參數能表達
+    「紙本已處理完畢」（Codex 對抗審查第六輪 high）。
+    帶 manual_paper_disposed 確認後：只做本地發票作廢與銷售反轉，**不送 F0501**。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    db_session.add(
+        SaleTender(
+            store_id=store_id, sale_id=sale_id, tender_type=TenderType.CASH, amount=Decimal(1050)
+        )
+    )
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    # 未帶確認 → 仍擋（且擋在任何退款之前）
+    with pytest.raises(ManualPaperInvoiceOperation):
+        await SalesService(db_session).void_sale(sale, actor_user_id=clerk_id)
+
+    # 帶確認 → 本地反轉完成
+    voided = await SalesService(db_session).void_sale(
+        sale, actor_user_id=clerk_id, manual_paper_disposed=True
+    )
+    assert voided.status is SaleStatus.VOIDED
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID
+    # **不得排 F0501**：平台上沒有這張發票
+    void_rows = [
+        q
+        for q in (
+            await db_session.scalars(
+                select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+            )
+        ).all()
+        if q.action is EInvoiceAction.VOID
+    ]
+    assert void_rows == []
+    actions = list(
+        (
+            await db_session.scalars(
+                select(AuditLog.action).where(AuditLog.store_id == store_id)
+            )
+        ).all()
+    )
+    assert "VOID_INVOICE" in actions
+
+
+async def test_non_amego_claim_is_refused_for_manual_registration(
+    db_session: AsyncSession,
+) -> None:
+    """非 Amego 路徑認領的列（舊 Turnkey outbox）→ 無法自動確認平台狀態 → 拒絕登記。
+
+    正式環境走不到那條路（`drop_pending` 已無呼叫端、序列化器是拋錯的樁），
+    真的出現就代表狀態不明，不該由系統自行判斷（Codex 對抗審查第六輪 critical）。
+    """
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    row.xml_path = "/srv/turnkey/SRC/F0401/a0.xml"  # 舊 outbox 形狀
+    row.dropped_at = None  # 已寫檔但尚未確認（既有 crash 恢復狀態）
+    await db_session.flush()
+
+    async def _explode() -> AmegoClient:
+        raise AssertionError("不應向 Amego 查詢舊 Turnkey 列")
+
+    with pytest.raises(ManualInvoiceNotRegisterable, match="人工對帳"):
+        await EInvoiceService(db_session).register_manual_invoice(
+            store_id,
+            sale_id,
+            invoice_no="ZA10029996",
+            invoice_date=date(2026, 8, 17),
+            invoice_time=None,
+            random_number=None,
+            total=Decimal(1050),
+            note=None,
+            actor_user_id=None,
+            client_factory=_explode,
+        )

@@ -10774,6 +10774,7 @@ export interface operations {
         parameters: {
             query?: {
                 manual_refund_ack?: boolean;
+                manual_paper_disposed?: boolean;
             };
             header?: never;
             path: {

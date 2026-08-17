@@ -535,6 +535,9 @@ async def void_sale(
     session: SessionDep,
     user: ManagerDep,
     manual_refund_ack: Annotated[bool, Query()] = False,
+    # 手開紙本發票（docs/36）：店長已依國稅局程序作廢紙本並保留收回聯的確認。
+    # 帶入才允許作廢，且只做本地反轉、不送 F0501（平台上沒有這張發票）。
+    manual_paper_disposed: Annotated[bool, Query()] = False,
 ) -> SaleRead:
     svc = SalesService(session)
     sale = await svc.get_sale(user.store_id, sale_id)
@@ -546,6 +549,7 @@ async def void_sale(
             user.id,
             linepay_client=_linepay_client(),
             manual_refund_ack=manual_refund_ack,
+            manual_paper_disposed=manual_paper_disposed,
         )
     except (SaleAlreadyVoid, SaleHasReturns) as exc:
         await session.rollback()

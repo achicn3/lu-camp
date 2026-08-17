@@ -227,6 +227,8 @@ function VoidConfirmDialog({
   // 手開紙本（docs/36）：來源由列表 API 帶入，**必須在畫面顯示任何退款指示之前**就知道，
   // 否則店員會先照指示退款、送出後才被後端擋下——錢已經出去了。
   const isManualPaper = sale.invoice_issue_channel === "MANUAL_PAPER";
+  // 紙本已依國稅局程序作廢的確認：帶到後端才允許本地反轉（且不送 F0501）。
+  const [manualPaperDisposed, setManualPaperDisposed] = useState(false);
   // 台灣Pay 無 API 退款（docs/30 finding #3）：作廢須店員先於台灣Pay App 手動退款、勾選確認，
   // 後端才反轉——否則客人已作廢卻仍被扣款。LINE Pay 由後端自動退、現金自錢櫃取出，皆不需此確認。
   const isMixed = sale.payment_method === "MIXED";
@@ -259,7 +261,11 @@ function VoidConfirmDialog({
       const { data, error: apiError } = await api.POST("/api/v1/sales/{sale_id}/void", {
         params: {
           path: { sale_id: sale.id },
-          query: isTaiwanPay ? { manual_refund_ack: manualRefundAck } : {},
+          query: isManualPaper
+            ? { manual_paper_disposed: manualPaperDisposed }
+            : isTaiwanPay
+              ? { manual_refund_ack: manualRefundAck }
+              : {},
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "作廢失敗");
@@ -290,9 +296,34 @@ function VoidConfirmDialog({
               本筆為手開紙本發票，系統不代管作廢。請依國稅局程序作廢紙本並保留收回聯；
               作廢完成前請勿退款給客人。
             </p>
+            {/* 完成紙本程序後仍要能讓系統收斂（docs/36）：否則庫存、點數、現金、
+                寄售結算永遠不會反轉，那筆單在系統裡永遠有效。 */}
+            <label className="field field-toggle void-manual-paper-ack">
+              <input
+                type="checkbox"
+                checked={manualPaperDisposed}
+                onChange={(e) => setManualPaperDisposed(e.target.checked)}
+              />
+              <span className="field-label">
+                我已依國稅局程序作廢紙本發票並保留收回聯
+              </span>
+            </label>
+            {error !== null && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
             <div className="pos-dialog-actions">
-              <button type="button" className="btn-primary" onClick={onClose}>
-                知道了
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={!manualPaperDisposed || voidSale.isPending}
+                onClick={() => voidSale.mutate()}
+              >
+                {voidSale.isPending ? "作廢中…" : "確認作廢（不送平台）"}
+              </button>
+              <button type="button" className="btn-ghost" onClick={onClose}>
+                取消
               </button>
             </div>
           </>
@@ -430,7 +461,10 @@ function ReturnDialog({
   const planKey = JSON.stringify(returnLines);
   const consentMatchesPlan = consentTaskId !== null && consentPlanKey === planKey;
   const paperRecalled = paperRecalledPlanKey === planKey;
-  const taiwanPayRefundConfirmed = taiwanPayConfirmedPlanKey === planKey;
+  // 台灣Pay 的確認鍵**必須含實際退款腿金額**：同一組退貨品項，其台灣Pay 金額仍會因
+  // 累計退款（別台終端先退過）或購物金優先分配而改變。只綁品項的話，店員退了 100 元、
+  // 金額後來變成 200 元，勾勾仍有效 → 系統記成退 200（Codex 對抗審查第六輪 high）。
+  // 注意：這只封住同一畫面內的變動；跨終端競態要後端簽發 plan token 才算真正解決。
 
   const preview = useQuery({
     queryKey: ["return-preview", sale.id, planKey],
@@ -456,6 +490,11 @@ function ReturnDialog({
   );
   const needsGiftDecision = unreturnedGifts.length > 0 && returningNonGift;
   const predictedRefund = refundPlan(tenders, previousRefund, refund);
+  // 含金額的確認鍵（見上方註解）：品項＋台灣Pay 腿金額都納入，任一改變即失效。
+  const taiwanPayLegAmount =
+    predictedRefund.find((leg) => leg.tender_type === "TAIWAN_PAY")?.amount ?? 0;
+  const taiwanPayKey = `${planKey}|${taiwanPayLegAmount}`;
+  const taiwanPayRefundConfirmed = taiwanPayConfirmedPlanKey === taiwanPayKey;
   const hasTaiwanPayRefund = predictedRefund.some(
     (leg) => leg.tender_type === "TAIWAN_PAY",
   );
@@ -700,7 +739,7 @@ function ReturnDialog({
               type="checkbox"
               checked={taiwanPayRefundConfirmed}
               onChange={(event) =>
-                setTaiwanPayConfirmedPlanKey(event.target.checked ? planKey : null)
+                setTaiwanPayConfirmedPlanKey(event.target.checked ? taiwanPayKey : null)
               }
             />
             <span className="field-label">
