@@ -147,6 +147,22 @@ def _line_key(line: SaleLineInput) -> str:
     return f"MENU:{line.menu_item_id}"
 
 
+def _dining_identity(data: CartUpsertRequest) -> tuple[str | None, str | None]:
+    """請求端的內用/外帶身分（docs/35）：供「落後一版重送」比對。"""
+    return (None if data.service_mode is None else data.service_mode.value, data.table_no)
+
+
+def _dining_identity_of(cart: CartSession) -> tuple[str | None, str | None]:
+    """已保存購物車的內用/外帶身分；升級前的舊購物車沒有這兩欄 → (None, None)。"""
+    payload = cart.staff_payload if isinstance(cart.staff_payload, dict) else {}
+    mode = payload.get("service_mode")
+    table_no = payload.get("table_no")
+    return (
+        mode if isinstance(mode, str) else None,
+        table_no if isinstance(table_no, str) else None,
+    )
+
+
 def _snapshot_fingerprint(snapshot: dict[str, object]) -> str:
     return hashlib.sha256(canonical_json_bytes(snapshot)).hexdigest()
 
@@ -732,9 +748,17 @@ class CustomerDisplayService:
         if current.status is not CartSessionStatus.DRAFT:
             raise CartSessionConflict("購物車已凍結或正在付款，不可修改")
         if data.expected_revision != current.revision:
+            # 落後一版且內容相同 → 視為「回應遺失後的重送」，回既有列不再進版。
+            # 內用/外帶與桌號**必須一起比**（docs/35）：它們不在客顯快照裡（客人螢幕不顯示
+            # 桌號），所以「選 A1 → 回應遺失 → 改選 A2」兩次 PUT 的快照指紋相同，第二次會被
+            # 當成重送而**靜默丟掉 A2**，POS 卻收到成功回應並接受新版號——店員以為存的是
+            # A2，重新載入卻是 A1。
+            # 不把桌號塞進 snapshot_fingerprint：那個指紋會被綁進簽署任務的
+            # cart_snapshot_fingerprint，代表「客人簽名當下看到的內容」，語意不可混。
             if (
                 data.expected_revision == current.revision - 1
                 and fingerprint == current.snapshot_fingerprint
+                and _dining_identity(data) == _dining_identity_of(current)
             ):
                 return current
             raise CartSessionConflict(

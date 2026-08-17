@@ -1435,3 +1435,64 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     assert sale is not None
     assert sale.service_mode is ServiceMode.DINE_IN
     assert sale.table_no == "A1"
+
+
+async def test_stale_cart_put_with_different_table_is_not_treated_as_a_retry(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """落後一版但**換了桌號**的 PUT 不是重送，不可靜默丟掉（docs/35）。
+
+    桌號不在客顯快照裡（客人螢幕不顯示桌號），所以兩次 PUT 的快照指紋相同。若只比指紋，
+    「選 A1 → 回應遺失 → 改選 A2」的第二次會被當成重送而丟掉 A2，POS 卻收到成功回應並
+    接受新版號——店員以為存的是 A2，重新載入卻是 A1。
+    """
+    seeded = await _seed(db_session, "36")
+    terminal_id, _, _csrf = await _pair(client, seeded, suffix="36")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-36"))
+    assert manager is not None
+    menu_item = MenuItem(store_id=manager.store_id, name="拿鐵", unit_price=Decimal("150"))
+    db_session.add(menu_item)
+    await db_session.flush()
+    menu_item_id = menu_item.id  # commit 會讓 ORM 物件過期，先取值（同步取用會 MissingGreenlet）
+    await db_session.commit()
+
+    def body(revision: int | None, table_no: str) -> dict[str, object]:
+        return {
+            "expected_revision": revision,
+            "lines": [{"line_type": "MENU", "menu_item_id": menu_item_id, "qty": 1}],
+            "tenders": [{"tender_type": "CASH", "amount": "150"}],
+            "service_mode": "DINE_IN",
+            "table_no": table_no,
+        }
+
+    first = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=body(None, "A1"),
+    )
+    assert first.status_code == 200, first.text
+    second = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=body(first.json()["revision"], "A2"),
+    )
+    assert second.status_code == 200, second.text
+    stale_revision = first.json()["revision"]
+
+    # 落後一版 + 換桌 → 必須衝突，讓 POS 重讀，而不是靜默沿用 A2
+    conflicting = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=body(stale_revision, "A3"),
+    )
+    assert conflicting.status_code == 409, conflicting.text
+
+    # 落後一版但內容完全相同 → 仍視為重送，回既有列、不進版（原本的冪等行為不可被破壞）
+    retry = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=body(stale_revision, "A2"),
+    )
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["revision"] == second.json()["revision"]

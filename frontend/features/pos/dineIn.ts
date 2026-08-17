@@ -40,7 +40,11 @@ export function validateDineIn(
     return {
       required: true,
       ok: false,
-      error: "本單含餐飲，請先選擇內用或外帶",
+      // 桌號清單是空的時，內用鍵在畫面上是**停用**的——店員按不下去，也就永遠看不到
+      // 後面那句「請至設定頁維護桌號」。所以一開始就要把設定指引講出來。
+      error: tablesUnavailable
+        ? "本單含餐飲：可選外帶；要點內用請先至設定頁維護桌號清單"
+        : "本單含餐飲，請先選擇內用或外帶",
       tablesUnavailable,
     };
   }

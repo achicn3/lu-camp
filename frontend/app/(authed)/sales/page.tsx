@@ -878,7 +878,7 @@ export default function SalesPage() {
                         推送簽收
                       </button>
                     )}
-                    {sale.service_mode != null && (
+                    {sale.service_mode != null && !voided && (
                       <button
                         type="button"
                         className="btn-ghost"

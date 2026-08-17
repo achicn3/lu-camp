@@ -1358,10 +1358,14 @@ export default function PosPage() {
       if (kitchenRequestSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
       setKitchen({ mode, tableNo, outcome: "SENT", error: null });
     },
-    onError: (err: Error) =>
+    // 失敗路徑同樣要認身分：`reset()` 不會取消在途的 mutation，A 單的慢失敗會把
+    // 現在這張（B 單）完成頁改寫成 FAILED，而重印鍵印的是 B。
+    onError: (err: Error, { sale }) => {
+      if (kitchenRequestSaleId.current !== sale.id) return;
       setKitchen((prev) =>
         prev === null ? prev : { ...prev, outcome: "FAILED", error: err.message },
-      ),
+      );
+    },
   });
 
   const printProof = useMutation({

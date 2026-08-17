@@ -53,6 +53,13 @@ describe("內用/外帶與桌號（docs/35）", () => {
     });
   });
 
+  it("桌號清單是空的時，一開始就要說去哪裡設定——內用鍵是停用的，店員按不下去也問不到原因", () => {
+    const v = validateDineIn(true, sel(), []);
+    expect(v.ok).toBe(false);
+    expect(v.tablesUnavailable).toBe(true);
+    expect(v.error).toContain("設定");
+  });
+
   it("桌號清單還沒維護 → 內用一律擋（fail closed，不讓自由打字繞過）", () => {
     const v = validateDineIn(true, sel({ mode: "DINE_IN", tableNo: "A1" }), []);
     expect(v.ok).toBe(false);
