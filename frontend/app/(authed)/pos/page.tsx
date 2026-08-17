@@ -1148,9 +1148,12 @@ export default function PosPage() {
   const [kitchen, setKitchen] = useState<{
     mode: ServiceMode;
     tableNo: string | null;
-    outcome: "SENT" | "SKIPPED" | "FAILED";
+    outcome: "PENDING" | "SENT" | "SKIPPED" | "FAILED";
     error: string | null;
   } | null>(null);
+  // 遲到的列印失敗（店員已經換下一筆）不能就這樣丟掉——吧台沒收到單，畫面卻什麼都不說。
+  // 改用一則**帶單號**的獨立提示，與當前完成頁的狀態分開呈現。
+  const [staleKitchenNotice, setStaleKitchenNotice] = useState<string | null>(null);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -1334,11 +1337,25 @@ export default function PosPage() {
         setKitchen({ mode, tableNo, outcome: "SKIPPED", error: null });
         return;
       }
-      setKitchen({ mode, tableNo, outcome: "SENT", error: null });
-      printKitchenTicket(sale, mode, tableNo).catch((err: Error) => {
-        if (!isCurrent()) return;
-        setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message });
-      });
+      // **不可在 promise 落地前就說「已送出」**：印表機卡住時會一直顯示成功，
+      // 而吧台其實沒收到單。先 PENDING，等結果出來才定案。
+      setKitchen({ mode, tableNo, outcome: "PENDING", error: null });
+      printKitchenTicket(sale, mode, tableNo).then(
+        () => {
+          if (!isCurrent()) return;
+          setKitchen({ mode, tableNo, outcome: "SENT", error: null });
+        },
+        (err: Error) => {
+          if (!isCurrent()) {
+            // 已經換單：這則失敗仍必須讓店員知道，只是不能蓋到現在這張完成頁上。
+            setStaleKitchenNotice(
+              `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+            );
+            return;
+          }
+          setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message });
+        },
+      );
     },
     [printKitchenEnabled],
   );
@@ -1355,13 +1372,19 @@ export default function PosPage() {
       return { saleId: sale.id, mode: sale.service_mode, tableNo: sale.table_no ?? null };
     },
     onSuccess: ({ saleId, mode, tableNo }) => {
+      setStaleKitchenNotice(null);  // 補印成功 → 先前那則遲到失敗已解決
       if (kitchenRequestSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
       setKitchen({ mode, tableNo, outcome: "SENT", error: null });
     },
     // 失敗路徑同樣要認身分：`reset()` 不會取消在途的 mutation，A 單的慢失敗會把
     // 現在這張（B 單）完成頁改寫成 FAILED，而重印鍵印的是 B。
     onError: (err: Error, { sale }) => {
-      if (kitchenRequestSaleId.current !== sale.id) return;
+      if (kitchenRequestSaleId.current !== sale.id) {
+        setStaleKitchenNotice(
+          `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+        );
+        return;
+      }
       setKitchen((prev) =>
         prev === null ? prev : { ...prev, outcome: "FAILED", error: err.message },
       );
@@ -2079,6 +2102,18 @@ export default function PosPage() {
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
             </p>
           )}
+          {staleKitchenNotice !== null && (
+            <p role="alert" className="form-error pos-kitchen-stale">
+              {staleKitchenNotice}
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setStaleKitchenNotice(null)}
+              >
+                知道了
+              </button>
+            </p>
+          )}
           {kitchen !== null && (
             <p
               className={kitchen.outcome === "FAILED" ? "form-error" : "hint"}
@@ -2088,7 +2123,9 @@ export default function PosPage() {
                 ? `出餐單列印失敗：${kitchen.error}（吧台不會收到單，請重印或口頭通知）`
                 : kitchen.outcome === "SKIPPED"
                   ? `${describeKitchenTarget(kitchen)}：本店已關閉自動列印出餐單，需要時可手動列印。`
-                  : `出餐單已送出列印（${describeKitchenTarget(kitchen)}）。`}
+                  : kitchen.outcome === "PENDING"
+                    ? `出餐單列印中…（${describeKitchenTarget(kitchen)}）`
+                    : `出餐單已送出列印（${describeKitchenTarget(kitchen)}）。`}
               <button
                 type="button"
                 className="btn-ghost pos-kitchen-reprint"
@@ -2176,6 +2213,18 @@ export default function PosPage() {
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}
       />
+      {staleKitchenNotice !== null && (
+        <p role="alert" className="form-error pos-kitchen-stale">
+          {staleKitchenNotice}
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setStaleKitchenNotice(null)}
+          >
+            知道了
+          </button>
+        </p>
+      )}
       <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">

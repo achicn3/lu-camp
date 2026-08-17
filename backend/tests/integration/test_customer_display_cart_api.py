@@ -1383,6 +1383,10 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
                 "line_pay_one_time_key": "OTK-menu-uncertain",
             }
         ],
+        # 真實 POS 會把內用/外帶與桌號一起同步進權威購物車；結帳（含對帳補單）會比對，
+        # 不帶就會被判定與客顯不一致。
+        "service_mode": "DINE_IN",
+        "table_no": "A1",
     }
     created = await client.put(
         f"/api/v1/customer-display/terminals/{terminal_id}/cart",

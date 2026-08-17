@@ -261,6 +261,21 @@ def _member_points_for(total: Decimal) -> int:
     return int(total // _POINTS_DIVISOR)
 
 
+def _dining_identity_of_cart(cart: CartSession) -> tuple[str | None, str | None]:
+    """客顯購物車保存的內用/外帶身分（docs/35）。
+
+    刻意在此重寫而不從 customerdisplay 的 service 匯入同名 helper：那個模組匯入本模組
+    （SalesService），反向匯入會造成循環相依。升級前的舊購物車沒有這兩欄 → (None, None)。
+    """
+    payload = cart.staff_payload if isinstance(cart.staff_payload, dict) else {}
+    mode = payload.get("service_mode")
+    table_no = payload.get("table_no")
+    return (
+        mode if isinstance(mode, str) else None,
+        table_no if isinstance(table_no, str) else None,
+    )
+
+
 def _validate_service_mode_shape(
     lines: Sequence[SaleLineInput],
     service_mode: ServiceMode | None,
@@ -597,6 +612,15 @@ class SalesService:
         canonical_actual = self._canonical_tenders(actual_tenders)
         if self._canonical_tenders(cart.snapshot.get("tenders")) != canonical_actual:
             raise SignatureContentMismatch("實際付款拆分與客顯購物車不一致")
+        # 內用/外帶與桌號同樣要比（docs/35）：它們不在客顯快照裡（客人螢幕不顯示桌號），
+        # 只比明細與收款的話，客戶端可以凍結/簽署 A1 桌卻送出 A2 桌結帳——繞過畫面上的鎖，
+        # 把出餐單送到別桌。純餐飲單不會走到這裡（餐飲不可用購物金→不需簽署），
+        # 但「二手＋餐飲」的混合單會。
+        if _dining_identity_of_cart(cart) != (
+            None if sale.service_mode is None else sale.service_mode.value,
+            sale.table_no,
+        ):
+            raise SignatureContentMismatch("內用/外帶或桌號與客顯購物車不一致")
         return signed_items
 
     async def _bind_store_credit_signature(

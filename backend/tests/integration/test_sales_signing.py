@@ -20,7 +20,10 @@ from app.modules.customerdisplay.models import CartSession
 from app.modules.customerdisplay.schemas import CartUpsertRequest
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct
+from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.signing.models import SignatureTask, SignatureTaskEvent
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
@@ -641,3 +644,62 @@ async def test_checkout_still_rejects_different_tender_amounts(
     )
     assert response.status_code == 422, response.text
     assert "不符" in response.text or "不一致" in response.text
+
+
+async def test_checkout_cannot_change_table_after_the_cart_was_signed(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """凍結/簽署的是 A1 桌，卻以 A2 桌送出結帳 → 拒絕（docs/35）。
+
+    桌號不在客顯快照裡（客人螢幕不顯示桌號），若只比明細與收款，客戶端就能繞過畫面上的鎖
+    把出餐單送到別桌。純餐飲單不會走到這條路（餐飲不可用購物金→不需簽署），
+    但「二手＋餐飲」的混合單會。
+    """
+    token, store_id, clerk_id, member_id, product_id = await _seed(db_session)
+    menu_item = MenuItem(store_id=store_id, name="美式咖啡", unit_price=Decimal("100"))
+    db_session.add(menu_item)
+    await db_session.flush()
+    menu_item_id = menu_item.id
+    await db_session.commit()
+
+    payload: dict[str, object] = {
+        "lines": [
+            {"line_type": "CATALOG", "catalog_product_id": product_id, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": menu_item_id, "qty": 1},
+        ],
+        "buyer_contact_id": member_id,
+        # 購物金上限＝總額 400 − 餐飲 100 = 300
+        "tenders": [
+            {"tender_type": "STORE_CREDIT", "amount": "300"},
+            {"tender_type": "CASH", "amount": "100"},
+        ],
+        "service_mode": "DINE_IN",
+        "table_no": "A1",
+    }
+    await StoreSettingsService(db_session).update_settings(
+        store_id,
+        actor_user_id=clerk_id,
+        patch=SettingsUpdateRequest(dine_in_tables=["A1", "A2"]),
+    )
+    await db_session.commit()
+    context = await prepare_signed_store_credit_cart(
+        db_session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload=payload,
+    )
+
+    tampered = {
+        **payload,
+        "table_no": "A2",  # 簽的是 A1
+        "signature_task_id": context.signature_task_id,
+        "cart_session_id": context.cart_session_id,
+        "cart_revision": context.cart_revision,
+    }
+    resp = await client.post(
+        "/api/v1/sales",
+        json=tampered,
+        headers={**_auth(token), "Idempotency-Key": f"tamper-table-{next(_idem)}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "桌號" in resp.json()["detail"]

@@ -161,6 +161,10 @@ async def prepare_signed_store_credit_cart(
             "lines": payload["lines"],
             "buyer_contact_id": payload.get("buyer_contact_id"),
             "tenders": payload.get("tenders"),
+            # 內用/外帶與桌號也要進權威購物車（docs/35）：結帳時會與這裡保存的值比對，
+            # 助手若不帶，混合單（二手＋餐飲）的合法結帳會被誤判成與客顯不一致。
+            "service_mode": payload.get("service_mode"),
+            "table_no": payload.get("table_no"),
         }
     )
     display = CustomerDisplayService(session)
