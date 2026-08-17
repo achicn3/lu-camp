@@ -8500,6 +8500,16 @@
             "title": "Id",
             "type": "integer"
           },
+          "invoice_issue_channel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EInvoiceIssueChannel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "invoice_status": {
             "$ref": "#/components/schemas/SaleInvoiceStatus"
           },
@@ -18097,6 +18107,7 @@
     },
     "/api/v1/sales": {
       "get": {
+        "description": "交易紀錄列表。\n\n`invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），\n且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，\n只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，\n客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。",
         "operationId": "listSales",
         "parameters": [
           {
@@ -18152,6 +18163,16 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "invoice_registerable",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Invoice Registerable",
+              "type": "boolean"
             }
           }
         ],

@@ -15,6 +15,7 @@ from app.modules.sales.pricing import DiscountRequest
 from app.shared.enums import (
     AdjustmentScope,
     CalculationMethod,
+    EInvoiceIssueChannel,
     LinePayRefundStatus,
     PaymentMethod,
     SaleInvoiceStatus,
@@ -495,6 +496,10 @@ class SaleSummaryRead(BaseModel):
     # 餐飲內用/外帶與桌號（docs/35）：交易紀錄要看得出「5 桌點了什麼」。
     service_mode: ServiceMode | None = None
     table_no: str | None = None
+    # 發票開立來源（docs/36）：交易紀錄必須在**顯示任何退款指示之前**就知道這筆是不是
+    # 手開紙本——否則店員會先被叫去台灣Pay App 退款，送出後才被後端擋下，錢已經出去了。
+    # 由 router 經 einvoice service 補上（§2 不跨模組讀表）；無發票 → None。
+    invoice_issue_channel: EInvoiceIssueChannel | None = None
 
 
 class LinePayRefundAttemptRead(BaseModel):

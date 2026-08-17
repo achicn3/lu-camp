@@ -39,7 +39,11 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
-from app.shared.exceptions import ManualPaperInvoiceOperation
+from app.shared.exceptions import (
+    AmegoTransportError,
+    ManualInvoiceNotRegisterable,
+    ManualPaperInvoiceOperation,
+)
 
 TAX_RATE = Decimal("0.05")
 
@@ -383,71 +387,152 @@ def test_manual_invoice_time_is_optional_in_schema() -> None:
 # ── 對抗審查：已送出但結果未知，不可登記 ──
 
 
-async def test_register_refuses_when_f0401_may_already_be_at_the_platform(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
-    """佇列列已被認領（xml_path/dropped_at 已寫）＝平台可能已收到 F0401。
+class _ScriptedAmego:
+    """腳本化平台回應；記錄呼叫過的 endpoint。"""
 
-    此時登記手開會取消掉那一列，平台之後若真的開出發票 → 手開紙本 + 電子發票 = 兩張，
-    而且遲到的成功回執會因佇列已 CANCELLED 被當成衝突，再也對不回來。
-    這正是本功能唯一要防的事，必須擋在登記之前，要求先完成對帳。
-    （既有的 void_invoice_for_sale 早就用 xml_path 區分「平台可能已收到」與「從未收過」。）
-    """
-    store_id, sale_id, mgr, _ = await _seed(db_session)
+    def __init__(self, resp: dict[str, object]) -> None:
+        self.resp = resp
+        self.calls: list[str] = []
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        self.calls.append(url)
+        return self.resp
+
+
+def _amego(resp: dict[str, object]) -> tuple[AmegoClient, _ScriptedAmego]:
+    transport = _ScriptedAmego(resp)
+    return (
+        AmegoClient(
+            seller_tax_id="12345678",
+            app_key="test-key",
+            transport=transport,
+            base_url="https://invoice-api.amego.tw",
+        ),
+        transport,
+    )
+
+
+async def _claimed_pending_invoice(
+    db_session: AsyncSession, store_id: int, sale_id: int
+) -> Invoice:
+    """建一張『已送出但結果未知』的待開立發票（Amego 認領後逾時的狀態）。"""
     invoice = await _pending_invoice(db_session, store_id, sale_id)
     await db_session.flush()
     row = await db_session.scalar(
         select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
     )
     assert row is not None
-    # 模擬 Amego 認領後 HTTP 逾時：狀態仍 PENDING，但已認領（結果未知）。
     row.xml_path = "amego:/json/f0401#a0"
     row.dropped_at = datetime.now(UTC)
-    # 先 commit：端點被擋下時會 rollback，未 commit 的前置資料會一起消失，
-    # 就驗不到「什麼都沒被改到」。
-    await db_session.commit()
-
-    resp = await client.post(
-        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
-    )
-    assert resp.status_code == 409, resp.text
-    assert "對帳" in resp.json()["detail"]
-
-    # router 會 rollback（物件被逐出 session），重新查詢確認什麼都沒改到
-    fresh_invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
-    assert fresh_invoice is not None
-    assert fresh_invoice.status is InvoiceStatus.PENDING  # 未被登記
-    fresh_row = await db_session.scalar(
-        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == fresh_invoice.id)
-    )
-    assert fresh_row is not None
-    assert fresh_row.status is UploadStatus.PENDING  # 未被取消
-
-
-async def test_register_still_allowed_after_platform_explicitly_rejected(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
-    """平台**明確拒絕**（FAILED）＝已知沒開出來，仍可登記手開紙本。
-
-    retry 會把 xml_path/dropped_at 清掉；FAILED 是平台給的確定答案，不是結果未知。
-    """
-    store_id, sale_id, mgr, _ = await _seed(db_session)
-    invoice = await _pending_invoice(db_session, store_id, sale_id)
     await db_session.flush()
+    return invoice
+
+
+async def _register(
+    db_session: AsyncSession, store_id: int, sale_id: int, client: AmegoClient
+) -> Invoice:
+    return await EInvoiceService(db_session).register_manual_invoice(
+        store_id,
+        sale_id,
+        invoice_no="ZA10029999",
+        invoice_date=date(2026, 8, 17),
+        invoice_time="14:32:00",
+        random_number="1234",
+        total=Decimal(1050),
+        note=None,
+        actor_user_id=None,
+        client_factory=lambda: _noop(client),
+    )
+
+
+async def _noop(client: AmegoClient) -> AmegoClient:
+    return client
+
+
+async def test_register_refuses_when_the_platform_already_has_the_invoice(
+    db_session: AsyncSession,
+) -> None:
+    """曾送出過的單，登記前必須向平台求證；平台**有**這張 → 拒絕登記。
+
+    否則就是手開紙本＋電子發票兩張。`FAILED` 也走同一條路：`success = code == 0`，
+    任何非零碼都會變 FAILED，其中包含「訂單號碼已存在」這種代表平台其實已經有的錯誤
+    （Codex 對抗審查第三輪 critical）。
+    """
+    store_id, sale_id, _, _ = await _seed(db_session)
+    await _claimed_pending_invoice(db_session, store_id, sale_id)
+    # 回應形狀比照 parse_query_issued 的實際要求（號碼/日期/時間/金額/建檔時間/狀態/型別）
+    client, transport = _amego(
+        {
+            "code": 0,
+            "data": {
+                "invoice_number": "ZA10020001",
+                "random_number": "4321",
+                "invoice_date": "20260817",
+                "invoice_time": "14:00:00",
+                "total_amount": "1050",
+                "create_date": int(datetime.now(UTC).timestamp()),
+                "invoice_status": 99,
+                "invoice_type": "C0401",
+            },
+        }
+    )
+    with pytest.raises(ManualInvoiceNotRegisterable, match="平台上已經有"):
+        await _register(db_session, store_id, sale_id, client)
+    assert [c.split("amego.tw")[-1] for c in transport.calls] == ["/json/invoice_query"]
+
+
+async def test_register_allowed_when_the_platform_says_not_found(
+    db_session: AsyncSession,
+) -> None:
+    """平台明確回「查無資料」（code=71）＝權威證據，才可登記並取消佇列。"""
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _claimed_pending_invoice(db_session, store_id, sale_id)
+    client, transport = _amego({"code": 71, "msg": "查無資料"})
+    result = await _register(db_session, store_id, sale_id, client)
+    assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+    assert [c.split("amego.tw")[-1] for c in transport.calls] == ["/json/invoice_query"]
     row = await db_session.scalar(
         select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
     )
     assert row is not None
-    row.status = UploadStatus.FAILED
-    row.last_error = "字軌號碼不足"
+    assert row.status is UploadStatus.CANCELLED
+
+
+async def test_register_fails_closed_when_the_platform_answer_is_ambiguous(
+    db_session: AsyncSession,
+) -> None:
+    """查詢回其他錯誤碼（授權失敗/限流…）不證明平台沒開 → 不可登記。"""
+    store_id, sale_id, _, _ = await _seed(db_session)
+    await _claimed_pending_invoice(db_session, store_id, sale_id)
+    client, _ = _amego({"code": 999, "msg": "授權失敗"})
+    with pytest.raises(AmegoTransportError):
+        await _register(db_session, store_id, sale_id, client)
+
+
+async def test_register_needs_no_platform_query_when_nothing_was_ever_sent(
+    db_session: AsyncSession,
+) -> None:
+    """從未送出過（無 xml_path/dropped_at）→ 不必問平台，也不該被憑證未設定卡住。"""
+    store_id, sale_id, _, _ = await _seed(db_session)
+    await _pending_invoice(db_session, store_id, sale_id)
     await db_session.flush()
 
-    resp = await client.post(
-        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+    async def _explode() -> AmegoClient:
+        raise AssertionError("從未送出的單不應向平台查詢")
+
+    result = await EInvoiceService(db_session).register_manual_invoice(
+        store_id,
+        sale_id,
+        invoice_no="ZA10029998",
+        invoice_date=date(2026, 8, 17),
+        invoice_time=None,
+        random_number=None,
+        total=Decimal(1050),
+        note=None,
+        actor_user_id=None,
+        client_factory=_explode,
     )
-    assert resp.status_code == 200, resp.text
-    await db_session.refresh(row)
-    assert row.status is UploadStatus.CANCELLED
+    assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
 
 
 # ── 對抗審查：號碼必須是 ASCII 數字 ──

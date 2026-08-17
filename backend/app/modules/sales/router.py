@@ -15,6 +15,7 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.time import AwareDateTime
 from app.modules.customerdisplay.service import CustomerDisplayService
+from app.modules.einvoice.service import EInvoiceService
 from app.modules.sales.linepay import (
     LinePayClient,
     linepay_client_from_config,
@@ -482,11 +483,35 @@ async def list_sales(
     date_to: Annotated[AwareDateTime | None, Query(alias="to")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    invoice_registerable: Annotated[bool, Query()] = False,
 ) -> list[SaleSummaryRead]:
-    sales = await SalesService(session).list_sales(
-        user.store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
+    """交易紀錄列表。
+
+    `invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），
+    且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，
+    只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，
+    客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。
+    """
+    svc = SalesService(session)
+    einvoice = EInvoiceService(session)
+    if invoice_registerable:
+        sale_ids = await einvoice.list_registerable_sale_ids(
+            user.store_id, limit=limit, offset=offset
+        )
+        sales = await svc.list_sales_by_ids(user.store_id, sale_ids)
+    else:
+        sales = await svc.list_sales(
+            user.store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
+        )
+    channels = await einvoice.issue_channels_for_sales(
+        user.store_id, [sale.id for sale in sales]
     )
-    return [SaleSummaryRead.model_validate(sale) for sale in sales]
+    return [
+        SaleSummaryRead.model_validate(sale).model_copy(
+            update={"invoice_issue_channel": channels.get(sale.id)}
+        )
+        for sale in sales
+    ]
 
 
 @router.get("/{sale_id}", response_model=SaleRead, operation_id="getSale")

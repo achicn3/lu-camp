@@ -1756,6 +1756,12 @@ class SalesService:
     async def get_tenders(self, sale_id: int) -> list[SaleTender]:
         return await self._repo.list_tenders(sale_id)
 
+    async def list_sales_by_ids(self, store_id: int, sale_ids: list[int]) -> list[Sale]:
+        """依 id 取銷售（保持新到舊）。供發票救援清單以發票狀態選單、再取回銷售摘要。"""
+        if not sale_ids:
+            return []
+        return await self._repo.list_sales_by_ids(store_id, sale_ids)
+
     async def list_sales(
         self,
         store_id: int,

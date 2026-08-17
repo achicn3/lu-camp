@@ -42,11 +42,6 @@ import {
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
 
-/** 還沒有有效發票、需要補開或登記手開的銷售（docs/36）。 */
-const NEEDS_INVOICE_STATUSES = new Set<SaleSummary["invoice_status"]>([
-  "NOT_ISSUED",
-  "PENDING_ISSUE",
-]);
 type ReturnTenderRead = components["schemas"]["ReturnTenderRead"];
 
 function extractDetail(error: unknown): string | null {
@@ -228,6 +223,9 @@ function VoidConfirmDialog({
   onVoided: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 手開紙本（docs/36）：來源由列表 API 帶入，**必須在畫面顯示任何退款指示之前**就知道，
+  // 否則店員會先照指示退款、送出後才被後端擋下——錢已經出去了。
+  const isManualPaper = sale.invoice_issue_channel === "MANUAL_PAPER";
   // 台灣Pay 無 API 退款（docs/30 finding #3）：作廢須店員先於台灣Pay App 手動退款、勾選確認，
   // 後端才反轉——否則客人已作廢卻仍被扣款。LINE Pay 由後端自動退、現金自錢櫃取出，皆不需此確認。
   const isMixed = sale.payment_method === "MIXED";
@@ -282,6 +280,23 @@ function VoidConfirmDialog({
     >
       <div className="card pos-dialog">
         <h2>作廢銷售 #{sale.id}？</h2>
+        {isManualPaper ? (
+          <>
+            {/* 手開紙本（docs/36）：**必須在顯示任何退款指示之前**擋下。若照常走一般流程，
+                台灣Pay 的路徑會先叫店員去 App 把錢退給客人、勾確認再送出，後端這時才回 409
+                ——錢已經出去、單子卻還有效（Codex 對抗審查第三輪 critical）。 */}
+            <p role="alert" className="form-error">
+              本筆為手開紙本發票，系統不代管作廢。請依國稅局程序作廢紙本並保留收回聯；
+              作廢完成前請勿退款給客人。
+            </p>
+            <div className="pos-dialog-actions">
+              <button type="button" className="btn-primary" onClick={onClose}>
+                知道了
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         <p>
           總額 <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
           ，作廢後庫存回補、點數與購物金沖回、寄售結算反轉，且無法復原。
@@ -342,6 +357,8 @@ function VoidConfirmDialog({
             取消
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -944,13 +961,7 @@ export default function SalesPage() {
   // ——前端沒有發票佇列頁，這個篩選是把它們撈回來的唯一途徑。
   const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
   const [manualInvoiceTarget, setManualInvoiceTarget] = useState<SaleSummary | null>(null);
-  const allRows = sales.data ?? [];
-  const rows = pendingInvoiceOnly
-    ? allRows.filter((sale) => NEEDS_INVOICE_STATUSES.has(sale.invoice_status))
-    : allRows;
-  const pendingInvoiceCount = allRows.filter((sale) =>
-    NEEDS_INVOICE_STATUSES.has(sale.invoice_status),
-  ).length;
+  const rows = sales.data ?? [];
 
   return (
     <section>
@@ -970,7 +981,7 @@ export default function SalesPage() {
           onChange={(e) => setPendingInvoiceOnly(e.target.checked)}
         />
         <span className="field-label">
-          只看未開立發票的交易（{pendingInvoiceCount}）
+          只看未開立發票的交易（可登記手開；不限今日）
         </span>
       </label>
       {isManager && <LinePayReconcilePanel />}
@@ -1047,21 +1058,19 @@ export default function SalesPage() {
                         推送簽收
                       </button>
                     )}
-                    {isManager &&
-                      !voided &&
-                      NEEDS_INVOICE_STATUSES.has(sale.invoice_status) && (
-                        <button
-                          type="button"
-                          className="btn-ghost"
-                          aria-label={`登記銷售 ${sale.id} 的手開發票`}
-                          onClick={() => {
-                            setVoidedNote(null);
-                            setManualInvoiceTarget(sale);
-                          }}
-                        >
-                          登記手開發票
-                        </button>
-                      )}
+                    {isManager && !voided && sale.invoice_status === "PENDING_ISSUE" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`登記銷售 ${sale.id} 的手開發票`}
+                        onClick={() => {
+                          setVoidedNote(null);
+                          setManualInvoiceTarget(sale);
+                        }}
+                      >
+                        登記手開發票
+                      </button>
+                    )}
                     {sale.service_mode != null && !voided && (
                       <button
                         type="button"

@@ -268,6 +268,15 @@ class SalesRepository:
         result: Sale | None = await self._session.scalar(stmt)
         return result
 
+    async def list_sales_by_ids(self, store_id: int, sale_ids: list[int]) -> list[Sale]:
+        stmt = (
+            select(Sale)
+            .where(Sale.store_id == store_id, Sale.id.in_(sale_ids))
+            .order_by(Sale.id.desc())
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)
+
     async def list_sales(
         self,
         store_id: int,

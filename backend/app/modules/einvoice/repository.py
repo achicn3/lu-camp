@@ -15,7 +15,7 @@ from app.modules.einvoice.models import (
     Invoice,
     InvoiceAllowance,
 )
-from app.shared.enums import UploadStatus
+from app.shared.enums import EInvoiceIssueChannel, InvoiceStatus, UploadStatus
 
 
 class EInvoiceRepository:
@@ -33,6 +33,30 @@ class EInvoiceRepository:
         stmt = select(Invoice).where(Invoice.id == invoice_id, Invoice.store_id == store_id)
         result: Invoice | None = await self._session.scalar(stmt)
         return result
+
+    async def issue_channels_for_sales(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, EInvoiceIssueChannel]:
+        """(sale_id → issue_channel)；沒有發票的銷售不列入。"""
+        stmt = select(Invoice.sale_id, Invoice.issue_channel).where(
+            Invoice.store_id == store_id, Invoice.sale_id.in_(sale_ids)
+        )
+        rows = await self._session.execute(stmt)
+        return {sale_id: channel for sale_id, channel in rows.all()}
+
+    async def list_pending_invoice_sale_ids(
+        self, store_id: int, *, limit: int, offset: int
+    ) -> list[int]:
+        """仍待開立（PENDING）的發票所屬銷售 id，新到舊；不限日期。"""
+        stmt = (
+            select(Invoice.sale_id)
+            .where(Invoice.store_id == store_id, Invoice.status == InvoiceStatus.PENDING)
+            .order_by(Invoice.sale_id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._session.scalars(stmt)
+        return list(result)
 
     async def find_invoice_by_sale(self, store_id: int, sale_id: int) -> Invoice | None:
         """以 sale_id 找既有發票（一筆銷售至多一張發票，冪等重入用）。"""

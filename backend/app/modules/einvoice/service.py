@@ -15,6 +15,7 @@
 
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import ClassVar
@@ -224,6 +225,7 @@ class EInvoiceService:
         total: Decimal,
         note: str | None,
         actor_user_id: int | None,
+        client_factory: Callable[[], Awaitable[AmegoClient]],
     ) -> Invoice:
         """登記手開紙本備用發票（docs/36）：字軌用完/平台故障時當場開給客人的那一張。
 
@@ -265,25 +267,36 @@ class EInvoiceService:
             for item in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id)
             if item.action is EInvoiceAction.ISSUE
         ]
-        # **平台可能已收到 F0401 時，絕不可登記手開**（Codex 對抗審查 critical #1）。
-        # 已認領/已曝光（xml_path 或 dropped_at 有值）但仍 PENDING ＝ 結果未知：Amego 已受理
-        # 但 HTTP 逾時、或 Turnkey 檔案已落地待回執。此時取消佇列列，平台之後若真的開出發票，
-        # 就變成手開紙本 + 電子發票兩張，而遲到的成功回執會因列已 CANCELLED 被當成衝突、
-        # 再也對不回來——正是本功能唯一要防的事。
-        # 必須先走「重試開立」讓對帳先行（invoice_query）確認平台確實沒開，才可登記。
-        # FAILED 不在此列：那是平台**明確拒絕**的確定答案，且 retry 會清掉 xml_path。
-        # 既有的 void_invoice_for_sale 早就以 xml_path 做同一個區分。
-        in_flight = [
-            item
-            for item in issue_items
-            if item.status is UploadStatus.PENDING
-            and (item.xml_path is not None or item.dropped_at is not None)
-        ]
-        if in_flight:
-            raise ManualInvoiceNotRegisterable(
-                "本筆的電子發票已送出但平台結果未確認，現在登記手開會有開出兩張發票的風險。"
-                "請先按「重試開立」完成對帳，確認平台確實沒有開立後再登記手開發票。"
+        # **只要曾經送出過，就必須先問平台**（Codex 對抗審查第三輪 critical）。
+        # 原本只擋「PENDING 且已認領」而放行 FAILED，理由是「FAILED＝平台明確拒絕」——
+        # 這條規則不成立：`send_via_amego` 是 `success = code == 0`，**任何非零碼都變 FAILED**，
+        # 其中包含「訂單號碼已存在」這類**代表平台其實已經有這張發票**的錯誤。
+        # 因此不論 PENDING 或 FAILED，只要 xml_path/dropped_at 有值（曾認領/曝光），
+        # 就以 invoice_query 向平台求證；沿用既有的「對帳先行」設計與其三態解析：
+        #   平台有 → 拒絕登記（否則紙本＋電子兩張）
+        #   明確查無（code=71） → 放行
+        #   其餘（含連不上/授權失敗/回應曖昧） → parse_query_issued 拋錯，fail closed
+        ever_claimed = any(
+            item.xml_path is not None or item.dropped_at is not None for item in issue_items
+        )
+        if ever_claimed:
+            # **延遲取得客戶端**：從未送出過的單（例如電子發票剛啟用就故障）不必被憑證卡住。
+            client = await client_factory()
+            order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
+            query_resp = await client.call(
+                "/json/invoice_query", build_invoice_query_data(order_id=order_id)
             )
+            existing_on_platform = parse_query_issued(
+                query_resp,
+                expect_total=Decimal(invoice.total),
+                expect_not_before=invoice.created_at,
+            )
+            if existing_on_platform is not None:
+                raise ManualInvoiceNotRegisterable(
+                    f"平台上已經有這筆交易的發票（{existing_on_platform.invoice_no}），"
+                    "不可再登記手開紙本，否則同一筆交易會有兩張發票。"
+                    "請改以「重試開立」讓系統補記平台的開立結果。"
+                )
 
         cancelled = 0
         for item in issue_items:
@@ -324,6 +337,32 @@ class EInvoiceService:
                 invoice_id=invoice_id,
                 status=UploadStatus.PENDING,
             )
+        )
+
+    async def issue_channels_for_sales(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, EInvoiceIssueChannel]:
+        """一批銷售各自的發票開立來源（docs/36；跨模組供 sales 列表用，§2 經 service）。
+
+        沒有發票的銷售不會出現在結果裡。交易紀錄要據此**在顯示任何退款指示之前**就知道
+        「這筆是手開紙本」——否則店員會先被叫去退款，之後才被後端擋下（錢已經出去了）。
+        """
+        if not sale_ids:
+            return {}
+        return await self._repo.issue_channels_for_sales(store_id, sale_ids)
+
+    async def list_registerable_sale_ids(
+        self, store_id: int, *, limit: int, offset: int
+    ) -> list[int]:
+        """可登記手開發票的銷售 id（發票仍為 PENDING），**不限日期**。
+
+        原本前端只查今日、最多 200 筆再於客端過濾：昨天沒收斂的單看不到，
+        而規格說這是唯一的救援途徑。資格也改由後端以**實際發票狀態**判定——
+        客端從 sale.invoice_status 推導會把「電子發票關閉、根本沒有發票」的單也列進來，
+        按下去只會 404。
+        """
+        return await self._repo.list_pending_invoice_sale_ids(
+            store_id, limit=limit, offset=offset
         )
 
     async def assert_platform_voidable(self, store_id: int, sale_id: int) -> None:

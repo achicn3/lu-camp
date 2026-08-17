@@ -2018,7 +2018,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Sales */
+        /**
+         * List Sales
+         * @description 交易紀錄列表。
+         *
+         *     `invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），
+         *     且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，
+         *     只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，
+         *     客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。
+         */
         get: operations["listSales"];
         put?: never;
         /** Create Sale */
@@ -5768,6 +5776,7 @@ export interface components {
             created_at: string;
             /** Id */
             id: number;
+            invoice_issue_channel?: components["schemas"]["EInvoiceIssueChannel"] | null;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
             payment_method: components["schemas"]["PaymentMethod"];
             service_mode?: components["schemas"]["ServiceMode"] | null;
@@ -10548,6 +10557,7 @@ export interface operations {
                 to?: components["schemas"]["AwareDateTime"] | null;
                 limit?: number;
                 offset?: number;
+                invoice_registerable?: boolean;
             };
             header?: never;
             path?: never;

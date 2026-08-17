@@ -154,6 +154,9 @@ async def register_manual_invoice(
         invoice = await svc.register_manual_invoice(
             user.store_id,
             sale_id,
+            # 只有「曾送出過」的單才需要向平台求證，屆時才建客戶端——從未送出的單
+            # 不該被憑證未設定卡住。
+            client_factory=lambda: _amego_client(session, user.store_id),
             invoice_no=payload.invoice_no,
             invoice_date=payload.invoice_date,
             invoice_time=(
@@ -168,9 +171,16 @@ async def register_manual_invoice(
     except InvoiceNotFound as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except AmegoNotConfigured as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ManualInvoiceNotRegisterable as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except AmegoTransportError as exc:
+        # 平台查詢結果不明（連不上/授權失敗/回應曖昧）→ fail closed，不可據以登記。
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     except IntegrityError as exc:
         # 同店號碼重複（uq_invoices_store_invoice_no）：這張紙已經登記過了。
         await session.rollback()

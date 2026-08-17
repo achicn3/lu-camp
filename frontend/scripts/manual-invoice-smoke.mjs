@@ -158,6 +158,25 @@ try {
   ok("登記後不再出現在未開立清單", !stillPending);
   await page.screenshot({ path: `${SHOTS}/05-after-register.png` });
 
+  // ── 登記後按作廢：必須**當場**說紙本程序，絕不可先叫店員去退款 ──
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("table tbody tr");
+  await page.locator(`button[aria-label="作廢銷售 ${saleId}"]`).click();
+  const voidDialog = page.locator('[role="dialog"][aria-label="作廢銷售確認"]');
+  await voidDialog.waitFor();
+  const voidText = (await voidDialog.textContent()) ?? "";
+  ok(
+    "作廢對話框直接說紙本程序",
+    voidText.includes("手開紙本發票") && voidText.includes("國稅局"),
+  );
+  ok(
+    "不會先要求店員去退款（台灣Pay 指示/確認框都不該出現）",
+    !voidText.includes("手動退款") && !voidText.includes("確認作廢"),
+    voidText.includes("手動退款") ? "仍出現退款指示" : "",
+  );
+  await page.screenshot({ path: `${SHOTS}/06-void-blocked.png` });
+  await voidDialog.getByRole("button", { name: "知道了" }).click();
+
   // ── 後端事實查核：來源、佇列取消 ──
   const invoice = await api(token, "GET", `/api/v1/sales/${saleId}`);
   ok(
