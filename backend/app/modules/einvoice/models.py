@@ -245,6 +245,10 @@ class EInvoiceUploadQueue(Base, TimestampMixin):
     # Amego 認領時凍結的 data JSON 全文（docs/24）：重送 byte-for-byte 用；Turnkey 路徑 NULL。
     amego_payload: Mapped[str | None] = mapped_column(Text)
     dropped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # **真的開始送出**的時點（docs/36）。與 dropped_at 不同：Amego 路徑的 dropped_at 是
+    # 「認領/凍結 payload」時就寫、**先於**對帳查詢與實際 POST；若查詢因斷網失敗，
+    # F0401 其實從未送出。posted_at 只在呼叫送出端點之前寫入，是「可能已到平台」的精確證據。
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
 

@@ -377,7 +377,13 @@ function ReturnDialog({
   const [qtys, setQtys] = useState<Record<number, number>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [taiwanPayRefundConfirmed, setTaiwanPayRefundConfirmed] = useState(false);
+  // 台灣Pay 的「已完成退款」必須**綁定當下的退貨計畫**（同紙本收回的做法）。
+  // 原本是整個對話框共用的 boolean：店員先退 300 元勾確認，再把數量改多，
+  // 勾勾仍為 true → 系統照新金額建立退貨，**認定的退款額大於實際退出去的錢**
+  // （Codex 對抗審查第五輪 high；既有問題，非本功能引入）。
+  const [taiwanPayConfirmedPlanKey, setTaiwanPayConfirmedPlanKey] = useState<string | null>(
+    null,
+  );
   // 贈品不一併收回時的說明（有未退贈品且退了主商品時必填；後端亦擋，雙重防線）。
   const [unreturnedGiftNote, setUnreturnedGiftNote] = useState("");
   // 發票處置（作廢／折讓）的兩道前置：收回紙本證明聯、買受人簽名同意。兩者都綁定當下的
@@ -424,6 +430,7 @@ function ReturnDialog({
   const planKey = JSON.stringify(returnLines);
   const consentMatchesPlan = consentTaskId !== null && consentPlanKey === planKey;
   const paperRecalled = paperRecalledPlanKey === planKey;
+  const taiwanPayRefundConfirmed = taiwanPayConfirmedPlanKey === planKey;
 
   const preview = useQuery({
     queryKey: ["return-preview", sale.id, planKey],
@@ -692,7 +699,9 @@ function ReturnDialog({
             <input
               type="checkbox"
               checked={taiwanPayRefundConfirmed}
-              onChange={(event) => setTaiwanPayRefundConfirmed(event.target.checked)}
+              onChange={(event) =>
+                setTaiwanPayConfirmedPlanKey(event.target.checked ? planKey : null)
+              }
             />
             <span className="field-label">
               已於台灣Pay完成退款 {formatNtd(

@@ -85,6 +85,27 @@ RESULT_KIND_SUMMARY = "SUMMARY"
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
+def _may_have_reached_platform(item: EInvoiceUploadQueue) -> bool:
+    """這一列的訊息**是否可能已經送到平台**（docs/36）。
+
+    `xml_path`/`dropped_at` 不足以判斷：Amego 路徑在認領（凍結 payload）時就寫入這兩欄
+    並 commit，**先於**對帳查詢與實際 POST。若查詢因斷網失敗，F0401 其實從未送出——
+    以痕跡判定會在平台/網路故障時把手開登記鎖死，而那正是本功能存在的理由。
+
+    真正的證據有三種：
+    - `posted_at`：Amego 送出端點呼叫前寫入。
+    - `attempts > 0`：只有 `retry()` 會加，而 retry 僅適用 FAILED，代表平台答覆過。
+    - Turnkey outbox：檔案一落地就是曝光，`dropped_at` 即證據（以 xml_path 前綴區分路徑）。
+    """
+    if item.posted_at is not None or item.attempts > 0:
+        return True
+    return (
+        item.xml_path is not None
+        and not item.xml_path.startswith("amego:")
+        and item.dropped_at is not None
+    )
+
+
 def _payload_first(payload: object, *, ctx: str) -> dict[str, object]:
     """取凍結 payload 的**唯一**一筆（Amego 各訊息皆為陣列，本系統一次只送一筆）。
 
@@ -276,15 +297,12 @@ class EInvoiceService:
         #   平台有 → 拒絕登記（否則紙本＋電子兩張）
         #   明確查無（code=71） → 放行
         #   其餘（含連不上/授權失敗/回應曖昧） → parse_query_issued 拋錯，fail closed
-        # `attempts > 0` 也算：`retry()` 會**清掉** xml_path/dropped_at 但把 attempts+1，
-        # 只看痕跡會讓「FAILED → 按重試 → 登記手開」判成從未送出而跳過求證，
-        # 先前世代若已被平台受理就是紙本＋電子兩張（Codex 對抗審查第四輪 critical）。
-        # attempts 是抹不掉的送出痕跡。
-        ever_claimed = any(
-            item.xml_path is not None or item.dropped_at is not None or item.attempts > 0
-            for item in issue_items
-        )
-        if ever_claimed:
+        # 待開立發票必須看得到它的 ISSUE 佇列列；看不到就無從判斷是否曾送出 → fail closed。
+        if not issue_items:
+            raise ManualInvoiceNotRegisterable(
+                "找不到本筆發票的開立佇列紀錄，無法確認是否曾送出平台；請人工對帳後再處理。"
+            )
+        if any(_may_have_reached_platform(item) for item in issue_items):
             # **延遲取得客戶端**：從未送出過的單（例如電子發票剛啟用就故障）不必被憑證卡住。
             client = await client_factory()
             order_id = amego_order_id(store_id=store_id, sale_id=sale_id)
@@ -890,6 +908,44 @@ class EInvoiceService:
                         issue_result=None,
                     )
 
+            # **送出前先持久化「已開始送出」**（docs/36）：從這一刻起平台就可能收到，
+            # 手開登記必須改以此為準向平台求證。認領痕跡（xml_path/dropped_at）不夠——
+            # 那在對帳查詢之前就寫了，查詢斷網失敗時其實什麼都沒送出。
+            locked.posted_at = datetime.now(UTC)
+            await self._session.commit()
+            # commit 釋放**整個交易**（含 sale 鎖）。重取必須照全域鎖序 sale → queue
+            # （反序會與作廢/退貨 AB-BA 死鎖），**並重跑與階段 2 相同的 CAS**：
+            # 這個空窗內並發作廢可能已把發票轉 VOID_PENDING、把此列收斂，
+            # 不重驗就會以過期世代硬送並在記錄結果時違反發票狀態約束。
+            if sale_id is not None:
+                from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+                await SalesService(self._session).lock_sale_row(store_id, sale_id)
+            locked = await self._repo.lock_queue_item(store_id, queue_id)
+            assert locked is not None
+            if not (
+                locked.status is UploadStatus.PENDING
+                and locked.attempts == claim_attempts
+                and locked.xml_path is not None
+            ):
+                await self._session.commit()  # 無變更；純釋放鎖
+                await self._session.refresh(locked)
+                return locked
+            # 同階段 2 的「強制刷新目標」：這個空窗內作廢可能已把發票轉 VOID_PENDING。
+            # 不刷新就會以過期的 PENDING 走「→ISSUED」分支，寫出 status=ISSUED 卻仍有
+            # void_reason 的列，直接違反 ck_invoices_void_reason_matches_status。
+            # **不可在此中止**：已認領的 VOID_PENDING 仍要完成交付，再由結果轉移收斂
+            # （既有併發測試期待平台開立成功後收斂 VOID_PENDING 並排 F0501）。
+            if locked.invoice_id is not None:
+                target = await self._repo.get_invoice(store_id, locked.invoice_id)
+                if target is not None:
+                    await self._session.refresh(target)
+            if locked.allowance_id is not None:
+                stale_allowance = await self._session.get(
+                    InvoiceAllowance, locked.allowance_id
+                )
+                if stale_allowance is not None:
+                    await self._session.refresh(stale_allowance)
             resp = await client.call(endpoint, payload)  # 傳輸中斷 → 維持已認領 PENDING
             code = resp.get("code")
             # 曖昧回應不可當「平台拒絕」記 FAILED（Codex 第一/二輪）：平台可能已開立，誤標

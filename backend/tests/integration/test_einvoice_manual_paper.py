@@ -412,10 +412,14 @@ def _amego(resp: dict[str, object]) -> tuple[AmegoClient, _ScriptedAmego]:
     )
 
 
-async def _claimed_pending_invoice(
+async def _posted_pending_invoice(
     db_session: AsyncSession, store_id: int, sale_id: int
 ) -> Invoice:
-    """建一張『已送出但結果未知』的待開立發票（Amego 認領後逾時的狀態）。"""
+    """建一張『**真的呼叫過送出端點**但結果未知』的待開立發票（POST 後逾時）。
+
+    關鍵是 `posted_at`：認領痕跡（xml_path/dropped_at）在對帳查詢之前就寫了，
+    不代表送出過（見 test_registration_works_during_an_outage_...）。
+    """
     invoice = await _pending_invoice(db_session, store_id, sale_id)
     await db_session.flush()
     row = await db_session.scalar(
@@ -424,6 +428,7 @@ async def _claimed_pending_invoice(
     assert row is not None
     row.xml_path = "amego:/json/f0401#a0"
     row.dropped_at = datetime.now(UTC)
+    row.posted_at = datetime.now(UTC)
     await db_session.flush()
     return invoice
 
@@ -459,7 +464,7 @@ async def test_register_refuses_when_the_platform_already_has_the_invoice(
     （Codex 對抗審查第三輪 critical）。
     """
     store_id, sale_id, _, _ = await _seed(db_session)
-    await _claimed_pending_invoice(db_session, store_id, sale_id)
+    await _posted_pending_invoice(db_session, store_id, sale_id)
     # 回應形狀比照 parse_query_issued 的實際要求（號碼/日期/時間/金額/建檔時間/狀態/型別）
     client, transport = _amego(
         {
@@ -486,7 +491,7 @@ async def test_register_allowed_when_the_platform_says_not_found(
 ) -> None:
     """平台明確回「查無資料」（code=71）＝權威證據，才可登記並取消佇列。"""
     store_id, sale_id, _, _ = await _seed(db_session)
-    invoice = await _claimed_pending_invoice(db_session, store_id, sale_id)
+    invoice = await _posted_pending_invoice(db_session, store_id, sale_id)
     client, transport = _amego({"code": 71, "msg": "查無資料"})
     result = await _register(db_session, store_id, sale_id, client)
     assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
@@ -503,7 +508,7 @@ async def test_register_fails_closed_when_the_platform_answer_is_ambiguous(
 ) -> None:
     """查詢回其他錯誤碼（授權失敗/限流…）不證明平台沒開 → 不可登記。"""
     store_id, sale_id, _, _ = await _seed(db_session)
-    await _claimed_pending_invoice(db_session, store_id, sale_id)
+    await _posted_pending_invoice(db_session, store_id, sale_id)
     client, _ = _amego({"code": 999, "msg": "授權失敗"})
     with pytest.raises(AmegoTransportError):
         await _register(db_session, store_id, sale_id, client)
@@ -737,3 +742,67 @@ async def test_retry_cleared_evidence_refuses_when_platform_has_the_invoice(
     )
     with pytest.raises(ManualInvoiceNotRegisterable, match="平台上已經有"):
         await _register(db_session, store_id, sale_id, client)
+
+
+async def test_registration_works_during_an_outage_when_nothing_was_actually_sent(
+    db_session: AsyncSession,
+) -> None:
+    """**平台/網路故障時必須還能登記紙本** —— 那正是本功能存在的理由。
+
+    Amego 路徑在真正 POST 之前就先寫 xml_path/dropped_at 並 commit（認領持久化），
+    之後才做對帳查詢、最後才送出。若查詢因斷網失敗，F0401 根本沒送出。
+    若以認領痕跡判定「曾送出、須向平台求證」，登記就會在斷網當下被鎖死
+    ——求證同樣連不上（Codex 對抗審查第五輪 critical）。
+    判準改看 posted_at（送出端點呼叫前才寫）。
+    """
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    # 認領已寫入（凍結 payload），但對帳查詢斷網失敗 → 從未真正送出
+    row.xml_path = "amego:/json/f0401#a0"
+    row.dropped_at = datetime.now(UTC)
+    row.posted_at = None
+    row.attempts = 0
+    await db_session.flush()
+
+    async def _explode() -> AmegoClient:
+        raise AssertionError("從未真正送出的單不該要求連平台（斷網時會鎖死）")
+
+    result = await EInvoiceService(db_session).register_manual_invoice(
+        store_id,
+        sale_id,
+        invoice_no="ZA10029997",
+        invoice_date=date(2026, 8, 17),
+        invoice_time=None,
+        random_number=None,
+        total=Decimal(1050),
+        note="平台故障",
+        actor_user_id=None,
+        client_factory=_explode,
+    )
+    assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+
+
+async def test_registration_still_requires_platform_check_once_posted(
+    db_session: AsyncSession,
+) -> None:
+    """一旦真的呼叫過送出端點（posted_at 有值），仍必須向平台求證。"""
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    row.xml_path = "amego:/json/f0401#a0"
+    row.dropped_at = datetime.now(UTC)
+    row.posted_at = datetime.now(UTC)
+    await db_session.flush()
+
+    client, transport = _amego({"code": 71, "msg": "查無資料"})
+    await _register(db_session, store_id, sale_id, client)
+    assert [c.split("amego.tw")[-1] for c in transport.calls] == ["/json/invoice_query"]
