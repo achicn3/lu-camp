@@ -1163,11 +1163,16 @@ export default function PosPage() {
     setKitchen(next);
   }, []);
   // 遲到的列印失敗（店員已經換下一筆）不能就這樣丟掉——吧台沒收到單，畫面卻什麼都不說。
-  // 記下**是哪一筆**失敗，補印時才不會因為印了別筆就把它的警告一起清掉。
-  const [staleKitchen, setStaleKitchen] = useState<{
-    saleId: number;
-    message: string;
-  } | null>(null);
+  // **必須是清單**：印表機卡住時往往連累好幾筆，只留一格會讓先前那幾桌的警告被蓋掉，
+  // 那幾單就此無聲無息。每筆記單號，逐筆確認或補印才消掉。
+  const [staleKitchen, setStaleKitchen] = useState<{ saleId: number; message: string }[]>(
+    [],
+  );
+  const pushStaleKitchen = useCallback((saleId: number, message: string) => {
+    setStaleKitchen((prev) =>
+      prev.some((item) => item.saleId === saleId) ? prev : [...prev, { saleId, message }],
+    );
+  }, []);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -1335,7 +1340,7 @@ export default function PosPage() {
   // 正常完成與**補救完成**（回應遺失、付款對帳後補單）共用這一支，否則補救出來的餐飲單
   // 不會自動出單、完成頁也沒有重印鍵。
   const startKitchenTicket = useCallback(
-    (sale: SaleRead) => {
+    (sale: SaleRead, enabled: boolean) => {
       // 代理端若卡在死掉的印表機，這個 promise 可能拖上數十秒；那段期間店員已經結完
       // 下一筆了。回來的失敗必須認得出自己已經過期，否則會把**別桌**的錯誤蓋到現在
       // 這張完成頁上（而重印鍵印的又是現在這筆）。以單號認身分。
@@ -1346,7 +1351,7 @@ export default function PosPage() {
       }
       const tableNo = sale.table_no ?? null;
       const base = { saleId: sale.id, mode, tableNo };
-      if (!printKitchenEnabled) {
+      if (!enabled) {
         applyKitchen({ ...base, outcome: "SKIPPED", error: null });
         return;
       }
@@ -1362,17 +1367,17 @@ export default function PosPage() {
           if (kitchenSaleId.current !== sale.id) {
             // 已換單，或已按「開始下一筆」清空：這則失敗仍必須讓店員知道，
             // 只是不能蓋到現在這張完成頁上。
-            setStaleKitchen({
-              saleId: sale.id,
-              message: `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
-            });
+            pushStaleKitchen(
+              sale.id,
+              `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+            );
             return;
           }
           applyKitchen({ ...base, outcome: "FAILED", error: err.message });
         },
       );
     },
-    [applyKitchen, printKitchenEnabled],
+    [applyKitchen, pushStaleKitchen],
   );
 
   // 出餐單重印（docs/35）：代理離線/缺紙時第一次會失敗，而交易已成立不會進 error 態
@@ -1387,7 +1392,7 @@ export default function PosPage() {
     },
     onSuccess: ({ saleId, mode, tableNo }) => {
       // 只清掉**同一筆**的遲到警告：補印 B 不代表 A 印出來了。
-      setStaleKitchen((prev) => (prev?.saleId === saleId ? null : prev));
+      setStaleKitchen((prev) => prev.filter((item) => item.saleId !== saleId));
       if (kitchenSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
       applyKitchen({ saleId, mode, tableNo, outcome: "SENT", error: null });
     },
@@ -1395,10 +1400,10 @@ export default function PosPage() {
     // 現在這張（B 單）完成頁改寫成 FAILED，而重印鍵印的是 B。
     onError: (err: Error, { sale }) => {
       if (kitchenSaleId.current !== sale.id) {
-        setStaleKitchen({
-          saleId: sale.id,
-          message: `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
-        });
+        pushStaleKitchen(
+          sale.id,
+          `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+        );
         return;
       }
       setKitchen((prev) =>
@@ -1760,7 +1765,17 @@ export default function PosPage() {
     setShowDialog(true);
     setNotice(successNotice);
     // 補救完成（回應遺失後恢復、或付款對帳後補單）同樣要出餐單並提供重印入口。
-    startKitchenTicket(sale);
+    // 設定尚未載入或載入失敗時**不可拿 `?? false` 當成「店家關閉了自動列印」**——
+    // 那會讓補救出來的單不印，畫面還謊稱是設定關閉的。比照本檔結帳的做法直接重讀。
+    let kitchenEnabled = printKitchenEnabled;
+    if (!settings.isSuccess) {
+      const fresh = await api.GET("/api/v1/settings");
+      if (fresh.data) {
+        queryClient.setQueryData(["settings"], fresh.data);
+        kitchenEnabled = fresh.data.print_kitchen_ticket;
+      }
+    }
+    startKitchenTicket(sale, kitchenEnabled);
     if (sale.invoice_status === "PENDING_ISSUE") {
       setInvoiceNote("發票開立中…");
       issueInvoice.mutate(sale);
@@ -2011,7 +2026,7 @@ export default function PosPage() {
         setDrawerNotice(null);
         openCashDrawer().catch((err: Error) => setDrawerNotice(err.message));
       }
-      startKitchenTicket(sale);
+      startKitchenTicket(sale, printKitchenEnabled);
     },
     onError: (err: Error) => {
       setNotice(err.message);
@@ -2119,18 +2134,20 @@ export default function PosPage() {
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
             </p>
           )}
-          {staleKitchen !== null && (
-            <p role="alert" className="form-error pos-kitchen-stale">
-              {staleKitchen.message}
+          {staleKitchen.map((item) => (
+            <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
+              {item.message}
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => setStaleKitchen(null)}
+                onClick={() =>
+                  setStaleKitchen((prev) => prev.filter((x) => x.saleId !== item.saleId))
+                }
               >
                 知道了
               </button>
             </p>
-          )}
+          ))}
           {kitchen !== null && (
             <p
               className={kitchen.outcome === "FAILED" ? "form-error" : "hint"}
@@ -2231,18 +2248,20 @@ export default function PosPage() {
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}
       />
-      {staleKitchen !== null && (
-        <p role="alert" className="form-error pos-kitchen-stale">
-          {staleKitchen.message}
+      {staleKitchen.map((item) => (
+        <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
+          {item.message}
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => setStaleKitchen(null)}
+            onClick={() =>
+              setStaleKitchen((prev) => prev.filter((x) => x.saleId !== item.saleId))
+            }
           >
             知道了
           </button>
         </p>
-      )}
+      ))}
       <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">
