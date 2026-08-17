@@ -15,7 +15,7 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import ClassVar
 from zoneinfo import ZoneInfo
@@ -51,6 +51,7 @@ from app.modules.einvoice.repository import EInvoiceRepository
 from app.modules.einvoice.serializer import InvoiceXmlSerializer
 from app.shared.enums import (
     EInvoiceAction,
+    EInvoiceIssueChannel,
     EInvoiceMessageType,
     InvoiceStatus,
     InvoiceType,
@@ -71,6 +72,8 @@ from app.shared.exceptions import (
     InvoiceIncompleteForIssue,
     InvoiceNotFound,
     InvoiceNotIssued,
+    ManualInvoiceNotRegisterable,
+    ManualPaperInvoiceOperation,
 )
 
 # 回執種類（einvoice_result_events.result_kind）。
@@ -209,6 +212,86 @@ class EInvoiceService:
         )
         return invoice
 
+    async def register_manual_invoice(
+        self,
+        store_id: int,
+        sale_id: int,
+        *,
+        invoice_no: str,
+        invoice_date: date,
+        invoice_time: str | None,
+        random_number: str | None,
+        total: Decimal,
+        note: str | None,
+        actor_user_id: int | None,
+    ) -> Invoice:
+        """登記手開紙本備用發票（docs/36）：字軌用完/平台故障時當場開給客人的那一張。
+
+        **重點在最後一步**：把該發票待送的 F0401 佇列列轉 CANCELLED。不做的話，字軌恢復
+        後任何人按「重試開立」，平台就真的會再開一張——同一筆交易兩張發票，這是稅務事故。
+
+        鎖序沿用全域約定 sale → queue（見 `issue_for_sale`；反序會與作廢/退貨路徑 AB-BA
+        死鎖）。發票必須仍是 PENDING；金額必須與既有發票相符（登記不是改金額的後門）。
+        號碼重複由部分唯一索引 `uq_invoices_store_invoice_no` 擋下，不另外查。
+        """
+        from app.modules.sales.service import SalesService  # 函式內 import 破循環
+
+        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
+        if invoice is None:
+            raise InvoiceNotFound(f"銷售 {sale_id} 無發票（einvoice 未啟用或非本店）")
+        await SalesService(self._session).lock_sale_row(store_id, sale_id)
+        await self._session.refresh(invoice)
+        if invoice.status is not InvoiceStatus.PENDING:
+            raise ManualInvoiceNotRegisterable(
+                f"發票狀態 {invoice.status.value}，不可登記手開紙本"
+                "（僅待開立的發票可登記）"
+            )
+        if Decimal(total) != Decimal(invoice.total):
+            raise ManualInvoiceNotRegisterable(
+                f"登記金額 {total} 與本筆發票金額 {invoice.total} 不符；"
+                "登記手開發票不會更動金額，請確認紙本內容"
+            )
+
+        invoice.invoice_no = invoice_no
+        invoice.invoice_date = invoice_date
+        invoice.invoice_time = invoice_time
+        invoice.random_number = random_number
+        invoice.issue_channel = EInvoiceIssueChannel.MANUAL_PAPER
+        invoice.status = InvoiceStatus.ISSUED
+        # barcode/QR 一律留空：那是平台回傳的證明聯內容，紙本沒有也不該印（前端據此擋下）。
+
+        cancelled = 0
+        for item in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id):
+            if item.action is EInvoiceAction.ISSUE and item.status in (
+                UploadStatus.PENDING,
+                UploadStatus.FAILED,
+            ):
+                item.status = UploadStatus.CANCELLED
+                cancelled += 1
+
+        await SalesService(self._session).mark_invoice_issued(store_id, sale_id)
+        # 人工輸入稅務號碼屬敏感操作（CLAUDE.md §5）：誰、何時、對象、前後值都要留。
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="REGISTER_MANUAL_INVOICE",
+            entity_type="invoice",
+            entity_id=str(invoice.id),
+            before={"status": InvoiceStatus.PENDING.value, "issue_channel": "AMEGO"},
+            after={
+                "status": invoice.status.value,
+                "issue_channel": invoice.issue_channel.value,
+                "invoice_no": invoice_no,
+                "invoice_date": invoice_date.isoformat(),
+                "sale_id": sale_id,
+                "cancelled_queue_items": cancelled,
+                "note": note,
+            },
+            is_sensitive=True,
+        )
+        return invoice
+
     async def _enqueue_f0501(self, store_id: int, invoice_id: int) -> None:
         """排入 F0501（作廢）上傳佇列（作廢已核可發票；裁示：作廢走 F0501）。"""
         await self._repo.add_queue_item(
@@ -242,6 +325,12 @@ class EInvoiceService:
         invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
         if invoice is None:
             return None
+        if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+            # 手開紙本（docs/36）：平台上沒有這張發票，F0501 沒有對象可作廢。
+            raise ManualPaperInvoiceOperation(
+                "本筆為手開紙本發票，系統不代管作廢；"
+                "請依國稅局程序作廢紙本並保留收回聯後，再作廢本銷售。"
+            )
         if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
             return invoice
         status_before = invoice.status
@@ -341,6 +430,12 @@ class EInvoiceService:
         invoice = await self._repo.get_invoice(store_id, invoice_id)
         if invoice is None:
             raise InvoiceNotFound(f"發票不存在或不屬於本店：id={invoice_id}")
+        if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+            # 手開紙本（docs/36）：平台上沒有這張發票，G0401 會指向不存在的原發票。
+            raise ManualPaperInvoiceOperation(
+                "本筆為手開紙本發票，系統不代管折讓；"
+                "請依國稅局程序開立紙本折讓證明單並留存。"
+            )
         if invoice.status is not InvoiceStatus.ISSUED:
             raise InvoiceNotIssued(
                 f"發票 {invoice_id} 尚未開立（狀態 {invoice.status.value}），不可折讓"

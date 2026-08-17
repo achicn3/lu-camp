@@ -61,8 +61,15 @@ class InvoiceFacts:
     """有作廢在途或結果未知——此時任何稅務動作都不得再疊加，一律轉人工。"""
     print_mark: bool
     """開立時列印了紙本證明聯。"""
+
     carrier_type: str | None
     donate_mark: bool
+    is_manual_paper: bool = False
+    """這張是**手開紙本備用發票**（docs/36），不是平台開的電子發票。
+
+    平台上根本沒有這張發票，F0501／G0401 送出去只會失敗或對錯對象；作廢與折讓一律
+    依國稅局的紙本程序人工處理。預設 False＝一般電子發票，既有行為不變。
+    """
 
 
 @dataclass(frozen=True)
@@ -118,6 +125,17 @@ def decide(
     consent = True  # 折讓與作廢皆須買受人同意
     # 作廢在途要**先於**「是否已開立」判斷（Codex 對抗審查 #2）：VOID_PENDING 的 is_issued
     # 為假，若照舊順序會被當成「沒有發票」而放行，等於在作廢未收斂時默默再疊一次稅務動作。
+    if facts.is_manual_paper:
+        # 先於所有其他判斷：手開紙本不管全退/部分退、有沒有折讓，都只能人工處理。
+        return ReturnInvoiceDecision(
+            action=ReturnInvoiceAction.REVIEW_REQUIRED,
+            requires_paper_recall=False,
+            requires_customer_consent=consent,
+            reason=(
+                "原發票為手開紙本備用發票，平台上沒有這張發票；"
+                "作廢或折讓請依國稅局的紙本程序辦理並保留收回聯，本次退貨轉人工處理。"
+            ),
+        )
     if facts.has_inflight_void:
         return ReturnInvoiceDecision(
             action=ReturnInvoiceAction.REVIEW_REQUIRED,

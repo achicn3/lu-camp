@@ -36,6 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base, TimestampMixin
 from app.shared.enums import (
     EInvoiceAction,
+    EInvoiceIssueChannel,
     EInvoiceMessageType,
     InvoiceStatus,
     InvoiceType,
@@ -136,6 +137,14 @@ class Invoice(Base, TimestampMixin):
         _enum_col(InvoiceStatus),
         default=InvoiceStatus.PENDING,
         server_default=InvoiceStatus.PENDING.value,
+    )
+    # 開立來源（docs/36）：MANUAL_PAPER＝手開紙本備用發票。**不另立 sale.invoice_status
+    # 狀態**——下游到處以 invoice_status 分支，多一個「也算已開立」的值會要求每處都改，
+    # 漏一處就錯；改以來源欄位區分，下游預設行為自動正確，只需在少數出口顯式擋下。
+    issue_channel: Mapped[EInvoiceIssueChannel] = mapped_column(
+        _enum_col(EInvoiceIssueChannel),
+        default=EInvoiceIssueChannel.AMEGO,
+        server_default=EInvoiceIssueChannel.AMEGO.value,
     )
 
 

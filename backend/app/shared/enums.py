@@ -316,6 +316,19 @@ class InvoiceStatus(StrEnum):
     ALLOWANCE = "ALLOWANCE"
 
 
+class EInvoiceIssueChannel(StrEnum):
+    """發票是怎麼開出來的（invoices.issue_channel，docs/36）。
+
+    AMEGO：經加值中心開立的電子發票（預設，既有全部紀錄皆為此）。
+    MANUAL_PAPER：字軌用完/平台故障時，以向國稅局領用的**紙本備用發票**當場手開。
+      平台上沒有這張發票 → 不可走 F0501 作廢、不可走 G0401 折讓、不印證明聯；
+      登記後該發票的待送 F0401 佇列列一律 CANCELLED，避免字軌恢復後重複開立。
+    """
+
+    AMEGO = "AMEGO"
+    MANUAL_PAPER = "MANUAL_PAPER"
+
+
 class UploadStatus(StrEnum):
     """電子發票上傳佇列狀態（einvoice_upload_queue.status）。
 

@@ -8,6 +8,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings as get_app_settings
@@ -19,6 +20,7 @@ from app.modules.einvoice.schemas import (
     EInvoiceQueueListRead,
     EInvoiceResultRequest,
     InvoiceRead,
+    ManualInvoiceRegisterRequest,
 )
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.store.service import StoreService
@@ -35,6 +37,7 @@ from app.shared.exceptions import (
     EInvoiceResultNotApplicable,
     InvoiceIncompleteForIssue,
     InvoiceNotFound,
+    ManualInvoiceNotRegisterable,
 )
 
 router = APIRouter(prefix="/einvoice", tags=["einvoice"])
@@ -125,6 +128,58 @@ async def issue_invoice_for_sale(
     except (AmegoIssueFailed, AmegoTransportError) as exc:
         # send_via_amego 自管交易：認領/FAILED 已 commit，此處僅回報（不 rollback 已存事實）。
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    await session.commit()
+    return InvoiceRead.model_validate(invoice)
+
+
+@router.post(
+    "/sales/{sale_id}/manual-invoice",
+    response_model=InvoiceRead,
+    operation_id="registerManualInvoiceForSale",
+)
+async def register_manual_invoice(
+    sale_id: int,
+    payload: ManualInvoiceRegisterRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> InvoiceRead:
+    """登記手開紙本備用發票（docs/36；限 MANAGER）。
+
+    字軌用完/平台故障時店家改開紙本，這裡把那張紙登記進系統，並**取消待送的 F0401**
+    ——否則字軌恢復後重試會讓平台再開一張，同一筆交易兩張發票。
+    發票非待開立 / 金額不符 / 號碼重複 → 409。
+    """
+    svc = EInvoiceService(session)
+    try:
+        invoice = await svc.register_manual_invoice(
+            user.store_id,
+            sale_id,
+            invoice_no=payload.invoice_no,
+            invoice_date=payload.invoice_date,
+            invoice_time=(
+                None if payload.invoice_time is None else payload.invoice_time.isoformat()
+            ),
+            random_number=payload.random_number,
+            total=payload.total,
+            note=payload.note,
+            actor_user_id=user.id,
+        )
+        await session.flush()
+    except InvoiceNotFound as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ManualInvoiceNotRegisterable as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        # 同店號碼重複（uq_invoices_store_invoice_no）：這張紙已經登記過了。
+        await session.rollback()
+        if "uq_invoices_store_invoice_no" not in str(exc.orig):
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"發票號碼 {payload.invoice_no} 已登記於本店其他交易，請確認紙本號碼",
+        ) from exc
     await session.commit()
     return InvoiceRead.model_validate(invoice)
 

@@ -12,7 +12,13 @@ from importlib import util
 from pathlib import Path
 from types import ModuleType
 
-from app.shared.enums import SaleInvoiceStatus, SaleStatus, SignatureTaskKind
+from app.shared.enums import (
+    EInvoiceIssueChannel,
+    SaleInvoiceStatus,
+    SaleStatus,
+    ServiceMode,
+    SignatureTaskKind,
+)
 
 _VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
 
@@ -38,3 +44,15 @@ def test_sale_status_check_lists_every_enum_value() -> None:
 def test_sale_invoice_status_check_lists_every_enum_value() -> None:
     migration = _load("a3c5e7f9b1d2_sale_invoice_status_pending_void.py")
     assert set(migration._NEW) == {s.value for s in SaleInvoiceStatus}
+
+
+def test_einvoice_issue_channel_check_lists_every_enum_value() -> None:
+    """手開紙本發票的來源欄位（docs/36）。"""
+    migration = _load("c7a9e1b3d5f7_invoice_issue_channel.py")
+    assert set(migration._CHANNELS) == {c.value for c in EInvoiceIssueChannel}
+
+
+def test_service_mode_check_lists_every_enum_value() -> None:
+    """內用/外帶（docs/35）。"""
+    migration = _load("b4d6f8a1c3e5_dine_in_service_mode_and_kitchen_ticket.py")
+    assert set(migration._SERVICE_MODES) == {m.value for m in ServiceMode}

@@ -292,6 +292,14 @@ class InvoiceNotFound(DomainError):
     """指定的發票不存在（或不屬於本店）。"""
 
 
+class ManualInvoiceNotRegisterable(DomainError):
+    """該發票目前不可登記手開紙本（docs/36）：非待開立狀態、金額不符、或號碼格式錯。"""
+
+
+class ManualPaperInvoiceOperation(DomainError):
+    """手開紙本發票不可走平台流程（docs/36）：作廢/折讓須依國稅局的紙本程序辦理。"""
+
+
 class EInvoiceQueueItemNotFound(DomainError):
     """指定的電子發票上傳佇列項目不存在（或不屬於本店）。"""
 

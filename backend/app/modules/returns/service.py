@@ -32,6 +32,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
     CashMovementType,
+    EInvoiceIssueChannel,
     InvoiceStatus,
     InvoiceVoidReason,
     PaymentMethod,
@@ -246,6 +247,8 @@ class ReturnsService:
             print_mark=invoice.print_mark,
             carrier_type=invoice.carrier_type,
             donate_mark=invoice.donate_mark,
+            # 手開紙本（docs/36）：平台上沒有這張發票，作廢/折讓一律轉人工。
+            is_manual_paper=invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER,
         )
         return decide(facts, is_full_return=is_full_return, now=datetime.now(UTC))
 

@@ -1,6 +1,6 @@
 """einvoice 查詢/操作 schema（金額字串整數元，§6/§11）。"""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Annotated
 
@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 
 from app.shared.enums import (
     EInvoiceAction,
+    EInvoiceIssueChannel,
     EInvoiceMessageType,
     InvoiceStatus,
     InvoiceType,
@@ -45,6 +46,8 @@ class InvoiceRead(BaseModel):
     tax: NTDAmount
     total: NTDAmount
     status: InvoiceStatus
+    # 開立來源（docs/36）：MANUAL_PAPER 代表手開紙本，前端據此隱藏作廢/折讓/印證明聯。
+    issue_channel: EInvoiceIssueChannel
     created_at: datetime
 
 
@@ -94,3 +97,21 @@ class EInvoiceResultRequest(BaseModel):
     # **retry 過的佇列（attempts>0）狀態性回執必帶**（省略→409，不得預設為當前世代）。
     # 從未 retry 的列省略無歧義（手動方便）；importer 一律必帶。
     delivery_attempt: int | None = Field(default=None, ge=0)
+
+
+class ManualInvoiceRegisterRequest(BaseModel):
+    """登記手開紙本備用發票（docs/36）。
+
+    只登記**客人手上那張紙**的內容，不改金額：`total` 必須等於發票既有總額，否則拒絕
+    （登記手開發票不是改金額的後門）。`invoice_time`／`random_number` 可省略——紙本上
+    不一定寫得清楚，不強迫店員亂填。
+    """
+
+    # 字軌 2 碼 + 號碼 8 碼，與證明聯列印的 InvoicePayload.invoice_number 同一條規則。
+    invoice_no: str = Field(pattern=r"^[A-Z]{2}\d{8}$")
+    invoice_date: date
+    invoice_time: time | None = None
+    random_number: str | None = Field(default=None, pattern=r"^\d{4}$")
+    total: NTDAmount
+    # 供稽核追溯：為何改開紙本（字軌用完、平台故障…）。
+    note: str | None = Field(default=None, max_length=200)

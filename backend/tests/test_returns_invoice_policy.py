@@ -24,6 +24,7 @@ def _facts(**overrides: object) -> InvoiceFacts:
         "print_mark": True,
         "carrier_type": None,
         "donate_mark": False,
+        "is_manual_paper": False,
     }
     base.update(overrides)
     return InvoiceFacts(**base)  # type: ignore[arg-type]
@@ -169,3 +170,34 @@ def test_has_paper_copy_matrix() -> None:
     assert has_paper_copy(_facts(print_mark=False)) is False
     assert has_paper_copy(_facts(carrier_type="3J0002")) is False
     assert has_paper_copy(_facts(donate_mark=True)) is False
+
+
+# ── 手開紙本發票（docs/36） ──
+
+
+@pytest.mark.parametrize("is_full_return", [True, False])
+def test_manual_paper_invoice_always_goes_to_manual_review(is_full_return: bool) -> None:
+    """手開紙本發票的退貨一律轉人工：作廢與折讓都得走國稅局的紙本程序，系統不代管。
+
+    無論全退或部分退——自動走 F0501/G0401 會對著一張**平台上根本不存在**的發票送稅務訊息。
+    """
+    d = decide(_facts(is_manual_paper=True), is_full_return=is_full_return, now=_NOW)
+    assert d.action is ReturnInvoiceAction.REVIEW_REQUIRED
+    assert d.requires_customer_consent is True
+    assert "紙本" in d.reason
+
+
+def test_manual_paper_takes_priority_over_existing_allowance() -> None:
+    """已有折讓也不改判：紙本發票的折讓不可能是系統開的，仍須人工。"""
+    d = decide(
+        _facts(is_manual_paper=True, has_settled_allowance=True),
+        is_full_return=False,
+        now=_NOW,
+    )
+    assert d.action is ReturnInvoiceAction.REVIEW_REQUIRED
+
+
+def test_amego_invoice_is_unaffected_by_the_new_fact() -> None:
+    """預設（電子發票）行為完全不變。"""
+    d = decide(_facts(), is_full_return=False, now=_NOW)
+    assert d.action is ReturnInvoiceAction.ALLOWANCE
