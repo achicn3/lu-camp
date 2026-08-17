@@ -237,8 +237,12 @@ def build_allowance_query_data(*, number: str) -> dict[str, str]:
 
 # 發票日期/時間以台灣時區呈現（f0401 回傳 invoice_time 為 Unix 秒）。
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
-_INVOICE_NO_RE = re.compile(r"^[A-Z]{2}\d{8}$")
-_RANDOM_RE = re.compile(r"^\d{4}$")
+# **必須 [0-9] + fullmatch**：Python 的 `\d` 接受 Unicode 數字（全形 `ＺＡ１２３４５６７８`、
+# 阿拉伯-印度 `ZA١٢٣٤٥٦٧٨` 都會過），而 `$` 還允許尾端換行。這裡吃的是**平台回傳**、
+# 會原樣寫進 invoices.invoice_no，PostgreSQL 唯一索引又把它們與 ASCII 版視為不同號碼
+# → 重號與對帳失真（Codex 對抗審查第二輪 high）。
+_INVOICE_NO_RE = re.compile(r"[A-Z]{2}[0-9]{8}")
+_RANDOM_RE = re.compile(r"[0-9]{4}")
 # 開立時間戳合理下界（2020-09）：擋 JSON bool/epoch 附近的胡說值被記成開立時間。
 _MIN_PLAUSIBLE_UNIX = 1_600_000_000
 # 官方文件明載的「查無資料」錯誤碼（invoice_query/invoice_file/invoice_print 通用）。
@@ -267,7 +271,7 @@ def parse_f0401_success(resp: dict[str, object]) -> AmegoIssueResult:
     number = str(resp.get("invoice_number") or "")
     random_number = str(resp.get("random_number") or "")
     raw_time = resp.get("invoice_time")
-    if not _INVOICE_NO_RE.match(number) or not _RANDOM_RE.match(random_number):
+    if not _INVOICE_NO_RE.fullmatch(number) or not _RANDOM_RE.fullmatch(random_number):
         raise AmegoTransportError("Amego f0401 回應欄位不合法（字軌/隨機碼）")
     # type() 嚴格檢查：Python bool 是 int 子類，JSON true 不得被記成 epoch 附近的開立時間。
     # 上界同樣要擋：只驗下界時 invoice_time=10**20 會通過守衛，再由 fromtimestamp 拋
@@ -399,7 +403,7 @@ def parse_query_issued(
     random_number = str(data.get("random_number") or "")
     raw_date = str(data.get("invoice_date") or "")
     raw_time = str(data.get("invoice_time") or "")
-    if not _INVOICE_NO_RE.match(number) or not _RANDOM_RE.match(random_number):
+    if not _INVOICE_NO_RE.fullmatch(number) or not _RANDOM_RE.fullmatch(random_number):
         raise AmegoTransportError("invoice_query 回應欄位不合法（字軌/隨機碼），待對帳")
     try:
         issued_date = datetime.strptime(raw_date, "%Y%m%d").date()
@@ -569,7 +573,7 @@ def _assert_allowance_original_invoice(data: dict[str, object], expected: str) -
                 "allowance_query 的 product_item 含非物件元素（回應不可信），待對帳"
             )
         number = str(item.get("original_invoice_number") or "")
-        if not _INVOICE_NO_RE.match(number):
+        if not _INVOICE_NO_RE.fullmatch(number):
             raise AmegoTransportError(
                 "allowance_query 的 product_item 缺合法原發票字軌（回應不可信），待對帳"
             )

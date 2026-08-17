@@ -184,3 +184,51 @@ async def test_print_kitchen_offline_returns_503() -> None:
     )
     assert resp.status_code == 503
     assert resp.json()["error"] == "DeviceOffline"
+
+
+# ── 稅務識別欄位必須是 ASCII（Codex 對抗審查第二輪 high）──
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("invoice_number", "ZA１２３４５６７８"),  # 全形
+        ("invoice_number", "ZA١٢٣٤٥٦٧٨"),  # 阿拉伯-印度
+        ("random_code", "１２３４"),
+        ("total_amount", "１０５０"),
+        ("seller_tax_id", "１２３４５６７８"),
+    ],
+)
+def test_invoice_payload_rejects_non_ascii_tax_fields(field: str, value: str) -> None:
+    """否則會印出「肉眼看到的號碼/金額/統編」與條碼內容不一致的證明聯。"""
+    from datetime import date, time
+
+    from agent.interfaces import InvoicePayload, SaleLinePayload
+
+    base: dict[str, object] = {
+        "sale_id": 1,
+        "invoice_number": "AB12345678",
+        "invoice_date": date(2026, 8, 17),
+        "invoice_time": time(14, 32),
+        "random_code": "9999",
+        "sales_amount": "1000",
+        "tax_amount": "50",
+        "total_amount": "1050",
+        "seller_tax_id": "12345678",
+        "seller_name": "路營二手",
+        "lines": [
+            SaleLinePayload(
+                line_type="CATALOG",
+                description="帳篷",
+                qty=1,
+                unit_price="1050",
+                line_total="1050",
+            )
+        ],
+        "barcode_content": "11508AB123456789999",
+        "qrcode_left_content": "L",
+        "qrcode_right_content": "R",
+    }
+    base[field] = value
+    with pytest.raises(ValidationError):
+        InvoicePayload(**base)

@@ -837,3 +837,49 @@ def test_deeply_nested_json_does_not_escape_controlled_errors() -> None:
     deep = "[" * 60_000 + "]" * 60_000
     with pytest.raises(RecursionError):
         _json.loads(deep)  # 前提成立：確實是 RecursionError 而非 ValueError
+
+
+# ── 平台回傳的稅務識別必須是 ASCII（Codex 對抗審查第二輪 high）──
+
+
+def _f0401_resp(**over: object) -> dict[str, object]:
+    resp: dict[str, object] = {
+        "code": 0,
+        "msg": "OK",
+        "invoice_number": "ZA12345678",
+        "random_number": "1234",
+        "invoice_time": 1_755_000_000,
+        "barcode": "11508ZA123456781234",
+        "qrcode_left": "L",
+        "qrcode_right": "R",
+    }
+    resp.update(over)
+    return resp
+
+
+@pytest.mark.parametrize(
+    "number",
+    [
+        "ZA１２３４５６７８",  # 全形數字
+        "ZA١٢٣٤٥٦٧٨",  # 阿拉伯-印度數字
+        "ZA12345678\n",  # 尾端換行（`$` 會放行，fullmatch 不會）
+        "ZA1234567",  # 少一位
+    ],
+)
+def test_f0401_success_rejects_non_ascii_or_padded_invoice_no(number: str) -> None:
+    """平台回傳會**原樣寫進 invoices.invoice_no**，而唯一索引把全形與 ASCII 視為不同號碼
+    → 重號與對帳失真。解析端必須擋在寫入之前。"""
+    with pytest.raises(AmegoTransportError):
+        parse_f0401_success(_f0401_resp(invoice_number=number))
+
+
+def test_f0401_success_rejects_non_ascii_random_number() -> None:
+    with pytest.raises(AmegoTransportError):
+        parse_f0401_success(_f0401_resp(random_number="１２３４"))
+
+
+def test_f0401_success_still_accepts_a_plain_ascii_response() -> None:
+    """回歸：正常回應不可被新驗證擋掉。"""
+    result = parse_f0401_success(_f0401_resp())
+    assert result.invoice_no == "ZA12345678"
+    assert result.random_number == "1234"

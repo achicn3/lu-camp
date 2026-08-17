@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
 from app.shared.enums import (
     EInvoiceAction,
@@ -113,6 +113,23 @@ class ManualInvoiceRegisterRequest(BaseModel):
     invoice_no: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")
     invoice_date: date
     invoice_time: time | None = None
+
+    @field_validator("invoice_time")
+    @classmethod
+    def _plain_hms(cls, value: time | None) -> time | None:
+        """只收 HH:MM:SS：`invoices.invoice_time` 是 VARCHAR(8)。
+
+        Pydantic 的 `time` 會收下 `14:32:00.123456`（15 字元）與 `14:32:00+08:00`（14 字元），
+        router 的 isoformat() 就會超出欄寬 → PostgreSQL 拒絕 → 未被端點捕捉的 500，
+        而不是好好告訴店員格式不對（Codex 對抗審查第二輪 medium）。
+        """
+        if value is None:
+            return None
+        if value.tzinfo is not None:
+            raise ValueError("開立時間不可帶時區，請填 HH:MM:SS")
+        if value.microsecond:
+            raise ValueError("開立時間只到秒，請填 HH:MM:SS")
+        return value
     random_number: str | None = Field(default=None, pattern=r"^[0-9]{4}$")  # 同上：限 ASCII
     total: NTDAmount
     # 供稽核追溯：為何改開紙本（字軌用完、平台故障…）。

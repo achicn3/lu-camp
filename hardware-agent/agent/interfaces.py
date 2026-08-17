@@ -203,7 +203,11 @@ class StoreHeader(BaseModel):
 
 
 class InvoicePayload(BaseModel):
-    """電子發票證明聯列印輸入。
+    r"""電子發票證明聯列印輸入。
+
+    **稅務識別與金額欄位一律用 `[0-9]` 而非 `\d`**：Pydantic 的 `\d` 接受 Unicode 數字，
+    全形/阿拉伯-印度數字會通過驗證，於是可能印出「肉眼看到的號碼/金額/統編」與條碼
+    內容不一致的證明聯（Codex 對抗審查第二輪 high）。
 
     版面依「電子發票實施作業要點」附件一格式一、條碼內容依財政資訊中心
     「電子發票證明聯一維及二維條碼規格說明」v1.9。金額為字串整數元（§6）。
@@ -212,16 +216,16 @@ class InvoicePayload(BaseModel):
     """
 
     sale_id: int
-    invoice_number: str = Field(pattern=r"^[A-Z]{2}\d{8}$")  # 字軌 2 碼 + 號碼 8 碼
+    invoice_number: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")  # 字軌 2 碼 + 號碼 8 碼
     invoice_date: date
     invoice_time: time
-    random_code: str = Field(pattern=r"^(\d{4}| {4})$")  # B2B 為 4 位空白（規格 FAQ 6）
-    sales_amount: str = Field(pattern=r"^\d+$")  # 未稅銷售額（整數元）
-    tax_amount: str = Field(pattern=r"^\d+$")
-    total_amount: str = Field(pattern=r"^\d+$")  # 含稅總計（整數元）
-    seller_tax_id: str = Field(pattern=r"^\d{8}$")
+    random_code: str = Field(pattern=r"^([0-9]{4}| {4})$")  # B2B 為 4 位空白（規格 FAQ 6）
+    sales_amount: str = Field(pattern=r"^[0-9]+$")  # 未稅銷售額（整數元）
+    tax_amount: str = Field(pattern=r"^[0-9]+$")
+    total_amount: str = Field(pattern=r"^[0-9]+$")  # 含稅總計（整數元）
+    seller_tax_id: str = Field(pattern=r"^[0-9]{8}$")
     seller_name: str = Field(min_length=1)  # 營業人識別標章（文字）
-    buyer_tax_id: str | None = Field(default=None, pattern=r"^\d{8}$")
+    buyer_tax_id: str | None = Field(default=None, pattern=r"^[0-9]{8}$")
     lines: list[SaleLinePayload] = Field(min_length=1)
     # 平台（Amego）回傳的條碼/QR **內容字串**（docs/24；Codex 第十八輪改必填）：
     # 證明聯內容一律以平台為權威——缺任一欄即 422，**無本地 AES 後備**（復原件/直呼

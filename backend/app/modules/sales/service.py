@@ -1996,6 +1996,11 @@ class SalesService:
 
         if await ReturnsService(self._session).has_returns_for_sale(sale.store_id, sale.id):
             raise SaleHasReturns(f"sale {sale.id} 已有退貨，不可作廢；請以退貨流程處理剩餘部分")
+        # 手開紙本發票不可走平台作廢（docs/36）：**必須是第一道**，早於任何付款判斷。
+        # 排在台灣Pay 的人工退款提示之後不夠——那道提示會先叫店員去 App 把錢退給客人，
+        # 店員照做（錢真的出去、收不回來）再作廢才被擋，等於重現「已退款卻沒作廢」
+        # （Codex 對抗審查第二輪 critical #2）。einvoice 內另有同一道守衛防直接呼叫。
+        await self._einvoice.assert_platform_voidable(sale.store_id, sale.id)
         # 台灣Pay 無 API 退款（店員於其 App 手動退）：作廢不得靜默完成而讓客人仍被扣款（Codex
         # adversarial finding #3）。含 TAIWAN_PAY tender 者，須店員先手動退款、帶 manual_refund_ack
         # 確認才反轉。純 LINE Pay 由下方 refund API 自動退、無需此確認；現金於錢櫃取出（既有口徑）。
@@ -2005,10 +2010,6 @@ class SalesService:
                 "此單含台灣Pay 收款（無 API 退款）：作廢前請先於台灣Pay App 手動退款給客人，"
                 "並勾選確認後再作廢，以免客人已作廢卻仍被扣款"
             )
-        # 手開紙本發票不可走平台作廢（docs/36）：**必須擋在任何退款之前**。
-        # einvoice 內另有同一道守衛（防直接呼叫），但那裡在現金/購物金反轉與不可逆的
-        # LINE Pay 退款之後——在那裡才擋，錢已經退出去了（Codex 對抗審查 critical #2）。
-        await self._einvoice.assert_platform_voidable(sale.store_id, sale.id)
         # 寄售付款的鎖序是 settlement→cash_session；作廢也必須先鎖／反轉 settlement，
         # 再記現金退出，避免與同時付款形成 settlement↔cash_session 的 AB-BA 死結。
         # 後續任一步失敗都在同一 DB 交易內回滾，不會單獨留下結算狀態。

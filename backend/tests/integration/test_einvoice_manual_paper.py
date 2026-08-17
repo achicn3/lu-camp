@@ -535,3 +535,56 @@ async def test_void_guard_runs_before_any_refund(
     ).all()
     assert refunds == [], "守衛在退款之後才擋 → 錢已經動了"
     assert sale.status is not SaleStatus.VOIDED
+
+
+async def test_void_guard_runs_before_the_taiwanpay_manual_refund_prompt(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """紙本守衛必須早於**台灣Pay 的人工退款提示**（Codex 對抗審查第二輪 critical #2）。
+
+    台灣Pay 沒有退款 API：系統會先要求店員自己去 App 把錢退給客人、勾確認後再作廢。
+    若守衛排在那道提示之後，店員會照做→**錢真的退出去了**→再作廢才被擋，
+    留下客人已退款、單子仍有效、紙本發票也沒作廢的狀態，且重試永遠被同一守衛拒絕。
+    判準：連「請先去 App 退款」都不該說出口，第一次就要說「紙本不能自動作廢」。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    await _pending_invoice(db_session, store_id, sale_id)
+    db_session.add(
+        SaleTender(
+            store_id=store_id,
+            sale_id=sale_id,
+            tender_type=TenderType.TAIWAN_PAY,
+            amount=Decimal(1050),
+        )
+    )
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    # 未帶 manual_refund_ack：若守衛排在後面，這裡會先丟 ManualRefundRequired（叫店員去退款）
+    with pytest.raises(ManualPaperInvoiceOperation, match="紙本"):
+        await SalesService(db_session).void_sale(sale, actor_user_id=clerk_id)
+
+
+@pytest.mark.parametrize("bad_time", ["14:32:00.123456", "14:32:00+08:00"])
+async def test_register_rejects_time_that_would_overflow_the_column(
+    client: httpx.AsyncClient, db_session: AsyncSession, bad_time: str
+) -> None:
+    """帶微秒/時區的時間要在邊界回 422，不是撞 VARCHAR(8) 變 500。"""
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    resp = await client.post(
+        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice",
+        json=_body(invoice_time=bad_time),
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422
