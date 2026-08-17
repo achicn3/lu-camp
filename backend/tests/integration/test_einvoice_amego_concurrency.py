@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.core.db as app_db
 from app.core.audit import AuditLog
@@ -413,4 +414,85 @@ async def test_settings_patch_serialized_with_checkout(
             settings = await StoreSettingsService(s3).get_effective_settings(store_id)
             assert settings.einvoice_enabled is False  # PATCH 最終生效（在結帳之後）
     finally:
+        await _cleanup(sm, store_id)
+
+
+class _VoidInPostedGapTransport:
+    """對帳查無（可送）；**在真正送出前**由外部 hook 完成作廢，模擬新空窗。"""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        self.calls.append(url)
+        if url.endswith("/json/invoice_query"):
+            return {"code": 71, "msg": "查無資料"}
+        return dict(_F0401_OK)
+
+
+async def test_void_in_posted_at_gap_does_not_break_invoice_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """docs/36 新增的 posted_at commit 造出**第二個空窗**（寫完送出記號 → 真正 POST）。
+
+    這個 commit 會釋放整個交易（含 sale 鎖），並發作廢可在此介入把發票轉 VOID_PENDING。
+    重取鎖後若漏了 CAS 與「強制刷新目標」，成功轉移會以過期的 PENDING 走 →ISSUED，
+    寫出 status=ISSUED 卻仍帶 void_reason 的列 → 違反
+    ck_invoices_void_reason_matches_status（開發時實際踩到，由既有併發測試抓出）。
+    這裡把作廢精準塞進**新**空窗，鎖住這條路徑。
+    """
+    sm = app_db.get_sessionmaker()
+    store_id, clerk_id, sale_id = await _seed_committed(sm, tag="posted")
+
+    orig_commit = AsyncSession.commit
+    state = {"voided": False}
+
+    async def hooked_commit(self: AsyncSession) -> None:
+        await orig_commit(self)
+        # 認領 commit 之後、送出前的那一次 commit：其後緊接著就是真正的 POST。
+        # 以「佇列列已寫入 posted_at」為訊號，只攔一次。
+        if state["voided"]:
+            return
+        row = await self.scalar(
+            select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.posted_at.is_not(None))
+        )
+        if row is None:
+            return
+        state["voided"] = True
+        async with sm() as s2:
+            sales = SalesService(s2)
+            target = await sales.get_sale_for_update(store_id, sale_id)
+            assert target is not None
+            await sales.void_sale(target, clerk_id)
+            await s2.commit()
+
+    monkeypatch.setattr(AsyncSession, "commit", hooked_commit)
+
+    try:
+        async with sm() as s1:
+            client = AmegoClient(
+                seller_tax_id="12345678",
+                app_key="test-key",
+                transport=_VoidInPostedGapTransport(),
+                base_url="https://invoice-api.amego.tw",
+            )
+            svc = EInvoiceService(s1)
+            queue_id = next(
+                i.id
+                for i in await svc.list_queue(store_id)
+                if i.action is EInvoiceAction.ISSUE
+            )
+            await svc.send_via_amego(store_id, queue_id, client=client)
+        monkeypatch.undo()
+
+        async with sm() as s3:
+            invoice = await s3.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+            assert invoice is not None
+            # 核心：狀態與作廢原因必須自洽（CHECK 沒被違反、交易沒炸）
+            if invoice.status in (InvoiceStatus.VOID, InvoiceStatus.VOID_PENDING):
+                assert invoice.void_reason is not None
+            else:
+                assert invoice.void_reason is None
+    finally:
+        monkeypatch.undo()
         await _cleanup(sm, store_id)
