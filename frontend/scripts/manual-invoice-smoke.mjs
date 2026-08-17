@@ -231,6 +231,11 @@ try {
   await browser.close();
 }
 
+// **還原店家設定**：本腳本為了製造待開立發票會打開電子發票開關。留著會讓後續腳本
+// （如 sales-return-smoke）的結帳被「須宣告發票設定狀態」擋成 409——跨腳本污染，
+// 症狀看起來像功能壞掉，其實是測試互相干擾。
+await api(token, "PATCH", "/api/v1/settings", { einvoice_enabled: false });
+
 const failed = results.filter((r) => !r.pass);
 console.log(`\n${results.length - failed.length}/${results.length} 通過`);
 console.log(`截圖：${SHOTS}`);
