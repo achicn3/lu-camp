@@ -52,10 +52,13 @@
 `printEInvoice` 已因缺條碼內容而擋下列印，**這正是我們要的行為**（紙本已在客人手上，
 不該再印一張證明聯）。此處不需改任何程式。
 
-### 3.3 `UploadStatus` 新增 `CANCELLED`
+### 3.3 佇列列轉 `CANCELLED`
 
 登記手開後，該發票所有 `PENDING`／`FAILED` 的 `ISSUE` 佇列列一律轉 `CANCELLED`。
 **這是防重複開立的關鍵**：不做這一步，§1 的第 2 點就會發生。
+
+> 實作時發現 `UploadStatus.CANCELLED` **早已存在**（enum、DB CHECK、既有作廢路徑都在用），
+> 不需要新增值或 migration。
 
 ### 3.4 登記流程（`EInvoiceService.register_manual_invoice`）
 
