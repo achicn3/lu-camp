@@ -103,6 +103,22 @@ const sale = await api(
 ok("建立待開立發票的銷售（前置）", sale.status === 201, `HTTP ${sale.status}`);
 const saleId = sale.json?.id;
 
+// 第二筆：登記完第一筆之後，只有這筆仍是「未開立」。有兩筆才分辨得出篩選到底有沒有生效
+// ——只有一筆時，篩不篩都是 1 筆，測試會**假綠**（本腳本先前就是這樣漏掉前端沒接上）。
+const sale2 = await api(
+  token,
+  "POST",
+  "/api/v1/sales",
+  {
+    lines: [{ line_type: "CATALOG", catalog_product_id: product.json.id, qty: 1 }],
+    tenders: [{ tender_type: "CASH", amount: "500" }],
+    expected_einvoice_enabled: true,
+  },
+  { "Idempotency-Key": `manual-inv-sale2-${RUN}` },
+);
+ok("建立第二筆待開立銷售（前置）", sale2.status === 201, `HTTP ${sale2.status}`);
+const saleId2 = sale2.json?.id;
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
@@ -119,17 +135,18 @@ try {
   await page.waitForSelector("table tbody tr");
 
   // ── 只看未開立：把離開 POS 後找不到的單撈回來 ──
-  const filter = page.getByLabel(/只看未開立發票的交易/);
-  await filter.check();
-  await page.waitForTimeout(500);
-  const filteredRows = await page.locator("table tbody tr").count();
-  ok("「只看未開立」篩選可用", filteredRows > 0, `${filteredRows} 筆`);
-  await page.screenshot({ path: `${SHOTS}/01-pending-invoice-filter.png` });
+  // 先在未篩選狀態登記第一筆，之後才有「一筆已開立、一筆未開立」可分辨。
+  const openRegister = async (id) => {
+    await page.locator(`button[aria-label="登記銷售 ${id} 的手開發票"]`).click();
+    const d = page.locator('[role="dialog"][aria-label="登記手開發票"]');
+    await d.waitFor();
+    return d;
+  };
+  const unfilteredCount = await page.locator("table tbody tr").count();
+  ok("未篩選時兩筆都在", unfilteredCount >= 2, `${unfilteredCount} 筆`);
 
   // ── 登記手開發票 ──
-  await page.locator(`button[aria-label="登記銷售 ${saleId} 的手開發票"]`).click();
-  const dialog = page.locator('[role="dialog"][aria-label="登記手開發票"]');
-  await dialog.waitFor();
+  const dialog = await openRegister(saleId);
   await page.screenshot({ path: `${SHOTS}/02-register-dialog.png` });
 
   // 格式錯誤要當場擋下，不是送出去才 422
@@ -151,11 +168,26 @@ try {
   ok("登記成功", true, INVOICE_NO);
   await page.screenshot({ path: `${SHOTS}/04-registered.png` });
 
-  // ── 登記後：該筆不再列於「未開立」，且發票狀態轉為已開立 ──
+  // ── 登記後：該筆不再可登記 ──
   await page.waitForTimeout(1200);
   const stillPending =
     (await page.locator(`button[aria-label="登記銷售 ${saleId} 的手開發票"]`).count()) > 0;
-  ok("登記後不再出現在未開立清單", !stillPending);
+  ok("登記後不再可登記手開", !stillPending);
+
+  // ── 篩選必須真的改變集合（否則就是前端沒接上後端，會假綠）──
+  const filter = page.getByLabel(/只看未開立發票的交易/);
+  await filter.check();
+  await page.waitForTimeout(1200);
+  const filteredIds = await page.locator("table tbody tr td:nth-child(2)").allTextContents();
+  ok(
+    "篩選後只剩仍未開立的那筆",
+    filteredIds.length === 1 && filteredIds[0].includes(String(saleId2)),
+    filteredIds.join(","),
+  );
+  await filter.uncheck();
+  await page.waitForTimeout(1200);
+  const backCount = await page.locator("table tbody tr").count();
+  ok("取消篩選後兩筆都回來", backCount >= 2, `${backCount} 筆`);
   await page.screenshot({ path: `${SHOTS}/05-after-register.png` });
 
   // ── 登記後按作廢：必須**當場**說紙本程序，絕不可先叫店員去退款 ──
@@ -184,9 +216,15 @@ try {
     invoice.json?.invoice_status === "ISSUED",
     String(invoice.json?.invoice_status),
   );
+  // 現在有兩筆：登記過的那筆必須從待送佇列消失，**未登記的第二筆本來就該還在**。
+  // 只斷言「完全沒有待送」會誤判——那反而代表把別人的佇列也取消了。
   const queue = await api(token, "GET", "/api/v1/einvoice/queue?status=PENDING&limit=200");
-  const stillQueued = (queue.json?.items ?? []).some((i) => i.invoice_id != null);
-  ok("待送佇列已無此發票（不會再自動開立）", !stillQueued);
+  const pending = (queue.json?.items ?? []).filter((i) => i.invoice_id != null);
+  ok(
+    "登記過的那筆已離開待送佇列，未登記的那筆仍在",
+    pending.length === 1,
+    `待送 ${pending.length} 筆`,
+  );
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

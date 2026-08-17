@@ -946,20 +946,26 @@ export default function SalesPage() {
     onError: (e: Error) => setAckNote(e.message),
   });
 
+  // 「只看未開立」（docs/36）：開立失敗的單一旦離開 POS 完成畫面就再也找不到
+  // ——前端沒有發票佇列頁，這個清單是把它們撈回來的唯一途徑。
+  // **由後端以實際發票狀態判定資格且不限日期**：只查今日會讓昨天沒收斂的單永遠消失；
+  // 客端從 sale.invoice_status 推導則會把「電子發票關閉、根本沒有發票」的單也列進來，
+  // 按下去只會 404。切換時 queryKey 必須跟著換，否則會沿用另一模式的快取。
+  const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
   const sales = useQuery({
-    queryKey: ["sales", "today"],
+    queryKey: ["sales", pendingInvoiceOnly ? "registerable" : "today"],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/sales", {
-        params: { query: { from: startOfTodayIso(), limit: 200 } },
+        params: {
+          query: pendingInvoiceOnly
+            ? { invoice_registerable: true, limit: 200 }
+            : { from: startOfTodayIso(), limit: 200 },
+        },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取交易紀錄失敗");
       return data;
     },
   });
-
-  // 「只看未開立」（docs/36）：開立失敗的單一旦離開 POS 完成畫面就再也找不到
-  // ——前端沒有發票佇列頁，這個篩選是把它們撈回來的唯一途徑。
-  const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
   const [manualInvoiceTarget, setManualInvoiceTarget] = useState<SaleSummary | null>(null);
   const rows = sales.data ?? [];
 
