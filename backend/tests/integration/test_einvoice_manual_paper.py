@@ -673,3 +673,67 @@ async def test_register_rejects_time_that_would_overflow_the_column(
         headers=_auth(mgr),
     )
     assert resp.status_code == 422
+
+
+async def test_retry_cleared_claim_evidence_still_requires_platform_check(
+    db_session: AsyncSession,
+) -> None:
+    """`retry()` 會清掉 xml_path/dropped_at，但**曾經送出過的事實抹不掉**。
+
+    只看 xml_path 就會被繞過：FAILED → 按重試（清痕跡、attempts+1）→ 登記手開時判成
+    「從未送出」而跳過平台求證 → 先前世代若已被平台受理，就是紙本＋電子兩張
+    （Codex 對抗審查第四輪 critical）。`attempts > 0` 是抹不掉的送出痕跡。
+    """
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    # retry 之後的狀態：痕跡沒了，但 attempts 記得曾經送過
+    row.xml_path = None
+    row.dropped_at = None
+    row.attempts = 1
+    await db_session.flush()
+
+    client, transport = _amego({"code": 71, "msg": "查無資料"})
+    result = await _register(db_session, store_id, sale_id, client)
+    assert result.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+    # 判準：必須真的問過平台
+    assert [c.split("amego.tw")[-1] for c in transport.calls] == ["/json/invoice_query"]
+
+
+async def test_retry_cleared_evidence_refuses_when_platform_has_the_invoice(
+    db_session: AsyncSession,
+) -> None:
+    """同上情境但平台其實有 → 必須拒絕登記（這才是真正要防的重複開立）。"""
+    store_id, sale_id, _, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    row.xml_path = None
+    row.dropped_at = None
+    row.attempts = 2
+    await db_session.flush()
+
+    client, _ = _amego(
+        {
+            "code": 0,
+            "data": {
+                "invoice_number": "ZA10020001",
+                "random_number": "4321",
+                "invoice_date": "20260817",
+                "invoice_time": "14:00:00",
+                "total_amount": "1050",
+                "create_date": int(datetime.now(UTC).timestamp()),
+                "invoice_status": 99,
+                "invoice_type": "C0401",
+            },
+        }
+    )
+    with pytest.raises(ManualInvoiceNotRegisterable, match="平台上已經有"):
+        await _register(db_session, store_id, sale_id, client)

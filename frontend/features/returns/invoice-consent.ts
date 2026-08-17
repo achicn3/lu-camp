@@ -46,3 +46,17 @@ export function returnSubmitBlockers(
   }
   return blockers;
 }
+
+
+/**
+ * 是否可以向店員顯示「請先去外部 App 退款」這類**不可逆**指示（docs/36）。
+ *
+ * preview 還沒回來、或發票處置為 REVIEW_REQUIRED（手開紙本發票就是這一種）時一律不顯示：
+ * 那些指示會讓店員先把錢退出去，送出退貨才被後端拒絕——錢收不回來、退貨也沒成立。
+ * 送出本身另由 `returnSubmitBlockers` 擋，但**擋送出不夠**：指示先出現就已經害了。
+ */
+export function mayShowExternalRefundInstructions(
+  preview: ReturnInvoicePreview | null,
+): boolean {
+  return preview !== null && preview.invoice_action !== "REVIEW_REQUIRED";
+}

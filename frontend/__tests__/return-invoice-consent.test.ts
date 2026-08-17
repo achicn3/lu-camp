@@ -4,6 +4,7 @@ import {
   invoiceActionLabel,
   returnSubmitBlockers,
   type ReturnInvoicePreview,
+  mayShowExternalRefundInstructions,
 } from "@/features/returns/invoice-consent";
 
 function preview(overrides: Partial<ReturnInvoicePreview> = {}): ReturnInvoicePreview {
@@ -83,5 +84,39 @@ describe("returnSubmitBlockers", () => {
     expect(
       returnSubmitBlockers(review, { paperRecalled: true, consentTaskSigned: true }),
     ).toContain("原發票狀態尚未確認，請待處理完成或聯繫管理者");
+  });
+});
+
+describe("mayShowExternalRefundInstructions（docs/36）", () => {
+  it("preview 還沒回來時不得顯示外部退款指示", () => {
+    expect(mayShowExternalRefundInstructions(null)).toBe(false);
+  });
+
+  it("轉人工（手開紙本發票）時不得顯示——店員會照做把錢退出去，之後才被後端拒絕", () => {
+    expect(
+      mayShowExternalRefundInstructions({
+        invoice_action: "REVIEW_REQUIRED",
+        requires_paper_recall: false,
+        requires_customer_consent: true,
+        reason: "手開紙本",
+        refund_total: "100",
+        unreturned_gifts: [],
+      } as never),
+    ).toBe(false);
+  });
+
+  it("正常折讓/作廢時照舊顯示", () => {
+    for (const action of ["ALLOWANCE", "VOID", "NONE"]) {
+      expect(
+        mayShowExternalRefundInstructions({
+          invoice_action: action,
+          requires_paper_recall: false,
+          requires_customer_consent: true,
+          reason: "",
+          refund_total: "100",
+          unreturned_gifts: [],
+        } as never),
+      ).toBe(true);
+    }
   });
 });

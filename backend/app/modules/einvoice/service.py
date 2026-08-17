@@ -276,8 +276,13 @@ class EInvoiceService:
         #   平台有 → 拒絕登記（否則紙本＋電子兩張）
         #   明確查無（code=71） → 放行
         #   其餘（含連不上/授權失敗/回應曖昧） → parse_query_issued 拋錯，fail closed
+        # `attempts > 0` 也算：`retry()` 會**清掉** xml_path/dropped_at 但把 attempts+1，
+        # 只看痕跡會讓「FAILED → 按重試 → 登記手開」判成從未送出而跳過求證，
+        # 先前世代若已被平台受理就是紙本＋電子兩張（Codex 對抗審查第四輪 critical）。
+        # attempts 是抹不掉的送出痕跡。
         ever_claimed = any(
-            item.xml_path is not None or item.dropped_at is not None for item in issue_items
+            item.xml_path is not None or item.dropped_at is not None or item.attempts > 0
+            for item in issue_items
         )
         if ever_claimed:
             # **延遲取得客戶端**：從未送出過的單（例如電子發票剛啟用就故障）不必被憑證卡住。

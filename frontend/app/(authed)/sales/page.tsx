@@ -38,6 +38,7 @@ import {
 import {
   invoiceActionLabel,
   returnSubmitBlockers,
+  mayShowExternalRefundInstructions,
 } from "@/features/returns/invoice-consent";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
@@ -684,7 +685,9 @@ function ReturnDialog({
             ))}
           </div>
         )}
-        {hasTaiwanPayRefund && (
+        {/* 手開紙本（docs/36）：preview 未回或轉人工時，**不得**顯示任何外部退款指示
+            ——店員會照做把錢退出去，送出才被擋（Codex 對抗審查第四輪 high）。 */}
+        {hasTaiwanPayRefund && mayShowExternalRefundInstructions(previewData) && (
           <label className="field field-toggle return-taiwan-confirm">
             <input
               type="checkbox"
