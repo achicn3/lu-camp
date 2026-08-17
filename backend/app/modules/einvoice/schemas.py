@@ -107,11 +107,13 @@ class ManualInvoiceRegisterRequest(BaseModel):
     不一定寫得清楚，不強迫店員亂填。
     """
 
-    # 字軌 2 碼 + 號碼 8 碼，與證明聯列印的 InvoicePayload.invoice_number 同一條規則。
-    invoice_no: str = Field(pattern=r"^[A-Z]{2}\d{8}$")
+    # 字軌 2 碼 + 號碼 8 碼。**必須用 [0-9] 而非 \d**：Python/Pydantic 的 `\d` 接受
+    # Unicode 數字，`ZA１２３４５６７８`（全形）與 `ZA١٢٣٤٥٦٧٨` 都會通過並原樣落庫，
+    # 而 PostgreSQL 唯一索引把它們與 ASCII 版視為不同號碼 → 對帳永遠對不起來。
+    invoice_no: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")
     invoice_date: date
     invoice_time: time | None = None
-    random_number: str | None = Field(default=None, pattern=r"^\d{4}$")
+    random_number: str | None = Field(default=None, pattern=r"^[0-9]{4}$")  # 同上：限 ASCII
     total: NTDAmount
     # 供稽核追溯：為何改開紙本（字軌用完、平台故障…）。
     note: str | None = Field(default=None, max_length=200)

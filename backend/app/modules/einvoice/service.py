@@ -260,12 +260,34 @@ class EInvoiceService:
         invoice.status = InvoiceStatus.ISSUED
         # barcode/QR 一律留空：那是平台回傳的證明聯內容，紙本沒有也不該印（前端據此擋下）。
 
+        issue_items = [
+            item
+            for item in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id)
+            if item.action is EInvoiceAction.ISSUE
+        ]
+        # **平台可能已收到 F0401 時，絕不可登記手開**（Codex 對抗審查 critical #1）。
+        # 已認領/已曝光（xml_path 或 dropped_at 有值）但仍 PENDING ＝ 結果未知：Amego 已受理
+        # 但 HTTP 逾時、或 Turnkey 檔案已落地待回執。此時取消佇列列，平台之後若真的開出發票，
+        # 就變成手開紙本 + 電子發票兩張，而遲到的成功回執會因列已 CANCELLED 被當成衝突、
+        # 再也對不回來——正是本功能唯一要防的事。
+        # 必須先走「重試開立」讓對帳先行（invoice_query）確認平台確實沒開，才可登記。
+        # FAILED 不在此列：那是平台**明確拒絕**的確定答案，且 retry 會清掉 xml_path。
+        # 既有的 void_invoice_for_sale 早就以 xml_path 做同一個區分。
+        in_flight = [
+            item
+            for item in issue_items
+            if item.status is UploadStatus.PENDING
+            and (item.xml_path is not None or item.dropped_at is not None)
+        ]
+        if in_flight:
+            raise ManualInvoiceNotRegisterable(
+                "本筆的電子發票已送出但平台結果未確認，現在登記手開會有開出兩張發票的風險。"
+                "請先按「重試開立」完成對帳，確認平台確實沒有開立後再登記手開發票。"
+            )
+
         cancelled = 0
-        for item in await self._repo.lock_queue_items_for_invoice(store_id, invoice.id):
-            if item.action is EInvoiceAction.ISSUE and item.status in (
-                UploadStatus.PENDING,
-                UploadStatus.FAILED,
-            ):
+        for item in issue_items:
+            if item.status in (UploadStatus.PENDING, UploadStatus.FAILED):
                 item.status = UploadStatus.CANCELLED
                 cancelled += 1
 
@@ -303,6 +325,21 @@ class EInvoiceService:
                 status=UploadStatus.PENDING,
             )
         )
+
+    async def assert_platform_voidable(self, store_id: int, sale_id: int) -> None:
+        """作廢前置檢查（docs/36）：紙本發票不可走平台作廢——**必須在任何副作用之前呼叫**。
+
+        `void_invoice_for_sale` 裡也有同一道守衛（防直接呼叫），但那裡已經在現金/購物金
+        反轉與**不可逆的 LINE Pay 退款**之後：在那裡才擋，主交易雖回滾，已送出的外部退款
+        收不回來 → 客人拿到錢、單子還有效、發票也沒作廢（Codex 對抗審查 critical #2）。
+        純讀、無副作用，安全地放在最前面。
+        """
+        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
+        if invoice is not None and invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+            raise ManualPaperInvoiceOperation(
+                "本筆為手開紙本發票，系統不代管作廢；"
+                "請依國稅局程序作廢紙本並保留收回聯後，再作廢本銷售。"
+            )
 
     async def void_invoice_for_sale(
         self,

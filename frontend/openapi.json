@@ -5633,7 +5633,7 @@
             "type": "string"
           },
           "invoice_no": {
-            "pattern": "^[A-Z]{2}\\d{8}$",
+            "pattern": "^[A-Z]{2}[0-9]{8}$",
             "title": "Invoice No",
             "type": "string"
           },
@@ -5664,7 +5664,7 @@
           "random_number": {
             "anyOf": [
               {
-                "pattern": "^\\d{4}$",
+                "pattern": "^[0-9]{4}$",
                 "type": "string"
               },
               {

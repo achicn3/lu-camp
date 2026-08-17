@@ -6,7 +6,7 @@
 """
 
 from collections.abc import AsyncGenerator
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 import httpx
@@ -19,17 +19,23 @@ from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
+from app.modules.cashdrawer.models import CashMovement
+from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.amego import AmegoClient
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
 from app.modules.einvoice.service import EInvoiceService
-from app.modules.sales.models import Sale
+from app.modules.sales.models import Sale, SaleTender
+from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
+    CashMovementType,
     EInvoiceAction,
     EInvoiceIssueChannel,
     InvoiceStatus,
     SaleInvoiceStatus,
+    SaleStatus,
+    TenderType,
     UploadStatus,
     UserRole,
 )
@@ -372,3 +378,160 @@ def test_manual_invoice_time_is_optional_in_schema() -> None:
     assert req.random_number is None
     assert req.invoice_date == date(2026, 8, 17)
     assert isinstance(time(14, 32), time)  # 型別可用性
+
+
+# ── 對抗審查：已送出但結果未知，不可登記 ──
+
+
+async def test_register_refuses_when_f0401_may_already_be_at_the_platform(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """佇列列已被認領（xml_path/dropped_at 已寫）＝平台可能已收到 F0401。
+
+    此時登記手開會取消掉那一列，平台之後若真的開出發票 → 手開紙本 + 電子發票 = 兩張，
+    而且遲到的成功回執會因佇列已 CANCELLED 被當成衝突，再也對不回來。
+    這正是本功能唯一要防的事，必須擋在登記之前，要求先完成對帳。
+    （既有的 void_invoice_for_sale 早就用 xml_path 區分「平台可能已收到」與「從未收過」。）
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    # 模擬 Amego 認領後 HTTP 逾時：狀態仍 PENDING，但已認領（結果未知）。
+    row.xml_path = "amego:/json/f0401#a0"
+    row.dropped_at = datetime.now(UTC)
+    # 先 commit：端點被擋下時會 rollback，未 commit 的前置資料會一起消失，
+    # 就驗不到「什麼都沒被改到」。
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+    )
+    assert resp.status_code == 409, resp.text
+    assert "對帳" in resp.json()["detail"]
+
+    # router 會 rollback（物件被逐出 session），重新查詢確認什麼都沒改到
+    fresh_invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert fresh_invoice is not None
+    assert fresh_invoice.status is InvoiceStatus.PENDING  # 未被登記
+    fresh_row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == fresh_invoice.id)
+    )
+    assert fresh_row is not None
+    assert fresh_row.status is UploadStatus.PENDING  # 未被取消
+
+
+async def test_register_still_allowed_after_platform_explicitly_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """平台**明確拒絕**（FAILED）＝已知沒開出來，仍可登記手開紙本。
+
+    retry 會把 xml_path/dropped_at 清掉；FAILED 是平台給的確定答案，不是結果未知。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    row = await db_session.scalar(
+        select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.invoice_id == invoice.id)
+    )
+    assert row is not None
+    row.status = UploadStatus.FAILED
+    row.last_error = "字軌號碼不足"
+    await db_session.flush()
+
+    resp = await client.post(
+        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+    )
+    assert resp.status_code == 200, resp.text
+    await db_session.refresh(row)
+    assert row.status is UploadStatus.CANCELLED
+
+
+# ── 對抗審查：號碼必須是 ASCII 數字 ──
+
+
+@pytest.mark.parametrize(
+    "invoice_no",
+    [
+        "ZA１２３４５６７８",  # 全形數字
+        "ZA١٢٣٤٥٦٧٨",  # 阿拉伯-印度數字
+        "ZA1234５678",  # 混合
+    ],
+)
+def test_invoice_no_rejects_non_ascii_digits(invoice_no: str) -> None:
+    """Pydantic 的 `\\d` 接受 Unicode 數字：全形號碼會被存成另一個字串，
+    資料庫唯一索引視為不同號碼 → 對帳永遠對不起來。必須限定 ASCII。"""
+    from pydantic import ValidationError
+
+    from app.modules.einvoice.schemas import ManualInvoiceRegisterRequest
+
+    with pytest.raises(ValidationError):
+        ManualInvoiceRegisterRequest.model_validate(
+            {"invoice_no": invoice_no, "invoice_date": "2026-08-17", "total": "1050"}
+        )
+
+
+def test_random_number_rejects_non_ascii_digits() -> None:
+    from pydantic import ValidationError
+
+    from app.modules.einvoice.schemas import ManualInvoiceRegisterRequest
+
+    with pytest.raises(ValidationError):
+        ManualInvoiceRegisterRequest.model_validate(
+            {
+                "invoice_no": "ZA12345678",
+                "invoice_date": "2026-08-17",
+                "total": "1050",
+                "random_number": "１２３４",
+            }
+        )
+
+
+# ── 對抗審查：作廢守衛必須在動到錢之前 ──
+
+
+async def test_void_guard_runs_before_any_refund(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """紙本發票的銷售作廢必須在**任何副作用之前**被擋下。
+
+    原本守衛在 void_invoice_for_sale 裡，而它在現金/購物金反轉與**不可逆的 LINE Pay 退款**
+    之後才執行：守衛拋錯 → 主交易回滾，但已送出的外部退款收不回來，結果是客人拿到錢、
+    單子卻還有效、發票也沒作廢，而且重試永遠被同一守衛拒絕。
+    以「錢有沒有動」當判準：擋下時不得留下任何退款流水。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    await _pending_invoice(db_session, store_id, sale_id)
+    db_session.add(
+        SaleTender(
+            store_id=store_id, sale_id=sale_id, tender_type=TenderType.CASH, amount=Decimal(1050)
+        )
+    )
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    with pytest.raises(ManualPaperInvoiceOperation, match="紙本"):
+        await SalesService(db_session).void_sale(sale, actor_user_id=clerk_id)
+
+    refunds = (
+        await db_session.scalars(
+            select(CashMovement).where(
+                CashMovement.store_id == store_id,
+                CashMovement.type == CashMovementType.SALE_REFUND_OUT,
+            )
+        )
+    ).all()
+    assert refunds == [], "守衛在退款之後才擋 → 錢已經動了"
+    assert sale.status is not SaleStatus.VOIDED
