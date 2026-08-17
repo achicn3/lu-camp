@@ -728,6 +728,15 @@ function PrintDialog({
   );
 }
 
+interface KitchenTicketState {
+  /** 這則狀態屬於哪一筆銷售——慢回應與換單的唯一判準。 */
+  saleId: number;
+  mode: ServiceMode;
+  tableNo: string | null;
+  outcome: "PENDING" | "SENT" | "SKIPPED" | "FAILED";
+  error: string | null;
+}
+
 /** 出餐單提示裡的目標描述：內用帶桌號、外帶不帶。 */
 function describeKitchenTarget(kitchen: {
   mode: ServiceMode;
@@ -1143,17 +1152,22 @@ export default function PosPage() {
   // 說「已送出」但其實沒印，店員會以為吧台收到單了。
   // 內用/外帶與桌號一律取自**後端回傳的 sale**，不用送出前的本地快照：sale 才是權威值，
   // 而且補救路徑（回應遺失/付款對帳後補單）根本沒有本地快照可用。
-  // 出餐單列印請求的身分（單號）：慢回應回來時用來判斷自己是否已經過期。
-  const kitchenRequestSaleId = useRef<number | null>(null);
-  const [kitchen, setKitchen] = useState<{
-    mode: ServiceMode;
-    tableNo: string | null;
-    outcome: "PENDING" | "SENT" | "SKIPPED" | "FAILED";
-    error: string | null;
-  } | null>(null);
+  // 出餐單狀態**自己帶單號**：慢回應回來時才知道自己講的是不是畫面上這一筆。
+  // （原本用一個獨立的 ref 當守衛，但 resetSale 清了狀態卻沒清 ref，舊單的失敗會被
+  // 誤判成「當前」而寫進一個根本不渲染的狀態——吧台漏單且畫面完全不提示。）
+  const [kitchen, setKitchen] = useState<KitchenTicketState | null>(null);
+  // `kitchen` 的鏡像：promise 落地時要同步讀，不能等 render。與 setKitchen 一起更新。
+  const kitchenSaleId = useRef<number | null>(null);
+  const applyKitchen = useCallback((next: KitchenTicketState | null) => {
+    kitchenSaleId.current = next?.saleId ?? null;
+    setKitchen(next);
+  }, []);
   // 遲到的列印失敗（店員已經換下一筆）不能就這樣丟掉——吧台沒收到單，畫面卻什麼都不說。
-  // 改用一則**帶單號**的獨立提示，與當前完成頁的狀態分開呈現。
-  const [staleKitchenNotice, setStaleKitchenNotice] = useState<string | null>(null);
+  // 記下**是哪一筆**失敗，補印時才不會因為印了別筆就把它的警告一起清掉。
+  const [staleKitchen, setStaleKitchen] = useState<{
+    saleId: number;
+    message: string;
+  } | null>(null);
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
@@ -1325,39 +1339,40 @@ export default function PosPage() {
       // 代理端若卡在死掉的印表機，這個 promise 可能拖上數十秒；那段期間店員已經結完
       // 下一筆了。回來的失敗必須認得出自己已經過期，否則會把**別桌**的錯誤蓋到現在
       // 這張完成頁上（而重印鍵印的又是現在這筆）。以單號認身分。
-      kitchenRequestSaleId.current = sale.id;
-      const isCurrent = () => kitchenRequestSaleId.current === sale.id;
       const mode = sale.service_mode;
       if (mode == null) {
-        setKitchen(null);
+        applyKitchen(null);
         return;
       }
       const tableNo = sale.table_no ?? null;
+      const base = { saleId: sale.id, mode, tableNo };
       if (!printKitchenEnabled) {
-        setKitchen({ mode, tableNo, outcome: "SKIPPED", error: null });
+        applyKitchen({ ...base, outcome: "SKIPPED", error: null });
         return;
       }
       // **不可在 promise 落地前就說「已送出」**：印表機卡住時會一直顯示成功，
       // 而吧台其實沒收到單。先 PENDING，等結果出來才定案。
-      setKitchen({ mode, tableNo, outcome: "PENDING", error: null });
+      applyKitchen({ ...base, outcome: "PENDING", error: null });
       printKitchenTicket(sale, mode, tableNo).then(
         () => {
-          if (!isCurrent()) return;
-          setKitchen({ mode, tableNo, outcome: "SENT", error: null });
+          if (kitchenSaleId.current !== sale.id) return;
+          applyKitchen({ ...base, outcome: "SENT", error: null });
         },
         (err: Error) => {
-          if (!isCurrent()) {
-            // 已經換單：這則失敗仍必須讓店員知道，只是不能蓋到現在這張完成頁上。
-            setStaleKitchenNotice(
-              `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
-            );
+          if (kitchenSaleId.current !== sale.id) {
+            // 已換單，或已按「開始下一筆」清空：這則失敗仍必須讓店員知道，
+            // 只是不能蓋到現在這張完成頁上。
+            setStaleKitchen({
+              saleId: sale.id,
+              message: `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+            });
             return;
           }
-          setKitchen({ mode, tableNo, outcome: "FAILED", error: err.message });
+          applyKitchen({ ...base, outcome: "FAILED", error: err.message });
         },
       );
     },
-    [printKitchenEnabled],
+    [applyKitchen, printKitchenEnabled],
   );
 
   // 出餐單重印（docs/35）：代理離線/缺紙時第一次會失敗，而交易已成立不會進 error 態
@@ -1367,22 +1382,23 @@ export default function PosPage() {
       if (sale.service_mode == null) {
         throw new Error("本單沒有餐飲品項，無需出餐單");
       }
-      kitchenRequestSaleId.current = sale.id;
       await printKitchenTicket(sale, sale.service_mode, sale.table_no ?? null);
       return { saleId: sale.id, mode: sale.service_mode, tableNo: sale.table_no ?? null };
     },
     onSuccess: ({ saleId, mode, tableNo }) => {
-      setStaleKitchenNotice(null);  // 補印成功 → 先前那則遲到失敗已解決
-      if (kitchenRequestSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
-      setKitchen({ mode, tableNo, outcome: "SENT", error: null });
+      // 只清掉**同一筆**的遲到警告：補印 B 不代表 A 印出來了。
+      setStaleKitchen((prev) => (prev?.saleId === saleId ? null : prev));
+      if (kitchenSaleId.current !== saleId) return;  // 已換單，過期結果不覆蓋
+      applyKitchen({ saleId, mode, tableNo, outcome: "SENT", error: null });
     },
     // 失敗路徑同樣要認身分：`reset()` 不會取消在途的 mutation，A 單的慢失敗會把
     // 現在這張（B 單）完成頁改寫成 FAILED，而重印鍵印的是 B。
     onError: (err: Error, { sale }) => {
-      if (kitchenRequestSaleId.current !== sale.id) {
-        setStaleKitchenNotice(
-          `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
-        );
+      if (kitchenSaleId.current !== sale.id) {
+        setStaleKitchen({
+          saleId: sale.id,
+          message: `#${sale.id} 的出餐單列印失敗：${err.message}（吧台未收到該單，請至交易紀錄重印）`,
+        });
         return;
       }
       setKitchen((prev) =>
@@ -2066,7 +2082,8 @@ export default function PosPage() {
     setInvoiceNote(null);
     setCompletedInvoice(null);
     setDineIn(clearDineIn());
-    setKitchen(null);
+    // 連同 ref 一起失效：在途列印之後回來要走「遲到警告」，不能被當成當前這張完成頁。
+    applyKitchen(null);
     reprintKitchen.reset();
     issueInvoice.reset();
     printProof.reset();
@@ -2102,13 +2119,13 @@ export default function PosPage() {
               錢櫃未開啟：{drawerNotice}（交易已完成，請以鑰匙開櫃）
             </p>
           )}
-          {staleKitchenNotice !== null && (
+          {staleKitchen !== null && (
             <p role="alert" className="form-error pos-kitchen-stale">
-              {staleKitchenNotice}
+              {staleKitchen.message}
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => setStaleKitchenNotice(null)}
+                onClick={() => setStaleKitchen(null)}
               >
                 知道了
               </button>
@@ -2129,7 +2146,8 @@ export default function PosPage() {
               <button
                 type="button"
                 className="btn-ghost pos-kitchen-reprint"
-                disabled={reprintKitchen.isPending}
+                // 自動列印還在跑時不可再送：兩張單都會印出來，吧台可能做兩份。
+                disabled={reprintKitchen.isPending || kitchen.outcome === "PENDING"}
                 onClick={() => reprintKitchen.mutate({ sale: completed })}
               >
                 {reprintKitchen.isPending
@@ -2213,13 +2231,13 @@ export default function PosPage() {
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}
       />
-      {staleKitchenNotice !== null && (
+      {staleKitchen !== null && (
         <p role="alert" className="form-error pos-kitchen-stale">
-          {staleKitchenNotice}
+          {staleKitchen.message}
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => setStaleKitchenNotice(null)}
+            onClick={() => setStaleKitchen(null)}
           >
             知道了
           </button>
