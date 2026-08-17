@@ -158,9 +158,10 @@ async def test_register_writes_audit_log(
         f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
     )
     assert resp.status_code == 200, resp.text
-    actions = list(
-        (await db_session.scalars(select(AuditLog.action).where(AuditLog.store_id == store_id))).all()
+    rows = await db_session.scalars(
+        select(AuditLog.action).where(AuditLog.store_id == store_id)
     )
+    actions = list(rows.all())
     assert "REGISTER_MANUAL_INVOICE" in actions
 
 
@@ -232,7 +233,7 @@ async def test_duplicate_invoice_no_in_same_store_is_rejected(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     """同店同號碼不可登記兩次（既有部分唯一索引擋下）。"""
-    store_id, sale_id, mgr, clerk_token = await _seed(db_session)
+    store_id, sale_id, mgr, _ = await _seed(db_session)
     await _pending_invoice(db_session, store_id, sale_id)
     other_sale = Sale(
         store_id=store_id,

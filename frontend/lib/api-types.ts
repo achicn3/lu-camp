@@ -1185,6 +1185,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/einvoice/sales/{sale_id}/manual-invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Manual Invoice
+         * @description 登記手開紙本備用發票（docs/36；限 MANAGER）。
+         *
+         *     字軌用完/平台故障時店家改開紙本，這裡把那張紙登記進系統，並**取消待送的 F0401**
+         *     ——否則字軌恢復後重試會讓平台再開一張，同一筆交易兩張發票。
+         *     發票非待開立 / 金額不符 / 號碼重複 → 409。
+         */
+        post: operations["registerManualInvoiceForSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gift-reasons": {
         parameters: {
             query?: never;
@@ -3862,6 +3886,17 @@ export interface components {
          */
         EInvoiceAction: "ISSUE" | "VOID" | "ALLOWANCE";
         /**
+         * EInvoiceIssueChannel
+         * @description 發票是怎麼開出來的（invoices.issue_channel，docs/36）。
+         *
+         *     AMEGO：經加值中心開立的電子發票（預設，既有全部紀錄皆為此）。
+         *     MANUAL_PAPER：字軌用完/平台故障時，以向國稅局領用的**紙本備用發票**當場手開。
+         *       平台上沒有這張發票 → 不可走 F0501 作廢、不可走 G0401 折讓、不印證明聯；
+         *       登記後該發票的待送 F0401 佇列列一律 CANCELLED，避免字軌恢復後重複開立。
+         * @enum {string}
+         */
+        EInvoiceIssueChannel: "AMEGO" | "MANUAL_PAPER";
+        /**
          * EInvoiceMessageType
          * @description MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。
          *
@@ -4340,6 +4375,7 @@ export interface components {
             /** Invoice Time */
             invoice_time: string | null;
             invoice_type: components["schemas"]["InvoiceType"];
+            issue_channel: components["schemas"]["EInvoiceIssueChannel"];
             /** Net */
             net: string;
             /** Npoban */
@@ -4598,6 +4634,31 @@ export interface components {
             password: string;
             /** Username */
             username: string;
+        };
+        /**
+         * ManualInvoiceRegisterRequest
+         * @description 登記手開紙本備用發票（docs/36）。
+         *
+         *     只登記**客人手上那張紙**的內容，不改金額：`total` 必須等於發票既有總額，否則拒絕
+         *     （登記手開發票不是改金額的後門）。`invoice_time`／`random_number` 可省略——紙本上
+         *     不一定寫得清楚，不強迫店員亂填。
+         */
+        ManualInvoiceRegisterRequest: {
+            /**
+             * Invoice Date
+             * Format: date
+             */
+            invoice_date: string;
+            /** Invoice No */
+            invoice_no: string;
+            /** Invoice Time */
+            invoice_time?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Random Number */
+            random_number?: string | null;
+            /** Total */
+            total: number | string;
         };
         /** MaskedMemberRead */
         MaskedMemberRead: {
@@ -8878,6 +8939,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    registerManualInvoiceForSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualInvoiceRegisterRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

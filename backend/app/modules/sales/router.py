@@ -47,6 +47,7 @@ from app.shared.exceptions import (
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
     LinePayTransportError,
+    ManualPaperInvoiceOperation,
     ManualRefundRequired,
     MemberPointsAdjustFailed,
     MenuItemNotFound,
@@ -84,6 +85,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     LinePayChargeFailed: status.HTTP_402_PAYMENT_REQUIRED,
     # 台灣Pay 作廢須先手動退款確認；LINE Pay 退款上次結果未定須人工對帳 → 409（前置未滿足）。
     ManualRefundRequired: status.HTTP_409_CONFLICT,
+    # 手開紙本發票不可走平台作廢（docs/36）：前置未滿足，同 ManualRefundRequired 口徑 → 409。
+    ManualPaperInvoiceOperation: status.HTTP_409_CONFLICT,
     LinePayRefundAmbiguous: status.HTTP_409_CONFLICT,
     SaleItemNotFound: status.HTTP_404_NOT_FOUND,
     MenuItemNotFound: status.HTTP_404_NOT_FOUND,

@@ -3703,6 +3703,15 @@
         "title": "EInvoiceAction",
         "type": "string"
       },
+      "EInvoiceIssueChannel": {
+        "description": "發票是怎麼開出來的（invoices.issue_channel，docs/36）。\n\nAMEGO：經加值中心開立的電子發票（預設，既有全部紀錄皆為此）。\nMANUAL_PAPER：字軌用完/平台故障時，以向國稅局領用的**紙本備用發票**當場手開。\n  平台上沒有這張發票 → 不可走 F0501 作廢、不可走 G0401 折讓、不印證明聯；\n  登記後該發票的待送 F0401 佇列列一律 CANCELLED，避免字軌恢復後重複開立。",
+        "enum": [
+          "AMEGO",
+          "MANUAL_PAPER"
+        ],
+        "title": "EInvoiceIssueChannel",
+        "type": "string"
+      },
       "EInvoiceMessageType": {
         "description": "MIG 4.1 存證訊息類型（einvoice_upload_queue.message_type、拋檔目錄名）。\n\n本店為自建 Turnkey 存證營業人（docs/14 §0）：F0401 開立、F0501 作廢、F0701 註銷、\nG0401 開立折讓、G0501 作廢折讓。實際 XML 欄位/長度/Enum 待 T13 依官方 XSD 落地。",
         "enum": [
@@ -4861,6 +4870,9 @@
           "invoice_type": {
             "$ref": "#/components/schemas/InvoiceType"
           },
+          "issue_channel": {
+            "$ref": "#/components/schemas/EInvoiceIssueChannel"
+          },
           "net": {
             "title": "Net",
             "type": "string"
@@ -4956,6 +4968,7 @@
           "tax",
           "total",
           "status",
+          "issue_channel",
           "created_at"
         ],
         "title": "InvoiceRead",
@@ -5609,6 +5622,76 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "ManualInvoiceRegisterRequest": {
+        "description": "登記手開紙本備用發票（docs/36）。\n\n只登記**客人手上那張紙**的內容，不改金額：`total` 必須等於發票既有總額，否則拒絕\n（登記手開發票不是改金額的後門）。`invoice_time`／`random_number` 可省略——紙本上\n不一定寫得清楚，不強迫店員亂填。",
+        "properties": {
+          "invoice_date": {
+            "format": "date",
+            "title": "Invoice Date",
+            "type": "string"
+          },
+          "invoice_no": {
+            "pattern": "^[A-Z]{2}\\d{8}$",
+            "title": "Invoice No",
+            "type": "string"
+          },
+          "invoice_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Time"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "random_number": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Random Number"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "invoice_no",
+          "invoice_date",
+          "total"
+        ],
+        "title": "ManualInvoiceRegisterRequest",
         "type": "object"
       },
       "MaskedMemberRead": {
@@ -15116,6 +15199,64 @@
           }
         ],
         "summary": "Issue Invoice For Sale",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/sales/{sale_id}/manual-invoice": {
+      "post": {
+        "description": "登記手開紙本備用發票（docs/36；限 MANAGER）。\n\n字軌用完/平台故障時店家改開紙本，這裡把那張紙登記進系統，並**取消待送的 F0401**\n——否則字軌恢復後重試會讓平台再開一張，同一筆交易兩張發票。\n發票非待開立 / 金額不符 / 號碼重複 → 409。",
+        "operationId": "registerManualInvoiceForSale",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualInvoiceRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register Manual Invoice",
         "tags": [
           "einvoice"
         ]

@@ -41,6 +41,12 @@ import {
 } from "@/features/returns/invoice-consent";
 
 type SaleSummary = components["schemas"]["SaleSummaryRead"];
+
+/** 還沒有有效發票、需要補開或登記手開的銷售（docs/36）。 */
+const NEEDS_INVOICE_STATUSES = new Set<SaleSummary["invoice_status"]>([
+  "NOT_ISSUED",
+  "PENDING_ISSUE",
+]);
 type ReturnTenderRead = components["schemas"]["ReturnTenderRead"];
 
 function extractDetail(error: unknown): string | null {
@@ -69,6 +75,148 @@ const SALE_STATUS_LABELS: Record<string, string> = {
   RETURNED: "已退貨",
   VOIDED: "已作廢",
 };
+
+function ManualInvoiceDialog({
+  sale,
+  onClose,
+  onRegistered,
+}: {
+  sale: SaleSummary;
+  onClose: () => void;
+  onRegistered: () => void;
+}) {
+  // 登記手開紙本備用發票（docs/36）：字軌用完/平台故障時店家改開紙本，這裡把那張紙
+  // 登記進系統，並取消待送的開立——否則字軌恢復後重試會讓平台再開一張。
+  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(() => taipeiDate());
+  const [invoiceTime, setInvoiceTime] = useState("");
+  const [randomNumber, setRandomNumber] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const register = useMutation({
+    mutationFn: async () => {
+      const { data, error: apiError } = await api.POST(
+        "/api/v1/einvoice/sales/{sale_id}/manual-invoice",
+        {
+          params: { path: { sale_id: sale.id } },
+          body: {
+            invoice_no: invoiceNo.trim().toUpperCase(),
+            invoice_date: invoiceDate,
+            invoice_time: invoiceTime === "" ? null : `${invoiceTime}:00`,
+            random_number: randomNumber === "" ? null : randomNumber,
+            total: sale.total,
+            note: note.trim() === "" ? null : note.trim(),
+          },
+        },
+      );
+      if (!data) throw new Error(extractDetail(apiError) ?? "登記失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      onRegistered();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const invoiceNoBad =
+    invoiceNo !== "" && !/^[A-Z]{2}\d{8}$/.test(invoiceNo.trim().toUpperCase());
+  const randomBad = randomNumber !== "" && !/^\d{4}$/.test(randomNumber);
+
+  return (
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="登記手開發票"
+    >
+      <div className="card pos-dialog">
+        <h2>登記手開發票 #{sale.id}</h2>
+        <p className="hint">
+          把客人手上那張<strong>紙本備用發票</strong>的號碼登記進系統。登記後本筆不會再自動開立
+          電子發票（避免同一筆交易開出兩張），日後的作廢與折讓也須依國稅局程序以紙本辦理。
+        </p>
+        <p>
+          本筆金額{" "}
+          <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
+          ，登記不會更動金額。
+        </p>
+        <label className="field">
+          <span className="field-label">發票號碼（字軌 2 碼 + 8 位數）</span>
+          <input
+            aria-label="發票號碼"
+            value={invoiceNo}
+            placeholder="ZA10029999"
+            onChange={(e) => setInvoiceNo(e.target.value)}
+          />
+          {invoiceNoBad && <span className="form-error">格式須為 2 個大寫英文字母 + 8 位數字</span>}
+        </label>
+        <label className="field">
+          <span className="field-label">開立日期</span>
+          <input
+            type="date"
+            aria-label="開立日期"
+            value={invoiceDate}
+            onChange={(e) => setInvoiceDate(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">開立時間（選填）</span>
+          <input
+            type="time"
+            aria-label="開立時間"
+            value={invoiceTime}
+            onChange={(e) => setInvoiceTime(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">隨機碼（選填，4 位數）</span>
+          <input
+            aria-label="隨機碼"
+            inputMode="numeric"
+            value={randomNumber}
+            onChange={(e) => setRandomNumber(e.target.value)}
+          />
+          {randomBad && <span className="form-error">隨機碼須為 4 位數字</span>}
+        </label>
+        <label className="field">
+          <span className="field-label">事由（選填，供日後稽核追溯）</span>
+          <input
+            aria-label="事由"
+            value={note}
+            placeholder="字軌用完 / 平台故障"
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={
+              register.isPending ||
+              invoiceNo.trim() === "" ||
+              invoiceNoBad ||
+              randomBad ||
+              invoiceDate === ""
+            }
+            onClick={() => register.mutate()}
+          >
+            {register.isPending ? "登記中…" : "確認登記"}
+          </button>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function VoidConfirmDialog({
   sale,
@@ -792,7 +940,17 @@ export default function SalesPage() {
     },
   });
 
-  const rows = sales.data ?? [];
+  // 「只看未開立」（docs/36）：開立失敗的單一旦離開 POS 完成畫面就再也找不到
+  // ——前端沒有發票佇列頁，這個篩選是把它們撈回來的唯一途徑。
+  const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
+  const [manualInvoiceTarget, setManualInvoiceTarget] = useState<SaleSummary | null>(null);
+  const allRows = sales.data ?? [];
+  const rows = pendingInvoiceOnly
+    ? allRows.filter((sale) => NEEDS_INVOICE_STATUSES.has(sale.invoice_status))
+    : allRows;
+  const pendingInvoiceCount = allRows.filter((sale) =>
+    NEEDS_INVOICE_STATUSES.has(sale.invoice_status),
+  ).length;
 
   return (
     <section>
@@ -805,6 +963,16 @@ export default function SalesPage() {
       {kitchenNote !== null && (
         <p className={reprintKitchen.isError ? "form-error" : "hint"}>{kitchenNote}</p>
       )}
+      <label className="field field-toggle sales-invoice-filter">
+        <input
+          type="checkbox"
+          checked={pendingInvoiceOnly}
+          onChange={(e) => setPendingInvoiceOnly(e.target.checked)}
+        />
+        <span className="field-label">
+          只看未開立發票的交易（{pendingInvoiceCount}）
+        </span>
+      </label>
       {isManager && <LinePayReconcilePanel />}
       {sales.isError && (
         <p role="alert" className="form-error">
@@ -813,7 +981,8 @@ export default function SalesPage() {
       )}
       {sales.isSuccess && rows.length === 0 && <p className="hint">今日尚無交易。</p>}
       {rows.length > 0 && (
-        <div className="card">
+        <div className="card sales-list-card">
+          <div className="sales-list-wrap">
           <table className="data-table sales-list">
           <thead>
             <tr>
@@ -878,6 +1047,21 @@ export default function SalesPage() {
                         推送簽收
                       </button>
                     )}
+                    {isManager &&
+                      !voided &&
+                      NEEDS_INVOICE_STATUSES.has(sale.invoice_status) && (
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          aria-label={`登記銷售 ${sale.id} 的手開發票`}
+                          onClick={() => {
+                            setVoidedNote(null);
+                            setManualInvoiceTarget(sale);
+                          }}
+                        >
+                          登記手開發票
+                        </button>
+                      )}
                     {sale.service_mode != null && !voided && (
                       <button
                         type="button"
@@ -925,6 +1109,7 @@ export default function SalesPage() {
             })}
           </tbody>
           </table>
+          </div>
         </div>
       )}
       {returnTarget !== null && (
@@ -942,6 +1127,19 @@ export default function SalesPage() {
               `銷售 #${returnTarget.id} 退貨完成，共 $${formatNtd(refund)}：${split}。`,
             );
             setReturnTarget(null);
+            void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
+          }}
+        />
+      )}
+      {manualInvoiceTarget !== null && (
+        <ManualInvoiceDialog
+          sale={manualInvoiceTarget}
+          onClose={() => setManualInvoiceTarget(null)}
+          onRegistered={() => {
+            setVoidedNote(
+              `#${manualInvoiceTarget.id} 已登記手開發票；本筆不會再自動開立電子發票。`,
+            );
+            setManualInvoiceTarget(null);
             void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
           }}
         />

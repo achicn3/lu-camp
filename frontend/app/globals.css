@@ -3420,3 +3420,17 @@ body {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--sp-2);
 }
+
+/* 交易紀錄表（docs/36 起多了「登記手開發票」，欄位與按鈕都變多）。
+   沿用 .settle-card 的既有做法：卡片放寬、表格自己橫向捲動、儲存格不折字
+   ——否則 .card 的 max-width:520px 會把「發票狀態」擠成一字一行。 */
+.sales-list-card {
+  max-width: none;
+}
+.sales-list-wrap {
+  overflow-x: auto;
+}
+.data-table.sales-list th,
+.data-table.sales-list td {
+  white-space: nowrap;
+}

@@ -20,6 +20,7 @@ from app.shared.exceptions import (
     DomainError,
     IdempotencyKeyConflict,
     LinePayChargeFailed,
+    ManualPaperInvoiceOperation,
     NoOpenCashSession,
     ReturnConflict,
     ReturnLineInvalid,
@@ -41,6 +42,8 @@ _STATUS_BY_EXC: dict[type[DomainError], int] = {
     IdempotencyKeyConflict: status.HTTP_409_CONFLICT,
     # LINE Pay 退款失敗/未設定（fail-closed，退貨整筆不成立）→ 402 Payment Required。
     LinePayChargeFailed: status.HTTP_402_PAYMENT_REQUIRED,
+    # 手開紙本發票的折讓須依國稅局程序人工辦理（docs/36）→ 409（前置未滿足）。
+    ManualPaperInvoiceOperation: status.HTTP_409_CONFLICT,
 }
 
 
