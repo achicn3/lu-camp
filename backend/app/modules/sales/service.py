@@ -67,6 +67,7 @@ from app.shared.enums import (
     AdjustmentScope,
     CartSessionStatus,
     CashMovementType,
+    EInvoiceIssueChannel,
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
@@ -2086,11 +2087,15 @@ class SalesService:
         # - 發票已直接作廢（平台從未收過 F0401）→ 從未成立，NOT_ISSUED
         # - 作廢請求已送出但平台未確認 → PENDING_VOID；**確認成功才由回呼轉 VOID**
         if voided_invoice is not None:
-            sale.invoice_status = (
-                SaleInvoiceStatus.NOT_ISSUED
-                if voided_invoice.status is InvoiceStatus.VOID
-                else SaleInvoiceStatus.PENDING_VOID
-            )
+            if voided_invoice.status is not InvoiceStatus.VOID:
+                sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
+            elif voided_invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+                # 手開紙本（docs/36）：那張紙**真的存在過也真的開立過**，只是後來依國稅局
+                # 程序作廢。記成 NOT_ISSUED 會讓報表/匯出/對帳誤報為從未開立
+                # （Codex 對抗審查第七輪）。NOT_ISSUED 只適用「平台從未收過 F0401」。
+                sale.invoice_status = SaleInvoiceStatus.VOID
+            else:
+                sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED
         # 庫存回補（invariant #1/#6）：作廢＝此筆銷售視為未發生，須把賣出的庫存放回——
         # 序號品 SOLD→IN_STOCK、散裝 remaining 加回、一般商品現量加回（與退貨同口徑，
         # 但不產生退貨單/折讓/退現）。否則作廢後庫存被永久消耗、序號品卡在 SOLD 不能再賣、

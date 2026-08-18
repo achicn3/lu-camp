@@ -261,11 +261,13 @@ function VoidConfirmDialog({
       const { data, error: apiError } = await api.POST("/api/v1/sales/{sale_id}/void", {
         params: {
           path: { sale_id: sale.id },
-          query: isManualPaper
-            ? { manual_paper_disposed: manualPaperDisposed }
-            : isTaiwanPay
-              ? { manual_refund_ack: manualRefundAck }
-              : {},
+          // **兩個確認可能同時需要**（docs/36）：紙本確認讓發票守衛放行，但含台灣Pay
+          // 收款時後端仍要求人工退款確認。寫成二選一的話，「手開紙本＋台灣Pay」的單
+          // 勾幾次都是 409，永遠清不掉（Codex 對抗審查第七輪 high）。
+          query: {
+            ...(isManualPaper ? { manual_paper_disposed: manualPaperDisposed } : {}),
+            ...(isTaiwanPay ? { manual_refund_ack: manualRefundAck } : {}),
+          },
         },
       });
       if (!data) throw new Error(extractDetail(apiError) ?? "作廢失敗");
@@ -313,11 +315,29 @@ function VoidConfirmDialog({
                 {error}
               </p>
             )}
+            {/* 台灣Pay 沒有退款 API：紙本程序完成**之後**才顯示退款指示——順序反了會讓
+                店長先把錢退出去，紙本卻還沒作廢。兩個確認最後會在同一個請求一起送出。 */}
+            {isTaiwanPay && manualPaperDisposed && (
+              <label className="field field-toggle">
+                <input
+                  type="checkbox"
+                  checked={manualRefundAck}
+                  onChange={(e) => setManualRefundAck(e.target.checked)}
+                />
+                <span className="field-label">
+                  我已於台灣Pay App 完成退款給客人
+                </span>
+              </label>
+            )}
             <div className="pos-dialog-actions">
               <button
                 type="button"
                 className="btn-danger"
-                disabled={!manualPaperDisposed || voidSale.isPending}
+                disabled={
+                  !manualPaperDisposed ||
+                  (isTaiwanPay && !manualRefundAck) ||
+                  voidSale.isPending
+                }
                 onClick={() => voidSale.mutate()}
               >
                 {voidSale.isPending ? "作廢中…" : "確認作廢（不送平台）"}
@@ -1193,7 +1213,7 @@ export default function SalesPage() {
               `銷售 #${returnTarget.id} 退貨完成，共 $${formatNtd(refund)}：${split}。`,
             );
             setReturnTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
+            void queryClient.invalidateQueries({ queryKey: ["sales"] });
           }}
         />
       )}
@@ -1206,7 +1226,7 @@ export default function SalesPage() {
               `#${manualInvoiceTarget.id} 已登記手開發票；本筆不會再自動開立電子發票。`,
             );
             setManualInvoiceTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
+            void queryClient.invalidateQueries({ queryKey: ["sales"] });
           }}
         />
       )}
@@ -1217,7 +1237,7 @@ export default function SalesPage() {
           onVoided={() => {
             setVoidedNote(`銷售 #${voidTarget.id} 已作廢。`);
             setVoidTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales", "today"] });
+            void queryClient.invalidateQueries({ queryKey: ["sales"] });
           }}
         />
       )}

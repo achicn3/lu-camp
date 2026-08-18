@@ -43,6 +43,7 @@ from app.shared.exceptions import (
     AmegoTransportError,
     ManualInvoiceNotRegisterable,
     ManualPaperInvoiceOperation,
+    ManualRefundRequired,
 )
 
 TAX_RATE = Decimal("0.05")
@@ -907,3 +908,83 @@ async def test_non_amego_claim_is_refused_for_manual_registration(
             actor_user_id=None,
             client_factory=_explode,
         )
+
+
+async def test_manual_paper_with_taiwanpay_can_be_voided_with_both_confirmations(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """手開紙本＋台灣Pay：兩個確認要能**同時**帶入，否則那筆單永遠清不掉。
+
+    紙本確認讓守衛放行，但後端仍要求台灣Pay 的人工退款確認；若前端二選一只送紙本那個，
+    店長勾幾次都是 409（Codex 對抗審查第七輪 high——與上一輪剛修的死路同類）。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    invoice = await _pending_invoice(db_session, store_id, sale_id)
+    db_session.add(
+        SaleTender(
+            store_id=store_id,
+            sale_id=sale_id,
+            tender_type=TenderType.TAIWAN_PAY,
+            amount=Decimal(1050),
+        )
+    )
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    svc = SalesService(db_session)
+    # 只帶紙本確認 → 仍被台灣Pay 的人工退款確認擋下（這就是死路）
+    with pytest.raises(ManualRefundRequired):
+        await svc.void_sale(sale, actor_user_id=clerk_id, manual_paper_disposed=True)
+    # 兩個都帶 → 完成
+    voided = await svc.void_sale(
+        sale,
+        actor_user_id=clerk_id,
+        manual_paper_disposed=True,
+        manual_refund_ack=True,
+    )
+    assert voided.status is SaleStatus.VOIDED
+    await db_session.refresh(invoice)
+    assert invoice.status is InvoiceStatus.VOID
+
+
+async def test_manual_paper_void_reports_as_void_not_never_issued(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """紙本作廢後，銷售的發票狀態必須是 VOID 而非 NOT_ISSUED（docs/36）。
+
+    那張紙本**真的存在過也真的開立過**，只是後來作廢；記成「從未開立」會讓報表、
+    匯出與對帳全部誤報（Codex 對抗審查第七輪 medium）。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("1000"))
+    await _pending_invoice(db_session, store_id, sale_id)
+    db_session.add(
+        SaleTender(
+            store_id=store_id, sale_id=sale_id, tender_type=TenderType.CASH, amount=Decimal(1050)
+        )
+    )
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    await SalesService(db_session).void_sale(
+        sale, actor_user_id=clerk_id, manual_paper_disposed=True
+    )
+    await db_session.refresh(sale)
+    assert sale.invoice_status is SaleInvoiceStatus.VOID
