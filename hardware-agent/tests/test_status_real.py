@@ -26,6 +26,7 @@ from agent.interfaces import DeviceKind, DeviceStatus, DeviceStatusProvider
 
 _BROTHER_HOST = "192.168.0.41"
 _EPSON_HOST = "192.168.0.42"
+_KITCHEN_HOST = "192.168.0.46"
 
 
 def make_provider(**kwargs: Any) -> RealStatusProvider:
@@ -291,3 +292,89 @@ def test_from_env_builds_provider_targeting_configured_ips(
     targets = {call.args[0] for call in mock_conn.call_args_list}
     assert (_EPSON_HOST, 9100) in targets
     assert (_BROTHER_HOST, 9100) in targets
+
+
+# ─────────────────────────────────────────────
+# 出餐機（第二台 EPSON，選配；docs/35）
+# ─────────────────────────────────────────────
+
+
+def _kitchen_provider() -> RealStatusProvider:
+    return make_provider(
+        kitchen=PrinterEndpoint(host=_KITCHEN_HOST, port=9100, timeout=2.0)
+    )
+
+
+def test_poll_omits_kitchen_when_not_configured() -> None:
+    """沒接第二台就**不得**憑空多出一台：狀態頁列出不存在的裝置比沒列還糟。"""
+    provider = make_provider()
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok"}):
+        statuses = provider.poll()
+    assert [s.id for s in statuses] == ["brother-1", "epson-1", "drawer-1"]
+
+
+def test_poll_includes_kitchen_when_configured() -> None:
+    """接了第二台就必須列管——它多半在廚房，離線了沒人會看到。"""
+    with _mock_tcp({_BROTHER_HOST: "ok", _EPSON_HOST: "ok", _KITCHEN_HOST: "ok"}):
+        statuses = _kitchen_provider().poll()
+    assert [s.id for s in statuses] == ["brother-1", "epson-1", "kitchen-1", "drawer-1"]
+    kitchen = next(s for s in statuses if s.id == "kitchen-1")
+    assert kitchen.kind is DeviceKind.RECEIPT_PRINTER
+    assert kitchen.driver == "real"
+    assert kitchen.online is True
+    # 尚未實機驗證過，不得宣稱已驗證
+    assert kitchen.validated_on_hardware is False
+
+
+def test_kitchen_offline_is_reported_and_does_not_poison_the_others() -> None:
+    """**這條是本功能的重點**：廚房那台掛了要看得出來，且不得連累櫃檯那台。"""
+    with _mock_tcp(
+        {_BROTHER_HOST: "ok", _EPSON_HOST: "ok", _KITCHEN_HOST: OSError("refused")}
+    ):
+        statuses = _kitchen_provider().poll()
+    by_id = {s.id: s for s in statuses}
+    assert by_id["kitchen-1"].online is False
+    assert by_id["kitchen-1"].last_seen is None
+    # 連線被拒＝合理離線，依既有契約 probe_error 為 None（只留給非預期例外）
+    assert by_id["kitchen-1"].probe_error is None
+    # 櫃檯那台與錢櫃不受影響
+    assert by_id["epson-1"].online is True
+    assert by_id["drawer-1"].online is True
+
+
+def test_kitchen_unexpected_probe_error_is_not_disguised_as_offline() -> None:
+    """設定/程式錯誤必須如實標示，**不得**偽裝成單純離線。
+
+    廚房那台本來就常離線（沒開機），若把「IP 打錯」也顯示成一樣的離線，
+    店家會一直以為只是沒開機而不去修設定。
+    """
+    with _mock_tcp(
+        {_BROTHER_HOST: "ok", _EPSON_HOST: "ok", _KITCHEN_HOST: ValueError("bad config")}
+    ):
+        statuses = _kitchen_provider().poll()
+    kitchen = next(s for s in statuses if s.id == "kitchen-1")
+    assert kitchen.online is False
+    assert kitchen.probe_error is not None
+    assert _KITCHEN_HOST in kitchen.probe_error
+
+
+def test_kitchen_probe_targets_its_own_host_not_the_receipt_printer() -> None:
+    """必須探測**出餐機自己的** IP：沿用 EPSON 的位址會讓廚房那台掛了仍顯示正常。"""
+    with _mock_tcp(
+        {_BROTHER_HOST: "ok", _EPSON_HOST: "ok", _KITCHEN_HOST: "ok"}
+    ) as mock_conn:
+        _kitchen_provider().poll()
+    targets = {call.args[0] for call in mock_conn.call_args_list}
+    assert (_KITCHEN_HOST, 9100) in targets
+
+
+def test_epson_offline_does_not_mark_kitchen_offline() -> None:
+    """反向也要成立：櫃檯那台掛了，廚房那台仍應照實回報在線。"""
+    with _mock_tcp(
+        {_BROTHER_HOST: "ok", _EPSON_HOST: OSError("refused"), _KITCHEN_HOST: "ok"}
+    ):
+        statuses = _kitchen_provider().poll()
+    by_id = {s.id: s for s in statuses}
+    assert by_id["epson-1"].online is False
+    assert by_id["drawer-1"].online is False  # 錢櫃依附 EPSON
+    assert by_id["kitchen-1"].online is True
