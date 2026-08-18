@@ -208,6 +208,23 @@ try {
   ok("取消篩選後兩筆都回來", backCount >= 2, `${backCount} 筆`);
   await page.screenshot({ path: `${SHOTS}/05-after-register.png` });
 
+  // 手開紙本必須在列表上看得出來：它不在光貿系統裡，月底申報要另外處理，
+  // 只顯示「已開立」的話店長得一筆筆點開才分得出來（docs/36）。
+  const paperRow = page.locator("table tbody tr", { hasText: `#${saleId}` });
+  ok(
+    "列表把手開紙本標示出來（與電子發票分得開）",
+    (await paperRow.getByText("手開紙本").count()) > 0,
+    ((await paperRow.textContent()) ?? "").slice(0, 80),
+  );
+  // 未登記的那筆不得被誤標。
+  ok(
+    "未登記的那筆不得被標成手開紙本",
+    (await page
+      .locator("table tbody tr", { hasText: `#${saleId2}` })
+      .getByText("手開紙本")
+      .count()) === 0,
+  );
+
   const issued = await api(token, "GET", `/api/v1/sales/${saleId}`);
   ok(
     "銷售的發票狀態轉為已開立",

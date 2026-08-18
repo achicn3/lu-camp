@@ -500,6 +500,32 @@ async def test_void_in_posted_at_gap_does_not_break_invoice_state(
                 assert invoice.void_reason is not None
             else:
                 assert invoice.void_reason is None
+            # **釘住結局，不只釘自洽**（Codex 對抗審查第十一輪）：這個空窗裡並發作廢後，
+            # 已認領的交付**仍會完成**（既有設計：認領後不中止，改由結果轉移收斂），
+            # 因此平台上真的會有一張發票 → 必須排 F0501 去作廢它，否則「已作廢的銷售」
+            # 在平台上留著一張有效發票。只斷言 CHECK 沒被違反的話，哪天改成「靜靜取消
+            # 交付、留 VOID_PENDING 收斂不了」也照樣綠。
+            rows = list(
+                await s3.scalars(
+                    select(EInvoiceUploadQueue).where(
+                        EInvoiceUploadQueue.store_id == store_id
+                    )
+                )
+            )
+            issue_rows = [r for r in rows if r.action is EInvoiceAction.ISSUE]
+            void_rows = [r for r in rows if r.action is EInvoiceAction.VOID]
+            resendable = (UploadStatus.PENDING, UploadStatus.FAILED)
+            if invoice.status is InvoiceStatus.VOID_PENDING:
+                # 交付完成 → 平台有發票 → 必須有 F0501，且開立列不得再可重送
+                assert void_rows, "作廢在途卻沒有 F0501 佇列列：平台上的發票永遠作廢不掉"
+                assert all(r.status not in resendable for r in issue_rows), (
+                    "開立列仍可重送：會對已作廢的銷售再開一張"
+                )
+            elif invoice.status is InvoiceStatus.VOID:
+                # 平台確認沒開過 → 開立列必須已收斂（否則字軌恢復後會憑空開出一張）
+                assert all(r.status not in resendable for r in issue_rows), (
+                    "已作廢卻留著可重送的開立列：字軌恢復後會憑空開出一張"
+                )
     finally:
         monkeypatch.undo()
         await _cleanup(sm, store_id)

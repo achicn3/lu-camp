@@ -2,11 +2,17 @@
 // /sales 交易紀錄（當日）：打錯單的現場救援入口——列出今日銷售、店長可作廢（二次確認，
 // docs/10 §28 危險動作）。作廢由後端整套反轉：庫存回補、點數/購物金沖回、寄售結算反轉、
 // 電子發票中止；已退貨/已作廢的單後端會擋（409），前端先行停用按鈕。
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
+import { SALES_PAGE_SIZE, nextSalesPageParam } from "@/features/sales/pagination";
 import { printKitchenTicket } from "@/lib/agent";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
@@ -1089,22 +1095,27 @@ export default function SalesPage() {
   // 客端從 sale.invoice_status 推導則會把「電子發票關閉、根本沒有發票」的單也列進來，
   // 按下去只會 404。切換時 queryKey 必須跟著換，否則會沿用另一模式的快取。
   const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
-  const sales = useQuery({
+  // **必須可分頁**（docs/36）：「只看未開立」不限日期，會隨時間累積；後端 limit 上限 200，
+  // 只抓第一頁的話第 201 筆之後就從**唯一的救援入口**永久消失——而那些正是拖最久、
+  // 最該處理的單，畫面還不會說被截斷了（Codex 對抗審查第十一輪 medium）。
+  const sales = useInfiniteQuery({
     queryKey: ["sales", pendingInvoiceOnly ? "registerable" : "today"],
-    queryFn: async () => {
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
       const { data, error } = await api.GET("/api/v1/sales", {
         params: {
           query: pendingInvoiceOnly
-            ? { invoice_registerable: true, limit: 200 }
-            : { from: startOfTodayIso(), limit: 200 },
+            ? { invoice_registerable: true, limit: SALES_PAGE_SIZE, offset: pageParam }
+            : { from: startOfTodayIso(), limit: SALES_PAGE_SIZE, offset: pageParam },
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取交易紀錄失敗");
       return data;
     },
+    getNextPageParam: nextSalesPageParam,
   });
   const [manualInvoiceTarget, setManualInvoiceTarget] = useState<SaleSummary | null>(null);
-  const rows = sales.data ?? [];
+  const rows = sales.data?.pages.flat() ?? [];
 
   return (
     <section>
@@ -1133,7 +1144,9 @@ export default function SalesPage() {
           {(sales.error as Error).message}
         </p>
       )}
-      {sales.isSuccess && rows.length === 0 && <p className="hint">今日尚無交易。</p>}
+      {sales.isSuccess && rows.length === 0 && (
+        <p className="hint">{pendingInvoiceOnly ? "沒有待開立發票的交易。" : "今日尚無交易。"}</p>
+      )}
       {rows.length > 0 && (
         <div className="card sales-list-card">
           <div className="sales-list-wrap">
@@ -1171,7 +1184,14 @@ export default function SalesPage() {
                         ? "外帶"
                         : "—"}
                   </td>
-                  <td>{labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}</td>
+                  {/* 手開紙本必須看得出來（docs/36）：它**不在光貿系統裡**，月底申報要另外
+                      處理。只顯示「已開立」的話，店長得一筆筆點開對話框才分得出來。 */}
+                  <td>
+                    {labelFor(INVOICE_STATUS_LABELS, sale.invoice_status)}
+                    {sale.invoice_issue_channel === "MANUAL_PAPER" && (
+                      <span className="pos-gift-badge">手開紙本</span>
+                    )}
+                  </td>
                   <td>{voided ? "已作廢" : labelFor(SALE_STATUS_LABELS, sale.status)}</td>
                   <td>
                     {!voided && !returned && (
@@ -1262,6 +1282,20 @@ export default function SalesPage() {
           </tbody>
           </table>
           </div>
+          {sales.hasNextPage && (
+            <p className="hint">
+              目前顯示前 {rows.length} 筆
+              {pendingInvoiceOnly ? "（未開立發票的交易不限日期，會持續累積）" : ""}。{" "}
+              <button
+                type="button"
+                className="btn-ghost sales-load-more"
+                disabled={sales.isFetchingNextPage}
+                onClick={() => void sales.fetchNextPage()}
+              >
+                {sales.isFetchingNextPage ? "載入中…" : "載入更多"}
+              </button>
+            </p>
+          )}
         </div>
       )}
       {returnTarget !== null && (
