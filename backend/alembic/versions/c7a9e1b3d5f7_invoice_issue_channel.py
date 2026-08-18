@@ -43,6 +43,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
+    """Downgrade schema.
+
+    **有手開紙本發票時一律中止**：這一欄是「這張發票平台上不存在」的唯一標記。
+    刪掉之後舊版程式會把它們當成一般電子發票，可能對平台送出 F0501/G0401；
+    再升級回來也只會以預設 AMEGO 回填，來源永久遺失——等於讓 rollback 本身
+    變成稅務事故（Codex 對抗審查第八輪 high）。
+    """
+    conn = op.get_bind()
+    remaining = conn.execute(
+        sa.text("SELECT count(*) FROM invoices WHERE issue_channel = 'MANUAL_PAPER'")
+    ).scalar_one()
+    if remaining:
+        raise RuntimeError(
+            f"資料庫中有 {remaining} 張手開紙本發票；降版會抹掉其來源標記，"
+            "使舊版把它們當成電子發票並可能送出平台作廢/折讓。"
+            "請先人工處置這些發票（或另行保存來源）後再降版。"
+        )
     op.drop_constraint(_CK, "invoices", type_="check")
     op.drop_column("invoices", "issue_channel")

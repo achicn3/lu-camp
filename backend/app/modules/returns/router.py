@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +65,9 @@ async def create_return(
     session: SessionDep,
     user: CurrentUserDep,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
+    # 手開紙本發票（docs/36）：店長已依國稅局程序處置紙本（作廢或開紙本折讓）的確認。
+    # 帶入才允許退貨，且只做本地反轉、不送 G0401/F0501（平台上沒有這張發票）。
+    manual_paper_disposed: Annotated[bool, Query()] = False,
 ) -> ReturnRead:
     svc = ReturnsService(session)
     inputs = [ReturnLineInput(line.sale_line_id, line.qty) for line in payload.lines]
@@ -82,6 +85,7 @@ async def create_return(
             invoice_recalled=payload.invoice_recalled,
             consent_signature_task_id=payload.consent_signature_task_id,
             unreturned_gift_note=payload.unreturned_gift_note,
+            manual_paper_disposed=manual_paper_disposed,
         )
     except IntegrityError as exc:
         await session.rollback()

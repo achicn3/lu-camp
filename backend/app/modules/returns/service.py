@@ -339,6 +339,7 @@ class ReturnsService:
         invoice_recalled: bool = False,
         consent_signature_task_id: int | None = None,
         unreturned_gift_note: str | None = None,
+        manual_paper_disposed: bool = False,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
@@ -419,7 +420,30 @@ class ReturnsService:
             )
         decided_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale.id)
         if invoice_decision.action is ReturnInvoiceAction.REVIEW_REQUIRED:
-            raise ReturnConflict(invoice_decision.reason)
+            # 手開紙本（docs/36）：平台上沒有這張發票，系統不能也不該代開 G0401/F0501。
+            # 但**光是擋下退貨並不是「轉人工」**——那會讓庫存、退款、點數、寄售結算全部
+            # 反轉不了，開過紙本發票的單就永遠退不了（Codex 對抗審查第八輪 high）。
+            # 店長確認已依國稅局程序處置紙本（作廢或開紙本折讓）後，允許**只做本地反轉**。
+            manual_paper = (
+                decided_invoice is not None
+                and decided_invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+            )
+            if not (manual_paper and manual_paper_disposed):
+                raise ReturnConflict(invoice_decision.reason)
+            invoice_decision = ReturnInvoiceDecision(
+                action=ReturnInvoiceAction.NONE,
+                requires_paper_recall=False,
+                # **不要求螢幕簽名同意**：那道同意的法源是「變更客人的電子發票（折讓/作廢）」，
+                # 而這條路徑不動任何電子稅務文件；客人的同意已在紙本程序取得
+                # （收回聯／紙本折讓證明單）。留著只會顯示一句與事實不符的訊息
+                # （「本次退貨會變更電子發票（開立折讓）」）並讓退貨卡住。
+                # 這條路徑的可稽核性由店長確認 + audit 承擔。
+                requires_customer_consent=False,
+                reason=(
+                    "手開紙本發票：店長已確認依國稅局程序處置紙本，"
+                    "本次退貨只做本地反轉，不送平台稅務訊息。"
+                ),
+            )
         if invoice_decision.requires_paper_recall and not invoice_recalled:
             # 店主裁示（2026-08-01）：累計全退且原發票有紙本時，未收回紙本一律拒絕退貨退款。
             # 真正的部分退貨不受此限——原發票對未退商品仍是客人的憑證，不得收回。
@@ -646,6 +670,11 @@ class ReturnsService:
         elif (
             invoice is not None
             and invoice.status == InvoiceStatus.ISSUED
+            # **必須看決策結果**（docs/36）：這裡原本只看「發票已開立且有退款」就開折讓，
+            # 等於繞過 invoice_policy——手開紙本的退貨（決策為 NONE）也會被開 G0401，
+            # 對著平台上不存在的發票送折讓。決策模組存在的意義就是做這個判斷。
+            # 既有行為不變：is_issued 為真時 decide() 只會回 ALLOWANCE/VOID/REVIEW_REQUIRED。
+            and invoice_decision.action is ReturnInvoiceAction.ALLOWANCE
             # 退款 0（僅退回贈品）沒有金額可折讓：折讓單的 total 必須 > 0，
             # 硬走下去會在同意流程都跑完後才 flush 失敗並整筆回滾。
             and refund_amount > 0

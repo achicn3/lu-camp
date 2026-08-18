@@ -1441,6 +1441,13 @@ export default function PosPage() {
         printProof.mutate({ invoice, sale });
       } else if (invoice.donate_mark) {
         setInvoiceNote("發票已開立並捐贈，不印證明聯");
+      } else if (invoice.issue_channel === "MANUAL_PAPER") {
+        // 手開紙本（docs/36）：另一台終端可能已登記手開發票。這張**平台上不存在也沒有
+        // 條碼**，導引去光貿補印只會讓店員撲空（Codex 對抗審查第八輪 medium）。
+        setInvoiceNote(
+          `本筆已登記手開紙本發票 ${invoice.invoice_no ?? ""}（紙本已交給客人），` +
+            "不需要也無法列印電子證明聯",
+        );
       } else if (invoice.carrier_type != null) {
         setInvoiceNote("發票已開立並存入載具，不印證明聯");
       } else {

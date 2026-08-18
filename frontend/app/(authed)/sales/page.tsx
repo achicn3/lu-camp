@@ -45,6 +45,20 @@ type SaleSummary = components["schemas"]["SaleSummaryRead"];
 
 type ReturnTenderRead = components["schemas"]["ReturnTenderRead"];
 
+/**
+ * 交易相關快取一次失效（docs/36）。
+ *
+ * **不能只失效 `["sales"]`**：`sale-detail` 與 `return-preview` 也承載安全判斷
+ * ——例如登記手開發票後，舊的退貨預覽仍會說「開折讓」而不是「轉人工」，
+ * 於是畫面照樣顯示不可逆的退款指示，店員退了錢才被後端拒絕。
+ * 這一類「前端拿過期資料做安全判斷」的問題已在本頁出現兩次，集中在此避免再漏。
+ */
+function invalidateSaleViews(queryClient: ReturnType<typeof useQueryClient>): void {
+  for (const key of [["sales"], ["sale-detail"], ["return-preview"]]) {
+    void queryClient.invalidateQueries({ queryKey: key });
+  }
+}
+
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
     const detail = (error as { detail: unknown }).detail;
@@ -435,6 +449,11 @@ function ReturnDialog({
   const [taiwanPayConfirmedPlanKey, setTaiwanPayConfirmedPlanKey] = useState<string | null>(
     null,
   );
+  // 手開紙本（docs/36）：這筆的發票平台上不存在，系統不代開折讓/作廢。店長確認已依
+  // 國稅局程序處置紙本後才可退貨，且只做本地反轉。不給這條路的話，開過紙本發票的單
+  // 就**永遠退不了**——庫存、退款、點數、寄售結算全部反轉不了。
+  const isManualPaperSale = sale.invoice_issue_channel === "MANUAL_PAPER";
+  const [manualPaperDisposed, setManualPaperDisposed] = useState(false);
   // 贈品不一併收回時的說明（有未退贈品且退了主商品時必填；後端亦擋，雙重防線）。
   const [unreturnedGiftNote, setUnreturnedGiftNote] = useState("");
   // 發票處置（作廢／折讓）的兩道前置：收回紙本證明聯、買受人簽名同意。兩者都綁定當下的
@@ -571,6 +590,10 @@ function ReturnDialog({
     paperRecalled,
     consentTaskSigned: consentSigned,
   });
+  // 紙本未確認前不可送出（後端亦會擋，此處讓店員先看到原因）。
+  if (isManualPaperSale && !manualPaperDisposed) {
+    blockers.push("請先依國稅局程序處置紙本發票並勾選確認");
+  }
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -582,7 +605,11 @@ function ReturnDialog({
         planFingerprintOf(qtys, reason),
       );
       const { data, error: apiError } = await api.POST("/api/v1/returns", {
-        params: { header: { "Idempotency-Key": idemKey } },
+        params: {
+          header: { "Idempotency-Key": idemKey },
+          // 手開紙本（docs/36）：店長確認已依國稅局程序處置紙本後，退貨只做本地反轉。
+          query: isManualPaperSale ? { manual_paper_disposed: manualPaperDisposed } : {},
+        },
         body: {
           sale_id: sale.id,
           reason: reason.trim(),
@@ -753,7 +780,27 @@ function ReturnDialog({
         )}
         {/* 手開紙本（docs/36）：preview 未回或轉人工時，**不得**顯示任何外部退款指示
             ——店員會照做把錢退出去，送出才被擋（Codex 對抗審查第四輪 high）。 */}
-        {hasTaiwanPayRefund && mayShowExternalRefundInstructions(previewData) && (
+        {isManualPaperSale && (
+          <>
+            <p role="alert" className="form-error">
+              本筆為手開紙本發票，系統不代開折讓／作廢。請先依國稅局程序處置紙本
+              （開立紙本折讓證明單或作廢並收回聯），完成前請勿退款給客人。
+            </p>
+            <label className="field field-toggle return-manual-paper-ack">
+              <input
+                type="checkbox"
+                checked={manualPaperDisposed}
+                onChange={(e) => setManualPaperDisposed(e.target.checked)}
+              />
+              <span className="field-label">
+                我已依國稅局程序處置本筆的紙本發票
+              </span>
+            </label>
+          </>
+        )}
+        {hasTaiwanPayRefund &&
+          mayShowExternalRefundInstructions(previewData) &&
+          (!isManualPaperSale || manualPaperDisposed) && (
           <label className="field field-toggle return-taiwan-confirm">
             <input
               type="checkbox"
@@ -1213,7 +1260,7 @@ export default function SalesPage() {
               `銷售 #${returnTarget.id} 退貨完成，共 $${formatNtd(refund)}：${split}。`,
             );
             setReturnTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales"] });
+            invalidateSaleViews(queryClient);
           }}
         />
       )}
@@ -1226,7 +1273,7 @@ export default function SalesPage() {
               `#${manualInvoiceTarget.id} 已登記手開發票；本筆不會再自動開立電子發票。`,
             );
             setManualInvoiceTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales"] });
+            invalidateSaleViews(queryClient);
           }}
         />
       )}
@@ -1237,7 +1284,7 @@ export default function SalesPage() {
           onVoided={() => {
             setVoidedNote(`銷售 #${voidTarget.id} 已作廢。`);
             setVoidTarget(null);
-            void queryClient.invalidateQueries({ queryKey: ["sales"] });
+            invalidateSaleViews(queryClient);
           }}
         />
       )}

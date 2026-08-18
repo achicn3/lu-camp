@@ -10453,7 +10453,9 @@ export interface operations {
     };
     createReturn: {
         parameters: {
-            query?: never;
+            query?: {
+                manual_paper_disposed?: boolean;
+            };
             header: {
                 "Idempotency-Key": string;
             };

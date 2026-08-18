@@ -22,8 +22,9 @@ from app.main import create_app
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.amego import AmegoClient
-from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
+from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.einvoice.service import EInvoiceService
+from app.modules.inventory.models import CatalogProduct
 from app.modules.sales.models import Sale, SaleTender
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
@@ -988,3 +989,103 @@ async def test_manual_paper_void_reports_as_void_not_never_issued(
     )
     await db_session.refresh(sale)
     assert sale.invoice_status is SaleInvoiceStatus.VOID
+
+
+async def _seed_returnable_manual_paper(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> tuple[int, int, str, int, int]:
+    """建一筆『有庫存商品、現金付款、已登記手開紙本』且可退貨的銷售。"""
+    store_id, _sale_id, mgr, _clerk = await _seed(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK))
+    assert clerk_id is not None
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal("2000"))
+    product = CatalogProduct(
+        store_id=store_id,
+        sku=f"MP-{store_id}",
+        name="退貨測試品",
+        unit_price=Decimal("1050"),
+        quantity_on_hand=5,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    await db_session.commit()
+
+    created = await client.post(
+        "/api/v1/sales",
+        json={
+            "lines": [{"line_type": "CATALOG", "catalog_product_id": product.id, "qty": 1}],
+            "tenders": [{"tender_type": "CASH", "amount": "1050"}],
+            "expected_einvoice_enabled": False,
+        },
+        headers={**_auth(mgr), "Idempotency-Key": f"mp-sale-{store_id}"},
+    )
+    assert created.status_code == 201, created.text
+    sale_id = int(created.json()["id"])
+    line_id = int(created.json()["lines"][0]["id"])
+    # 建 PENDING 發票再登記手開（銷售建立時 einvoice 未啟用故不會自動建）
+    await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    reg = await client.post(
+        f"/api/v1/einvoice/sales/{sale_id}/manual-invoice",
+        json=_body(),
+        headers=_auth(mgr),
+    )
+    assert reg.status_code == 200, reg.text
+    return store_id, sale_id, mgr, product.id, line_id
+
+# ── 手開紙本的退貨路徑（否則庫存/退款/點數永遠不反轉） ──
+
+
+async def test_manual_paper_return_is_blocked_without_confirmation(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """未確認紙本已處置 → 仍擋（避免系統自行對平台上不存在的發票開折讓）。"""
+    _store_id, sale_id, mgr, _product_id, line_id = await _seed_returnable_manual_paper(
+        client, db_session
+    )
+    resp = await client.post(
+        "/api/v1/returns",
+        json={
+            "sale_id": sale_id,
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+            "reason": "客人不要了",
+        },
+        headers={**_auth(mgr), "Idempotency-Key": f"mp-ret-block-{sale_id}"},
+    )
+    assert resp.status_code == 409, resp.text
+    assert "紙本" in resp.json()["detail"]
+
+
+async def test_manual_paper_return_completes_with_confirmation(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """店長確認已依國稅局程序處置紙本後，退貨必須能完成（docs/36）。
+
+    否則開過手開紙本的單就**永遠退不了**——庫存不回補、錢不退、點數不沖回。
+    系統只做本地反轉，**不送 G0401/F0501**（平台上沒有這張發票）。
+    """
+    _store_id, sale_id, mgr, product_id, line_id = await _seed_returnable_manual_paper(
+        client, db_session
+    )
+    before = await db_session.scalar(
+        select(CatalogProduct.quantity_on_hand).where(CatalogProduct.id == product_id)
+    )
+    resp = await client.post(
+        "/api/v1/returns?manual_paper_disposed=true",
+        json={
+            "sale_id": sale_id,
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+            "reason": "客人不要了",
+        },
+        headers={**_auth(mgr), "Idempotency-Key": f"mp-ret-ok-{sale_id}"},
+    )
+    assert resp.status_code == 201, resp.text
+    after = await db_session.scalar(
+        select(CatalogProduct.quantity_on_hand).where(CatalogProduct.id == product_id)
+    )
+    assert after == (before or 0) + 1  # 庫存已回補
+    # 不得產生折讓或作廢訊息
+    allowances = (await db_session.scalars(select(InvoiceAllowance))).all()
+    assert allowances == []
+    queue = (await db_session.scalars(select(EInvoiceUploadQueue))).all()
+    assert [q for q in queue if q.action is not EInvoiceAction.ISSUE] == []
