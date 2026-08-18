@@ -142,6 +142,12 @@ try {
   const failText = (await note.textContent()) ?? "";
   ok("開立失敗但交易已成立（畫面明說）", failText.includes("發票尚未開立"), failText.slice(0, 120));
   ok("失敗時提供「重試開立」入口", await retry.isVisible());
+  // 只丟平台錯誤碼，店員不知道下一步能做什麼——字軌用完/平台故障正是改開紙本的時機。
+  ok(
+    "失敗訊息要說得出下一步（改開紙本並登記）",
+    failText.includes("紙本") && failText.includes("交易紀錄"),
+    failText.slice(0, 160),
+  );
   await page.screenshot({ path: `${SHOTS}/01-issue-failed.png` });
 
   // 銷售必須真的存在且為未開立——不能因為發票失敗就把交易吞掉。

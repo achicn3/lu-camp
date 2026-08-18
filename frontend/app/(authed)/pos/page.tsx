@@ -1460,7 +1460,13 @@ export default function PosPage() {
       }
     },
     onError: (err: Error) => {
-      setInvoiceNote(`發票尚未開立：${err.message}（銷售已成立，可稍後補開）`);
+      // 錯誤原文留著給維護者判讀，但**店員需要的是下一步**：字軌用完/平台故障正是
+      // 手開紙本備用發票的使用時機（docs/36），畫面若只丟一句平台錯誤碼，店員會卡在
+      // 這裡不知道能做什麼。
+      setInvoiceNote(
+        `發票尚未開立：${err.message}（銷售已成立，可稍後補開；` +
+          "若平台持續失敗或字軌已用完，請改開紙本發票給客人，並至「交易紀錄」登記）",
+      );
     },
   });
   const balanceQuery = useQuery({
