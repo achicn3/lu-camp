@@ -154,9 +154,17 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 | 帳號 | `dev-manager` / `dev-clerk` / `dev-kiosk`，密碼皆 `dev-test-123456` |
 | 店家統編 | **`12345678`**（Amego 測試公司；不符會被平台直接回拒） |
 | `einvoice_enabled` | **全程 `false`**——需要開立的腳本自行以 `withSettings` 暫時開啟並還原 |
-| `AMEGO_APP_KEY` | **必填**（環境變數注入，值不入 repo；來源見 `docs/24 §1`）。未設則設定頁根本開不了發票 |
+| `AMEGO_APP_KEY` | **已備妥於 repo 根目錄 `.env`**（已被 `.gitignore` 排除）。啟動後端前先載入：`set -a && . /home/test/lu-camp/.env && set +a`。未載入則設定頁根本開不了發票 |
 | `MANUAL_ALLOW_EINVOICE_ISSUE` | `true`（手冊腳本的「真的開發票」opt-in 閘門） |
 | 版本錨定 | `git rev-parse --short HEAD` ＋ 分支名，寫入手冊首頁 |
+
+> **金鑰位置的坑**：`backend/.env` 是**空檔（0 bytes）**，金鑰在**根目錄** `.env`。
+> `docs/34 §2` 的 export 區塊既沒列 `AMEGO_APP_KEY`、也沒 source 根目錄 `.env`，
+> 照著貼就會漏掉它——發票整條線會在「設定頁開不了發票」那裡卡住，而症狀看起來
+> 像功能壞掉。docs/34 需同步補上這一行。
+>
+> 本測試環境的金鑰對應 Amego 公開測試公司（統編 `12345678`），2026-08-18 實測
+> `invoice_query` 往返正常。**正式憑證絕不可寫入本文件或 repo 任何位置。**
 
 **本輪刻意用 `:8001` 而非 `docs/34` 的 `:8787`**：前端預設就是 `:8001`，不必給
 `NEXT_PUBLIC_AGENT_URL`，直接消滅「忘了給環境變數 → 列印與開錢櫃全部靜默失敗」那個坑
