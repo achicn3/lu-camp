@@ -110,8 +110,12 @@ async def issue_invoice_for_sale(
     """
     svc = EInvoiceService(session)
     try:
-        client = await _amego_client(session, user.store_id)
-        invoice = await svc.issue_for_sale(user.store_id, sale_id, client=client)
+        # 延遲建立客戶端：已開立（含手開紙本）不需要平台，不得被憑證未設定卡成 409。
+        invoice = await svc.issue_for_sale(
+            user.store_id,
+            sale_id,
+            client_factory=lambda: _amego_client(session, user.store_id),
+        )
     except AmegoNotConfigured as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

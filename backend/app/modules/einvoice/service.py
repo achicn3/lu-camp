@@ -1097,7 +1097,11 @@ class EInvoiceService:
         return item
 
     async def issue_for_sale(
-        self, store_id: int, sale_id: int, *, client: AmegoClient
+        self,
+        store_id: int,
+        sale_id: int,
+        *,
+        client_factory: Callable[[], Awaitable[AmegoClient]],
     ) -> Invoice:
         """POS 結帳後開立入口：把該銷售的發票上送 Amego，回開立後發票（冪等）。
 
@@ -1105,6 +1109,11 @@ class EInvoiceService:
         （FAILED 列先 retry 轉回 PENDING 再送，POS 一鍵重試）；其他狀態（作廢中/已作廢）
         → EInvoiceQueueNotDroppable。平台明確拒絕 → AmegoIssueFailed（佇列已 FAILED、
         留 last_error）；傳輸中斷 → AmegoTransportError（已認領，之後對帳）。
+
+        **客戶端延遲建立**（同 `register_manual_invoice`）：已開立的發票（含手開紙本）
+        答案就在本地，不需要也不該被憑證卡住。先建客戶端會讓「AMEGO_APP_KEY 未載到」
+        變成 409，連「本筆已登記手開紙本」都讀不回來——而連不上平台正是店家改開紙本的
+        原因，等於這功能最需要它的時候失效（Codex 對抗審查第十輪 high）。
         """
         invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
         if invoice is None:
@@ -1142,7 +1151,9 @@ class EInvoiceService:
             raise EInvoiceQueueItemNotFound(f"發票 {invoice.id} 無可上送的開立佇列列")
         if issue_item.status is UploadStatus.FAILED:
             await self.retry(store_id, issue_item.id)
-        sent = await self.send_via_amego(store_id, issue_item.id, client=client)
+        sent = await self.send_via_amego(
+            store_id, issue_item.id, client=await client_factory()
+        )
         if sent.status is not UploadStatus.UPLOADED:
             raise AmegoIssueFailed(
                 f"Amego 拒絕開立：{sent.last_error or '未知錯誤'}（可稍後重試）"

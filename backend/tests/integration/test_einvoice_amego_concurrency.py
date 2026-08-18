@@ -62,6 +62,11 @@ class _SlowTransport:
         return dict(_F0401_OK)
 
 
+async def _ready(client: AmegoClient) -> AmegoClient:
+    """既有測試用現成客戶端；issue_for_sale 改收工廠後包一層即可。"""
+    return client
+
+
 async def _seed_committed(sm: object, *, tag: str) -> tuple[int, int, int]:
     """建店/店員/設定/在庫品/銷售並 commit（雙 session 測試需要真提交）。"""
     async with sm() as s:  # type: ignore[operator]
@@ -130,7 +135,9 @@ async def test_issue_and_void_concurrently_no_deadlock() -> None:
                 transport=_SlowTransport(),
                 base_url="https://invoice-api.amego.tw",
             )
-            await EInvoiceService(s1).issue_for_sale(store_id, sale_id, client=client)
+            await EInvoiceService(s1).issue_for_sale(
+                store_id, sale_id, client_factory=lambda: _ready(client)
+            )
 
     async def do_void() -> None:
         await asyncio.sleep(0.15)  # 開立先持鎖，作廢中途進場

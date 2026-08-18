@@ -1,11 +1,17 @@
 // POS 開立失敗 → 重試 → 改手開紙本的瀏覽器煙霧（docs/36）。
 //
-// **必須用真的 Amego 測試環境**：這段畫面的三個分支（開立中／開立失敗＋重試／已登記手開紙本）
-// 只有在真的送出並被平台拒絕時才會出現。用假資料蓋出來的狀態驗不到重試按鈕與錯誤訊息。
+// **必須用真的 Amego 測試環境**：這段畫面的分支只有在真的對平台發出請求並失敗時才會出現。
+//
+// **失敗注入在哪一步（重要，別誤讀本腳本的涵蓋範圍）**：Amego 路徑是「對帳先行」——送出
+// F0401 之前會先 `invoice_query` 問平台有沒有這筆。統編不對時**查詢就被拒**（錯誤碼 12），
+// 所以本腳本重現的是「**F0401 從未送出**」那一類失敗：佇列列維持 PENDING、attempts=0、
+// posted_at 未寫。畫面分支（失敗提示＋重試＋改口手開紙本）驗得到；
+// **「已送出後才失敗 / FAILED 重試」那一類不在本腳本涵蓋範圍**，由後端測試守。
+// 下方會斷言失敗確實停在查詢階段，避免哪天變成別種失敗還以為驗到了。
 //
 // 前置（見 docs/20、docs/24）：
 //   - backend(:8000) 啟動時帶 `AMEGO_APP_KEY`（值在 repo 根目錄 .env，已被 .gitignore 排除）
-//   - 店家統編**故意不是** Amego 測試統編 12345678 → 平台拒絕 → 穩定重現「開立失敗」
+//   - 店家統編**故意不是** Amego 測試統編 12345678 → 平台拒絕
 //     （用正確統編會真的開出測試發票，就驗不到失敗分支了）
 //   - `einvoice_enabled = true`
 // 執行：node scripts/pos-invoice-failure-smoke.mjs
@@ -157,6 +163,24 @@ try {
     "銷售已寫入且為未開立",
     sale != null && sale.invoice_status === "PENDING_ISSUE",
     `#${sale?.id} ${sale?.invoice_status}`,
+  );
+
+  // **釘住失敗發生在哪一步**：本腳本注入的是「對帳查詢就被拒」＝F0401 從未送出。
+  // 若哪天變成別種失敗（例如查詢過了、F0401 才被拒 → 佇列轉 FAILED），畫面看起來一樣，
+  // 但底下的狀態完全不同（已送出過的單登記手開前必須先向平台求證）。不釘住就會誤以為
+  // 這支腳本涵蓋了「已送出後失敗」那條路。
+  const queue = await api(token, "GET", "/api/v1/einvoice/queue?limit=200");
+  if (queue.status !== 200 || !Array.isArray(queue.json?.items)) {
+    throw new Error(`佇列查詢失敗 HTTP ${queue.status}：${JSON.stringify(queue.json)}`);
+  }
+  const row = queue.json.items.filter((i) => i.invoice_id != null).slice(-1)[0];
+  ok(
+    "失敗停在對帳查詢階段（F0401 未送出：PENDING、attempts=0）",
+    row != null &&
+      row.status === "PENDING" &&
+      row.attempts === 0 &&
+      String(row.last_error ?? "").includes("invoice_query"),
+    `${row?.status}/attempts=${row?.attempts}/${String(row?.last_error ?? "").slice(0, 60)}`,
   );
 
   // ── 2) 再按一次重試：平台仍拒絕，狀態不得被洗成「已開立」 ──

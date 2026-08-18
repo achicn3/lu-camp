@@ -41,6 +41,7 @@ from app.shared.enums import (
     UserRole,
 )
 from app.shared.exceptions import (
+    AmegoNotConfigured,
     AmegoTransportError,
     ManualInvoiceNotRegisterable,
     ManualPaperInvoiceOperation,
@@ -299,13 +300,16 @@ async def test_issue_for_sale_sends_nothing_after_manual_registration(
     ).status_code == 200
 
     svc = EInvoiceService(db_session)
-    amego = AmegoClient(
-        seller_tax_id="12345678",
-        app_key="test-key",
-        transport=_ExplodingTransport(),
-        base_url="https://invoice-api.amego.tw",
-    )
-    invoice = await svc.issue_for_sale(store_id, sale_id, client=amego)
+
+    async def _client() -> AmegoClient:
+        return AmegoClient(
+            seller_tax_id="12345678",
+            app_key="test-key",
+            transport=_ExplodingTransport(),
+            base_url="https://invoice-api.amego.tw",
+        )
+
+    invoice = await svc.issue_for_sale(store_id, sale_id, client_factory=_client)
     assert invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
     # 也不得留下任何待送/可重送的佇列列
     rows = (
@@ -1119,3 +1123,56 @@ async def test_manual_paper_return_confirmation_requires_manager(
         headers={**_auth(clerk_token), "Idempotency-Key": f"mp-ret-clerk-{sale_id}"},
     )
     assert resp.status_code == 403, resp.text
+
+
+async def test_manual_paper_retry_works_without_amego_credentials(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """憑證未設定時，POS 按「重試開立」仍要拿得回那張手開紙本發票。
+
+    答案就在本地（已 ISSUED/MANUAL_PAPER），根本不需要平台。先建客戶端會讓
+    `AMEGO_APP_KEY` 未載到變成 409，連「本筆已登記手開紙本」都讀不回來——而
+    連不上平台正是店家改開紙本的原因，等於這功能最需要它的時候失效。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    async def _no_credentials() -> AmegoClient:
+        raise AmegoNotConfigured("AMEGO_APP_KEY 未設定（環境變數），不可呼叫 Amego API")
+
+    invoice = await EInvoiceService(db_session).issue_for_sale(
+        store_id, sale_id, client_factory=_no_credentials
+    )
+    assert invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+    assert invoice.status is InvoiceStatus.ISSUED
+
+
+async def test_manual_paper_retry_via_http_route_without_credentials(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """**經 HTTP 路由**重試：憑證未設定也要回 200 與那張手開紙本，不得 409。
+
+    服務層測試擋不到這個 bug——問題出在路由**先**建 Amego 客戶端才進服務層，
+    於是「憑證未設定」在服務層有機會回答「已開立」之前就把請求打掉
+    （Codex 對抗審查第十輪 high：service test does not exercise this route ordering）。
+    測試環境 `amego_app_key` 預設為空字串，正是要重現的組態。
+    """
+    store_id, sale_id, mgr, _ = await _seed(db_session)
+    await _pending_invoice(db_session, store_id, sale_id)
+    await db_session.flush()
+    assert (
+        await client.post(
+            f"/api/v1/einvoice/sales/{sale_id}/manual-invoice", json=_body(), headers=_auth(mgr)
+        )
+    ).status_code == 200
+
+    res = await client.post(f"/api/v1/einvoice/sales/{sale_id}/issue", headers=_auth(mgr))
+    assert res.status_code == 200, res.text
+    assert res.json()["issue_channel"] == "MANUAL_PAPER"
+    assert res.json()["status"] == "ISSUED"

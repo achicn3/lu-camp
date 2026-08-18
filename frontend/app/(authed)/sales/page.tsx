@@ -454,7 +454,9 @@ function ReturnDialog({
   // 就**永遠退不了**——庫存、退款、點數、寄售結算全部反轉不了。
   // 「紙本已處置」限店長（後端亦以 403 擋）：店員看到勾選框只會勾了才發現不能送。
   const canConfirmPaper = useIsManager();
-  const [manualPaperDisposed, setManualPaperDisposed] = useState(false);
+  const [manualPaperDisposedPlanKey, setManualPaperDisposedPlanKey] = useState<string | null>(
+    null,
+  );
   // 贈品不一併收回時的說明（有未退贈品且退了主商品時必填；後端亦擋，雙重防線）。
   const [unreturnedGiftNote, setUnreturnedGiftNote] = useState("");
   // 發票處置（作廢／折讓）的兩道前置：收回紙本證明聯、買受人簽名同意。兩者都綁定當下的
@@ -501,6 +503,10 @@ function ReturnDialog({
   const planKey = JSON.stringify(returnLines);
   const consentMatchesPlan = consentTaskId !== null && consentPlanKey === planKey;
   const paperRecalled = paperRecalledPlanKey === planKey;
+  // **綁定本次退貨計畫**（與收回紙本／簽名同意／台灣Pay 退款一致）：店長是針對「退這些
+  // 品項」去開紙本折讓單或作廢的。勾完再改品項卻仍算數，手上那張紙就與實退金額對不上
+  // ——例如為 $500 部分退開的折讓單，被拿去放行 $1000 整筆退（Codex 對抗審查第十輪）。
+  const manualPaperDisposed = manualPaperDisposedPlanKey === planKey;
   // 台灣Pay 的確認鍵**必須含實際退款腿金額**：同一組退貨品項，其台灣Pay 金額仍會因
   // 累計退款（別台終端先退過）或購物金優先分配而改變。只綁品項的話，店員退了 100 元、
   // 金額後來變成 200 元，勾勾仍有效 → 系統記成退 200（Codex 對抗審查第六輪 high）。
@@ -793,7 +799,9 @@ function ReturnDialog({
                 <input
                   type="checkbox"
                   checked={manualPaperDisposed}
-                  onChange={(e) => setManualPaperDisposed(e.target.checked)}
+                  onChange={(e) =>
+                    setManualPaperDisposedPlanKey(e.target.checked ? planKey : null)
+                  }
                 />
                 <span className="field-label">
                   我已依國稅局程序處置本筆的紙本發票
