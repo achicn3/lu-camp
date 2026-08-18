@@ -188,9 +188,18 @@ class ReturnsService:
                 requires_customer_consent=False,
                 reason="本次退貨金額為 0（僅退回贈品），發票不需處置。",
             )
+        preview_invoice = await self._einvoice.get_invoice_for_sale(store_id, sale_id)
         return {
             "is_full_return": is_full_return,
             "invoice_action": decision.action.value,
+            # **由後端明說「這個轉人工店長可以解除」**（docs/36）：REVIEW_REQUIRED 有兩種——
+            # 作廢在途那種真的不能動，手開紙本那種只要店長確認已處置紙本就能繼續。
+            # 讓前端自己從別的欄位推斷，結果就是送出鍵永遠停用、退貨路徑形同不存在。
+            "manual_paper_resolvable": (
+                decision.action is ReturnInvoiceAction.REVIEW_REQUIRED
+                and preview_invoice is not None
+                and preview_invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER
+            ),
             "requires_paper_recall": decision.requires_paper_recall,
             "requires_customer_consent": decision.requires_customer_consent,
             "reason": decision.reason,

@@ -130,7 +130,11 @@ def decide(
         return ReturnInvoiceDecision(
             action=ReturnInvoiceAction.REVIEW_REQUIRED,
             requires_paper_recall=False,
-            requires_customer_consent=consent,
+            # **不要求螢幕簽名同意**：這條路徑不動任何電子稅務文件（見 ReturnService 對
+            # 本判定的替換），客人的同意在紙本程序取得。此處若照一般折讓/作廢回報 True，
+            # 預覽與實際執行就會不一致——畫面會要求一道後端根本不檢查的簽名，
+            # 送出鍵因而永遠停用，開過紙本發票的單從 UI 完全退不了。
+            requires_customer_consent=False,
             reason=(
                 "原發票為手開紙本備用發票，平台上沒有這張發票；"
                 "作廢或折讓請依國稅局的紙本程序辦理並保留收回聯，本次退貨轉人工處理。"

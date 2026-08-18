@@ -24,6 +24,7 @@ function ok(name, pass, detail = "") {
 const RUN = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 // 每輪換號碼：同店發票號碼唯一，寫死會在第二輪撞既有登記。
 const INVOICE_NO = `ZZ${RUN.slice(-8)}`;
+const INVOICE_NO_2 = `ZY${RUN.slice(-8)}`;
 
 async function api(token, method, path, body, extraHeaders = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -89,6 +90,20 @@ await api(
   { lines: po.json.lines.map((l) => ({ line_id: l.id, qty: l.qty })) },
   { "Idempotency-Key": `manual-inv-recv-${RUN}` },
 );
+// **佇列基準線**：同一個 DB 上別的腳本（return-invoice-smoke）會留下合法的 VOID/ALLOWANCE
+// 佇列列。以全域計數斷言會被別人的資料判成失敗，所以只看「本腳本開跑後新增的列」。
+// `limit` 上限是 200，超過會回 422。若把錯誤回應當成「空清單」，所有「不得排 F0501/G0401」
+// 的斷言都會**假綠**（實測踩過：limit=1000 → 422 → items undefined → 0 筆 → 全過）。
+const queueItems = async (query = "") => {
+  const res = await api(token, "GET", `/api/v1/einvoice/queue?limit=200${query}`);
+  if (res.status !== 200 || !Array.isArray(res.json?.items)) {
+    throw new Error(`佇列查詢失敗 HTTP ${res.status}：${JSON.stringify(res.json)}`);
+  }
+  return res.json.items;
+};
+const PRE_EXISTING = new Set((await queueItems()).map((i) => i.id));
+const mine = (items) => items.filter((i) => !PRE_EXISTING.has(i.id));
+
 const sale = await api(
   token,
   "POST",
@@ -179,9 +194,12 @@ try {
   await filter.check();
   await page.waitForTimeout(1200);
   const filteredIds = await page.locator("table tbody tr td:nth-child(2)").allTextContents();
+  // 只斷言**本輪這兩筆**的相對關係：同一個 DB 上別的腳本也會留下未開立的單，
+  // 用「只剩一列」會被別人的資料判成失敗。但仍要求集合真的變小，否則篩選沒接上也會過。
+  const has = (id) => filteredIds.some((t) => t.includes(`#${id}`));
   ok(
-    "篩選後只剩仍未開立的那筆",
-    filteredIds.length === 1 && filteredIds[0].includes(String(saleId2)),
+    "篩選後：已登記的那筆消失、未登記的那筆仍在，且集合變小",
+    !has(saleId) && has(saleId2) && filteredIds.length < unfilteredCount,
     filteredIds.join(","),
   );
   await filter.uncheck();
@@ -229,20 +247,68 @@ try {
 
   const voided = await api(token, "GET", `/api/v1/sales/${saleId}`);
   ok("銷售已作廢", voided.json?.status === "VOIDED", String(voided.json?.status));
-  const q2 = await api(token, "GET", "/api/v1/einvoice/queue?limit=200");
-  const voidMsgs = (q2.json?.items ?? []).filter((i) => i.action === "VOID");
+  // **只看這筆自己的發票**：別的腳本（return-invoice-smoke）會在同一庫留下合法的
+  // VOID/ALLOWANCE 佇列列，用全域計數會被別人的資料判成失敗（跨腳本污染）。
+  const voidMsgs = mine(await queueItems()).filter((i) => i.action === "VOID");
   ok("不得排 F0501（平台上沒有這張發票）", voidMsgs.length === 0, `${voidMsgs.length} 筆`);
 
   // ── 後端事實查核：來源、佇列取消 ──
   // 作廢後發票狀態不再是 ISSUED；改在作廢前就查核（見上方登記段）。
   // 現在有兩筆：登記過的那筆必須從待送佇列消失，**未登記的第二筆本來就該還在**。
   // 只斷言「完全沒有待送」會誤判——那反而代表把別人的佇列也取消了。
-  const queue = await api(token, "GET", "/api/v1/einvoice/queue?status=PENDING&limit=200");
-  const pending = (queue.json?.items ?? []).filter((i) => i.invoice_id != null);
+  const pending = mine(await queueItems("&status=PENDING")).filter((i) => i.invoice_id != null);
   ok(
     "登記過的那筆已離開待送佇列，未登記的那筆仍在",
     pending.length === 1,
     `待送 ${pending.length} 筆`,
+  );
+  // ── 手開紙本的**退貨**必須從 UI 走得完（docs/36 R9#2）──
+  // 後端做完不等於做完：`returnSubmitBlockers` 曾對 REVIEW_REQUIRED 直接 return，
+  // 送出鍵永遠停用＝這條路徑從畫面上完全走不到，而後端測試全綠。這裡用真畫面把它走完。
+  const reg2 = await api(token, "POST", `/api/v1/einvoice/sales/${saleId2}/manual-invoice`, {
+    invoice_no: INVOICE_NO_2,
+    invoice_date: new Date().toISOString().slice(0, 10),
+    total: "500",
+    note: "字軌用完（退貨測試前置）",
+  });
+  ok("第二筆也登記手開（前置）", reg2.status === 200, `HTTP ${reg2.status}`);
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("table tbody tr");
+  await page.locator(`button[aria-label="退貨銷售 ${saleId2}"]`).click();
+  const retDialog = page.locator('[role="dialog"][aria-label="退貨"]');
+  await retDialog.waitFor();
+  await retDialog.getByRole("button", { name: "整筆退貨" }).click();
+  await page.waitForTimeout(1500);
+  const retText = (await retDialog.textContent()) ?? "";
+  ok("退貨對話框說明紙本程序", retText.includes("手開紙本發票") && retText.includes("國稅局"));
+  ok(
+    "紙本未確認前不得顯示外部退款指示",
+    !retText.includes("手動退款") && !retText.includes("已於台灣Pay"),
+  );
+  const retSubmit = retDialog.getByRole("button", { name: /確認退貨/ });
+  ok("未確認紙本處置前不可送出", await retSubmit.isDisabled());
+  await page.screenshot({ path: `${SHOTS}/08-return-blocked.png` });
+
+  await retDialog.getByLabel("退貨原因").fill("手開紙本退貨煙霧");
+  await retDialog.getByLabel(/已依國稅局程序處置本筆的紙本發票/).check();
+  await page.waitForTimeout(500);
+  ok("店長確認後可送出（否則此路徑等於不存在）", !(await retSubmit.isDisabled()));
+  await retSubmit.click();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: `${SHOTS}/09-return-done.png` });
+
+  const afterReturn = await api(token, "GET", `/api/v1/sales/${saleId2}`);
+  const returnedQty = (afterReturn.json?.lines ?? []).reduce(
+    (acc, l) => acc + (l.returned_qty ?? 0),
+    0,
+  );
+  ok("退貨真的成立（明細已記退貨數）", returnedQty === 1, `已退 ${returnedQty}`);
+  const allowanceMsgs = mine(await queueItems()).filter((i) => i.action === "ALLOWANCE");
+  ok(
+    "不得排 G0401 折讓（平台上沒有這張發票）",
+    allowanceMsgs.length === 0,
+    `${allowanceMsgs.length} 筆`,
   );
 } catch (err) {
   ok("煙霧流程例外", false, String(err));

@@ -5394,6 +5394,11 @@ export interface components {
             invoice_action: string;
             /** Is Full Return */
             is_full_return: boolean;
+            /**
+             * Manual Paper Resolvable
+             * @default false
+             */
+            manual_paper_resolvable: boolean;
             /** Reason */
             reason: string;
             /** Refund Total */

@@ -11,6 +11,7 @@ function preview(overrides: Partial<ReturnInvoicePreview> = {}): ReturnInvoicePr
   return {
     is_full_return: true,
     invoice_action: "VOID",
+    manual_paper_resolvable: false,
     requires_paper_recall: true,
     requires_customer_consent: true,
     reason: "整筆退貨且原發票為本月開立：作廢原發票。需先向客人收回紙本證明聯。",
@@ -88,35 +89,103 @@ describe("returnSubmitBlockers", () => {
 });
 
 describe("mayShowExternalRefundInstructions（docs/36）", () => {
+  const clear = { paperRecalled: true, consentTaskSigned: true, manualPaperDisposed: true };
+
   it("preview 還沒回來時不得顯示外部退款指示", () => {
-    expect(mayShowExternalRefundInstructions(null)).toBe(false);
+    expect(mayShowExternalRefundInstructions(null, clear)).toBe(false);
   });
 
-  it("轉人工（手開紙本發票）時不得顯示——店員會照做把錢退出去，之後才被後端拒絕", () => {
+  it("轉人工且無法解除時不得顯示——店員會照做把錢退出去，之後才被後端拒絕", () => {
     expect(
-      mayShowExternalRefundInstructions({
-        invoice_action: "REVIEW_REQUIRED",
-        requires_paper_recall: false,
-        requires_customer_consent: true,
-        reason: "手開紙本",
-        refund_total: "100",
-        unreturned_gifts: [],
-      } as never),
+      mayShowExternalRefundInstructions(
+        preview({
+          invoice_action: "REVIEW_REQUIRED",
+          manual_paper_resolvable: false,
+          requires_paper_recall: false,
+        }),
+        clear,
+      ),
     ).toBe(false);
   });
 
-  it("正常折讓/作廢時照舊顯示", () => {
+  it("手開紙本經店長確認後**必須**顯示，否則台灣Pay 的手開紙本退貨永遠退不了", () => {
+    const manualPaper = preview({
+      invoice_action: "REVIEW_REQUIRED",
+      manual_paper_resolvable: true,
+      requires_paper_recall: false,
+      requires_customer_consent: false,
+    });
+    expect(
+      mayShowExternalRefundInstructions(manualPaper, {
+        paperRecalled: false,
+        consentTaskSigned: false,
+        manualPaperDisposed: false,
+      }),
+    ).toBe(false);
+    expect(mayShowExternalRefundInstructions(manualPaper, clear)).toBe(true);
+  });
+
+  // 現行設計：台灣Pay 退款確認與收回紙本、簽名同意**三重確認同時出現**
+  // （scripts/return-invoice-smoke.mjs 情境 7）。是否改成序列化（退款排最後一關）
+  // 屬設計變更，待裁示——這裡把現行行為釘住，避免被無意改掉。
+  it("紙本尚未收回／尚未簽名時仍會顯示：三重確認同時出現（現行設計）", () => {
+    expect(
+      mayShowExternalRefundInstructions(preview(), {
+        paperRecalled: false,
+        consentTaskSigned: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("前置全部完成的折讓/作廢照舊顯示", () => {
     for (const action of ["ALLOWANCE", "VOID", "NONE"]) {
-      expect(
-        mayShowExternalRefundInstructions({
-          invoice_action: action,
-          requires_paper_recall: false,
-          requires_customer_consent: true,
-          reason: "",
-          refund_total: "100",
-          unreturned_gifts: [],
-        } as never),
-      ).toBe(true);
+      expect(mayShowExternalRefundInstructions(preview({ invoice_action: action }), clear)).toBe(
+        true,
+      );
     }
+  });
+});
+
+describe("手開紙本的轉人工可由店長解除（docs/36）", () => {
+  const manualPaper = preview({
+    invoice_action: "REVIEW_REQUIRED",
+    manual_paper_resolvable: true,
+    requires_paper_recall: false,
+    requires_customer_consent: false,
+    reason: "手開紙本",
+  });
+
+  it("未確認前擋下，且訊息要說得出該做什麼", () => {
+    const blockers = returnSubmitBlockers(manualPaper, {
+      paperRecalled: false,
+      consentTaskSigned: false,
+    });
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0]).toContain("紙本");
+  });
+
+  it("店長確認後解除——否則送出鍵永遠停用，退貨路徑等於不存在", () => {
+    expect(
+      returnSubmitBlockers(manualPaper, {
+        paperRecalled: false,
+        consentTaskSigned: false,
+        manualPaperDisposed: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it("**不可解除**的轉人工（如作廢在途）不受影響", () => {
+    const inflightVoid = preview({
+      invoice_action: "REVIEW_REQUIRED",
+      manual_paper_resolvable: false,
+      reason: "作廢在途",
+    });
+    const blockers = returnSubmitBlockers(inflightVoid, {
+      paperRecalled: true,
+      consentTaskSigned: true,
+      manualPaperDisposed: true,
+    });
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0]).toContain("尚未確認");
   });
 });

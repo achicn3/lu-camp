@@ -452,7 +452,8 @@ function ReturnDialog({
   // 手開紙本（docs/36）：這筆的發票平台上不存在，系統不代開折讓/作廢。店長確認已依
   // 國稅局程序處置紙本後才可退貨，且只做本地反轉。不給這條路的話，開過紙本發票的單
   // 就**永遠退不了**——庫存、退款、點數、寄售結算全部反轉不了。
-  const isManualPaperSale = sale.invoice_issue_channel === "MANUAL_PAPER";
+  // 「紙本已處置」限店長（後端亦以 403 擋）：店員看到勾選框只會勾了才發現不能送。
+  const canConfirmPaper = useIsManager();
   const [manualPaperDisposed, setManualPaperDisposed] = useState(false);
   // 贈品不一併收回時的說明（有未退贈品且退了主商品時必填；後端亦擋，雙重防線）。
   const [unreturnedGiftNote, setUnreturnedGiftNote] = useState("");
@@ -517,6 +518,10 @@ function ReturnDialog({
     },
   });
   const previewData = returnLines.length > 0 ? (preview.data ?? null) : null;
+  // 以**預覽回傳的權威旗標**為準；列表快取的 issue_channel 只作為尚未取得預覽時的提示。
+  const isManualPaperSale =
+    (previewData?.manual_paper_resolvable ?? false) ||
+    (previewData === null && sale.invoice_issue_channel === "MANUAL_PAPER");
   // 退款金額的權威來源是後端預覽；預覽尚未回來時先顯示本機預估（送出仍以後端為準）。
   const refund =
     previewData !== null
@@ -589,11 +594,8 @@ function ReturnDialog({
   const blockers = returnSubmitBlockers(previewData, {
     paperRecalled,
     consentTaskSigned: consentSigned,
+    manualPaperDisposed,
   });
-  // 紙本未確認前不可送出（後端亦會擋，此處讓店員先看到原因）。
-  if (isManualPaperSale && !manualPaperDisposed) {
-    blockers.push("請先依國稅局程序處置紙本發票並勾選確認");
-  }
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -786,21 +788,30 @@ function ReturnDialog({
               本筆為手開紙本發票，系統不代開折讓／作廢。請先依國稅局程序處置紙本
               （開立紙本折讓證明單或作廢並收回聯），完成前請勿退款給客人。
             </p>
-            <label className="field field-toggle return-manual-paper-ack">
-              <input
-                type="checkbox"
-                checked={manualPaperDisposed}
-                onChange={(e) => setManualPaperDisposed(e.target.checked)}
-              />
-              <span className="field-label">
-                我已依國稅局程序處置本筆的紙本發票
-              </span>
-            </label>
+            {canConfirmPaper ? (
+              <label className="field field-toggle return-manual-paper-ack">
+                <input
+                  type="checkbox"
+                  checked={manualPaperDisposed}
+                  onChange={(e) => setManualPaperDisposed(e.target.checked)}
+                />
+                <span className="field-label">
+                  我已依國稅局程序處置本筆的紙本發票
+                </span>
+              </label>
+            ) : (
+              <p className="hint">本筆需店長確認紙本已處置後才能退貨。</p>
+            )}
           </>
         )}
+        {/* 台灣Pay 沒有退款 API，這個勾選等於「請店員先去 App 把錢退出去」。轉人工尚未解除
+            （含手開紙本未經店長確認）時**不得**顯示，否則店員照做把錢退出去，送出才被擋。 */}
         {hasTaiwanPayRefund &&
-          mayShowExternalRefundInstructions(previewData) &&
-          (!isManualPaperSale || manualPaperDisposed) && (
+          mayShowExternalRefundInstructions(previewData, {
+            paperRecalled,
+            consentTaskSigned: consentSigned,
+            manualPaperDisposed,
+          }) && (
           <label className="field field-toggle return-taiwan-confirm">
             <input
               type="checkbox"

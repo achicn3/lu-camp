@@ -7496,6 +7496,11 @@
             "title": "Is Full Return",
             "type": "boolean"
           },
+          "manual_paper_resolvable": {
+            "default": false,
+            "title": "Manual Paper Resolvable",
+            "type": "boolean"
+          },
           "reason": {
             "title": "Reason",
             "type": "string"

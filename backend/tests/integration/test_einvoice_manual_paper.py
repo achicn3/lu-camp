@@ -1089,3 +1089,33 @@ async def test_manual_paper_return_completes_with_confirmation(
     assert allowances == []
     queue = (await db_session.scalars(select(EInvoiceUploadQueue))).all()
     assert [q for q in queue if q.action is not EInvoiceAction.ISSUE] == []
+
+
+async def test_manual_paper_return_confirmation_requires_manager(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """「紙本已處置」是稅務判斷，**店員不得自行認定**（docs/36 限 MANAGER）。
+
+    退貨端點本身允許店員操作（一般退貨是日常作業），但這個確認不同：它決定系統要不要
+    略過折讓/作廢而直接反轉帳務。作廢端點本來就限店長，退貨這條路漏了同一道門檻。
+    """
+    _store_id, sale_id, _mgr, _product_id, line_id = await _seed_returnable_manual_paper(
+        client, db_session
+    )
+    clerk_token = encode_access_token(
+        user_id=int(
+            await db_session.scalar(select(User.id).where(User.role == UserRole.CLERK)) or 0
+        ),
+        role="CLERK",
+        store_id=_store_id,
+    )
+    resp = await client.post(
+        "/api/v1/returns?manual_paper_disposed=true",
+        json={
+            "sale_id": sale_id,
+            "lines": [{"sale_line_id": line_id, "qty": 1}],
+            "reason": "客人不要了",
+        },
+        headers={**_auth(clerk_token), "Idempotency-Key": f"mp-ret-clerk-{sale_id}"},
+    )
+    assert resp.status_code == 403, resp.text

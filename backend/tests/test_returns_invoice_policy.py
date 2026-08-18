@@ -183,7 +183,10 @@ def test_manual_paper_invoice_always_goes_to_manual_review(is_full_return: bool)
     """
     d = decide(_facts(is_manual_paper=True), is_full_return=is_full_return, now=_NOW)
     assert d.action is ReturnInvoiceAction.REVIEW_REQUIRED
-    assert d.requires_customer_consent is True
+    # 這條路徑不動電子稅務文件，**不得**回報需要螢幕簽名同意：ReturnService 執行時
+    # 根本不檢查它，預覽若說要，畫面就會卡在一道永遠不會被驗證的關卡上。
+    assert d.requires_customer_consent is False
+    assert d.requires_paper_recall is False
     assert "紙本" in d.reason
 
 

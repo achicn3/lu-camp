@@ -16,6 +16,7 @@ from app.modules.returns.schemas import (
 )
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.linepay import linepay_client_from_config
+from app.shared.enums import UserRole
 from app.shared.exceptions import (
     DomainError,
     IdempotencyKeyConflict,
@@ -69,6 +70,14 @@ async def create_return(
     # 帶入才允許退貨，且只做本地反轉、不送 G0401/F0501（平台上沒有這張發票）。
     manual_paper_disposed: Annotated[bool, Query()] = False,
 ) -> ReturnRead:
+    # 退貨本身是店員日常作業（CurrentUserDep），但「紙本已處置」是**稅務判斷**：
+    # 它決定系統要不要略過折讓/作廢而直接反轉帳務，店員不得自行認定。
+    # 作廢端點本來就限店長，退貨這條路必須補上同一道門檻（docs/36）。
+    if manual_paper_disposed and user.role != UserRole.MANAGER.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="「紙本已處置」需店長確認",
+        )
     svc = ReturnsService(session)
     inputs = [ReturnLineInput(line.sale_line_id, line.qty) for line in payload.lines]
     requested = {line.sale_line_id: line.qty for line in payload.lines}

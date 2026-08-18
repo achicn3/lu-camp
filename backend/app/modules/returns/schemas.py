@@ -54,6 +54,9 @@ class ReturnPreviewRead(BaseModel):
 
     is_full_return: bool
     invoice_action: str
+    # 這個 REVIEW_REQUIRED 是否可由店長確認「紙本已處置」後繼續（docs/36）。
+    # 作廢在途那種不可；手開紙本那種可以。前端據此決定送出鍵能不能解除。
+    manual_paper_resolvable: bool = False
     requires_paper_recall: bool
     requires_customer_consent: bool
     reason: str
