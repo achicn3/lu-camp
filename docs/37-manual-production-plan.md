@@ -193,11 +193,16 @@ Mock 裝置的手冊重點放在**「裝置離線或失敗時店員該怎麼辦�
 
 ```
 P0 模擬營運資料      → seed_demo.py ＋ seed_verification.txt
-P1 系統盤點與覆蓋清單 → docs/manual/coverage.yaml        （新 agent 審核）
+P1 系統盤點與覆蓋清單 → docs/manual/coverage.yaml
+PE 電子發票模組驗收   → einvoice-acceptance.mjs ＋ 平台回應證據鏈   ← 見 §11
 P2 腳本更新與截圖     → screenshots manifest ＋ evidence.jsonl
 P3 手冊內容           → content-*.mjs 更新（沿用既有 22 章結構）
 P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-report.md
 ```
+
+**PE 排在 P2 之前**（店主裁示 2026-08-18）：手冊要描述發票的作廢與折讓，
+但那兩條路徑至今**從未被任何腳本送到平台**過。先把模組驗收完、確定行為，
+再去寫手冊與截圖；順序反了會照著未驗證的行為寫。
 
 ### 6.1 既有產線缺的兩項產物（P1／P2 補上）
 
@@ -375,3 +380,72 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 - **禁止**「依畫面指示操作」「填寫相關資料」「完成必要欄位」等模糊描述
 - 每個功能說明統一格式：功能名稱／用途／前置條件／進入路徑／畫面說明／操作步驟／
   操作結果／系統連動／注意事項／常見問題／對應截圖
+
+
+---
+
+## 11. PE：電子發票模組驗收（對真平台，排在 P2 之前）
+
+店主裁示：**發票相關 API 要全部測過**。本階段獨立於手冊產製，先確認模組行為，
+再據以撰寫手冊。
+
+### 11.1 為什麼要獨立一步
+
+盤點既有腳本後發現一個空白：**沒有任何腳本呼叫過 `POST /einvoice/queue/{id}/send`**。
+也就是說作廢（F0501）與折讓（G0401）的整條送出路徑，至今只有人工在後台按過
+（`docs/34 §5` 即要求店長手動觸發）。手冊卻要描述這兩條流程。
+
+### 11.2 API 面清單（查證自 `einvoice/router.py`、`einvoice/amego.py`）
+
+**HTTP 端點（6 支）**
+
+| 端點 | 用途 | 既有覆蓋 |
+|---|---|---|
+| `GET /einvoice/queue` | 佇列列表（狀態過濾、分頁） | 已被讀取驗證 |
+| `POST /einvoice/sales/{id}/issue` | 開立（冪等） | B2C／載具／B2B 已對真平台驗過 |
+| `POST /einvoice/sales/{id}/manual-invoice` | 手開紙本登記 | 有腳本，**未對真平台**驗證 |
+| `POST /einvoice/queue/{id}/send` | 送出（ISSUE／VOID／ALLOWANCE 共用出口） | **無** |
+| `POST /einvoice/queue/{id}/retry` | 重試（FAILED → PENDING） | **無** |
+| `POST /einvoice/queue/{id}/result` | 記錄回執 | **無** |
+
+**平台端點（5 支）**：`/json/f0401`、`/json/f0501`、`/json/g0401`、
+`/json/invoice_query`、`/json/allowance_query`。後三者除了「開立前對帳先行」之外，
+沒有針對性驗證。
+
+**開立變體（4 種，由 `build_f0401_data` 分支決定）**：
+B2C 一般（`BuyerIdentifier=0000000000`、`TaxAmount=0`）、B2B 統編（用發票落地快照的
+net/tax 分稅）、手機載具（`CarrierType`／`CarrierId1`／`CarrierId2`）、捐贈（`NPOBAN`）。
+**捐贈那條只在 UI 欄位出現過，從未真的開出一張捐贈發票。**
+
+### 11.3 驗收矩陣（`frontend/scripts/einvoice-acceptance.mjs`）
+
+比照既有的 `linepay-acceptance.mjs`（同樣是「對真平台把一個整合的 API 走完」）。
+以 API 為主、不走瀏覽器——UI 部分既有 `einvoice-smoke.mjs` 已覆蓋。
+
+1. **開立四變體**：B2C／B2B／載具／捐贈，各取得號碼與隨機碼
+2. **冪等**：對同一筆再呼叫 `issue`，必須回原發票且**不得**再送平台
+3. **對帳先行**：以 `invoice_query` by `order_id` 查得到剛開的那張，金額相符
+4. **作廢**：同月整筆退貨 → 排 F0501 → **真的 send** →
+   以 `invoice_query` by `invoice_number` 確認平台狀態為已作廢
+5. **折讓**：部分退貨 → 排 G0401 → **真的 send** →
+   以 `allowance_query` 確認折讓單存在，且折讓單號、原發票號、稅額與含稅總計相符
+6. **已折讓後再退貨** → 必須繼續折讓，**不得**作廢原發票
+7. **佇列端點**：`retry`（FAILED → PENDING）、`result`（記錄回執）
+8. **手開紙本**：登記後 ISSUE 佇列轉 `CANCELLED`；三個出口（F0501／G0401／退貨決策）
+   全部擋下；並以 `invoice_query` 確認**平台上真的沒有那張**
+9. **銷售作廢** → 連動發票作廢
+
+每一步保留平台回應的原始碼與號碼，作為證據鏈輸出。
+
+### 11.4 前置與風險
+
+- **序號推高是前提**（§2.3）：折讓單號 `L1-1`、`L1-2` 已被佔用，不推高會直接撞號
+- 本階段會在 Amego 測試後台留下**真的發票、作廢與折讓紀錄**；測試環境無妨，
+  但號碼會真的被消耗，不可無限量重跑
+- 執行前先掃號段確認未被佔用（公開共用測試帳號）
+
+### 11.5 PE 驗收
+
+- 矩陣九項全綠，輸出平台回應證據
+- 在 Amego 後台以肉眼核對至少：一張開立、一張作廢、一張折讓
+- 任何一項失敗即停下回報，**不得**帶著未驗證的行為進入 P2 撰寫手冊
