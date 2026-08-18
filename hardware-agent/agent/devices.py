@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from agent.config import (
     brother_endpoint_from_env,
     epson_endpoint_from_env,
+    kitchen_endpoint_from_env,
     label_font_path_from_env,
 )
 from agent.drivers.brother_label import BrotherLabelPrinter
@@ -39,6 +40,17 @@ class AgentDevices:
     receipt_printer: ReceiptPrinter
     cash_drawer: CashDrawer
     status_provider: DeviceStatusProvider
+    kitchen_printer: ReceiptPrinter | None = None
+    """出餐單專用的第二台印表機（docs/35，選配）。
+
+    `None`＝沒接第二台，出餐單印到收據機（既有行為）。放廚房/吧台的那台只印出餐單，
+    不印客人的收據/明細聯/證明聯。
+    """
+
+    @property
+    def kitchen_ticket_printer(self) -> ReceiptPrinter:
+        """出餐單的實際目的地——**唯一的解析點**，呼叫端不得自行 or 一次。"""
+        return self.kitchen_printer if self.kitchen_printer is not None else self.receipt_printer
 
 
 def default_fake_devices() -> AgentDevices:
@@ -64,6 +76,7 @@ def real_epson_devices_from_env() -> AgentDevices:
     """
     epson = epson_endpoint_from_env()
     brother = brother_endpoint_from_env()
+    kitchen = kitchen_endpoint_from_env()
     writer = NetworkEscposWriter(epson)
     label_printer: LabelPrinter = (
         BrotherLabelPrinter(brother, font_path=label_font_path_from_env())
@@ -74,5 +87,8 @@ def real_epson_devices_from_env() -> AgentDevices:
         label_printer=label_printer,
         receipt_printer=EscposReceiptPrinter(writer),
         cash_drawer=RealCashDrawer(writer),
-        status_provider=RealStatusProvider(epson=epson, brother=brother),
+        status_provider=RealStatusProvider(epson=epson, brother=brother, kitchen=kitchen),
+        kitchen_printer=(
+            EscposReceiptPrinter(NetworkEscposWriter(kitchen)) if kitchen is not None else None
+        ),
     )

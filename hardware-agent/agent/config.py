@@ -94,6 +94,26 @@ def brother_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEn
     )
 
 
+def kitchen_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndpoint | None:
+    """讀出餐單印表機連線端點（**選配**：第二台 EPSON，通常放廚房/吧台；docs/35）。
+
+    `AGENT_KITCHEN_HOST` 未設/空白 → 回 `None`，出餐單即印到收據機（既有行為，
+    在買到第二台之前不得因此壞掉）。有設即回端點；選填 `AGENT_KITCHEN_PORT`
+    （預設 9100）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，與其他裝置共用）。
+    IP 一律由環境變數提供、程式碼不寫死。
+    """
+    resolved = os.environ if env is None else env
+    host = resolved.get("AGENT_KITCHEN_HOST", "").strip()
+    if not host:
+        return None
+    timeout = float(resolved.get("AGENT_DEVICE_PROBE_TIMEOUT", str(_DEFAULT_PROBE_TIMEOUT)))
+    return PrinterEndpoint(
+        host=host,
+        port=int(resolved.get("AGENT_KITCHEN_PORT", str(_DEFAULT_PORT))),
+        timeout=timeout,
+    )
+
+
 # repo 內建標籤字型（Noto Sans TC，OFL 授權，見 assets/fonts/OFL.txt）：標籤品名為
 # 繁體中文，部署主機不一定裝有 CJK 字型，故 repo 自帶、預設使用。
 _BUNDLED_LABEL_FONT = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "NotoSansTC.ttf"

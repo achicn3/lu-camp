@@ -27,7 +27,11 @@ import socket
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from agent.config import PrinterEndpoint, device_config_from_env
+from agent.config import (
+    PrinterEndpoint,
+    device_config_from_env,
+    kitchen_endpoint_from_env,
+)
 from agent.interfaces import DeviceKind, DeviceStatus
 
 # B 級（產品裁示不做）一律列入 unsupported，前端顯示「不支援」而非「故障」（ADR-010/011）
@@ -73,11 +77,20 @@ class RealStatusProvider:
         epson: EPSON TM-T82III 連線端點（IP/port/逾時，由設定注入）。
         brother: Brother QL-810W 連線端點；`None` 表示未列管 Brother（測 A 只接 EPSON），
             此時 `poll()` 只回 EPSON 收據機 + 依附錢櫃。
+        kitchen: 出餐單印表機（第二台 EPSON，通常放廚房/吧台；docs/35）連線端點；
+            `None` 表示未接第二台（出餐單印到櫃檯那台），不列管。
     """
 
-    def __init__(self, *, epson: PrinterEndpoint, brother: PrinterEndpoint | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        epson: PrinterEndpoint,
+        brother: PrinterEndpoint | None = None,
+        kitchen: PrinterEndpoint | None = None,
+    ) -> None:
         self._brother = brother
         self._epson = epson
+        self._kitchen = kitchen
 
     def _poll_brother(self) -> DeviceStatus:
         """TCP 探測 Brother QL-810W；B 級全標 unsupported（網路後端不讀狀態、產品不做）。"""
@@ -112,6 +125,23 @@ class RealStatusProvider:
             probe_error=result.probe_error,
         )
 
+    def _poll_kitchen(self) -> DeviceStatus:
+        """TCP 探測出餐機（第二台 EPSON）。**必須列管**：它多半在廚房，沒人會看到它離線。"""
+        assert self._kitchen is not None  # 僅在已接第二台時由 poll() 呼叫
+        result = _tcp_probe(self._kitchen)
+        return DeviceStatus(
+            id="kitchen-1",
+            kind=DeviceKind.RECEIPT_PRINTER,
+            model="EPSON TM-T82III（出餐單）",
+            online=result.online,
+            last_seen=result.last_seen,
+            details={},
+            unsupported=list(_PRINTER_UNSUPPORTED),
+            driver="real",
+            validated_on_hardware=False,
+            probe_error=result.probe_error,
+        )
+
     def _poll_cash_drawer(self, *, epson: DeviceStatus) -> DeviceStatus:
         """錢櫃狀態依附 EPSON（掛在其 drawer port）；開關偵測不做（標 unsupported）。
 
@@ -135,15 +165,19 @@ class RealStatusProvider:
         )
 
     def poll(self) -> list[DeviceStatus]:
-        """輪詢裝置。Brother 有列管時順序 Brother → EPSON → 錢櫃；未列管則只回 EPSON → 錢櫃。"""
+        """輪詢裝置：Brother（有列管才有）→ EPSON → 出餐機（有接才有）→ 錢櫃。"""
         epson = self._poll_epson()
-        drawer = self._poll_cash_drawer(epson=epson)
-        if self._brother is None:
-            return [epson, drawer]
-        return [self._poll_brother(), epson, drawer]
+        statuses = [] if self._brother is None else [self._poll_brother()]
+        statuses.append(epson)
+        if self._kitchen is not None:
+            statuses.append(self._poll_kitchen())
+        statuses.append(self._poll_cash_drawer(epson=epson))
+        return statuses
 
 
 def real_status_provider_from_env() -> RealStatusProvider:
     """由環境變數（裝置 IP/port/逾時）建立真機狀態提供者；IP 不寫死於程式碼。"""
     config = device_config_from_env()
-    return RealStatusProvider(brother=config.brother, epson=config.epson)
+    return RealStatusProvider(
+        brother=config.brother, epson=config.epson, kitchen=kitchen_endpoint_from_env()
+    )

@@ -83,7 +83,9 @@ async def print_kitchen(ticket: KitchenTicketPayload, devices: DevicesDep) -> Ok
 
     **不取店家抬頭**——內部作業單不需要店名/統編，也不該因後端 `stores` 取不到就印不出來。
     """
-    await anyio.to_thread.run_sync(devices.receipt_printer.print_kitchen_ticket, ticket)
+    # 出餐機接了就印那台、沒接退回收據機（解析在 AgentDevices.kitchen_ticket_printer）。
+    # **缺紙不得改印櫃檯那台**——店員會以為廚房收到了，餐永遠不會被做。
+    await anyio.to_thread.run_sync(devices.kitchen_ticket_printer.print_kitchen_ticket, ticket)
     return OkResponse(status="ok")
 
 

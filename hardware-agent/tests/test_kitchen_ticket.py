@@ -232,3 +232,67 @@ def test_invoice_payload_rejects_non_ascii_tax_fields(field: str, value: str) ->
     base[field] = value
     with pytest.raises(ValidationError):
         InvoicePayload(**base)
+
+
+# ── 第二台印表機（出餐機；docs/35）──
+
+
+def _app_with_kitchen(receipt: object, kitchen: object) -> FastAPI:
+    base = default_fake_devices()
+    return create_app(
+        AgentDevices(
+            label_printer=base.label_printer,
+            receipt_printer=receipt,  # type: ignore[arg-type]
+            cash_drawer=base.cash_drawer,
+            status_provider=base.status_provider,
+            kitchen_printer=kitchen,  # type: ignore[arg-type]
+        )
+    )
+
+
+async def test_kitchen_ticket_goes_to_kitchen_printer_when_configured() -> None:
+    """接了第二台就印到那台，**收據機不得也收到一份**。
+
+    兩台都印＝廚房和櫃檯各出一張，店員以為有兩筆單。
+    """
+    receipt = FakeReceiptPrinter()
+    kitchen = FakeReceiptPrinter()
+    ticket = _dine_in()
+    resp = await _post(
+        _app_with_kitchen(receipt, kitchen), "/print/kitchen", ticket.model_dump(mode="json")
+    )
+    assert resp.status_code == 200
+    assert kitchen.kitchen_tickets == [ticket]
+    assert receipt.kitchen_tickets == []
+
+
+async def test_kitchen_ticket_falls_back_to_receipt_printer() -> None:
+    """**沒接第二台就退回收據機**：買到機器之前，出餐單不得因此壞掉。"""
+    receipt = FakeReceiptPrinter()
+    ticket = _dine_in()
+    resp = await _post(_app_with(receipt), "/print/kitchen", ticket.model_dump(mode="json"))
+    assert resp.status_code == 200
+    assert receipt.kitchen_tickets == [ticket]
+
+
+async def test_kitchen_printer_receives_only_kitchen_tickets() -> None:
+    """出餐機不得收到收據/明細聯/證明聯：客人的憑證仍從櫃檯那台出。"""
+    receipt = FakeReceiptPrinter()
+    kitchen = FakeReceiptPrinter()
+    resp = await _post(
+        _app_with_kitchen(receipt, kitchen), "/print/kitchen", _dine_in().model_dump(mode="json")
+    )
+    assert resp.status_code == 200
+    assert kitchen.kitchen_tickets == [_dine_in()]
+    assert (kitchen.receipts, kitchen.details, kitchen.einvoices) == ([], [], [])
+
+
+async def test_kitchen_printer_paper_out_does_not_fall_back_to_receipt() -> None:
+    """出餐機缺紙**不得**偷偷改印櫃檯那台：店員會以為廚房收到了。"""
+    receipt = FakeReceiptPrinter()
+    kitchen = FakeReceiptPrinter(paper_out=True)
+    resp = await _post(
+        _app_with_kitchen(receipt, kitchen), "/print/kitchen", _dine_in().model_dump(mode="json")
+    )
+    assert resp.status_code == 409
+    assert receipt.kitchen_tickets == []

@@ -11,6 +11,7 @@ from agent.config import (
     MissingDeviceConfigError,
     brother_endpoint_from_env,
     device_config_from_env,
+    kitchen_endpoint_from_env,
     label_font_path_from_env,
 )
 
@@ -100,3 +101,33 @@ class TestLabelFontPathFromEnv:
     def test_missing_override_raises(self) -> None:
         with pytest.raises(MissingDeviceConfigError):
             label_font_path_from_env({"AGENT_LABEL_FONT": "/no/such/font.ttf"})
+
+
+class TestKitchenEndpointFromEnv:
+    """出餐機（第二台 EPSON）選配（docs/35）。"""
+
+    def test_unset_returns_none(self) -> None:
+        """未接第二台回 None——出餐單即印到收據機，不得因此報錯或壞掉。"""
+        assert kitchen_endpoint_from_env({}) is None
+        assert kitchen_endpoint_from_env({"AGENT_KITCHEN_HOST": "   "}) is None
+
+    def test_set_returns_endpoint_with_defaults(self) -> None:
+        endpoint = kitchen_endpoint_from_env({"AGENT_KITCHEN_HOST": "192.0.2.60"})
+        assert endpoint is not None
+        assert (endpoint.host, endpoint.port, endpoint.timeout) == ("192.0.2.60", 9100, 2.0)
+
+    def test_overrides_port_and_timeout(self) -> None:
+        endpoint = kitchen_endpoint_from_env(
+            {
+                "AGENT_KITCHEN_HOST": "192.0.2.60",
+                "AGENT_KITCHEN_PORT": "9101",
+                "AGENT_DEVICE_PROBE_TIMEOUT": "3.5",
+            }
+        )
+        assert endpoint is not None
+        assert (endpoint.port, endpoint.timeout) == (9101, 3.5)
+
+    def test_does_not_borrow_the_receipt_printer_host(self) -> None:
+        """**不得**以 EPSON 的 host 當預設：那會讓「沒接第二台」被誤判成已接，
+        狀態頁多出一台其實不存在的出餐機。"""
+        assert kitchen_endpoint_from_env({"AGENT_EPSON_HOST": "192.168.0.42"}) is None

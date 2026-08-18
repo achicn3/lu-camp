@@ -134,3 +134,34 @@ def test_real_devices_builder_wires_brother_when_host_set(
     assert isinstance(devices.status_provider, RealStatusProvider)
     assert devices.status_provider._brother is not None
     assert devices.status_provider._brother.host == "192.0.2.45"
+
+
+def test_real_devices_builder_wires_kitchen_printer_when_host_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AGENT_KITCHEN_HOST 有設 → 出餐單走**獨立的第二台**，且狀態一併列管（docs/35）。"""
+    monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
+    monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)
+    monkeypatch.setenv("AGENT_KITCHEN_HOST", "192.0.2.60")
+    devices = real_epson_devices_from_env()
+    assert isinstance(devices.kitchen_printer, EscposReceiptPrinter)
+    # 必須是**另一台**，不可是收據機本身（否則兩台設定等於沒生效）
+    assert devices.kitchen_printer is not devices.receipt_printer
+    assert devices.kitchen_ticket_printer is devices.kitchen_printer
+    assert isinstance(devices.status_provider, RealStatusProvider)
+    assert devices.status_provider._kitchen is not None
+    assert devices.status_provider._kitchen.host == "192.0.2.60"
+
+
+def test_real_devices_builder_falls_back_to_receipt_printer_without_kitchen_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """沒接第二台 → 出餐單印到收據機，且狀態頁**不得**憑空多出一台出餐機。"""
+    monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
+    monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)
+    monkeypatch.delenv("AGENT_KITCHEN_HOST", raising=False)
+    devices = real_epson_devices_from_env()
+    assert devices.kitchen_printer is None
+    assert devices.kitchen_ticket_printer is devices.receipt_printer
+    assert isinstance(devices.status_provider, RealStatusProvider)
+    assert devices.status_provider._kitchen is None
