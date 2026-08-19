@@ -44,7 +44,7 @@
 
 | 原始指令要求 | 既有實作 |
 |---|---|
-| Playwright 擷取腳本 | `frontend/scripts/manual/` **30 支**，可重跑 |
+| Playwright 擷取腳本 | `frontend/scripts/manual/` **30 支情境 ＋ `99-cleanup`**，可重跑（本輪再加 2 支＝32 支） |
 | 內容分檔撰寫 | `content-1..5.mjs`（22 章） |
 | base64 內嵌、單一 HTML | `convert-images.mjs`（WebP）＋ `build-manual.mjs` |
 | RWD／離線／燈箱／搜尋／列印 QA | `qa-manual.mjs`（五種寬度、外部資源、離線開啟、列印樣式） |
@@ -154,14 +154,29 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 | 帳號 | `dev-manager` / `dev-clerk` / `dev-kiosk`，密碼皆 `dev-test-123456` |
 | 店家統編 | **`12345678`**（Amego 測試公司；不符會被平台直接回拒） |
 | `einvoice_enabled` | **全程 `false`**——需要開立的腳本自行以 `withSettings` 暫時開啟並還原 |
-| `AMEGO_APP_KEY` | **已備妥於 repo 根目錄 `.env`**（已被 `.gitignore` 排除）。啟動後端前先載入：`set -a && . /home/test/lu-camp/.env && set +a`。未載入則設定頁根本開不了發票 |
+| `AMEGO_APP_KEY` | **已備妥於 repo 根目錄 `.env`，後端會自動讀取，無須另行 export**（`config.py` 的 `env_file` 就指向該檔） |
 | `MANUAL_ALLOW_EINVOICE_ISSUE` | `true`（手冊腳本的「真的開發票」opt-in 閘門） |
 | 版本錨定 | `git rev-parse --short HEAD` ＋ 分支名，寫入手冊首頁 |
 
-> **金鑰位置的坑**：`backend/.env` 是**空檔（0 bytes）**，金鑰在**根目錄** `.env`。
-> `docs/34 §2` 的 export 區塊既沒列 `AMEGO_APP_KEY`、也沒 source 根目錄 `.env`，
-> 照著貼就會漏掉它——發票整條線會在「設定頁開不了發票」那裡卡住，而症狀看起來
-> 像功能壞掉。docs/34 需同步補上這一行。
+> ### ⛔ 切勿 `source` 根目錄的 `.env`
+>
+> 根目錄 `.env` 內含 **`DATABASE_URL=…/lucamp`（開發主庫，不是 `lucamp_manual`）**。
+> `docs/34 §2` 先 `export DATABASE_URL=…/lucamp_manual`；若之後再
+> `set -a && . .env && set +a`，`DATABASE_URL` 會被**覆寫回 `lucamp`**——
+> 而 §3.1 要求全部真的執行的破壞性操作（作廢、退貨、盤點調整、備份還原）
+> 就會打在**開發主庫**上，且**畫面完全正常、無從察覺**。
+>
+> 而且這一步**根本不需要**：`config.py` 的 `env_file` 已指向 repo 根 `.env`，
+> 且 docstring 明載「OS 環境變數優先於 .env 檔」——所以 `AMEGO_APP_KEY` 會自動載入、
+> 你 export 的 `DATABASE_URL` 也不會被蓋掉。前幾輪從未 export 過該金鑰卻開得出真發票，
+> 正是這個機制。
+>
+> **起後端後必做一次驗證**，確認真的連到 `lucamp_manual`：
+>
+> ```bash
+> "$DOCKER" exec lu-camp-db-1 psql -U lucamp -d lucamp_manual \
+>   -c "select count(*) from stores"       # 有回應即為該庫
+> ```
 >
 > 本測試環境的金鑰對應 Amego 公開測試公司（統編 `12345678`），2026-08-18 實測
 > `invoice_query` 往返正常。**正式憑證絕不可寫入本文件或 repo 任何位置。**
@@ -170,8 +185,8 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 `NEXT_PUBLIC_AGENT_URL`，直接消滅「忘了給環境變數 → 列印與開錢櫃全部靜默失敗」那個坑
 （`docs/34 §3`、§9 記載前兩輪都栽在這裡）。
 
-**docs/34 需同步兩處**：埠號改 `8001`（或明示本輪偏離），
-以及 `/devices/status` 的 `driver` 期望值由 `real` 改為 **`fake`**（本輪硬體全 Mock）。
+**docs/34 需同步**：埠號改 `8001`（或明示本輪偏離）。
+`/devices/status` 的 `driver` 期望值**維持 `real`**——本輪走真機。
 
 ### 3.1 破壞性操作
 
@@ -192,9 +207,13 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 
 1. `ManagerDep` 相依
 2. 全域 grep 內聯判定 `UserRole.MANAGER.value`——有三處店長閘門**不是** `ManagerDep`：
-   `returns/router.py`（手開紙本處置確認）、`sales/router.py`（作廢的同名旗標）、
-   `contacts/router.py`（national_id／roles 的服務層判定）
-3. 前端導覽的 `managerOnly`（`app/(authed)/layout.tsx`）
+   `returns/router.py`（手開紙本處置確認）、`contacts/router.py`（national_id／roles）、
+   `inventory/router.py`（`_ensure_category_create_allowed`，條件式）。
+   **`sales/router.py` 沒有內聯判定**——它的同名 `manual_paper_disposed` 掛在
+   `/sales/{id}/void`，而該端點本來就是 `ManagerDep`（複審更正）。
+3. 前端的 `managerOnly` **有兩份且不一致**：導覽（`app/(authed)/layout.tsx`）與
+   首頁模組卡片（`app/(authed)/page.tsx`）。例如「備份」在導覽是 managerOnly，
+   首頁清單根本沒有這一項。兩份都要比對。
 
 **MANAGER-only 動作清單**（實作時再核一次）：
 作廢銷售、作廢收購、改售價、現金手動調整、查看身分證、門市活動、餐飲菜單、報表、設定、
@@ -231,24 +250,34 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 ```bash
 cd hardware-agent
 set -a && . ./.env && set +a
-uv run uvicorn agent.main:app --host 0.0.0.0 --port 8001
+uv run uvicorn agent.main:app --host 127.0.0.1 --port 8001
 curl -s http://localhost:8001/devices/status | grep -o '"driver":"[a-z]*"'   # 必須全是 real
 ```
 
 真機模式下裝置 id 會從 `label-1`／`receipt-1` 變成 **`brother-1`／`epson-1`**（Fake 與真機用不同 id）。
 
+### 5.1 真機前置檢查（不做會連鎖失敗）
+
+改真機後，**原本靠 Fake 必定成功的步驟會變成可能失敗**：
+
+- `05-acquisition` 等 `.acq-print-labels .form-success`、`06-inventory` 等 `.inv-reprint-ok`
+  （各 15 秒）。Brother 離線或紙裝錯就**整支中止**，而 `docs/34 §4` 的迴圈是 `break`，
+  後面全部不跑。
+- `08-pos` 反而**不斷言**，只等 2.5 秒就截圖——真機失敗時會把「✗ 失敗」拍進手冊而不報錯。
+
+跑腳本前逐項確認：
+
+1. 兩台印表機都開機、在線（`/devices/status` 全 `online: true`、`driver: real`）
+2. Brother 裝的是 **DK-22210（29mm 連續）**——驅動寫死此規格，紙不對就印不出來
+3. EPSON 紙量足夠（缺紙會靜默排隊，見上方 FAQ）
+
+**P2 完成後必須人工複核三張圖**確為成功畫面（不是失敗提示）：
+`05-acquisition/labels-printed`、`06-inventory/reprint-label`、`08-pos/print-dialog-done`。
+
 > **缺紙的 FAQ**：本輪走真機，**可以複驗** 2026-08-18 的單次觀察
 > （缺紙時 API 立刻回 200、畫面顯示成功，補紙後印表機自動補印）。
 > 手冊主答案仍為「到**交易紀錄 → 重印出餐單**」——那是系統既有、隨時可用的補救入口；
 > 自動補印列為輔助說明，本輪複驗後才可寫成已驗證。
-
-> **缺紙的 FAQ 怎麼寫**（審查指出原寫法本輪驗不到、且漏掉系統既有的補救入口）：
->
-> - **主答案**：出餐單沒出來 → 到**交易紀錄 → 重印出餐單**（POS 失敗提示本身就寫
->   「請至交易紀錄重印」）。這是系統既有、隨時可用的補救動作。
-> - **附註**：2026-08-18 單次實機觀察——缺紙時 API 立刻回 200、畫面顯示成功，
->   紙補回去後印表機會自動補印。屬印表機韌體緩衝行為，**本輪全走 Mock、未複驗**，
->   手冊須標明此來源，不得寫成本輪驗證結果。
 
 ---
 
@@ -283,7 +312,7 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 - 發現功能只存在於分支、未合併 `main`
 - 最終 HTML 逼近 12 MB
 - 需要修改應用程式原始碼才能繼續
-- 實機離線或列印異常，且非設定問題
+- 實機離線或列印異常，且非設定問題（**標籤機／收據機列印失敗 → 立刻停**，不要讓迴圈往下跑）
 - Amego 測試帳號的號段被佔用或平台回應異常
 
 ---
@@ -354,7 +383,7 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 | 2 | **等式**：應付寄售人 ＝ 售價 − 抽成；抽成 ＝ `round_ntd(售價 × commission_pct / 100)`，並產生 `PENDING` 結算 | 2 |
 | 3 | 買斷毛利 ＝ 售價 − 收購成本；寄售只認抽成、不認全額售價 | 3 |
 | 4 | 現金：開帳零用金 ＋ 銷售現金收入 − 收購付出 − 寄售付款 ± 手動調整 ＝ 結帳應有現金（**per-session**） | 4 |
-| 5 | 已開票的退貨必須產生折讓單，**不得**直接刪除發票 | 5 |
+| 5 | 已開票的退貨必須產生折讓單**或作廢原發票**，且不得直接刪除發票（同月整筆退＝作廢、部分退或跨月＝折讓；驗證須按 `is_full_return` × 同月與否分流） | 5 |
 | 6 | 散裝批 `remaining_qty` 不得 < 0；歸零轉 `SOLD_OUT`；每件成本 ＝ 收購成本 ÷ 總件數 | 6 |
 | 7 | 退已售寄售品須反轉結算（未付→`CANCELLED`；已付→`reclaim_needed`） | 7 |
 | 8 | 影響現金的操作必須在開帳中的 `cash_session` 下 | 8 |
@@ -364,6 +393,10 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 
 > #2 原本寫成「撥付 **≤** 售出金額」——不等式驗證不出漏算抽成以外的任何錯誤，改回等式。
 > #7 尤其重要：§7.7 要求「未售退回」情境，沒有這條驗證等於放它過。
+
+> **#5 與 #7 在 seed 階段是空集合驗證**：§2.1 定案量體資料在 `einvoice_enabled=false`
+> 下產生，所以 seed 裡沒有任何 ISSUED 發票，這兩條的發票半邊「會通過但什麼都沒驗到」。
+> 其實質驗證歸屬 **PE 階段**（§11）。驗證腳本須把這件事印出來，不要讓綠燈騙人。
 
 輸出 `seed_verification.txt`。
 
@@ -472,7 +505,7 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 | 17 設定 | 桌號清單維護、出餐單列印開關 | docs/35 |
 | 19 跨系統流程 | 新增第五條：內用點餐 → 桌號 → 結帳出餐單 → 加點 → 退貨 | docs/35 |
 | 21 常見問題 | 出餐單沒印出來 → 補紙後會自動印（實測結論） | 實測 |
-| 22 覆蓋附錄 | 更新 POS／交易紀錄／電子發票三列，並標註硬體本輪為 Mock | 兩者 |
+| 22 覆蓋附錄 | 更新 POS／交易紀錄／電子發票三列；硬體標註為**真機**（標籤機為首次實印） | 兩者 |
 
 全書另需補**角色標示**：每個 MANAGER-only 動作加「限店長」，並以 `dev-clerk` 截對照圖（§4）。
 
@@ -498,9 +531,12 @@ P4 建置與品質檢查     → manual.html ＋ coverage-report.md ＋ qa-repor
 
 ### 11.1 為什麼要獨立一步
 
-盤點既有腳本後發現一個空白：**沒有任何腳本呼叫過 `POST /einvoice/queue/{id}/send`**。
-也就是說作廢（F0501）與折讓（G0401）的整條送出路徑，至今只有人工在後台按過
-（`docs/34 §5` 即要求店長手動觸發）。手冊卻要描述這兩條流程。
+盤點既有腳本後發現一個空白：**沒有任何腳本呼叫過 `POST /einvoice/queue/{id}/send`**
+——也就是作廢（F0501）與折讓（G0401）的送出路徑，**自動化覆蓋為零**。
+
+（更正：不是「從未走過平台」。`docs/current-status.md` 記載 2026-07-23 已有一張真 F0401
+與**兩張 G0401** 走完平台，手冊也收錄了 Amego 後台的作廢發票圖。當時是店長手動以 curl
+打 `send`——Amego 後台只能看，不能送。）手冊要描述這兩條流程，就不能只靠一次人工紀錄。
 
 ### 11.2 API 面清單（查證自 `einvoice/router.py`、`einvoice/amego.py`）
 
@@ -544,12 +580,64 @@ net/tax 分稅）、手機載具（`CarrierType`／`CarrierId1`／`CarrierId2`�
 
 每一步保留平台回應的原始碼與號碼，作為證據鏈輸出。
 
+### 11.3.1 這些查證要怎麼做（沒有現成端點）
+
+`invoice_query`／`allowance_query` **只存在於後端 service 內部的「對帳先行」，沒有對外端點**。
+所以第 3、4、5、8 項的平台查證**不能靠打自家 API**。
+
+**定案**：平台查證以 `backend/` 下的一次性 Python 腳本執行，直接重用既有 `AmegoClient`
+（簽章、`x-www-form-urlencoded`、`md5(data+time+app_key)` 都已實作）。
+**不要**在前端 Node 腳本裡重刻簽章，也不要把金鑰塞進前端環境。
+`einvoice-acceptance.mjs` 負責走本系統的 HTTP API，平台查證由該 Python 腳本負責，兩者輸出併成證據鏈。
+
+### 11.3.2 第 4、5 項的前置（不做會第一次就卡死）
+
+作廢與折讓**都不是打一支 API 就完成**：
+
+- `decide()` 對折讓與作廢一律 `requires_customer_consent=True` → `create_return` 必須帶
+  **已簽署**的 `consent_signature_task_id`，且品項／數量／金額都要對得上
+- 同月整筆退且原發票有紙本證明聯（B2C 一般開立就會有）→ `requires_paper_recall=True`，
+  未帶 `invoice_recalled` 直接 `ReturnConflict`
+- 取得已簽任務需要**已配對的顧客螢幕**（KIOSK）與合法簽名 PNG——而配對是 P2 的
+  `04-kiosk-pair` 做的。**PE 排在 P2 之前，得自己先做一次配對。**
+
+### 11.3.3 第 8 項要拆成兩半，否則驗不到那道守衛
+
+`register_manual_invoice` 只有在 `_may_have_reached_platform()`（`posted_at` 非空或
+`attempts > 0`）時才向平台查詢。用「沒開立過的單」去登記，會**跳過整段查詢**——
+與 §8 的 P2 腳本走同一條窄路，最有價值的守衛根本沒被觸發。
+
+- **8a 從未送出 → 放行**：合成一筆 PENDING 發票直接登記，應成功。
+  （註：此情境下「以 `invoice_query` 確認平台沒有那張」是**恆真**，證明力接近零。）
+- **8b 可能已送出 → 拒絕**：以 SQL 把一張**已開立**的發票回退成 `PENDING` 並**保留
+  `posted_at`**（比照 `09d` 的 `markIssued`／`sql()` 手法），再登記，
+  必須被「平台上已經有這筆交易的發票…」擋下。**這一項才是真正的驗證。**
+
+### 11.3.4 第 7 項（retry／result）的前置與語意
+
+- `retry` **只吃 `FAILED`**。而 §8 已排除「統編故意不對」那個手段，所以要製造 FAILED，
+  可送一張 **OrderId 已存在**的 F0401（平台明確拒絕 → 佇列轉 FAILED）。
+- `record_result` 是 **Turnkey 時代的落庫出口**：狀態驅動只對「已拋檔且仍 PENDING」的列
+  生效。Amego 路徑的 `send_via_amego` 是同步收斂成 `UPLOADED`／`FAILED`，
+  正常送完的列已是終態。PE 只驗「終態重複回執冪等」與「未認領 → `EInvoiceResultNotApplicable`」，
+  **不要期待它改狀態**。
+
+### 11.3.5 佇列端點沒有任何 UI
+
+`send`／`retry`／`result` 三支**只能由店長手動打 API**（全前端無任何 `einvoice/queue` 呼叫）。
+§9 要在第 8 章寫作廢與折讓流程時，**必須誠實寫明「送出這一步目前沒有畫面」**，
+否則手冊會描述一個不存在的按鈕。此缺口併入第 22 章覆蓋附錄。
+
 ### 11.4 前置與風險
 
 - **序號推高是前提**（§2.3）：折讓單號 `L1-1`、`L1-2` 已被佔用，不推高會直接撞號
 - 本階段會在 Amego 測試後台留下**真的發票、作廢與折讓紀錄**；測試環境無妨，
   但號碼會真的被消耗，不可無限量重跑
 - 執行前先掃號段確認未被佔用（公開共用測試帳號）
+- **OrderId 是確定性導出的**（`S{store}-{sale}`）：同一筆銷售一旦開立就**永遠不能再開第二張**。
+  PE 若要重跑，必須改用新的 sale，不能重用舊的
+- 折讓單號 `L{store}-{allowance}` 同理；且母發票一旦進入作廢流程，其折讓即不可重送
+- **PE 執行完要把本輪佔用的 `S`／`L` 號段寫進證據鏈**，供 P2 與日後重跑避開
 
 ### 11.5 PE 驗收
 
