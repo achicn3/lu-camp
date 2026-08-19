@@ -33,6 +33,7 @@ type EffectivenessReport = components["schemas"]["EffectivenessReport"];
 type ReconciliationReport = components["schemas"]["ReconciliationReport"];
 type DailySummaryReport = components["schemas"]["DailySummaryReport"];
 type TrendsReport = components["schemas"]["TrendsReport"];
+type DineInReport = components["schemas"]["DineInReport"];
 type InsightsReport = components["schemas"]["InsightsReport"];
 type InsightsBreakdownRow = components["schemas"]["InsightsBreakdownRow"];
 type DailyCashReport = components["schemas"]["DailyCashReport"];
@@ -47,6 +48,7 @@ type Tab =
   | "dashboard"
   | "insights"
   | "trends"
+  | "dine-in"
   | "daily-cash"
   | "sales-margin"
   | "discounts"
@@ -63,6 +65,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "dashboard", label: "今日營運" },
   { key: "insights", label: "經營洞察" },
   { key: "trends", label: "趨勢" },
+  { key: "dine-in", label: "餐飲內用/外帶" },
   { key: "daily-cash", label: "現金對帳" },
   { key: "sales-margin", label: "銷售毛利" },
   { key: "discounts", label: "臨時折扣" },
@@ -602,6 +605,168 @@ function InsightsPanel() {
           <BreakdownTable
             rows={dimension === "brand" ? report.brand_breakdown : report.category_breakdown}
           />
+        </>
+      )}
+    </div>
+  );
+}
+
+function DineInPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+  const [granularity, setGranularity] = useState<"day" | "week">("day");
+
+  const query = useQuery({
+    queryKey: ["reports", "dine-in", { from, to, granularity }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/dine-in", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to), granularity } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取餐飲報表失敗");
+    },
+  });
+
+  const report: DineInReport | undefined = query.data;
+  const pct = (share: string) => `${(Number(share) * 100).toFixed(1)}%`;
+  const peak = report
+    ? [...report.hourly].sort(
+        (a, b) =>
+          b.dine_in_groups + b.takeout_groups - (a.dine_in_groups + a.takeout_groups),
+      )[0]
+    : undefined;
+
+  return (
+    <div>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <label>
+          粒度
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as "day" | "week")}
+          >
+            <option value="day">每日</option>
+            <option value="week">每週</option>
+          </select>
+        </label>
+      </div>
+
+      {/* **口徑必須顯示在畫面上**（docs/39 §3）：這兩句不寫，數字會被誤讀。 */}
+      <p className="hint rpt-dine-in-basis">
+        組數＝<b>一筆含餐飲品項的結帳算一組</b>；佔比的分母是<b>「有餐飲的單」</b>，
+        不是全店訂單——所以多賣二手商品不會稀釋內用佔比。客單價<b>只計餐飲品項</b>，
+        同一張單的二手成交不列入。
+      </p>
+      <p className="hint rpt-dine-in-basis">
+        ⚠️ 內用與外帶的客單價<b>不可直接比較</b>：外帶不累點、不折扣、不可用購物金，
+        計價條件本就不同。
+      </p>
+
+      {query.isError && <p className="form-error">{(query.error as Error).message}</p>}
+      {report && (
+        <>
+          <table className="inv-table rpt-dine-in-summary">
+            <thead>
+              <tr>
+                <th>服務型態</th>
+                <th>組數</th>
+                <th>佔比</th>
+                <th>餐飲營收</th>
+                <th>餐飲客單價</th>
+                <th>整單合計（對照）</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(
+                [
+                  ["內用", report.summary.dine_in],
+                  ["外帶", report.summary.takeout],
+                ] as const
+              ).map(([label, stats]) => (
+                <tr key={label}>
+                  <td>{label}</td>
+                  <td>{stats.groups}</td>
+                  <td>{pct(stats.share)}</td>
+                  <td>${stats.fnb_revenue}</td>
+                  <td>${stats.avg_ticket}</td>
+                  <td>${stats.gross_total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3>趨勢</h3>
+          <table className="inv-table rpt-dine-in-trend">
+            <thead>
+              <tr>
+                <th>期間起</th>
+                <th>內用組數</th>
+                <th>外帶組數</th>
+                <th>內用營收</th>
+                <th>外帶營收</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.trend.length === 0 && (
+                <tr>
+                  <td colSpan={5}>期間內沒有餐飲交易。</td>
+                </tr>
+              )}
+              {report.trend.map((b) => (
+                <tr key={b.bucket_start}>
+                  <td>{b.bucket_start.slice(0, 10)}</td>
+                  <td>{b.dine_in_groups}</td>
+                  <td>{b.takeout_groups}</td>
+                  <td>${b.dine_in_revenue}</td>
+                  <td>${b.takeout_revenue}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3>時段分佈（台北時間）</h3>
+          {peak && peak.dine_in_groups + peak.takeout_groups > 0 && (
+            <p className="hint">
+              最忙時段：{peak.hour}:00–{peak.hour + 1}:00（內用 {peak.dine_in_groups} 組、
+              外帶 {peak.takeout_groups} 組）
+            </p>
+          )}
+          <table className="inv-table rpt-dine-in-hourly">
+            <thead>
+              <tr>
+                <th>時段</th>
+                <th>內用</th>
+                <th>外帶</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.hourly
+                .filter((h) => h.dine_in_groups + h.takeout_groups > 0)
+                .map((h) => (
+                  <tr key={h.hour}>
+                    <td>
+                      {String(h.hour).padStart(2, "0")}:00
+                    </td>
+                    <td>{h.dine_in_groups}</td>
+                    <td>{h.takeout_groups}</td>
+                  </tr>
+                ))}
+              {report.hourly.every((h) => h.dine_in_groups + h.takeout_groups === 0) && (
+                <tr>
+                  <td colSpan={3}>期間內沒有餐飲交易。</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </>
       )}
     </div>
@@ -2028,6 +2193,8 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
       return <InsightsPanel />;
     case "trends":
       return <TrendsPanel />;
+    case "dine-in":
+      return <DineInPanel />;
     case "daily-cash":
       return <DailyCashPanel />;
     case "sales-margin":

@@ -13,7 +13,13 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd, split_tax_inclusive
-from app.core.time import store_bucket_bounds, store_date, store_day_bounds
+from app.core.time import (
+    STORE_TIME_ZONE,
+    store_bucket_bounds,
+    store_date,
+    store_day_bounds,
+    utc_now,
+)
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -32,6 +38,10 @@ from app.modules.reports.schemas import (
     DailyCashReport,
     DailyCashSessionRow,
     DailySummaryReport,
+    DineInHourBucket,
+    DineInReport,
+    DineInSummary,
+    DineInTrendBucket,
     DiscountClerkRow,
     DiscountReasonRow,
     DiscountReport,
@@ -51,6 +61,7 @@ from app.modules.reports.schemas import (
     PaymentMethodTotal,
     ReconciliationReport,
     SalesMarginReport,
+    ServiceModeStats,
     TrendRow,
     TrendsReport,
 )
@@ -59,7 +70,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.service import UserService
-from app.shared.enums import CampaignStatus, OwnershipType
+from app.shared.enums import CampaignStatus, OwnershipType, ServiceMode
 from app.shared.exceptions import DomainError
 
 
@@ -663,6 +674,104 @@ class ReportsService:
             issued += i
             redeemed += r
         return issued, redeemed
+
+    async def dine_in_report(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> DineInReport:
+        """餐飲內用／外帶報表（docs/39）。半開區間 [from, to)。
+
+        **口徑集中在此，不散落各處**：
+        - 一筆含餐飲品項的結帳＝一組
+        - 佔比的分母是「有餐飲的單」（內用組數＋外帶組數），**不是全店訂單**
+        - 客單價只算 `MENU` 行；整單合計另列對照
+        - 分桶與時段一律以**台北時間**切
+        """
+        if granularity not in ("day", "week", "month", "quarter"):
+            raise ValueError(f"不支援的 granularity：{granularity}")
+        rows = await self._sales.dine_in_rows(store_id, date_from, date_to)
+
+        totals: dict[str, dict[str, Decimal | int]] = {
+            mode: {"groups": 0, "fnb": Decimal(0), "gross": Decimal(0)}
+            for mode in (ServiceMode.DINE_IN.value, ServiceMode.TAKEOUT.value)
+        }
+        buckets: dict[datetime, dict[str, Decimal | int]] = {}
+        hours: dict[int, dict[str, int]] = {
+            h: {ServiceMode.DINE_IN.value: 0, ServiceMode.TAKEOUT.value: 0} for h in range(24)
+        }
+        for created_at, mode, fnb_revenue, gross_total in rows:
+            bucket = totals.get(mode)
+            if bucket is None:  # 未知型態不硬塞進任一邊（寧可不算，也不要算錯）
+                continue
+            bucket["groups"] = int(bucket["groups"]) + 1
+            bucket["fnb"] = Decimal(bucket["fnb"]) + fnb_revenue
+            bucket["gross"] = Decimal(bucket["gross"]) + gross_total
+            start, _ = store_bucket_bounds(granularity, created_at)
+            slot = buckets.setdefault(
+                start,
+                {
+                    "dine_in_groups": 0,
+                    "takeout_groups": 0,
+                    "dine_in_revenue": Decimal(0),
+                    "takeout_revenue": Decimal(0),
+                },
+            )
+            key = "dine_in" if mode == ServiceMode.DINE_IN.value else "takeout"
+            slot[f"{key}_groups"] = int(slot[f"{key}_groups"]) + 1
+            slot[f"{key}_revenue"] = Decimal(slot[f"{key}_revenue"]) + fnb_revenue
+            hours[created_at.astimezone(STORE_TIME_ZONE).hour][mode] += 1
+
+        fnb_groups = sum(int(t["groups"]) for t in totals.values())
+
+        def _stats(mode: ServiceMode) -> ServiceModeStats:
+            t = totals[mode.value]
+            groups = int(t["groups"])
+            revenue = Decimal(t["fnb"])
+            return ServiceModeStats(
+                groups=groups,
+                # 分母是「有餐飲的單」——這一行是本報表最容易寫錯的地方（docs/39 §3.2）
+                share=(
+                    Decimal(0)
+                    if fnb_groups == 0
+                    else (Decimal(groups) / Decimal(fnb_groups)).quantize(Decimal("0.0001"))
+                ),
+                fnb_revenue=revenue,
+                avg_ticket=Decimal(0) if groups == 0 else round_ntd(revenue / Decimal(groups)),
+                gross_total=Decimal(t["gross"]),
+            )
+
+        return DineInReport(
+            generated_at=utc_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            granularity=granularity,
+            summary=DineInSummary(
+                dine_in=_stats(ServiceMode.DINE_IN), takeout=_stats(ServiceMode.TAKEOUT)
+            ),
+            trend=[
+                DineInTrendBucket(
+                    bucket_start=start,
+                    dine_in_groups=int(v["dine_in_groups"]),
+                    takeout_groups=int(v["takeout_groups"]),
+                    dine_in_revenue=Decimal(v["dine_in_revenue"]),
+                    takeout_revenue=Decimal(v["takeout_revenue"]),
+                )
+                for start, v in sorted(buckets.items())
+            ],
+            hourly=[
+                DineInHourBucket(
+                    hour=h,
+                    dine_in_groups=hours[h][ServiceMode.DINE_IN.value],
+                    takeout_groups=hours[h][ServiceMode.TAKEOUT.value],
+                )
+                for h in range(24)
+            ],
+        )
 
     async def trends(
         self, store_id: int, *, date_from: datetime, date_to: datetime, granularity: str

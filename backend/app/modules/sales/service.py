@@ -2206,6 +2206,12 @@ class SalesService:
         """臨時折扣的期間彙總（依原因、依店員）。金額取落盤值，不重算。"""
         return await self._repo.discount_rows(store_id, date_from, date_to)
 
+    async def dine_in_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[datetime, str, Decimal, Decimal]]:
+        """含餐飲品項的銷售逐筆：(成交時間, 服務型態, 餐飲營收, 整單合計)（docs/39）。"""
+        return await self._repo.dine_in_rows(store_id, date_from, date_to)
+
     async def gift_report_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> tuple[

@@ -3681,6 +3681,138 @@
         "title": "DailySummaryReport",
         "type": "object"
       },
+      "DineInHourBucket": {
+        "description": "**台北時間**的一個小時（0–23）。用 UTC 會讓尖峰整體位移 8 小時。",
+        "properties": {
+          "dine_in_groups": {
+            "title": "Dine In Groups",
+            "type": "integer"
+          },
+          "hour": {
+            "title": "Hour",
+            "type": "integer"
+          },
+          "takeout_groups": {
+            "title": "Takeout Groups",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hour",
+          "dine_in_groups",
+          "takeout_groups"
+        ],
+        "title": "DineInHourBucket",
+        "type": "object"
+      },
+      "DineInReport": {
+        "description": "餐飲內用／外帶報表（docs/39）。\n\n**口徑三條**（畫面必須顯示，不能只留在文件裡）：\n1. 佔比的分母是「有餐飲的單」，不是全店訂單\n2. 客單價只算 MENU 行\n3. 內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、\n   不可用購物金（docs/35），計價條件本就不同",
+        "properties": {
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "granularity": {
+            "title": "Granularity",
+            "type": "string"
+          },
+          "hourly": {
+            "items": {
+              "$ref": "#/components/schemas/DineInHourBucket"
+            },
+            "title": "Hourly",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DineInSummary"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/DineInTrendBucket"
+            },
+            "title": "Trend",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "granularity",
+          "summary",
+          "trend",
+          "hourly"
+        ],
+        "title": "DineInReport",
+        "type": "object"
+      },
+      "DineInSummary": {
+        "properties": {
+          "dine_in": {
+            "$ref": "#/components/schemas/ServiceModeStats"
+          },
+          "takeout": {
+            "$ref": "#/components/schemas/ServiceModeStats"
+          }
+        },
+        "required": [
+          "dine_in",
+          "takeout"
+        ],
+        "title": "DineInSummary",
+        "type": "object"
+      },
+      "DineInTrendBucket": {
+        "description": "一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。",
+        "properties": {
+          "bucket_start": {
+            "format": "date-time",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "dine_in_groups": {
+            "title": "Dine In Groups",
+            "type": "integer"
+          },
+          "dine_in_revenue": {
+            "title": "Dine In Revenue",
+            "type": "string"
+          },
+          "takeout_groups": {
+            "title": "Takeout Groups",
+            "type": "integer"
+          },
+          "takeout_revenue": {
+            "title": "Takeout Revenue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket_start",
+          "dine_in_groups",
+          "takeout_groups",
+          "dine_in_revenue",
+          "takeout_revenue"
+        ],
+        "title": "DineInTrendBucket",
+        "type": "object"
+      },
       "DiscountClerkRow": {
         "description": "一位店員在期間內打出的折扣（無核准機制 → 事後稽核靠這個看得出異常）。",
         "properties": {
@@ -9265,6 +9397,41 @@
         ],
         "title": "ServiceMode",
         "type": "string"
+      },
+      "ServiceModeStats": {
+        "description": "單一服務型態（內用或外帶）在期間內的統計。",
+        "properties": {
+          "avg_ticket": {
+            "title": "Avg Ticket",
+            "type": "string"
+          },
+          "fnb_revenue": {
+            "title": "Fnb Revenue",
+            "type": "string"
+          },
+          "gross_total": {
+            "title": "Gross Total",
+            "type": "string"
+          },
+          "groups": {
+            "title": "Groups",
+            "type": "integer"
+          },
+          "share": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Share",
+            "type": "string"
+          }
+        },
+        "required": [
+          "groups",
+          "share",
+          "fnb_revenue",
+          "avg_ticket",
+          "gross_total"
+        ],
+        "title": "ServiceModeStats",
+        "type": "object"
       },
       "SettingsRead": {
         "description": "單店設定輸出。",
@@ -17572,6 +17739,71 @@
           }
         ],
         "summary": "Daily Summary",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/dine-in": {
+      "get": {
+        "description": "餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。\n\n半開區間 [from, to)；to<=from → 422。\n\n**口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；\n客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、\n不可用購物金（docs/35），計價條件本就不同。",
+        "operationId": "dineInReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "granularity",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "title": "Granularity",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DineInReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dine In",
         "tags": [
           "reports"
         ]

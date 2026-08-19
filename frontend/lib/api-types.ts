@@ -1801,6 +1801,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/dine-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dine In
+         * @description 餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。
+         *
+         *     半開區間 [from, to)；to<=from → 422。
+         *
+         *     **口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；
+         *     客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
+         *     不可用購物金（docs/35），計價條件本就不同。
+         */
+        get: operations["dineInReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/discounts": {
         parameters: {
             query?: never;
@@ -3909,6 +3935,78 @@ export interface components {
             transaction_count: number;
             /** Unknown Cost Sales */
             unknown_cost_sales: string;
+        };
+        /**
+         * DineInHourBucket
+         * @description **台北時間**的一個小時（0–23）。用 UTC 會讓尖峰整體位移 8 小時。
+         */
+        DineInHourBucket: {
+            /** Dine In Groups */
+            dine_in_groups: number;
+            /** Hour */
+            hour: number;
+            /** Takeout Groups */
+            takeout_groups: number;
+        };
+        /**
+         * DineInReport
+         * @description 餐飲內用／外帶報表（docs/39）。
+         *
+         *     **口徑三條**（畫面必須顯示，不能只留在文件裡）：
+         *     1. 佔比的分母是「有餐飲的單」，不是全店訂單
+         *     2. 客單價只算 MENU 行
+         *     3. 內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
+         *        不可用購物金（docs/35），計價條件本就不同
+         */
+        DineInReport: {
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Granularity */
+            granularity: string;
+            /** Hourly */
+            hourly: components["schemas"]["DineInHourBucket"][];
+            /** Store Id */
+            store_id: number;
+            summary: components["schemas"]["DineInSummary"];
+            /** Trend */
+            trend: components["schemas"]["DineInTrendBucket"][];
+        };
+        /** DineInSummary */
+        DineInSummary: {
+            dine_in: components["schemas"]["ServiceModeStats"];
+            takeout: components["schemas"]["ServiceModeStats"];
+        };
+        /**
+         * DineInTrendBucket
+         * @description 一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。
+         */
+        DineInTrendBucket: {
+            /**
+             * Bucket Start
+             * Format: date-time
+             */
+            bucket_start: string;
+            /** Dine In Groups */
+            dine_in_groups: number;
+            /** Dine In Revenue */
+            dine_in_revenue: string;
+            /** Takeout Groups */
+            takeout_groups: number;
+            /** Takeout Revenue */
+            takeout_revenue: string;
         };
         /**
          * DiscountClerkRow
@@ -6099,6 +6197,22 @@ export interface components {
          * @enum {string}
          */
         ServiceMode: "DINE_IN" | "TAKEOUT";
+        /**
+         * ServiceModeStats
+         * @description 單一服務型態（內用或外帶）在期間內的統計。
+         */
+        ServiceModeStats: {
+            /** Avg Ticket */
+            avg_ticket: string;
+            /** Fnb Revenue */
+            fnb_revenue: string;
+            /** Gross Total */
+            gross_total: string;
+            /** Groups */
+            groups: number;
+            /** Share */
+            share: string;
+        };
         /**
          * SettingsRead
          * @description 單店設定輸出。
@@ -10307,6 +10421,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailySummaryReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dineInReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                granularity?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DineInReport"];
                 };
             };
             /** @description Validation Error */

@@ -610,6 +610,45 @@ class SalesRepository:
             [(int(r[0]), int(r[1]), Decimal(r[2])) for r in by_clerk],
         )
 
+    async def dine_in_rows(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[datetime, str, Decimal, Decimal]]:
+        """期間內**每一筆含餐飲品項的銷售**：(成交時間, 服務型態, 餐飲營收, 整單合計)。
+
+        一列＝一筆結帳＝一「組」（docs/39 裁示）。回傳逐筆而非彙總，
+        是因為報表要同時做組數、佔比、趨勢分桶與時段分佈，逐筆最省事也最不容易算錯。
+
+        - **餐飲營收只計 `MENU` 行的 `net_amount`（實付）**——同一張單的二手成交
+          不得混入，否則餐飲客單價會被灌水
+        - `gross_total` 為整單合計（含非餐飲），供對照；不可拿來算客單價
+        - 作廢單排除；`service_mode` 為 NULL 者不會有餐飲行（docs/35 的 CHECK 保證）
+        """
+        fnb = func.sum(
+            case((SaleLine.line_type == SaleLineType.MENU, SaleLine.net_amount), else_=0)
+        )
+        rows = await self._session.execute(
+            select(
+                Sale.created_at,
+                Sale.service_mode,
+                func.coalesce(fnb, 0),
+                func.coalesce(func.sum(SaleLine.net_amount), 0),
+            )
+            .join(SaleLine, SaleLine.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                Sale.created_at >= date_from,
+                Sale.created_at < date_to,
+                Sale.service_mode.is_not(None),
+            )
+            .group_by(Sale.id, Sale.created_at, Sale.service_mode)
+            .having(fnb > 0)
+        )
+        return [
+            (created, str(mode), Decimal(rev), Decimal(total))
+            for created, mode, rev, total in rows
+        ]
+
     async def gift_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> tuple[

@@ -3478,3 +3478,13 @@ body {
 .call-ticket-list td:last-child {
   white-space: nowrap;
 }
+
+/* ── 餐飲內用/外帶報表（docs/39）────────────────────────────── */
+/* 口徑說明必須看得見：數字被誤讀的代價比版面擁擠高。 */
+.rpt-dine-in-basis {
+  max-width: 70ch;
+  margin: 4px 0;
+}
+.rpt-dine-in-summary {
+  margin-top: 12px;
+}

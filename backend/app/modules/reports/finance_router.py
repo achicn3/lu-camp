@@ -20,6 +20,7 @@ from app.modules.reports.schemas import (
     ConsignmentPayablesReport,
     DailyCashReport,
     DailySummaryReport,
+    DineInReport,
     DiscountReport,
     GiftReport,
     InsightsReport,
@@ -551,6 +552,36 @@ async def discounts(
         ],
     )
     return export_response(exp, fmt)
+
+
+@router.get("/dine-in", response_model=DineInReport, operation_id="dineInReport")
+async def dine_in(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
+    granularity: Annotated[str, Query()] = "day",
+) -> DineInReport:
+    """餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。
+
+    半開區間 [from, to)；to<=from → 422。
+
+    **口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；
+    客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
+    不可用購物金（docs/35），計價條件本就不同。
+    """
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    try:
+        return await ReportsService(session).dine_in_report(
+            user.store_id, date_from=date_from, date_to=date_to, granularity=granularity
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.get("/gifts", response_model=GiftReport, operation_id="giftReport")

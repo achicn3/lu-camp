@@ -497,3 +497,66 @@ class InsightsReport(BaseModel):
     category_breakdown: list[InsightsBreakdownRow]
     turnover: InsightsTurnover
     revenue_mix: InsightsRevenueMix
+
+
+# ── 餐飲內用／外帶（docs/39）──────────────────────────────
+
+
+class ServiceModeStats(BaseModel):
+    """單一服務型態（內用或外帶）在期間內的統計。"""
+
+    groups: int
+    """組數：**一筆含餐飲品項的結帳算一組**（不論點了幾杯）。"""
+    share: Decimal
+    """佔比。**分母是「有餐飲的單」**，不是全店訂單——用全店當分母，
+    多賣幾台二手裝備就會把內用佔比稀釋掉，看起來像內用生意變差。"""
+    fnb_revenue: NTDAmount
+    """餐飲營收：只計 `MENU` 行的實付（net_amount）。"""
+    avg_ticket: NTDAmount
+    """餐飲客單價 ＝ 餐飲營收 ÷ 組數。**只算 MENU 行**，
+    否則同一張單的二手成交會把它灌水。"""
+    gross_total: NTDAmount
+    """整單合計（含非餐飲品項），供對照用；**不要拿它算客單價**。"""
+
+
+class DineInSummary(BaseModel):
+    dine_in: ServiceModeStats
+    takeout: ServiceModeStats
+
+
+class DineInTrendBucket(BaseModel):
+    """一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。"""
+
+    bucket_start: datetime
+    dine_in_groups: int
+    takeout_groups: int
+    dine_in_revenue: NTDAmount
+    takeout_revenue: NTDAmount
+
+
+class DineInHourBucket(BaseModel):
+    """**台北時間**的一個小時（0–23）。用 UTC 會讓尖峰整體位移 8 小時。"""
+
+    hour: int
+    dine_in_groups: int
+    takeout_groups: int
+
+
+class DineInReport(BaseModel):
+    """餐飲內用／外帶報表（docs/39）。
+
+    **口徑三條**（畫面必須顯示，不能只留在文件裡）：
+    1. 佔比的分母是「有餐飲的單」，不是全店訂單
+    2. 客單價只算 MENU 行
+    3. 內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
+       不可用購物金（docs/35），計價條件本就不同
+    """
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    granularity: str
+    summary: DineInSummary
+    trend: list[DineInTrendBucket]
+    hourly: list[DineInHourBucket]
