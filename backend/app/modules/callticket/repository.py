@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.callticket.models import CallTicket
@@ -36,19 +36,42 @@ class CallTicketRepository:
     async def list_tickets(
         self, store_id: int, *, include_done: bool, limit: int, offset: int
     ) -> list[CallTicket]:
-        """待處理在前（號碼小的先），已完成的接在後面（最近完成的先）。
+        """待處理在前（舊的先，＝排隊順序），已完成接在後面（**最近完成的先**）。
+
+        **兩群的排序方向相反，所以分兩次查**：
+        - 待處理＝排隊，先來先服務 → 日期/號碼**遞增**
+        - 已完成＝回頭找先前的表單連結，要找的幾乎都是最近的 → 日期/號碼**遞減**
+
+        用單一 `ORDER BY` 只能給一個方向：已完成若跟著遞增，歷史累積後撈到的會是
+        幾百天前的單，而剛完成的那筆被擠到 limit 之外——「顯示已完成」這個開關
+        時間一久就形同失效。
 
         **跨日未完成的仍列出**——那是客人真的還在等的單，不得因為換日就消失。
         """
-        stmt = select(CallTicket).where(CallTicket.store_id == store_id)
-        if not include_done:
-            stmt = stmt.where(CallTicket.status == CallTicketStatus.WAITING)
-        # **明確排序，不依賴字母序**：原本用 `status.desc()` 讓 WAITING 排在 DONE 前面，
-        # 那是靠 'W' > 'D' 的巧合——日後多一個狀態（例如 CANCELLED）就會無聲跑掉。
-        stmt = stmt.order_by(
-            case((CallTicket.status == CallTicketStatus.WAITING, 0), else_=1),
-            CallTicket.ticket_date.asc(),
-            CallTicket.ticket_no.asc(),
+        waiting = list(
+            await self._session.scalars(
+                select(CallTicket)
+                .where(
+                    CallTicket.store_id == store_id,
+                    CallTicket.status == CallTicketStatus.WAITING,
+                )
+                .order_by(CallTicket.ticket_date.asc(), CallTicket.ticket_no.asc())
+                .limit(limit)
+                .offset(offset)
+            )
         )
-        rows = await self._session.scalars(stmt.limit(limit).offset(offset))
-        return list(rows)
+        if not include_done:
+            return waiting
+        remaining = limit - len(waiting)
+        if remaining <= 0:
+            return waiting
+        done = await self._session.scalars(
+            select(CallTicket)
+            .where(
+                CallTicket.store_id == store_id,
+                CallTicket.status == CallTicketStatus.DONE,
+            )
+            .order_by(CallTicket.ticket_date.desc(), CallTicket.ticket_no.desc())
+            .limit(remaining)
+        )
+        return waiting + list(done)

@@ -208,6 +208,50 @@ async def test_waiting_sorts_before_done_regardless_of_letters(
     assert [r.id for r in rows] == [waiting.id, done.id]
 
 
+async def test_waiting_is_oldest_first_but_done_is_newest_first(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """兩群的排序方向**相反**，且必須真的相反。
+
+    待處理＝排隊，先來先服務（舊的先）；已完成＝回頭找先前的表單連結，
+    要找的幾乎都是最近那筆（新的先）。若已完成也跟著遞增，歷史累積後撈到的會是
+    幾百天前的單、剛完成的被擠出 limit——「顯示已完成」就形同失效。
+    """
+    svc = _svc(db_session)
+    old_done = await svc.create(
+        seed.store_a, name="很久以前完成", actor_user_id=seed.user_a, now=YESTERDAY
+    )
+    await svc.complete(seed.store_a, old_done.id, actor_user_id=seed.user_a)
+    new_done = await svc.create(
+        seed.store_a, name="剛剛完成", actor_user_id=seed.user_a, now=TODAY
+    )
+    await svc.complete(seed.store_a, new_done.id, actor_user_id=seed.user_a)
+    old_wait = await svc.create(
+        seed.store_a, name="等最久", actor_user_id=seed.user_a, now=YESTERDAY
+    )
+    new_wait = await svc.create(
+        seed.store_a, name="剛取號", actor_user_id=seed.user_a, now=TODAY
+    )
+
+    rows = await svc.list_tickets(seed.store_a, include_done=True)
+    assert [r.id for r in rows] == [old_wait.id, new_wait.id, new_done.id, old_done.id]
+
+
+async def test_done_is_not_starved_by_the_limit(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """limit 用在**合併後**的清單：候位吃掉全部額度時，已完成就一筆都不撈。"""
+    svc = _svc(db_session)
+    done = await svc.create(seed.store_a, name="已完成", actor_user_id=seed.user_a)
+    await svc.complete(seed.store_a, done.id, actor_user_id=seed.user_a)
+    for i in range(3):
+        await svc.create(seed.store_a, name=f"候位{i}", actor_user_id=seed.user_a)
+
+    rows = await svc.list_tickets(seed.store_a, include_done=True, limit=2)
+    assert len(rows) == 2
+    assert all(r.status is CallTicketStatus.WAITING for r in rows)
+
+
 async def test_list_respects_limit(db_session: AsyncSession, seed: Seed) -> None:
     """清單是舊的排前面：limit 太小會讓**剛取號的客人**從畫面上消失。"""
     svc = _svc(db_session)
