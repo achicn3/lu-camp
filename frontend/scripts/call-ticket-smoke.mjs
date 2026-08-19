@@ -1,6 +1,7 @@
 // 叫號系統瀏覽器煙霧（docs/38）：真 backend＋真 Postgres＋真瀏覽器。
 // 取號 → 號碼顯示 → 清單 → 完成 → 從清單消失 → 以 include_done 確認資料還在。
 // 需 backend(:8000) + frontend(:3000) 已起。
+import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,8 @@ const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/,
 const API = (process.env.SMOKE_API ?? "http://localhost:8000").replace(/\/+$/, "");
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "call-ticket");
 const USERNAME = process.env.SMOKE_USERNAME ?? "dev-manager";
+const DB_CONTAINER = process.env.SMOKE_DB_CONTAINER ?? "lu-camp-db-1";
+const DB_NAME = process.env.SMOKE_DB_NAME ?? "lucamp_e2e";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
 
 mkdirSync(SHOTS, { recursive: true });
@@ -31,6 +34,16 @@ async function api(token, method, path, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+// 跨日情境只能靠回填日期製造（API 一律用當下時間）。這是**測試資料的佈置**，
+// 不是繞過流程：畫面與 API 行為全部走真路徑（同 return-invoice-smoke 的既有做法）。
+function sql(statement) {
+  return execFileSync(
+    "docker",
+    ["exec", DB_CONTAINER, "psql", "-U", "lucamp", "-d", DB_NAME, "-tAc", statement],
+    { encoding: "utf8" },
+  ).trim();
 }
 
 const RUN = Date.now().toString().slice(-6);
@@ -128,6 +141,73 @@ try {
     !(waiting.json ?? []).some((t) => t.name === name),
     `${(waiting.json ?? []).length} 筆候位中`,
   );
+
+  // ── 前一天的資料不得汙染當天（店主特別要求）──
+  // 最危險的樣子：昨天的 #3 沒處理完、今天又有一個 #3，店員喊「3 號」時兩個人站起來。
+  const ydName = `昨天未完成-${RUN}`;
+  const ydDoneName = `昨天已完成-${RUN}`;
+  const yd = await api(token, "POST", "/api/v1/call-tickets", { name: ydName });
+  const ydDone = await api(token, "POST", "/api/v1/call-tickets", { name: ydDoneName });
+  await api(token, "POST", `/api/v1/call-tickets/${ydDone.json.id}/complete`);
+  sql(`UPDATE call_tickets SET ticket_date = CURRENT_DATE - 1 WHERE id = ${yd.json.id}`);
+  sql(`UPDATE call_tickets SET ticket_date = CURRENT_DATE - 1 WHERE id = ${ydDone.json.id}`);
+
+  // 1) 今天的號碼**不得**接續昨天
+  const todayTicket = await api(token, "POST", "/api/v1/call-tickets", {
+    name: `今天新客-${RUN}`,
+  });
+  const todayNo = todayTicket.json.ticket_no;
+  const sameDayMax = Number(
+    sql(
+      `SELECT COALESCE(MAX(ticket_no),0) FROM call_tickets ` +
+        `WHERE ticket_date = CURRENT_DATE AND id <> ${todayTicket.json.id}`,
+    ),
+  );
+  ok(
+    "今天的號碼只依當日流水，不接續昨天",
+    todayNo === sameDayMax + 1,
+    `今天配到 #${todayNo}，當日既有最大 #${sameDayMax}`,
+  );
+
+  // **強制製造真正的撞號**：把昨天那筆的號碼改成與今天這筆相同。
+  // 不這樣做，「同號不同日分得開」那條斷言會因為根本沒撞到而空過（假綠）。
+  sql(`UPDATE call_tickets SET ticket_no = ${todayNo} WHERE id = ${yd.json.id}`);
+
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForSelector("table.call-ticket-list tbody tr");
+
+  // 2) 昨天沒處理完的仍在清單（客人真的還在等），但**必須標日期**
+  const ydRow = page.locator("table.call-ticket-list tbody tr", { hasText: ydName });
+  await ydRow.waitFor({ timeout: 15000 });
+  const ydLabel = ((await ydRow.locator("td").first().textContent()) ?? "").trim();
+  ok(
+    "昨天未完成的仍在清單，且號碼標了日期（否則與今天的號碼混淆）",
+    /^\d+\/\d+ #\d+$/.test(ydLabel),
+    ydLabel,
+  );
+
+  // 3) 昨天**已完成**的不得混進今天的候位清單
+  ok(
+    "昨天已完成的不出現在候位清單",
+    (await page.locator("table.call-ticket-list tbody tr", { hasText: ydDoneName }).count()) === 0,
+  );
+
+  // 4) 同號不同日必須在畫面上分得開——這是「喊 3 號兩個人站起來」的防線
+  const labels = await page.locator("table.call-ticket-list tbody td:first-child").allTextContents();
+  const trimmed = labels.map((t) => t.trim());
+  // 先確認這一輪**真的有撞號**，否則下面那條斷言等於沒驗
+  const collided = trimmed.filter((t) => t.endsWith(`#${todayNo}`));
+  ok(
+    "本輪真的製造出同號不同日（否則下一條斷言是空的）",
+    collided.length === 2,
+    collided.join(" | "),
+  );
+  ok(
+    "同號不同日在畫面上分得開（標籤不重複）",
+    new Set(trimmed).size === trimmed.length,
+    trimmed.join(" | "),
+  );
+  await page.screenshot({ path: `${SHOTS}/05-cross-day.png` });
 
   // ── 危險連結在邊界被擋（不是只有前端不渲染）──
   const bad = await api(token, "POST", "/api/v1/call-tickets", {
