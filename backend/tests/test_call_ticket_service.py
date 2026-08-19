@@ -189,3 +189,28 @@ async def test_foreign_key_error_is_not_swallowed_as_a_number_clash(
         await _svc(db_session).create(
             seed.store_a, name="壞使用者", actor_user_id=999_999_999
         )
+
+
+async def test_waiting_sorts_before_done_regardless_of_letters(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """待處理必須排在已完成之前——**不可依賴狀態字串的字母序**。
+
+    原本用 `status.desc()` 讓 WAITING 排在 DONE 前面，那是靠 'W' > 'D' 的巧合；
+    日後多一個狀態就會無聲跑掉。
+    """
+    svc = _svc(db_session)
+    done = await svc.create(seed.store_a, name="先完成", actor_user_id=seed.user_a)
+    await svc.complete(seed.store_a, done.id, actor_user_id=seed.user_a)
+    waiting = await svc.create(seed.store_a, name="後取號但還在等", actor_user_id=seed.user_a)
+
+    rows = await svc.list_tickets(seed.store_a, include_done=True)
+    assert [r.id for r in rows] == [waiting.id, done.id]
+
+
+async def test_list_respects_limit(db_session: AsyncSession, seed: Seed) -> None:
+    """清單是舊的排前面：limit 太小會讓**剛取號的客人**從畫面上消失。"""
+    svc = _svc(db_session)
+    for i in range(5):
+        await svc.create(seed.store_a, name=f"客{i}", actor_user_id=seed.user_a)
+    assert len(await svc.list_tickets(seed.store_a, limit=3)) == 3

@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.callticket.models import CallTicket
@@ -43,8 +43,10 @@ class CallTicketRepository:
         stmt = select(CallTicket).where(CallTicket.store_id == store_id)
         if not include_done:
             stmt = stmt.where(CallTicket.status == CallTicketStatus.WAITING)
+        # **明確排序，不依賴字母序**：原本用 `status.desc()` 讓 WAITING 排在 DONE 前面，
+        # 那是靠 'W' > 'D' 的巧合——日後多一個狀態（例如 CANCELLED）就會無聲跑掉。
         stmt = stmt.order_by(
-            CallTicket.status.desc(),  # WAITING > DONE（字母序反向）
+            case((CallTicket.status == CallTicketStatus.WAITING, 0), else_=1),
             CallTicket.ticket_date.asc(),
             CallTicket.ticket_no.asc(),
         )

@@ -3,6 +3,9 @@ import type { components } from "@/lib/api-types";
 
 export type CallTicket = components["schemas"]["CallTicketRead"];
 
+/** 後端 `/api/v1/call-tickets` 的 `limit` 上限。 */
+export const CALL_TICKET_PAGE_SIZE = 200;
+
 const SAFE_SCHEMES = ["http:", "https:"];
 
 /**

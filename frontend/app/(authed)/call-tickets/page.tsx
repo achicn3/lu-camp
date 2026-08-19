@@ -8,7 +8,11 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
-import { isSafeExternalLink, ticketLabel } from "@/features/call-tickets/callTickets";
+import {
+  CALL_TICKET_PAGE_SIZE,
+  isSafeExternalLink,
+  ticketLabel,
+} from "@/features/call-tickets/callTickets";
 
 type CallTicket = components["schemas"]["CallTicketRead"];
 
@@ -32,7 +36,11 @@ export default function CallTicketsPage() {
   const tickets = useQuery({
     queryKey: ["call-tickets"],
     queryFn: async () => {
-      const { data, error: err } = await api.GET("/api/v1/call-tickets", {});
+      // **明確帶上限**：預設 100 而清單是舊的排前面，若累積超過 100 筆未完成，
+      // 剛取號的客人反而不會出現在清單上。取後端上限 200，並在達上限時提示。
+      const { data, error: err } = await api.GET("/api/v1/call-tickets", {
+        params: { query: { limit: CALL_TICKET_PAGE_SIZE } },
+      });
       if (!data) throw new Error(extractDetail(err) ?? "讀取候位清單失敗");
       return data;
     },
@@ -151,6 +159,12 @@ export default function CallTicketsPage() {
         </p>
       )}
       {tickets.isSuccess && rows.length === 0 && <p className="hint">目前沒有人在候位。</p>}
+      {rows.length >= CALL_TICKET_PAGE_SIZE && (
+        <p role="alert" className="form-error">
+          候位中已達顯示上限 {CALL_TICKET_PAGE_SIZE} 筆，可能還有更多沒列出。
+          請先把已處理完的按「完成」。
+        </p>
+      )}
       {rows.length > 0 && (
         <div className="card">
           <table className="data-table call-ticket-list">
