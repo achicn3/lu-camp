@@ -630,6 +630,16 @@ function DineInPanel() {
 
   const report: DineInReport | undefined = query.data;
   const pct = (share: string) => `${(Number(share) * 100).toFixed(1)}%`;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/dine-in", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+      granularity,
+    });
+    void downloadReport(url, `dine-in-${from}-${to}.${fmt}`);
+  }
+
   const peak = report
     ? [...report.hourly].sort(
         (a, b) =>
@@ -670,6 +680,8 @@ function DineInPanel() {
         ⚠️ 內用與外帶的客單價<b>不可直接比較</b>：外帶不累點、不折扣、不可用購物金，
         計價條件本就不同。
       </p>
+
+      <DownloadButtons onDownload={handleDownload} />
 
       {query.isError && <p className="form-error">{(query.error as Error).message}</p>}
       {report && (
@@ -722,8 +734,8 @@ function DineInPanel() {
                 </tr>
               )}
               {report.trend.map((b) => (
-                <tr key={b.bucket_start}>
-                  <td>{b.bucket_start.slice(0, 10)}</td>
+                <tr key={b.period}>
+                  <td>{b.period}</td>
                   <td>{b.dine_in_groups}</td>
                   <td>{b.takeout_groups}</td>
                   <td>${b.dine_in_revenue}</td>

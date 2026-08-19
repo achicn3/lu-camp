@@ -525,9 +525,14 @@ class DineInSummary(BaseModel):
 
 
 class DineInTrendBucket(BaseModel):
-    """一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。"""
+    """一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。
 
-    bucket_start: datetime
+    `period` 是**台北營業日**（與既有 `TrendRow.period` 同型別、同口徑）。
+    **刻意不給 UTC datetime**：給了的話，每個使用端（畫面、匯出）都要自己記得轉時區，
+    而漏轉的症狀是「數字全對、日期悄悄差一天」——最難發現的一種錯。
+    """
+
+    period: date
     dine_in_groups: int
     takeout_groups: int
     dine_in_revenue: NTDAmount

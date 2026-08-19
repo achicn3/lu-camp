@@ -561,7 +561,8 @@ async def dine_in(
     date_from: Annotated[AwareDateTime, Query(alias="from")],
     date_to: Annotated[AwareDateTime, Query(alias="to")],
     granularity: Annotated[str, Query()] = "day",
-) -> DineInReport:
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> DineInReport | Response:
     """餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。
 
     半開區間 [from, to)；to<=from → 422。
@@ -575,13 +576,70 @@ async def dine_in(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
         )
     try:
-        return await ReportsService(session).dine_in_report(
+        report = await ReportsService(session).dine_in_report(
             user.store_id, date_from=date_from, date_to=date_to, granularity=granularity
         )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    if fmt == "json":
+        return report
+    # 匯出與 JSON **同源**（同一 service 取數），只做呈現轉換。
+    # meta 帶上口徑：檔案離開系統之後，畫面上那兩句提醒就跟不過去了。
+    exp = TabularExport(
+        sheet="餐飲內用外帶",
+        filename_stem=f"dine-in-{report.store_id}-{report.granularity}",
+        meta=[
+            ("店別", str(report.store_id)),
+            ("區間", f"{report.date_from.isoformat()} ~ {report.date_to.isoformat()}"),
+            ("粒度", report.granularity),
+            ("組數定義", "一筆含餐飲品項的結帳算一組"),
+            ("佔比分母", "有餐飲的單（不是全店訂單）"),
+            (
+                "客單價口徑",
+                "只計餐飲品項；內用與外帶不可直接比較"
+                "（外帶不累點/不折扣/不可用購物金）",
+            ),
+        ],
+        headers=["服務型態", "組數", "佔比", "餐飲營收", "餐飲客單價", "整單合計"],
+        rows=[
+            [
+                label,
+                str(stats.groups),
+                f"{stats.share:.4f}",
+                str(stats.fnb_revenue),
+                str(stats.avg_ticket),
+                str(stats.gross_total),
+            ]
+            for label, stats in (
+                ("內用", report.summary.dine_in),
+                ("外帶", report.summary.takeout),
+            )
+        ]
+        + [["", "", "", "", "", ""]]
+        + [["期間起", "內用組數", "外帶組數", "內用營收", "外帶營收", ""]]
+        + [
+            [
+                b.period.isoformat(),
+                str(b.dine_in_groups),
+                str(b.takeout_groups),
+                str(b.dine_in_revenue),
+                str(b.takeout_revenue),
+                "",
+            ]
+            for b in report.trend
+        ]
+        # **時段分佈也要進檔案**：它是店主指名的四個指標之一，
+        # 只印在畫面上等於「只能用眼睛看、不能拿去分析」。
+        + [["", "", "", "", "", ""]]
+        + [["時段（台北）", "內用組數", "外帶組數", "", "", ""]]
+        + [
+            [f"{h.hour:02d}:00", str(h.dine_in_groups), str(h.takeout_groups), "", "", ""]
+            for h in report.hourly
+        ],
+    )
+    return export_response(exp, fmt)
 
 
 @router.get("/gifts", response_model=GiftReport, operation_id="giftReport")

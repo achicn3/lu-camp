@@ -3779,19 +3779,19 @@
         "type": "object"
       },
       "DineInTrendBucket": {
-        "description": "一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。",
+        "description": "一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。\n\n`period` 是**台北營業日**（與既有 `TrendRow.period` 同型別、同口徑）。\n**刻意不給 UTC datetime**：給了的話，每個使用端（畫面、匯出）都要自己記得轉時區，\n而漏轉的症狀是「數字全對、日期悄悄差一天」——最難發現的一種錯。",
         "properties": {
-          "bucket_start": {
-            "format": "date-time",
-            "title": "Bucket Start",
-            "type": "string"
-          },
           "dine_in_groups": {
             "title": "Dine In Groups",
             "type": "integer"
           },
           "dine_in_revenue": {
             "title": "Dine In Revenue",
+            "type": "string"
+          },
+          "period": {
+            "format": "date",
+            "title": "Period",
             "type": "string"
           },
           "takeout_groups": {
@@ -3804,7 +3804,7 @@
           }
         },
         "required": [
-          "bucket_start",
+          "period",
           "dine_in_groups",
           "takeout_groups",
           "dine_in_revenue",
@@ -17772,6 +17772,21 @@
             "schema": {
               "default": "day",
               "title": "Granularity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
               "type": "string"
             }
           }

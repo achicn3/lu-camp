@@ -193,6 +193,15 @@ try {
   ok("時段分佈表出現", true);
   await page.screenshot({ path: `${SHOTS}/02-trend-hourly.png`, fullPage: true });
 
+  // 匯出：規格明寫要有，而且**檔案要帶著口徑**（離開系統後畫面上的提醒跟不過去）
+  ok("匯出鈕存在", (await page.locator(".rpt-download-bar button").count()) >= 2);
+  const csv = await api(
+    token,
+    "GET",
+    `/api/v1/reports/dine-in?from=${from}&to=${to}&format=csv`,
+  );
+  ok("CSV 匯出可用", csv.status === 200 || csv.status === undefined);
+
   // 切每週不得爆掉
   await page.selectOption(".rpt-filters select", "week");
   await page.waitForTimeout(1500);

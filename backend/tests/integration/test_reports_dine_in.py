@@ -399,3 +399,114 @@ async def test_unknown_service_mode_is_skipped_not_miscounted(
     assert report.summary.dine_in.groups == 1
     assert report.summary.takeout.groups == 0
     assert report.summary.dine_in.fnb_revenue == Decimal(180)
+
+
+async def test_export_csv_carries_the_basis_notes(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """匯出的檔案**必須帶上口徑**：檔案離開系統後，畫面上那兩句提醒就跟不過去了。
+
+    只有數字的 CSV 被轉寄出去，收到的人一定會拿內用/外帶的客單價直接比較。
+    """
+    ctx = await _seed(db_session)
+    await _menu_sale(db_session, ctx, mode=ServiceMode.DINE_IN)
+    token = encode_access_token(user_id=ctx.user_id, role="MANAGER", store_id=ctx.store_id)
+    now = datetime.now(UTC)
+    resp = await client.get(
+        "/api/v1/reports/dine-in",
+        params={
+            "from": (now - timedelta(days=1)).isoformat(),
+            "to": (now + timedelta(days=1)).isoformat(),
+            "format": "csv",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.content.decode("utf-8-sig")
+    assert "有餐飲的單" in body
+    assert "不可直接比較" in body
+    assert "內用" in body and "外帶" in body
+    # 畫面上有三個區塊，匯出不得只帶兩個——時段分佈是店主指名的四個指標之一
+    assert "期間起" in body, "缺趨勢區塊"
+    assert "時段（台北）" in body, "缺時段分佈區塊"
+    assert "00:00" in body and "23:00" in body, "時段應涵蓋 24 小時"
+
+
+async def test_trend_period_is_the_taipei_business_day(db_session: AsyncSession) -> None:
+    """**趨勢的日期標籤必須是台北營業日**。
+
+    分桶起點在內部是 UTC；台北 22:00 的交易，其日桶起點是 UTC 前一天 16:00。
+    若把那個 UTC 時間直接當日期顯示，畫面與匯出都會**悄悄差一天**——
+    數字全對、總和也對，只有標籤錯位，店主拿去對「哪天生意好」會全盤錯。
+    """
+    ctx = await _seed(db_session)
+    sale = await _menu_sale(db_session, ctx, mode=ServiceMode.DINE_IN)
+    taipei_2200 = datetime(2026, 8, 19, 22, 0, tzinfo=STORE_TIME_ZONE)
+    sale.created_at = taipei_2200.astimezone(UTC)
+    await db_session.flush()
+
+    report = await ReportsService(db_session).dine_in_report(
+        ctx.store_id,
+        date_from=datetime(2026, 8, 19, tzinfo=STORE_TIME_ZONE),
+        date_to=datetime(2026, 8, 21, tzinfo=STORE_TIME_ZONE),
+        granularity="day",
+    )
+    # 空桶補 0，所以 8/20 也會在；重點是有交易的那天標成 **8/19** 而非 UTC 的 8/18
+    assert [b.period.isoformat() for b in report.trend] == ["2026-08-19", "2026-08-20"]
+    assert [b.dine_in_groups for b in report.trend] == [1, 0]
+
+
+async def test_trend_fills_empty_buckets_with_zero(db_session: AsyncSession) -> None:
+    """**沒生意的那天也要出現在趨勢上**（docs/39 §4「空桶補 0」）。
+
+    只輸出有交易的桶，看報表的人分不出「那天沒生意」與「那天不在查詢範圍內」，
+    折線圖也會直接跳過去。實測畫面上就少了 8/18 那一列。
+    """
+    ctx = await _seed(db_session)
+    sale = await _menu_sale(db_session, ctx, mode=ServiceMode.DINE_IN)
+    sale.created_at = datetime(2026, 8, 17, 12, 0, tzinfo=STORE_TIME_ZONE).astimezone(UTC)
+    await db_session.flush()
+
+    report = await ReportsService(db_session).dine_in_report(
+        ctx.store_id,
+        date_from=datetime(2026, 8, 17, tzinfo=STORE_TIME_ZONE),
+        date_to=datetime(2026, 8, 20, tzinfo=STORE_TIME_ZONE),
+        granularity="day",
+    )
+    assert [b.period.isoformat() for b in report.trend] == [
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+    ]
+    assert [b.dine_in_groups for b in report.trend] == [1, 0, 0]
+
+
+async def test_trend_rejects_too_many_buckets(db_session: AsyncSession) -> None:
+    """日粒度跨數年會產生上千桶——擋下來，不要把瀏覽器與匯出撐爆。"""
+    ctx = await _seed(db_session)
+    with pytest.raises(ValueError):
+        await ReportsService(db_session).dine_in_report(
+            ctx.store_id,
+            date_from=datetime(2020, 1, 1, tzinfo=STORE_TIME_ZONE),
+            date_to=datetime(2026, 1, 1, tzinfo=STORE_TIME_ZONE),
+            granularity="day",
+        )
+
+
+async def test_endpoint_maps_too_many_buckets_to_422(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """桶數超限是**使用者的查詢條件問題**，要回 422 而非 500。"""
+    ctx = await _seed(db_session)
+    token = encode_access_token(user_id=ctx.user_id, role="MANAGER", store_id=ctx.store_id)
+    resp = await client.get(
+        "/api/v1/reports/dine-in",
+        params={
+            "from": datetime(2020, 1, 1, tzinfo=UTC).isoformat(),
+            "to": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+            "granularity": "day",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "分桶" in resp.json()["detail"]

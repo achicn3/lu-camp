@@ -675,6 +675,48 @@ class ReportsService:
             redeemed += r
         return issued, redeemed
 
+    @staticmethod
+    def _dine_in_trend(
+        buckets: dict[datetime, dict[str, Decimal | int]],
+        *,
+        date_from: datetime,
+        date_to: datetime,
+        granularity: str,
+    ) -> list[DineInTrendBucket]:
+        """把有資料的桶鋪回**完整的期間軸**——空桶補 0（docs/39 §4）。
+
+        只輸出「有交易的桶」會讓沒生意的那天整列消失，看報表的人分不出
+        「那天沒生意」與「那天不在查詢範圍內」；折線圖也會直接跳過去。
+        """
+        empty: dict[str, Decimal | int] = {
+            "dine_in_groups": 0,
+            "takeout_groups": 0,
+            "dine_in_revenue": Decimal(0),
+            "takeout_revenue": Decimal(0),
+        }
+        out: list[DineInTrendBucket] = []
+        cursor, _ = store_bucket_bounds(granularity, date_from)
+        count = 0
+        while cursor < date_to:
+            _, nxt = store_bucket_bounds(granularity, cursor)
+            count += 1
+            if count > MAX_TREND_BUCKETS:
+                raise ValueError(
+                    f"期間/粒度產生過多分桶（>{MAX_TREND_BUCKETS}）；請縮小區間或放大粒度"
+                )
+            v = buckets.get(cursor, empty)
+            out.append(
+                DineInTrendBucket(
+                    period=store_date(cursor),
+                    dine_in_groups=int(v["dine_in_groups"]),
+                    takeout_groups=int(v["takeout_groups"]),
+                    dine_in_revenue=Decimal(v["dine_in_revenue"]),
+                    takeout_revenue=Decimal(v["takeout_revenue"]),
+                )
+            )
+            cursor = nxt
+        return out
+
     async def dine_in_report(
         self,
         store_id: int,
@@ -753,16 +795,9 @@ class ReportsService:
             summary=DineInSummary(
                 dine_in=_stats(ServiceMode.DINE_IN), takeout=_stats(ServiceMode.TAKEOUT)
             ),
-            trend=[
-                DineInTrendBucket(
-                    bucket_start=start,
-                    dine_in_groups=int(v["dine_in_groups"]),
-                    takeout_groups=int(v["takeout_groups"]),
-                    dine_in_revenue=Decimal(v["dine_in_revenue"]),
-                    takeout_revenue=Decimal(v["takeout_revenue"]),
-                )
-                for start, v in sorted(buckets.items())
-            ],
+            trend=self._dine_in_trend(
+                buckets, date_from=date_from, date_to=date_to, granularity=granularity
+            ),
             hourly=[
                 DineInHourBucket(
                     hour=h,

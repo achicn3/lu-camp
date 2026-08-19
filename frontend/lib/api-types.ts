@@ -3992,17 +3992,21 @@ export interface components {
         /**
          * DineInTrendBucket
          * @description 一個時間桶（依 granularity）的內用/外帶組數與餐飲營收。空桶補 0。
+         *
+         *     `period` 是**台北營業日**（與既有 `TrendRow.period` 同型別、同口徑）。
+         *     **刻意不給 UTC datetime**：給了的話，每個使用端（畫面、匯出）都要自己記得轉時區，
+         *     而漏轉的症狀是「數字全對、日期悄悄差一天」——最難發現的一種錯。
          */
         DineInTrendBucket: {
-            /**
-             * Bucket Start
-             * Format: date-time
-             */
-            bucket_start: string;
             /** Dine In Groups */
             dine_in_groups: number;
             /** Dine In Revenue */
             dine_in_revenue: string;
+            /**
+             * Period
+             * Format: date
+             */
+            period: string;
             /** Takeout Groups */
             takeout_groups: number;
             /** Takeout Revenue */
@@ -10440,6 +10444,7 @@ export interface operations {
                 from: components["schemas"]["AwareDateTime"];
                 to: components["schemas"]["AwareDateTime"];
                 granularity?: string;
+                format?: "json" | "csv" | "xlsx";
             };
             header?: never;
             path?: never;
