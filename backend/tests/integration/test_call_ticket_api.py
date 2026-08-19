@@ -174,3 +174,17 @@ async def test_complete_unknown_ticket_is_404(
     clerk, _, _ = await _seed(db_session)
     resp = await client.post("/api/v1/call-tickets/999999/complete", headers=_auth(clerk))
     assert resp.status_code == 404
+
+
+async def test_explicit_nulls_are_accepted(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """明確送 null 也要收（前端在欄位留白時就是送 null）。"""
+    clerk, _, _ = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/call-tickets",
+        json={"name": "只有稱呼", "link": None, "note": None},
+        headers=_auth(clerk),
+    )
+    assert resp.status_code == 201, resp.text
+    assert (resp.json()["link"], resp.json()["note"]) == (None, None)

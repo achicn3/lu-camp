@@ -214,3 +214,58 @@ async def test_list_respects_limit(db_session: AsyncSession, seed: Seed) -> None
     for i in range(5):
         await svc.create(seed.store_a, name=f"客{i}", actor_user_id=seed.user_a)
     assert len(await svc.list_tickets(seed.store_a, limit=3)) == 3
+
+
+async def test_number_clash_is_retried_with_a_fresh_number(
+    db_session: AsyncSession, seed: Seed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**撞號要能重試成功**——這是並發配號的核心守衛，先前零覆蓋。
+
+    模擬「讀到 max 之後、寫入之前被別人插隊」：第一次配號故意回一個已被用掉的號碼，
+    唯一索引擋下 → savepoint 退掉 → 重讀 max 再寫。最終必須拿到正確的下一號，
+    且**呼叫端先前完成的工作不得被一併回滾**。
+    """
+    from app.modules.callticket.repository import CallTicketRepository
+
+    svc = _svc(db_session)
+    first = await svc.create(seed.store_a, name="已存在", actor_user_id=seed.user_a)
+    assert first.ticket_no == 1
+
+    real = CallTicketRepository.next_ticket_no
+    calls = {"n": 0}
+
+    async def _clash_once(self: CallTicketRepository, store_id: int, ticket_date: object) -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return 1  # 撞上 first
+        return await real(self, store_id, ticket_date)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(CallTicketRepository, "next_ticket_no", _clash_once)
+    second = await svc.create(seed.store_a, name="撞號後重取", actor_user_id=seed.user_a)
+
+    assert calls["n"] == 2, "第一次應撞號並重試一次"
+    assert second.ticket_no == 2
+    # 先前那筆仍在（savepoint 只退掉失敗的那次新增，沒動整個交易）
+    rows = await svc.list_tickets(seed.store_a, include_done=True)
+    assert {r.id for r in rows} == {first.id, second.id}
+
+
+async def test_persistent_clash_eventually_raises(
+    db_session: AsyncSession, seed: Seed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一直撞號**不可無限迴圈**：重試上限用完就原樣拋出。"""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.callticket.repository import CallTicketRepository
+
+    svc = _svc(db_session)
+    await svc.create(seed.store_a, name="佔號", actor_user_id=seed.user_a)
+
+    async def _always_clash(
+        self: CallTicketRepository, store_id: int, ticket_date: object
+    ) -> int:
+        return 1
+
+    monkeypatch.setattr(CallTicketRepository, "next_ticket_no", _always_clash)
+    with pytest.raises(IntegrityError):
+        await svc.create(seed.store_a, name="永遠撞", actor_user_id=seed.user_a)

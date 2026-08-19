@@ -97,7 +97,15 @@ export default function CallTicketsPage() {
         客人要賣東西時先在此登記取號；處理完按「完成」。表單連結可留著日後回查。
       </p>
 
-      <div className="card call-ticket-form">
+      {/* 用真的 <form>：櫃檯打完稱呼直接按 Enter 就取號（原本 Enter 什麼都不會發生），
+          鍵盤與輔助技術的行為也才正確。 */}
+      <form
+        className="card call-ticket-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) create.mutate();
+        }}
+      >
         <label className="field">
           <span className="field-label">稱呼（必填）</span>
           <input
@@ -128,15 +136,10 @@ export default function CallTicketsPage() {
             placeholder="例：帳篷兩頂、桌椅一組"
           />
         </label>
-        <button
-          type="button"
-          className="btn-primary call-ticket-issue"
-          disabled={!canSubmit}
-          onClick={() => create.mutate()}
-        >
+        <button type="submit" className="btn-primary call-ticket-issue" disabled={!canSubmit}>
           {create.isPending ? "取號中…" : "取號"}
         </button>
-      </div>
+      </form>
 
       {error !== null && (
         <p role="alert" className="form-error">

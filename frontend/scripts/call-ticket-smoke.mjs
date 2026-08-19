@@ -71,6 +71,15 @@ try {
   ok("取號後把號碼大大地顯示出來", /^\d+$/.test(issued.trim()), `#${issued.trim()}`);
   await page.screenshot({ path: `${SHOTS}/01-issued.png` });
 
+  // ── 櫃檯打完稱呼按 Enter 就該取號（不必移到按鈕）──
+  const name2 = `煙霧客Enter-${RUN}`;
+  await page.fill('input[name="name"]', name2);
+  await page.press('input[name="name"]', "Enter");
+  await page.waitForSelector(`table.call-ticket-list tbody tr:has-text("${name2}")`, {
+    timeout: 15000,
+  });
+  ok("在稱呼欄按 Enter 即可取號", true);
+
   // ── 出現在候位清單 ──
   const row = page.locator("table.call-ticket-list tbody tr", { hasText: name });
   await row.waitFor({ timeout: 15000 });
