@@ -507,3 +507,10 @@ class RestoreStatus(StrEnum):
     RUNNING = "RUNNING"
     VERIFIED = "VERIFIED"
     FAILED = "FAILED"
+
+
+class CallTicketStatus(StrEnum):
+    """叫號單狀態（docs/38）。DONE 後從待處理清單消失，但資料留著可回頭查表單連結。"""
+
+    WAITING = "WAITING"
+    DONE = "DONE"

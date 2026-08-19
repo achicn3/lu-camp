@@ -1058,6 +1058,137 @@
         "title": "CalculationMethod",
         "type": "string"
       },
+      "CallTicketCreateRequest": {
+        "description": "登記一筆候位（名稱必填，連結與備註選填）。",
+        "properties": {
+          "link": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CallTicketCreateRequest",
+        "type": "object"
+      },
+      "CallTicketRead": {
+        "description": "叫號單輸出。`ticket_date` 為**台北營業日**（每日重置的依據）。",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CallTicketStatus"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "ticket_date": {
+            "format": "date",
+            "title": "Ticket Date",
+            "type": "string"
+          },
+          "ticket_no": {
+            "title": "Ticket No",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "ticket_date",
+          "ticket_no",
+          "name",
+          "link",
+          "note",
+          "status",
+          "created_at",
+          "completed_at"
+        ],
+        "title": "CallTicketRead",
+        "type": "object"
+      },
+      "CallTicketStatus": {
+        "description": "叫號單狀態（docs/38）。DONE 後從待處理清單消失，但資料留著可回頭查表單連結。",
+        "enum": [
+          "WAITING",
+          "DONE"
+        ],
+        "title": "CallTicketStatus",
+        "type": "string"
+      },
       "CampaignCreateRequest": {
         "description": "建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。\n\n寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。",
         "properties": {
@@ -11965,6 +12096,175 @@
         "summary": "Update Bulk Price",
         "tags": [
           "inventory"
+        ]
+      }
+    },
+    "/api/v1/call-tickets": {
+      "get": {
+        "description": "候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。",
+        "operationId": "listCallTickets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_done",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Done",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CallTicketRead"
+                  },
+                  "title": "Response Listcalltickets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Call Tickets",
+        "tags": [
+          "call-tickets"
+        ]
+      },
+      "post": {
+        "description": "登記一筆候位並配號（同店同日從 1 開始）。",
+        "operationId": "createCallTicket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallTicketCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallTicketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Call Ticket",
+        "tags": [
+          "call-tickets"
+        ]
+      }
+    },
+    "/api/v1/call-tickets/{ticket_id}/complete": {
+      "post": {
+        "description": "標記完成（**冪等**：已完成再按回原狀態，不報錯、不覆寫第一次的人與時間）。",
+        "operationId": "completeCallTicket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "title": "Ticket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallTicketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Complete Call Ticket",
+        "tags": [
+          "call-tickets"
         ]
       }
     },

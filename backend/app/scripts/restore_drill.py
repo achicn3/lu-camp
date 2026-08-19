@@ -148,6 +148,14 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("顧客螢幕-購物車階段數", "SELECT count(*) FROM cart_sessions"),
     ("顧客螢幕-配對紀錄數", "SELECT count(*) FROM terminal_kiosk_pairings"),
     ("顧客螢幕-裝置數", "SELECT count(*) FROM kiosk_devices"),
+    ("叫號-筆數", "SELECT count(*) FROM call_tickets"),
+    # 完成後仍留著的表單連結是裁示的重點（docs/38）：還原若把它弄丟，
+    # 客人先前填的那份表單就再也找不回來。連內容一起比對，不只比筆數。
+    (
+        "叫號-號碼與連結雜湊",
+        "SELECT md5(COALESCE(string_agg(ticket_date::text || ':' || ticket_no || ':'"
+        " || status || ':' || COALESCE(link,'-'), ',' ORDER BY id),'')) FROM call_tickets",
+    ),
     ("稽核-筆數", "SELECT count(*) FROM audit_log"),
 ]
 

@@ -277,6 +277,50 @@ export interface paths {
         patch: operations["updateBulkPrice"];
         trace?: never;
     };
+    "/api/v1/call-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Call Tickets
+         * @description 候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。
+         */
+        get: operations["listCallTickets"];
+        put?: never;
+        /**
+         * Create Call Ticket
+         * @description 登記一筆候位並配號（同店同日從 1 開始）。
+         */
+        post: operations["createCallTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/call-tickets/{ticket_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Call Ticket
+         * @description 標記完成（**冪等**：已完成再按回原狀態，不報錯、不覆寫第一次的人與時間）。
+         */
+        post: operations["completeCallTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/campaigns": {
         parameters: {
             query?: never;
@@ -2887,6 +2931,55 @@ export interface components {
          * @enum {string}
          */
         CalculationMethod: "FIXED_AMOUNT" | "PERCENTAGE";
+        /**
+         * CallTicketCreateRequest
+         * @description 登記一筆候位（名稱必填，連結與備註選填）。
+         */
+        CallTicketCreateRequest: {
+            /** Link */
+            link?: string | null;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * CallTicketRead
+         * @description 叫號單輸出。`ticket_date` 為**台北營業日**（每日重置的依據）。
+         */
+        CallTicketRead: {
+            /** Completed At */
+            completed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Link */
+            link: string | null;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            status: components["schemas"]["CallTicketStatus"];
+            /** Store Id */
+            store_id: number;
+            /**
+             * Ticket Date
+             * Format: date
+             */
+            ticket_date: string;
+            /** Ticket No */
+            ticket_no: number;
+        };
+        /**
+         * CallTicketStatus
+         * @description 叫號單狀態（docs/38）。DONE 後從待處理清單消失，但資料留著可回頭查表單連結。
+         * @enum {string}
+         */
+        CallTicketStatus: "WAITING" | "DONE";
         /**
          * CampaignCreateRequest
          * @description 建立活動（DRAFT）。寄售折扣預設關；品項預設自有序號+自有散裝開（docs/21 §8）。
@@ -7147,6 +7240,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCallTickets: {
+        parameters: {
+            query?: {
+                include_done?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCallTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CallTicketCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    completeCallTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"];
                 };
             };
             /** @description Validation Error */

@@ -475,3 +475,7 @@ class RestoreError(DomainError):
 
 class RestoreAlreadyRunning(DomainError):
     """已有一筆還原進行中（單一在跑守衛）：每次還原都 clone 整庫，併發塞爆磁碟，故拒絕回 409。"""
+
+
+class CallTicketNotFound(DomainError):
+    """叫號單不存在或不屬於本店（docs/38）。"""

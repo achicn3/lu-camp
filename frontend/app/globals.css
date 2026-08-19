@@ -3434,3 +3434,36 @@ body {
 .data-table.sales-list td {
   white-space: nowrap;
 }
+
+/* ── 叫號（docs/38）──────────────────────────────────────────── */
+.call-ticket-form {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+.call-ticket-form .btn-primary {
+  justify-self: start;
+}
+/* 剛取到的號碼是要**喊出口**的，不是給人瞇著眼找的 */
+.call-ticket-issued {
+  max-width: 560px;
+  text-align: center;
+}
+.call-ticket-big-number {
+  font-size: 72px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 4px 0;
+}
+.call-ticket-list {
+  width: 100%;
+}
+.call-ticket-list .call-ticket-no {
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* 稱呼與操作鈕不該被擠成兩行 */
+.call-ticket-list td:nth-child(2),
+.call-ticket-list td:last-child {
+  white-space: nowrap;
+}
