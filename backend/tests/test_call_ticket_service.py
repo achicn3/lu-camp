@@ -163,16 +163,41 @@ async def test_completed_ticket_is_still_retrievable(
     assert (found.link, found.note) == ("https://example.com/form/123", "帳篷兩頂")
 
 
-async def test_unfinished_tickets_from_previous_days_stay_in_the_list(
-    db_session: AsyncSession, seed: Seed
-) -> None:
-    """跨日未完成的不得憑空消失——那是客人真的還在等的單。"""
+async def test_waiting_list_shows_today_only(db_session: AsyncSession, seed: Seed) -> None:
+    """**候位清單只看今天**（店主裁示 2026-08-19）。
+
+    「昨天未完成從今天的角度根本不重要」——跨日的不再佔用今天的清單。
+    """
     svc = _svc(db_session)
-    old = await svc.create(
+    stale = await svc.create(
         seed.store_a, name="昨天沒處理完", actor_user_id=seed.user_a, now=YESTERDAY
     )
-    rows = await svc.list_tickets(seed.store_a, include_done=False)
-    assert old.id in [r.id for r in rows]
+    fresh = await svc.create(seed.store_a, name="今天", actor_user_id=seed.user_a, now=TODAY)
+
+    rows = await svc.list_tickets(seed.store_a, include_done=False, now=TODAY)
+    assert [r.id for r in rows] == [fresh.id]
+    assert stale.id not in [r.id for r in rows]
+
+
+async def test_stale_waiting_is_still_findable_in_history(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """**資料不刪**：跨日未完成的離開候位清單後，歷史檢視是唯一找得回它的地方。
+
+    否則客人先前填的那份表單連結就永遠消失了。
+    """
+    svc = _svc(db_session)
+    stale = await svc.create(
+        seed.store_a,
+        name="昨天沒處理完",
+        link="https://example.com/form/stale",
+        actor_user_id=seed.user_a,
+        now=YESTERDAY,
+    )
+    rows = await svc.list_tickets(seed.store_a, include_done=True, now=TODAY)
+    found = next(r for r in rows if r.id == stale.id)
+    assert found.status is CallTicketStatus.WAITING
+    assert found.link == "https://example.com/form/stale"
 
 
 async def test_foreign_key_error_is_not_swallowed_as_a_number_clash(
@@ -233,8 +258,10 @@ async def test_waiting_is_oldest_first_but_done_is_newest_first(
         seed.store_a, name="剛取號", actor_user_id=seed.user_a, now=TODAY
     )
 
-    rows = await svc.list_tickets(seed.store_a, include_done=True)
-    assert [r.id for r in rows] == [old_wait.id, new_wait.id, new_done.id, old_done.id]
+    rows = await svc.list_tickets(seed.store_a, include_done=True, now=TODAY)
+    # 候位只剩今天那筆；昨天未完成的落到歷史區（與已完成一起，最近的先）
+    assert rows[0].id == new_wait.id
+    assert [r.id for r in rows[1:]] == [new_done.id, old_wait.id, old_done.id]
 
 
 async def test_done_is_not_starved_by_the_limit(

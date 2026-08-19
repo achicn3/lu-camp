@@ -169,45 +169,46 @@ try {
     `今天配到 #${todayNo}，當日既有最大 #${sameDayMax}`,
   );
 
-  // **強制製造真正的撞號**：把昨天那筆的號碼改成與今天這筆相同。
-  // 不這樣做，「同號不同日分得開」那條斷言會因為根本沒撞到而空過（假綠）。
+  // 讓昨天那筆與今天這筆同號：候位清單不該因此混入，歷史檢視則須靠日期前綴分辨。
   sql(`UPDATE call_tickets SET ticket_no = ${todayNo} WHERE id = ${yd.json.id}`);
 
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForSelector("table.call-ticket-list tbody tr");
 
-  // 2) 昨天沒處理完的仍在清單（客人真的還在等），但**必須標日期**
-  const ydRow = page.locator("table.call-ticket-list tbody tr", { hasText: ydName });
-  await ydRow.waitFor({ timeout: 15000 });
-  const ydLabel = ((await ydRow.locator("td").first().textContent()) ?? "").trim();
+  // 2) 昨天的單（不論完成與否）**都不得出現在今天的候位清單**
+  //    店主裁示 2026-08-19：「昨天未完成從今天的角度根本不重要」。
   ok(
-    "昨天未完成的仍在清單，且號碼標了日期（否則與今天的號碼混淆）",
-    /^\d+\/\d+ #\d+$/.test(ydLabel),
-    ydLabel,
+    "昨天未完成的不出現在今天的候位清單",
+    (await page.locator("table.call-ticket-list tbody tr", { hasText: ydName }).count()) === 0,
   );
-
-  // 3) 昨天**已完成**的不得混進今天的候位清單
   ok(
-    "昨天已完成的不出現在候位清單",
+    "昨天已完成的也不出現在候位清單",
     (await page.locator("table.call-ticket-list tbody tr", { hasText: ydDoneName }).count()) === 0,
   );
 
-  // 4) 同號不同日必須在畫面上分得開——這是「喊 3 號兩個人站起來」的防線
+  // 3) 候位清單裡不該有任何帶日期前綴的號碼（＝沒有跨日殘留）
   const labels = await page.locator("table.call-ticket-list tbody td:first-child").allTextContents();
   const trimmed = labels.map((t) => t.trim());
-  // 先確認這一輪**真的有撞號**，否則下面那條斷言等於沒驗
-  const collided = trimmed.filter((t) => t.endsWith(`#${todayNo}`));
   ok(
-    "本輪真的製造出同號不同日（否則下一條斷言是空的）",
-    collided.length === 2,
-    collided.join(" | "),
-  );
-  ok(
-    "同號不同日在畫面上分得開（標籤不重複）",
-    new Set(trimmed).size === trimmed.length,
+    "候位清單全是今天的號碼（無日期前綴）",
+    trimmed.every((t) => /^#\d+$/.test(t)),
     trimmed.join(" | "),
   );
   await page.screenshot({ path: `${SHOTS}/05-cross-day.png` });
+
+  // 4) **資料不刪**：昨天那筆仍能從歷史檢視找回（含表單連結）
+  await page.getByLabel(/顯示已完成/).check();
+  const staleRow = page.locator("table.call-ticket-list tbody tr", { hasText: ydName });
+  await staleRow.waitFor({ timeout: 15000 });
+  ok("跨日未完成的仍可從「顯示已完成」找回（資料沒被刪）", true);
+  const staleLabel = ((await staleRow.locator("td").first().textContent()) ?? "").trim();
+  ok(
+    "歷史檢視裡的跨日單有日期前綴，與今天的號碼分得開",
+    /^\d+\/\d+ #\d+$/.test(staleLabel),
+    staleLabel,
+  );
+  await page.screenshot({ path: `${SHOTS}/06-cross-day-history.png` });
+  await page.getByLabel(/顯示已完成/).uncheck();
 
   // ── 危險連結在邊界被擋（不是只有前端不渲染）──
   const bad = await api(token, "POST", "/api/v1/call-tickets", {

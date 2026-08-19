@@ -97,8 +97,14 @@ class CallTicketService:
         include_done: bool = False,
         limit: int = 100,
         offset: int = 0,
+        now: datetime | None = None,
     ) -> list[CallTicket]:
-        """預設只回待處理；`include_done=True` 供事後回頭找那個表單連結。"""
+        """預設只回**今天**的待處理；`include_done=True` 供事後回頭找那個表單連結。"""
+        moment = now if now is not None else utc_now()
         return await self._repo.list_tickets(
-            store_id, include_done=include_done, limit=limit, offset=offset
+            store_id,
+            include_done=include_done,
+            today=store_date(moment),
+            limit=limit,
+            offset=offset,
         )
