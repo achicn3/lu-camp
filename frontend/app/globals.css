@@ -3455,8 +3455,19 @@ body {
   line-height: 1.1;
   margin: 4px 0;
 }
+/* `.card` 預設 max-width 520px，清單塞不下會擠成直排（沿用 sales-list 的做法）。 */
+.call-ticket-list-card {
+  max-width: none;
+}
+.call-ticket-list-wrap {
+  overflow-x: auto;
+}
 .call-ticket-list {
   width: 100%;
+}
+.data-table.call-ticket-list th,
+.data-table.call-ticket-list td {
+  white-space: nowrap;
 }
 .call-ticket-list .call-ticket-no {
   font-weight: 700;

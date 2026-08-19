@@ -100,7 +100,20 @@ try {
   ok("按完成後從候位清單消失", true);
   await page.screenshot({ path: `${SHOTS}/03-after-complete.png` });
 
-  // ── 資料還在（裁示「從清單消失，但資料留著」的落點）──
+  // ── **從畫面上**找得回已完成的（裁示「資料留著」若只有 API 撈得到，等於找不回來）──
+  await page.getByLabel(/顯示已完成/).check();
+  const doneRow = page.locator("table.call-ticket-list tbody tr", { hasText: name });
+  await doneRow.waitFor({ timeout: 15000 });
+  const doneText = (await doneRow.textContent()) ?? "";
+  ok("勾「顯示已完成」後，畫面上找得回那筆與它的表單連結", doneText.includes("已完成"));
+  ok(
+    "已完成的不再顯示「完成」按鈕",
+    (await doneRow.getByRole("button", { name: /完成叫號/ }).count()) === 0,
+  );
+  await page.screenshot({ path: `${SHOTS}/04-show-done.png` });
+  await page.getByLabel(/顯示已完成/).uncheck();
+
+  // ── 資料還在（後端層再確認一次）──
   const all = await api(token, "GET", "/api/v1/call-tickets?include_done=true&limit=200");
   const found = (all.json ?? []).find((t) => t.name === name);
   ok(

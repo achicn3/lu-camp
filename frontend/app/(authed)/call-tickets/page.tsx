@@ -30,16 +30,19 @@ export default function CallTicketsPage() {
   const [link, setLink] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // **裁示「資料留著」的落點**：沒有這個開關，完成的單就只剩 API 撈得到——
+  // 等於資料留了也找不回來（後端做好、UI 走不到，是本專案已經犯過的錯）。
+  const [showDone, setShowDone] = useState(false);
   // 剛取到的號碼——這個數字是要喊出口的，取號後大大地顯示出來。
   const [justIssued, setJustIssued] = useState<CallTicket | null>(null);
 
   const tickets = useQuery({
-    queryKey: ["call-tickets"],
+    queryKey: ["call-tickets", showDone ? "all" : "waiting"],
     queryFn: async () => {
       // **明確帶上限**：預設 100 而清單是舊的排前面，若累積超過 100 筆未完成，
       // 剛取號的客人反而不會出現在清單上。取後端上限 200，並在達上限時提示。
       const { data, error: err } = await api.GET("/api/v1/call-tickets", {
-        params: { query: { limit: CALL_TICKET_PAGE_SIZE } },
+        params: { query: { limit: CALL_TICKET_PAGE_SIZE, include_done: showDone } },
       });
       if (!data) throw new Error(extractDetail(err) ?? "讀取候位清單失敗");
       return data;
@@ -155,13 +158,23 @@ export default function CallTicketsPage() {
         </div>
       )}
 
-      <h2>候位中</h2>
+      <h2>{showDone ? "候位與已完成" : "候位中"}</h2>
+      <label className="field field-toggle call-ticket-show-done">
+        <input
+          type="checkbox"
+          checked={showDone}
+          onChange={(e) => setShowDone(e.target.checked)}
+        />
+        <span className="field-label">顯示已完成（可回頭找先前的表單連結）</span>
+      </label>
       {tickets.isError && (
         <p role="alert" className="form-error">
           {(tickets.error as Error).message}
         </p>
       )}
-      {tickets.isSuccess && rows.length === 0 && <p className="hint">目前沒有人在候位。</p>}
+      {tickets.isSuccess && rows.length === 0 && (
+        <p className="hint">{showDone ? "尚無任何叫號紀錄。" : "目前沒有人在候位。"}</p>
+      )}
       {rows.length >= CALL_TICKET_PAGE_SIZE && (
         <p role="alert" className="form-error">
           候位中已達顯示上限 {CALL_TICKET_PAGE_SIZE} 筆，可能還有更多沒列出。
@@ -169,7 +182,8 @@ export default function CallTicketsPage() {
         </p>
       )}
       {rows.length > 0 && (
-        <div className="card">
+        <div className="card call-ticket-list-card">
+          <div className="call-ticket-list-wrap">
           <table className="data-table call-ticket-list">
             <thead>
               <tr>
@@ -178,6 +192,7 @@ export default function CallTicketsPage() {
                 <th>表單連結</th>
                 <th>備註</th>
                 <th>登記時間</th>
+                {showDone && <th>狀態</th>}
                 <th aria-label="操作" />
               </tr>
             </thead>
@@ -199,21 +214,29 @@ export default function CallTicketsPage() {
                   </td>
                   <td>{ticket.note ?? "—"}</td>
                   <td>{formatTaipeiDateTime(ticket.created_at)}</td>
+                  {showDone && (
+                    <td>{ticket.status === "DONE" ? "已完成" : "候位中"}</td>
+                  )}
                   <td>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      aria-label={`完成叫號 ${ticket.ticket_no}`}
-                      disabled={complete.isPending}
-                      onClick={() => complete.mutate(ticket.id)}
-                    >
-                      完成
-                    </button>
+                    {/* 已完成的不再顯示「完成」——按了雖是冪等的，但畫面不該給出
+                        一個什麼都不會改變的按鈕。 */}
+                    {ticket.status === "WAITING" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        aria-label={`完成叫號 ${ticket.ticket_no}`}
+                        disabled={complete.isPending}
+                        onClick={() => complete.mutate(ticket.id)}
+                      >
+                        完成
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </section>
