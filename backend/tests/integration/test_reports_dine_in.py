@@ -25,12 +25,20 @@ from app.modules.inventory.models import CatalogProduct
 from app.modules.menu.models import MenuItem
 from app.modules.reports.service import ReportsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
-from app.modules.sales.models import Sale
+from app.modules.sales.models import GiftReason, Sale
 from app.modules.sales.service import SalesService
 from app.modules.settings.models import StoreSettings
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import SaleLineType, SaleStatus, ServiceMode, TenderType, UserRole
+from app.shared.enums import (
+    SaleLineKind,
+    SaleLineType,
+    SaleStatus,
+    ServiceMode,
+    TenderType,
+    UserRole,
+)
+from app.shared.exceptions import SaleLineInvalid
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,11 +58,14 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
 
 
 class Ctx:
-    def __init__(self, store_id: int, user_id: int, menu_id: int, product_id: int) -> None:
+    def __init__(
+        self, store_id: int, user_id: int, menu_id: int, product_id: int, gift_reason_id: int
+    ) -> None:
         self.store_id = store_id
         self.user_id = user_id
         self.menu_id = menu_id
         self.product_id = product_id
+        self.gift_reason_id = gift_reason_id
 
 
 async def _seed(session: AsyncSession) -> Ctx:
@@ -77,9 +88,10 @@ async def _seed(session: AsyncSession) -> Ctx:
         unit_cost=Decimal("200"),
         quantity_on_hand=100,
     )
-    session.add_all([menu, product])
+    gift_reason = GiftReason(store_id=store.id, code="PROMO", name="活動贈品")
+    session.add_all([menu, product, gift_reason])
     await session.flush()
-    return Ctx(store.id, user.id, menu.id, product.id)
+    return Ctx(store.id, user.id, menu.id, product.id, gift_reason.id)
 
 
 def _window() -> tuple[datetime, datetime]:
@@ -298,13 +310,15 @@ async def test_endpoint_rejects_bad_range_and_granularity(
     auth = {"Authorization": f"Bearer {token}"}
     now = datetime.now(UTC)
     same = {"from": now.isoformat(), "to": now.isoformat()}
-    assert (await client.get("/api/v1/reports/dine-in", params=same, headers=auth)).status_code == 422
+    resp_same = await client.get("/api/v1/reports/dine-in", params=same, headers=auth)
+    assert resp_same.status_code == 422
     bad = {
         "from": (now - timedelta(days=1)).isoformat(),
         "to": now.isoformat(),
         "granularity": "fortnight",
     }
-    assert (await client.get("/api/v1/reports/dine-in", params=bad, headers=auth)).status_code == 422
+    resp_bad = await client.get("/api/v1/reports/dine-in", params=bad, headers=auth)
+    assert resp_bad.status_code == 422
 
 
 async def test_endpoint_returns_the_report(
@@ -329,3 +343,59 @@ async def test_endpoint_returns_the_report(
     assert body["summary"]["dine_in"]["groups"] == 1
     assert body["summary"]["takeout"]["groups"] == 2
     assert len(body["hourly"]) == 24
+
+
+# ── 自審補的邊界 ────────────────────────────────────────────
+
+
+async def test_menu_item_cannot_be_a_gift(db_session: AsyncSession) -> None:
+    """**餐飲不可作為贈品**（既有規則），所以不會出現「營收 0 的餐飲組」。
+
+    這條在此重述是為了釘住報表的一個前提：本報表以「餐飲營收 > 0」判斷是不是一組，
+    只有在餐飲行永遠有金額時才成立。哪天放寬贈品規則，這條會先紅，
+    提醒去改報表的判定（否則送一杯的那組客人會整組不見）。
+    """
+    ctx = await _seed(db_session)
+    with pytest.raises(SaleLineInvalid):
+        await SalesService(db_session).create_sale(
+            ctx.store_id,
+            ctx.user_id,
+            lines=[
+                SaleLineInput(
+                    line_type=SaleLineType.MENU,
+                    menu_item_id=ctx.menu_id,
+                    qty=1,
+                    line_kind=SaleLineKind.GIFT,
+                    gift_reason_id=ctx.gift_reason_id,
+                )
+            ],
+            tenders=None,
+            service_mode=ServiceMode.DINE_IN,
+            table_no="A1",
+        )
+
+
+async def test_unknown_service_mode_is_skipped_not_miscounted(
+    db_session: AsyncSession
+) -> None:
+    """未知服務型態**寧可不算，也不要算錯**（防禦分支先前零覆蓋）。"""
+    ctx = await _seed(db_session)
+    await _menu_sale(db_session, ctx, mode=ServiceMode.DINE_IN)
+    svc = ReportsService(db_session)
+    original = svc._sales.dine_in_rows
+
+    async def _with_bogus_mode(
+        store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[datetime, str, Decimal, Decimal]]:
+        rows = await original(store_id, date_from, date_to)
+        return [*rows, (datetime.now(UTC), "SOMETHING_NEW", Decimal(999), Decimal(999))]
+
+    svc._sales.dine_in_rows = _with_bogus_mode  # type: ignore[method-assign]
+    date_from, date_to = _window()
+    report = await svc.dine_in_report(
+        ctx.store_id, date_from=date_from, date_to=date_to, granularity="day"
+    )
+    # 未知型態既不算內用也不算外帶，更不得混進營收
+    assert report.summary.dine_in.groups == 1
+    assert report.summary.takeout.groups == 0
+    assert report.summary.dine_in.fnb_revenue == Decimal(180)
