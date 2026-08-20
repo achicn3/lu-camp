@@ -366,6 +366,36 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
         )
     )
 
+    # 時間序回填守衛（不是領域不變量，是**防止同一個錯誤再犯第五次**的護欄）。
+    #
+    # service 一律以 now() 落地時間欄，而報表依時間篩選——漏回填任何一個欄位，
+    # 資料就會整批擠在今天，而各項「數量達標」的綠燈完全看不出來。
+    # 已經踩過四次：班別 opened_at/closed_at、收購 created_at、
+    # 寄售結算 created_at、序號品/散裝批 intake_date（滯銷報表看的就是它）。
+    for table, column in (
+        ("sales", "created_at"),
+        ("serialized_items", "intake_date"),
+        ("cash_sessions", "opened_at"),
+        ("consignment_settlements", "created_at"),
+        ("bulk_lots", "intake_date"),
+    ):
+        total = await _count(session, table, f"store_id = {store_id}")
+        today_n = await _count(
+            session,
+            table,
+            f"store_id = {store_id} AND ({column} AT TIME ZONE 'Asia/Taipei')::date"
+            " = (now() AT TIME ZONE 'Asia/Taipei')::date",
+        )
+        # 全部擠在今天 ＝ 沒回填。單日佔比超過三成即視為異常（12 個月的資料不可能如此）。
+        ok = total == 0 or today_n / total <= 0.30
+        results.append(
+            InvariantResult(
+                f"時間序已回填：{table}.{column}",
+                ok,
+                f"檢查 {total} 筆，其中 {today_n} 筆落在今天",
+            )
+        )
+
     # 10. 購物金餘額 ＝ 異動流水加總
     # 餘額在獨立的 `store_credit_accounts.balance`（不在 contacts）；
     # 流水金額欄是 `signed_amount`（帶正負號），不是 `amount`。
@@ -498,6 +528,31 @@ def _pick_price(rng: random.Random) -> int:
     return rng.randrange(15000, 30001, 500)
 
 
+async def _backdate_acquisition(
+    session: AsyncSession, acquisition_id: int, moment: datetime
+) -> None:
+    """把一張收購單及其產出的庫存全部回填到 `moment`。
+
+    **不只是收購單本身**：序號品與散裝批各有自己的 `created_at` 與 `intake_date`，
+    而**滯銷庫存報表看的是 `intake_date`**。漏掉它的話，整年的庫存都顯示成今天入庫，
+    §7.4 要求的「150+ 件滯銷 180 天以上」會是 **0 筆**，滯銷報表整頁空白。
+    （實測：全量跑完 11,849 件序號品的 intake_date 全是同一天。）
+    """
+    acq = await session.get(Acquisition, acquisition_id)
+    if acq is not None:
+        acq.created_at = moment
+    for item in await session.scalars(
+        select(SerializedItem).where(SerializedItem.acquisition_id == acquisition_id)
+    ):
+        item.created_at = moment
+        item.intake_date = moment
+    for lot in await session.scalars(
+        select(BulkLot).where(BulkLot.acquisition_id == acquisition_id)
+    ):
+        lot.created_at = moment
+        lot.intake_date = moment
+
+
 async def seed_acquisitions(
     session: AsyncSession,
     store_id: int,
@@ -602,10 +657,7 @@ async def seed_acquisitions(
                 idempotency_key=f"seed-{batch}-{kind.value}-{i}",
             )
             if acquired_at is not None:
-                # 收購也要回填時間，否則整年的收購全部落在今天
-                acq = await session.get(Acquisition, result.acquisition_id)
-                if acq is not None:
-                    acq.created_at = acquired_at
+                await _backdate_acquisition(session, result.acquisition_id, acquired_at)
             orders += 1
             items_done += size
             i += 1
@@ -640,9 +692,7 @@ async def seed_acquisitions(
                 idempotency_key=f"seed-{batch}-lot-{i}",
             )
             if acquired_at is not None:
-                acq = await session.get(Acquisition, result.acquisition_id)
-                if acq is not None:
-                    acq.created_at = acquired_at
+                await _backdate_acquisition(session, result.acquisition_id, acquired_at)
             ok += 1
         return ok
 
