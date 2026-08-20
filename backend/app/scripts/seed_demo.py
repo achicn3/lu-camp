@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import math
 import os
 import random
+import struct
 import sys
+import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -70,6 +74,8 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
+from app.modules.customerdisplay.models import KioskDevice
+from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
@@ -90,6 +96,7 @@ from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
+from app.scripts.seed_dev_user import DevUserSeed, upsert_dev_user
 from app.shared.enums import (
     AcquisitionType,
     BulkAcquisitionBasis,
@@ -102,6 +109,7 @@ from app.shared.enums import (
     SerializedItemStatus,
     ServiceMode,
     TenderType,
+    UserRole,
 )
 from app.shared.exceptions import DomainError, DuplicateContact, DuplicateMenuItem
 
@@ -666,12 +674,37 @@ async def seed_acquisitions(
                     if split_cash <= 0 or split_cash >= total:
                         payout = PayoutMethod.CASH
                         split_cash = None
+            # **手持切結**（docs/23 K4）：付現/購物金的買斷可綁客人簽署的切結書。
+            # 寄售不撥款、不支援綁定，service 會直接拒絕（K4 第二輪 high）。
+            #
+            # 切結內容必須與收購**精確相符**（品項名＋金額＋總額），否則
+            # `_affidavit_content_matches` 會擋下——客人簽的必須就是這張收購。
+            signature_task_id: int | None = None
+            if kiosk is not None and kind is AcquisitionType.BUYOUT and rng.random() < affidavit_pct:
+                total = sum((i.acquisition_cost or Decimal(0) for i in items), Decimal(0))
+                signature_task_id = await sign_affidavit(
+                    session,
+                    store_id,
+                    manager_id,
+                    kiosk,
+                    contact_id=seller,
+                    content={
+                        "items": [
+                            {"name": i.name, "amount": str(i.acquisition_cost or 0)}
+                            for i in items
+                        ],
+                        "total": str(total),
+                    },
+                    chosen_payout=payout,
+                    rng=rng,
+                )
             data = AcquisitionCreate(
                 type=kind,
                 contact_id=seller,
                 items=items,
                 payout_method=payout,
                 payout_split_cash=split_cash,
+                signature_task_id=signature_task_id,
             )
             # **冪等鍵必須帶批次識別**：只用序號的話，重跑（或換 --seed）會用同一把鍵
             # 配上不同內容 → IdempotencyKeyConflict。鍵一旦重複，冪等機制會把它當成
@@ -729,6 +762,116 @@ async def seed_acquisitions(
     made["bulk_lots"] = await _lots(bulk_lots)
     await session.commit()
     return made
+
+
+def make_signature_png(rng: random.Random, *, width: int = 240, height: int = 80) -> str:
+    """產生一張**通過後端完整驗證**的簽名 PNG（base64）。
+
+    後端逐 chunk 驗 CRC、解 zlib、逐掃描線驗 filter、還要求**可見墨跡 ≥ 100 像素**
+    （空白影像不得成為法律證據）。故這裡真的畫一條起伏筆劃，不是塞白圖。
+    RGBA（color_type 6）、8-bit、非交錯——上游只收這個子集。
+    """
+    phase = rng.uniform(0, 12)
+    amp = height / 4
+    rows: list[bytes] = []
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            centre = height / 2 + math.sin((x + phase) / 12.0) * amp
+            row += b"\x00\x00\x00\xff" if abs(y - centre) < 2.5 else b"\xff\xff\xff\x00"
+        rows.append(bytes(row))
+    raw = b"".join(b"\x00" + r for r in rows)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw, 6))
+        + chunk(b"IEND", b"")
+    )
+    return base64.b64encode(png).decode()
+
+
+@dataclass(frozen=True)
+class KioskSetup:
+    """手持簽署所需的裝置組合（docs/23）。"""
+
+    device_id: int
+    terminal_id: int
+    session_token: str
+
+
+async def seed_kiosk(session: AsyncSession, store_id: int, manager_id: int) -> KioskSetup:
+    """建立顧客螢幕（kiosk）與 POS 櫃檯並完成配對——簽署任務的前置。
+
+    **每一步都是必要的**：`create_task` 會解析 terminal → 有效配對 → 裝置，
+    且要求裝置**在線**（`last_seen_at` 在 45 秒內），否則拒絕建立任務。
+    """
+    kiosk_password = os.environ.get("SEED_KIOSK_PASSWORD", "").strip()
+    if not kiosk_password:
+        raise SeedFailed(
+            "SEED_KIOSK_PASSWORD 未設定；簽署任務需要一個 KIOSK 帳號（密碼不入 repo）"
+        )
+    await upsert_dev_user(
+        session,
+        DevUserSeed(
+            username="dev-kiosk",
+            password=kiosk_password,
+            role=UserRole.KIOSK,
+            store_id=store_id,
+        ),
+    )
+    await session.commit()
+
+    display = CustomerDisplayService(session)
+    result = await display.create_device_session(
+        username="dev-kiosk",
+        password=kiosk_password,
+        installation_id="seed-kiosk-01",
+        label="模擬顧客螢幕",
+    )
+    device_id = result.device.id
+    terminal = await display.register_terminal(
+        store_id,
+        installation_id="seed-pos-01",
+        name="模擬收銀台",
+        actor_user_id=manager_id,
+    )
+    await session.commit()
+
+    if result.paired_terminal is None:
+        code = result.pairing_code
+        if code is None:
+            principal = await display.authenticate_device_session(result.raw_session_token)
+            _device, code, _expires = await display.issue_pairing_code(principal)
+            await session.commit()
+        await display.pair_terminal(
+            store_id, terminal.id, pairing_code=code, actor_user_id=manager_id
+        )
+        await session.commit()
+    return KioskSetup(
+        device_id=device_id, terminal_id=terminal.id, session_token=result.raw_session_token
+    )
+
+
+async def touch_kiosk(session: AsyncSession, store_id: int, device_id: int) -> None:
+    """把顧客螢幕的 last_seen_at 推到現在。
+
+    裝置離線 45 秒就不能建立簽署任務，而整批 seed 要跑十幾分鐘——不在每次建立任務前
+    更新，跑到第二分鐘就會整批 `顧客螢幕目前離線`。真實情境下手持端本來就持續 heartbeat。
+    """
+    device = await session.get(KioskDevice, device_id)
+    if device is None or device.store_id != store_id:
+        raise SeedFailed(f"顧客螢幕 {device_id} 不存在或不屬於本店")
+    device.last_seen_at = datetime.now(UTC)
 
 
 # 供應商（docs/19）。一般商品的進貨來源。
