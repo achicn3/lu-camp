@@ -94,6 +94,8 @@ from app.modules.sales.models import Sale, SaleLine
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
+from app.modules.signing.schemas import SignatureTaskCreate
+from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.scripts.seed_dev_user import DevUserSeed, upsert_dev_user
@@ -108,6 +110,7 @@ from app.shared.enums import (
     SaleStatus,
     SerializedItemStatus,
     ServiceMode,
+    SignatureTaskKind,
     TenderType,
     UserRole,
 )
@@ -593,9 +596,11 @@ async def seed_acquisitions(
     manager_id: int,
     seller_ids: list[int],
     member_seller_ids: list[int],
+    kiosk: KioskSetup | None,
     rng: random.Random,
     *,
     rng_seed: int,
+    affidavit_pct: float,
     buyout_items: int,
     consignment_items: int,
     bulk_lots: int = 0,
@@ -680,7 +685,14 @@ async def seed_acquisitions(
             # 切結內容必須與收購**精確相符**（品項名＋金額＋總額），否則
             # `_affidavit_content_matches` 會擋下——客人簽的必須就是這張收購。
             signature_task_id: int | None = None
-            if kiosk is not None and kind is AcquisitionType.BUYOUT and rng.random() < affidavit_pct:
+            # SPLIT 不能綁切結：手持端只讓客人在**現金/購物金二選一**（docs/23 D7），
+            # 沒有「一半一半」這個選項，故 sign_task 會直接拒絕 SPLIT。
+            if (
+                kiosk is not None
+                and kind is AcquisitionType.BUYOUT
+                and payout is not PayoutMethod.SPLIT
+                and rng.random() < affidavit_pct
+            ):
                 total = sum((i.acquisition_cost or Decimal(0) for i in items), Decimal(0))
                 signature_task_id = await sign_affidavit(
                     session,
@@ -872,6 +884,47 @@ async def touch_kiosk(session: AsyncSession, store_id: int, device_id: int) -> N
     if device is None or device.store_id != store_id:
         raise SeedFailed(f"顧客螢幕 {device_id} 不存在或不屬於本店")
     device.last_seen_at = datetime.now(UTC)
+
+
+async def sign_affidavit(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    kiosk: KioskSetup,
+    *,
+    contact_id: int,
+    content: dict[str, object],
+    chosen_payout: PayoutMethod,
+    rng: random.Random,
+) -> int:
+    """走完整條手持簽署流程並回傳已簽任務 id（docs/23）。
+
+    四個步驟**一個都不能少**，每一步都有後端守衛：
+    `heartbeat`（離線 45 秒即拒建任務）→ `create_task`（PENDING）→
+    `acknowledge_task`（顧客螢幕確認已渲染，PENDING→SIGNING；SSE 到達不算）→
+    `sign_task`（驗 PNG 結構與**可見墨跡**，SIGNING→SIGNED）。
+    """
+    await touch_kiosk(session, store_id, kiosk.device_id)
+    signing = SigningService(session)
+    task = await signing.create_task(
+        store_id,
+        SignatureTaskCreate(
+            kind=SignatureTaskKind.ACQUISITION_AFFIDAVIT,
+            contact_id=contact_id,
+            content=content,
+            terminal_id=kiosk.terminal_id,
+        ),
+        created_by=manager_id,
+    )
+    await signing.acknowledge_task(store_id, kiosk.device_id, task.id)
+    await signing.sign_task(
+        store_id,
+        task.id,
+        device_id=kiosk.device_id,
+        signature_image_base64=make_signature_png(rng),
+        chosen_payout=chosen_payout,
+    )
+    return task.id
 
 
 # 供應商（docs/19）。一般商品的進貨來源。
@@ -1283,6 +1336,7 @@ async def seed_daily_sales(
     member_ids: list[int],
     seller_ids: list[int],
     member_seller_ids: list[int],
+    kiosk: KioskSetup | None,
     menu_items: list[MenuItem],
     suppliers: list[Supplier],
     catalog: list[CatalogProduct],
@@ -1300,6 +1354,7 @@ async def seed_daily_sales(
     void_rate: float,
     variance_rate: float,
     slow_mover_pct: float,
+    affidavit_pct: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -1397,8 +1452,10 @@ async def seed_daily_sales(
                 manager_id,
                 seller_ids,
                 member_seller_ids,
+                kiosk,
                 rng,
                 rng_seed=rng_seed,
+                affidavit_pct=affidavit_pct,
                 buyout_items=max(1, int(intake * 0.75)),
                 consignment_items=max(0, intake - int(intake * 0.75)),
                 # 散裝批：目標全年 150–250 堆（§7.4），約每 1.5 個營業日收進一堆
@@ -1733,6 +1790,7 @@ async def run(
     void_rate: float,
     variance_rate: float,
     slow_mover_pct: float,
+    affidavit_pct: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -1753,6 +1811,8 @@ async def run(
         # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
         menu_items = await seed_menu(session, store_id, manager_id)
         # 供應商 → 一般商品（初始庫存 0，靠每日補貨的採購收貨進貨）
+        # 手持簽署的前置：顧客螢幕 + POS 櫃檯 + 配對
+        kiosk = await seed_kiosk(session, store_id, manager_id)
         suppliers = await seed_suppliers(session, store_id)
         catalog = await seed_catalog(session, store_id)
 
@@ -1765,6 +1825,7 @@ async def run(
             contacts["members"],
             contacts["sellers"],
             contacts["member_sellers"],
+            kiosk,
             menu_items,
             suppliers,
             catalog,
@@ -1781,6 +1842,7 @@ async def run(
             void_rate=void_rate,
             variance_rate=variance_rate,
             slow_mover_pct=slow_mover_pct,
+            affidavit_pct=affidavit_pct,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -1805,6 +1867,9 @@ async def run(
         report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
+        report.counts["簽名任務"] = await _count(
+            session, "signature_tasks", f"store_id = {store_id}"
+        )
         report.counts["退貨"] = daily["returns"]
         report.counts["作廢銷售"] = daily["voided"]
         report.counts["現金差異事件"] = await _count(
@@ -1858,6 +1923,10 @@ def main() -> None:
     parser.add_argument(
         "--slow-mover-pct", type=float, default=0.07, help="入庫時被歸為滯銷品的比例"
     )
+    # §7.4 目標 400–900 個簽名任務；買斷單約 2,100 張 → 三成即約 630
+    parser.add_argument(
+        "--affidavit-pct", type=float, default=0.30, help="買斷收購綁定手持切結的比例"
+    )
     parser.add_argument(
         "--out",
         default="seed_verification.txt",
@@ -1880,6 +1949,7 @@ def main() -> None:
             void_rate=args.void_rate,
             variance_rate=args.variance_rate,
             slow_mover_pct=args.slow_mover_pct,
+            affidavit_pct=args.affidavit_pct,
         )
     )
     rendered = report.render()
