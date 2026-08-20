@@ -369,6 +369,7 @@ async def seed_acquisitions(
     seller_ids: list[int],
     rng: random.Random,
     *,
+    rng_seed: int,
     buyout_items: int,
     consignment_items: int,
 ) -> dict[str, int]:
@@ -380,6 +381,8 @@ async def seed_acquisitions(
     收購付現需要**開帳中的 cash_session**（§7.2.1），故呼叫端須先開帳。
     """
     svc = AcquisitionService(session)
+    # 批次識別：同一種子重跑會沿用既有資料（冪等重放），換種子則產生新批次
+    batch = f"s{rng_seed}"
     default_commission_pct = (
         await StoreSettingsService(session).get_effective_settings(store_id)
     ).default_commission_pct
@@ -410,8 +413,14 @@ async def seed_acquisitions(
                 items=[item],
                 payout_method=PayoutMethod.CASH,
             )
+            # **冪等鍵必須帶批次識別**：只用序號的話，重跑（或換 --seed）會用同一把鍵
+            # 配上不同內容 → IdempotencyKeyConflict。鍵一旦重複，冪等機制會把它當成
+            # 「同一筆的重試」，這正是它該做的事——所以要讓不同批次的鍵天然不同。
             await svc.create_acquisition(
-                store_id, manager_id, data, idempotency_key=f"seed-{kind.value}-{i}-{ok}"
+                store_id,
+                manager_id,
+                data,
+                idempotency_key=f"seed-{batch}-{kind.value}-{i}",
             )
             ok += 1
         return ok
@@ -460,6 +469,7 @@ async def run(
             manager_id,
             contacts["sellers"],
             rng,
+            rng_seed=rng_seed,
             buyout_items=buyout_items,
             consignment_items=consignment_items,
         )
