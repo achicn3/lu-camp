@@ -633,6 +633,38 @@ service 一律以 `now()` 落地時間欄，而報表依時間篩選。**漏回�
 它們卡在「待人工對帳」——那正是系統設計要處理的狀態，也是真實店家會遇到的情形
 （平台答案不明、需人工查證）。留著讓手冊的對帳畫面有東西可示範，比清成全綠更有用。
 
+### 7.4.9 其餘外部整合與備份
+
+| 功能 | 作法 | 實測結果 |
+|---|---|---|
+| 台灣Pay | 免串 API（店員另用 App 收款，系統只記錄） | 1,056 筆 |
+| LINE Pay | `frontend/scripts/seed-linepay.mjs`，真沙盒真收費 | 25 筆收費／7 筆退款 |
+| 折讓 G0401 | `seed_allowances.py`（須在發票上送之後） | 287 張／286 上送 |
+| 備份 | 真 pg_dump → 加密 → 上傳 R2 | 9.5 MB，SUCCEEDED |
+| 還原演練 | 還原到拋棄式資料庫並驗證 | VERIFIED（演練庫已清除） |
+
+**LINE Pay 的數量天生有上限**：`oneTimeKey` 沒有 API 可以產生（Offline v4 是「店家掃
+客人碼」，真店面用掃碼槍讀客人手機），只能從沙盒頁的條碼圖解出來，每筆要重載一次頁面。
+數十筆足夠覆蓋畫面與報表；上千筆沒有意義。
+
+#### 兩個「同 session」合約
+
+`BackupService.run_backup` 與 `RestoreService.run_restore` 都是同 session 版本，
+**呼叫端要自己 commit**。少了那行，R2 上的物件是真的、也印出 SUCCEEDED，
+但 `backup_runs` 那一列會隨 session 關閉被丟掉。第一次就這樣「成功」了卻沒有紀錄。
+
+#### 待修：備份修剪的前綴比對範圍過寬（產品缺陷，非 seed 問題）
+
+`_prune_remote` 以 `backups/{db_name}_` 為前綴列出物件並刪除不在保留清單內的，
+但保留清單 `newest_succeeded_r2_keys` 是**精確**比對 `BackupRun.db_name == db_name`。
+
+兩者不對稱：備份**正式庫 `lucamp`** 時，前綴 `backups/lucamp_` 會一併列出
+`lucamp_sim_*`、`lucamp_e2e_*`、`lucamp_manual_*`，而這些都不在保留清單裡 → **全被刪除**。
+
+目前 bucket 裡只有測試備份，損失有限；但只要出現「一個庫名是另一個庫名的前綴」
+（例如日後有 `lucamp` 與 `lucamp_archive`），就會刪掉不該刪的。
+**修法**：比對時要求前綴之後緊接時戳格式，而非任意字元。
+
 ### 7.5 不變條件驗證（失敗即中止）
 
 至少檢查：
