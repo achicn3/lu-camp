@@ -887,7 +887,7 @@ function CreateCatalogProduct() {
       >
         <p className="hint">廠商採購商品先在此建檔（初始庫存 0），之後於採購補貨頁建採購單→收貨補庫存。</p>
         {pendingCatalogCreate !== null && (
-          <p className="hint">上一筆商品建立結果尚未確認，已還原原送出內容，請重試確認。</p>
+          <p className="hint">上一筆商品有沒有建好還不確定，已幫你把剛才填的內容放回來，請再送出一次。</p>
         )}
         <div className="inv-catalog-create-grid">
           <label className="field">

@@ -112,7 +112,7 @@ function GeneralSettingsCard({
       retentionDays < 1 ||
       retentionDays > 3650
     ) {
-      setError("簽名 PNG 保存天數請輸入 1–3650 的整數");
+      setError("簽名圖檔保留天數請輸入 1 到 3650 之間的整數");
       return;
     }
 
@@ -160,7 +160,7 @@ function GeneralSettingsCard({
         <input name="tax_rate" inputMode="decimal" defaultValue={taxPct} required />
       </label>
       <label className="field">
-        <span className="field-label">簽名 PNG 保存天數</span>
+        <span className="field-label">簽名圖檔保留天數</span>
         <input
           name="signature_png_retention_days"
           inputMode="numeric"
@@ -892,13 +892,13 @@ function SignatureRetentionReportCard({
 }) {
   return (
     <div className="card">
-      <h2>簽名 PNG 待清理報表</h2>
+      <h2>可清除的簽名圖檔</h2>
       <p className="hint">
-        第一版只列報、不刪檔。快照、signature/content hash、evidence hash 與狀態事件不受
-        PNG 保存期限影響。
+        這裡只列出可以清除的簽名圖檔，系統不會自動刪除，要不要刪由店長決定。
+        清除的只有圖檔本身；簽署紀錄、簽署內容與時間都會完整保留，不受保留天數影響。
       </p>
       {rows.length === 0 ? (
-        <p className="hint">目前沒有已到保存期限的簽名 PNG。</p>
+        <p className="hint">目前沒有超過保留天數的簽名圖檔。</p>
       ) : (
         <table className="settings-history-table">
           <thead>

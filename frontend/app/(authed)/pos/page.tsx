@@ -1907,7 +1907,7 @@ export default function PosPage() {
         setDisplayCart(current.data);
         if (current.data.status === "PAYMENT_UNCERTAIN") {
           throw new Error(
-            "PAYMENT_UNCERTAIN：本筆付款結果尚未裁定，禁止再次付款；請由店長執行付款對帳",
+            "這筆付款有沒有成功還不確定，先不要再收一次款。請店長到「付款對帳」查明後再處理。",
           );
         }
         if (plan.storeCredit > 0) {
@@ -2685,7 +2685,7 @@ export default function PosPage() {
                     {signTask.data?.status === "EXPIRED"
                       ? "簽署任務已逾時，購物車已解凍；請重新送出。"
                       : signTask.data?.status === "FAILED"
-                        ? "本次結帳未成立，舊簽署已留存為失敗證據；重試必須重新簽署。"
+                        ? "這次結帳沒有成功。剛才那次簽名已存檔備查，重新結帳要請客人再簽一次。"
                         : "簽署已作廢，請重新送出。"}
                   </p>
                   <button

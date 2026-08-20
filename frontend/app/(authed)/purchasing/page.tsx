@@ -407,7 +407,7 @@ function CreatePurchaseOrder({
             <div className="pur-product-empty">
               <p className="empty-state">
                 {pendingCatalogCreate !== null
-                  ? "上一筆商品建立結果尚未確認，已還原原送出內容。"
+                  ? "上一筆商品有沒有建好還不確定，已幫你把剛才填的內容放回來。"
                   : "查無相符的一般商品。"}
               </p>
               {!newProductOpen && pendingCatalogCreate === null ? (
