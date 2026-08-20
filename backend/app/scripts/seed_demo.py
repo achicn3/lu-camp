@@ -65,6 +65,8 @@ from app.modules.acquisition.schemas import (
 )
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.consignment.models import ConsignmentSettlement
+from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
@@ -80,7 +82,9 @@ from app.modules.purchasing.schemas import (
     SupplierCreate,
 )
 from app.modules.purchasing.service import PurchasingService
+from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.models import Sale, SaleLine
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
@@ -89,15 +93,17 @@ from app.modules.user.models import User
 from app.shared.enums import (
     AcquisitionType,
     BulkAcquisitionBasis,
+    ConsignmentSettlementStatus,
     ContactRole,
     Grade,
     PayoutMethod,
     SaleLineType,
+    SaleStatus,
     SerializedItemStatus,
     ServiceMode,
     TenderType,
 )
-from app.shared.exceptions import DuplicateContact, DuplicateMenuItem
+from app.shared.exceptions import DomainError, DuplicateContact, DuplicateMenuItem
 
 _ALLOWED_ENVS = {"development", "test"}
 # **資料庫允許清單**（docs/37 §7.9）：硬綁單一名稱會讓它在 e2e 庫上拒跑；
@@ -271,19 +277,31 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
         InvariantResult("散裝批餘量不為負", negative == 0, f"檢查 {lots} 堆")
     )
 
-    # 6b. 散裝批 remaining_qty ＝ total_qty − 已售件數；歸零者須為 SOLD_OUT
+    # 6b. 散裝批 remaining_qty ＝ total_qty − 已售件數 ＋ 已退件數；歸零者須為 SOLD_OUT
+    #
+    # **退貨與作廢都會把件數還回堆裡**，但 sale_line 仍在原地——只減不加的話，
+    # 有退貨的堆一定對不上（實測 53 堆有 1 堆被抓出來）。
     lot_drift = await session.scalar(
         text(
             "SELECT count(*) FROM ("
-            "  SELECT b.id FROM bulk_lots b"
-            "  LEFT JOIN sale_lines l ON l.bulk_lot_id = b.id"
-            "    AND l.store_id = b.store_id"
-            "  LEFT JOIN sales s ON s.id = l.sale_id AND s.status <> 'VOIDED'"
-            "  WHERE b.store_id = :sid"
-            "  GROUP BY b.id, b.total_qty, b.remaining_qty"
-            "  HAVING b.total_qty - COALESCE(sum(CASE WHEN s.id IS NULL THEN 0 ELSE l.qty END), 0)"
-            "         <> b.remaining_qty"
-            ") t"
+            "  SELECT b.id,"
+            "         b.total_qty"
+            "         - COALESCE(("
+            "             SELECT sum(l.qty) FROM sale_lines l"
+            "             JOIN sales s ON s.id = l.sale_id"
+            "             WHERE l.bulk_lot_id = b.id AND l.store_id = b.store_id"
+            "               AND s.status <> 'VOIDED'"
+            "           ), 0)"
+            "         + COALESCE(("
+            "             SELECT sum(rl.qty) FROM return_lines rl"
+            "             JOIN sale_lines l ON l.id = rl.sale_line_id"
+            "             JOIN sales s ON s.id = l.sale_id"
+            "             WHERE l.bulk_lot_id = b.id AND l.store_id = b.store_id"
+            "               AND s.status <> 'VOIDED'"
+            "           ), 0) AS derived,"
+            "         b.remaining_qty"
+            "  FROM bulk_lots b WHERE b.store_id = :sid"
+            ") t WHERE t.derived <> t.remaining_qty"
         ),
         {"sid": store_id},
     )
@@ -423,25 +441,34 @@ async def seed_contacts(
             )
         )
 
+    member_sellers: list[int] = []
     for _ in range(_SELLER_COUNT):
         serial += 1
+        # **約四成的賣方同時是會員**：想用購物金收款（撥款方式 STORE_CREDIT/SPLIT）
+        # 的賣方**必須**是會員，否則 service 會擋下（docs/16 I-8）。
+        # 全部設為純 SELLER 的話，購物金入帳一筆都產不出來。
+        also_member = rng.random() < 0.40
+        roles = [ContactRole.SELLER, ContactRole.CONSIGNOR]
+        if also_member:
+            roles.append(ContactRole.MEMBER)
         # 賣方/寄售主**必須**有 national_id，否則收購階段會被擋下
-        sellers.append(
-            await _ensure(
-                ContactCreate(
-                    name=_fake_name(rng),
-                    phone=_fake_phone(serial),
-                    national_id=_make_national_id(rng),
-                    roles=[ContactRole.SELLER, ContactRole.CONSIGNOR],
-                    address=_fake_address(rng),
-                )
+        contact_id = await _ensure(
+            ContactCreate(
+                name=_fake_name(rng),
+                phone=_fake_phone(serial),
+                national_id=_make_national_id(rng),
+                roles=roles,
+                address=_fake_address(rng),
             )
         )
+        sellers.append(contact_id)
+        if also_member:
+            member_sellers.append(contact_id)
 
     await session.commit()
     if not sellers:  # pragma: no cover - 上面已保證，這是最後防線
         raise SeedFailed("沒有任何賣方/寄售主，收購階段將無法進行")
-    return {"members": members, "sellers": sellers}
+    return {"members": members, "sellers": sellers, "member_sellers": member_sellers}
 
 
 # 露營二手品的分類與品名（docs/37 §7.6）。售價呈長尾：眾數 300–1,500，
@@ -476,6 +503,7 @@ async def seed_acquisitions(
     store_id: int,
     manager_id: int,
     seller_ids: list[int],
+    member_seller_ids: list[int],
     rng: random.Random,
     *,
     rng_seed: int,
@@ -535,11 +563,34 @@ async def seed_acquisitions(
                 n - items_done,
                 rng.choices([1, 2, 3, 4, 5, 6, 8], [20, 24, 20, 14, 10, 7, 5])[0],
             )
+            items = [_item(kind) for _ in range(size)]
+            # **撥款方式**（SC-2）：買斷才有撥款；寄售不撥款、恆為 CASH。
+            # 想收購物金的賣方**必須是會員**（docs/16 I-8），故只在會員賣方上使用。
+            seller = rng.choice(seller_ids)
+            payout = PayoutMethod.CASH
+            split_cash: Decimal | None = None
+            if kind is AcquisitionType.BUYOUT and member_seller_ids:
+                roll = rng.random()
+                if roll < 0.18:
+                    seller = rng.choice(member_seller_ids)
+                    payout = PayoutMethod.STORE_CREDIT
+                elif roll < 0.26:
+                    seller = rng.choice(member_seller_ids)
+                    payout = PayoutMethod.SPLIT
+                    total = sum(
+                        (i.acquisition_cost or Decimal(0) for i in items), Decimal(0)
+                    )
+                    # 一半現金一半購物金（整數元；購物金部分由後端推導）
+                    split_cash = Decimal(int(total / 2))
+                    if split_cash <= 0 or split_cash >= total:
+                        payout = PayoutMethod.CASH
+                        split_cash = None
             data = AcquisitionCreate(
                 type=kind,
-                contact_id=rng.choice(seller_ids),
-                items=[_item(kind) for _ in range(size)],
-                payout_method=PayoutMethod.CASH,
+                contact_id=seller,
+                items=items,
+                payout_method=payout,
+                payout_split_cash=split_cash,
             )
             # **冪等鍵必須帶批次識別**：只用序號的話，重跑（或換 --seed）會用同一把鍵
             # 配上不同內容 → IdempotencyKeyConflict。鍵一旦重複，冪等機制會把它當成
@@ -976,6 +1027,25 @@ def _daily_sale_count(day: date, rng: random.Random, *, base: float) -> int:
     return max(0, int(rng.gauss(base * factor, base * factor * 0.25)))
 
 
+_RETURN_REASONS = (
+    "客人尺寸不合",
+    "回家後發現有瑕疵",
+    "重複購買",
+    "家人已有同款",
+    "現場試用後不滿意",
+    "拉鍊卡住",
+    "缺件",
+    "顏色與描述不符",
+)
+
+
+def moment_of(day: date, hour: int, minute: int = 0) -> datetime:
+    """台北營業日的某個時點，轉成 UTC。**時間序全靠回填**，故到處都要用。"""
+    return datetime(
+        day.year, day.month, day.day, hour, minute, tzinfo=STORE_TIME_ZONE
+    ).astimezone(UTC)
+
+
 def _business_hour(day: date, rng: random.Random) -> int:
     """時段分佈（§7.3）：裝備集中 14–18 時，假日尖峰 13–17 時。"""
     if day.weekday() >= 5:
@@ -989,6 +1059,7 @@ async def seed_daily_sales(
     manager_id: int,
     member_ids: list[int],
     seller_ids: list[int],
+    member_seller_ids: list[int],
     menu_items: list[MenuItem],
     suppliers: list[Supplier],
     catalog: list[CatalogProduct],
@@ -1002,6 +1073,9 @@ async def seed_daily_sales(
     catalog_per_day: float,
     bulk_per_day: float,
     warmup_days: int,
+    return_rate: float,
+    void_rate: float,
+    variance_rate: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -1013,11 +1087,14 @@ async def seed_daily_sales(
     """
     sales_svc = SalesService(session)
     cash = CashDrawerService(session)
+    consignment_svc = ConsignmentService(session)
+    returns_svc = ReturnsService(session)
     made = {
         "sales": 0, "sessions": 0, "buyout": 0, "consignment": 0,
         "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
         "bulk_lots": 0, "bulk_lines": 0,
-        "buyout_orders": 0, "consignment_orders": 0,
+        "buyout_orders": 0, "consignment_orders": 0, "settlements_paid": 0,
+        "returns": 0, "voided": 0,
     }
     # 暖身期的產出**分開計數**：§7.4 的目標數字談的是 12 個月視窗，
     # 把暖身期混進去會讓「達標」變成假的。
@@ -1093,6 +1170,7 @@ async def seed_daily_sales(
                 store_id,
                 manager_id,
                 seller_ids,
+                member_seller_ids,
                 rng,
                 rng_seed=rng_seed,
                 buyout_items=max(1, int(intake * 0.75)),
@@ -1143,6 +1221,13 @@ async def seed_daily_sales(
             )
             # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
             sale.created_at = moment
+            # **寄售結算的建立時點也要一併回填**。只回填 sale.created_at 的話，結算列的
+            # created_at 仍是 now()，後續「賣出滿 7 天才來領錢」的條件永遠不成立——
+            # 實測 40 天跑下來已付款數是 0。與班別、收購時間同一類錯誤，這已是第三次。
+            for settlement in await session.scalars(
+                select(ConsignmentSettlement).where(ConsignmentSettlement.sale_id == sale.id)
+            ):
+                settlement.created_at = moment
             bump("sales")
 
         # **一般商品**：可補貨，故同一個 SKU 能反覆賣出（與序號品的「一件一次」相反）。
@@ -1247,9 +1332,138 @@ async def seed_daily_sales(
             bump("dine_in" if dine_in else "takeout")
         await session.commit()
 
-        # 當日結帳；counted 由 service 算出的 expected 決定（variance=0）
+        # **作廢**（§7.4 目標 120–200，約 1%）：當天稍早打錯的單，同日作廢。
+        # 作廢會反轉收款與庫存、寄售結算轉 CANCELLED（§7 不變量 #7）——這些都要真的發生。
+        if rng.random() < void_rate:
+            todays = list(
+                await session.scalars(
+                    select(Sale)
+                    .where(
+                        Sale.store_id == store_id,
+                        Sale.status == SaleStatus.COMPLETED,
+                        Sale.created_at >= moment_of(day, 0),
+                        Sale.created_at < moment_of(day, 23, 59),
+                    )
+                    .order_by(Sale.id.desc())
+                    .limit(20)
+                )
+            )
+            for candidate in todays:
+                if await _count(
+                    session,
+                    "return_lines rl JOIN returns r ON r.id = rl.return_id",
+                    f"r.sale_id = {candidate.id}",
+                ):
+                    continue
+                try:
+                    await sales_svc.void_sale(candidate, manager_id)
+                except DomainError:
+                    continue
+                await session.commit()
+                bump("voided")
+                break
+
+        # **退貨**（§7.4 目標 200–350）：從幾天前的單挑一張退。
+        # 餐飲不支援退貨（docs/35），故只挑非 MENU 的明細；
+        # 退寄售品會反轉 consignment_settlement（§7 不變量 #7），這正是要讓它發生。
+        if rng.random() < return_rate:
+            recent = list(
+                await session.scalars(
+                    select(Sale)
+                    .where(
+                        Sale.store_id == store_id,
+                        Sale.status == SaleStatus.COMPLETED,
+                        Sale.created_at >= moment_of(day, 9, 30) - timedelta(days=20),
+                        Sale.created_at < moment_of(day, 9, 30),
+                    )
+                    .order_by(Sale.id.desc())
+                    .limit(60)
+                )
+            )
+            rng.shuffle(recent)
+            for candidate in recent[:8]:
+                sale_lines = list(
+                    await session.scalars(
+                        select(SaleLine).where(
+                            SaleLine.sale_id == candidate.id,
+                            SaleLine.line_type != SaleLineType.MENU,
+                        )
+                    )
+                )
+                if not sale_lines:
+                    continue
+                # 已退過的不再退（避免撞上「累計全退」的發票處置分支，那需要簽名與紙本回收）
+                already = await _count(
+                    session,
+                    "return_lines rl JOIN returns r ON r.id = rl.return_id",
+                    f"r.sale_id = {candidate.id}",
+                )
+                if already:
+                    continue
+                # **只退一部分**：整筆全退會觸發發票作廢/折讓，需要客人簽名任務，
+                # 那條路徑留給簽名任務階段再處理。
+                target = rng.choice(sale_lines)
+                if len(sale_lines) == 1 and target.qty == 1:
+                    continue
+                qty = 1 if target.qty == 1 else rng.randint(1, target.qty - 1)
+                try:
+                    await returns_svc.create_return(
+                        store_id,
+                        sale_id=candidate.id,
+                        lines=[ReturnLineInput(sale_line_id=target.id, qty=qty)],
+                        reason=rng.choice(_RETURN_REASONS),
+                        actor_user_id=manager_id,
+                        idempotency_key=f"seed-ret-{day.isoformat()}-{candidate.id}",
+                    )
+                except DomainError:
+                    continue  # 該單不可退（發票狀態、付款方式等）——換下一張
+                await session.commit()
+                bump("returns")
+                break
+
+        # **寄售結算付款**：賣出後隔一段時間才付給寄售人（現實中會另約時間來拿錢）。
+        # 必須在開帳中的班別下進行（§7 不變量 #8），且付款後抽屜淨增 ＝ 抽成、
+        # 不是全額售價（§7 不變量 #3）——這條只有真的走 service 才會成立。
+        pending = list(
+            await session.scalars(
+                select(ConsignmentSettlement)
+                .where(
+                    ConsignmentSettlement.store_id == store_id,
+                    ConsignmentSettlement.status == ConsignmentSettlementStatus.PENDING,
+                    ConsignmentSettlement.created_at < moment_of(day, 9, 30) - timedelta(days=7),
+                )
+                .order_by(ConsignmentSettlement.id)
+                .limit(12)
+            )
+        )
+        paid_any = False
+        for settlement in pending:
+            if rng.random() >= 0.55:  # 有些寄售人拖著沒來拿——真實店家一定有未結的尾巴
+                continue
+            paid = await consignment_svc.pay_settlement(
+                store_id,
+                settlement.id,
+                actor_user_id=manager_id,
+                idempotency_key=f"seed-payout-{day.isoformat()}-{settlement.id}",
+            )
+            paid.paid_at = moment_of(day, rng.randrange(10, 20), rng.randrange(60))
+            bump("settlements_paid")
+            paid_any = True
+        if paid_any:
+            await session.commit()
+
+        # 當日結帳。**多數日子點數與應有一致，但真實店家一定有對不起來的時候**
+        # （§7.4 目標 15–30 次差異，含 1–2 筆大額）——全部 variance=0 的資料
+        # 會讓現金差異報表整頁空白，看不出這個功能在做什麼。
         opened = await cash.get_current_session(store_id) or opened
-        await cash.close_session(opened, await cash.expected_amount(opened), manager_id)
+        expected = await cash.expected_amount(opened)
+        counted = expected
+        if rng.random() < variance_rate:
+            if rng.random() < 0.10:  # 偶爾一筆大額（少找錢／整疊點錯）
+                counted = expected + Decimal(rng.choice([-5000, -3000, 2000, 3500]))
+            else:  # 平常就是零頭對不上
+                counted = expected + Decimal(rng.choice([-500, -100, -50, 50, 100, 200]))
+        await cash.close_session(opened, counted, manager_id)
         opened.closed_at = datetime(
             day.year, day.month, day.day, 21, 0, tzinfo=STORE_TIME_ZONE
         ).astimezone(UTC)
@@ -1278,6 +1492,9 @@ async def run(
     catalog_per_day: float,
     bulk_per_day: float,
     warmup_days: int,
+    return_rate: float,
+    void_rate: float,
+    variance_rate: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -1309,6 +1526,7 @@ async def run(
             manager_id,
             contacts["members"],
             contacts["sellers"],
+            contacts["member_sellers"],
             menu_items,
             suppliers,
             catalog,
@@ -1321,6 +1539,9 @@ async def run(
             catalog_per_day=catalog_per_day,
             bulk_per_day=bulk_per_day,
             warmup_days=warmup_days,
+            return_rate=return_rate,
+            void_rate=void_rate,
+            variance_rate=variance_rate,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -1345,6 +1566,18 @@ async def run(
         report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
+        report.counts["退貨"] = daily["returns"]
+        report.counts["作廢銷售"] = daily["voided"]
+        report.counts["現金差異事件"] = await _count(
+            session, "cash_sessions", f"store_id = {store_id} AND variance <> 0"
+        )
+        report.counts["購物金異動"] = await _count(
+            session, "store_credit_ledger", f"store_id = {store_id}"
+        )
+        report.counts["寄售結算-已付款"] = daily["settlements_paid"]
+        report.counts["寄售結算-未付"] = await _count(
+            session, "consignment_settlements", f"store_id = {store_id} AND status = 'PENDING'"
+        )
         report.counts["（暖身期）銷售"] = daily["warmup_sales"]
         report.counts["（暖身期）班別"] = daily["warmup_sessions"]
         report.counts["（暖身期）收購件數"] = (
@@ -1374,6 +1607,14 @@ def main() -> None:
         default=150,
         help="視窗開始前先營運的天數（讓貨架上本來就有存貨；其產出分開計數）",
     )
+    # 目標 200–350 筆 / 約 339 個營業日 → 每日約 0.8 的機率
+    parser.add_argument("--return-rate", type=float, default=0.8, help="每個營業日發生退貨的機率")
+    # 目標 120–200 筆 / 約 339 個營業日 → 每日約 0.45 的機率
+    parser.add_argument("--void-rate", type=float, default=0.45, help="每個營業日發生作廢的機率")
+    # 目標 15–30 次 / 約 339 個營業日 → 每日約 0.07 的機率
+    parser.add_argument(
+        "--variance-rate", type=float, default=0.07, help="每個營業日結帳點數對不上的機率"
+    )
     parser.add_argument(
         "--out",
         default="seed_verification.txt",
@@ -1392,6 +1633,9 @@ def main() -> None:
             catalog_per_day=args.catalog_per_day,
             bulk_per_day=args.bulk_per_day,
             warmup_days=args.warmup_days,
+            return_rate=args.return_rate,
+            void_rate=args.void_rate,
+            variance_rate=args.variance_rate,
         )
     )
     rendered = report.render()
