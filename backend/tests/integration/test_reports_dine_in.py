@@ -510,3 +510,32 @@ async def test_endpoint_maps_too_many_buckets_to_422(
     )
     assert resp.status_code == 422, resp.text
     assert "分桶" in resp.json()["detail"]
+
+
+async def test_hourly_handles_midnight_and_late_night_taipei(
+    db_session: AsyncSession,
+) -> None:
+    """**台北 00:30 與 23:30 是最危險的兩個邊界**（docs/39 §7）。
+
+    台北 00:30 的 UTC 是**前一天 16:30**——若以 UTC 切，這筆會落在前一天的
+    16 時桶，營業日與尖峰時段同時錯位。23:30 同理（UTC 15:30）。
+    """
+    ctx = await _seed(db_session)
+    early = await _menu_sale(db_session, ctx, mode=ServiceMode.DINE_IN)
+    late = await _menu_sale(db_session, ctx, mode=ServiceMode.TAKEOUT)
+    early.created_at = datetime(2026, 8, 19, 0, 30, tzinfo=STORE_TIME_ZONE).astimezone(UTC)
+    late.created_at = datetime(2026, 8, 19, 23, 30, tzinfo=STORE_TIME_ZONE).astimezone(UTC)
+    await db_session.flush()
+
+    report = await ReportsService(db_session).dine_in_report(
+        ctx.store_id,
+        date_from=datetime(2026, 8, 19, tzinfo=STORE_TIME_ZONE),
+        date_to=datetime(2026, 8, 20, tzinfo=STORE_TIME_ZONE),
+        granularity="day",
+    )
+    by_hour = {h.hour: h for h in report.hourly}
+    assert by_hour[0].dine_in_groups == 1, "台北 00:30 應落在 0 時桶（不是前一天 16 時）"
+    assert by_hour[23].takeout_groups == 1, "台北 23:30 應落在 23 時桶"
+    # 兩筆都屬同一個台北營業日，趨勢只應有一列
+    assert [b.period.isoformat() for b in report.trend] == ["2026-08-19"]
+    assert (report.summary.dine_in.groups, report.summary.takeout.groups) == (1, 1)

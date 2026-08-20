@@ -160,6 +160,19 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
+// **攔截畫面自己收到的回應**再比對，才是真的「數字與後端一致」。
+// 拿另一個日期區間查來的結果去比，比的是兩個不同的東西（本腳本第一版就這樣錯過）。
+let rendered = null;
+page.on("response", async (resp) => {
+  if (resp.url().includes("/api/v1/reports/dine-in") && resp.request().method() === "GET") {
+    try {
+      rendered = await resp.json();
+    } catch {
+      /* 匯出等非 JSON 回應略過 */
+    }
+  }
+});
+
 try {
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.fill('input[name="username"]', USERNAME);
@@ -187,6 +200,31 @@ try {
 
   const summaryText = (await page.locator("table.rpt-dine-in-summary").textContent()) ?? "";
   ok("摘要顯示內用與外帶", summaryText.includes("內用") && summaryText.includes("外帶"));
+
+  // **畫面數字必須與後端一致**（docs/39 §7）：只檢查「有出現內用/外帶這幾個字」
+  // 不會發現前端把欄位接錯（例如把整單合計當成客單價顯示）。
+  ok("已攔截到畫面收到的報表回應", rendered !== null);
+  const expected = rendered.summary;
+  const dineRow = page.locator("table.rpt-dine-in-summary tbody tr").first();
+  const cells = (await dineRow.locator("td").allTextContents()).map((t) => t.trim());
+  const [, groupsCell, shareCell, revenueCell, avgCell, grossCell] = cells;
+  ok(
+    "內用組數與後端一致",
+    groupsCell === String(expected.dine_in.groups),
+    `畫面=${groupsCell} 後端=${expected.dine_in.groups}`,
+  );
+  ok(
+    "內用佔比與後端一致（換算成百分比）",
+    shareCell === `${(Number(expected.dine_in.share) * 100).toFixed(1)}%`,
+    `畫面=${shareCell} 後端=${expected.dine_in.share}`,
+  );
+  ok(
+    "餐飲營收與客單價各就各位（沒有把整單合計當客單價）",
+    revenueCell === `$${expected.dine_in.fnb_revenue}` &&
+      avgCell === `$${expected.dine_in.avg_ticket}` &&
+      grossCell === `$${expected.dine_in.gross_total}`,
+    `營收=${revenueCell} 客單價=${avgCell} 整單=${grossCell}`,
+  );
   await page.screenshot({ path: `${SHOTS}/01-summary.png` });
 
   await page.waitForSelector("table.rpt-dine-in-hourly");
