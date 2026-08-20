@@ -69,7 +69,7 @@ describe("(authed) layout", () => {
     const menuButton = within(nav).getByRole("button", { name: "開啟系統選單" });
     expect(nav.firstElementChild).toBe(menuButton);
     // 常用項目常駐頂欄
-    expect(screen.getByText("收銀結帳")).toBeDefined();
+    expect(screen.getByText("POS 結帳")).toBeDefined();
     expect(screen.getByText("交易紀錄")).toBeDefined();
     // 次要項目收在選單，未開啟前不在畫面
     expect(screen.queryByText("庫存")).toBeNull();

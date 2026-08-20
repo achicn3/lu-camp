@@ -160,7 +160,7 @@ export function PosCustomerDisplay({
         const detail =
           error && typeof error === "object" && "detail" in error
             ? String(error.detail)
-            : "無法建立收銀台";
+            : "無法註冊 POS 櫃檯";
         throw new Error(detail);
       }
       return data;
@@ -262,7 +262,7 @@ export function PosCustomerDisplay({
           if (!data) {
             throw new Error(
               response.status === 409
-                ? "顧客螢幕的購物車和這裡對不起來，請重新整理收銀畫面後再操作。"
+                ? "顧客螢幕的購物車和這裡對不起來，請重新整理 POS 後再操作。"
                 : "顧客螢幕同步失敗，請確認店內網路。",
             );
           }
@@ -280,7 +280,7 @@ export function PosCustomerDisplay({
               },
             },
           );
-          if (!data) throw new Error("顧客螢幕沒有清空成功，請重新整理收銀畫面。");
+          if (!data) throw new Error("顧客螢幕沒有清空成功，請重新整理 POS。");
           revision.current = null;
           setSyncedRevision(null);
           onCartChange?.(null);
@@ -334,7 +334,7 @@ export function PosCustomerDisplay({
 
   const pair = useMutation({
     mutationFn: async (code: string) => {
-      if (!terminal.data) throw new Error("收銀台尚未設定好");
+      if (!terminal.data) throw new Error("POS 櫃檯尚未就緒");
       const { data, error } = await api.POST(
         "/api/v1/customer-display/terminals/{terminal_id}/pair",
         {

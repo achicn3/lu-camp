@@ -392,7 +392,7 @@ function DineInCard({
       <div className="field">
         <span className="field-label">桌號清單</span>
         {tables.length === 0 ? (
-          <p className="hint">還沒設定桌號。設定之前，收銀台不能選「內用」。</p>
+          <p className="hint">還沒設定桌號。設定之前，POS 不能選「內用」。</p>
         ) : (
           <ul className="dinein-table-list">
             {tables.map((table) => (

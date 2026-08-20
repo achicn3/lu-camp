@@ -1803,7 +1803,7 @@ export default function PosPage() {
     mutationFn: async (
       action: "QUERY_PROVIDER" | "MANUAL_SUCCESS" | "MANUAL_FAILED",
     ) => {
-      if (!displayTerminal) throw new Error("找不到目前的收銀台");
+      if (!displayTerminal) throw new Error("找不到目前 POS 櫃檯");
       const manual = action !== "QUERY_PROVIDER";
       const { data, error } = await api.POST(
         "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
@@ -2124,7 +2124,7 @@ export default function PosPage() {
   if (completed !== null) {
     return (
       <section>
-        <h1 className="page-title">收銀結帳</h1>
+        <h1 className="page-title">POS 結帳</h1>
         <div className="card pos-complete">
           <h2>
             {completed.payment_method === "LINE_PAY" ? "LINE Pay 收款成功" : "已完成"}{" "}
@@ -2248,7 +2248,7 @@ export default function PosPage() {
 
   return (
     <section>
-      <h1 className="page-title">收銀結帳</h1>
+      <h1 className="page-title">POS 結帳</h1>
       <PosCustomerDisplay
         lines={saleLines}
         adjustments={adjustments}

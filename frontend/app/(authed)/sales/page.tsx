@@ -576,7 +576,7 @@ function ReturnDialog({
         body: { installation_id: terminalInstallationId(), name: "主要櫃檯" },
       });
       const terminal = terminalResponse.data;
-      if (!terminal?.paired_kiosk) throw new Error("請先把這台收銀台和顧客螢幕配對");
+      if (!terminal?.paired_kiosk) throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
       if (!terminal.paired_kiosk.online) {
         throw new Error("顧客螢幕目前離線，無法請客人簽名同意");
       }
@@ -1065,7 +1065,7 @@ export default function SalesPage() {
       });
       const terminal = terminalResponse.data;
       if (!terminal?.paired_kiosk) {
-        throw new Error("請先把這台收銀台和顧客螢幕配對");
+        throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
       }
       if (!terminal.paired_kiosk.online) {
         throw new Error("顧客螢幕目前離線，無法推送交易簽收");
