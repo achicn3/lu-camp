@@ -28,6 +28,7 @@ import os
 import random
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select, text
@@ -55,16 +56,29 @@ import app.modules.storecredit.models  # noqa: F401
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.core.national_id import _LETTER_VALUES, _WEIGHTS, is_valid_national_id
+from app.core.time import STORE_TIME_ZONE, store_date, utc_now
+from app.modules.acquisition.models import Acquisition
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
+from app.modules.inventory.models import SerializedItem
+from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
-from app.shared.enums import AcquisitionType, ContactRole, Grade, PayoutMethod
+from app.shared.enums import (
+    AcquisitionType,
+    ContactRole,
+    Grade,
+    PayoutMethod,
+    SaleLineType,
+    SerializedItemStatus,
+    TenderType,
+)
 from app.shared.exceptions import DuplicateContact
 
 _ALLOWED_ENVS = {"development", "test"}
@@ -372,6 +386,8 @@ async def seed_acquisitions(
     rng_seed: int,
     buyout_items: int,
     consignment_items: int,
+    batch_suffix: str = "",
+    acquired_at: datetime | None = None,
 ) -> dict[str, int]:
     """收購入庫（相依鏈第 2 步）：買斷與寄售的序號單品。
 
@@ -382,7 +398,7 @@ async def seed_acquisitions(
     """
     svc = AcquisitionService(session)
     # 批次識別：同一種子重跑會沿用既有資料（冪等重放），換種子則產生新批次
-    batch = f"s{rng_seed}"
+    batch = f"s{rng_seed}{f'-{batch_suffix}' if batch_suffix else ''}"
     default_commission_pct = (
         await StoreSettingsService(session).get_effective_settings(store_id)
     ).default_commission_pct
@@ -416,18 +432,179 @@ async def seed_acquisitions(
             # **冪等鍵必須帶批次識別**：只用序號的話，重跑（或換 --seed）會用同一把鍵
             # 配上不同內容 → IdempotencyKeyConflict。鍵一旦重複，冪等機制會把它當成
             # 「同一筆的重試」，這正是它該做的事——所以要讓不同批次的鍵天然不同。
-            await svc.create_acquisition(
+            result = await svc.create_acquisition(
                 store_id,
                 manager_id,
                 data,
                 idempotency_key=f"seed-{batch}-{kind.value}-{i}",
             )
+            if acquired_at is not None:
+                # 收購也要回填時間，否則整年的收購全部落在今天
+                acq = await session.get(Acquisition, result.acquisition_id)
+                if acq is not None:
+                    acq.created_at = acquired_at
             ok += 1
         return ok
 
     made["buyout"] = await _one(AcquisitionType.BUYOUT, buyout_items)
     made["consignment"] = await _one(AcquisitionType.CONSIGNMENT, consignment_items)
     await session.commit()
+    return made
+
+
+# 收購送件的季節性（§7.3）：3–5 月（露季結束出清）與 1 月（年前整理）為高峰
+_INTAKE_SEASONALITY = {
+    1: 1.6, 2: 0.8, 3: 1.5, 4: 1.5, 5: 1.4, 6: 0.7,
+    7: 0.6, 8: 0.6, 9: 0.9, 10: 1.0, 11: 0.9, 12: 1.0,
+}
+
+
+# 營運節奏（docs/37 §7.3）
+_HOLIDAY_MULTIPLIER = 2.7  # 週六日約平日 2.5–3 倍
+# 裝備類季節性：10 月–翌年 2 月旺季，6–8 月淡季（約旺季 40%）
+_GEAR_SEASONALITY = {
+    1: 1.00, 2: 0.95, 3: 0.70, 4: 0.60, 5: 0.55, 6: 0.40,
+    7: 0.40, 8: 0.45, 9: 0.70, 10: 1.00, 11: 1.05, 12: 1.00,
+}
+
+
+def _daily_sale_count(day: date, rng: random.Random, *, base: float) -> int:
+    """某一營業日的銷售筆數：季節性 × 週間 × 隨機擾動。"""
+    factor = _GEAR_SEASONALITY[day.month]
+    if day.weekday() >= 5:
+        factor *= _HOLIDAY_MULTIPLIER
+    return max(0, int(rng.gauss(base * factor, base * factor * 0.25)))
+
+
+def _business_hour(day: date, rng: random.Random) -> int:
+    """時段分佈（§7.3）：裝備集中 14–18 時，假日尖峰 13–17 時。"""
+    if day.weekday() >= 5:
+        return rng.choices([11, 12, 13, 14, 15, 16, 17, 18], [1, 2, 4, 5, 5, 4, 3, 2])[0]
+    return rng.choices([12, 13, 14, 15, 16, 17, 18, 19], [1, 2, 3, 4, 4, 3, 2, 1])[0]
+
+
+async def seed_daily_sales(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    member_ids: list[int],
+    seller_ids: list[int],
+    rng: random.Random,
+    *,
+    rng_seed: int,
+    days: int,
+    base_per_day: float,
+    daily_intake: float,
+) -> dict[str, int]:
+    """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
+
+    **不可沿用既有 seed_dev_demo 的手法**（只開一個班別、全部銷售掛其下再回填日期）：
+    §7.4 要 305–400 個歷史班別，且不變條件 #4 的現金等式要 **per-session** 成立。
+
+    今日的班別**留給呼叫端決定**是否結掉——手冊的 `02-cash-open` 需要「尚未開帳」，
+    但儀表板又需要今日有交易（§2.2 的定案：seed 今日交易後把當日班別結掉）。
+    """
+    sales_svc = SalesService(session)
+    cash = CashDrawerService(session)
+    made = {"sales": 0, "sessions": 0, "buyout": 0, "consignment": 0}
+    today = store_date(utc_now())
+
+    # **一次撈出可售清單再逐一取用**：每筆銷售各查一次資料庫，在上萬筆時是主要成本。
+    pool = list(
+        await session.scalars(
+            select(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.status == SerializedItemStatus.IN_STOCK,
+            )
+            .order_by(SerializedItem.id)
+        )
+    )
+    rng.shuffle(pool)
+    cursor = 0
+
+    for offset in range(days, 0, -1):
+        day = today - timedelta(days=offset)
+        if day.weekday() == 1 and rng.random() < 0.5:  # 週二不定期公休
+            continue
+        n = _daily_sale_count(day, rng, base=base_per_day)
+        if n == 0:
+            continue
+
+        # 每一天都是獨立班別：先結掉殘留的，再開今天的
+        current = await cash.get_current_session(store_id)
+        if current is not None:
+            await cash.close_session(current, await cash.expected_amount(current), manager_id)
+            await session.commit()
+        opened = await cash.open_session(store_id, manager_id, Decimal(30000))
+        # **班別時間也要回填**：只回填 sale.created_at 的話，所有班別都會擠在今天，
+        # 現金對帳報表與手冊的每日對帳截圖就全部失真（實測踩過）。
+        opened.opened_at = datetime(
+            day.year, day.month, day.day, 9, 30, tzinfo=STORE_TIME_ZONE
+        ).astimezone(UTC)
+        await session.commit()
+        made["sessions"] += 1
+
+        # **當日收購與當日銷售共用同一個班別**——現實中收購付現與銷售收現就是同一個抽屜。
+        # 先前把收購全部塞進單一班別，該班別的應有現金變成 −720 萬（實測踩過）。
+        intake = max(0, int(rng.gauss(daily_intake * _INTAKE_SEASONALITY[day.month], 1.5)))
+        if intake > 0:
+            acquired_today = await seed_acquisitions(
+                session,
+                store_id,
+                manager_id,
+                seller_ids,
+                rng,
+                rng_seed=rng_seed,
+                buyout_items=max(1, int(intake * 0.75)),
+                consignment_items=max(0, intake - int(intake * 0.75)),
+                batch_suffix=day.isoformat(),
+                acquired_at=opened.opened_at,
+            )
+            made["buyout"] += acquired_today["buyout"]
+            made["consignment"] += acquired_today["consignment"]
+            # 當日新入庫的也要進可售池（今天收、今天就可能賣出）
+            fresh = list(
+                await session.scalars(
+                    select(SerializedItem).where(
+                        SerializedItem.store_id == store_id,
+                        SerializedItem.status == SerializedItemStatus.IN_STOCK,
+                        SerializedItem.id.not_in([p.id for p in pool[cursor:]] or [0]),
+                    )
+                )
+            )
+            pool.extend(i for i in fresh if i.status == SerializedItemStatus.IN_STOCK)
+
+        for i in range(n):
+            if cursor >= len(pool):  # 庫存賣完就停止（不是錯誤，但要讓呼叫端看得到）
+                break
+            item = pool[cursor]
+            cursor += 1
+            moment = datetime(
+                day.year, day.month, day.day,
+                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+            ).astimezone(UTC)
+            sale = await sales_svc.create_sale(
+                store_id,
+                manager_id,
+                lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=item.listed_price)],
+                buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.45 else None),
+                idempotency_key=f"seed-sale-{day.isoformat()}-{i}",
+            )
+            # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
+            sale.created_at = moment
+            made["sales"] += 1
+        await session.commit()
+
+        # 當日結帳；counted 由 service 算出的 expected 決定（variance=0）
+        opened = await cash.get_current_session(store_id) or opened
+        await cash.close_session(opened, await cash.expected_amount(opened), manager_id)
+        opened.closed_at = datetime(
+            day.year, day.month, day.day, 21, 0, tzinfo=STORE_TIME_ZONE
+        ).astimezone(UTC)
+        await session.commit()
+
     return made
 
 
@@ -441,7 +618,12 @@ async def purge(session: AsyncSession, store_id: int) -> None:
 
 
 async def run(
-    *, rng_seed: int, do_purge: bool, buyout_items: int, consignment_items: int
+    *,
+    rng_seed: int,
+    do_purge: bool,
+    days: int,
+    base_per_day: float,
+    daily_intake: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -458,22 +640,22 @@ async def run(
         # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
         contacts = await seed_contacts(session, store_id, rng)
 
-        # 相依鏈第 2 步：收購入庫。**付現需開帳中的 cash_session**（§7.2.1），先開帳。
-        cash = CashDrawerService(session)
-        if await cash.get_current_session(store_id) is None:
-            await cash.open_session(store_id, manager_id, Decimal(20000))
-            await session.commit()
-        acquired = await seed_acquisitions(
+        # 相依鏈第 2＋3 步：**逐日開帳 → 當日收購 → 當日銷售 → 結帳**。
+        # 收購與銷售共用當日班別（現實中就是同一個抽屜），現金等式才 per-session 成立。
+        daily = await seed_daily_sales(
             session,
             store_id,
             manager_id,
+            contacts["members"],
             contacts["sellers"],
             rng,
             rng_seed=rng_seed,
-            buyout_items=buyout_items,
-            consignment_items=consignment_items,
+            days=days,
+            base_per_day=base_per_day,
+            daily_intake=daily_intake,
         )
-        # TODO(P0 分段建置)：散裝批／一般商品 → 逐日班別＋銷售 → 寄售結算 → 退貨 → 簽名。
+        acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
+        # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
 
         report = SeedReport()
         report.counts["會員"] = len(contacts["members"])
@@ -483,12 +665,10 @@ async def run(
         report.counts["序號商品"] = await _count(
             session, "serialized_items", f"store_id = {store_id}"
         )
-        report.counts["銷售"] = await _count(session, "sales", f"store_id = {store_id}")
+        report.counts["銷售"] = daily["sales"]
+        report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
         report.counts["聯絡人"] = await _count(session, "contacts", f"store_id = {store_id}")
-        report.counts["現金班別"] = await _count(
-            session, "cash_sessions", f"store_id = {store_id}"
-        )
         report.invariants = await verify_invariants(session, store_id)
         return report
 
@@ -498,8 +678,9 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42, help="固定亂數種子（相同種子＝相同資料）")
     parser.add_argument("--purge", action="store_true", help="清除本腳本產生的資料")
     # 分段建置期間可先跑小批量把整條路徑走通，再放大到目標量
-    parser.add_argument("--buyout", type=int, default=10, help="買斷件數")
-    parser.add_argument("--consignment", type=int, default=10, help="寄售件數")
+    parser.add_argument("--intake", type=float, default=3.0, help="每個營業日平均收購件數")
+    parser.add_argument("--days", type=int, default=3, help="回溯的營業天數")
+    parser.add_argument("--per-day", type=float, default=8.0, help="平日基準銷售筆數")
     parser.add_argument(
         "--out",
         default="seed_verification.txt",
@@ -511,8 +692,9 @@ def main() -> None:
         run(
             rng_seed=args.seed,
             do_purge=args.purge,
-            buyout_items=args.buyout,
-            consignment_items=args.consignment,
+            days=args.days,
+            base_per_day=args.per_day,
+            daily_intake=args.intake,
         )
     )
     rendered = report.render()
