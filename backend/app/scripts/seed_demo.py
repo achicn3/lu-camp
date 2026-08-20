@@ -78,6 +78,11 @@ from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
 from app.modules.customerdisplay.models import KioskDevice
+from app.modules.customerdisplay.schemas import (
+    CartLineRequest,
+    CartTenderRequest,
+    CartUpsertRequest,
+)
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
@@ -102,6 +107,7 @@ from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.modules.stocktake.service import StocktakeService
 from app.modules.store.models import Store
+from app.modules.storecredit.models import StoreCreditAccount
 from app.modules.user.models import User
 from app.scripts.seed_dev_user import DevUserSeed, upsert_dev_user
 from app.shared.enums import (
@@ -1084,6 +1090,88 @@ async def seed_stocktakes(
     return made
 
 
+async def store_credit_checkout(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    kiosk: KioskSetup,
+    *,
+    item: SerializedItem,
+    buyer_contact_id: int,
+    credit_amount: Decimal,
+    rng: random.Random,
+    idempotency_key: str,
+) -> Sale:
+    """以「購物金＋現金」結帳，走完整的客顯權威購物車流程（docs/16 §3.2、docs/23 K5）。
+
+    **這條鏈一步都不能少，也不能繞過。** `create_sale` 有一道無條件守衛：
+    以購物金付款必須帶 `signature_task_id` 且購物車已凍結，否則
+    `SignatureContentMismatch`——不是設定能關的。所以順序是：
+
+    `upsert_cart`（DRAFT，帶買方與付款拆分）→ `freeze_store_credit_cart`
+    （凍結＋建 STORE_CREDIT_USE 任務，同一交易）→ 顧客螢幕 ACK → 客人簽名 →
+    `begin_checkout`（PROCESSING）→ `create_sale`（帶 cart 與已簽任務）。
+    """
+    await touch_kiosk(session, store_id, kiosk.device_id)
+    display = CustomerDisplayService(session)
+    cash_part = item.listed_price - credit_amount
+    cart = await display.upsert_cart(
+        store_id,
+        kiosk.terminal_id,
+        CartUpsertRequest(
+            lines=[
+                CartLineRequest(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)
+            ],
+            buyer_contact_id=buyer_contact_id,
+            tenders=[
+                CartTenderRequest(tender_type=TenderType.STORE_CREDIT, amount=credit_amount),
+                CartTenderRequest(tender_type=TenderType.CASH, amount=cash_part),
+            ],
+        ),
+        actor_user_id=manager_id,
+    )
+    await session.flush()
+    frozen, task = await display.freeze_store_credit_cart(
+        store_id,
+        kiosk.terminal_id,
+        expected_revision=cart.revision,
+        actor_user_id=manager_id,
+    )
+    await session.flush()
+    signing = SigningService(session)
+    await signing.acknowledge_task(store_id, kiosk.device_id, task.id)
+    # 購物金簽署**不帶 chosen_payout**——那是收購切結才有的撥款二選一，
+    # 這裡帶了會被擋（「此簽署任務不涉及撥款選擇」）。
+    await signing.sign_task(
+        store_id,
+        task.id,
+        device_id=kiosk.device_id,
+        signature_image_base64=make_signature_png(rng),
+        chosen_payout=None,
+    )
+    processing = await display.begin_checkout(
+        store_id,
+        kiosk.terminal_id,
+        expected_revision=frozen.revision,
+        signature_task_id=task.id,
+        actor_user_id=manager_id,
+    )
+    return await SalesService(session).create_sale(
+        store_id,
+        manager_id,
+        lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
+        tenders=[
+            TenderInput(tender_type=TenderType.STORE_CREDIT, amount=credit_amount),
+            TenderInput(tender_type=TenderType.CASH, amount=cash_part),
+        ],
+        buyer_contact_id=buyer_contact_id,
+        signature_task_id=task.id,
+        cart_session_id=processing.id,
+        cart_revision=processing.revision,
+        idempotency_key=idempotency_key,
+    )
+
+
 async def sign_affidavit(
     session: AsyncSession,
     store_id: int,
@@ -1582,6 +1670,9 @@ async def seed_daily_sales(
     cash = CashDrawerService(session)
     consignment_svc = ConsignmentService(session)
     returns_svc = ReturnsService(session)
+    min_spend = (
+        await StoreSettingsService(session).get_effective_settings(store_id)
+    ).store_credit_min_spend
     # 折扣/贈品原因是 migration 就備好的主檔；沒有就不產生對應資料而非硬塞
     # 折扣/贈品原因是 migration 就備好的主檔。**要記下哪些原因必填備註**——
     # 「其他」這類原因不帶備註會被 service 擋下（實測踩過）。
@@ -1604,7 +1695,7 @@ async def seed_daily_sales(
         "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
         "bulk_lots": 0, "bulk_lines": 0,
         "buyout_orders": 0, "consignment_orders": 0, "settlements_paid": 0,
-        "returns": 0, "voided": 0,
+        "returns": 0, "voided": 0, "credit_sales": 0,
     }
     # 暖身期的產出**分開計數**：§7.4 的目標數字談的是 12 個月視窗，
     # 把暖身期混進去會讓「達標」變成假的。
@@ -1725,6 +1816,27 @@ async def seed_daily_sales(
                         # 插在未售段的隨機位置，避免「一律先進先出」這種不真實的取用順序
                         pool.insert(rng.randint(cursor, len(pool)), item)
 
+        # 當日有購物金餘額的會員（每天刷新一次，不逐筆查——上萬筆時逐筆查是主要成本）
+        credit_holders: list[tuple[int, Decimal]] = []
+        if kiosk is not None:
+            credit_holders = [
+                (contact_id, balance)
+                for contact_id, balance in (
+                    await session.execute(
+                        select(StoreCreditAccount.contact_id, StoreCreditAccount.balance)
+                        .where(
+                            StoreCreditAccount.store_id == store_id,
+                            # **要 > 0，不能只用 >= min_spend**：低消預設是 0，
+                            # 餘額 0 的帳戶會過關，最後組出金額 0 的購物金付款而被擋。
+                            StoreCreditAccount.balance > 0,
+                            StoreCreditAccount.balance >= min_spend,
+                        )
+                        .order_by(StoreCreditAccount.balance.desc())
+                        .limit(100)
+                    )
+                ).all()
+            ]
+
         for i in range(n):
             # 滯銷品偶爾還是會賣出去（有人識貨、或降價出清）——但機率低很多。
             if slow_pool and rng.random() < _SLOW_MOVER_SALE_RATE:
@@ -1745,6 +1857,41 @@ async def seed_daily_sales(
             ]
             adjustments: list[DiscountRequest] | None = None
             amount = item.listed_price
+            # **購物金折抵**：有餘額的會員拿購物金來折。走完整客顯凍結購物車＋簽署流程，
+            # 那是 `create_sale` 的無條件守衛（見 store_credit_checkout）。
+            if (
+                kiosk is not None
+                and credit_holders
+                and item.ownership_type is OwnershipType.OWNED
+                and rng.random() < 0.12
+            ):
+                holder_idx = rng.randrange(len(credit_holders))
+                holder, balance = credit_holders[holder_idx]
+                ceiling = Decimal(round_ntd(item.listed_price * Decimal("0.6")))
+                use: Decimal = balance if balance < ceiling else ceiling
+                if use > 0 and use >= min_spend and item.listed_price - use > 0:
+                    try:
+                        credit_sale = await store_credit_checkout(
+                            session, store_id, manager_id, kiosk,
+                            item=item, buyer_contact_id=holder, credit_amount=use,
+                            rng=rng, idempotency_key=f"seed-sc-{day.isoformat()}-{i}",
+                        )
+                    except DomainError:
+                        credit_holders.pop(holder_idx)
+                    else:
+                        credit_sale.created_at = moment_of(
+                            day, _business_hour(day, rng), rng.randrange(60)
+                        )
+                        await session.commit()
+                        remaining = balance - use
+                        if remaining > 0 and remaining >= min_spend:
+                            credit_holders[holder_idx] = (holder, remaining)
+                        else:
+                            credit_holders.pop(holder_idx)
+                        bump("sales")
+                        bump("credit_sales")
+                        continue
+
             # **寄售品不可折扣**（寄售人談好的價格，店家無權自行讓利）——
             # service 會擋下「此商品不可折扣（寄售、餐飲或贈品）」。只折買斷品。
             own = item.ownership_type is OwnershipType.OWNED
@@ -2175,6 +2322,10 @@ async def run(
             f"store_id = {store_id} AND counted_qty IS NOT NULL AND counted_qty <> system_qty",
         )
         report.counts["叫號（今日）"] = tickets_made
+        report.counts["購物金折抵結帳"] = daily["credit_sales"]
+        report.counts["客顯購物車"] = await _count(
+            session, "cart_sessions", f"store_id = {store_id}"
+        )
         report.counts["銷售折扣"] = await _count(
             session, "sale_adjustments", f"store_id = {store_id}"
         )
