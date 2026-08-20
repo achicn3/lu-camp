@@ -213,7 +213,7 @@ function KioskLogin({
     <main className="kiosk-login">
       <form className="kiosk-login-card" onSubmit={onSubmit}>
         <h1 className="kiosk-login-title">顧客螢幕設定</h1>
-        <p className="kiosk-login-sub">以本店 KIOSK 帳號啟用；登入後再與 POS 櫃檯配對。</p>
+        <p className="kiosk-login-sub">用本店的顧客螢幕帳號登入，登入後再和收銀台配對。</p>
         <label className="field">
           <span className="field-label">帳號</span>
           <input name="username" autoComplete="username" required autoFocus />
@@ -277,8 +277,8 @@ function PairingScreen({ device, csrf }: { device: KioskDevice; csrf: string }) 
     <main className="kiosk-pairing">
       <section className="kiosk-pairing-card">
         <p className="kiosk-eyebrow">裝置已啟用 · {device.label}</p>
-        <h1>連接您的 POS 櫃檯</h1>
-        <p>請在 POS 輸入配對碼。配對完成後，此畫面會自動切換為顧客購物車。</p>
+        <h1>連接你的收銀台</h1>
+        <p>請在收銀台輸入這組配對碼。配對好之後，這個畫面會自動變成客人的購物車。</p>
         {pairingCode ? (
           <output className="kiosk-pairing-code" aria-label="配對碼">
             {pairingCode}
@@ -502,7 +502,7 @@ function KioskConsole({
       })
       .then(async ({ response }) => {
         if (!response.ok) {
-          setAckError("簽署任務已逾時或被撤回，正在重新載入…");
+          setAckError("客人太久沒簽或已取消，正在重新載入…");
         }
         await queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
       })

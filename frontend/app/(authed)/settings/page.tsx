@@ -170,8 +170,8 @@ function GeneralSettingsCard({
           required
         />
         <span className="hint">
-          預設 183 天（半年）。目前為 REPORT_ONLY：到期只列入待清理報表，不會刪除影像；
-          交易快照、hash 與事件仍保存五年。
+          預設 183 天（半年）。目前只會列出可清除的圖檔，不會自動刪除；
+          交易內容與簽署紀錄一律保存五年，不受這個天數影響。
         </span>
       </label>
       <label className="field">
@@ -392,7 +392,7 @@ function DineInCard({
       <div className="field">
         <span className="field-label">桌號清單</span>
         {tables.length === 0 ? (
-          <p className="hint">尚未設定桌號——在設定之前，POS 無法選擇「內用」。</p>
+          <p className="hint">還沒設定桌號。設定之前，收銀台不能選「內用」。</p>
         ) : (
           <ul className="dinein-table-list">
             {tables.map((table) => (

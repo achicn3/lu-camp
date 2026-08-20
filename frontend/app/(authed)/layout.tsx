@@ -18,7 +18,7 @@ type NavItem = { href: string; label: string; ready: boolean; managerOnly?: bool
 // MORE＝其餘功能，收進「更多」側邊選單（點漢堡開啟）。
 const PRIMARY_NAV: NavItem[] = [
   { href: "/", label: "首頁", ready: true },
-  { href: "/pos", label: "POS 結帳", ready: true },
+  { href: "/pos", label: "收銀結帳", ready: true },
   { href: "/sales", label: "交易紀錄", ready: true },
   { href: "/cash", label: "現金對帳", ready: true },
   { href: "/contacts", label: "會員/賣方", ready: true },

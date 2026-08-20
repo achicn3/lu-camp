@@ -384,7 +384,7 @@ function CreatePurchaseOrder({
         <span>搜尋一般商品（加入明細）</span>
         <input
           aria-label="搜尋一般商品"
-          placeholder="輸入品名或 SKU"
+          placeholder="輸入品名或商品編號"
           value={productSearchText}
           disabled={pendingCatalogCreate !== null || createProduct.isPending}
           onChange={(e) => {
@@ -425,7 +425,7 @@ function CreatePurchaseOrder({
                   <div className="pur-product-create-head">
                     <div>
                       <h3>建立一般商品</h3>
-                      <p className="hint">SKU 可留白，由系統自動產生；建立後會直接加入本張採購單。</p>
+                      <p className="hint">商品編號可以留白，系統會自動編；建立後會直接加入這張採購單。</p>
                     </div>
                     <button
                       type="button"
@@ -448,9 +448,9 @@ function CreatePurchaseOrder({
                       />
                     </label>
                     <label className="field">
-                      <span>SKU（選填）</span>
+                      <span>商品編號（選填）</span>
                       <input
-                        aria-label="一般商品 SKU"
+                        aria-label="一般商品編號"
                         placeholder="留白由系統產生"
                         value={pendingCatalogCreate?.body.sku ?? newProductSku}
                         disabled={pendingCatalogCreate !== null || createProduct.isPending}

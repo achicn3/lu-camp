@@ -7,7 +7,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "露營二手 POS",
+  title: "露營二手收銀系統",
   description: "門市操作系統：結帳、收購、庫存、現金對帳",
 };
 

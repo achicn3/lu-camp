@@ -912,7 +912,7 @@ export default function AcquisitionPage() {
       });
       const terminal = terminalResponse.data;
       if (!terminal?.paired_kiosk) {
-        throw new Error("請先將此 POS 櫃檯與顧客螢幕配對");
+        throw new Error("請先把這台收銀台和顧客螢幕配對");
       }
       if (!terminal.paired_kiosk.online) {
         throw new Error("顧客螢幕目前離線，無法進行收購簽署");
@@ -1109,7 +1109,7 @@ export default function AcquisitionPage() {
             <div className="acq-sign-wait">
               <p role="alert" className="form-error">
                 {signTask.data?.status === "EXPIRED"
-                  ? "簽署任務已逾時，請重新送出。"
+                  ? "客人太久沒有簽名，請重新送出給客人簽。"
                   : signTask.data?.status === "FAILED"
                     ? "此簽署已標記失敗，重試必須重新簽署。"
                     : "簽署已撤回。"}

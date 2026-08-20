@@ -251,7 +251,7 @@ describe("InventoryPage", () => {
     expect((screen.getByLabelText("低庫存提醒點") as HTMLInputElement).value).toBe("4");
     await user.click(screen.getByRole("button", { name: "重試並確認上架結果" }));
 
-    expect(await screen.findByText(/SKU AUTO-C1D2E3F4A5B6/)).toBeTruthy();
+    expect(await screen.findByText(/商品編號 AUTO-C1D2E3F4A5B6/)).toBeTruthy();
     expect(calls).toHaveLength(2);
     expect(calls[1]).toEqual(calls[0]);
   });

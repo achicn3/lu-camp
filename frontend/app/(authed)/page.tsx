@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCurrentRole } from "@/lib/useCurrentRole";
 
 const MODULES: { title: string; description: string; href: string; managerOnly?: boolean }[] = [
-  { title: "POS 結帳", description: "掃碼、購物車、餐飲點餐、收現找零、列印", href: "/pos" },
+  { title: "收銀結帳", description: "掃碼、購物車、餐飲點餐、收現找零、列印", href: "/pos" },
   { title: "現金對帳", description: "開帳／異動／結帳差異", href: "/cash" },
   { title: "會員/賣方", description: "查詢、建檔、點數、寄售與往來", href: "/contacts" },
   { title: "庫存", description: "序號品、一般商品、散裝堆、補印標籤", href: "/inventory" },

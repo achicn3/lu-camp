@@ -1803,7 +1803,7 @@ export default function PosPage() {
     mutationFn: async (
       action: "QUERY_PROVIDER" | "MANUAL_SUCCESS" | "MANUAL_FAILED",
     ) => {
-      if (!displayTerminal) throw new Error("找不到目前 POS 櫃檯");
+      if (!displayTerminal) throw new Error("找不到目前的收銀台");
       const manual = action !== "QUERY_PROVIDER";
       const { data, error } = await api.POST(
         "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
@@ -1825,7 +1825,7 @@ export default function PosPage() {
     onSuccess: async (data) => {
       setDisplayCart(data.cart);
       if (data.outcome === "STILL_UNCERTAIN") {
-        setNotice("LINE Pay 平台目前仍無法確認結果；請稍後再查，或由店長依外部證據裁定。");
+        setNotice("LINE Pay 那邊還是查不到結果。請稍後再查一次，或由店長比對客人的付款紀錄後判斷。");
       } else if (data.outcome === "SUCCESS_CONFIRMED") {
         if (data.cart.sale_id == null) {
           setNotice("已確認 LINE Pay 付款成功，但本機交易尚未補成立；請勿重新付款並聯絡管理員。");
@@ -2124,7 +2124,7 @@ export default function PosPage() {
   if (completed !== null) {
     return (
       <section>
-        <h1 className="page-title">POS 結帳</h1>
+        <h1 className="page-title">收銀結帳</h1>
         <div className="card pos-complete">
           <h2>
             {completed.payment_method === "LINE_PAY" ? "LINE Pay 收款成功" : "已完成"}{" "}
@@ -2248,7 +2248,7 @@ export default function PosPage() {
 
   return (
     <section>
-      <h1 className="page-title">POS 結帳</h1>
+      <h1 className="page-title">收銀結帳</h1>
       <PosCustomerDisplay
         lines={saleLines}
         adjustments={adjustments}
@@ -2683,7 +2683,7 @@ export default function PosPage() {
                 <>
                   <p role="alert" className="form-error">
                     {signTask.data?.status === "EXPIRED"
-                      ? "簽署任務已逾時，購物車已解凍；請重新送出。"
+                      ? "客人太久沒有簽名，購物車已解鎖；請重新送出給客人簽。"
                       : signTask.data?.status === "FAILED"
                         ? "這次結帳沒有成功。剛才那次簽名已存檔備查，重新結帳要請客人再簽一次。"
                         : "簽署已作廢，請重新送出。"}

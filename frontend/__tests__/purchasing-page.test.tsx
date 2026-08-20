@@ -309,7 +309,7 @@ describe("/purchasing", () => {
     await user.type(screen.getByLabelText("搜尋一般商品"), "首次採購營繩");
     await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
     expect((screen.getByLabelText("一般商品名稱") as HTMLInputElement).value).toBe("首次採購營繩");
-    expect((screen.getByLabelText("一般商品 SKU") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("一般商品編號") as HTMLInputElement).value).toBe("");
     await user.type(screen.getByLabelText("一般商品售價"), "250");
     await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
 

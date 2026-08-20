@@ -148,7 +148,7 @@ function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => vo
     }
     const note = String(form.get("note")).trim();
     if (!note) {
-      setError("請填寫事由（留痕）");
+      setError("請填寫原因（會留下紀錄）");
       return;
     }
     mutation.mutate({ amount, note });

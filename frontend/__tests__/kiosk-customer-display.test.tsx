@@ -117,7 +117,7 @@ describe("/kiosk 客顯", () => {
     await user.click(screen.getByRole("button", { name: "啟用裝置" }));
 
     expect(await screen.findByText("482913")).toBeTruthy();
-    expect(screen.getByText(/請在 POS 輸入配對碼/)).toBeTruthy();
+    expect(screen.getByText(/請在收銀台輸入這組配對碼/)).toBeTruthy();
     const loginRequest = requests.find((r) =>
       r.url.endsWith("/api/v1/kiosk/device-sessions"),
     );

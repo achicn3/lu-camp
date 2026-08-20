@@ -860,7 +860,7 @@ function CreateCatalogProduct() {
     },
     onSuccess: (data) => {
       clearPendingCatalogCreate(catalogCreateStoreId);
-      setOkMsg(`已上架「${data.name}」（SKU ${data.sku}），初始庫存 0，可於採購補貨頁建採購單補貨。`);
+      setOkMsg(`已上架「${data.name}」（商品編號 ${data.sku}），目前庫存 0，可到採購補貨頁開採購單進貨。`);
       setSku("");
       setName("");
       setUnitPrice("");
@@ -891,9 +891,9 @@ function CreateCatalogProduct() {
         )}
         <div className="inv-catalog-create-grid">
           <label className="field">
-            <span>SKU（選填）</span>
+            <span>商品編號（選填）</span>
             <input
-              aria-label="SKU"
+              aria-label="商品編號"
               placeholder="留白由系統產生"
               value={pendingCatalogCreate?.body.sku ?? sku}
               disabled={pendingCatalogCreate !== null || create.isPending}
@@ -977,7 +977,7 @@ function CatalogPanel() {
   return (
     <div className="inv-panel">
       <CreateCatalogProduct />
-      <SearchBar placeholder="品名 / SKU" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="品名 / 商品編號" onSearch={(value) => { setQ(value); setPage(0); }}>
         <label className="inv-check">
           <input
             type="checkbox"
@@ -991,7 +991,7 @@ function CatalogPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["SKU", "品名", "單價", "現有量", "再訂購點", "操作"]}
+        headers={["商品編號", "品名", "單價", "現有量", "再訂購點", "操作"]}
       >
         {rows.map((product) => {
           const low = isLowStock(product.quantity_on_hand, product.reorder_point);
