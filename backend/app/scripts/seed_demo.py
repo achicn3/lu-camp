@@ -58,13 +58,17 @@ from app.core.db import get_sessionmaker
 from app.core.national_id import _LETTER_VALUES, _WEIGHTS, is_valid_national_id
 from app.core.time import STORE_TIME_ZONE, store_date, utc_now
 from app.modules.acquisition.models import Acquisition
-from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
+from app.modules.acquisition.schemas import (
+    AcquisitionCreate,
+    AcquisitionItemIn,
+    AcquisitionLotIn,
+)
 from app.modules.acquisition.service import AcquisitionService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
-from app.modules.inventory.models import CatalogProduct, SerializedItem
+from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
@@ -84,6 +88,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
     AcquisitionType,
+    BulkAcquisitionBasis,
     ContactRole,
     Grade,
     PayoutMethod,
@@ -266,6 +271,83 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
         InvariantResult("散裝批餘量不為負", negative == 0, f"檢查 {lots} 堆")
     )
 
+    # 6b. 散裝批 remaining_qty ＝ total_qty − 已售件數；歸零者須為 SOLD_OUT
+    lot_drift = await session.scalar(
+        text(
+            "SELECT count(*) FROM ("
+            "  SELECT b.id FROM bulk_lots b"
+            "  LEFT JOIN sale_lines l ON l.bulk_lot_id = b.id"
+            "    AND l.store_id = b.store_id"
+            "  LEFT JOIN sales s ON s.id = l.sale_id AND s.status <> 'VOIDED'"
+            "  WHERE b.store_id = :sid"
+            "  GROUP BY b.id, b.total_qty, b.remaining_qty"
+            "  HAVING b.total_qty - COALESCE(sum(CASE WHEN s.id IS NULL THEN 0 ELSE l.qty END), 0)"
+            "         <> b.remaining_qty"
+            ") t"
+        ),
+        {"sid": store_id},
+    )
+    results.append(
+        InvariantResult("散裝批餘量＝總量−已售", int(lot_drift or 0) == 0, f"檢查 {lots} 堆")
+    )
+    bad_status = await _count(
+        session,
+        "bulk_lots",
+        f"store_id = {store_id} AND ((remaining_qty = 0) <> (status = 'SOLD_OUT'))",
+    )
+    results.append(
+        InvariantResult("散裝批歸零即 SOLD_OUT", bad_status == 0, f"檢查 {lots} 堆")
+    )
+
+    # 一般商品庫存不得為負（採購收貨加、銷售扣）
+    neg_stock = await _count(
+        session, "catalog_products", f"store_id = {store_id} AND quantity_on_hand < 0"
+    )
+    catalog_n = await _count(session, "catalog_products", f"store_id = {store_id}")
+    results.append(
+        InvariantResult("一般商品庫存不為負", neg_stock == 0, f"檢查 {catalog_n} 項商品")
+    )
+
+    # 4. 現金抽屜對帳：每個已結班別的 variance 必須有值（差異需記錄）
+    unrecorded = await _count(
+        session,
+        "cash_sessions",
+        f"store_id = {store_id} AND status = 'CLOSED' AND variance IS NULL",
+    )
+    closed_n = await _count(
+        session, "cash_sessions", f"store_id = {store_id} AND status = 'CLOSED'"
+    )
+    results.append(
+        InvariantResult("已結班別皆有記錄差異", unrecorded == 0, f"檢查 {closed_n} 個班別")
+    )
+
+    # 2. 寄售售出必產生 consignment_settlement（不得有賣掉卻無結算的寄售品）
+    missing_settlement = await session.scalar(
+        text(
+            "SELECT count(*) FROM sale_lines l"
+            "  JOIN sales s ON s.id = l.sale_id"
+            "  JOIN serialized_items i ON i.id = l.serialized_item_id"
+            "  LEFT JOIN consignment_settlements c ON c.serialized_item_id = i.id"
+            " WHERE l.store_id = :sid AND s.status <> 'VOIDED'"
+            "   AND i.ownership_type = 'CONSIGNMENT' AND c.id IS NULL"
+        ),
+        {"sid": store_id},
+    )
+    consigned_sold = await _count(
+        session,
+        "sale_lines l JOIN sales s ON s.id = l.sale_id"
+        " JOIN serialized_items i ON i.id = l.serialized_item_id",
+        f"l.store_id = {store_id} AND s.status <> 'VOIDED'"
+        " AND i.ownership_type = 'CONSIGNMENT'",
+    )
+    results.append(
+        InvariantResult(
+            "寄售售出必有結算",
+            int(missing_settlement or 0) == 0,
+            f"檢查 {consigned_sold} 筆寄售銷售行",
+        )
+    )
+
     # 10. 購物金餘額 ＝ 異動流水加總
     # 餘額在獨立的 `store_credit_accounts.balance`（不在 contacts）；
     # 流水金額欄是 `signed_amount`（帶正負號），不是 `amount`。
@@ -399,6 +481,7 @@ async def seed_acquisitions(
     rng_seed: int,
     buyout_items: int,
     consignment_items: int,
+    bulk_lots: int = 0,
     batch_suffix: str = "",
     acquired_at: datetime | None = None,
 ) -> dict[str, int]:
@@ -415,31 +498,47 @@ async def seed_acquisitions(
     default_commission_pct = (
         await StoreSettingsService(session).get_effective_settings(store_id)
     ).default_commission_pct
-    made = {"buyout": 0, "consignment": 0}
+    made = {
+        "buyout": 0, "consignment": 0, "bulk_lots": 0,
+        "buyout_orders": 0, "consignment_orders": 0,
+    }
 
-    async def _one(kind: AcquisitionType, n: int) -> int:
-        ok = 0
-        for i in range(n):
-            category, names = rng.choice(_CATEGORIES)
-            listed = _pick_price(rng)
-            # 收購成本以毛利率回推（定價計算機的反向），確保成本 < 售價
-            cost = max(50, int(listed * rng.uniform(0.35, 0.62)))
-            item = AcquisitionItemIn(
-                name=f"{rng.choice(names)}（{category}）",
-                grade=rng.choice([Grade.S, Grade.A, Grade.B, Grade.C, Grade.D]),
-                listed_price=Decimal(listed),
-                # 買斷才有收購成本；寄售的成本概念是抽成，兩者不可混填
-                acquisition_cost=Decimal(cost) if kind is AcquisitionType.BUYOUT else None,
-                # 寄售**每筆都必須帶抽成**（schema 強制）。取店家設定的預設值，
-                # 不寫死 50——設定改了之後 seed 資料才不會與店家實際口徑脫節。
-                commission_pct=(
-                    None if kind is AcquisitionType.BUYOUT else default_commission_pct
-                ),
+    def _item(kind: AcquisitionType) -> AcquisitionItemIn:
+        category, names = rng.choice(_CATEGORIES)
+        listed = _pick_price(rng)
+        # 收購成本以毛利率回推（定價計算機的反向），確保成本 < 售價
+        cost = max(50, int(listed * rng.uniform(0.35, 0.62)))
+        return AcquisitionItemIn(
+            name=f"{rng.choice(names)}（{category}）",
+            grade=rng.choice([Grade.S, Grade.A, Grade.B, Grade.C, Grade.D]),
+            listed_price=Decimal(listed),
+            # 買斷才有收購成本；寄售的成本概念是抽成，兩者不可混填
+            acquisition_cost=Decimal(cost) if kind is AcquisitionType.BUYOUT else None,
+            # 寄售**每筆都必須帶抽成**（schema 強制）。取店家設定的預設值，
+            # 不寫死 50——設定改了之後 seed 資料才不會與店家實際口徑脫節。
+            commission_pct=(None if kind is AcquisitionType.BUYOUT else default_commission_pct),
+        )
+
+    async def _one(kind: AcquisitionType, n: int) -> tuple[int, int]:
+        """把 n 件商品**分裝成數張收購單**，回傳 (單數, 件數)。
+
+        §7.4 的「買斷收購 1,800–2,400」數的是**單**，「二手商品個體 8,000–10,000」
+        數的是**件**——約 3.3 件/單。先前一單一件，兩個目標不可能同時成立。
+        現實也是這樣：客人多半一次拿一整袋來賣，不會一件一趟。
+        """
+        orders = 0
+        items_done = 0
+        i = 0
+        while items_done < n:
+            # 每單 1–8 件，眾數 2–3（一整袋來賣），平均約 3.3
+            size = min(
+                n - items_done,
+                rng.choices([1, 2, 3, 4, 5, 6, 8], [20, 24, 20, 14, 10, 7, 5])[0],
             )
             data = AcquisitionCreate(
                 type=kind,
                 contact_id=rng.choice(seller_ids),
-                items=[item],
+                items=[_item(kind) for _ in range(size)],
                 payout_method=PayoutMethod.CASH,
             )
             # **冪等鍵必須帶批次識別**：只用序號的話，重跑（或換 --seed）會用同一把鍵
@@ -456,11 +555,51 @@ async def seed_acquisitions(
                 acq = await session.get(Acquisition, result.acquisition_id)
                 if acq is not None:
                     acq.created_at = acquired_at
+            orders += 1
+            items_done += size
+            i += 1
+        return orders, items_done
+
+    async def _lots(n: int) -> int:
+        """E 級散裝批：一次收一整堆（論斤／論袋），之後按件零售。"""
+        ok = 0
+        for i in range(n):
+            name, unit_price, qty_lo, qty_hi = rng.choice(_BULK_KINDS)
+            total_qty = rng.randint(qty_lo, qty_hi)
+            # 整堆的收購成本：每件成本壓在售價的 3–5 成（§7 不變量 #6 每件成本＝總價÷件數）
+            cost = max(50, int(unit_price * total_qty * rng.uniform(0.30, 0.50)))
+            data = AcquisitionCreate(
+                type=AcquisitionType.BULK_LOT,
+                contact_id=rng.choice(seller_ids),
+                lot=AcquisitionLotIn(
+                    name=name,
+                    acquisition_cost=Decimal(cost),
+                    acquisition_basis=rng.choice(
+                        [BulkAcquisitionBasis.WEIGHT, BulkAcquisitionBasis.BAG]
+                    ),
+                    total_qty=total_qty,
+                    unit_price=Decimal(unit_price),
+                ),
+                payout_method=PayoutMethod.CASH,
+            )
+            result = await svc.create_acquisition(
+                store_id,
+                manager_id,
+                data,
+                idempotency_key=f"seed-{batch}-lot-{i}",
+            )
+            if acquired_at is not None:
+                acq = await session.get(Acquisition, result.acquisition_id)
+                if acq is not None:
+                    acq.created_at = acquired_at
             ok += 1
         return ok
 
-    made["buyout"] = await _one(AcquisitionType.BUYOUT, buyout_items)
-    made["consignment"] = await _one(AcquisitionType.CONSIGNMENT, consignment_items)
+    made["buyout_orders"], made["buyout"] = await _one(AcquisitionType.BUYOUT, buyout_items)
+    made["consignment_orders"], made["consignment"] = await _one(
+        AcquisitionType.CONSIGNMENT, consignment_items
+    )
+    made["bulk_lots"] = await _lots(bulk_lots)
     await session.commit()
     return made
 
@@ -793,10 +932,30 @@ def _fnb_basket(
     return [(item, rng.choices([1, 2, 3], [6, 3, 1])[0]) for item in picked]
 
 
-# 收購送件的季節性（§7.3）：3–5 月（露季結束出清）與 1 月（年前整理）為高峰
+# 散裝批（E 級，CLAUDE.md §7 不變量 #6）：整堆收進來、按件零售。
+# 露營場收購最常見的就是這類「一箱雜物」。(名稱, 單價, 件數下限, 件數上限)
+_BULK_KINDS: tuple[tuple[str, int, int, int], ...] = (
+    ("雜項營釘 一批", 20, 40, 200),
+    ("二手營繩 一批", 35, 30, 120),
+    ("露營小物 綜合", 50, 40, 150),
+    ("鍋具零件 一批", 60, 20, 80),
+    ("燈具配件 一批", 45, 25, 100),
+    ("收納袋 二手一批", 40, 30, 120),
+    ("餐具 二手一批", 25, 50, 200),
+    ("帳篷配件 一批", 55, 20, 90),
+    ("瓦斯罐轉接頭 一批", 70, 15, 60),
+    ("童軍繩 短段一批", 15, 60, 250),
+)
+
+
+# 收購送件的季節性（§7.3）：3–5 月（露季結束出清）與 1 月（年前整理）為高峰。
+#
+# **秋冬底線刻意拉高、峰谷比刻意壓平**：原本的 0.6–1.6 純粹反映「客人什麼時候
+# 主動送東西來」，但那會讓 10–2 月的裝備旺季把貨架抽乾——實測跑到 10 月時在庫
+# 只剩 35 件。真實店家在旺季前會**主動去調貨**，不會坐等客人上門。
 _INTAKE_SEASONALITY = {
-    1: 1.6, 2: 0.8, 3: 1.5, 4: 1.5, 5: 1.4, 6: 0.7,
-    7: 0.6, 8: 0.6, 9: 0.9, 10: 1.0, 11: 0.9, 12: 1.0,
+    1: 1.30, 2: 0.90, 3: 1.30, 4: 1.30, 5: 1.25, 6: 0.85,
+    7: 0.80, 8: 0.85, 9: 1.00, 10: 1.05, 11: 1.00, 12: 1.05,
 }
 
 
@@ -841,6 +1000,8 @@ async def seed_daily_sales(
     daily_intake: float,
     fnb_per_day: float,
     catalog_per_day: float,
+    bulk_per_day: float,
+    warmup_days: int,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -855,7 +1016,17 @@ async def seed_daily_sales(
     made = {
         "sales": 0, "sessions": 0, "buyout": 0, "consignment": 0,
         "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
+        "bulk_lots": 0, "bulk_lines": 0,
+        "buyout_orders": 0, "consignment_orders": 0,
     }
+    # 暖身期的產出**分開計數**：§7.4 的目標數字談的是 12 個月視窗，
+    # 把暖身期混進去會讓「達標」變成假的。
+    warm = dict.fromkeys(made, 0)
+    in_window = True
+
+    def bump(key: str, n: int = 1) -> None:
+        (made if in_window else warm)[key] += n
+
     cost_by_sku = {
         f"NEW-{index + 1:04d}": cost
         for index, (_name, _price, cost, _reorder) in enumerate(_CATALOG_PRODUCTS)
@@ -875,9 +1046,14 @@ async def seed_daily_sales(
     )
     rng.shuffle(pool)
     cursor = 0
+    max_seen_item_id = max((item.id for item in pool), default=0)
 
-    for offset in range(days, 0, -1):
+    # **暖身期**：視窗開始前先營運一段時間，讓貨架上本來就有存貨。
+    # 從零庫存起跑的話，10–2 月的裝備旺季會把貨架抽乾（實測 10 月只剩 35 件在庫）——
+    # 真實店家在報表視窗開始的那一天，本來就有前幾個月累積的庫存。
+    for offset in range(days + warmup_days, 0, -1):
         day = today - timedelta(days=offset)
+        in_window = offset <= days
         if day.weekday() == 1 and rng.random() < 0.5:  # 週二不定期公休
             continue
         n = _daily_sale_count(day, rng, base=base_per_day)
@@ -898,15 +1074,15 @@ async def seed_daily_sales(
             day.year, day.month, day.day, 9, 30, tzinfo=STORE_TIME_ZONE
         ).astimezone(UTC)
         await session.commit()
-        made["sessions"] += 1
+        bump("sessions")
 
         # 補貨：低於補貨點就開採購單並收貨。**走完整 PO → 收貨流程**，
         # 庫存異動、成本快照與採購單狀態機才會真的被觸發。
         if catalog and suppliers:
-            made["purchase_orders"] += await restock_catalog(
+            bump("purchase_orders", await restock_catalog(
                 session, store_id, manager_id, suppliers, catalog, rng,
                 day=day, moment=opened.opened_at, cost_by_sku=cost_by_sku,
-            )
+            ))
 
         # **當日收購與當日銷售共用同一個班別**——現實中收購付現與銷售收現就是同一個抽屜。
         # 先前把收購全部塞進單一班別，該班別的應有現金變成 −720 萬（實測踩過）。
@@ -921,22 +1097,32 @@ async def seed_daily_sales(
                 rng_seed=rng_seed,
                 buyout_items=max(1, int(intake * 0.75)),
                 consignment_items=max(0, intake - int(intake * 0.75)),
+                # 散裝批：目標全年 150–250 堆（§7.4），約每 1.5 個營業日收進一堆
+                bulk_lots=1 if rng.random() < 0.65 else 0,
                 batch_suffix=day.isoformat(),
                 acquired_at=opened.opened_at,
             )
-            made["buyout"] += acquired_today["buyout"]
-            made["consignment"] += acquired_today["consignment"]
-            # 當日新入庫的也要進可售池（今天收、今天就可能賣出）
+            for key, count in acquired_today.items():
+                bump(key, count)
+            # 當日新入庫的也要進可售池（今天收、今天就可能賣出）。
+            # **以 `id > 已見最大值` 取增量**：先前用 `id.not_in(池中未售清單)`，
+            # 在上萬件時會組出帶數千個參數的 SQL，每天一次——跑滿一年就是主要成本。
             fresh = list(
                 await session.scalars(
-                    select(SerializedItem).where(
+                    select(SerializedItem)
+                    .where(
                         SerializedItem.store_id == store_id,
                         SerializedItem.status == SerializedItemStatus.IN_STOCK,
-                        SerializedItem.id.not_in([p.id for p in pool[cursor:]] or [0]),
+                        SerializedItem.id > max_seen_item_id,
                     )
+                    .order_by(SerializedItem.id)
                 )
             )
-            pool.extend(i for i in fresh if i.status == SerializedItemStatus.IN_STOCK)
+            if fresh:
+                max_seen_item_id = fresh[-1].id
+                # 插在未售段的隨機位置，避免「一律先進先出」這種不真實的取用順序
+                for item in fresh:
+                    pool.insert(rng.randint(cursor, len(pool)), item)
 
         for i in range(n):
             if cursor >= len(pool):  # 庫存賣完就停止（不是錯誤，但要讓呼叫端看得到）
@@ -957,7 +1143,7 @@ async def seed_daily_sales(
             )
             # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
             sale.created_at = moment
-            made["sales"] += 1
+            bump("sales")
 
         # **一般商品**：可補貨，故同一個 SKU 能反覆賣出（與序號品的「一件一次」相反）。
         for i in range(n_catalog):
@@ -991,8 +1177,43 @@ async def seed_daily_sales(
                 idempotency_key=f"seed-cat-{day.isoformat()}-{i}",
             )
             sale.created_at = moment
-            made["sales"] += 1
-            made["catalog_lines"] += len(cat_basket)
+            bump("sales")
+            bump("catalog_lines", len(cat_basket))
+
+        # **散裝批**：一堆可分次賣（§7 不變量 #6：remaining_qty 扣減後不得 < 0、歸零轉 SOLD_OUT）。
+        open_lots = list(
+            await session.scalars(
+                select(BulkLot).where(
+                    BulkLot.store_id == store_id, BulkLot.remaining_qty > 0
+                )
+            )
+        )
+        n_bulk = _daily_sale_count(day, rng, base=bulk_per_day) if open_lots else 0
+        for i in range(n_bulk):
+            open_lots = [lot for lot in open_lots if lot.remaining_qty > 0]
+            if not open_lots:
+                break
+            lot = rng.choice(open_lots)
+            qty = min(lot.remaining_qty, rng.choices([1, 2, 3, 5], [5, 3, 2, 1])[0])
+            moment = datetime(
+                day.year, day.month, day.day,
+                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+            ).astimezone(UTC)
+            sale = await sales_svc.create_sale(
+                store_id,
+                manager_id,
+                lines=[
+                    SaleLineInput(line_type=SaleLineType.BULK_LOT, bulk_lot_id=lot.id, qty=qty)
+                ],
+                tenders=[
+                    TenderInput(tender_type=TenderType.CASH, amount=lot.unit_price * qty)
+                ],
+                buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.35 else None),
+                idempotency_key=f"seed-bulk-{day.isoformat()}-{i}",
+            )
+            sale.created_at = moment
+            bump("sales")
+            bump("bulk_lines")
 
         # **餐飲**：不扣庫存，故不受收購量牽制——這正是銷售量的主要來源（docs/37 §7.4.1）。
         for i in range(n_fnb):
@@ -1022,8 +1243,8 @@ async def seed_daily_sales(
                 idempotency_key=f"seed-fnb-{day.isoformat()}-{i}",
             )
             sale.created_at = moment
-            made["sales"] += 1
-            made["dine_in" if dine_in else "takeout"] += 1
+            bump("sales")
+            bump("dine_in" if dine_in else "takeout")
         await session.commit()
 
         # 當日結帳；counted 由 service 算出的 expected 決定（variance=0）
@@ -1034,7 +1255,7 @@ async def seed_daily_sales(
         ).astimezone(UTC)
         await session.commit()
 
-    return made
+    return {**made, **{f"warmup_{k}": v for k, v in warm.items()}}
 
 
 async def purge(session: AsyncSession, store_id: int) -> None:
@@ -1055,6 +1276,8 @@ async def run(
     daily_intake: float,
     fnb_per_day: float,
     catalog_per_day: float,
+    bulk_per_day: float,
+    warmup_days: int,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -1096,6 +1319,8 @@ async def run(
             daily_intake=daily_intake,
             fnb_per_day=fnb_per_day,
             catalog_per_day=catalog_per_day,
+            bulk_per_day=bulk_per_day,
+            warmup_days=warmup_days,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -1103,7 +1328,9 @@ async def run(
         report = SeedReport()
         report.counts["會員"] = len(contacts["members"])
         report.counts["賣方/寄售主"] = len(contacts["sellers"])
+        report.counts["收購-買斷單數"] = daily["buyout_orders"]
         report.counts["收購-買斷件數"] = acquired["buyout"]
+        report.counts["收購-寄售單數"] = daily["consignment_orders"]
         report.counts["收購-寄售件數"] = acquired["consignment"]
         report.counts["序號商品"] = await _count(
             session, "serialized_items", f"store_id = {store_id}"
@@ -1112,11 +1339,17 @@ async def run(
         report.counts["供應商"] = len(suppliers)
         report.counts["一般商品"] = len(catalog)
         report.counts["採購單"] = daily["purchase_orders"]
+        report.counts["散裝批"] = daily["bulk_lots"]
         report.counts["銷售"] = daily["sales"]
         report.counts["餐飲-內用組數"] = daily["dine_in"]
         report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
+        report.counts["（暖身期）銷售"] = daily["warmup_sales"]
+        report.counts["（暖身期）班別"] = daily["warmup_sessions"]
+        report.counts["（暖身期）收購件數"] = (
+            daily["warmup_buyout"] + daily["warmup_consignment"]
+        )
         report.counts["聯絡人"] = await _count(session, "contacts", f"store_id = {store_id}")
         report.invariants = await verify_invariants(session, store_id)
         return report
@@ -1127,12 +1360,19 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42, help="固定亂數種子（相同種子＝相同資料）")
     parser.add_argument("--purge", action="store_true", help="清除本腳本產生的資料")
     # 分段建置期間可先跑小批量把整條路徑走通，再放大到目標量
-    parser.add_argument("--intake", type=float, default=3.0, help="每個營業日平均收購件數")
-    parser.add_argument("--days", type=int, default=3, help="回溯的營業天數")
-    parser.add_argument("--per-day", type=float, default=8.0, help="平日基準裝備銷售筆數")
-    parser.add_argument("--fnb-per-day", type=float, default=6.0, help="平日基準餐飲組數")
+    parser.add_argument("--intake", type=float, default=24.0, help="每個營業日平均收購件數")
+    parser.add_argument("--days", type=int, default=365, help="回溯的營業天數")
+    parser.add_argument("--per-day", type=float, default=22.0, help="平日基準裝備銷售筆數")
+    parser.add_argument("--fnb-per-day", type=float, default=5.4, help="平日基準餐飲組數")
     parser.add_argument(
-        "--catalog-per-day", type=float, default=5.0, help="平日基準一般商品銷售筆數"
+        "--catalog-per-day", type=float, default=6.0, help="平日基準一般商品銷售筆數"
+    )
+    parser.add_argument("--bulk-per-day", type=float, default=3.3, help="平日基準散裝批銷售筆數")
+    parser.add_argument(
+        "--warmup-days",
+        type=int,
+        default=150,
+        help="視窗開始前先營運的天數（讓貨架上本來就有存貨；其產出分開計數）",
     )
     parser.add_argument(
         "--out",
@@ -1150,6 +1390,8 @@ def main() -> None:
             daily_intake=args.intake,
             fnb_per_day=args.fnb_per_day,
             catalog_per_day=args.catalog_per_day,
+            bulk_per_day=args.bulk_per_day,
+            warmup_days=args.warmup_days,
         )
     )
     rendered = report.render()
