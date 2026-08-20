@@ -59,6 +59,7 @@ import app.modules.stocktake.models
 import app.modules.storecredit.models  # noqa: F401
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
+from app.core.money import round_ntd
 from app.core.national_id import _LETTER_VALUES, _WEIGHTS, is_valid_national_id
 from app.core.time import STORE_TIME_ZONE, store_date, utc_now
 from app.modules.acquisition.models import Acquisition
@@ -68,6 +69,8 @@ from app.modules.acquisition.schemas import (
     AcquisitionLotIn,
 )
 from app.modules.acquisition.service import AcquisitionService
+from app.modules.callticket.service import CallTicketService
+from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.service import ConsignmentService
@@ -90,22 +93,28 @@ from app.modules.purchasing.schemas import (
 from app.modules.purchasing.service import PurchasingService
 from app.modules.returns.service import ReturnLineInput, ReturnsService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.models import DiscountReason, GiftReason, Sale, SaleLine
+from app.modules.sales.pricing import DiscountRequest
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
+from app.modules.stocktake.service import StocktakeService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.scripts.seed_dev_user import DevUserSeed, upsert_dev_user
 from app.shared.enums import (
     AcquisitionType,
+    AdjustmentScope,
     BulkAcquisitionBasis,
+    CalculationMethod,
     ConsignmentSettlementStatus,
     ContactRole,
     Grade,
+    OwnershipType,
     PayoutMethod,
+    SaleLineKind,
     SaleLineType,
     SaleStatus,
     SerializedItemStatus,
@@ -597,6 +606,8 @@ async def seed_acquisitions(
     seller_ids: list[int],
     member_seller_ids: list[int],
     kiosk: KioskSetup | None,
+    brands: list[tuple[int, list[int]]],
+    categories: dict[str, int],
     rng: random.Random,
     *,
     rng_seed: int,
@@ -630,10 +641,21 @@ async def seed_acquisitions(
         listed = _pick_price(rng)
         # 收購成本以毛利率回推（定價計算機的反向），確保成本 < 售價
         cost = max(50, int(listed * rng.uniform(0.35, 0.62)))
+        # **掛上品牌/型號/分類**：沒有這些，庫存頁的篩選、分類毛利報表、
+        # 定價規則頁全部沒東西可看。約一成是雜牌（真實店家也收得到）。
+        brand_id: int | None = None
+        model_id: int | None = None
+        if brands and rng.random() < 0.90:
+            brand_id, model_ids = rng.choice(brands)
+            if model_ids and rng.random() < 0.75:
+                model_id = rng.choice(model_ids)
         return AcquisitionItemIn(
             name=f"{rng.choice(names)}（{category}）",
             grade=rng.choice([Grade.S, Grade.A, Grade.B, Grade.C, Grade.D]),
             listed_price=Decimal(listed),
+            brand_id=brand_id,
+            product_model_id=model_id,
+            category_id=categories.get(category),
             # 買斷才有收購成本；寄售的成本概念是抽成，兩者不可混填
             acquisition_cost=Decimal(cost) if kind is AcquisitionType.BUYOUT else None,
             # 寄售**每筆都必須帶抽成**（schema 強制）。取店家設定的預設值，
@@ -747,6 +769,7 @@ async def seed_acquisitions(
                 contact_id=rng.choice(seller_ids),
                 lot=AcquisitionLotIn(
                     name=name,
+                    category_id=categories.get("配件零件"),
                     acquisition_cost=Decimal(cost),
                     acquisition_basis=rng.choice(
                         [BulkAcquisitionBasis.WEIGHT, BulkAcquisitionBasis.BAG]
@@ -884,6 +907,181 @@ async def touch_kiosk(session: AsyncSession, store_id: int, device_id: int) -> N
     if device is None or device.store_id != store_id:
         raise SeedFailed(f"顧客螢幕 {device_id} 不存在或不屬於本店")
     device.last_seen_at = datetime.now(UTC)
+
+
+# 露營品牌與型號（docs/37 §7.6）。真實二手店的庫存一定掛得上品牌，
+# 「品牌/型號」的篩選與報表沒有資料就是空的。
+_BRANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Snow Peak", ("Amenity Dome", "Land Breeze", "Entry Pack TT", "IGT 系統桌")),
+    ("Coleman", ("Tough Dome", "Weathermaster", "Cooler 54QT", "Lantern 286A")),
+    ("Logos", ("Tradcanvas", "neos PANEL", "丸洗い寝袋", "T/C Tepee")),
+    ("Nordisk", ("Asgard 12.6", "Reisa 6", "Oppland 3", "Utgard 13.2")),
+    ("MSR", ("Hubba Hubba NX", "PocketRocket", "WhisperLite", "Elixir 2")),
+    ("Helinox", ("Chair One", "Chair Two", "Table One", "Cot One")),
+    ("Petromax", ("HK500", "Atago", "鑄鐵鍋 ft6", "Perkomax")),
+    ("Iwatani", ("風防王", "達人爐", "岩谷卡式爐", "燒烤爐")),
+    ("Thermos", ("保溫壺 1L", "燜燒罐", "保冷提袋", "保溫瓶 900ml")),
+    ("Naturehike", ("雲尚 2", "星河帳", "自動充氣墊", "戶外折疊椅")),
+    ("Captain Stag", ("鹿牌炊具", "折疊桌", "露營推車", "焚火台")),
+    ("Uniflame", ("焚火台 L", "薪grill", "fan 折疊桌", "char-cole")),
+)
+
+
+async def seed_taxonomy(
+    session: AsyncSession, store_id: int
+) -> tuple[list[tuple[int, list[int]]], dict[str, int]]:
+    """建立品牌、型號、分類（分類會自動 seed 各成色帶定價規則）。
+
+    回傳 (品牌與其型號 id, 分類名→id)。收購時掛上去——沒有品牌/分類的庫存，
+    庫存頁的篩選、分類毛利報表與定價規則頁全部沒東西可看。
+    """
+    svc = InventoryService(session)
+    brands: list[tuple[int, list[int]]] = []
+    for name, models in _BRANDS:
+        brand = await svc.get_or_create_brand(store_id, name)
+        model_ids = [
+            (await svc.get_or_create_product_model(store_id, brand.id, model)).id
+            for model in models
+        ]
+        brands.append((brand.id, model_ids))
+
+    default_margin = (
+        await StoreSettingsService(session).get_effective_settings(store_id)
+    ).default_margin_pct
+    categories: dict[str, int] = {}
+    for category_name, _names in _CATEGORIES:
+        category = await svc.get_or_create_category(
+            store_id, category_name, default_target_margin_pct=default_margin
+        )
+        categories[category_name] = category.id
+    await session.commit()
+    return brands, categories
+
+
+# 門市活動（docs/21）。歷史活動讓活動頁與活動成效報表有東西可看。
+_CAMPAIGNS: tuple[tuple[str, int, int, int], ...] = (
+    # (名稱, 折扣%, 幾天前開始, 檔期天數)
+    ("開學季露營裝備特賣", 15, 330, 10),
+    ("雙十連假出遊季", 12, 315, 5),
+    ("秋季換季出清", 20, 280, 14),
+    ("黑色星期五", 25, 265, 4),
+    ("年終回饋", 18, 240, 7),
+    ("農曆年前大掃除特賣", 15, 205, 10),
+    ("開工好禮", 10, 190, 5),
+    ("春季露營季開跑", 12, 150, 14),
+    ("清明連假特惠", 15, 135, 4),
+    ("母親節感恩回饋", 20, 105, 7),
+    ("端午連假", 12, 80, 4),
+    ("暑期親子露營", 15, 50, 21),
+    ("夏日清涼特賣", 18, 20, 10),
+)
+
+
+async def seed_campaigns(
+    session: AsyncSession, store_id: int, manager_id: int, today: date
+) -> int:
+    """建立歷史門市活動（皆已結束）。
+
+    **不在銷售期間真的套用折扣**：`create_sale` 讀的是 `datetime.now(UTC)`，
+    而本腳本的銷售是「先建立、再回填 created_at」，時間對不起來。
+    活動本身的紀錄與檔期報表仍需要這些列。
+    """
+    svc = CampaignService(session)
+    made = 0
+    for name, pct, days_ago, span in _CAMPAIGNS:
+        starts = moment_of(today - timedelta(days=days_ago), 10, 0)
+        campaign = await svc.create_campaign(
+            store_id,
+            name=name,
+            discount_pct=pct,
+            starts_at=starts,
+            ends_at=starts + timedelta(days=span),
+            applies_owned_serialized=True,
+            applies_owned_bulk=True,
+            applies_catalog=True,
+            applies_consignment=False,  # 寄售品不參加（寄售人談好的價格）
+            created_by=manager_id,
+        )
+        await svc.activate(store_id, campaign.id, actor_user_id=manager_id)
+        await svc.end(store_id, campaign.id, actor_user_id=manager_id)
+        campaign.created_at = starts
+        made += 1
+    await session.commit()
+    return made
+
+
+async def seed_call_tickets(
+    session: AsyncSession, store_id: int, manager_id: int, rng: random.Random
+) -> int:
+    """今日的叫號清單（docs/38）。
+
+    **只建今天的**：docs/38 的裁示是「跨日就清掉」，昨天未完成的號碼在今天沒有意義。
+    留幾筆 WAITING（畫面上看得到候位）、其餘標記完成。
+    """
+    svc = CallTicketService(session)
+    made = 0
+    for index, (name, note) in enumerate(_CALL_TICKETS):
+        ticket = await svc.create(
+            store_id,
+            name=name,
+            link=f"https://forms.gle/seed{index + 1:04d}" if rng.random() < 0.7 else None,
+            note=note,
+            actor_user_id=manager_id,
+        )
+        made += 1
+        # 前面幾位已經處理完；最後三位還在等
+        if index < len(_CALL_TICKETS) - 3:
+            await svc.complete(store_id, ticket.id, actor_user_id=manager_id)
+    await session.commit()
+    return made
+
+
+_CALL_TICKETS: tuple[tuple[str, str | None], ...] = (
+    ("陳先生", "帶了一頂 Snow Peak 帳篷"),
+    ("林小姐", None),
+    ("黃太太", "兩箱雜物，需要秤重"),
+    ("張先生", "問過電話，說有一組桌椅"),
+    ("李小姐", None),
+    ("王先生", "寄售，先估價"),
+    ("吳小姐", "睡袋三個"),
+    ("劉先生", None),
+)
+
+
+async def seed_stocktakes(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    rng: random.Random,
+    today: date,
+    *,
+    count: int,
+) -> int:
+    """定期盤點一般商品（docs/19）。
+
+    **實點數要與系統量有差**，否則盤點差異報表整頁都是 0——真實盤點一定盤得出短溢。
+    確認盤點會即時校正現量並寫 ADJUST 帳，故庫存不變條件仍須成立。
+    """
+    svc = StocktakeService(session)
+    made = 0
+    for index in range(count):
+        stocktake = await svc.create_stocktake(store_id, actor_user_id=manager_id)
+        counts: dict[int, int] = {}
+        for line in stocktake.lines:
+            # 約一成的品項盤出差異（多為短少：耗損、竊損、漏登）
+            if rng.random() < 0.10:
+                delta = rng.choice([-3, -2, -1, -1, -1, 1, 2])
+                counts[line.catalog_product_id] = max(0, line.system_qty + delta)
+            else:
+                counts[line.catalog_product_id] = line.system_qty
+        await svc.confirm_stocktake(store_id, stocktake.id, counts, actor_user_id=manager_id)
+        # 盤點時點回填：每季一次，往前推
+        moment = moment_of(today - timedelta(days=90 * (count - index) - 5), 20, 30)
+        stocktake.created_at = moment
+        stocktake.confirmed_at = moment
+        made += 1
+    await session.commit()
+    return made
 
 
 async def sign_affidavit(
@@ -1299,6 +1497,20 @@ def _daily_sale_count(day: date, rng: random.Random, *, base: float) -> int:
     return max(0, int(rng.gauss(base * factor, base * factor * 0.25)))
 
 
+_DISCOUNT_NOTES = (
+    "外袋有磨損，經店長同意折價",
+    "拉鍊需更換，議價後成交",
+    "展示品，客人可接受小刮痕",
+    "熟客回饋",
+    "同行介紹",
+)
+
+_GIFT_NOTES = (
+    "隨帳篷附贈的營釘",
+    "活動期間滿額贈",
+    "客人反映有小瑕疵，補一個小物",
+)
+
 _RETURN_REASONS = (
     "客人尺寸不合",
     "回家後發現有瑕疵",
@@ -1337,6 +1549,8 @@ async def seed_daily_sales(
     seller_ids: list[int],
     member_seller_ids: list[int],
     kiosk: KioskSetup | None,
+    brands: list[tuple[int, list[int]]],
+    categories: dict[str, int],
     menu_items: list[MenuItem],
     suppliers: list[Supplier],
     catalog: list[CatalogProduct],
@@ -1368,6 +1582,23 @@ async def seed_daily_sales(
     cash = CashDrawerService(session)
     consignment_svc = ConsignmentService(session)
     returns_svc = ReturnsService(session)
+    # 折扣/贈品原因是 migration 就備好的主檔；沒有就不產生對應資料而非硬塞
+    # 折扣/贈品原因是 migration 就備好的主檔。**要記下哪些原因必填備註**——
+    # 「其他」這類原因不帶備註會被 service 擋下（實測踩過）。
+    discount_reasons = list(
+        await session.execute(
+            select(DiscountReason.id, DiscountReason.requires_note).where(
+                DiscountReason.store_id == store_id, DiscountReason.is_active.is_(True)
+            )
+        )
+    )
+    gift_reasons = list(
+        await session.execute(
+            select(GiftReason.id, GiftReason.requires_note).where(
+                GiftReason.store_id == store_id, GiftReason.is_active.is_(True)
+            )
+        )
+    )
     made = {
         "sales": 0, "sessions": 0, "buyout": 0, "consignment": 0,
         "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
@@ -1453,6 +1684,8 @@ async def seed_daily_sales(
                 seller_ids,
                 member_seller_ids,
                 kiosk,
+                brands,
+                categories,
                 rng,
                 rng_seed=rng_seed,
                 affidavit_pct=affidavit_pct,
@@ -1505,12 +1738,61 @@ async def seed_daily_sales(
                 day.year, day.month, day.day,
                 _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
             ).astimezone(UTC)
+            # **臨時折扣**（docs/32）：店員議價、瑕疵折讓、熟客優惠。約 18% 的單有折扣。
+            # 折扣改變成交價，故收款金額必須用 service 報回來的 total，不能用牌價。
+            gear_lines = [
+                SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)
+            ]
+            adjustments: list[DiscountRequest] | None = None
+            amount = item.listed_price
+            # **寄售品不可折扣**（寄售人談好的價格，店家無權自行讓利）——
+            # service 會擋下「此商品不可折扣（寄售、餐飲或贈品）」。只折買斷品。
+            own = item.ownership_type is OwnershipType.OWNED
+            if own and discount_reasons and rng.random() < 0.18:
+                pct = rng.choice([5, 5, 10, 10, 10, 15, 20])
+                reason_id, requires_note = rng.choice(discount_reasons)
+                adjustments = [
+                    DiscountRequest(
+                        scope=AdjustmentScope.ORDER,
+                        method=CalculationMethod.PERCENTAGE,
+                        value=Decimal(pct),
+                        reason_id=reason_id,
+                        note=rng.choice(_DISCOUNT_NOTES) if requires_note else None,
+                    )
+                ]
+                amount = item.listed_price - round_ntd(item.listed_price * Decimal(pct) / 100)
+
+            # **贈品**（docs/32）：買大件送小東西。贈品照樣扣庫存，只是成交 0 元。
+            # 贈品同理只送自己的貨——把寄售人的東西免費送出去不合理。
+            # **要往後找**合適的贈品（自有、且價值明顯低於主商品）：只看游標那一件的話，
+            # 條件幾乎不會成立，贈品數會是 0（實測踩過）。
+            if gift_reasons and rng.random() < 0.06:
+                for offset in range(0, min(40, len(pool) - cursor)):
+                    gift_item = pool[cursor + offset]
+                    if (
+                        gift_item.ownership_type is not OwnershipType.OWNED
+                        or gift_item.listed_price > item.listed_price / 4
+                    ):
+                        continue
+                    pool.pop(cursor + offset)
+                    gift_reason_id, gift_needs_note = rng.choice(gift_reasons)
+                    gear_lines.append(
+                        SaleLineInput(
+                            line_type=SaleLineType.SERIALIZED,
+                            item_code=gift_item.item_code,
+                            line_kind=SaleLineKind.GIFT,
+                            gift_reason_id=gift_reason_id,
+                            gift_note=(rng.choice(_GIFT_NOTES) if gift_needs_note else None),
+                        )
+                    )
+                    break
             sale = await sales_svc.create_sale(
                 store_id,
                 manager_id,
-                lines=[SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
-                tenders=[TenderInput(tender_type=TenderType.CASH, amount=item.listed_price)],
+                lines=gear_lines,
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
                 buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.45 else None),
+                adjustments=adjustments,
                 idempotency_key=f"seed-sale-{day.isoformat()}-{i}",
             )
             # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
@@ -1813,6 +2095,8 @@ async def run(
         # 供應商 → 一般商品（初始庫存 0，靠每日補貨的採購收貨進貨）
         # 手持簽署的前置：顧客螢幕 + POS 櫃檯 + 配對
         kiosk = await seed_kiosk(session, store_id, manager_id)
+        # 品牌／型號／分類（分類會自動 seed 各成色帶定價規則）
+        brands, categories = await seed_taxonomy(session, store_id)
         suppliers = await seed_suppliers(session, store_id)
         catalog = await seed_catalog(session, store_id)
 
@@ -1826,6 +2110,8 @@ async def run(
             contacts["sellers"],
             contacts["member_sellers"],
             kiosk,
+            brands,
+            categories,
             menu_items,
             suppliers,
             catalog,
@@ -1845,6 +2131,14 @@ async def run(
             affidavit_pct=affidavit_pct,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
+
+        # 銷售跑完之後才盤點（要盤到有進出過的庫存）與建活動紀錄
+        today = store_date(utc_now())
+        campaigns_made = await seed_campaigns(session, store_id, manager_id, today)
+        stocktakes_made = await seed_stocktakes(
+            session, store_id, manager_id, rng, today, count=4
+        )
+        tickets_made = await seed_call_tickets(session, store_id, manager_id, rng)
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
 
         report = SeedReport()
@@ -1857,6 +2151,12 @@ async def run(
         report.counts["序號商品"] = await _count(
             session, "serialized_items", f"store_id = {store_id}"
         )
+        report.counts["品牌"] = len(brands)
+        report.counts["分類"] = len(categories)
+        report.counts["型號"] = await _count(session, "product_models", f"store_id = {store_id}")
+        report.counts["分類定價規則"] = await _count(
+            session, "category_pricing_rules", f"store_id = {store_id}"
+        )
         report.counts["菜單品項"] = len(menu_items)
         report.counts["供應商"] = len(suppliers)
         report.counts["一般商品"] = len(catalog)
@@ -1867,6 +2167,20 @@ async def run(
         report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
+        report.counts["門市活動"] = campaigns_made
+        report.counts["盤點單"] = stocktakes_made
+        report.counts["盤點差異行"] = await _count(
+            session,
+            "stocktake_lines",
+            f"store_id = {store_id} AND counted_qty IS NOT NULL AND counted_qty <> system_qty",
+        )
+        report.counts["叫號（今日）"] = tickets_made
+        report.counts["銷售折扣"] = await _count(
+            session, "sale_adjustments", f"store_id = {store_id}"
+        )
+        report.counts["贈品明細"] = await _count(
+            session, "sale_lines", f"store_id = {store_id} AND line_kind = 'GIFT'"
+        )
         report.counts["簽名任務"] = await _count(
             session, "signature_tasks", f"store_id = {store_id}"
         )
