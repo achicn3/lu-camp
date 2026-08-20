@@ -30,6 +30,7 @@ import os
 import random
 import struct
 import sys
+import time
 import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -237,6 +238,27 @@ def _guard_environment(database_url: str) -> None:
             f"拒絕執行：資料庫 `{db_name}` 不在允許清單 {sorted(_ALLOWED_DB_NAMES)}。"
             "本腳本會灌入上萬筆資料，跑錯庫就是災難。"
         )
+
+
+async def bump_platform_id_sequences(session: AsyncSession, base: int) -> None:
+    """把 `sales` 與 `invoice_allowances` 的 id 序列推到一個高起點。
+
+    **這關係到真的送上 Amego 時會不會撞號。** 平台單號是由本地 id 確定性導出的
+    （`OrderId = S{store}-{sale}`、折讓 `L{store}-{allowance}`），而測試環境是
+    **官方公開共用帳號**——`S1-1`、`S1-14`、`S1-20`、`S1-50` 這些早就被別人（和我們
+    先前的測試）用掉了。從 1 開始編號，一上傳就是一整片「OrderId 重複」。
+
+    起點預設取當下的 epoch 秒，所以**每一次 seed 都拿到全新的號段**：重建資料庫後
+    重跑不會與自己上一次的資料撞號（同一個 id 這次指的是另一筆交易）。
+    """
+    # DDL 不吃繫結參數（`ALTER SEQUENCE ... RESTART WITH $1` 是語法錯誤），
+    # 故起點以 int() 收斂後內插——來源是 argparse 的 int，不是外部字串。
+    start = int(base)
+    if start < 1:
+        raise SeedFailed(f"id 起點必須為正整數，收到 {base}")
+    for sequence in ("sales_id_seq", "invoice_allowances_id_seq"):
+        await session.execute(text(f"ALTER SEQUENCE {sequence} RESTART WITH {start}"))
+    await session.commit()
 
 
 async def _require_prerequisites(session: AsyncSession) -> tuple[int, int]:
@@ -1510,7 +1532,12 @@ _MENU_ITEMS: tuple[tuple[str, int, str], ...] = (
 
 
 async def seed_settings(
-    session: AsyncSession, store_id: int, manager_id: int, *, einvoice: bool
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    *,
+    einvoice: bool,
+    linepay: bool,
 ) -> None:
     """持久化店家設定列，並維護內用桌號（相依鏈的前置步驟）。
 
@@ -1526,6 +1553,17 @@ async def seed_settings(
         )
     await StoreSettingsService(session).update_settings(
         store_id, actor_user_id=manager_id, patch=patch
+    )
+    # 行動支付（docs/30）：台灣Pay 免串 API、無手續費；LINE Pay 走沙盒真收費，
+    # 手續費 1.5%（P2e 驗收紀錄：270 元收 4 元）。
+    await StoreSettingsService(session).update_settings(
+        store_id,
+        actor_user_id=manager_id,
+        patch=SettingsUpdateRequest(
+            linepay_enabled=linepay,
+            linepay_fee_pct=Decimal("0.015"),
+            taiwanpay_fee_pct=Decimal("0"),
+        ),
     )
     # 溢價率調整留痕（docs/16 §6.1）：真實店家會依市況調整購物金溢價。
     for rate in ("0.05", "0.08", "0.06"):
@@ -1831,6 +1869,7 @@ async def seed_daily_sales(
     variance_rate: float,
     slow_mover_pct: float,
     affidavit_pct: float,
+    taiwanpay_pct: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -2107,11 +2146,18 @@ async def seed_daily_sales(
                         )
                     )
                     break
+            # **台灣Pay**（docs/30）：店員另用台灣Pay App 收款、免串 API，系統只記錄。
+            # 非現金，不進抽屜——現金對帳的應有現金不含這些（§7 不變量 #4）。
+            pay_type = (
+                TenderType.TAIWAN_PAY
+                if rng.random() < taiwanpay_pct
+                else TenderType.CASH
+            )
             sale = await sales_svc.create_sale(
                 store_id,
                 manager_id,
                 lines=gear_lines,
-                tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
+                tenders=[TenderInput(tender_type=pay_type, amount=amount)],
                 buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.45 else None),
                 adjustments=adjustments,
                 idempotency_key=f"seed-sale-{day.isoformat()}-{i}",
@@ -2397,6 +2443,9 @@ async def run(
     einvoice: bool,
     manual_invoice_count: int,
     ack_count: int,
+    taiwanpay_pct: float,
+    linepay: bool,
+    sale_id_base: int,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -2410,8 +2459,12 @@ async def run(
             return SeedReport(counts={"已清除": 1}, invariants=[])
 
         rng = random.Random(rng_seed)
+        # **先推高 id 序列**：平台單號由本地 id 導出，共用測試帳號上低號早被用掉了。
+        await bump_platform_id_sequences(session, sale_id_base)
         # 相依鏈第 0 步：設定。內用桌號沒維護的話，**任何內用單都開不出來**。
-        await seed_settings(session, store_id, manager_id, einvoice=einvoice)
+        await seed_settings(
+            session, store_id, manager_id, einvoice=einvoice, linepay=linepay
+        )
         # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
         contacts = await seed_contacts(session, store_id, rng)
         # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
@@ -2453,6 +2506,7 @@ async def run(
             variance_rate=variance_rate,
             slow_mover_pct=slow_mover_pct,
             affidavit_pct=affidavit_pct,
+            taiwanpay_pct=taiwanpay_pct,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
 
@@ -2524,6 +2578,9 @@ async def run(
             f"store_id = {store_id} AND counted_qty IS NOT NULL AND counted_qty <> system_qty",
         )
         report.counts["叫號（今日）"] = tickets_made
+        report.counts["台灣Pay 收款"] = await _count(
+            session, "sale_tenders", f"store_id = {store_id} AND tender_type = 'TAIWAN_PAY'"
+        )
         report.counts["購物金折抵結帳"] = daily["credit_sales"]
         report.counts["客顯購物車"] = await _count(
             session, "cart_sessions", f"store_id = {store_id}"
@@ -2604,6 +2661,18 @@ def main() -> None:
     )
     parser.add_argument("--acks", type=int, default=120, help="交易紀錄簽收的筆數（docs/23 K5）")
     parser.add_argument(
+        "--taiwanpay-pct", type=float, default=0.12, help="以台灣Pay 收款的比例（docs/30，免 API）"
+    )
+    parser.add_argument(
+        "--no-linepay", action="store_true", help="設定中不啟用 LINE Pay（預設啟用）"
+    )
+    parser.add_argument(
+        "--sale-id-base",
+        type=int,
+        default=int(time.time()),
+        help="sales/invoice_allowances 的 id 起點（決定 Amego 平台單號，避免共用沙盒撞號）",
+    )
+    parser.add_argument(
         "--out",
         default="seed_verification.txt",
         help="驗證報告輸出路徑",
@@ -2629,6 +2698,9 @@ def main() -> None:
             einvoice=not args.no_einvoice,
             manual_invoice_count=args.manual_invoices,
             ack_count=args.acks,
+            taiwanpay_pct=args.taiwanpay_pct,
+            linepay=not args.no_linepay,
+            sale_id_base=args.sale_id_base,
         )
     )
     rendered = report.render()
