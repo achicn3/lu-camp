@@ -289,16 +289,28 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
     """
     results: list[InvariantResult] = []
 
-    # 1. 序號商品一旦 SOLD 不可再被售出（同一 serialized_item 不得出現在兩張未作廢的單）
+    # 1. 序號商品一旦 SOLD 不可再被售出。
+    #
+    # **不是「不得出現在兩張單」**——退貨後商品回到在庫，再賣出去完全合法，而且是
+    # 真實店家每天在做的事。第一版寫成「出現兩次即違規」，資料一豐富就誤報
+    # （實測抓到一件：賣出 → 退貨 → 再賣出）。**是檢查寫錯，不是資料有問題。**
+    #
+    # 正確口徑：**已售次數 − 已退次數 ≤ 1**，也就是不得在沒有退貨的情況下被賣兩次。
     dup = await session.scalar(
         text(
             "SELECT count(*) FROM ("
-            "  SELECT l.serialized_item_id FROM sale_lines l"
+            "  SELECT l.serialized_item_id,"
+            "         count(*) - COALESCE(("
+            "           SELECT sum(rl.qty) FROM return_lines rl"
+            "           JOIN sale_lines l2 ON l2.id = rl.sale_line_id"
+            "           WHERE l2.serialized_item_id = l.serialized_item_id"
+            "         ), 0) AS net_sold"
+            "  FROM sale_lines l"
             "  JOIN sales s ON s.id = l.sale_id"
             "  WHERE l.store_id = :sid AND l.serialized_item_id IS NOT NULL"
             "    AND s.status <> 'VOIDED'"
-            "  GROUP BY l.serialized_item_id HAVING count(*) > 1"
-            ") t"
+            "  GROUP BY l.serialized_item_id"
+            ") t WHERE t.net_sold > 1"
         ),
         {"sid": store_id},
     )
@@ -2432,6 +2444,7 @@ async def run(
     *,
     rng_seed: int,
     do_purge: bool,
+    only_tickets: bool,
     days: int,
     base_per_day: float,
     daily_intake: float,
@@ -2463,6 +2476,15 @@ async def run(
             return SeedReport(counts={"已清除": 1}, invariants=[])
 
         rng = random.Random(rng_seed)
+        if only_tickets:
+            # **叫號只有「今天」有意義**（docs/38 裁示：跨日就清掉）。整批 seed 跑一次要
+            # 十幾分鐘，但叫號隔天就過期——截圖當天用這個旗標重刷即可，不必重跑全部。
+            made = await seed_call_tickets(session, store_id, manager_id, rng)
+            report = SeedReport()
+            report.counts["叫號（今日）"] = made
+            report.invariants = await verify_invariants(session, store_id)
+            return report
+
         # **先推高 id 序列**：平台單號由本地 id 導出，共用測試帳號上低號早被用掉了。
         await bump_platform_id_sequences(session, sale_id_base)
         # 相依鏈第 0 步：設定。內用桌號沒維護的話，**任何內用單都開不出來**。
@@ -2624,6 +2646,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="模擬營運資料（docs/37 P0）")
     parser.add_argument("--seed", type=int, default=42, help="固定亂數種子（相同種子＝相同資料）")
     parser.add_argument("--purge", action="store_true", help="清除本腳本產生的資料")
+    parser.add_argument(
+        "--only-tickets",
+        action="store_true",
+        help="只重刷今日叫號（docs/38 跨日就清掉；截圖當天用，不必重跑整批）",
+    )
     # 分段建置期間可先跑小批量把整條路徑走通，再放大到目標量
     parser.add_argument("--intake", type=float, default=24.0, help="每個營業日平均收購件數")
     parser.add_argument("--days", type=int, default=365, help="回溯的營業天數")
@@ -2690,6 +2717,7 @@ def main() -> None:
         run(
             rng_seed=args.seed,
             do_purge=args.purge,
+            only_tickets=args.only_tickets,
             days=args.days,
             base_per_day=args.per_day,
             daily_intake=args.intake,
