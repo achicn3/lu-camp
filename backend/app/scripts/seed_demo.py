@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import random
 import sys
 from dataclasses import dataclass, field
 
@@ -33,13 +34,61 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
+from app.core.national_id import _LETTER_VALUES, _WEIGHTS, is_valid_national_id
+from app.modules.contacts.schemas import ContactCreate
+from app.modules.contacts.service import ContactService
 from app.modules.store.models import Store
 from app.modules.user.models import User
+from app.shared.enums import ContactRole
+from app.shared.exceptions import DuplicateContact
 
 _ALLOWED_ENVS = {"development", "test"}
 # **資料庫允許清單**（docs/37 §7.9）：硬綁單一名稱會讓它在 e2e 庫上拒跑；
 # 但也不能不擋——這支腳本會灌入上萬筆資料，跑錯庫就是災難。
 _ALLOWED_DB_NAMES = {"lucamp_manual", "lucamp_e2e"}
+
+
+# ── 假資料規範（docs/37 §7.8）────────────────────────────────
+# 姓名用固定合成名單、電話用**未配發號段**、信箱一律 @example.com、地址虛構。
+_SURNAMES = "陳林黃張李王吳劉蔡楊許鄭謝洪郭邱曾廖賴徐周葉蘇莊呂江何蕭羅高"
+_GIVEN = (
+    "志明 淑芬 家豪 雅婷 俊傑 怡君 建宏 美玲 冠廷 詩涵 承翰 佳蓉 宗翰 郁婷 彥廷 "
+    "宜蓁 柏翰 欣怡 品豪 筱涵 昱翔 婉婷 冠宇 思穎 育誠 佩君 峻瑋 曉雯 泓瑋 于萱"
+).split()
+_STREETS = "營區 山線 溪畔 林蔭 星空 曠野 露光 帳篷 野炊 湖畔"
+
+
+def _fake_name(rng: random.Random) -> str:
+    return rng.choice(_SURNAMES) + rng.choice(_GIVEN)
+
+
+def _fake_phone(serial: int) -> str:
+    """未配發號段 09xx——**不可用真實號段**，避免簡訊/來電打到真人。"""
+    return f"0900{serial:06d}"
+
+
+def _fake_address(rng: random.Random) -> str:
+    return f"南投縣仁愛鄉{rng.choice(_STREETS)}路{rng.randint(1, 300)}號"
+
+
+def _make_national_id(rng: random.Random) -> str:
+    """產生**檢核碼合法**的身分證字號（店主裁示 2026-08-19）。
+
+    原訂刻意產生錯誤檢核碼，但收購對象必須有 national_id、而建檔 API 拒絕
+    檢核碼錯誤的值，兩者無解——裁示以「全程走 service」為優先。
+    殘留風險（號碼對應真實格式）已記於 docs/37 §7.8。
+    """
+    letter = rng.choice(sorted(_LETTER_VALUES))
+    gender = rng.choice("12")
+    body = "".join(str(rng.randint(0, 9)) for _ in range(7))
+    value = _LETTER_VALUES[letter]
+    numbers = [value // 10, value % 10, int(gender), *(int(c) for c in body)]
+    partial = sum(n * w for n, w in zip(numbers, _WEIGHTS[:-1], strict=True))
+    check = (10 - partial % 10) % 10
+    candidate = f"{letter}{gender}{body}{check}"
+    if not is_valid_national_id(candidate):  # pragma: no cover - 演算法自洽時不會發生
+        raise SeedFailed(f"產生的身分證字號檢核碼不合法：{candidate}")
+    return candidate
 
 
 class SeedFailed(SystemExit):
@@ -189,6 +238,66 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
     return results
 
 
+# 會員消費分佈（docs/37 §7.7）：約 60% 單次、30% 偶發、10% 常客。
+# 這裡只決定「角色與規模」，實際消費次數在銷售階段依此分佈抽樣。
+_MEMBER_COUNT = 2200
+_SELLER_COUNT = 850
+
+
+async def seed_contacts(
+    session: AsyncSession, store_id: int, rng: random.Random
+) -> dict[str, list[int]]:
+    """建立會員與賣方／寄售主（相依鏈第 1 步，docs/37 §7.2.1）。
+
+    **全程走 `ContactService.create_contact`**（店主裁示）：手機唯一性、身分證檢核碼、
+    加密與盲索引去重都由 service 負責，不繞過。
+
+    回傳 {"members": [...], "sellers": [...]} 供後續階段使用——收購只能掛在
+    **有 national_id 的** 賣方/寄售主身上（`AcquisitionRequiresNationalId`）。
+    """
+    svc = ContactService(session)
+    members: list[int] = []
+    sellers: list[int] = []
+    serial = 0
+
+    for _ in range(_MEMBER_COUNT):
+        serial += 1
+        try:
+            contact = await svc.create_contact(
+                store_id,
+                ContactCreate(
+                    name=_fake_name(rng),
+                    phone=_fake_phone(serial),
+                    roles=[ContactRole.MEMBER],
+                    address=_fake_address(rng),
+                ),
+            )
+        except DuplicateContact:  # pragma: no cover - 手機以流水號產生，不應撞號
+            continue
+        members.append(contact.id)
+
+    for _ in range(_SELLER_COUNT):
+        serial += 1
+        # 賣方/寄售主**必須**有 national_id，否則收購階段會被擋下
+        try:
+            contact = await svc.create_contact(
+                store_id,
+                ContactCreate(
+                    name=_fake_name(rng),
+                    phone=_fake_phone(serial),
+                    national_id=_make_national_id(rng),
+                    roles=[ContactRole.SELLER, ContactRole.CONSIGNOR],
+                    address=_fake_address(rng),
+                ),
+            )
+        except DuplicateContact:  # pragma: no cover
+            continue
+        sellers.append(contact.id)
+
+    await session.commit()
+    return {"members": members, "sellers": sellers}
+
+
 async def purge(session: AsyncSession, store_id: int) -> None:
     """清除本腳本產生的資料（`--purge`）。
 
@@ -210,11 +319,14 @@ async def run(*, rng_seed: int, do_purge: bool) -> SeedReport:
             await session.commit()
             return SeedReport(counts={"已清除": 1}, invariants=[])
 
-        # TODO(P0 分段建置)：依序加入銷售／收購／寄售／現金班別／簽名任務。
-        # 每加一類就在 verify_invariants 補對應檢查，維持「驗證先行」。
-        _ = rng_seed
+        rng = random.Random(rng_seed)
+        # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
+        # TODO(P0 分段建置)：接著加入收購／庫存 → 現金班別＋銷售 → 寄售結算 → 退貨 → 簽名。
+        contacts = await seed_contacts(session, store_id, rng)
 
         report = SeedReport()
+        report.counts["會員"] = len(contacts["members"])
+        report.counts["賣方/寄售主"] = len(contacts["sellers"])
         report.counts["銷售"] = await _count(session, "sales", f"store_id = {store_id}")
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
         report.counts["聯絡人"] = await _count(session, "contacts", f"store_id = {store_id}")
