@@ -396,6 +396,32 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
             )
         )
 
+    # 滯銷庫存必須存在（§7.4：期末在庫含 150+ 件滯銷 180 天以上）。
+    #
+    # 不是領域不變量，是**手冊需求**：滯銷庫存報表若一筆都沒有，那一頁就沒東西可截圖。
+    # 只有在資料橫跨 180 天以上時才檢查——小批量試跑不該被這條擋下。
+    span_days = await session.scalar(
+        text(
+            "SELECT COALESCE(EXTRACT(DAY FROM now() - min(intake_date)), 0)"
+            " FROM serialized_items WHERE store_id = :sid"
+        ),
+        {"sid": store_id},
+    )
+    if int(span_days or 0) >= 200:
+        aged = await _count(
+            session,
+            "serialized_items",
+            f"store_id = {store_id} AND status = 'IN_STOCK'"
+            " AND intake_date < now() - interval '180 days'",
+        )
+        results.append(
+            InvariantResult(
+                "期末在庫含滯銷品（180 天以上）",
+                aged >= 150,
+                f"檢查到 {aged} 件（目標 150+）",
+            )
+        )
+
     # 10. 購物金餘額 ＝ 異動流水加總
     # 餘額在獨立的 `store_credit_accounts.balance`（不在 contacts）；
     # 流水金額欄是 `signed_amount`（帶正負號），不是 `amount`。
@@ -1089,6 +1115,10 @@ _RETURN_REASONS = (
 )
 
 
+# 滯銷品每次被選中的機率。壓得比正常品低很多，它們才會在架上待滿 180 天以上。
+_SLOW_MOVER_SALE_RATE = 0.02
+
+
 def moment_of(day: date, hour: int, minute: int = 0) -> datetime:
     """台北營業日的某個時點，轉成 UTC。**時間序全靠回填**，故到處都要用。"""
     return datetime(
@@ -1126,6 +1156,7 @@ async def seed_daily_sales(
     return_rate: float,
     void_rate: float,
     variance_rate: float,
+    slow_mover_pct: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -1174,6 +1205,8 @@ async def seed_daily_sales(
     rng.shuffle(pool)
     cursor = 0
     max_seen_item_id = max((item.id for item in pool), default=0)
+    # 滯銷品另池存放：不隨主池的游標被依序賣掉，會一直留在架上變老
+    slow_pool: list[SerializedItem] = []
 
     # **暖身期**：視窗開始前先營運一段時間，讓貨架上本來就有存貨。
     # 從零庫存起跑的話，10–2 月的裝備旺季會把貨架抽乾（實測 10 月只剩 35 件在庫）——
@@ -1248,15 +1281,26 @@ async def seed_daily_sales(
             )
             if fresh:
                 max_seen_item_id = fresh[-1].id
-                # 插在未售段的隨機位置，避免「一律先進先出」這種不真實的取用順序
                 for item in fresh:
-                    pool.insert(rng.randint(cursor, len(pool)), item)
+                    # **滯銷品**：真實店家一定有賣不掉的東西（開價過高、款式冷門、
+                    # 有使用痕跡）。若每件都終究會賣掉，期末在庫全是近期入庫的，
+                    # §7.4 要求的「150+ 件滯銷 180 天以上」會是 0——滯銷報表整頁空白。
+                    # （實測：修好 intake_date 之後最舊的在庫品也只有 5 個月。）
+                    if rng.random() < slow_mover_pct:
+                        slow_pool.append(item)
+                    else:
+                        # 插在未售段的隨機位置，避免「一律先進先出」這種不真實的取用順序
+                        pool.insert(rng.randint(cursor, len(pool)), item)
 
         for i in range(n):
-            if cursor >= len(pool):  # 庫存賣完就停止（不是錯誤，但要讓呼叫端看得到）
+            # 滯銷品偶爾還是會賣出去（有人識貨、或降價出清）——但機率低很多。
+            if slow_pool and rng.random() < _SLOW_MOVER_SALE_RATE:
+                item = slow_pool.pop(rng.randrange(len(slow_pool)))
+            elif cursor >= len(pool):  # 庫存賣完就停止（不是錯誤，但要讓呼叫端看得到）
                 break
-            item = pool[cursor]
-            cursor += 1
+            else:
+                item = pool[cursor]
+                cursor += 1
             moment = datetime(
                 day.year, day.month, day.day,
                 _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
@@ -1545,6 +1589,7 @@ async def run(
     return_rate: float,
     void_rate: float,
     variance_rate: float,
+    slow_mover_pct: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -1592,6 +1637,7 @@ async def run(
             return_rate=return_rate,
             void_rate=void_rate,
             variance_rate=variance_rate,
+            slow_mover_pct=slow_mover_pct,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -1665,6 +1711,10 @@ def main() -> None:
     parser.add_argument(
         "--variance-rate", type=float, default=0.07, help="每個營業日結帳點數對不上的機率"
     )
+    # §7.4 要求期末在庫含 150+ 件滯銷 180 天以上
+    parser.add_argument(
+        "--slow-mover-pct", type=float, default=0.07, help="入庫時被歸為滯銷品的比例"
+    )
     parser.add_argument(
         "--out",
         default="seed_verification.txt",
@@ -1686,6 +1736,7 @@ def main() -> None:
             return_rate=args.return_rate,
             void_rate=args.void_rate,
             variance_rate=args.variance_rate,
+            slow_mover_pct=args.slow_mover_pct,
         )
     )
     rendered = report.render()
