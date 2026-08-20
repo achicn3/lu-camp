@@ -30,7 +30,6 @@ import os
 import random
 import struct
 import sys
-import time
 import zlib
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -248,8 +247,13 @@ async def bump_platform_id_sequences(session: AsyncSession, base: int) -> None:
     **官方公開共用帳號**——`S1-1`、`S1-14`、`S1-20`、`S1-50` 這些早就被別人（和我們
     先前的測試）用掉了。從 1 開始編號，一上傳就是一整片「OrderId 重複」。
 
-    起點預設取當下的 epoch 秒，所以**每一次 seed 都拿到全新的號段**：重建資料庫後
-    重跑不會與自己上一次的資料撞號（同一個 id 這次指的是另一筆交易）。
+    起點預設在一個很寬的區間裡**隨機**取，讓每次 seed 拿到互不重疊的號段。
+
+    **不能用 epoch 秒當起點**（第一版就是這樣寫的，實測撞了）：epoch 一秒只走 1，
+    但一次 seed 在 16 分鐘內就吃掉近 18,000 個 id——兩次執行只要間隔不到 5 小時，
+    號段就會重疊。實際症狀是重建資料庫重跑後，開頭 29 筆全部撞上前一次已開立的發票，
+    被「對帳先行」擋成待人工對帳。隨機起點的碰撞機率則可忽略
+    （18,000 寬的窗落在 19 億的空間裡）。
     """
     # DDL 不吃繫結參數（`ALTER SEQUENCE ... RESTART WITH $1` 是語法錯誤），
     # 故起點以 int() 收斂後內插——來源是 argparse 的 int，不是外部字串。
@@ -2669,8 +2673,11 @@ def main() -> None:
     parser.add_argument(
         "--sale-id-base",
         type=int,
-        default=int(time.time()),
-        help="sales/invoice_allowances 的 id 起點（決定 Amego 平台單號，避免共用沙盒撞號）",
+        default=random.SystemRandom().randrange(10_000_000, 2_000_000_000),
+        help=(
+            "sales/invoice_allowances 的 id 起點（決定 Amego 平台單號，避免撞號）。"
+            "預設隨機——固定值或 epoch 都會讓連續兩次執行的號段重疊"
+        ),
     )
     parser.add_argument(
         "--out",
