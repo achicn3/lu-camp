@@ -65,8 +65,11 @@ from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.models import SerializedItem
+from app.modules.menu.models import MenuItem
+from app.modules.menu.service import MenuService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
+from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -77,9 +80,10 @@ from app.shared.enums import (
     PayoutMethod,
     SaleLineType,
     SerializedItemStatus,
+    ServiceMode,
     TenderType,
 )
-from app.shared.exceptions import DuplicateContact
+from app.shared.exceptions import DuplicateContact, DuplicateMenuItem
 
 _ALLOWED_ENVS = {"development", "test"}
 # **資料庫允許清單**（docs/37 §7.9）：硬綁單一名稱會讓它在 e2e 庫上拒跑；
@@ -452,6 +456,130 @@ async def seed_acquisitions(
     return made
 
 
+# 內用桌號。**沒有這一步就開不出內用單**：create_sale 會擋掉不在
+# `settings.dine_in_tables` 裡的桌號，而該設定預設是空清單（docs/35）。
+_DINE_IN_TABLES = ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]
+
+# 菜單（docs/35）。露營場邊小賣部的品項：熱飲、冷飲、簡餐、點心。
+# 價格為含稅整數元（CLAUDE.md §6）。
+_MENU_ITEMS: tuple[tuple[str, int, str], ...] = (
+    ("美式咖啡", 80, "飲品"),
+    ("拿鐵", 110, "飲品"),
+    ("卡布奇諾", 110, "飲品"),
+    ("熱可可", 100, "飲品"),
+    ("錫蘭紅茶", 70, "飲品"),
+    ("烏龍茶", 70, "飲品"),
+    ("鮮奶茶", 90, "飲品"),
+    ("氣泡水", 60, "飲品"),
+    ("可樂", 40, "飲品"),
+    ("運動飲料", 45, "飲品"),
+    ("礦泉水", 25, "飲品"),
+    ("生啤酒", 130, "飲品"),
+    ("手沖單品", 150, "飲品"),
+    ("柳橙汁", 80, "飲品"),
+    ("檸檬紅茶", 80, "飲品"),
+    ("牛肉麵", 180, "簡餐"),
+    ("咖哩飯", 160, "簡餐"),
+    ("炒泡麵", 120, "簡餐"),
+    ("烤吐司總匯", 110, "簡餐"),
+    ("熱狗堡", 90, "簡餐"),
+    ("義大利肉醬麵", 170, "簡餐"),
+    ("鹽酥雞", 100, "點心"),
+    ("薯條", 70, "點心"),
+    ("雞塊", 80, "點心"),
+    ("烤香腸", 60, "點心"),
+    ("棉花糖烤組", 120, "點心"),
+    ("爆米花", 50, "點心"),
+    ("鬆餅", 130, "點心"),
+    ("冰淇淋", 60, "點心"),
+    ("泡麵", 45, "點心"),
+)
+
+
+async def seed_settings(session: AsyncSession, store_id: int, manager_id: int) -> None:
+    """持久化店家設定列，並維護內用桌號（相依鏈的前置步驟）。
+
+    預設 `dine_in_tables` 是**空清單**，此時任何內用結帳都會被
+    `create_sale` 擋下（docs/35：桌號必須是設定頁維護過的那幾桌）。
+    """
+    await StoreSettingsService(session).update_settings(
+        store_id,
+        actor_user_id=manager_id,
+        patch=SettingsUpdateRequest(dine_in_tables=list(_DINE_IN_TABLES)),
+    )
+    await session.commit()
+
+
+async def seed_menu(session: AsyncSession, store_id: int, manager_id: int) -> list[MenuItem]:
+    """建立菜單品項；已存在同名者沿用（腳本可重跑）。"""
+    svc = MenuService(session)
+    items: list[MenuItem] = []
+    for order, (name, price, category) in enumerate(_MENU_ITEMS):
+        try:
+            items.append(
+                await svc.create_menu_item(
+                    store_id,
+                    name=name,
+                    unit_price=Decimal(price),
+                    category=category,
+                    sort_order=order,
+                    actor_user_id=manager_id,
+                )
+            )
+        except DuplicateMenuItem:
+            existing = await session.scalar(
+                select(MenuItem).where(MenuItem.store_id == store_id, MenuItem.name == name)
+            )
+            if existing is not None:
+                items.append(existing)
+    await session.commit()
+    return items
+
+
+# 餐飲季節性：與裝備**相反**——夏天露營旺、賣吃喝；冬天裝備旺、餐飲淡。
+# 兩者高峰不同時間，共用一張季節表會讓全年曲線變成假的同步波動。
+_FNB_SEASONALITY = {
+    1: 0.75, 2: 0.85, 3: 0.95, 4: 1.10, 5: 1.15, 6: 1.20,
+    7: 1.30, 8: 1.30, 9: 1.10, 10: 1.00, 11: 0.85, 12: 0.80,
+}
+
+# 內用佔比（docs/39 §3.2 的分母是「有餐飲的單」）。假日較多人坐下來吃。
+_DINE_IN_SHARE_WEEKDAY = 0.50
+_DINE_IN_SHARE_HOLIDAY = 0.62
+
+
+def _fnb_sale_count(day: date, rng: random.Random, *, base: float) -> int:
+    """某一營業日的餐飲組數。"""
+    factor = _FNB_SEASONALITY[day.month]
+    if day.weekday() >= 5:
+        factor *= _HOLIDAY_MULTIPLIER
+    return max(0, int(rng.gauss(base * factor, base * factor * 0.3)))
+
+
+def _fnb_hour(day: date, rng: random.Random) -> int:
+    """餐飲時段：午餐 11–13 與下午茶 14–17 兩個峰，晚間 18–20 次之。
+
+    與裝備的時段（14–18）**刻意不同**——docs/39 的時段分佈報表若兩者同形，
+    就看不出「餐飲有午餐峰」這個真實現象。
+    """
+    hours = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    weights = (
+        [1, 4, 6, 5, 4, 4, 3, 3, 3, 2, 1]
+        if day.weekday() >= 5
+        else [1, 3, 5, 4, 3, 3, 2, 2, 2, 1, 1]
+    )
+    return rng.choices(hours, weights)[0]
+
+
+def _fnb_basket(
+    menu_items: list[MenuItem], rng: random.Random, *, dine_in: bool
+) -> list[tuple[MenuItem, int]]:
+    """一組客人點的東西：內用份數較多（坐下來吃），外帶偏飲品。"""
+    n_kinds = rng.choices([1, 2, 3, 4], [4, 4, 2, 1] if dine_in else [6, 3, 1, 0])[0]
+    picked = rng.sample(menu_items, min(n_kinds, len(menu_items)))
+    return [(item, rng.choices([1, 2, 3], [6, 3, 1])[0]) for item in picked]
+
+
 # 收購送件的季節性（§7.3）：3–5 月（露季結束出清）與 1 月（年前整理）為高峰
 _INTAKE_SEASONALITY = {
     1: 1.6, 2: 0.8, 3: 1.5, 4: 1.5, 5: 1.4, 6: 0.7,
@@ -489,12 +617,14 @@ async def seed_daily_sales(
     manager_id: int,
     member_ids: list[int],
     seller_ids: list[int],
+    menu_items: list[MenuItem],
     rng: random.Random,
     *,
     rng_seed: int,
     days: int,
     base_per_day: float,
     daily_intake: float,
+    fnb_per_day: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -506,7 +636,7 @@ async def seed_daily_sales(
     """
     sales_svc = SalesService(session)
     cash = CashDrawerService(session)
-    made = {"sales": 0, "sessions": 0, "buyout": 0, "consignment": 0}
+    made = {"sales": 0, "sessions": 0, "buyout": 0, "consignment": 0, "dine_in": 0, "takeout": 0}
     today = store_date(utc_now())
 
     # **一次撈出可售清單再逐一取用**：每筆銷售各查一次資料庫，在上萬筆時是主要成本。
@@ -528,7 +658,8 @@ async def seed_daily_sales(
         if day.weekday() == 1 and rng.random() < 0.5:  # 週二不定期公休
             continue
         n = _daily_sale_count(day, rng, base=base_per_day)
-        if n == 0:
+        n_fnb = _fnb_sale_count(day, rng, base=fnb_per_day) if menu_items else 0
+        if n == 0 and n_fnb == 0:
             continue
 
         # 每一天都是獨立班別：先結掉殘留的，再開今天的
@@ -595,6 +726,37 @@ async def seed_daily_sales(
             # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
             sale.created_at = moment
             made["sales"] += 1
+
+        # **餐飲**：不扣庫存，故不受收購量牽制——這正是銷售量的主要來源（docs/37 §7.4.1）。
+        for i in range(n_fnb):
+            holiday = day.weekday() >= 5
+            share = _DINE_IN_SHARE_HOLIDAY if holiday else _DINE_IN_SHARE_WEEKDAY
+            dine_in = rng.random() < share
+            basket = _fnb_basket(menu_items, rng, dine_in=dine_in)
+            amount = sum((item.unit_price * qty for item, qty in basket), Decimal(0))
+            moment = datetime(
+                day.year, day.month, day.day,
+                _fnb_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+            ).astimezone(UTC)
+            sale = await sales_svc.create_sale(
+                store_id,
+                manager_id,
+                lines=[
+                    SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=item.id, qty=qty)
+                    for item, qty in basket
+                ],
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
+                # 外帶不累點、不折扣、不可用購物金（docs/35 §1.1），故不掛會員
+                buyer_contact_id=(
+                    rng.choice(member_ids) if dine_in and rng.random() < 0.30 else None
+                ),
+                service_mode=ServiceMode.DINE_IN if dine_in else ServiceMode.TAKEOUT,
+                table_no=rng.choice(_DINE_IN_TABLES) if dine_in else None,
+                idempotency_key=f"seed-fnb-{day.isoformat()}-{i}",
+            )
+            sale.created_at = moment
+            made["sales"] += 1
+            made["dine_in" if dine_in else "takeout"] += 1
         await session.commit()
 
         # 當日結帳；counted 由 service 算出的 expected 決定（variance=0）
@@ -624,6 +786,7 @@ async def run(
     days: int,
     base_per_day: float,
     daily_intake: float,
+    fnb_per_day: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -637,10 +800,14 @@ async def run(
             return SeedReport(counts={"已清除": 1}, invariants=[])
 
         rng = random.Random(rng_seed)
+        # 相依鏈第 0 步：設定。內用桌號沒維護的話，**任何內用單都開不出來**。
+        await seed_settings(session, store_id, manager_id)
         # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
         contacts = await seed_contacts(session, store_id, rng)
+        # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
+        menu_items = await seed_menu(session, store_id, manager_id)
 
-        # 相依鏈第 2＋3 步：**逐日開帳 → 當日收購 → 當日銷售 → 結帳**。
+        # 相依鏈第 3 步：**逐日開帳 → 當日收購 → 當日銷售 → 結帳**。
         # 收購與銷售共用當日班別（現實中就是同一個抽屜），現金等式才 per-session 成立。
         daily = await seed_daily_sales(
             session,
@@ -648,11 +815,13 @@ async def run(
             manager_id,
             contacts["members"],
             contacts["sellers"],
+            menu_items,
             rng,
             rng_seed=rng_seed,
             days=days,
             base_per_day=base_per_day,
             daily_intake=daily_intake,
+            fnb_per_day=fnb_per_day,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -665,7 +834,10 @@ async def run(
         report.counts["序號商品"] = await _count(
             session, "serialized_items", f"store_id = {store_id}"
         )
+        report.counts["菜單品項"] = len(menu_items)
         report.counts["銷售"] = daily["sales"]
+        report.counts["餐飲-內用組數"] = daily["dine_in"]
+        report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
         report.counts["聯絡人"] = await _count(session, "contacts", f"store_id = {store_id}")
@@ -680,7 +852,8 @@ def main() -> None:
     # 分段建置期間可先跑小批量把整條路徑走通，再放大到目標量
     parser.add_argument("--intake", type=float, default=3.0, help="每個營業日平均收購件數")
     parser.add_argument("--days", type=int, default=3, help="回溯的營業天數")
-    parser.add_argument("--per-day", type=float, default=8.0, help="平日基準銷售筆數")
+    parser.add_argument("--per-day", type=float, default=8.0, help="平日基準裝備銷售筆數")
+    parser.add_argument("--fnb-per-day", type=float, default=6.0, help="平日基準餐飲組數")
     parser.add_argument(
         "--out",
         default="seed_verification.txt",
@@ -695,6 +868,7 @@ def main() -> None:
             days=args.days,
             base_per_day=args.per_day,
             daily_intake=args.intake,
+            fnb_per_day=args.fnb_per_day,
         )
     )
     rendered = report.render()
