@@ -64,9 +64,18 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
-from app.modules.inventory.models import SerializedItem
+from app.modules.inventory.models import CatalogProduct, SerializedItem
+from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
+from app.modules.purchasing.models import Supplier
+from app.modules.purchasing.schemas import (
+    PurchaseOrderCreate,
+    PurchaseOrderLineCreate,
+    ReceiveLineIn,
+    SupplierCreate,
+)
+from app.modules.purchasing.service import PurchasingService
 from app.modules.sales.inputs import SaleLineInput, TenderInput
 from app.modules.sales.service import SalesService
 from app.modules.settings.schemas import SettingsUpdateRequest
@@ -456,6 +465,104 @@ async def seed_acquisitions(
     return made
 
 
+# 供應商（docs/19）。一般商品的進貨來源。
+_SUPPLIERS: tuple[tuple[str, str], ...] = (
+    ("山野戶外用品有限公司", "02-2345-6789"),
+    ("野樂實業股份有限公司", "04-2278-1122"),
+    ("大地露營器材行", "03-4567-8901"),
+    ("極光貿易有限公司", "02-8765-4321"),
+    ("溪畔食品批發", "05-2233-4455"),
+    ("光野照明科技", "07-3344-5566"),
+    ("台灣瓦斯罐工業", "06-2211-3344"),
+    ("雲頂紡織有限公司", "04-8899-7766"),
+)
+
+# 一般商品（新品）：消耗品與小配件為主——這類會反覆補貨、反覆賣出，
+# 正是序號品（一件一次）補不上的銷售量來源（§7.4.1）。
+# (名稱, 售價, 進價, 補貨點)
+_CATALOG_PRODUCTS: tuple[tuple[str, int, int, int], ...] = (
+    ("高山瓦斯罐 230g", 180, 110, 24),
+    ("高山瓦斯罐 450g", 280, 175, 18),
+    ("卡式瓦斯罐 三入", 150, 92, 20),
+    ("防風打火機", 120, 62, 15),
+    ("營燈電池 AA 四入", 90, 45, 30),
+    ("營燈電池 AAA 四入", 90, 45, 24),
+    ("18650 充電電池", 350, 210, 10),
+    ("營釘 鍛造 20cm 十入", 480, 290, 12),
+    ("營釘 鋁合金 18cm 十入", 260, 150, 12),
+    ("營繩 反光 4mm 20m", 220, 128, 15),
+    ("營繩調節片 十入", 120, 60, 15),
+    ("橡皮頭營槌", 450, 268, 8),
+    ("鍛造營槌", 890, 520, 6),
+    ("地布 300x300", 780, 460, 8),
+    ("天幕營柱 240cm", 680, 395, 10),
+    ("延長線 15m 防水", 850, 495, 8),
+    ("摺疊桌 蛋捲 90cm", 1580, 920, 5),
+    ("摺疊椅 克米特", 1880, 1120, 5),
+    ("月亮椅", 1280, 750, 6),
+    ("行軍床", 1980, 1180, 4),
+    ("充氣睡墊 單人", 1450, 850, 6),
+    ("自動充氣枕", 480, 275, 10),
+    ("睡袋內套 棉質", 520, 300, 8),
+    ("保溫壺 1L", 780, 450, 8),
+    ("鈦杯 450ml", 690, 400, 8),
+    ("不鏽鋼杯 三入", 320, 180, 12),
+    ("鑄鐵鍋 26cm", 2280, 1350, 3),
+    ("荷蘭鍋腳架", 880, 510, 5),
+    ("烤盤 波浪紋", 980, 570, 6),
+    ("露營餐具組 四人", 680, 390, 8),
+    ("砧板 摺疊", 280, 155, 12),
+    ("料理刀 附套", 450, 258, 8),
+    ("燜燒罐 500ml", 890, 520, 6),
+    ("保冷袋 20L", 780, 450, 6),
+    ("冰磚 大", 180, 95, 20),
+    ("水桶 摺疊 10L", 350, 198, 12),
+    ("水袋 12L", 420, 240, 10),
+    ("洗碗精 露營用", 120, 58, 24),
+    ("菜瓜布 三入", 60, 28, 30),
+    ("垃圾袋 露營用 十入", 80, 38, 30),
+    ("防蚊液 敵避 12%", 280, 158, 20),
+    ("防蚊手環 五入", 150, 78, 20),
+    ("蚊香 盤裝", 90, 42, 24),
+    ("急救包 基本款", 480, 275, 8),
+    ("暖暖包 十入", 150, 72, 30),
+    ("手電筒 頭燈", 580, 335, 10),
+    ("營燈 充電式", 980, 570, 8),
+    ("串燈 10m 暖白", 450, 260, 12),
+    ("太陽能充電板 20W", 1880, 1120, 3),
+    ("行動電源 20000mAh", 1280, 750, 5),
+    ("木炭 3kg", 180, 92, 24),
+    ("生火棒 十入", 120, 58, 24),
+    ("噴槍 卡式", 680, 395, 8),
+    ("柴火 相思木 5kg", 320, 175, 15),
+    ("防火地墊", 580, 335, 8),
+    ("焚火台 摺疊", 1480, 870, 4),
+    ("排煙帳篷專用煙囪", 2280, 1350, 2),
+    ("雨衣 連身", 380, 215, 12),
+    ("雨鞋 中筒", 680, 395, 8),
+    ("防水袋 20L", 420, 240, 10),
+    ("快乾毛巾 大", 280, 155, 15),
+    ("摺疊水盆", 320, 180, 12),
+    ("曬衣繩 附夾", 180, 92, 15),
+    ("露營車輪推車", 2680, 1580, 3),
+    ("裝備收納箱 60L", 880, 510, 6),
+    ("收納袋 分類六件組", 480, 275, 10),
+    ("帳篷修補片", 150, 72, 15),
+    ("防水噴劑", 380, 215, 12),
+    ("帳篷清潔劑", 280, 158, 12),
+    ("睡袋壓縮袋", 350, 198, 10),
+    ("登山杖 一對", 1180, 690, 5),
+    ("護膝 一對", 480, 275, 8),
+    ("多功能工具鉗", 780, 450, 6),
+    ("指南針", 320, 180, 8),
+    ("哨子 求生", 90, 42, 20),
+    ("反光背心", 180, 95, 15),
+    ("摺疊鏟", 580, 335, 6),
+    ("斧頭 手斧", 980, 570, 4),
+    ("鋸子 摺疊", 680, 395, 6),
+)
+
+
 # 內用桌號。**沒有這一步就開不出內用單**：create_sale 會擋掉不在
 # `settings.dine_in_tables` 裡的桌號，而該設定預設是空清單（docs/35）。
 _DINE_IN_TABLES = ["A1", "A2", "A3", "A4", "B1", "B2", "C1", "C2"]
@@ -534,6 +641,112 @@ async def seed_menu(session: AsyncSession, store_id: int, manager_id: int) -> li
                 items.append(existing)
     await session.commit()
     return items
+
+
+async def seed_suppliers(
+    session: AsyncSession, store_id: int
+) -> list[Supplier]:
+    """建立供應商；已存在同名者沿用（腳本可重跑）。"""
+    svc = PurchasingService(session)
+    made: list[Supplier] = []
+    for name, contact in _SUPPLIERS:
+        existing = await session.scalar(
+            select(Supplier).where(Supplier.store_id == store_id, Supplier.name == name)
+        )
+        if existing is not None:
+            made.append(existing)
+            continue
+        made.append(await svc.create_supplier(store_id, SupplierCreate(name=name, contact=contact)))
+    await session.commit()
+    return made
+
+
+async def seed_catalog(session: AsyncSession, store_id: int) -> list[CatalogProduct]:
+    """建立一般商品（初始庫存 0，靠採購收貨補）；已存在同 SKU 者沿用。"""
+    svc = InventoryService(session)
+    made: list[CatalogProduct] = []
+    for index, (name, price, _cost, reorder) in enumerate(_CATALOG_PRODUCTS):
+        sku = f"NEW-{index + 1:04d}"
+        existing = await session.scalar(
+            select(CatalogProduct).where(
+                CatalogProduct.store_id == store_id, CatalogProduct.sku == sku
+            )
+        )
+        if existing is not None:
+            made.append(existing)
+            continue
+        made.append(
+            await svc.create_catalog(
+                store_id,
+                sku=sku,
+                name=name,
+                unit_price=Decimal(price),
+                reorder_point=reorder,
+            )
+        )
+    await session.commit()
+    return made
+
+
+async def restock_catalog(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    suppliers: list[Supplier],
+    products: list[CatalogProduct],
+    rng: random.Random,
+    *,
+    day: date,
+    moment: datetime,
+    cost_by_sku: dict[str, int],
+) -> int:
+    """對低於補貨點的商品開採購單並收貨（走完整 PO → 收貨流程）。
+
+    **不直接改 `quantity_on_hand`**：庫存異動、成本快照（`unit_cost`＝最新進價）、
+    收貨批次與採購單狀態機都靠這條路徑才會被真正觸發（docs/37 §7.2 黃金路徑走 service）。
+    回傳本次收貨的採購單數。
+    """
+    low = [p for p in products if p.quantity_on_hand <= p.reorder_point]
+    if not low:
+        return 0
+    svc = PurchasingService(session)
+    made = 0
+    # 依供應商分批開單：一張單一個供應商（現實就是這樣）
+    rng.shuffle(low)
+    for chunk_start in range(0, len(low), 12):
+        chunk = low[chunk_start : chunk_start + 12]
+        supplier = rng.choice(suppliers)
+        lines = [
+            PurchaseOrderLineCreate(
+                catalog_product_id=product.id,
+                qty=max(6, product.reorder_point * rng.choice([2, 3, 4])),
+                unit_cost=Decimal(cost_by_sku[product.sku]),
+            )
+            for product in chunk
+        ]
+        order = await svc.create_purchase_order(
+            store_id,
+            PurchaseOrderCreate(supplier_id=supplier.id, lines=lines, submit=True),
+            actor_user_id=manager_id,
+        )
+        await session.flush()
+        receive_lines = [ReceiveLineIn(line_id=line.id, qty=line.qty) for line in order.lines]
+        key = f"seed-recv-{day.isoformat()}-{order.id}"
+        await svc.receive_purchase_order(
+            store_id,
+            order.id,
+            actor_user_id=manager_id,
+            lines=receive_lines,
+            idempotency_key=key,
+            request_fingerprint=key,
+        )
+        # 採購與收貨的時點也要回填，否則整年的進貨全落在今天
+        order.created_at = moment
+        for receipt in order.receipts:
+            receipt.received_at = moment
+        made += 1
+    await session.commit()
+    return made
 
 
 # 餐飲季節性：與裝備**相反**——夏天露營旺、賣吃喝；冬天裝備旺、餐飲淡。
@@ -618,6 +831,8 @@ async def seed_daily_sales(
     member_ids: list[int],
     seller_ids: list[int],
     menu_items: list[MenuItem],
+    suppliers: list[Supplier],
+    catalog: list[CatalogProduct],
     rng: random.Random,
     *,
     rng_seed: int,
@@ -625,6 +840,7 @@ async def seed_daily_sales(
     base_per_day: float,
     daily_intake: float,
     fnb_per_day: float,
+    catalog_per_day: float,
 ) -> dict[str, int]:
     """逐日「開帳 → 當日銷售 → 結帳」（相依鏈第 3 步，docs/37 §7.2.1）。
 
@@ -636,7 +852,14 @@ async def seed_daily_sales(
     """
     sales_svc = SalesService(session)
     cash = CashDrawerService(session)
-    made = {"sales": 0, "sessions": 0, "buyout": 0, "consignment": 0, "dine_in": 0, "takeout": 0}
+    made = {
+        "sales": 0, "sessions": 0, "buyout": 0, "consignment": 0,
+        "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
+    }
+    cost_by_sku = {
+        f"NEW-{index + 1:04d}": cost
+        for index, (_name, _price, cost, _reorder) in enumerate(_CATALOG_PRODUCTS)
+    }
     today = store_date(utc_now())
 
     # **一次撈出可售清單再逐一取用**：每筆銷售各查一次資料庫，在上萬筆時是主要成本。
@@ -659,7 +882,8 @@ async def seed_daily_sales(
             continue
         n = _daily_sale_count(day, rng, base=base_per_day)
         n_fnb = _fnb_sale_count(day, rng, base=fnb_per_day) if menu_items else 0
-        if n == 0 and n_fnb == 0:
+        n_catalog = _daily_sale_count(day, rng, base=catalog_per_day) if catalog else 0
+        if n == 0 and n_fnb == 0 and n_catalog == 0:
             continue
 
         # 每一天都是獨立班別：先結掉殘留的，再開今天的
@@ -675,6 +899,14 @@ async def seed_daily_sales(
         ).astimezone(UTC)
         await session.commit()
         made["sessions"] += 1
+
+        # 補貨：低於補貨點就開採購單並收貨。**走完整 PO → 收貨流程**，
+        # 庫存異動、成本快照與採購單狀態機才會真的被觸發。
+        if catalog and suppliers:
+            made["purchase_orders"] += await restock_catalog(
+                session, store_id, manager_id, suppliers, catalog, rng,
+                day=day, moment=opened.opened_at, cost_by_sku=cost_by_sku,
+            )
 
         # **當日收購與當日銷售共用同一個班別**——現實中收購付現與銷售收現就是同一個抽屜。
         # 先前把收購全部塞進單一班別，該班別的應有現金變成 −720 萬（實測踩過）。
@@ -726,6 +958,41 @@ async def seed_daily_sales(
             # **時間序靠回填**：service 以 now() 落地，報表則一律以 created_at 篩選
             sale.created_at = moment
             made["sales"] += 1
+
+        # **一般商品**：可補貨，故同一個 SKU 能反覆賣出（與序號品的「一件一次」相反）。
+        for i in range(n_catalog):
+            in_stock = [p for p in catalog if p.quantity_on_hand > 0]
+            if not in_stock:
+                break
+            n_kinds = min(rng.choices([1, 2, 3], [5, 3, 2])[0], len(in_stock))
+            cat_basket: list[tuple[CatalogProduct, int]] = []
+            for product in rng.sample(in_stock, n_kinds):
+                qty = min(product.quantity_on_hand, rng.choices([1, 2, 3], [7, 2, 1])[0])
+                if qty > 0:
+                    cat_basket.append((product, qty))
+            if not cat_basket:
+                continue
+            amount = sum((p.unit_price * qty for p, qty in cat_basket), Decimal(0))
+            moment = datetime(
+                day.year, day.month, day.day,
+                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+            ).astimezone(UTC)
+            sale = await sales_svc.create_sale(
+                store_id,
+                manager_id,
+                lines=[
+                    SaleLineInput(
+                        line_type=SaleLineType.CATALOG, catalog_product_id=p.id, qty=qty
+                    )
+                    for p, qty in cat_basket
+                ],
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
+                buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.40 else None),
+                idempotency_key=f"seed-cat-{day.isoformat()}-{i}",
+            )
+            sale.created_at = moment
+            made["sales"] += 1
+            made["catalog_lines"] += len(cat_basket)
 
         # **餐飲**：不扣庫存，故不受收購量牽制——這正是銷售量的主要來源（docs/37 §7.4.1）。
         for i in range(n_fnb):
@@ -787,6 +1054,7 @@ async def run(
     base_per_day: float,
     daily_intake: float,
     fnb_per_day: float,
+    catalog_per_day: float,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -806,6 +1074,9 @@ async def run(
         contacts = await seed_contacts(session, store_id, rng)
         # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
         menu_items = await seed_menu(session, store_id, manager_id)
+        # 供應商 → 一般商品（初始庫存 0，靠每日補貨的採購收貨進貨）
+        suppliers = await seed_suppliers(session, store_id)
+        catalog = await seed_catalog(session, store_id)
 
         # 相依鏈第 3 步：**逐日開帳 → 當日收購 → 當日銷售 → 結帳**。
         # 收購與銷售共用當日班別（現實中就是同一個抽屜），現金等式才 per-session 成立。
@@ -816,12 +1087,15 @@ async def run(
             contacts["members"],
             contacts["sellers"],
             menu_items,
+            suppliers,
+            catalog,
             rng,
             rng_seed=rng_seed,
             days=days,
             base_per_day=base_per_day,
             daily_intake=daily_intake,
             fnb_per_day=fnb_per_day,
+            catalog_per_day=catalog_per_day,
         )
         acquired = {"buyout": daily["buyout"], "consignment": daily["consignment"]}
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
@@ -835,6 +1109,9 @@ async def run(
             session, "serialized_items", f"store_id = {store_id}"
         )
         report.counts["菜單品項"] = len(menu_items)
+        report.counts["供應商"] = len(suppliers)
+        report.counts["一般商品"] = len(catalog)
+        report.counts["採購單"] = daily["purchase_orders"]
         report.counts["銷售"] = daily["sales"]
         report.counts["餐飲-內用組數"] = daily["dine_in"]
         report.counts["餐飲-外帶組數"] = daily["takeout"]
@@ -855,6 +1132,9 @@ def main() -> None:
     parser.add_argument("--per-day", type=float, default=8.0, help="平日基準裝備銷售筆數")
     parser.add_argument("--fnb-per-day", type=float, default=6.0, help="平日基準餐飲組數")
     parser.add_argument(
+        "--catalog-per-day", type=float, default=5.0, help="平日基準一般商品銷售筆數"
+    )
+    parser.add_argument(
         "--out",
         default="seed_verification.txt",
         help="驗證報告輸出路徑",
@@ -869,6 +1149,7 @@ def main() -> None:
             base_per_day=args.per_day,
             daily_intake=args.intake,
             fnb_per_day=args.fnb_per_day,
+            catalog_per_day=args.catalog_per_day,
         )
     )
     rendered = report.render()
