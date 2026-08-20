@@ -77,13 +77,16 @@ from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.repository import ContactRepository
 from app.modules.contacts.schemas import ContactCreate
 from app.modules.contacts.service import ContactService
-from app.modules.customerdisplay.models import KioskDevice
+from app.modules.customerdisplay.models import CartSession, KioskDevice
 from app.modules.customerdisplay.schemas import (
     CartLineRequest,
     CartTenderRequest,
     CartUpsertRequest,
 )
 from app.modules.customerdisplay.service import CustomerDisplayService
+from app.modules.einvoice.amego import AmegoClient
+from app.modules.einvoice.models import Invoice
+from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
@@ -108,6 +111,7 @@ from app.modules.signing.service import SigningService
 from app.modules.stocktake.service import StocktakeService
 from app.modules.store.models import Store
 from app.modules.storecredit.models import StoreCreditAccount
+from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.models import User
 from app.scripts.seed_dev_user import DevUserSeed, upsert_dev_user
 from app.shared.enums import (
@@ -118,6 +122,7 @@ from app.shared.enums import (
     ConsignmentSettlementStatus,
     ContactRole,
     Grade,
+    InvoiceStatus,
     OwnershipType,
     PayoutMethod,
     SaleLineKind,
@@ -1090,6 +1095,159 @@ async def seed_stocktakes(
     return made
 
 
+async def _never_call_amego() -> AmegoClient:
+    """seed 絕不呼叫 Amego。這個工廠只在真的要連線時才會被 await——一旦被叫到就是 bug。
+
+    `register_manual_invoice` 對「從未送出過」的佇列列會跳過平台查詢
+    （`_may_have_reached_platform`：`posted_at` 為空且 `attempts` 為 0），
+    所以正常路徑不會走到這裡。
+    """
+    raise SeedFailed(
+        "seed 不得呼叫 Amego 電子發票平台——本函式被呼叫代表有佇列列被判定為「可能已送出」"
+    )
+
+
+async def seed_credit_suggestions(
+    session: AsyncSession, store_id: int, today: date, *, days: int
+) -> int:
+    """購物金溢價建議值（docs/16 SC-5b）：逐日算出當日建議並落庫。
+
+    引擎讀的是**該時點之前**的銷售/收購指標，所以必須在全部交易資料都到位之後才跑，
+    否則早期的建議值會是在空資料上算出來的。
+    """
+    svc = PremiumSuggestionService(session)
+    made = 0
+    for offset in range(days, 0, -1):
+        for_date = today - timedelta(days=offset)
+        await svc.suggestion_today(
+            store_id, today=for_date, now=moment_of(for_date, 23, 0)
+        )
+        made += 1
+    await session.commit()
+    return made
+
+
+async def seed_transaction_acks(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    kiosk: KioskSetup,
+    rng: random.Random,
+    *,
+    count: int,
+) -> int:
+    """交易紀錄簽收（docs/23 K5，TRANSACTION_ACK）：客人在顧客螢幕上確認這筆交易。
+
+    只挑**最近**且未作廢的單：簽名當下會重驗該銷售仍可簽收，太舊或已退貨的會被擋。
+    """
+    signing = SigningService(session)
+    # **只有經過顧客螢幕的單才簽得了收**：`_ensure_ack_belongs_to_device` 要求該銷售
+    # 有對應的購物車且屬於這台裝置。從全部銷售裡亂挑的話，絕大多數會被擋
+    # （實測要 25 筆只成功 4 筆）——本店走客顯的就是購物金折抵那些單。
+    recent = list(
+        await session.scalars(
+            select(Sale)
+            .join(CartSession, CartSession.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status == SaleStatus.COMPLETED,
+                CartSession.kiosk_device_id == kiosk.device_id,
+            )
+            .order_by(Sale.id.desc())
+            .limit(count * 3)
+        )
+    )
+    rng.shuffle(recent)
+    made = 0
+    for sale in recent:
+        if made >= count:
+            break
+        await touch_kiosk(session, store_id, kiosk.device_id)
+        # **savepoint**：某些單不可簽收（已退貨/已作廢/已有簽收），只退掉這一次的嘗試。
+        # 用 session.rollback() 會把整個交易連同前面成功的部分一起丟掉，而且在
+        # async session 裡從例外處理中回滾會炸 MissingGreenlet（實測踩過）。
+        try:
+            async with session.begin_nested():
+                task = await signing.create_task(
+                    store_id,
+                    SignatureTaskCreate(
+                        kind=SignatureTaskKind.TRANSACTION_ACK,
+                        contact_id=sale.buyer_contact_id,
+                        content={},
+                        terminal_id=kiosk.terminal_id,
+                        ref_type="sale",
+                        ref_id=sale.id,
+                    ),
+                    created_by=manager_id,
+                )
+                await signing.acknowledge_task(store_id, kiosk.device_id, task.id)
+                await signing.sign_task(
+                    store_id,
+                    task.id,
+                    device_id=kiosk.device_id,
+                    signature_image_base64=make_signature_png(rng),
+                    chosen_payout=None,
+                )
+        except DomainError:
+            continue
+        await session.commit()
+        made += 1
+    return made
+
+
+async def seed_manual_paper_invoices(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    rng: random.Random,
+    *,
+    count: int,
+) -> int:
+    """把一部分待開立發票登記為**手開紙本備用發票**（docs/36）。
+
+    這是唯一能在**不呼叫平台**的前提下把發票變成「已開立」的路徑，也是真實情境：
+    字軌用完或平台故障時，店員當場開紙本給客人、事後補登記。
+    其餘發票維持 PENDING（待上傳）——那也是真實狀態，不是資料不完整。
+    """
+    svc = EInvoiceService(session)
+    pending = list(
+        await session.scalars(
+            select(Invoice)
+            .where(Invoice.store_id == store_id, Invoice.status == InvoiceStatus.PENDING)
+            .order_by(Invoice.id)
+            .limit(count * 4)
+        )
+    )
+    rng.shuffle(pending)
+    made = 0
+    for invoice in pending:
+        if made >= count:
+            break
+        track = rng.choice(("AB", "CD", "EF", "GH"))
+        number = f"{track}{rng.randrange(10_000_000, 99_999_999)}"
+        sale = await session.get(Sale, invoice.sale_id)
+        if sale is None:
+            continue
+        try:
+            await svc.register_manual_invoice(
+                store_id,
+                invoice.sale_id,
+                invoice_no=number,
+                invoice_date=store_date(sale.created_at),
+                invoice_time=f"{rng.randrange(10, 21):02d}:{rng.randrange(60):02d}:00",
+                random_number=f"{rng.randrange(1000, 9999)}",
+                total=invoice.total,
+                note="字軌用完，當場開紙本備用發票",
+                actor_user_id=manager_id,
+                client_factory=_never_call_amego,
+            )
+        except DomainError:
+            continue
+        await session.commit()
+        made += 1
+    return made
+
+
 async def store_credit_checkout(
     session: AsyncSession,
     store_id: int,
@@ -1351,17 +1509,33 @@ _MENU_ITEMS: tuple[tuple[str, int, str], ...] = (
 )
 
 
-async def seed_settings(session: AsyncSession, store_id: int, manager_id: int) -> None:
+async def seed_settings(
+    session: AsyncSession, store_id: int, manager_id: int, *, einvoice: bool
+) -> None:
     """持久化店家設定列，並維護內用桌號（相依鏈的前置步驟）。
 
     預設 `dine_in_tables` 是**空清單**，此時任何內用結帳都會被
     `create_sale` 擋下（docs/35：桌號必須是設定頁維護過的那幾桌）。
     """
+    patch = SettingsUpdateRequest(dine_in_tables=list(_DINE_IN_TABLES))
+    if einvoice:
+        # 開啟後，每筆銷售都會**在同一交易內於本機**建立待開立發票＋F0401 佇列列。
+        # 這一步不碰網路；實際上傳是另一支 worker。
+        patch = SettingsUpdateRequest(
+            dine_in_tables=list(_DINE_IN_TABLES), einvoice_enabled=True
+        )
     await StoreSettingsService(session).update_settings(
-        store_id,
-        actor_user_id=manager_id,
-        patch=SettingsUpdateRequest(dine_in_tables=list(_DINE_IN_TABLES)),
+        store_id, actor_user_id=manager_id, patch=patch
     )
+    # 溢價率調整留痕（docs/16 §6.1）：真實店家會依市況調整購物金溢價。
+    for rate in ("0.05", "0.08", "0.06"):
+        await StoreSettingsService(session).update_settings(
+            store_id,
+            actor_user_id=manager_id,
+            patch=SettingsUpdateRequest(
+                premium_rate=Decimal(rate), premium_change_reason="依市況調整購物金溢價"
+            ),
+        )
     await session.commit()
 
 
@@ -2220,6 +2394,9 @@ async def run(
     variance_rate: float,
     slow_mover_pct: float,
     affidavit_pct: float,
+    einvoice: bool,
+    manual_invoice_count: int,
+    ack_count: int,
 ) -> SeedReport:
     settings = get_settings()
     _guard_environment(settings.database_url)
@@ -2234,7 +2411,7 @@ async def run(
 
         rng = random.Random(rng_seed)
         # 相依鏈第 0 步：設定。內用桌號沒維護的話，**任何內用單都開不出來**。
-        await seed_settings(session, store_id, manager_id)
+        await seed_settings(session, store_id, manager_id, einvoice=einvoice)
         # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
         contacts = await seed_contacts(session, store_id, rng)
         # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
@@ -2286,6 +2463,19 @@ async def run(
             session, store_id, manager_id, rng, today, count=4
         )
         tickets_made = await seed_call_tickets(session, store_id, manager_id, rng)
+        acks_made = await seed_transaction_acks(
+            session, store_id, manager_id, kiosk, rng, count=ack_count
+        )
+        suggestions = await seed_credit_suggestions(
+            session, store_id, today, days=min(days, 120)
+        )
+        manual_invoices = (
+            await seed_manual_paper_invoices(
+                session, store_id, manager_id, rng, count=manual_invoice_count
+            )
+            if einvoice
+            else 0
+        )
         # TODO(P0 分段建置)：散裝批／一般商品 → 寄售結算 → 退貨 → 簽名任務。
 
         report = SeedReport()
@@ -2314,6 +2504,18 @@ async def run(
         report.counts["餐飲-外帶組數"] = daily["takeout"]
         report.counts["現金班別"] = daily["sessions"]
         report.counts["銷售明細"] = await _count(session, "sale_lines", f"store_id = {store_id}")
+        report.counts["發票-待開立"] = await _count(
+            session, "invoices", f"store_id = {store_id} AND status = 'PENDING'"
+        )
+        report.counts["發票-手開紙本已開立"] = manual_invoices
+        report.counts["發票-上傳佇列"] = await _count(
+            session, "einvoice_upload_queue", f"store_id = {store_id}"
+        )
+        report.counts["交易紀錄簽收"] = acks_made
+        report.counts["購物金建議值"] = suggestions
+        report.counts["溢價率變更"] = await _count(
+            session, "premium_rate_history", f"store_id = {store_id}"
+        )
         report.counts["門市活動"] = campaigns_made
         report.counts["盤點單"] = stocktakes_made
         report.counts["盤點差異行"] = await _count(
@@ -2393,6 +2595,15 @@ def main() -> None:
         "--affidavit-pct", type=float, default=0.30, help="買斷收購綁定手持切結的比例"
     )
     parser.add_argument(
+        "--no-einvoice",
+        action="store_true",
+        help="不啟用電子發票（預設啟用；**僅在本機建立待開立發票與佇列，絕不呼叫平台**）",
+    )
+    parser.add_argument(
+        "--manual-invoices", type=int, default=60, help="登記為手開紙本備用發票的張數（docs/36）"
+    )
+    parser.add_argument("--acks", type=int, default=120, help="交易紀錄簽收的筆數（docs/23 K5）")
+    parser.add_argument(
         "--out",
         default="seed_verification.txt",
         help="驗證報告輸出路徑",
@@ -2415,6 +2626,9 @@ def main() -> None:
             variance_rate=args.variance_rate,
             slow_mover_pct=args.slow_mover_pct,
             affidavit_pct=args.affidavit_pct,
+            einvoice=not args.no_einvoice,
+            manual_invoice_count=args.manual_invoices,
+            ack_count=args.acks,
         )
     )
     rendered = report.render()
