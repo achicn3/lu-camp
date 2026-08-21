@@ -15,6 +15,7 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
     AcquisitionRead,
+    AcquisitionReceiptRead,
     AcquisitionResult,
     AcquisitionVoidRequest,
     AcquisitionVoidResult,
@@ -159,6 +160,25 @@ async def get_acquisition(
     if acquisition is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到收購單")
     return AcquisitionRead.from_model(acquisition)
+
+
+@router.get(
+    "/{acquisition_id}/receipt",
+    response_model=AcquisitionReceiptRead,
+    operation_id="getAcquisitionReceipt",
+)
+async def get_acquisition_receipt(
+    acquisition_id: int, session: SessionDep, user: CurrentUserDep
+) -> AcquisitionReceiptRead:
+    """收購憑證聯的補印內容（docs/23 K6）。
+
+    憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。這支提供事後重組所需的
+    品項、賣方姓名與簽名任務——`AcquisitionRead` 沒有這些。
+    """
+    receipt = await AcquisitionService(session).receipt_for_reprint(user.store_id, acquisition_id)
+    if receipt is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到收購單")
+    return receipt
 
 
 @router.post(

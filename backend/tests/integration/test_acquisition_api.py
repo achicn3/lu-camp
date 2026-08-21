@@ -275,3 +275,53 @@ async def test_unexpected_error_rolls_back(
             },
             headers=_auth(token),
         )
+
+
+async def test_acquisition_receipt_reprint(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """憑證聯補印：事後仍取得回品項、賣方姓名與金額（docs/23 K6）。
+
+    存在的理由是**補印**——憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。
+    `AcquisitionRead` 不含品項與賣方姓名，所以另有這支唯讀端點。
+    """
+    _, token = await _seed_token(db_session)
+    await _open_drawer(client, token)
+    contact_id = await _make_seller(client, token)
+
+    created = await client.post(
+        "/api/v1/acquisitions",
+        json={
+            "type": "BUYOUT",
+            "contact_id": contact_id,
+            "items": [
+                {"name": "帳篷", "grade": "A", "listed_price": "3000", "acquisition_cost": "1800"},
+                {"name": "睡袋", "grade": "B", "listed_price": "1000", "acquisition_cost": "600"},
+            ],
+        },
+        headers=_auth(token),
+    )
+    assert created.status_code == 201
+    acquisition_id = created.json()["acquisition_id"]
+
+    resp = await client.get(
+        f"/api/v1/acquisitions/{acquisition_id}/receipt", headers=_auth(token)
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["acquisition_id"] == acquisition_id
+    assert body["seller_name"] != ""
+    assert body["total"] == "2400"
+    assert body["payout_method"] == "CASH"
+    assert body["voided_at"] is None
+    names = sorted(item["name"] for item in body["items"])
+    assert names == ["帳篷", "睡袋"]
+    assert sorted(item["amount"] for item in body["items"]) == ["1800", "600"]
+
+
+async def test_acquisition_receipt_unknown_id_is_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _seed_token(db_session)
+    resp = await client.get("/api/v1/acquisitions/999999/receipt", headers=_auth(token))
+    assert resp.status_code == 404

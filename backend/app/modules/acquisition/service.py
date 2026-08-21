@@ -24,7 +24,12 @@ from app.core.money import round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
 from app.modules.acquisition.models import Acquisition
 from app.modules.acquisition.repository import AcquisitionRepository
-from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionResult
+from app.modules.acquisition.schemas import (
+    AcquisitionCreate,
+    AcquisitionReceiptItem,
+    AcquisitionReceiptRead,
+    AcquisitionResult,
+)
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
 from app.modules.inventory.service import InventoryService
@@ -69,6 +74,10 @@ COMMISSION_PCT_MAX = 100
 _CASH_PAYING = frozenset({AcquisitionType.BUYOUT, AcquisitionType.BULK_LOT})
 
 
+# 憑證聯的品項上限：一張紙印不下太多，且收購單本來就不會有數百件。
+_RECEIPT_ITEM_CAP = 200
+
+
 class AcquisitionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -89,6 +98,50 @@ class AcquisitionService:
 
     async def get_acquisition(self, store_id: int, acquisition_id: int) -> Acquisition | None:
         return await self._repo.get(store_id, acquisition_id)
+
+    async def receipt_for_reprint(
+        self, store_id: int, acquisition_id: int
+    ) -> "AcquisitionReceiptRead | None":
+        """收購憑證聯的補印內容（docs/23 K6）。不存在/他店 → None。
+
+        **為什麼要有這支**：憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來——
+        客人事後說「憑證聯不見了」店員無計可施。`AcquisitionRead` 不含品項、賣方姓名
+        與簽名任務，重建不出憑證聯，故另組一份唯讀內容。
+
+        金額口徑與當初列印一致：買斷列**收購價**、寄售品列 0 元（僅列示品項，
+        店家沒有付錢給寄售人，付款發生在賣出後的結算）。
+        """
+        acquisition = await self._repo.get(store_id, acquisition_id)
+        if acquisition is None:
+            return None
+        contact = await self._contacts.get_contact(store_id, acquisition.contact_id)
+        items: list[AcquisitionReceiptItem] = [
+            AcquisitionReceiptItem(
+                name=item.name,
+                amount=Decimal(item.acquisition_cost or 0),
+            )
+            for item in await self._inventory.list_serialized_by_acquisitions(
+                store_id, [acquisition_id], limit=_RECEIPT_ITEM_CAP
+            )
+        ]
+        items += [
+            AcquisitionReceiptItem(name=lot.name, amount=Decimal(lot.acquisition_cost or 0))
+            for lot in await self._inventory.list_bulk_lots_by_acquisitions(
+                store_id, [acquisition_id], limit=_RECEIPT_ITEM_CAP
+            )
+        ]
+        return AcquisitionReceiptRead(
+            acquisition_id=acquisition.id,
+            store_id=acquisition.store_id,
+            seller_name=(contact.name if contact is not None else ""),
+            items=items,
+            total=Decimal(acquisition.total_cash_paid or 0),
+            payout_method=acquisition.payout_method,
+            created_at=acquisition.created_at,
+            signature_task_id=acquisition.signature_task_id,
+            store_credit_granted=acquisition.payout_credit_cash_equivalent,
+            voided_at=acquisition.voided_at,
+        )
 
     async def list_by_contact(
         self, store_id: int, contact_id: int, *, limit: int = 50, offset: int = 0

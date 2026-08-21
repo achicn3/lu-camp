@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { SALES_PAGE_SIZE, nextSalesPageParam } from "@/features/sales/pagination";
-import { printKitchenTicket } from "@/lib/agent";
+import { printEInvoice, printKitchenTicket, printSaleDetail } from "@/lib/agent";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -1054,6 +1054,59 @@ export default function SalesPage() {
     onError: (err: Error) => setKitchenNote(err.message),
   });
 
+  // 明細聯補印（docs/32）：POS 完成畫面的列印對話框明講「或日後在交易紀錄補印」，
+  // 但先前**只有那個對話框有入口**——關掉就再也印不出來，等於對店員說了做不到的話。
+  // 後端 `POST /sales/{id}/print-detail` 早就在（router docstring 就寫「補印明細」），
+  // 缺的只是這顆按鈕。
+  const [printNote, setPrintNote] = useState<string | null>(null);
+  const reprintDetail = useMutation({
+    mutationFn: async (sale: SaleSummary) => {
+      const { data, error } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取銷售明細失敗");
+      // 補印不重建當初的活動名稱與簽名附註——那些是結帳當下的畫面狀態，
+      // 事後無從還原；明細聯本身的品項與金額才是客人要的。
+      await printSaleDetail(data, null);
+      await api.POST("/api/v1/sales/{sale_id}/print-detail", {
+        params: { path: { sale_id: sale.id } },
+      });
+      return sale.id;
+    },
+    onSuccess: (saleId) => setPrintNote(`已送出 #${saleId} 的商品明細聯。`),
+    onError: (err: Error) => setPrintNote(err.message),
+  });
+
+  // 發票證明聯補印（docs/24）：客人把證明聯弄丟、或缺紙漏印時的補救。
+  // 取發票走 `issue` 端點——它對已開立的發票是冪等的（其 docstring 明載
+  // 「POS 重試/重印取號用」），**不會**再送平台開第二張。
+  const reprintInvoice = useMutation({
+    mutationFn: async (sale: SaleSummary) => {
+      const [{ data: saleData, error: saleError }, header] = await Promise.all([
+        api.GET("/api/v1/sales/{sale_id}", { params: { path: { sale_id: sale.id } } }),
+        api.GET("/api/v1/stores/{store_id}/receipt-header", {
+          params: { path: { store_id: 1 } },
+        }),
+      ]);
+      if (!saleData) throw new Error(extractDetail(saleError) ?? "讀取銷售明細失敗");
+      const { data: invoice, error: invoiceError } = await api.POST(
+        "/api/v1/einvoice/sales/{sale_id}/issue",
+        { params: { path: { sale_id: sale.id } } },
+      );
+      if (!invoice) throw new Error(extractDetail(invoiceError) ?? "讀取發票失敗");
+      if (!invoice.print_mark) {
+        throw new Error("本筆已存入載具或捐贈，依規定不印證明聯");
+      }
+      await printEInvoice(invoice, saleData, {
+        taxId: header.data?.tax_id ?? "",
+        name: header.data?.name ?? "",
+      });
+      return sale.id;
+    },
+    onSuccess: (saleId) => setPrintNote(`已送出 #${saleId} 的發票證明聯。`),
+    onError: (err: Error) => setPrintNote(err.message),
+  });
+
   const pushAck = useMutation({
     mutationFn: async (sale: SaleSummary) => {
       if (sale.buyer_contact_id == null) throw new Error("此單無買方會員，無法推送簽收");
@@ -1125,6 +1178,11 @@ export default function SalesPage() {
       </p>
       {voidedNote !== null && <p className="form-success">{voidedNote}</p>}
       {ackNote !== null && <p className="hint">{ackNote}</p>}
+      {printNote !== null && (
+        <p className={reprintDetail.isError || reprintInvoice.isError ? "form-error" : "hint"}>
+          {printNote}
+        </p>
+      )}
       {kitchenNote !== null && (
         <p className={reprintKitchen.isError ? "form-error" : "hint"}>{kitchenNote}</p>
       )}
@@ -1246,6 +1304,38 @@ export default function SalesPage() {
                         }}
                       >
                         重印出餐單
+                      </button>
+                    )}
+                    {!voided && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={reprintDetail.isPending}
+                        aria-label={`補印銷售 ${sale.id} 商品明細聯`}
+                        onClick={() => {
+                          setPrintNote(null);
+                          reprintDetail.mutate(sale);
+                        }}
+                      >
+                        補印明細聯
+                      </button>
+                    )}
+                    {/* 只在**平台已開立**時提供：手開紙本的證明聯是店員手寫那張，
+                        系統印不出來；未開立的更沒有內容可印。 */}
+                    {!voided
+                      && sale.invoice_status === "ISSUED"
+                      && sale.invoice_issue_channel !== "MANUAL_PAPER" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={reprintInvoice.isPending}
+                        aria-label={`補印銷售 ${sale.id} 發票證明聯`}
+                        onClick={() => {
+                          setPrintNote(null);
+                          reprintInvoice.mutate(sale);
+                        }}
+                      >
+                        補印發票證明聯
                       </button>
                     )}
                     {sale.signature_task_id != null && (

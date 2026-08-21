@@ -177,6 +177,35 @@ class AcquisitionVoidResult(BaseModel):
     reversed_credit: NTDAmount
 
 
+class AcquisitionReceiptItem(BaseModel):
+    """憑證聯上的一行：品名與金額（買斷為收購價、寄售為 0 元僅列示）。"""
+
+    name: str
+    amount: NTDAmount
+
+
+class AcquisitionReceiptRead(BaseModel):
+    """收購憑證聯的補印內容（docs/23 K6）。
+
+    **存在的理由是補印**：憑證聯原本只能在收購完成畫面印一次，關掉就再也印不出來——
+    客人事後說「憑證聯不見了」就補不出來。`AcquisitionRead` 不含品項、賣方姓名與簽名，
+    重建不出憑證聯，故另開這個唯讀模型。
+
+    `signature_task_id` 供前端取原簽名圖；沒有簽名的收購（未走手持切結）為 None。
+    """
+
+    acquisition_id: int
+    store_id: int
+    seller_name: str
+    items: list[AcquisitionReceiptItem]
+    total: NTDAmount
+    payout_method: PayoutMethod
+    created_at: datetime
+    signature_task_id: int | None
+    store_credit_granted: NTDAmount | None
+    voided_at: datetime | None
+
+
 class AcquisitionRead(BaseModel):
     """收購單查詢輸出。"""
 

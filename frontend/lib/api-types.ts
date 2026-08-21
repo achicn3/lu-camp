@@ -42,6 +42,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/acquisitions/{acquisition_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Acquisition Receipt
+         * @description 收購憑證聯的補印內容（docs/23 K6）。
+         *
+         *     憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。這支提供事後重組所需的
+         *     品項、賣方姓名與簽名任務——`AcquisitionRead` 沒有這些。
+         */
+        get: operations["getAcquisitionReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/acquisitions/{acquisition_id}/void": {
         parameters: {
             query?: never;
@@ -2697,6 +2720,50 @@ export interface components {
             /** Total Cash Paid */
             total_cash_paid: string | null;
             type: components["schemas"]["AcquisitionType"];
+            /** Voided At */
+            voided_at: string | null;
+        };
+        /**
+         * AcquisitionReceiptItem
+         * @description 憑證聯上的一行：品名與金額（買斷為收購價、寄售為 0 元僅列示）。
+         */
+        AcquisitionReceiptItem: {
+            /** Amount */
+            amount: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * AcquisitionReceiptRead
+         * @description 收購憑證聯的補印內容（docs/23 K6）。
+         *
+         *     **存在的理由是補印**：憑證聯原本只能在收購完成畫面印一次，關掉就再也印不出來——
+         *     客人事後說「憑證聯不見了」就補不出來。`AcquisitionRead` 不含品項、賣方姓名與簽名，
+         *     重建不出憑證聯，故另開這個唯讀模型。
+         *
+         *     `signature_task_id` 供前端取原簽名圖；沒有簽名的收購（未走手持切結）為 None。
+         */
+        AcquisitionReceiptRead: {
+            /** Acquisition Id */
+            acquisition_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Items */
+            items: components["schemas"]["AcquisitionReceiptItem"][];
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Seller Name */
+            seller_name: string;
+            /** Signature Task Id */
+            signature_task_id: number | null;
+            /** Store Credit Granted */
+            store_credit_granted: string | null;
+            /** Store Id */
+            store_id: number;
+            /** Total */
+            total: string;
             /** Voided At */
             voided_at: string | null;
         };
@@ -6939,6 +7006,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAcquisitionReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionReceiptRead"];
                 };
             };
             /** @description Validation Error */

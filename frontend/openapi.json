@@ -365,6 +365,109 @@
         "title": "AcquisitionRead",
         "type": "object"
       },
+      "AcquisitionReceiptItem": {
+        "description": "憑證聯上的一行：品名與金額（買斷為收購價、寄售為 0 元僅列示）。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "amount"
+        ],
+        "title": "AcquisitionReceiptItem",
+        "type": "object"
+      },
+      "AcquisitionReceiptRead": {
+        "description": "收購憑證聯的補印內容（docs/23 K6）。\n\n**存在的理由是補印**：憑證聯原本只能在收購完成畫面印一次，關掉就再也印不出來——\n客人事後說「憑證聯不見了」就補不出來。`AcquisitionRead` 不含品項、賣方姓名與簽名，\n重建不出憑證聯，故另開這個唯讀模型。\n\n`signature_task_id` 供前端取原簽名圖；沒有簽名的收購（未走手持切結）為 None。",
+        "properties": {
+          "acquisition_id": {
+            "title": "Acquisition Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionReceiptItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
+          "seller_name": {
+            "title": "Seller Name",
+            "type": "string"
+          },
+          "signature_task_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Task Id"
+          },
+          "store_credit_granted": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Credit Granted"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
+          }
+        },
+        "required": [
+          "acquisition_id",
+          "store_id",
+          "seller_name",
+          "items",
+          "total",
+          "payout_method",
+          "created_at",
+          "signature_task_id",
+          "store_credit_granted",
+          "voided_at"
+        ],
+        "title": "AcquisitionReceiptRead",
+        "type": "object"
+      },
       "AcquisitionResult": {
         "description": "收購成功結果：回傳可辨識的收購單號與待列印識別碼。",
         "properties": {
@@ -11561,6 +11664,54 @@
           }
         ],
         "summary": "Get Acquisition",
+        "tags": [
+          "acquisition"
+        ]
+      }
+    },
+    "/api/v1/acquisitions/{acquisition_id}/receipt": {
+      "get": {
+        "description": "收購憑證聯的補印內容（docs/23 K6）。\n\n憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。這支提供事後重組所需的\n品項、賣方姓名與簽名任務——`AcquisitionRead` 沒有這些。",
+        "operationId": "getAcquisitionReceipt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "acquisition_id",
+            "required": true,
+            "schema": {
+              "title": "Acquisition Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionReceiptRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Acquisition Receipt",
         "tags": [
           "acquisition"
         ]

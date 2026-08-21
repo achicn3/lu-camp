@@ -607,6 +607,84 @@ function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null
   );
 }
 
+/**
+ * 收購憑證聯補印（docs/23 K6）。
+ *
+ * **原本印不回來**：憑證聯的列印按鈕在收購完成畫面的結果區塊裡，換一筆收購或離開頁面
+ * 就消失——客人事後說「憑證聯不見了」店員無計可施。收購沒有清單頁（後端也沒有清單
+ * 端點），所以這裡用單號查詢：店員從客人的收據或系統紀錄拿到單號即可補印。
+ */
+function ReprintAcquisitionReceipt() {
+  const [input, setInput] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const reprint = useMutation({
+    mutationFn: async () => {
+      const id = Number(input.trim());
+      if (!Number.isInteger(id) || id <= 0) throw new Error("請輸入收購單號（數字）");
+      const { data, error } = await api.GET("/api/v1/acquisitions/{acquisition_id}/receipt", {
+        params: { path: { acquisition_id: id } },
+      });
+      if (!data) {
+        throw new Error(
+          (error as { detail?: string } | undefined)?.detail ?? "找不到這張收購單",
+        );
+      }
+      if (data.voided_at !== null) throw new Error("這張收購單已作廢，不補印憑證聯");
+      // **憑證聯必有簽名**：代理端的版型無條件印「賣方簽名」那一欄
+      // （`AcquisitionReceiptPrint.signature_png_base64` 是必填）。沒走手持切結的收購
+      // 本來就沒有這張憑證聯，照實說明而不是印一張缺簽名的殘缺文件。
+      if (data.signature_task_id === null) {
+        throw new Error("這張收購當初沒有請客人於手持裝置簽名，沒有憑證聯可補印");
+      }
+      const signaturePngBase64 = await fetchSignaturePngBase64(data.signature_task_id);
+      await printAcquisitionReceipt({
+        storeId: data.store_id,
+        acquisitionId: data.acquisition_id,
+        sellerName: data.seller_name,
+        items: data.items.map((i) => ({ name: i.name, amount: i.amount })),
+        total: data.total,
+        payoutMethod: data.payout_method,
+        createdAt: data.created_at,
+        signaturePngBase64,
+        storeCreditGranted: data.store_credit_granted ?? undefined,
+      });
+      return data.acquisition_id;
+    },
+    onSuccess: (id) => setNote(`已送出 #${id} 的收購憑證聯。`),
+    onError: (e: Error) => setNote(e.message),
+  });
+
+  return (
+    <div className="card acq-reprint">
+      <h2>補印收購憑證聯</h2>
+      <p className="hint">客人把憑證聯弄丟、或當初沒印到時，用收購單號補印一張。</p>
+      <div className="acq-reprint-row">
+        <input
+          aria-label="收購單號"
+          inputMode="numeric"
+          placeholder="收購單號"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={reprint.isPending || input.trim() === ""}
+          onClick={() => {
+            setNote(null);
+            reprint.mutate();
+          }}
+        >
+          {reprint.isPending ? "列印中…" : "補印"}
+        </button>
+      </div>
+      {note !== null && (
+        <p className={reprint.isError ? "form-error" : "hint"}>{note}</p>
+      )}
+    </div>
+  );
+}
+
 export default function AcquisitionPage() {
   const queryClient = useQueryClient();
   const [type, setType] = useState<AcqType>("BUYOUT");
@@ -985,6 +1063,7 @@ export default function AcquisitionPage() {
   return (
     <section className="acq">
       <h1 className="page-title">收購鑑價入庫</h1>
+      <ReprintAcquisitionReceipt />
 
       <fieldset
         className="acq-signature-lock"
