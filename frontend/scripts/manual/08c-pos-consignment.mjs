@@ -34,12 +34,22 @@ async function ensureConsignmentItem() {
   const existing = match((await apiJson(token, "GET", "/api/v1/serialized-items?limit=200")).json ?? []);
   if (existing) return existing.item_code;
 
-  // 收購/寄售對象**必須有 national_id**（後端 422）。seed 出來的寄售人沒有，
-  // 只有 03-contacts 建的那位有，所以用 has_national_id 篩，不能隨手取第一個 CONSIGNOR。
-  const contacts = (await apiJson(token, "GET", "/api/v1/contacts?limit=50")).json ?? [];
-  const consignor = contacts.find(
-    (c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id,
-  );
+  // 收購/寄售對象**必須有 national_id**（後端 422），所以用 has_national_id 篩，
+  // 不能隨手取第一個 CONSIGNOR。
+  //
+  // **要用搜尋，不能讀前 50 筆**：demo 資料有三千多筆聯絡人，03-contacts 建的那位
+  // 排在最後（id 3000+），`?limit=50` 撈到的全是前面的純會員 → 永遠找不到而中止。
+  // 原本的寫法在只有十幾筆測資時可行，被 12 個月的真實資料打壞。
+  const found = (await apiJson(token, "GET", "/api/v1/contacts?q=手冊測試客&limit=50")).json ?? [];
+  let consignor = found.find((c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id);
+  if (!consignor) {
+    // 退而求其次：翻頁找任何一位具身分證的寄售人（seed 的賣方也有身分證）
+    for (let offset = 0; offset < 4000 && !consignor; offset += 200) {
+      const page = (await apiJson(token, "GET", `/api/v1/contacts?limit=200&offset=${offset}`)).json ?? [];
+      if (page.length === 0) break;
+      consignor = page.find((c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id);
+    }
+  }
   if (!consignor) {
     throw new Error("找不到具身分證字號的寄售人（寄售收購必填），請先跑 03-contacts");
   }

@@ -34,7 +34,9 @@ await withSettings(["einvoice_enabled"], async () => {
     token, "POST", "/api/v1/sales",
     {
       lines: [{ line_type: "SERIALIZED", item_code: item.item_code }],
-      tenders: [{ tender_type: "CASH", amount: String(item.listed_price) }],
+      // **不自己算應付金額**：省略 `tenders` 後端就以實際總額開一筆全額現金。
+      // 原本用牌價當收款額，遇到有生效中的門市活動（07 會建一檔全店九折）就會被擋：
+      // 「收款總額（2100）必須等於應付總額（1890）」。價格是後端算的，客戶端不該猜。
       expected_einvoice_enabled: true,
     },
     { "Idempotency-Key": `manual-paper-${Date.now()}` },

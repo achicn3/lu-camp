@@ -82,6 +82,14 @@ await kiosk.waitForTimeout(1200);
 await kiosk.screenshot({ path: join(dir, "11b-kiosk-cart.png"), fullPage: true });
 console.log("   📸 11b-kiosk-cart.png");
 
+// **有餐飲品項就必須選內用/外帶**（docs/35）：這是本腳本寫成之後才加的規則，
+// 不選的話結帳鈕會一直停用——畫面不會說為什麼，只是按不下去。
+// 這裡選外帶（內用還要選桌號，那條流程由 08g 專門示範）。
+await page.locator('.pos-dinein-mode:has-text("外帶")').click();
+await page.waitForTimeout(500);
+await shot(page, "dinein-takeout", { locator: ".pos-dinein-panel" });
+note("購物車裡有餐飲品項時，一定要先選內用或外帶，否則結帳鈕不會亮");
+
 // 現金收款＋找零
 await page.fill(".pos-tender input[inputmode='numeric']", "");
 const receivedField = page.locator('.field:has-text("實收現金") input');

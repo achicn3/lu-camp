@@ -2,7 +2,9 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { BASE, login, makeShot, newBrowser, note, shotsDir, uniquePhone, validNationalId } from "./_lib.mjs";
+import {
+  apiJson, apiLogin, BASE, login, makeShot, newBrowser, note, shotsDir, uniquePhone, validNationalId,
+} from "./_lib.mjs";
 
 const dir = shotsDir("03-contacts");
 const shot = makeShot(dir);
@@ -80,8 +82,13 @@ await page.waitForTimeout(800);
 await shot(page, "all-members-filtered", { locator: ".card:has(.member-table)" });
 
 // ── 進入會員詳情 ──
-await page.click('button:has-text("清除")');
-await page.waitForTimeout(600);
+// **先篩選再點，不要清除**：清除後列出的是全部聯絡人的第一頁，而 demo 資料有三千多筆，
+// 剛建立的這位排在最後一頁根本點不到。腳本原本寫「清除→點名字」，在只有十幾筆測資的
+// 年代可行，被 12 個月的真實資料打壞——**不要假設剛建立的紀錄會出現在列表第一頁**。
+await page.fill('input[aria-label="會員清單篩選"]', MAIN.name);
+await page.click('button:has-text("篩選")');
+await page.waitForSelector(`a.member-table-link:has-text("${MAIN.name}")`, { timeout: 15000 });
+await page.waitForTimeout(400);
 await page.click(`a.member-table-link:has-text("${MAIN.name}")`);
 await page.waitForURL(/\/contacts\/\d+$/);
 await page.waitForTimeout(1200);
@@ -115,6 +122,31 @@ const revealed = await page.textContent(".member-id-actions .money").catch(() =>
 note(`查看身分證回傳：${revealed}`);
 await shot(page, "detail-reveal-nid", { locator: '.card:has(h2:text("角色與身分證"))' });
 
-writeFileSync(join(dir, "data.json"), JSON.stringify({ MAIN, SECOND, contactId }, null, 2));
+// **寫入前先向後端確認實際存的是什麼**（而不是把本地變數當成事實）。
+//
+// 這支腳本按下「建檔」後從不檢查結果，而 `validNationalId(1234567)` 是**固定種子**——
+// 重跑會產生同一組身分證、被當成重複建檔而拒絕，但腳本照樣往下走，
+// 把一個**從未存進資料庫的電話**寫進 data.json。
+// 後面每一支 POS 腳本都靠那個電話找人，於是整串 08/09 系列連鎖失敗，
+// 而錯誤訊息只說「找不到會員」，看不出源頭在這裡。
+const token = await apiLogin();
+const confirmed = {};
+for (const [key, person] of [["MAIN", MAIN], ["SECOND", SECOND]]) {
+  const found = await apiJson(token, "GET", `/api/v1/contacts?q=${encodeURIComponent(person.name)}`);
+  const rows = Array.isArray(found.json) ? found.json : (found.json?.items ?? []);
+  const hit = rows.find((c) => c.name === person.name);
+  if (hit === undefined) {
+    throw new Error(`建檔未成功：資料庫查不到「${person.name}」，後續腳本會連鎖失敗`);
+  }
+  if (hit.phone !== person.phone) {
+    note(`「${person.name}」已存在（電話 ${hit.phone}），沿用既有那筆而非本次產生的號碼`);
+  }
+  confirmed[key] = { ...person, phone: hit.phone, id: hit.id };
+}
+
+writeFileSync(
+  join(dir, "data.json"),
+  JSON.stringify({ MAIN: confirmed.MAIN, SECOND: confirmed.SECOND, contactId }, null, 2),
+);
 await browser.close();
 console.log("✅ 03-contacts 完成");

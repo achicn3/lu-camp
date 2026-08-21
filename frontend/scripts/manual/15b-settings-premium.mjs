@@ -23,7 +23,7 @@ await page.click('.settings-confirm-dialog button:has-text("確認")');
 await page.waitForTimeout(2500);
 await shot(page, "premium-saved", { locator: '.card:has(h2:text("溢價率設定"))' });
 await shot(page, "premium-history", { locator: '.card:has(h2:text("溢價率變更紀錄"))' });
-await shot(page, "signature-retention", { locator: '.card:has(h2:text("簽名 PNG 待清理報表"))' });
+await shot(page, "signature-retention", { locator: '.card:has(h2:text("可清除的簽名圖檔"))' });
 note(`變更紀錄：${(await page.textContent('.card:has(h2:text("溢價率變更紀錄"))'))?.replace(/\s+/g, " ").slice(0, 200)}`);
 
 });

@@ -76,7 +76,7 @@ const sku = await page
   .first()
   .textContent()
   .catch(() => null);
-note(`一般商品 SKU：${sku}`);
+note(`一般商品編號：${sku}`);
 
 // ── 散裝批 ──
 await page.click('button:has-text("散裝批")');
