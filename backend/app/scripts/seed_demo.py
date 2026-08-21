@@ -1059,6 +1059,86 @@ async def seed_campaigns(
     return made
 
 
+async def seed_mixed_fnb_sales(
+    session: AsyncSession,
+    store_id: int,
+    manager_id: int,
+    menu_items: list[MenuItem],
+    rng: random.Random,
+    today: date,
+    *,
+    count: int,
+) -> int:
+    """「餐飲＋二手」同一張單——客人邊吃邊挑裝備。
+
+    **報表少了這種單就有一欄示範不出來**：餐飲報表的「整單合計（對照）」用意是
+    「這組客人總共花多少，含非餐飲」，若每張含餐飲的單都只有餐飲，那一欄永遠等於
+    餐飲營收，看起來像多餘的欄位（實測：$40,625 對 $40,625）。
+
+    需要開帳中的班別（收現，§7 不變量 #8）；跑完把班別結掉。
+    """
+    if not menu_items:
+        return 0
+    sales_svc = SalesService(session)
+    cash = CashDrawerService(session)
+    made = 0
+    opened_here = False
+    if await cash.get_current_session(store_id) is None:
+        await cash.open_session(store_id, manager_id, Decimal(30000))
+        await session.commit()
+        opened_here = True
+
+    pool = list(
+        await session.scalars(
+            select(SerializedItem)
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.status == SerializedItemStatus.IN_STOCK,
+                SerializedItem.ownership_type == OwnershipType.OWNED,
+            )
+            .order_by(SerializedItem.id.desc())
+            .limit(count * 3)
+        )
+    )
+    rng.shuffle(pool)
+    for index in range(min(count, len(pool))):
+        item = pool[index]
+        dine_in = rng.random() < 0.6
+        basket = _fnb_basket(menu_items, rng, dine_in=dine_in)
+        day = today - timedelta(days=rng.randrange(1, 120))
+        amount = item.listed_price + sum(
+            (m.unit_price * qty for m, qty in basket), Decimal(0)
+        )
+        try:
+            sale = await sales_svc.create_sale(
+                store_id,
+                manager_id,
+                lines=[
+                    SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=item.item_code),
+                    *[
+                        SaleLineInput(line_type=SaleLineType.MENU, menu_item_id=m.id, qty=qty)
+                        for m, qty in basket
+                    ],
+                ],
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
+                service_mode=ServiceMode.DINE_IN if dine_in else ServiceMode.TAKEOUT,
+                table_no=rng.choice(_DINE_IN_TABLES) if dine_in else None,
+                idempotency_key=f"seed-mixed-{day.isoformat()}-{index}",
+            )
+        except DomainError:
+            continue
+        sale.created_at = moment_of(day, _fnb_hour(day, rng), rng.randrange(60))
+        made += 1
+    await session.commit()
+
+    if opened_here:
+        current = await cash.get_current_session(store_id)
+        if current is not None:
+            await cash.close_session(current, await cash.expected_amount(current), manager_id)
+            await session.commit()
+    return made
+
+
 async def seed_call_tickets(
     session: AsyncSession, store_id: int, manager_id: int, rng: random.Random
 ) -> int:
@@ -2445,6 +2525,7 @@ async def run(
     rng_seed: int,
     do_purge: bool,
     only_tickets: bool,
+    only_mixed: int,
     days: int,
     base_per_day: float,
     daily_intake: float,
@@ -2476,6 +2557,18 @@ async def run(
             return SeedReport(counts={"已清除": 1}, invariants=[])
 
         rng = random.Random(rng_seed)
+        if only_mixed:
+            # 增量補「餐飲＋二手」混合單：整批重跑要十幾分鐘，而且會再消耗上萬個
+            # 平台發票號碼——為了補一欄報表資料不值得。
+            menu_items = await seed_menu(session, store_id, manager_id)
+            made = await seed_mixed_fnb_sales(
+                session, store_id, manager_id, menu_items, rng,
+                store_date(utc_now()), count=only_mixed,
+            )
+            report = SeedReport()
+            report.counts["餐飲＋二手混合單"] = made
+            report.invariants = await verify_invariants(session, store_id)
+            return report
         if only_tickets:
             # **叫號只有「今天」有意義**（docs/38 裁示：跨日就清掉）。整批 seed 跑一次要
             # 十幾分鐘，但叫號隔天就過期——截圖當天用這個旗標重刷即可，不必重跑全部。
@@ -2651,6 +2744,12 @@ def main() -> None:
         action="store_true",
         help="只重刷今日叫號（docs/38 跨日就清掉；截圖當天用，不必重跑整批）",
     )
+    parser.add_argument(
+        "--only-mixed",
+        type=int,
+        default=0,
+        help="只增量補 N 筆「餐飲＋二手」混合單（不重跑整批、不再消耗平台發票號）",
+    )
     # 分段建置期間可先跑小批量把整條路徑走通，再放大到目標量
     parser.add_argument("--intake", type=float, default=24.0, help="每個營業日平均收購件數")
     parser.add_argument("--days", type=int, default=365, help="回溯的營業天數")
@@ -2718,6 +2817,7 @@ def main() -> None:
             rng_seed=args.seed,
             do_purge=args.purge,
             only_tickets=args.only_tickets,
+            only_mixed=args.only_mixed,
             days=args.days,
             base_per_day=args.per_day,
             daily_intake=args.intake,
