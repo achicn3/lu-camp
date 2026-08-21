@@ -118,7 +118,10 @@ def _report_tabs() -> tuple[list[str], int | None]:
     claimed = None
     script = _FRONTEND / "scripts/manual/14-reports.mjs"
     if script.exists():
-        m = re.search(r"(\d+)\s*個分頁", script.read_text())
+        # **只看標題那一行**：整份檔案掃的話，說明段落裡提到的數字也會被當成宣稱值
+        # （本檔的說明就寫著「標題寫『12 個分頁』」，於是永遠報 stale——實測踩過）。
+        first_line = script.read_text().splitlines()[0] if script.read_text() else ""
+        m = re.search(r"(\d+)\s*個分頁", first_line)
         if m:
             claimed = int(m.group(1))
     return tabs, claimed

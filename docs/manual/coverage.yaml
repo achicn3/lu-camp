@@ -23,7 +23,7 @@ screens:
     label: "叫號"
     in_menu: true
     manager_only: false
-    scripts: []          # ← 手冊未涵蓋
+    scripts: ["19-call-tickets.mjs"]
   - route: "/campaigns"
     label: "門市活動"
     in_menu: true
@@ -118,7 +118,6 @@ endpoints:
 
 report_tabs:
   total: 15
-  claimed_by_14_reports: 12
   list:
     - "今日營運"
     - "經營洞察"
@@ -138,7 +137,4 @@ report_tabs:
 
 gaps:
   screens_without_script:
-    - "/call-tickets"
     - "/contacts/[id]"
-  report_tabs_stale:
-    - "14-reports.mjs 自稱涵蓋 12 個分頁，實際有 15 個"
