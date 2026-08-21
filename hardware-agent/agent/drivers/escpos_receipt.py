@@ -341,6 +341,11 @@ class EscposReceiptPrinter:
         out += _CUT
         self._writer.write(bytes(out))
 
+    def print_raw(self, data: bytes) -> None:
+        """原樣輸出外部產生的 ESC/POS（見協定說明）。**不做任何改寫**——
+        內容含加密驗證資訊與點陣圖，任何加工都可能讓條碼掃不出來。"""
+        self._writer.write(data)
+
     def print_einvoice(self, invoice: InvoicePayload) -> None:
         """列印電子發票證明聯（附件一格式一；記載順序固定、不得增刪/變更）。
 

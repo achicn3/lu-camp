@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
@@ -202,6 +204,22 @@ class StoreHeader(BaseModel):
     invoice_track_info: str | None = None
 
 
+class RawPrintPayload(BaseModel):
+    """外部服務產生好的 ESC/POS 位元組（base64 傳輸）。
+
+    **上限刻意設寬**：Amego 的證明聯把二維條碼畫成點陣圖，實測一張約 11 KB，
+    base64 後約 15 KB。設太緊會在真的要補印時被自己擋下。
+    """
+
+    base64_data: str = Field(min_length=1, max_length=200_000)
+
+    def decoded(self) -> bytes:
+        try:
+            return base64.b64decode(self.base64_data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("base64_data 不是有效的 base64") from exc
+
+
 class InvoicePayload(BaseModel):
     r"""電子發票證明聯列印輸入。
 
@@ -286,6 +304,15 @@ class ReceiptPrinter(Protocol):
 
     def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
         """列印商品明細聯（含店家抬頭；逐項品名/數量/單價/小計 + 總計/稅）。"""
+        ...
+
+    def print_raw(self, data: bytes) -> None:
+        """把**已經是 ESC/POS 的位元組**原樣送到印表機。
+
+        用於「由外部服務產生整張版面」的情境——目前是 Amego 的 `invoice_print`
+        （發票補印）：證明聯的二維條碼含一段以財政部金鑰加密的驗證資訊，**本地算不出來**，
+        只能由加值中心產生。它回傳的就是可直送的 ESC/POS，我們不解讀、不改寫、原樣轉送。
+        """
         ...
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:

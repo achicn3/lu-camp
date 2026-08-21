@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { SALES_PAGE_SIZE, nextSalesPageParam } from "@/features/sales/pagination";
-import { printEInvoice, printKitchenTicket, printSaleDetail } from "@/lib/agent";
+import { printKitchenTicket, printRaw, printSaleDetail } from "@/lib/agent";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -1078,29 +1078,23 @@ export default function SalesPage() {
   });
 
   // 發票證明聯補印（docs/24）：客人把證明聯弄丟、或缺紙漏印時的補救。
-  // 取發票走 `issue` 端點——它對已開立的發票是冪等的（其 docstring 明載
-  // 「POS 重試/重印取號用」），**不會**再送平台開第二張。
+  //
+  // **整張版面向 Amego 要，不在本地組。** 證明聯的二維條碼含一段以財政部金鑰加密的
+  // 驗證資訊，那把鑰匙在加值中心手上；而 `invoice_query` 只回隨機碼、**不回條碼內容**
+  // （已對真平台實測）。所以本地能不能組出證明聯，取決於開立當下有沒有收到那些內容——
+  // 「送出成功但回應遺失」的那種就永遠補不出來。
+  //
+  // 改走 Amego 的 `invoice_print`（列印格式 2＝發票補印），以**我們自己的 OrderId** 查：
+  // OrderId 由 (store, sale) 確定性導出，只要銷售在就一定算得出來，
+  // 不依賴那個可能弄丟的發票號碼。**任何 180 天內已開立的發票都補得出來。**
   const reprintInvoice = useMutation({
     mutationFn: async (sale: SaleSummary) => {
-      const [{ data: saleData, error: saleError }, header] = await Promise.all([
-        api.GET("/api/v1/sales/{sale_id}", { params: { path: { sale_id: sale.id } } }),
-        api.GET("/api/v1/stores/{store_id}/receipt-header", {
-          params: { path: { store_id: 1 } },
-        }),
-      ]);
-      if (!saleData) throw new Error(extractDetail(saleError) ?? "讀取銷售明細失敗");
-      const { data: invoice, error: invoiceError } = await api.POST(
-        "/api/v1/einvoice/sales/{sale_id}/issue",
+      const { data, error } = await api.POST(
+        "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
         { params: { path: { sale_id: sale.id } } },
       );
-      if (!invoice) throw new Error(extractDetail(invoiceError) ?? "讀取發票失敗");
-      if (!invoice.print_mark) {
-        throw new Error("本筆已存入載具或捐贈，依規定不印證明聯");
-      }
-      await printEInvoice(invoice, saleData, {
-        taxId: header.data?.tax_id ?? "",
-        name: header.data?.name ?? "",
-      });
+      if (!data) throw new Error(extractDetail(error) ?? "取得補印內容失敗");
+      await printRaw(data.base64_data);
       return sale.id;
     },
     onSuccess: (saleId) => setPrintNote(`已送出 #${saleId} 的發票證明聯。`),
@@ -1321,7 +1315,9 @@ export default function SalesPage() {
                       </button>
                     )}
                     {/* 只在**平台已開立**時提供：手開紙本的證明聯是店員手寫那張，
-                        系統印不出來；未開立的更沒有內容可印。 */}
+                        系統印不出來；未開立的更沒有內容可印。
+                        **不再看本地有沒有條碼內容**——版面向 Amego 要，
+                        連「送出成功但回應遺失」那種也補得出來。 */}
                     {!voided
                       && sale.invoice_status === "ISSUED"
                       && sale.invoice_issue_channel !== "MANUAL_PAPER" && (

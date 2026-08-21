@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit_log
 from app.core.money import split_tax_inclusive
 from app.modules.einvoice.amego import (
+    AMEGO_PRINTER_TYPE_TM_T82III,
     AmegoClient,
     AmegoIssueResult,
     allowance_number,
@@ -34,9 +35,11 @@ from app.modules.einvoice.amego import (
     build_f0401_data,
     build_f0501_data,
     build_g0401_data,
+    build_invoice_print_data,
     build_invoice_query_by_number_data,
     build_invoice_query_data,
     parse_f0401_success,
+    parse_invoice_print,
     parse_query_allowance_exists,
     parse_query_invoice_voided,
     parse_query_issued,
@@ -1095,6 +1098,43 @@ class EInvoiceService:
         await self._session.commit()
         await self._session.refresh(item)
         return item
+
+    async def reprint_payload_for_sale(
+        self,
+        store_id: int,
+        sale_id: int,
+        *,
+        client_factory: Callable[[], Awaitable[AmegoClient]],
+    ) -> str:
+        """向 Amego 取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS）。
+
+        **為什麼不自己組版面**：證明聯的二維條碼含一段以財政部金鑰加密的驗證資訊，
+        那把鑰匙在加值中心手上。`invoice_query` 也只回隨機碼、不回條碼內容
+        （已對真平台實測）。所以補印一律由平台產生整張版面，我們原樣轉送印表機。
+
+        僅限**平台已開立**者：手開紙本的證明聯是店員手寫那張、平台上沒有；
+        未開立的更沒有內容可印。
+        """
+        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
+        if invoice is None:
+            raise InvoiceNotFound(f"銷售 {sale_id} 無發票")
+        if invoice.status is not InvoiceStatus.ISSUED:
+            raise InvoiceNotIssued(
+                f"發票狀態 {invoice.status.value}，尚未開立，無證明聯可補印"
+            )
+        if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
+            raise ManualPaperInvoiceOperation(
+                "本筆為手開紙本發票，證明聯是當初手寫的那張，系統無法補印"
+            )
+        client = await client_factory()
+        resp = await client.call(
+            "/json/invoice_print",
+            build_invoice_print_data(
+                order_id=amego_order_id(store_id=store_id, sale_id=sale_id),
+                printer_type=AMEGO_PRINTER_TYPE_TM_T82III,
+            ),
+        )
+        return parse_invoice_print(resp)
 
     async def issue_for_sale(
         self,

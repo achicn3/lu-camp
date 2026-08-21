@@ -20,6 +20,7 @@ from agent.interfaces import (
     AcquisitionReceiptPayload,
     InvoicePayload,
     KitchenTicketPayload,
+    RawPrintPayload,
     SalePayload,
     StoreHeader,
 )
@@ -86,6 +87,18 @@ async def print_kitchen(ticket: KitchenTicketPayload, devices: DevicesDep) -> Ok
     # 出餐機接了就印那台、沒接退回收據機（解析在 AgentDevices.kitchen_ticket_printer）。
     # **缺紙不得改印櫃檯那台**——店員會以為廚房收到了，餐永遠不會被做。
     await anyio.to_thread.run_sync(devices.kitchen_ticket_printer.print_kitchen_ticket, ticket)
+    return OkResponse(status="ok")
+
+
+@router.post("/raw", response_model=OkResponse, operation_id="printRaw")
+async def print_raw(payload: RawPrintPayload, devices: DevicesDep) -> OkResponse:
+    """把外部服務產生的 ESC/POS **原樣**送到收據機。
+
+    目前唯一的用途是 Amego 的發票補印（`/json/invoice_print`）：證明聯的二維條碼含
+    一段以財政部金鑰加密的驗證資訊，**本地算不出來**，只能由加值中心產生整張版面。
+    我們不解讀也不改寫它的位元組——任何加工都可能讓條碼掃不出來。
+    """
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_raw, payload.decoded())
     return OkResponse(status="ok")
 
 

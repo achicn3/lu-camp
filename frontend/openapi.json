@@ -5340,6 +5340,20 @@
         "title": "InvoiceRead",
         "type": "object"
       },
+      "InvoiceReprintPayloadRead": {
+        "description": "證明聯補印內容（base64 的 ESC/POS，由 Amego `invoice_print` 產生）。\n\n刻意**只回位元組、不回結構化欄位**：這張版面由加值中心產生，我們不解讀也不改寫——\n任何加工都可能讓二維條碼掃不出來。",
+        "properties": {
+          "base64_data": {
+            "title": "Base64 Data",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base64_data"
+        ],
+        "title": "InvoiceReprintPayloadRead",
+        "type": "object"
+      },
       "InvoiceStatus": {
         "description": "發票（invoices）本地紀錄狀態。\n\nPENDING：本地已建、排入上傳佇列，尚未取得平台核可（無字軌號碼——序列化/配號待 T13 收尾）；\nISSUED：平台 ProcessResult 核可、正式開立；\nVOID_PENDING：已核可發票申請作廢、F0501 已排隊但平台尚未確認（本地不可先當正式作廢，\n  否則 F0501 失敗時本地顯示作廢、平台仍有效）；VOID：F0501 平台核可後的正式作廢；\nALLOWANCE：已折讓。佇列本身的上傳狀態另見 UploadStatus。",
         "enum": [
@@ -15890,6 +15904,54 @@
           }
         ],
         "summary": "Register Manual Invoice",
+        "tags": [
+          "einvoice"
+        ]
+      }
+    },
+    "/api/v1/einvoice/sales/{sale_id}/reprint-payload": {
+      "post": {
+        "description": "取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS，由 Amego 產生）。\n\n證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——補印一律由平台\n產生整張版面。用 POST 是因為它會實際呼叫外部平台（非純讀取）。",
+        "operationId": "getEInvoiceReprintPayload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sale_id",
+            "required": true,
+            "schema": {
+              "title": "Sale Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceReprintPayloadRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Reprint Payload",
         "tags": [
           "einvoice"
         ]

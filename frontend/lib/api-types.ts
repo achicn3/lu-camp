@@ -1276,6 +1276,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/einvoice/sales/{sale_id}/reprint-payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get Reprint Payload
+         * @description 取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS，由 Amego 產生）。
+         *
+         *     證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——補印一律由平台
+         *     產生整張版面。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
+         */
+        post: operations["getEInvoiceReprintPayload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gift-reasons": {
         parameters: {
             query?: never;
@@ -4667,6 +4690,17 @@ export interface components {
             tax: string;
             /** Total */
             total: string;
+        };
+        /**
+         * InvoiceReprintPayloadRead
+         * @description 證明聯補印內容（base64 的 ESC/POS，由 Amego `invoice_print` 產生）。
+         *
+         *     刻意**只回位元組、不回結構化欄位**：這張版面由加值中心產生，我們不解讀也不改寫——
+         *     任何加工都可能讓二維條碼掃不出來。
+         */
+        InvoiceReprintPayloadRead: {
+            /** Base64 Data */
+            base64_data: string;
         };
         /**
          * InvoiceStatus
@@ -9402,6 +9436,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEInvoiceReprintPayload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceReprintPayloadRead"];
                 };
             };
             /** @description Validation Error */

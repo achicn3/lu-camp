@@ -20,6 +20,7 @@ from app.modules.einvoice.schemas import (
     EInvoiceQueueListRead,
     EInvoiceResultRequest,
     InvoiceRead,
+    InvoiceReprintPayloadRead,
     ManualInvoiceRegisterRequest,
 )
 from app.modules.einvoice.service import EInvoiceService
@@ -37,7 +38,9 @@ from app.shared.exceptions import (
     EInvoiceResultNotApplicable,
     InvoiceIncompleteForIssue,
     InvoiceNotFound,
+    InvoiceNotIssued,
     ManualInvoiceNotRegisterable,
+    ManualPaperInvoiceOperation,
 )
 
 router = APIRouter(prefix="/einvoice", tags=["einvoice"])
@@ -134,6 +137,32 @@ async def issue_invoice_for_sale(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     await session.commit()
     return InvoiceRead.model_validate(invoice)
+
+
+@router.post(
+    "/sales/{sale_id}/reprint-payload",
+    response_model=InvoiceReprintPayloadRead,
+    operation_id="getEInvoiceReprintPayload",
+)
+async def get_reprint_payload(
+    sale_id: int, session: SessionDep, user: CurrentUserDep
+) -> InvoiceReprintPayloadRead:
+    """取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS，由 Amego 產生）。
+
+    證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——補印一律由平台
+    產生整張版面。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
+    """
+    try:
+        payload = await EInvoiceService(session).reprint_payload_for_sale(
+            user.store_id, sale_id, client_factory=lambda: _amego_client(session, user.store_id)
+        )
+    except (InvoiceNotFound, InvoiceNotIssued, ManualPaperInvoiceOperation) as exc:
+        # 找不到／尚未開立／手開紙本：都是「這筆本來就沒有證明聯可補印」，屬 409。
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except AmegoTransportError as exc:
+        # 平台連不上或未回列印內容——不可靜默印出空白，明確回報上游故障。
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return InvoiceReprintPayloadRead(base64_data=payload)
 
 
 @router.post(

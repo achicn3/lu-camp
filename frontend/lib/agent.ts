@@ -96,6 +96,17 @@ export async function printEInvoice(
  * 列印出餐單（docs/35）：桌號＋餐飲品項，給吧台核對出餐。
  * 只送 MENU 明細（二手商品不進吧台）、不送金額；沒有餐飲行就不該呼叫。
  */
+/**
+ * 把外部服務產生好的 ESC/POS **原樣**送到收據機。
+ *
+ * 目前唯一用途是 Amego 的發票補印：證明聯的二維條碼含一段以財政部金鑰加密的驗證資訊，
+ * 那把鑰匙在加值中心手上，**本地推算不出來**；`invoice_query` 也只回隨機碼、不回條碼內容
+ * （已對真平台實測）。所以補印一律由平台產生整張版面，我們不解讀也不改寫。
+ */
+export async function printRaw(base64Data: string): Promise<void> {
+  await postAgent("/print/raw", { base64_data: base64Data });
+}
+
 export async function printKitchenTicket(
   sale: SaleRead,
   serviceMode: "DINE_IN" | "TAKEOUT",

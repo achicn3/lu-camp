@@ -51,6 +51,16 @@ class InvoiceRead(BaseModel):
     created_at: datetime
 
 
+class InvoiceReprintPayloadRead(BaseModel):
+    """證明聯補印內容（base64 的 ESC/POS，由 Amego `invoice_print` 產生）。
+
+    刻意**只回位元組、不回結構化欄位**：這張版面由加值中心產生，我們不解讀也不改寫——
+    任何加工都可能讓二維條碼掃不出來。
+    """
+
+    base64_data: str
+
+
 class EInvoiceQueueItemRead(BaseModel):
     """上傳佇列項目輸出（GET /einvoice/queue）。"""
 

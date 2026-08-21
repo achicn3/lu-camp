@@ -62,6 +62,7 @@ class FakeReceiptPrinter:
         self.receipts: list[tuple[SalePayload, StoreHeader]] = []
         self.details: list[tuple[SalePayload, StoreHeader]] = []
         self.einvoices: list[InvoicePayload] = []
+        self.raw_prints: list[bytes] = []
         self.acquisitions: list[tuple[AcquisitionReceiptPayload, StoreHeader]] = []
         self.kitchen_tickets: list[KitchenTicketPayload] = []
 
@@ -82,6 +83,10 @@ class FakeReceiptPrinter:
     def print_detail(self, sale: SalePayload, header: StoreHeader) -> None:
         self._guard()
         self.details.append((sale, header))
+
+    def print_raw(self, data: bytes) -> None:
+        self._guard()
+        self.raw_prints.append(data)
 
     def print_einvoice(self, invoice: InvoicePayload) -> None:
         self._guard()

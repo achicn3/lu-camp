@@ -220,6 +220,53 @@ def build_g0401_data(
     ]
 
 
+# EPSON TM-T82III 的機型代碼（Amego「機型支援功能表」；官方表列支援正本與**補印**、BIG5）。
+# 換機種要改這裡——代碼錯了 Amego 會產出另一台機器的指令，印出來是亂碼。
+AMEGO_PRINTER_TYPE_TM_T82III = 3
+# 列印格式：1＝發票正本、2＝發票補印。
+AMEGO_PRINT_TYPE_ORIGINAL = 1
+AMEGO_PRINT_TYPE_REPRINT = 2
+
+
+def build_invoice_print_data(
+    *, order_id: str, printer_type: int, reprint: bool = True
+) -> dict[str, str | int]:
+    """invoice_print（發票列印）payload：**以訂單編號查**，回傳可直送的 ESC/POS。
+
+    **為什麼用 order_id 而不是發票號碼**：`OrderId` 由 `(store, sale)` 確定性導出，
+    只要那筆銷售在就一定算得出來；而發票號碼正是「送出成功但回應遺失」時弄丟的東西。
+    用它當鍵等於要求先有你沒有的東西。
+
+    **為什麼要有這支**：證明聯的二維條碼含一段以財政部金鑰加密的驗證資訊，
+    加值中心才有那把鑰匙，本地推算不出來。`invoice_query` 只回隨機碼、不回條碼內容
+    （已對真平台實測），所以補印只能靠這支由 Amego 產生整張版面。
+
+    平台限制：**只能查 180 天內的發票**；0 元發票不回傳列印內容。
+    """
+    return {
+        "type": "order",
+        "order_id": order_id,
+        "printer_type": printer_type,
+        "print_invoice_type": (
+            AMEGO_PRINT_TYPE_REPRINT if reprint else AMEGO_PRINT_TYPE_ORIGINAL
+        ),
+    }
+
+
+def parse_invoice_print(resp: dict[str, object]) -> str:
+    """取出 base64 的 ESC/POS；平台未回內容一律拋錯，不回空字串讓呼叫端誤印空白。"""
+    code = resp.get("code")
+    if code != 0:
+        raise AmegoTransportError(f"invoice_print 回錯誤碼 {code}：{resp.get('msg')}")
+    data = resp.get("data")
+    payload = data.get("base64_data") if isinstance(data, dict) else None
+    if not isinstance(payload, str) or payload == "":
+        raise AmegoTransportError(
+            "invoice_print 未回傳列印內容（0 元發票或該機型不支援；不可據此列印空白）"
+        )
+    return payload
+
+
 def build_invoice_query_data(*, order_id: str) -> dict[str, str]:
     """invoice_query（發票查詢）payload：以訂單編號查（未知結果對帳復原用）。"""
     return {"type": "order", "order_id": order_id}
