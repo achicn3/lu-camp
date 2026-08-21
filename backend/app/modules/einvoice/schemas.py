@@ -52,13 +52,16 @@ class InvoiceRead(BaseModel):
 
 
 class InvoiceReprintPayloadRead(BaseModel):
-    """證明聯補印內容（base64 的 ESC/POS，由 Amego `invoice_print` 產生）。
+    """證明聯列印內容（base64 的 ESC/POS，由 Amego `invoice_print` 產生）。
 
     刻意**只回位元組、不回結構化欄位**：這張版面由加值中心產生，我們不解讀也不改寫——
     任何加工都可能讓二維條碼掃不出來。
     """
 
     base64_data: str
+    # True＝這張會印出「補印」二字（依法須併同原聯兌獎）；False＝正本。
+    # 由後端依「證明聯印出來過沒有」決定，不讓前端自己猜。
+    is_reprint: bool
 
 
 class EInvoiceQueueItemRead(BaseModel):

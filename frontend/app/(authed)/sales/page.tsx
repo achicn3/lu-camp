@@ -1084,7 +1084,7 @@ export default function SalesPage() {
   // （已對真平台實測）。所以本地能不能組出證明聯，取決於開立當下有沒有收到那些內容——
   // 「送出成功但回應遺失」的那種就永遠補不出來。
   //
-  // 改走 Amego 的 `invoice_print`（列印格式 2＝發票補印），以**我們自己的 OrderId** 查：
+  // 改走 Amego 的 `invoice_print`，以**我們自己的 OrderId** 查：
   // OrderId 由 (store, sale) 確定性導出，只要銷售在就一定算得出來，
   // 不依賴那個可能弄丟的發票號碼。**任何 180 天內已開立的發票都補得出來。**
   const reprintInvoice = useMutation({
@@ -1093,11 +1093,21 @@ export default function SalesPage() {
         "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
         { params: { path: { sale_id: sale.id } } },
       );
-      if (!data) throw new Error(extractDetail(error) ?? "取得補印內容失敗");
+      if (!data) throw new Error(extractDetail(error) ?? "取得列印內容失敗");
       await printRaw(data.base64_data);
-      return sale.id;
+      // **印表機回報成功之後**才記，順序不能顛倒：這支端點記的是「紙真的出來了」，
+      // 先記會把失敗的那次算掉「列印一次」的額度，害真正的正本被當成補印。
+      await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
+        params: { path: { sale_id: sale.id } },
+      });
+      return { saleId: sale.id, isReprint: data.is_reprint };
     },
-    onSuccess: (saleId) => setPrintNote(`已送出 #${saleId} 的發票證明聯。`),
+    onSuccess: ({ saleId, isReprint }) =>
+      setPrintNote(
+        isReprint
+          ? `已送出 #${saleId} 的發票證明聯（補印）。補印聯須連同原本那張一起才能兌獎。`
+          : `已送出 #${saleId} 的發票證明聯。`,
+      ),
     onError: (err: Error) => setPrintNote(err.message),
   });
 

@@ -1419,6 +1419,12 @@ export default function PosPage() {
       if (header == null) header = (await storeHeader.refetch()).data ?? undefined;
       if (header?.tax_id == null) throw new Error("讀不到店家統編抬頭");
       await printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name });
+      // 印出來了才記——這是「證明聯以列印一次為限」的那一次。沒記到的話，
+      // 之後在交易紀錄按補印會誤判成正本而多印一張；記錯邊則是印成補印，
+      // 客人拿到一張須併同原聯才能兌獎的紙。
+      await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
+        params: { path: { sale_id: sale.id } },
+      });
     },
     onSuccess: () => setInvoiceNote("發票已開立，證明聯已送印"),
     onError: (err: Error) =>

@@ -116,6 +116,10 @@ class Invoice(Base, TimestampMixin):
     donate_mark: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     npoban: Mapped[str | None] = mapped_column(String(7))  # 捐贈碼 3–7 碼
     print_mark: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # 證明聯**實際印出**的時間（None＝從未印出）。與 print_mark 無關——那是 MIG 的
+    # 列印註記（紙本 vs 載具）。這裡記的是事實，用來決定下一次該印正本還是補印：
+    # 要點 §26「證明聯以列印一次為限」，補印須加註「補印」二字且併同原聯才能兌獎。
+    proof_printed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 作廢原因（僅作廢時有值）：SALE_VOID＝整筆銷售作廢、FULL_RETURN＝銷售有效但全退、
     # CORRECTION＝開立內容有誤重開。同樣是「作廢」，帳務意義不同，報表/稽核須能分辨。
     void_reason: Mapped[InvoiceVoidReason | None] = mapped_column(

@@ -18,7 +18,7 @@ import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,6 +167,17 @@ def _payload_allowance_identity(payload: object) -> tuple[Decimal, Decimal, str]
     if not original:
         raise EInvoiceDropError("g0401：凍結 payload 缺原發票字軌，無從驗證身分（需人工對帳）")
     return net, tax, original
+
+
+class ProofPrintPayload(NamedTuple):
+    """證明聯列印內容＋這次是正本還是補印。
+
+    `is_reprint` 由後端依「印出來過沒有」決定並回給前端顯示，不讓 UI 自己猜——
+    猜錯會對店員講錯話（補印聯依法須併同原聯才能兌獎）。
+    """
+
+    base64_data: str
+    is_reprint: bool
 
 
 class EInvoiceService:
@@ -1105,7 +1116,7 @@ class EInvoiceService:
         sale_id: int,
         *,
         client_factory: Callable[[], Awaitable[AmegoClient]],
-    ) -> str:
+    ) -> ProofPrintPayload:
         """向 Amego 取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS）。
 
         **為什麼不自己組版面**：證明聯的二維條碼含一段以財政部金鑰加密的驗證資訊，
@@ -1114,6 +1125,11 @@ class EInvoiceService:
 
         僅限**平台已開立**者：手開紙本的證明聯是店員手寫那張、平台上沒有；
         未開立的更沒有內容可印。
+
+        **正本還是補印，由「印出來過沒有」決定**（電子發票實施作業要點 §26）：
+        證明聯以列印一次為限，從未印出（例：開立成功但回應斷線）時那一次還沒用掉，
+        要印**正本**；已印過才印補印——補印會加註「補印」二字，且依法須併同原聯
+        才能兌獎，誤用等於給客人一張兌不了獎的紙。
         """
         invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
         if invoice is None:
@@ -1126,15 +1142,28 @@ class EInvoiceService:
             raise ManualPaperInvoiceOperation(
                 "本筆為手開紙本發票，證明聯是當初手寫的那張，系統無法補印"
             )
+        is_reprint = invoice.proof_printed_at is not None
         client = await client_factory()
         resp = await client.call(
             "/json/invoice_print",
             build_invoice_print_data(
                 order_id=amego_order_id(store_id=store_id, sale_id=sale_id),
                 printer_type=AMEGO_PRINTER_TYPE_TM_T82III,
+                reprint=is_reprint,
             ),
         )
-        return parse_invoice_print(resp)
+        return ProofPrintPayload(parse_invoice_print(resp), is_reprint)
+
+    async def mark_proof_printed(self, store_id: int, sale_id: int) -> None:
+        """記下證明聯已實際印出（印表機回報成功後呼叫）。
+
+        **為什麼不在產出內容時就記**：那正是要修的失效樣態——內容拿到了、紙沒出來。
+        以印表機回報為準，才不會把一次失敗的列印算掉「列印一次」的額度。
+        """
+        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
+        if invoice is None:
+            raise InvoiceNotFound(f"銷售 {sale_id} 無發票")
+        await self._repo.mark_proof_printed(invoice, datetime.now(tz=UTC))
 
     async def issue_for_sale(
         self,

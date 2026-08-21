@@ -4,6 +4,7 @@
 避免同一列被並發拋檔/標記造成 attempts 或狀態競態。
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -63,6 +64,12 @@ class EInvoiceRepository:
         stmt = select(Invoice).where(Invoice.store_id == store_id, Invoice.sale_id == sale_id)
         result: Invoice | None = await self._session.scalar(stmt)
         return result
+
+    async def mark_proof_printed(self, invoice: Invoice, printed_at: datetime) -> None:
+        """記下證明聯印出的時間；**已有時間就不覆蓋**——「列印一次」指最初那次。"""
+        if invoice.proof_printed_at is None:
+            invoice.proof_printed_at = printed_at
+            await self._session.flush()
 
     # ── 折讓 ──
 

@@ -6,6 +6,7 @@
 invoice_query 對帳。作廢（F0501）與折讓（G0401）走同一出口。
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import count
@@ -81,6 +82,15 @@ class _ScriptedTransport:
             raise result
         assert isinstance(result, dict)
         return result
+
+
+def _awaitable_client(transport: AmegoTransport) -> Callable[[], Awaitable[AmegoClient]]:
+    """reprint_payload_for_sale 收的是 client factory（router 在該處才查店家統編）。"""
+
+    async def factory() -> AmegoClient:
+        return _client(transport)
+
+    return factory
 
 
 def _client(transport: AmegoTransport) -> AmegoClient:
@@ -1400,3 +1410,70 @@ async def test_void_blocked_when_platform_has_conflicting_pending_allowance(
     item = next(i for i in await svc.list_queue(store_id) if i.id == void_queue_id)
     assert item.status is UploadStatus.PENDING
     assert item.last_error is not None and "相斥" in item.last_error
+
+
+# ── 證明聯列印：正本 vs 補印（電子發票實施作業要點 §26）────────────────────
+
+_PRINT_OK = {"code": 0, "msg": "", "data": {"base64_data": "G0A="}}
+
+
+async def _issued_sale(db_session: AsyncSession) -> tuple[int, int, EInvoiceService]:
+    """跑完一次成功開立，回 (store_id, sale_id, svc)。"""
+    store_id, clerk_id, code = await _seed(db_session)
+    sale_id = await _checkout(db_session, store_id, clerk_id, code)
+    svc = EInvoiceService(db_session)
+    queue_id = await _issue_queue_id(svc, store_id)
+    await svc.send_via_amego(store_id, queue_id, client=_client(_issue_ok_transport()))
+    return store_id, sale_id, svc
+
+
+def _print_type(transport: _ScriptedTransport) -> int:
+    import json as _json
+
+    return int(_json.loads(transport.calls[-1][1]["data"])["print_invoice_type"])
+
+
+async def test_never_printed_proof_prints_as_an_original(db_session: AsyncSession) -> None:
+    """從未印出（例：開立成功但回應斷線）→ **正本**。
+
+    要點 §26「證明聯以列印一次為限」——沒印過就是那一次還沒用掉。
+    若誤印成補印，客人手上沒有原聯，那張紙永遠兌不了獎。
+    """
+    store_id, sale_id, svc = await _issued_sale(db_session)
+    transport = _ScriptedTransport(dict(_PRINT_OK))
+
+    await svc.reprint_payload_for_sale(
+        store_id, sale_id, client_factory=_awaitable_client(transport)
+    )
+
+    assert transport.calls[-1][0].endswith("/json/invoice_print")
+    assert _print_type(transport) == 1
+
+
+async def test_proof_printed_once_then_prints_as_a_reprint(db_session: AsyncSession) -> None:
+    """已印過 → **補印**（加註「補印」二字，須併同原聯兌獎）。"""
+    store_id, sale_id, svc = await _issued_sale(db_session)
+    await svc.mark_proof_printed(store_id, sale_id)
+    transport = _ScriptedTransport(dict(_PRINT_OK))
+
+    await svc.reprint_payload_for_sale(
+        store_id, sale_id, client_factory=_awaitable_client(transport)
+    )
+
+    assert _print_type(transport) == 2
+
+
+async def test_marking_proof_printed_again_keeps_the_first_time(
+    db_session: AsyncSession,
+) -> None:
+    """重複標記不覆蓋——「列印一次」指的是最初那次，之後都是補印。"""
+    store_id, sale_id, svc = await _issued_sale(db_session)
+    await svc.mark_proof_printed(store_id, sale_id)
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None and invoice.proof_printed_at is not None
+    first = invoice.proof_printed_at
+
+    await svc.mark_proof_printed(store_id, sale_id)
+
+    await db_session.refresh(invoice)
+    assert invoice.proof_printed_at == first

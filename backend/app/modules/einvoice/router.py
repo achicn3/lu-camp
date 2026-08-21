@@ -147,10 +147,14 @@ async def issue_invoice_for_sale(
 async def get_reprint_payload(
     sale_id: int, session: SessionDep, user: CurrentUserDep
 ) -> InvoiceReprintPayloadRead:
-    """取這筆銷售的發票證明聯**補印內容**（base64 ESC/POS，由 Amego 產生）。
+    """取這筆銷售的發票證明聯列印內容（base64 ESC/POS，由 Amego 產生）。
 
-    證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——補印一律由平台
-    產生整張版面。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
+    證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——整張版面一律由
+    平台產生。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
+
+    回傳的 `is_reprint` 指出這張會不會印上「補印」二字：從未印出者印**正本**，
+    已印過才印補印（要點 §26，見 service）。印表機回報成功後，前端須呼叫
+    `markEInvoiceProofPrinted` 把事實記回來，下一次才判斷得準。
     """
     try:
         payload = await EInvoiceService(session).reprint_payload_for_sale(
@@ -162,7 +166,30 @@ async def get_reprint_payload(
     except AmegoTransportError as exc:
         # 平台連不上或未回列印內容——不可靜默印出空白，明確回報上游故障。
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-    return InvoiceReprintPayloadRead(base64_data=payload)
+    return InvoiceReprintPayloadRead(
+        base64_data=payload.base64_data, is_reprint=payload.is_reprint
+    )
+
+
+@router.post(
+    "/sales/{sale_id}/proof-printed",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="markEInvoiceProofPrinted",
+)
+async def mark_proof_printed(
+    sale_id: int, session: SessionDep, user: CurrentUserDep
+) -> None:
+    """記下證明聯**已實際印出**（印表機回報成功後由前端呼叫）。
+
+    以印表機回報為準、而非產出內容時就記：內容拿到卻沒出紙正是要修的失效樣態，
+    先記會把失敗的那次算掉「列印一次」的額度，害真正的正本變成補印。
+    重複呼叫只保留最早那次。
+    """
+    try:
+        await EInvoiceService(session).mark_proof_printed(user.store_id, sale_id)
+    except InvoiceNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
 
 
 @router.post(
