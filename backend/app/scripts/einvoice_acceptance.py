@@ -55,6 +55,8 @@ from app.modules.einvoice.amego import (
 )
 from app.modules.inventory.models import SerializedItem
 from app.modules.sales.models import Sale as SaleModel
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.signing.schemas import SignatureTaskCreate
 from app.modules.signing.service import SigningService
 from app.scripts.seed_allowances import _kiosk_ids
@@ -205,6 +207,19 @@ async def run(
     _guard_environment(get_settings().database_url)
     async with get_sessionmaker()() as session:
         await _guard_test_seller(session, store_id)
+
+    # **本階段自己開發票開關、跑完還原**（docs/37 §3：手冊環境全程 `einvoice_enabled=false`，
+    # 需要開立的流程自行 opt-in）。不還原的話後續手冊腳本會在非預期狀態下跑。
+    async with get_sessionmaker()() as session:
+        settings_svc = StoreSettingsService(session)
+        was_enabled = (await settings_svc.get_effective_settings(store_id)).einvoice_enabled
+        if not was_enabled:
+            await settings_svc.update_settings(
+                store_id,
+                actor_user_id=1,
+                patch=SettingsUpdateRequest(einvoice_enabled=True),
+            )
+            await session.commit()
 
     ev = Evidence()
     run_tag = uuid4().hex[:8]
@@ -524,7 +539,7 @@ async def run(
             )
         ).first()
     ev.order_ids.append(f"S{store_id}-{void_sale['id']}")
-    ev.add(
+    result_9 = ev.add(
         "9. 銷售作廢－連動發票進入作廢",
         st_issue == 200
         and st_void in (200, 204)
@@ -533,6 +548,16 @@ async def run(
         作廢回應=st_void,
         發票狀態=(row[0] if row is not None else None),
     )
+    _ = result_9
+    if not was_enabled:
+        async with get_sessionmaker()() as session:
+            await StoreSettingsService(session).update_settings(
+                store_id,
+                actor_user_id=1,
+                patch=SettingsUpdateRequest(einvoice_enabled=False),
+            )
+            await session.commit()
+        print("• 已把 einvoice_enabled 還原為停用（手冊環境的預設狀態）", flush=True)
     return ev
 
 
