@@ -654,13 +654,15 @@ function ReprintAcquisitionReceipt() {
     onError: (e: Error) => setNote(e.message),
   });
 
+  // 標籤刻意不叫「收購單號」：頁面上已有同名欄位，撞名會讓自動化工具無法指定
+  // （Playwright 嚴格模式直接拒絕），螢幕報讀軟體也分不出是哪一個。
   return (
     <div className="card acq-reprint">
       <h2>補印收購憑證聯</h2>
       <p className="hint">客人把憑證聯弄丟、或當初沒印到時，用收購單號補印一張。</p>
       <div className="acq-reprint-row">
         <input
-          aria-label="收購單號"
+          aria-label="要補印的收購單號"
           inputMode="numeric"
           placeholder="收購單號"
           value={input}

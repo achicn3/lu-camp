@@ -47,7 +47,7 @@ try {
   ok("收購：補印收購憑證聯面板", (await page.locator(".acq-reprint").count()) > 0);
 
   // 查一張不存在的單號，確認錯誤訊息看得懂
-  await page.fill('input[aria-label="收購單號"]', "99999999");
+  await page.fill('input[aria-label="要補印的收購單號"]', "99999999");
   await page.click('.acq-reprint button:has-text("補印")');
   await page.waitForTimeout(2500);
   const msg = await page.locator(".acq-reprint .form-error, .acq-reprint .hint").last().innerText();
