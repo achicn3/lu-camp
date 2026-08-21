@@ -43,7 +43,7 @@ screens:
     label: "會員/賣方"
     in_menu: true
     manager_only: false
-    scripts: ["03-contacts.mjs"]
+    scripts: ["03-contacts.mjs", "20-member-centre.mjs"]
   - route: "/contacts/[id]"
     label: ""
     in_menu: false
@@ -73,7 +73,7 @@ screens:
     label: "POS 結帳"
     in_menu: true
     manager_only: false
-    scripts: ["04-kiosk-pair.mjs", "08-pos.mjs", "08b-pos-mixed.mjs", "08c-pos-consignment.mjs", "08d-pos-mixed-cash.mjs", "08e-pos-mixed-linepay.mjs", "08f-pos-gift-discount.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "17-einvoice-linepay.mjs"]
+    scripts: ["04-kiosk-pair.mjs", "08-pos.mjs", "08b-pos-mixed.mjs", "08c-pos-consignment.mjs", "08d-pos-mixed-cash.mjs", "08e-pos-mixed-linepay.mjs", "08f-pos-gift-discount.mjs", "08g-pos-dinein.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "17-einvoice-linepay.mjs"]
   - route: "/purchasing"
     label: "採購補貨"
     in_menu: true
@@ -88,12 +88,12 @@ screens:
     label: "交易紀錄"
     in_menu: true
     manager_only: false
-    scripts: ["08f-pos-gift-discount.mjs", "09-sales.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "09d-invoice-disposition.mjs"]
+    scripts: ["08f-pos-gift-discount.mjs", "09-sales.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "09d-invoice-disposition.mjs", "09e-manual-paper-invoice.mjs"]
   - route: "/settings"
     label: "設定"
     in_menu: true
     manager_only: true
-    scripts: ["08e-pos-mixed-linepay.mjs", "09c-invoice-return-void.mjs", "14c-reports-gift-discount.mjs", "15-settings-backup.mjs", "15b-settings-premium.mjs", "17-einvoice-linepay.mjs"]
+    scripts: ["08e-pos-mixed-linepay.mjs", "08g-pos-dinein.mjs", "09c-invoice-return-void.mjs", "14c-reports-gift-discount.mjs", "15-settings-backup.mjs", "15b-settings-premium.mjs", "17-einvoice-linepay.mjs"]
   - route: "/signing"
     label: "簽署紀錄"
     in_menu: true
