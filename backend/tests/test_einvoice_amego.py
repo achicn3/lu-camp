@@ -16,12 +16,18 @@ from typing import cast
 import pytest
 
 from app.modules.einvoice.amego import (
+    AMEGO_PRINT_TYPE_ORIGINAL,
+    AMEGO_PRINT_TYPE_REPRINT,
+    AMEGO_PRINTER_LANG_BIG5,
+    AMEGO_PRINTER_TYPE_TM_T82III,
     AmegoClient,
     amego_order_id,
     build_f0401_data,
     build_f0501_data,
+    build_invoice_print_data,
     build_invoice_query_data,
     parse_f0401_success,
+    parse_invoice_print,
     parse_query_allowance_exists,
     parse_query_invoice_voided,
     parse_query_issued,
@@ -883,3 +889,52 @@ def test_f0401_success_still_accepts_a_plain_ascii_response() -> None:
     result = parse_f0401_success(_f0401_resp())
     assert result.invoice_no == "ZA12345678"
     assert result.random_number == "1234"
+
+
+# ── invoice_print（補印證明聯）payload ────────────────────────────────────
+
+
+def test_invoice_print_payload_pins_big5_encoding() -> None:
+    """必須明確指定 BIG5。
+
+    回歸自實機：不帶 `printer_lang` 時平台用**預設編碼（實測為 GBK）**，
+    TM-T82III 是台灣機、以 BIG5 解碼，於是整張紙除了點陣圖那幾個字以外
+    全是亂碼——而且**回應 HTTP 200、位元組長度也正常**，只有印出來才看得見。
+    """
+    data = build_invoice_print_data(
+        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III
+    )
+    assert data["printer_lang"] == AMEGO_PRINTER_LANG_BIG5
+
+
+def test_invoice_print_payload_queries_by_order_id_and_marks_reprint() -> None:
+    """以 order_id 查（發票號碼正是斷線時弄丟的東西），並標記為補印。"""
+    data = build_invoice_print_data(
+        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III
+    )
+    assert data["type"] == "order"
+    assert data["order_id"] == "S1-123"
+    assert data["printer_type"] == AMEGO_PRINTER_TYPE_TM_T82III
+    assert data["print_invoice_type"] == AMEGO_PRINT_TYPE_REPRINT
+
+
+def test_invoice_print_payload_can_request_the_original_layout() -> None:
+    data = build_invoice_print_data(
+        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III, reprint=False
+    )
+    assert data["print_invoice_type"] == AMEGO_PRINT_TYPE_ORIGINAL
+
+
+def test_parse_invoice_print_rejects_an_empty_payload() -> None:
+    """0 元發票不回內容——不可回空字串讓呼叫端印出一張白紙。"""
+    with pytest.raises(AmegoTransportError):
+        parse_invoice_print({"code": 0, "data": {"base64_data": ""}})
+
+
+def test_parse_invoice_print_rejects_an_error_code() -> None:
+    with pytest.raises(AmegoTransportError):
+        parse_invoice_print({"code": 999, "msg": "查無資料"})
+
+
+def test_parse_invoice_print_returns_the_escpos_payload() -> None:
+    assert parse_invoice_print({"code": 0, "data": {"base64_data": "G0A="}}) == "G0A="

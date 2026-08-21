@@ -226,6 +226,9 @@ AMEGO_PRINTER_TYPE_TM_T82III = 3
 # 列印格式：1＝發票正本、2＝發票補印。
 AMEGO_PRINT_TYPE_ORIGINAL = 1
 AMEGO_PRINT_TYPE_REPRINT = 2
+# 熱感應機編碼：1＝BIG5、2＝GBK、3＝UTF-8。**一定要明示**——不帶此參數時平台
+# 會套自己的預設（實測為 GBK），而台灣機以 BIG5 解碼，整張紙就是亂碼。
+AMEGO_PRINTER_LANG_BIG5 = 1
 
 
 def build_invoice_print_data(
@@ -242,11 +245,14 @@ def build_invoice_print_data(
     （已對真平台實測），所以補印只能靠這支由 Amego 產生整張版面。
 
     平台限制：**只能查 180 天內的發票**；0 元發票不回傳列印內容。
+
+    編碼必須明示為 BIG5，理由見 `AMEGO_PRINTER_LANG_BIG5`。
     """
     return {
         "type": "order",
         "order_id": order_id,
         "printer_type": printer_type,
+        "printer_lang": AMEGO_PRINTER_LANG_BIG5,
         "print_invoice_type": (
             AMEGO_PRINT_TYPE_REPRINT if reprint else AMEGO_PRINT_TYPE_ORIGINAL
         ),

@@ -53,8 +53,8 @@
     `SalesAmount = SalesAmount − TaxAmount`
   - `TotalAmount = SalesAmount + FreeTaxSalesAmount + ZeroTaxSalesAmount + TaxAmount`
   - `TaxType`（發票層）＝1、`TaxRate`＝`"0.05"`
-- 選填 `printer_type`（≥2 回 ESC/POS base64）／`printer_lang`——**本系統不用**（自家 agent 依
-  附件一格式列印，見 §3）。
+- 選填 `printer_type`（≥2 回 ESC/POS base64）／`printer_lang`（1＝BIG5、2＝GBK、3＝UTF-8）。
+  **開立走自家 agent 排版**（附件一格式，見 §3）；**補印證明聯改用平台產版**，見 §3.1。
 
 ### f0401 成功回應
 `invoice_number`（字軌 10 碼）、`invoice_time`（Unix）、`random_number`（4 碼）、
@@ -166,6 +166,32 @@
 
 測試以測試統編/App Key 對真 Amego 測試環境打通一次（手動驗證），單元/整合測試以
 假 client（錄製回應）為主，不在 CI 內打外部服務。
+
+## 3.1 補印證明聯：走平台產版（`invoice_print`）
+
+**問題**：呼叫 F0401 後網路斷線、沒收到回應——發票在平台上開成了，但本地沒有發票號碼、
+隨機碼與條碼內容，證明聯印不出來。
+
+**為什麼不能自己補印**：證明聯左側二維條碼含一段以財政部金鑰加密的驗證資訊，
+只有加值中心有那把鑰匙，本地推算不出來；`invoice_query` 也只回隨機碼、不回條碼內容
+（已對真平台實測）。所以整張版面只能由平台產生。
+
+**做法**：`POST /json/invoice_print`，取回可直送印表機的 ESC/POS（base64），
+交給 hardware-agent 的 `POST /print/raw` 原樣輸出（agent 不解讀、不改寫）。
+
+| 參數 | 值 | 為什麼 |
+|---|---|---|
+| `type` / `order_id` | `order` / `S{store}-{sale}` | **用訂單編號查，不用發票號碼**——OrderId 由 `(store, sale)` 確定性導出，一定算得出來；發票號碼正是斷線時弄丟的東西 |
+| `printer_type` | `3`（EPSON TM-T82III） | 官方「機型支援功能表」；代碼錯會產出別台機器的指令 |
+| `print_invoice_type` | `2`（補印） | 1 為正本 |
+| `printer_lang` | `1`（BIG5） | **必填**，理由見下 |
+
+**`printer_lang` 一定要明示**：不帶此參數時平台套自己的預設（實測為 **GBK**），
+而台灣機以 BIG5 解碼，紙上除了點陣圖那幾個字以外全是亂碼。這個錯誤**回應 HTTP 200、
+位元組長度也完全正常**，只有印出來才看得見——已由 `test_invoice_print_payload_pins_big5_encoding` 守住。
+
+**平台限制**：只能查 **180 天內**的發票；0 元發票不回列印內容
+（`parse_invoice_print` 一律拋錯，不回空字串讓呼叫端印白紙）。
 
 ## 4. 真實測試環境驗證紀錄（2026-07-23）
 
