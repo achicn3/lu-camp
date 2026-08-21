@@ -95,12 +95,22 @@ def _endpoints() -> list[Endpoint]:
     return rows
 
 
-def _script_routes() -> dict[str, list[str]]:
+def _script_routes(routes: list[str]) -> dict[str, list[str]]:
+    """腳本實際造訪的路由。
+
+    **動態路由要另外對應**：腳本寫的是 `${BASE}/contacts/${member.id}`，
+    正規表達式只解得出 `/contacts`，於是 `/contacts/[id]` 永遠被判定成「沒有腳本」——
+    明明剛寫好一支專門拍它的腳本（實測踩過，還差點把「缺口已清零」寫進提交訊息）。
+    """
+    dynamic = {r.rsplit("/", 1)[0]: r for r in routes if r.endswith("]")}
     out: dict[str, list[str]] = {}
     for f in sorted((_FRONTEND / "scripts/manual").glob("[0-9]*.mjs")):
+        text = f.read_text()
         found = set()
-        for m in re.finditer(r"\$\{BASE\}(/[a-z-]*)", f.read_text()):
-            found.add(m.group(1) or "/")
+        for m in re.finditer(r"\$\{BASE\}(/[a-z-]*)(/\$\{)?", text):
+            base = m.group(1) or "/"
+            # 後面緊接 `/${…}` 代表帶了動態片段 → 對應到 `/xxx/[id]`
+            found.add(dynamic[base] if m.group(2) and base in dynamic else base)
         for route in found:
             out.setdefault(route, []).append(f.name)
     return out
@@ -129,9 +139,10 @@ def _report_tabs() -> tuple[list[str], int | None]:
 
 def build() -> str:
     menu = _menu()
-    covered = _script_routes()
+    routes = _routes()
+    covered = _script_routes(routes)
     screens = []
-    for route in _routes():
+    for route in routes:
         label, manager_only = menu.get(route, ("", False))
         screens.append(
             Screen(

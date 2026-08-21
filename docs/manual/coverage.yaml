@@ -43,12 +43,12 @@ screens:
     label: "會員/賣方"
     in_menu: true
     manager_only: false
-    scripts: ["03-contacts.mjs", "20-member-centre.mjs"]
+    scripts: ["03-contacts.mjs"]
   - route: "/contacts/[id]"
     label: ""
     in_menu: false
     manager_only: false
-    scripts: []          # ← 手冊未涵蓋
+    scripts: ["20-member-centre.mjs"]
   - route: "/inventory"
     label: "庫存"
     in_menu: true
@@ -137,4 +137,4 @@ report_tabs:
 
 gaps:
   screens_without_script:
-    - "/contacts/[id]"
+    []
