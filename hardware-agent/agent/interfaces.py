@@ -213,11 +213,22 @@ class RawPrintPayload(BaseModel):
 
     base64_data: str = Field(min_length=1, max_length=200_000)
 
-    def decoded(self) -> bytes:
+    @field_validator("base64_data")
+    @classmethod
+    def _decodable(cls, value: str) -> str:
+        """在**驗證階段**就擋下壞 base64，才會回 422 而不是 500。
+
+        原本在 handler 裡才解碼，ValueError 沒有對應的 exception handler，
+        壞輸入會變成「內部錯誤」——看起來像印表機壞了，其實是送進來的資料不對。
+        """
         try:
-            return base64.b64decode(self.base64_data, validate=True)
+            base64.b64decode(value, validate=True)
         except (binascii.Error, ValueError) as exc:
             raise ValueError("base64_data 不是有效的 base64") from exc
+        return value
+
+    def decoded(self) -> bytes:
+        return base64.b64decode(self.base64_data, validate=True)
 
 
 class InvoicePayload(BaseModel):

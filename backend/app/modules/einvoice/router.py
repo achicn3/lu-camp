@@ -186,7 +186,9 @@ async def mark_proof_printed(
     重複呼叫只保留最早那次。
     """
     try:
-        await EInvoiceService(session).mark_proof_printed(user.store_id, sale_id)
+        await EInvoiceService(session).mark_proof_printed(
+            user.store_id, sale_id, actor_user_id=user.id
+        )
     except InvoiceNotFound as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()

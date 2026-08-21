@@ -972,7 +972,9 @@ class SalesService:
         # 逐行依品項種類/擁有型態與活動開關套折後價（無活動→原價）。
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
 
-        food_subtotal = Decimal(0)  # 餐飲（內用）小計：購物金折抵上限與會員點數都要扣掉它
+        # 餐飲小計（**含外帶**）：購物金折抵上限與會員點數都要扣掉它。
+        # 判斷依 line_type == MENU，與內用/外帶無關——寫成「內用」會誤導。
+        food_subtotal = Decimal(0)
         discountable_flags: list[bool] = []
         for line in lines:
             line_total = await self._process_line(
@@ -1013,7 +1015,8 @@ class SalesService:
                 plan=plan,
             )
 
-        # 內用不得以購物金折抵（裁示）：購物金 tender ≤ 應付總額 − 餐飲小計。
+        # 餐飲不得以購物金折抵（裁示）：購物金 tender ≤ 應付總額 − 餐飲小計。
+        # **外帶也一樣**——限制綁 line_type == MENU，不是綁內用。
         store_credit_amount = sum(
             (t.amount for t in plan if t.tender_type == TenderType.STORE_CREDIT), Decimal(0)
         )

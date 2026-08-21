@@ -1154,16 +1154,37 @@ class EInvoiceService:
         )
         return ProofPrintPayload(parse_invoice_print(resp), is_reprint)
 
-    async def mark_proof_printed(self, store_id: int, sale_id: int) -> None:
+    async def mark_proof_printed(
+        self, store_id: int, sale_id: int, *, actor_user_id: int | None = None
+    ) -> None:
         """記下證明聯已實際印出（印表機回報成功後呼叫）。
 
         **為什麼不在產出內容時就記**：那正是要修的失效樣態——內容拿到了、紙沒出來。
         以印表機回報為準，才不會把一次失敗的列印算掉「列印一次」的額度。
+
+        每次都寫稽核（CLAUDE.md §5）：`copy` 記的是這一張到底是正本還是補印。
+        營業人補印導致重複兌領獎金時責任在營業人身上，事後要舉證「印的是補印」
+        就靠這筆——同模組的作廢與手開登記都有寫，補印沒有理由例外。
         """
         invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
         if invoice is None:
             raise InvoiceNotFound(f"銷售 {sale_id} 無發票")
+        printed_before = invoice.proof_printed_at
         await self._repo.mark_proof_printed(invoice, datetime.now(tz=UTC))
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="PRINT_INVOICE_PROOF",
+            entity_type="invoice",
+            entity_id=str(invoice.id),
+            after={
+                "sale_id": sale_id,
+                "invoice_no": invoice.invoice_no,
+                # 第一次列印＝正本（「列印一次為限」的那一次）；之後一律補印。
+                "copy": "REPRINT" if printed_before is not None else "ORIGINAL",
+            },
+        )
 
     async def issue_for_sale(
         self,

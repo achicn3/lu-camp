@@ -3,6 +3,7 @@
 全程免實機：注入 FakeReceiptPrinter；店家抬頭 client 以覆寫依賴或 httpx.MockTransport mock。
 """
 
+import base64
 import subprocess
 import sys
 from datetime import date, time
@@ -529,3 +530,52 @@ def test_detail_receipt_explains_the_manual_discount() -> None:
     )
     rendered = _item_sub_rows(line).decode("big5", errors="ignore")
     assert "100" in rendered
+
+
+# ── /print/raw：外部產生的 ESC/POS 原樣轉送 ────────────────────────────────
+
+
+async def test_print_raw_forwards_the_bytes_untouched() -> None:
+    """**一個位元組都不能改**：內容含加密驗證資訊與點陣圖，加工會讓條碼掃不出來。"""
+    printer = FakeReceiptPrinter()
+    data = bytes([0x1B, 0x40]) + "電子發票證明聯".encode("big5") + bytes([0x1D, 0x56, 0x00])
+
+    resp = await _post(
+        _app_with(printer, _FakeClient()),
+        "/print/raw",
+        {"base64_data": base64.b64encode(data).decode()},
+    )
+
+    assert resp.status_code == 200
+    assert printer.raw_prints == [data]
+
+
+async def test_print_raw_rejects_invalid_base64_as_bad_input() -> None:
+    """壞 base64 是**送進來的資料不對**，不是印表機壞了——要回 422 而不是 500。"""
+    printer = FakeReceiptPrinter()
+
+    resp = await _post(
+        _app_with(printer, _FakeClient()), "/print/raw", {"base64_data": "not base64!!"}
+    )
+
+    assert resp.status_code == 422
+    assert printer.raw_prints == []
+
+
+async def test_print_raw_rejects_an_empty_payload() -> None:
+    """空內容送到印表機只會吐白紙，先擋下來。"""
+    printer = FakeReceiptPrinter()
+
+    resp = await _post(_app_with(printer, _FakeClient()), "/print/raw", {"base64_data": ""})
+
+    assert resp.status_code == 422
+    assert printer.raw_prints == []
+
+
+def test_escpos_print_raw_writes_exactly_what_it_is_given() -> None:
+    """驅動層同樣不得改寫（真機路徑）。"""
+    writer = FakePrinter()
+
+    EscposReceiptPrinter(writer).print_raw(b"\x1b@abc")
+
+    assert bytes(writer.buffer) == b"\x1b@abc"

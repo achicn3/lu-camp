@@ -1097,16 +1097,30 @@ export default function SalesPage() {
       await printRaw(data.base64_data);
       // **印表機回報成功之後**才記，順序不能顛倒：這支端點記的是「紙真的出來了」，
       // 先記會把失敗的那次算掉「列印一次」的額度，害真正的正本被當成補印。
-      await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
-        params: { path: { sale_id: sale.id } },
-      });
-      return { saleId: sale.id, isReprint: data.is_reprint };
+      //
+      // 回應**必須檢查**：openapi-fetch 對 4xx/5xx 是回 `error` 而不是丟例外，
+      // 不看就等於靜默吞掉。沒記到的話下一次按補印會再印一張正本。
+      const { error: recordError } = await api.POST(
+        "/api/v1/einvoice/sales/{sale_id}/proof-printed",
+        { params: { path: { sale_id: sale.id } } },
+      );
+      return {
+        saleId: sale.id,
+        isReprint: data.is_reprint,
+        recordFailed: recordError !== undefined,
+      };
     },
-    onSuccess: ({ saleId, isReprint }) =>
+    onSuccess: ({ saleId, isReprint, recordFailed }) =>
       setPrintNote(
-        isReprint
-          ? `已送出 #${saleId} 的發票證明聯（補印）。補印聯須連同原本那張一起才能兌獎。`
-          : `已送出 #${saleId} 的發票證明聯。`,
+        [
+          isReprint
+            ? `已送出 #${saleId} 的發票證明聯（補印）。補印聯須連同原本那張一起才能兌獎。`
+            : `已送出 #${saleId} 的發票證明聯。`,
+          // 紙已經出來了，所以這不是列印失敗——但沒記到，再按一次會多印一張。
+          recordFailed ? "（系統沒記錄到這次列印，請勿重複列印）" : "",
+        ]
+          .filter(Boolean)
+          .join(""),
       ),
     onError: (err: Error) => setPrintNote(err.message),
   });

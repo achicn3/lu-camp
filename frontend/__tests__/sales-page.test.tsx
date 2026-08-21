@@ -417,3 +417,75 @@ describe("/sales 交易紀錄頁", () => {
     expect(within(dialog).queryByText(/現金退還請直接自錢櫃取出/)).toBeNull();
   });
 });
+
+describe("/sales 補印發票證明聯", () => {
+  function stubReprint(opts: { isReprint: boolean; recordOk: boolean }) {
+    const calls: string[] = [];
+    stubFetch((url, method) => {
+      calls.push(`${method} ${url}`);
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/reprint-payload") && method === "POST") {
+        return json({ base64_data: "G0A=", is_reprint: opts.isReprint });
+      }
+      if (url.includes("/print/raw") && method === "POST") {
+        return json({ status: "ok" });
+      }
+      if (url.includes("/proof-printed") && method === "POST") {
+        return opts.recordOk
+          ? new Response(null, { status: 204 })
+          : json({ detail: "資料庫忙線" }, 503);
+      }
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { invoice_status: "ISSUED" })]);
+      }
+      return null;
+    });
+    return calls;
+  }
+
+  it("從未印出：印正本，並把列印事實記回後端", async () => {
+    const calls = stubReprint({ isReprint: false, recordOk: true });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/已送出 #7 的發票證明聯。/)).toBeTruthy(),
+    );
+    // 正本不得出現「補印」的兌獎提醒，否則店員會對客人講錯話。
+    expect(screen.queryByText(/須連同原本那張/)).toBeNull();
+    // 順序不能顛倒：先印、印成功了才記。
+    const printed = calls.findIndex((c) => c.includes("/print/raw"));
+    const recorded = calls.findIndex((c) => c.includes("/proof-printed"));
+    expect(printed).toBeGreaterThanOrEqual(0);
+    expect(recorded).toBeGreaterThan(printed);
+  });
+
+  it("已印過：標示為補印，並提醒須併同原聯兌獎", async () => {
+    stubReprint({ isReprint: true, recordOk: true });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/補印聯須連同原本那張一起才能兌獎/)).toBeTruthy(),
+    );
+  });
+
+  it("紙出來了但沒記到：不可說成列印失敗，要叫店員別再印", async () => {
+    // openapi-fetch 對 4xx/5xx 是回 error 不是丟例外——不檢查就會靜默吞掉，
+    // 下一次按補印會再印一張正本（同一張發票兩張正本，重複兌領責任在營業人）。
+    stubReprint({ isReprint: false, recordOk: false });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/請勿重複列印/)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/失敗/)).toBeNull();
+  });
+});

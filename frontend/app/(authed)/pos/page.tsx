@@ -1123,6 +1123,11 @@ function MenuPanel({
   );
 }
 
+// 區分「紙沒出來」與「紙出來了但沒記到」——兩者要對店員講完全相反的話。
+// **必須放模組層**：定義在 component 內每次 render 都是新的 class identity，
+// re-render 後 onError 的 instanceof 會比不中。
+class ProofRecordError extends Error {}
+
 export default function PosPage() {
   const queryClient = useQueryClient();
   const [lines, setLines] = useState<CartLine[]>([]);
@@ -1422,13 +1427,22 @@ export default function PosPage() {
       // 印出來了才記——這是「證明聯以列印一次為限」的那一次。沒記到的話，
       // 之後在交易紀錄按補印會誤判成正本而多印一張；記錯邊則是印成補印，
       // 客人拿到一張須併同原聯才能兌獎的紙。
-      await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
+      //
+      // **紙已經出來了，所以記錄失敗不能說成「列印失敗」**：那句話會叫店員再按一次重印，
+      // 而未記錄狀態下的重印會印出**第二張正本**——同一張發票兩張正本，
+      // 重複兌領的責任在營業人身上。這裡回報的是記錄失敗，並明講不要再印。
+      const { error } = await api.POST("/api/v1/einvoice/sales/{sale_id}/proof-printed", {
         params: { path: { sale_id: sale.id } },
       });
+      if (error) throw new ProofRecordError(extractDetail(error) ?? "記錄失敗");
     },
     onSuccess: () => setInvoiceNote("發票已開立，證明聯已送印"),
     onError: (err: Error) =>
-      setInvoiceNote(`發票已開立，但證明聯列印失敗：${err.message}（可按重印）`),
+      setInvoiceNote(
+        err instanceof ProofRecordError
+          ? `證明聯已印出，但系統沒記錄到（${err.message}）。請勿重印，重印會多出一張正本。`
+          : `發票已開立，但證明聯列印失敗：${err.message}（可按重印）`,
+      ),
   });
 
   // 結帳後開立（docs/24）：失敗不擋交易（銷售已成立），留待補開清單重試。

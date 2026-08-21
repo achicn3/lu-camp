@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.einvoice.amego import AmegoClient, AmegoTransport, allowance_number
@@ -1477,3 +1478,27 @@ async def test_marking_proof_printed_again_keeps_the_first_time(
 
     await db_session.refresh(invoice)
     assert invoice.proof_printed_at == first
+
+
+async def test_marking_proof_printed_writes_an_audit_trail(db_session: AsyncSession) -> None:
+    """列印證明聯要留稽核：誰、何時、印的是正本還是補印。
+
+    營業人補印導致重複兌領獎金時責任在營業人身上（要點 §26／統一發票給獎辦法），
+    事後要舉證「這張印的是補印、不是第二張正本」就只能靠這筆紀錄。
+    同模組的作廢與手開登記都有寫，補印沒有理由例外。
+    """
+    store_id, sale_id, svc = await _issued_sale(db_session)
+    clerk_id = await db_session.scalar(select(User.id).where(User.store_id == store_id))
+
+    await svc.mark_proof_printed(store_id, sale_id, actor_user_id=clerk_id)
+    await svc.mark_proof_printed(store_id, sale_id, actor_user_id=clerk_id)
+
+    logs = list(
+        await db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "PRINT_INVOICE_PROOF")
+            .order_by(AuditLog.id)
+        )
+    )
+    assert [(log.after or {})["copy"] for log in logs] == ["ORIGINAL", "REPRINT"]
+    assert all(log.actor_user_id == clerk_id for log in logs)

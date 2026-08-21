@@ -14,8 +14,11 @@
 
 真統編下來後**程式不動**，只需帶環境變數重跑、更新同一列（id 穩定）：
 
-    SEED_STORE_TAX_ID=<真統編> SEED_STORE_NAME=露坑 \
+    SEED_STORE_TAX_ID=<真統編> SEED_STORE_NAME=露坑選物 \
         uv run python -m app.scripts.seed_dev_store
+
+**店名會印在發票證明聯最上面那一行**（營業人識別標章，附件一格式一第 1 項），
+收據聯／明細聯的抬頭也用同一個值——所以這裡填什麼，客人手上那張紙就印什麼。
 
 執行：``cd backend && uv run python -m app.scripts.seed_dev_store``
 """
