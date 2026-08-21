@@ -1,8 +1,36 @@
 // 手冊 07：餐飲菜單（新增/改價/下架/上架/刪除）＋ 門市活動（建立/啟用/結束/作廢/篩選）。
-import { BASE, login, makeShot, newBrowser, shotsDir } from "./_lib.mjs";
+import { apiJson, apiLogin, BASE, login, makeShot, newBrowser, note, shotsDir } from "./_lib.mjs";
 
 const dir = shotsDir("07-menu-campaigns");
 const shot = makeShot(dir);
+
+// **先清掉前幾輪留下的同名活動與菜單品項**。本章每跑一次就建一檔「手冊測試-全店九折」，
+// 累積之後畫面上同名的有好幾列，`:has-text(...)` 一次指到多列而失敗
+// （Playwright 嚴格模式：strict mode violation）。
+// 同一個道理也適用於菜單品項——重跑會建出重複的「手沖咖啡」。
+// 不要假設起始狀態是乾淨的。
+const token = await apiLogin();
+const campaigns = (await apiJson(token, "GET", "/api/v1/campaigns?limit=200")).json ?? [];
+const stale = (Array.isArray(campaigns) ? campaigns : campaigns.items ?? []).filter((c) =>
+  String(c.name ?? "").startsWith("手冊測試-"),
+);
+for (const c of stale) {
+  // 生效中的要先結束才能作廢；已作廢/已結束的直接跳過
+  if (c.status === "ACTIVE") {
+    await apiJson(token, "POST", `/api/v1/campaigns/${c.id}/end`, {});
+  } else if (c.status === "DRAFT") {
+    await apiJson(token, "POST", `/api/v1/campaigns/${c.id}/cancel`, {});
+  }
+}
+if (stale.length > 0) note(`已收掉 ${stale.length} 檔前幾輪留下的「手冊測試-」活動`);
+
+const menuItems = (await apiJson(token, "GET", "/api/v1/menu-items?include_unavailable=true")).json ?? [];
+for (const m of (Array.isArray(menuItems) ? menuItems : menuItems.items ?? [])) {
+  if (["手沖咖啡", "現烤鬆餅"].includes(m.name)) {
+    await apiJson(token, "DELETE", `/api/v1/menu-items/${m.id}`, undefined);
+  }
+}
+
 const { browser, page } = await newBrowser();
 await login(page);
 
