@@ -34,7 +34,7 @@ try {
   if ((await page.getByLabel("一般商品名稱").inputValue()) !== productName) {
     throw new Error("搜尋文字未帶入一般商品名稱");
   }
-  if ((await page.getByLabel("一般商品 SKU").inputValue()) !== "") {
+  if ((await page.getByLabel("一般商品編號").inputValue()) !== "") {
     throw new Error("SKU 預設應留白");
   }
   await page.getByLabel("一般商品售價").fill("280");
