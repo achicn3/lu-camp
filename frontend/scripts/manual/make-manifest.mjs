@@ -34,6 +34,9 @@ const PICK = {
   "17-einvoice": ["01-settings-einvoice-on", "02-settings-linepay-on", "03-pos-invoice-fields", "04-pos-tender-linepay", "05-invoice-taxid-error", "06-invoice-b2b", "07-checkout-invoice-result"],
   // Amego 加值中心後台的核對畫面（官方公開測試帳號；非本店憑證）
   "17-einvoice-amego": ["01-issued-list", "02-issued-detail", "03-void-fullreturn-list", "04-void-fullreturn-detail", "05-void-salevoid-list", "06-void-salevoid-detail"],
+  "08g-pos-dinein": ["02-settings-tables-added", "06-dinein-panel", "07-dinein-tables", "10-dinein-done", "12-takeout-done"],
+  "09e-manual-paper-invoice": ["02-pending-only", "04-dialog-filled", "06-row-manual-paper", "07-return-manual-paper"],
+  "19-call-tickets": ["01-empty", "02-form-filled", "03-issued-number", "04-waiting-list", "07-include-done"],
 };
 
 // PICK 條目同時是**識別碼**（content-*.mjs 以 `fig("<dir>/<name>")` 引用）與檔案線索。
@@ -91,9 +94,19 @@ for (const [dir, files] of Object.entries(PICK)) {
 // 因此以「本批最新截圖時間」為基準，超過門檻的舊圖一律列出並讓產生流程失敗，
 // 除非操作者明確以 MANUAL_ALLOW_STALE=true 表示知情。
 const STALE_HOURS = Number(process.env.MANUAL_STALE_HOURS ?? 48);
+
+// **人工擷取、沒有腳本能重產的截圖**：外部網站畫面（Amego 開立方後台）只能由人登入後
+// 手動截圖，本批腳本再怎麼跑都不會更新它們，永遠會被判定為陳舊。
+// 用具名清單放行，而不是叫操作者拿 MANUAL_ALLOW_STALE=true 一次蓋掉全部——
+// 那會連「真的該重跑卻沒重跑」的圖一起放行，等於把這道防線關掉。
+// 新增項目前請先確認：它真的無法由腳本產生嗎？能產生就去修腳本，不要加進來。
+const MANUALLY_CAPTURED = ["17-einvoice-amego/"];
+const isManuallyCaptured = (id) => MANUALLY_CAPTURED.some((prefix) => id.startsWith(prefix));
+
 const newest = manifest.reduce((max, item) => Math.max(max, item.mtime), 0);
 const stale = manifest
   .filter((item) => newest - item.mtime > STALE_HOURS * 3600_000)
+  .filter((item) => !isManuallyCaptured(item.id))
   .map((item) => ({ id: item.id, ageHours: ((newest - item.mtime) / 3600_000).toFixed(1) }));
 
 writeFileSync(

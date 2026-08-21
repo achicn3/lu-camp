@@ -234,6 +234,11 @@ export function makeShot(dir) {
       highlight = [], // CSS selector 陣列，畫紅框
       padding = 12,
       content = false, // 截「頁首＋主要內容」實際高度，去掉頁尾大片空白
+      // `content` 的高度上限（CSS px）。**必要的防呆**：清單頁的高度隨資料量長，
+      // 種了 12 個月的示範資料之後，交易紀錄整頁高達 5,000 CSS px（15,000 裝置 px），
+      // 手冊裡會變成讀者要滑過的表格牆，而且 chromium 解碼 42 MP 以上的 PNG 會直接失敗。
+      // 圖是用來「看得懂這一頁長怎樣」，不是用來窮舉每一列。要完整長圖請明確加大這個值。
+      contentMaxHeight = 2200,
     } = opts;
     n += 1;
     const name = `${String(n).padStart(2, "0")}-${slug}.png`;
@@ -285,11 +290,12 @@ export function makeShot(dir) {
           width: document.documentElement.clientWidth,
         };
       });
-      await page.screenshot({
-        path,
-        fullPage: true,
-        clip: { x: 0, y: 0, width: box.width, height: Math.ceil(box.bottom) + 24 },
-      });
+      const wanted = Math.ceil(box.bottom) + 24;
+      const height = Math.min(wanted, contentMaxHeight);
+      if (height < wanted) {
+        console.log(`   ✂ ${slug}：內容高 ${wanted}px，裁到 ${height}px（資料量造成的長清單）`);
+      }
+      await page.screenshot({ path, fullPage: true, clip: { x: 0, y: 0, width: box.width, height } });
     } else {
       await page.screenshot({ path, fullPage: full });
     }

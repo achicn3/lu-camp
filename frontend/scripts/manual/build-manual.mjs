@@ -7,7 +7,7 @@ import { acquisition, cash, contacts, kiosk } from "./content-2.mjs";
 import { cover, overview, quickstart } from "./content-1.mjs";
 import { campaigns, consignment, inventory, menu, pos, sales } from "./content-3.mjs";
 import { backup, purchasing, reports, settings, signing, stocktake } from "./content-4.mjs";
-import { admin, coverage, faq, flows } from "./content-5.mjs";
+import { admin, callTickets, coverage, faq, flows } from "./content-5.mjs";
 
 const IMAGES = JSON.parse(readFileSync(join(homedir(), "tmp", "lu-camp-manual", "images.json"), "utf8"));
 const OUT = process.argv[2] ?? join(homedir(), "tmp", "lu-camp-manual", "露營二手POS-系統操作手冊.html");
@@ -32,10 +32,11 @@ const CHAPTERS = [
   { id: "ch-reports", num: "16", title: "報表", html: reports },
   { id: "ch-settings", num: "17", title: "設定", html: settings },
   { id: "ch-backup", num: "18", title: "備份與還原", html: backup },
-  { id: "ch-flows", num: "19", title: "跨系統完整流程", html: flows },
-  { id: "ch-admin", num: "20", title: "管理員功能總表", html: admin },
-  { id: "ch-faq", num: "21", title: "常見問題與錯誤排除", html: faq },
-  { id: "ch-coverage", num: "22", title: "附錄：功能覆蓋與驗證狀態", html: coverage },
+  { id: "ch-call-tickets", num: "19", title: "叫號（收購候位）", html: callTickets },
+  { id: "ch-flows", num: "20", title: "跨系統完整流程", html: flows },
+  { id: "ch-admin", num: "21", title: "管理員功能總表", html: admin },
+  { id: "ch-faq", num: "22", title: "常見問題與錯誤排除", html: faq },
+  { id: "ch-coverage", num: "23", title: "附錄：功能覆蓋與驗證狀態", html: coverage },
 ];
 
 // 把 data-img="id" 換成實際 base64；同時收集 h2 供目錄使用。
