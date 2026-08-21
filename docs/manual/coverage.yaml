@@ -1,0 +1,144 @@
+# 手冊涵蓋度盤點（docs/37 P1）
+#
+# **本檔由 `backend/app/scripts/manual_coverage.py` 產生，不要手改。**
+# 手寫清單一定會與程式碼脫節，而脫節的盤點比沒有盤點更糟——它會讓人以為已經涵蓋。
+
+screens:
+  - route: "/"
+    label: "首頁"
+    in_menu: true
+    manager_only: false
+    scripts: ["01-shell.mjs", "04-kiosk-pair.mjs"]
+  - route: "/acquisition"
+    label: "收購"
+    in_menu: true
+    manager_only: false
+    scripts: ["05-acquisition.mjs"]
+  - route: "/backup"
+    label: "備份"
+    in_menu: true
+    manager_only: true
+    scripts: ["15-settings-backup.mjs", "15b-settings-premium.mjs", "16b-backup-error.mjs"]
+  - route: "/call-tickets"
+    label: "叫號"
+    in_menu: true
+    manager_only: false
+    scripts: []          # ← 手冊未涵蓋
+  - route: "/campaigns"
+    label: "門市活動"
+    in_menu: true
+    manager_only: true
+    scripts: ["07-menu-campaigns.mjs"]
+  - route: "/cash"
+    label: "現金對帳"
+    in_menu: true
+    manager_only: false
+    scripts: ["02-cash-open.mjs", "02b-cash-validation.mjs", "18-cash-close.mjs"]
+  - route: "/consignment"
+    label: "寄售付款"
+    in_menu: true
+    manager_only: false
+    scripts: ["10-consignment.mjs"]
+  - route: "/contacts"
+    label: "會員/賣方"
+    in_menu: true
+    manager_only: false
+    scripts: ["03-contacts.mjs"]
+  - route: "/contacts/[id]"
+    label: ""
+    in_menu: false
+    manager_only: false
+    scripts: []          # ← 手冊未涵蓋
+  - route: "/inventory"
+    label: "庫存"
+    in_menu: true
+    manager_only: false
+    scripts: ["06-inventory.mjs", "11-purchasing.mjs", "12-stocktake-signing.mjs"]
+  - route: "/kiosk"
+    label: ""
+    in_menu: false
+    manager_only: false
+    scripts: ["04-kiosk-pair.mjs", "05-acquisition.mjs", "08-pos.mjs", "08b-pos-mixed.mjs", "08c-pos-consignment.mjs", "08d-pos-mixed-cash.mjs", "08e-pos-mixed-linepay.mjs", "09-sales.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "09d-invoice-disposition.mjs", "17-einvoice-linepay.mjs"]
+  - route: "/login"
+    label: ""
+    in_menu: false
+    manager_only: false
+    scripts: ["01-shell.mjs", "04-kiosk-pair.mjs"]
+  - route: "/menu"
+    label: "餐飲菜單"
+    in_menu: true
+    manager_only: true
+    scripts: ["07-menu-campaigns.mjs"]
+  - route: "/pos"
+    label: "POS 結帳"
+    in_menu: true
+    manager_only: false
+    scripts: ["04-kiosk-pair.mjs", "08-pos.mjs", "08b-pos-mixed.mjs", "08c-pos-consignment.mjs", "08d-pos-mixed-cash.mjs", "08e-pos-mixed-linepay.mjs", "08f-pos-gift-discount.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "17-einvoice-linepay.mjs"]
+  - route: "/purchasing"
+    label: "採購補貨"
+    in_menu: true
+    manager_only: false
+    scripts: ["11-purchasing.mjs"]
+  - route: "/reports"
+    label: "報表"
+    in_menu: true
+    manager_only: true
+    scripts: ["01-shell.mjs", "14-reports.mjs", "14b-reports-reconciliation.mjs", "14c-reports-gift-discount.mjs"]
+  - route: "/sales"
+    label: "交易紀錄"
+    in_menu: true
+    manager_only: false
+    scripts: ["08f-pos-gift-discount.mjs", "09-sales.mjs", "09b-sales-void.mjs", "09c-invoice-return-void.mjs", "09d-invoice-disposition.mjs"]
+  - route: "/settings"
+    label: "設定"
+    in_menu: true
+    manager_only: true
+    scripts: ["08e-pos-mixed-linepay.mjs", "09c-invoice-return-void.mjs", "14c-reports-gift-discount.mjs", "15-settings-backup.mjs", "15b-settings-premium.mjs", "17-einvoice-linepay.mjs"]
+  - route: "/signing"
+    label: "簽署紀錄"
+    in_menu: true
+    manager_only: false
+    scripts: ["12-stocktake-signing.mjs", "13-signing.mjs"]
+  - route: "/stocktake"
+    label: "盤點"
+    in_menu: true
+    manager_only: false
+    scripts: ["12-stocktake-signing.mjs"]
+
+endpoints:
+  total: 109
+  by_auth:
+    登入即可: 66
+    MANAGER: 40
+    未驗證: 3
+  unauthenticated:
+    - "GET /stores/{store_id}/receipt-header"   # store
+    - "POST /auth/login"   # user
+    - "GET /auth/me"   # user
+
+report_tabs:
+  total: 15
+  claimed_by_14_reports: 12
+  list:
+    - "今日營運"
+    - "經營洞察"
+    - "趨勢"
+    - "餐飲內用/外帶"
+    - "現金對帳"
+    - "銷售毛利"
+    - "臨時折扣"
+    - "贈品"
+    - "活動成效"
+    - "庫存價值"
+    - "寄售應付"
+    - "負債"
+    - "流量"
+    - "效益指標"
+    - "對帳"
+
+gaps:
+  screens_without_script:
+    - "/call-tickets"
+    - "/contacts/[id]"
+  report_tabs_stale:
+    - "14-reports.mjs 自稱涵蓋 12 個分頁，實際有 15 個"
