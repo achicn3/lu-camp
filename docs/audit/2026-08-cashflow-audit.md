@@ -1285,3 +1285,72 @@ P1-2 的離群者仍只有 `backend/app/modules/sales/repository.py:534`（完�
 自 2026-08-22 店主核准修復 P0-1／P0-2 起，本 session 的「唯讀、不改任何實作」約束
 由店主明示解除（僅就核准的修復範圍）。稽核結論本身不再變動；
 後續修復以獨立分支、依 `CLAUDE.md` 的 TDD 與四道門進行，修復內容不回寫本檔的發現段落。
+
+---
+
+## 階段 8：由實機照片衍生的新發現（2026-08-22）
+
+### 8.1　P1-8　完成頁的「重印證明聯」印出的是**第二張正本**，且無任何阻擋
+
+**來源**：店主提供的兩張證明聯照片，操作為「結帳 → 從導向的完成頁 → 馬上按『重印證明聯』」。
+兩張的字軌、時間、隨機碼、總計完全相同，且**皆無「補印」字樣**。
+
+**成因（已於程式碼確認）**：完成頁的按鈕與交易紀錄的補印是**兩條不同的路徑**。
+
+完成頁（`frontend/app/(authed)/pos/page.tsx:1420-1426`）走**本地排版**，也就是正本：
+```tsx
+  const printProof = useMutation({
+    mutationFn: async ({ invoice, sale }) => {
+      ...
+      await printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name });
+```
+交易紀錄（`frontend/app/(authed)/sales/page.tsx:1093-1097`）走**平台排版**，會依
+`proof_printed_at` 決定 `reprint` 旗標，因此有「補印」字樣：
+```tsx
+        "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
+      ...
+      await printRaw(data.base64_data);
+```
+
+按鈕本身**常駐**、只在列印中停用（`frontend/app/(authed)/pos/page.tsx:2231-2238`）：
+```tsx
+                <button
+                  type="button"
+                  className="btn-ghost pos-invoice-reprint"
+                  disabled={printProof.isPending}
+                  onClick={() =>
+                    printProof.mutate({ invoice: completedInvoice, sale: completed })
+                  }
+                >
+                  {printProof.isPending ? "列印中…" : "重印證明聯"}
+                </button>
+```
+沒有任何「已成功印過就不給按」的條件。
+
+**開發者其實知道這個危險**，但只處理了「記錄失敗」那條分支的文案，
+沒有擋住「記錄成功之後再按一次」（`frontend/app/(authed)/pos/page.tsx:1442-1444`）：
+```tsx
+        err instanceof ProofRecordError
+          ? `證明聯已印出，但系統沒記錄到（${err.message}）。請勿重印，重印會多出一張正本。`
+          : `發票已開立，但證明聯列印失敗：${err.message}（可按重印）`,
+```
+
+**連帶的證據不一致**：第二次列印後仍會 POST `proof-printed`，
+而後端依 `printed_before is not None` 把稽核記成 `copy="REPRINT"`
+（`backend/app/modules/einvoice/service.py:1177-1180`）——
+**紙上是正本、稽核說是補印**，事後要舉證反而指向錯誤的方向。
+
+按鈕文案「重印證明聯」也與實際行為不符：它是「列印失敗時的重試」，不是「補印」。
+
+### 8.2　店主裁示（2026-08-22）
+
+| 事項 | 裁示 |
+|---|---|
+| P1-8 完成頁重印會多出一張正本 | **維持現況，不修**（現實中列印失敗、缺紙、代理離線等突發狀況多，需要能重試） |
+| 交易紀錄的補印是否保留「補印」字樣 | 店主要求**拿掉**，理由同上 |
+
+**稽核意見（僅記錄，不阻擋裁示）**：「補印」註記與「列印一次為限」並非本系統的設計選擇，
+而是《電子發票實施作業要點》第 26 點的要求；補印聯依法須併同原聯才能兌獎。
+拿掉註記後，同一張發票會存在多張外觀完全相同、且都像正本的證明聯，
+重複兌領獎金的責任歸營業人。此為法遵取捨，決定權在店主。
+拿掉註記的實作屬另一件事，須另開分支處理（本檔僅記錄裁示）。
