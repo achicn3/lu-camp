@@ -111,7 +111,7 @@ describe("/pos 結帳頁", () => {
     ).toBe("購物金 $300＋台灣Pay $700");
   });
 
-  it("空車：顯示提示、發票區標示本期不開票、結帳鍵停用", async () => {
+  it("空車：顯示提示、發票區標示這筆不開發票、結帳鍵停用", async () => {
     stubFetch((url) => {
       if (url.includes("/settings")) return json(SETTINGS);
       if (url.includes("/cash-sessions/current"))
@@ -120,7 +120,7 @@ describe("/pos 結帳頁", () => {
       return null;
     });
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     expect(screen.getByText(/點下方餐飲菜單開始結帳/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "結帳" })).toHaveProperty(
       "disabled",
@@ -203,7 +203,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
     const scan = screen.getByLabelText("掃描或輸入商品條碼");
     await user.type(scan, "TENT1{Enter}");
@@ -401,7 +401,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
@@ -429,7 +429,7 @@ describe("/pos 結帳頁", () => {
       return null;
     });
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
     expect(screen.getByText("購物金＋其他付款")).toBeTruthy();
     expect(screen.queryByText("現金＋LINE Pay")).toBeNull();
@@ -686,7 +686,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
@@ -750,7 +750,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     // 二手序號品入車
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
@@ -813,7 +813,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     // 不打 {Enter}：輸入到符合碼制即自動送出加入購物車
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "S1-ABCDEF0123");
     await waitFor(() =>
@@ -836,7 +836,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "NOPE{Enter}");
     await waitFor(() =>
       expect(screen.getByText(/找不到此條碼：NOPE/)).toBeTruthy(),
@@ -867,7 +867,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "GAS-230{Enter}");
     await waitFor(() =>
       expect(screen.getByText("高山瓦斯罐 230g")).toBeTruthy(),
@@ -900,7 +900,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "EMPTY-1{Enter}");
     await waitFor(() =>
       expect(screen.getByText(/EMPTY-1 已無庫存/)).toBeTruthy(),
@@ -928,7 +928,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText(/本期不開票/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "結帳" }));

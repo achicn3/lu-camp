@@ -1,7 +1,7 @@
 "use client";
 // /pos 結帳（docs/10 §5、docs/16 §3.2）：掃碼加入購物車（序號品／散裝堆）→ 會員歸戶（選填）
 // → 收款（現金／購物金／混合）→ 結帳 POST /sales →（完成後）詢問是否列印商品明細。
-// einvoice_enabled=false 時發票區隱藏（顯示「本期不開票」），載具輸入待啟用後再開。
+// einvoice_enabled=false 時發票區隱藏（顯示「這筆不開發票」），載具輸入待啟用後再開。
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ChangeEvent,
@@ -2916,7 +2916,7 @@ export default function PosPage() {
             </fieldset>
           ) : (
             <p className="hint pos-invoice-off">
-              本期不開票（未啟用電子發票）。
+              這筆不開發票（本店尚未啟用電子發票）。
             </p>
           )}
 
