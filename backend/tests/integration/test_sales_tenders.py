@@ -1142,10 +1142,24 @@ async def test_linepay_tender_rejected_until_p2(
 
 
 async def _cleanup_store(store_id: int) -> None:
-    """真 commit 測試的收尾：清掉該店留下的所有列（順序依外鍵相依）。"""
+    """真 commit 測試的收尾：清掉**本檔真 commit 測試會產生的**列。
+
+    不是「該店的所有列」——`sales` 的外鍵子表有九張（cart_sessions、
+    consignment_settlements、invoices、linepay_transactions、returns、sale_adjustments、
+    sale_lines、sale_tenders、signature_task_events），這裡只涵蓋本檔會碰到的。
+    要拿去清「有發票／有寄售結算」的測試前，請先補齊，否則 `DELETE FROM sales` 會在
+    finally 裡因外鍵失敗，把原始的測試失敗訊息蓋掉。
+
+    以 `session_replication_role = replica` 停用 trigger（沿用本檔既有作法）：
+    帳本不可變、退貨不可刪等守衛都是刻意擋住正常路徑的，清理必須繞過。
+    """
     sm = app_db.get_sessionmaker()
     async with sm() as s:
+        await s.execute(text("SET session_replication_role = replica"))
         await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+        await s.execute(text("DELETE FROM return_tenders WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM return_lines WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM returns WHERE store_id = :s"), {"s": store_id})
         await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
         await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
         await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
@@ -1160,11 +1174,15 @@ async def _cleanup_store(store_id: int) -> None:
         await s.execute(delete(Contact).where(Contact.store_id == store_id))
         await s.execute(delete(User).where(User.store_id == store_id))
         await s.execute(delete(Store).where(Store.id == store_id))
+        await s.execute(text("SET session_replication_role = DEFAULT"))
         await s.commit()
 
 
-async def _seed_store_credit_sale(idem: str) -> tuple[int, int, int, str]:
-    """真 commit 建一筆「全額購物金付款」的銷售。回 (store_id, member_id, sale_id, mgr_token)。"""
+async def _seed_store_credit_sale(idem: str) -> tuple[int, int, int, str, str]:
+    """真 commit 建一筆「全額購物金付款」的銷售（總額 200）。
+
+    回 (store_id, member_id, sale_id, clerk_token, mgr_token)。
+    """
     sm = app_db.get_sessionmaker()
     async with sm() as s:
         token, mgr_token, store_id, clerk_id = await _seed(s)
@@ -1186,7 +1204,7 @@ async def _seed_store_credit_sale(idem: str) -> tuple[int, int, int, str]:
                 headers=_auth(token, idem),
             )
             assert created.status_code == 201, created.text
-            return store_id, member_id, int(created.json()["id"]), mgr_token
+            return store_id, member_id, int(created.json()["id"]), token, mgr_token
 
 
 async def test_void_store_credit_sale_commits_for_real() -> None:
@@ -1201,7 +1219,7 @@ async def test_void_store_credit_sale_commits_for_real() -> None:
     既有的 savepoint 版 `test_void_reverses_store_credit_tender` 抓不到這個失效。
     """
     sm = app_db.get_sessionmaker()
-    store_id, member_id, sale_id, mgr_token = await _seed_store_credit_sale("void-real")
+    store_id, member_id, sale_id, _clerk, mgr_token = await _seed_store_credit_sale("void-real")
     try:
         async with sm() as s:
             assert await StoreCreditService(s).get_balance(store_id, member_id) == Decimal(300)
@@ -1234,22 +1252,73 @@ async def test_void_store_credit_sale_commits_for_real() -> None:
         await _cleanup_store(store_id)
 
 
-async def test_invoice_void_alone_does_not_require_credit_reversal() -> None:
+async def test_full_return_then_invoice_void_commits_for_real() -> None:
     """P0-2（2026-08 金流稽核）：發票作廢 ≠ 銷售作廢，不得要求購物金沖正。
 
-    同月整筆退貨會作廢原發票（ADR-014），F0501 核可後回寫 `invoice_status='VOID'`；
-    但退貨回補購物金走的是 REFUND/SALE_RETURN，**不會**有 SALE_VOID 沖正。
-    守衛若把 `invoice_status='VOID'` 當成「銷售已作廢」，這個回寫就會在 COMMIT 被擋，
-    連「平台已核可作廢」的回執事件都一起回滾。
+    走**真實路徑**：購物金全額銷售 → `POST /api/v1/returns` 整筆退貨（沿途真的產生
+    REFUND/SALE_RETURN 帳本分錄與 return_tenders）→ 再模擬 F0501 平台核可的回寫
+    （`invoice_status='VOID'`，見 sales/service.py 的 mark_invoice_voided）。
+
+    退貨回補購物金走的是 REFUND/SALE_RETURN，**不會**有 SALE_VOID 沖正；守衛若把
+    `invoice_status='VOID'` 當成「銷售已作廢」，這次回寫就會在 COMMIT 被擋——
+    而那次 COMMIT 正是負責保存平台回執事件的那一次，稽核軌跡會一起消失。
     """
     sm = app_db.get_sessionmaker()
-    store_id, _member_id, sale_id, _mgr = await _seed_store_credit_sale("invvoid-real")
+    store_id, member_id, sale_id, clerk_token, _mgr = await _seed_store_credit_sale("ret-real")
     try:
+        async with sm() as s:
+            line_id = await s.scalar(
+                text("SELECT id FROM sale_lines WHERE sale_id = :id"), {"id": sale_id}
+            )
+            assert line_id is not None
+            assert await StoreCreditService(s).get_balance(store_id, member_id) == Decimal(300)
+
+        transport = httpx.ASGITransport(app=create_app())
+        async with sm() as helper_s:
+            async with CustomerDisplayAwareClient(
+                transport=transport, base_url="http://test", db_session=helper_s
+            ) as c:
+                returned = await c.post(
+                    "/api/v1/returns",
+                    json={
+                        "sale_id": sale_id,
+                        "reason": "客人不要了",
+                        "lines": [{"sale_line_id": int(line_id), "qty": 2}],
+                    },
+                    headers=_auth(clerk_token, "ret-real-idem"),
+                )
+        assert returned.status_code == 201, returned.text
+
+        async with sm() as s:
+            # 退貨走 REFUND/SALE_RETURN，不是 SALE_VOID 沖正
+            refund = await s.scalar(
+                select(StoreCreditLedger).where(
+                    StoreCreditLedger.source_type == StoreCreditSourceType.SALE_RETURN,
+                    StoreCreditLedger.entry_type == StoreCreditEntryType.REFUND,
+                )
+            )
+            assert refund is not None and refund.signed_amount == Decimal(200)
+            no_void_reversal = await s.scalar(
+                select(func.count())
+                .select_from(StoreCreditLedger)
+                .where(
+                    StoreCreditLedger.source_type == StoreCreditSourceType.SALE_VOID,
+                    StoreCreditLedger.source_id == sale_id,
+                )
+            )
+            assert no_void_reversal == 0
+            assert await StoreCreditService(s).get_balance(store_id, member_id) == Decimal(500)
+            sale_status = await s.scalar(
+                text("SELECT status FROM sales WHERE id = :id"), {"id": sale_id}
+            )
+            assert sale_status == "RETURNED"
+
+        # F0501 核可後的回寫：不得因缺少 SALE_VOID 沖正而被擋
         async with sm() as s:
             await s.execute(
                 text("UPDATE sales SET invoice_status='VOID' WHERE id=:id"), {"id": sale_id}
             )
-            await s.commit()  # 不得因缺少 SALE_VOID 沖正而被擋
+            await s.commit()
         async with sm() as s:
             after = await s.scalar(
                 text("SELECT invoice_status FROM sales WHERE id = :id"), {"id": sale_id}
