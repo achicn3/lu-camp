@@ -107,6 +107,27 @@ curl -s http://127.0.0.1:8787/devices/status | python3 -m json.tool | grep -E '"
 
 ---
 
+
+### 從 WSL 外面連進來（Windows 瀏覽器／店內平板）
+
+`localhost` 連不到時要用 WSL 的 IP（`hostname -I`），但改用 IP 會**同時踩到三道關卡**，
+而且三者的症狀都不像網路問題：
+
+| 關卡 | 症狀 | 解法 |
+|---|---|---|
+| Next 封鎖跨來源開發資源 | **畫面只有背景色**；JS 全部 200、主控台無錯誤；登入表單以 GET 送出、帳密跑到網址列（＝React 完全沒 hydrate） | `next.config.ts` 的 `allowedDevOrigins` 已含 WSL/區網網段 |
+| 後端 CORS 只允許 localhost | 登入請求 `net::ERR_FAILED`，畫面顯示「無法連線到伺服器」 | 啟動後端時 `CORS_ORIGINS=http://localhost:3000,http://<IP>:3000` |
+| 硬體代理綁 127.0.0.1 | 頁面正常，但**結帳印不出東西** | 代理改 `--host 0.0.0.0` |
+
+前端還要 `frontend/.env.local` 指定 `NEXT_PUBLIC_API_BASE_URL` 與 `NEXT_PUBLIC_AGENT_URL`
+（**瀏覽器端**的 localhost 指的是瀏覽器所在的機器，不是 WSL）。該檔已被 gitignore。
+
+> **`localhost` 為什麼會突然不能用**：NAT 模式下靠 Windows 的 `wslrelay` 轉發，
+> 那個機制在主機睡眠／喚醒後常會壞掉，**不會有任何提示**。
+> 想一勞永逸就在 Windows 的 `%USERPROFILE%\.wslconfig` 設 `networkingMode=mirrored`
+> 再 `wsl --shutdown`（代價是 WSL 會關閉）。
+
+
 ## 4. 跑 30 支手冊腳本
 
 **先把截圖目錄清空**（重要）：截圖檔名含流水號，腳本增刪情境時會位移。舊檔留著會讓
