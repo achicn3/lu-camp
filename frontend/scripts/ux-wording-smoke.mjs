@@ -124,19 +124,22 @@ try {
   ok("清除品牌後型號標籤同步消失（不留假的已選狀態）", chipsAfter === 0, `剩 ${chipsAfter} 個`);
   await page.screenshot({ path: join(SHOTS, "06-brand-cleared.png"), fullPage: true });
 
-  // ── 5) 估計轉售價 → 上架售價一鍵帶入（兩者常相同，省去重複輸入）──
+  // ── 5) 估計轉售價（未稅）→ 上架售價自動帶入含稅價 ──
   await page.locator('input[aria-label="估計轉售價"]').first().fill("2500");
   await page.waitForTimeout(300);
-  const fillBtn = page.locator('button:has-text("同估計轉售價")').first();
-  ok("出現「同估計轉售價」快捷", (await fillBtn.count()) > 0);
+  const listedField = page.locator('input[aria-label="上架售價（含稅）"]').first();
+  const autoListed = await listedField.inputValue();
+  ok("估計轉售價 2500（未稅）→ 上架售價自動 2625（含稅）", autoListed === "2625", `上架售價=${autoListed}`);
+  const fillBtn = page.locator('button:has-text("帶入含稅價格")').first();
+  ok("出現「帶入含稅價格」快捷", (await fillBtn.count()) > 0);
   await fillBtn.click();
-  const listed = await page.locator('input[aria-label="上架售價"]').first().inputValue();
-  ok("一鍵帶入後上架售價＝估計轉售價", listed === "2500", `上架售價=${listed}`);
+  const listed = await listedField.inputValue();
+  ok("按鈕帶入後仍為含稅價", listed === "2625", `上架售價=${listed}`);
   const acqTips = await page.$$eval(".info-tip", (els) =>
     els.map((e) => e.getAttribute("title") ?? ""),
   );
-  const resaleHint = acqTips.find((t) => t.includes("不會存入")) ?? "";
-  ok("估計轉售價有說明（點出不會存入系統）", resaleHint !== "", resaleHint.slice(0, 20) + "…");
+  const resaleHint = acqTips.find((t) => t.includes("不含稅")) ?? "";
+  ok("估計轉售價有說明（點出是不含稅、會自動帶到上架售價）", resaleHint !== "", resaleHint.slice(0, 20) + "…");
   // 觸控/鍵盤可用：說明是可點擊的按鈕，點擊後展開（非僅 hover 的 title）。
   await page.locator(".info-tip").first().click();
   const popCount = await page.locator('[role="tooltip"]').count();

@@ -136,7 +136,7 @@ try {
   await cat.fill(`分類${Date.now().toString().slice(-5)}`);
   await page.click('button:has-text("建立「")');
   await page.fill('input[aria-label="收購價"]', "1200");
-  await page.fill('input[aria-label="上架售價"]', "3000");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "3000");
 
   // 送至手持裝置簽署
   await page.click('button:has-text("送至手持裝置簽署")');
@@ -209,7 +209,7 @@ try {
   await cat2.fill(`分類${Date.now().toString().slice(-5)}`);
   await page.click('button:has-text("建立「")');
   await page.fill('input[aria-label="收購價"]', "800");
-  await page.fill('input[aria-label="上架售價"]', "2000");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "2000");
   await page.click('button:has-text("送至手持裝置簽署")');
   await page.waitForSelector("text=等待客人確認並簽署", { timeout: 8000 });
   const cur2 = await (

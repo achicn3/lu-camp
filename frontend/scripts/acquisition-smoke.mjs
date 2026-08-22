@@ -65,15 +65,27 @@ try {
   await page.click('button:has-text("建立「登山服飾」")');
   ok("分類查無即建（seed 定價規則）", true);
 
-  // 5) 估計轉售價 → 建議最高收購成本（雙重約束定價輔助）
+  // 5) 估計轉售價（未稅）→ 建議最高收購成本 + 上架售價自動帶入含稅價
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   await page.waitForSelector("text=建議最高收購成本");
   ok("顯示建議最高收購成本", true);
+  // 上架售價一律同步為含稅價：3000 × 1.05 = 3150（店主裁示 2026-08-22）
+  const listedInput = page.locator('input[aria-label="上架售價（含稅）"]');
+  await page.waitForFunction(
+    () =>
+      document.querySelector('input[aria-label="上架售價（含稅）"]')?.value === "3150",
+    null,
+    { timeout: 5000 },
+  );
+  ok("估計轉售價 3000（未稅）→ 上架售價自動帶入 3150（含稅）", true);
   await page.screenshot({ path: `${SHOTS}/01-buyout-aid.png` });
 
   // 6) 收購價 + 上架售價 → 現金送出（已開帳）
   await page.fill('input[aria-label="收購價"]', "1000");
-  await page.fill('input[aria-label="上架售價"]', "3000");
+  // 店員仍可手動改上架售價（改完不會被自動同步蓋掉，除非再動估計轉售價）
+  await listedInput.fill("3000");
+  await page.waitForTimeout(200);
+  ok("手動改上架售價後保持不變", (await listedInput.inputValue()) === "3000");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector("text=收購完成");
   ok("現金收購送出完成", true);

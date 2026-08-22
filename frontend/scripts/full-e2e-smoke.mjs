@@ -184,7 +184,7 @@ try {
   await page.locator(".acq-row select").first().selectOption("A");
   await page.fill('input[aria-label="估計轉售價"]', "2400");
   await page.fill('input[aria-label="收購價"]', "900");
-  await page.fill('input[aria-label="上架售價"]', "1800");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "1800");
   await shot(page, "buyout1-filled");
   // 現金撥款（預設 CASH，已開帳）→ 送出
   await page.click('button:has-text("送出收購")');
@@ -217,7 +217,7 @@ try {
   await page.locator(".acq-row select").first().selectOption("B");
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   await page.fill('input[aria-label="收購價"]', "2500");
-  await page.fill('input[aria-label="上架售價"]', "3000");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "3000");
   // 撥款改「購物金」
   await page.locator(".acq-payout-mode", { hasText: "購物金" }).click();
   await page.waitForSelector(".acq-premium");
@@ -237,7 +237,7 @@ try {
   await comboPickExisting("分類", "帳", "帳篷").then(({ opt: o }) => o.click());
   await page.locator(".acq-row select").first().selectOption("A");
   await page.locator('label:has-text("抽成") input').fill("50");
-  await page.fill('input[aria-label="上架售價"]', "1000");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "1000");
   await shot(page, "consign-filled");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector(".acq-result", { timeout: 10000 });

@@ -8,6 +8,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -20,6 +21,7 @@ import {
   maxAcquisitionCost,
   payableTotal,
   suggestedListedPrice,
+  taxInclusivePrice,
 } from "@/features/acquisition/pricing";
 import {
   type AcqType,
@@ -340,6 +342,7 @@ function ItemRowCard({
   onChange,
   onRemove,
   refreshCategories,
+  taxRate,
 }: {
   type: AcqType;
   index: number;
@@ -348,6 +351,8 @@ function ItemRowCard({
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
   refreshCategories: () => void;
+  /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
+  taxRate: number | null;
 }) {
   const category = categories.find((c) => c.id === row.categoryId) ?? null;
 
@@ -379,7 +384,30 @@ function ItemRowCard({
   const cost = parseNtd(row.acquisitionCost);
   const overCost = type === "BUYOUT" && maxCost !== null && cost !== null && cost > maxCost;
   const listed = parseNtd(row.listedPrice);
-  const margin = listed !== null && cost !== null ? marginPct(listed, cost) : null;
+  const margin =
+    listed !== null && cost !== null && taxRate !== null
+      ? marginPct(listed, cost, taxRate)
+      : null;
+  // 估計轉售價（未稅）對應的含稅價：自動帶入上架售價、也是按鈕上顯示的數字。
+  const resaleTaxInclusive =
+    resale !== null && taxRate !== null ? taxInclusivePrice(resale, taxRate) : null;
+
+  // 一律同步：估計轉售價（或稅率）一有值就把上架售價換成含稅價（店主裁示 2026-08-22）。
+  // 店員之後仍可自行改上架售價——改它不會動到下面的相依，所以不會被蓋掉；
+  // 但只要再動估計轉售價，就會再覆蓋一次，這是刻意的。
+  // 放 effect 而不是輸入框的 onChange：設定（稅率）比店員打字晚到時，onChange 那次算不出
+  // 含稅價就永遠補不回來了，上架售價會安靜地留空。
+  // onChange 由父層以行內箭頭函式傳入、每次 render 都換身分，不能進相依陣列
+  // （會變成每次 render 都覆蓋一次上架售價）。改以 ref 取最新的一份；
+  // 寫入放在 effect 裡，render 階段寫 ref 是 React 不允許的。
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  useEffect(() => {
+    if (resaleTaxInclusive === null) return;
+    onChangeRef.current({ listedPrice: String(resaleTaxInclusive) });
+  }, [resaleTaxInclusive]);
 
   function searchBrands(q: string): Promise<ComboOption[]> {
     return api
@@ -469,8 +497,8 @@ function ItemRowCard({
         </label>
         <label className="field">
           <span className="field-label">
-            估計轉售價（鑑價輔助）
-            <InfoTip text="你評估這件商品大概能賣多少。系統據此算出「建議最高收購成本」，避免收太貴。這個數字只用於試算，不會存入系統。" />
+            估計轉售價（未稅）
+            <InfoTip text="你評估這件商品能為店裡賺回多少，也就是「不含稅、實際入袋」的金額。系統用它算出建議最高收購成本，並自動把加了稅的價格填到下面的上架售價。" />
           </span>
           <input
             aria-label="估計轉售價"
@@ -512,16 +540,16 @@ function ItemRowCard({
 
       <label className="field">
         <span className="field-label">
-          上架售價
-          <InfoTip text="實際掛牌販售的價格，會存入系統。常與估計轉售價相同，可按右方一鍵帶入。" />
-          {category !== null && cost !== null && (
+          上架售價（含稅）
+          <InfoTip text="客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價會自動加稅帶進來，你也可以直接改這裡。" />
+          {category !== null && cost !== null && taxRate !== null && (
             <button
               type="button"
               className="acq-link"
               onClick={() =>
                 onChange({
                   listedPrice: String(
-                    suggestedListedPrice(cost, category.target_margin_pct) ?? cost,
+                    suggestedListedPrice(cost, category.target_margin_pct, taxRate) ?? cost,
                   ),
                 })
               }
@@ -529,20 +557,20 @@ function ItemRowCard({
               套用建議（目標毛利 {category.target_margin_pct}%）
             </button>
           )}
-          {/* 估計轉售價是鑑價輔助（用來反推最高可收多少），上架售價才是實際掛牌價；
-              兩者常常相同，給一鍵帶入省去重複輸入，但仍保留「刻意決定」這一步。 */}
-          {resale !== null && resale > 0 && (
+          {/* 估計轉售價是未稅（店家實際入袋），上架售價是含稅（客人付的）。
+              輸入時已自動同步；這顆按鈕是給「手動改過之後想把含稅價再帶回來」用的。 */}
+          {resaleTaxInclusive !== null && (
             <button
               type="button"
               className="acq-link"
-              onClick={() => onChange({ listedPrice: String(resale) })}
+              onClick={() => onChange({ listedPrice: String(resaleTaxInclusive) })}
             >
-              同估計轉售價（{formatNtd(resale)}）
+              帶入含稅價格（{formatNtd(resaleTaxInclusive)}）
             </button>
           )}
         </span>
         <input
-          aria-label="上架售價"
+          aria-label="上架售價（含稅）"
           inputMode="numeric"
           value={row.listedPrice}
           onChange={(e) => onChange({ listedPrice: e.target.value })}
@@ -774,6 +802,10 @@ export default function AcquisitionPage() {
   const isBulk = type === "BULK_LOT";
   const sellerIsMember = seller?.roles.includes("MEMBER") ?? false;
   const premiumRate = settings.data ? Number(settings.data.premium_rate) : 0;
+  // 營業稅率取自 settings（§6 不得寫死）。未載入或值不可用時一律為 null、不做含稅換算——
+  // 若讓 NaN 流下去，上架售價欄位會被填成字串 "NaN"，比不自動帶入更糟。
+  const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
+  const taxRate = Number.isFinite(rawTaxRate) ? rawTaxRate : null;
   const drawerOpen = drawer.data != null;
 
   const payable = isBulk
@@ -1120,6 +1152,7 @@ export default function AcquisitionPage() {
               refreshCategories={() =>
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })
               }
+              taxRate={taxRate}
             />
           ))}
           <button type="button" className="btn-ghost" onClick={() => setRows((p) => [...p, emptyItem()])}>

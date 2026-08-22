@@ -58,7 +58,7 @@ try {
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   await page.waitForSelector("text=建議最高收購成本");
   await page.fill('input[aria-label="收購價"]', "1000");
-  await page.fill('input[aria-label="上架售價"]', "3000");
+  await page.fill('input[aria-label="上架售價（含稅）"]', "3000");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector("text=收購完成");
   ok("買斷送出完成（有序號條碼）", await page.locator("text=序號條碼").isVisible());

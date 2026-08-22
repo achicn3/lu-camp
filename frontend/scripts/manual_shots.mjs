@@ -274,7 +274,7 @@ async function main() {
     await page.selectOption('.acq-row select', "A").catch(() => {});
     await page.fill('input[aria-label="估計轉售價"]', "9000");
     await page.fill('input[aria-label="收購價"]', "5000");
-    await page.fill('input[aria-label="上架售價"]', "8800");
+    await page.fill('input[aria-label="上架售價（含稅）"]', "8800");
     await T(page, 400);
     await shot(page, "24-acq-row-filled");
     // 撥款方式：購物金（賣方非會員）→ 提醒

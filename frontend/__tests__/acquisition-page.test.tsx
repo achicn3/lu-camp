@@ -39,7 +39,7 @@ function stub(over: { drawer?: boolean } = {}) {
         return json([{ id: 1, name: "登山服飾", target_margin_pct: 45 }]);
       }
       if (url.includes("/settings")) {
-        return json({ premium_rate: "0.1000", default_margin_pct: 45 });
+        return json({ premium_rate: "0.1000", default_margin_pct: 45, tax_rate: "0.0500" });
       }
       if (url.includes("/cash-sessions/current")) {
         return over.drawer === false ? json(null, 404) : json({ id: 1, status: "OPEN" });
@@ -159,6 +159,33 @@ describe("AcquisitionPage", () => {
     await waitFor(() => expect(patches).toHaveLength(1));
     expect(patches[0]).toMatchObject({ national_id: "A123456789" });
     expect(patches[0].roles).toEqual(expect.arrayContaining(["MEMBER", "SELLER"]));
+  });
+
+  it("打完估計轉售價（未稅）→ 上架售價自動帶入含稅價", async () => {
+    stub();
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價");
+    await userEvent.type(resale, "2010");
+    await waitFor(() =>
+      expect((screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value).toBe("2111"),
+    );
+  });
+
+  it("估計轉售價再改一次 → 上架售價一律跟著換（即使已手動改過）", async () => {
+    stub();
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價");
+    await userEvent.type(resale, "2010");
+    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    await waitFor(() => expect(listed.value).toBe("2111"));
+    // 店員手動改成別的價
+    await userEvent.clear(listed);
+    await userEvent.type(listed, "2500");
+    expect(listed.value).toBe("2500");
+    // 再動估計轉售價 → 覆蓋回含稅價（店主裁示：無論如何就是同步）
+    await userEvent.clear(resale);
+    await userEvent.type(resale, "1000");
+    await waitFor(() => expect(listed.value).toBe("1050"));
   });
 
   it("blocks submit with validation errors when nothing filled", async () => {

@@ -9,6 +9,32 @@ export function roundNtd(value: number): number {
   return Math.round(value);
 }
 
+/**
+ * 稅率轉基點整數（如 0.05 → 500）。
+ *
+ * 含稅換算一律走「乘基點再除 10000」而不是 `× (1 + rate)`：後者在二進位浮點下可能算出
+ * 2110.4999999999998 這種值，剛好落在 .5 的金額就會少一元。稅率最多四位小數（DB Numeric(5,4)）。
+ */
+function rateBasisPoints(taxRate: number): number {
+  return Math.round(taxRate * 10000);
+}
+
+/**
+ * 未稅 → 含稅（整數元）。稅率由 settings 提供，不得寫死（CLAUDE.md §6）。
+ *
+ * 台灣標價含稅：店員心裡的「這件我要賣 2010」是**未稅**（他實際要拿到的錢），
+ * 掛在架上讓客人看的是含稅 2111。少了這一步，客人付 2010、店家只實得 1914。
+ */
+export function taxInclusivePrice(netNtd: number, taxRate: number): number | null {
+  if (netNtd <= 0) return null;
+  return roundNtd((netNtd * (10000 + rateBasisPoints(taxRate))) / 10000);
+}
+
+/** 含稅 → 未稅（整數元）；與後端 `core/money.split_tax_inclusive` 同式：round(total / (1+rate))。 */
+export function netOfTaxInclusive(grossNtd: number, taxRate: number): number {
+  return roundNtd((grossNtd * 10000) / (10000 + rateBasisPoints(taxRate)));
+}
+
 /** 分類×成色帶定價規則（由 API PricingRuleRead 映射來；min_price_multiple 已 parse 為 number）。 */
 export interface PricingRule {
   discountCeilingPct: number;
@@ -31,26 +57,53 @@ export function maxAcquisitionCost(resaleNtd: number, rule: PricingRule): number
   return Math.max(0, roundNtd(Math.min(byMargin, byMultiple)));
 }
 
-/** 毛利率（整數百分比）= (listed − cost) / listed × 100；listed ≤ 0 回 null。 */
-export function marginPct(listedNtd: number, costNtd: number): number | null {
-  if (listedNtd <= 0) return null;
-  return roundNtd(((listedNtd - costNtd) / listedNtd) * 100);
+/**
+ * 毛利率（整數百分比），**以未稅售價為分母**：(未稅 − cost) / 未稅 × 100。
+ *
+ * 用含稅售價當分母會系統性高估——那 5% 是代政府收的，從來不是店家的毛利。
+ * （含稅 2010、成本 1000：舊寫法顯示 50%，實際只有 48%。）
+ * `listedTaxInclusiveNtd` ≤ 0 或未稅算出來 ≤ 0 回 null。
+ */
+export function marginPct(
+  listedTaxInclusiveNtd: number,
+  costNtd: number,
+  taxRate: number,
+): number | null {
+  if (listedTaxInclusiveNtd <= 0) return null;
+  const net = netOfTaxInclusive(listedTaxInclusiveNtd, taxRate);
+  if (net <= 0) return null;
+  return roundNtd(((net - costNtd) / net) * 100);
 }
 
-/** 建議含稅售價 = cost ÷ (1 − margin/100)；margin 限 0–99，越界回 null。 */
-export function suggestedListedPrice(costNtd: number, targetMarginPct: number): number | null {
+/**
+ * 建議**含稅**售價 = cost ÷ (1 − margin/100) × (1 + 稅率)；margin 限 0–99，越界回 null。
+ *
+ * 目標毛利是對**未稅**談的，所以先算未稅售價、最後才加稅。**只四捨五入一次**：
+ * 先把未稅取整再加稅會多一次捨入誤差。
+ */
+export function suggestedListedPrice(
+  costNtd: number,
+  targetMarginPct: number,
+  taxRate: number,
+): number | null {
   if (targetMarginPct < 0 || targetMarginPct > 99) return null;
-  return roundNtd(costNtd / (1 - targetMarginPct / 100));
+  const net = costNtd / (1 - targetMarginPct / 100);
+  return roundNtd((net * (10000 + rateBasisPoints(taxRate))) / 10000);
 }
 
-/** 散裝建議每件均一價 = (每件成本) ÷ (1 − margin/100)；qty>0、margin 0–99，否則 null。 */
+/**
+ * 散裝建議每件**含稅**均一價 = 每件成本 ÷ (1 − margin/100) × (1 + 稅率)。
+ * qty>0、margin 0–99，否則 null。與序號品同口徑（只四捨五入一次）。
+ */
 export function suggestedBulkUnitPrice(
   lotCostNtd: number,
   qty: number,
   targetMarginPct: number,
+  taxRate: number,
 ): number | null {
   if (qty <= 0 || targetMarginPct < 0 || targetMarginPct > 99) return null;
-  return roundNtd(lotCostNtd / qty / (1 - targetMarginPct / 100));
+  const net = lotCostNtd / qty / (1 - targetMarginPct / 100);
+  return roundNtd((net * (10000 + rateBasisPoints(taxRate))) / 10000);
 }
 
 /** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */
