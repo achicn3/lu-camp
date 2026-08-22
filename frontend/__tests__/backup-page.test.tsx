@@ -207,6 +207,27 @@ describe("/backup", () => {
     expect(await screen.findByText(/備份未設定/)).toBeDefined();
   });
 
+  it("兩張紀錄表都包在可橫向捲動的容器裡（欄位是斷不開的長字串）", async () => {
+    // 備份紀錄放檔案指紋、還原紀錄放 `lucamp_manual_20260820_161152_….dump.enc`
+    // 與 `restored=e1f3a5c7b9d2 == head …`——這些字串斷不開，沒有捲動容器
+    // 就會整片衝出卡片外（實機發現：頁面右側被表格撐爆）。
+    // 專案既有的 *-table-wrap 慣例（會員、寄售都是這樣），備份頁原本漏了。
+    loginAs("MANAGER");
+    stubFetch((url) => {
+      if (url.includes("/backup/health")) return json(HEALTH);
+      if (url.includes("/backup/restores")) return json(RESTORES);
+      if (url.includes("/backup/runs")) return json(RUNS);
+      return null;
+    });
+    const { container } = renderPage();
+    await screen.findByText("備份紀錄");
+    const tables = [...container.querySelectorAll("table.data-table")];
+    expect(tables.length).toBeGreaterThanOrEqual(2);
+    for (const t of tables) {
+      expect(t.closest(".backup-table-wrap")).not.toBeNull();
+    }
+  });
+
   it("還原卡控：需選備份→輸入檔名＋勾選才可觸發，成功 POST /backup/restore", async () => {
     loginAs("MANAGER");
     let restoreBody: Record<string, unknown> | null = null;

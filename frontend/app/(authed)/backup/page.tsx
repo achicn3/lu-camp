@@ -241,6 +241,7 @@ function RunsCard({ runs }: { runs: BackupRunRead[] }) {
       {runs.length === 0 ? (
         <p className="hint">尚無備份紀錄。</p>
       ) : (
+        <div className="backup-table-wrap">
         <table className="data-table">
           <thead>
             <tr>
@@ -268,6 +269,7 @@ function RunsCard({ runs }: { runs: BackupRunRead[] }) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
@@ -450,6 +452,7 @@ function RestoreCard({
       {restores.length > 0 && (
         <>
           <h3 style={{ marginTop: 16 }}>還原紀錄</h3>
+          <div className="backup-table-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -481,6 +484,7 @@ function RestoreCard({
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </div>

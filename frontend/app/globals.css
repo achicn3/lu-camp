@@ -1183,6 +1183,22 @@ body {
   min-width: 80px;
   white-space: nowrap;
 }
+/* 備份／還原紀錄：欄位裡是長檔名與檢查明細（`lucamp_manual_20260820_161152_….dump.enc`、
+   `restored=e1f3a5c7b9d2 == head …`），這些字串斷不開，沒有捲動容器就會整片衝出卡片外。
+   沿用專案既有的 *-table-wrap 慣例（會員、寄售都是這樣處理）。 */
+.backup-table-wrap {
+  overflow-x: auto;
+}
+.backup-table-wrap .data-table {
+  min-width: max-content;
+}
+/* 檢查明細那一欄放長字串，允許在任意字元斷行，免得把整列撐開。 */
+.backup-verify-list,
+.backup-error-cell {
+  overflow-wrap: anywhere;
+  max-width: 42ch;
+}
+
 .member-table-wrap {
   overflow-x: auto;
 }
