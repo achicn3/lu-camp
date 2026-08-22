@@ -46,7 +46,7 @@ async def b0_data_volume_thresholds(session: AsyncSession) -> None:
         await session.execute(
             text(
                 """
-        SELECT COUNT(*) FILTER (WHERE invoice_status <> 'VOID') AS sales_count,
+        SELECT COUNT(*) FILTER (WHERE status <> 'VOIDED') AS sales_count,
                COALESCE(EXTRACT(EPOCH FROM (MAX(created_at)-MIN(created_at))) / 86400, 0)
                  AS span_days
         FROM sales
@@ -86,7 +86,7 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
                 """
         SELECT sl.serialized_item_id, COUNT(*) AS n
         FROM sale_lines sl JOIN sales s ON s.id = sl.sale_id
-        WHERE sl.line_type = 'SERIALIZED' AND s.invoice_status <> 'VOID'
+        WHERE sl.line_type = 'SERIALIZED' AND s.status <> 'VOIDED'
           AND NOT EXISTS (SELECT 1 FROM return_lines rl WHERE rl.sale_line_id = sl.id)
         GROUP BY sl.serialized_item_id HAVING COUNT(*) > 1
         """
@@ -105,7 +105,7 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
         LEFT JOIN (
           SELECT sl.serialized_item_id AS iid, COUNT(*) n
           FROM sale_lines sl JOIN sales s ON s.id = sl.sale_id
-          WHERE sl.line_type='SERIALIZED' AND s.invoice_status <> 'VOID'
+          WHERE sl.line_type='SERIALIZED' AND s.status <> 'VOIDED'
             AND NOT EXISTS (SELECT 1 FROM return_lines rl WHERE rl.sale_line_id = sl.id)
           GROUP BY sl.serialized_item_id
         ) cnt ON cnt.iid = si.id
@@ -254,7 +254,7 @@ async def b6_bulk_lot(session: AsyncSession) -> None:
         LEFT JOIN (
           SELECT sl.bulk_lot_id AS lid, SUM(sl.qty) q
           FROM sale_lines sl JOIN sales s ON s.id=sl.sale_id
-          WHERE sl.line_type='BULK_LOT' AND s.invoice_status <> 'VOID'
+          WHERE sl.line_type='BULK_LOT' AND s.status <> 'VOIDED'
           GROUP BY sl.bulk_lot_id
         ) sold ON sold.lid = bl.id
         LEFT JOIN (
@@ -338,7 +338,7 @@ async def b10_money_integrity(session: AsyncSession) -> None:
                 """
         SELECT s.id, s.total, COALESCE(SUM(t.amount),0) AS tsum
         FROM sales s LEFT JOIN sale_tenders t ON t.sale_id=s.id
-        WHERE s.invoice_status <> 'VOID'
+        WHERE s.status <> 'VOIDED'
         GROUP BY s.id, s.total HAVING s.total <> COALESCE(SUM(t.amount),0)
         """
             )

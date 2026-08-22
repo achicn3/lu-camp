@@ -350,7 +350,7 @@ async def s4_member_points(session: AsyncSession) -> None:
         SELECT s.id, s.awarded_points, s.buyer_contact_id, s.total,
                COALESCE(SUM(l.line_total) FILTER (WHERE l.line_type='MENU'), 0) AS food
         FROM sales s LEFT JOIN sale_lines l ON l.sale_id = s.id
-        WHERE s.invoice_status <> 'VOID'
+        WHERE s.status <> 'VOIDED'
         GROUP BY s.id
         """
             )
@@ -427,7 +427,7 @@ async def s7_serialized_state(session: AsyncSession) -> None:
         SELECT i.id FROM serialized_items i
         WHERE i.status = 'SOLD' AND NOT EXISTS (
           SELECT 1 FROM sale_lines l JOIN sales s ON s.id = l.sale_id
-          WHERE l.serialized_item_id = i.id AND s.invoice_status <> 'VOID')
+          WHERE l.serialized_item_id = i.id AND s.status <> 'VOIDED')
         """
             )
         )
@@ -441,7 +441,7 @@ async def s7_serialized_state(session: AsyncSession) -> None:
         SELECT i.id FROM serialized_items i
         WHERE i.status = 'IN_STOCK' AND EXISTS (
           SELECT 1 FROM sale_lines l JOIN sales s ON s.id = l.sale_id
-          WHERE l.serialized_item_id = i.id AND s.invoice_status <> 'VOID'
+          WHERE l.serialized_item_id = i.id AND s.status <> 'VOIDED'
           AND s.status <> 'RETURNED'
           AND NOT EXISTS (SELECT 1 FROM return_lines rl WHERE rl.sale_line_id = l.id))
         """

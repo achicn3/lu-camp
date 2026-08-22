@@ -42,7 +42,7 @@ async def _sample_ids() -> dict[str, Any]:
     conn = await asyncpg.connect(PG)
     q = {
         "contact_id": "SELECT id FROM contacts WHERE 'MEMBER'=ANY(roles) ORDER BY id LIMIT 1",
-        "sale_id": "SELECT id FROM sales WHERE invoice_status <> 'VOID' ORDER BY id DESC LIMIT 1",
+        "sale_id": "SELECT id FROM sales WHERE status <> 'VOIDED' ORDER BY id DESC LIMIT 1",
         "task_id": "SELECT id FROM signature_tasks WHERE status='SIGNED' ORDER BY id LIMIT 1",
         "purchase_order_id": "SELECT id FROM purchase_orders ORDER BY id DESC LIMIT 1",
         "supplier_id": "SELECT id FROM suppliers ORDER BY id LIMIT 1",
@@ -69,7 +69,7 @@ async def _sample_ids() -> dict[str, Any]:
     # 一致 tuple：會員消費明細路由需要「該買方自己的銷售」（獨立取值會 404，Codex P2）
     row = await conn.fetchrow(
         "SELECT buyer_contact_id, id FROM sales "
-        "WHERE buyer_contact_id IS NOT NULL AND invoice_status <> 'VOID' ORDER BY id DESC LIMIT 1"
+        "WHERE buyer_contact_id IS NOT NULL AND status <> 'VOIDED' ORDER BY id DESC LIMIT 1"
     )
     if row is not None:
         out["contact_id"], out["sale_id"] = row[0], row[1]
