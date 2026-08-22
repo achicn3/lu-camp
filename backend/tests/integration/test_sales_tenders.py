@@ -11,14 +11,15 @@ from decimal import Decimal
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.core.db as app_db
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.cashdrawer.models import CashMovement
+from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import CatalogProduct
@@ -724,7 +725,11 @@ async def test_cross_store_sale_debit_blocked() -> None:
 
 
 async def test_void_without_reversal_blocked() -> None:
-    """第三輪 P2：raw 將購物金銷售標 VOID 卻不沖回 → COMMIT 被擋（不可留未沖回負債）。"""
+    """第三輪 P2：raw 將購物金銷售標作廢卻不沖回 → COMMIT 被擋（不可留未沖回負債）。
+
+    判定欄位隨 ADR-013 由 `invoice_status='VOID'` 改為 `status='VOIDED'`
+    （2026-08 金流稽核 P0-2）；守衛的意圖不變——原本只是判錯了欄位。
+    """
     import app.core.db as app_db
 
     sm = app_db.get_sessionmaker()
@@ -754,11 +759,9 @@ async def test_void_without_reversal_blocked() -> None:
                 )
                 assert created.status_code == 201, created.text
                 sale_id = created.json()["id"]
-        # 直接把 sale 標 VOID，但不寫沖正 → COMMIT 應被擋
+        # 直接把 sale 標作廢，但不寫沖正 → COMMIT 應被擋
         async with sm() as s:
-            await s.execute(
-                text("UPDATE sales SET invoice_status='VOID' WHERE id=:id"), {"id": sale_id}
-            )
+            await s.execute(text("UPDATE sales SET status='VOIDED' WHERE id=:id"), {"id": sale_id})
             with pytest.raises(DBAPIError):
                 await s.commit()
     finally:
@@ -819,7 +822,7 @@ async def test_sale_void_reversal_requires_voided_sale() -> None:
                 )
                 assert created.status_code == 201, created.text
                 sale_id = created.json()["id"]
-        # 銷售仍 NOT_ISSUED（未作廢）→ 直插 SALE_VOID 沖正應被擋
+        # 銷售仍 COMPLETED（未作廢）→ 直插 SALE_VOID 沖正應被擋
         async with sm() as s:
             debit = await s.scalar(
                 select(StoreCreditLedger).where(
@@ -1136,3 +1139,121 @@ async def test_linepay_tender_rejected_until_p2(
     # 銷售未建立
     n = await db_session.scalar(select(func.count()).select_from(SaleTender))
     assert n == 0
+
+
+async def _cleanup_store(store_id: int) -> None:
+    """真 commit 測試的收尾：清掉該店留下的所有列（順序依外鍵相依）。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+        await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
+        await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+        await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id})
+        await delete_customer_display_rows(s, store_id=store_id)
+        await s.execute(text("DELETE FROM sales WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM acquisitions WHERE store_id = :s"), {"s": store_id})
+        await s.execute(text("DELETE FROM catalog_products WHERE store_id = :s"), {"s": store_id})
+        await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
+        await s.execute(text("DELETE FROM audit_log WHERE store_id = :s"), {"s": store_id})
+        await s.execute(delete(Contact).where(Contact.store_id == store_id))
+        await s.execute(delete(User).where(User.store_id == store_id))
+        await s.execute(delete(Store).where(Store.id == store_id))
+        await s.commit()
+
+
+async def _seed_store_credit_sale(idem: str) -> tuple[int, int, int, str]:
+    """真 commit 建一筆「全額購物金付款」的銷售。回 (store_id, member_id, sale_id, mgr_token)。"""
+    sm = app_db.get_sessionmaker()
+    async with sm() as s:
+        token, mgr_token, store_id, clerk_id = await _seed(s)
+        member_id = await _seed_member_with_credit(s, store_id, clerk_id, 500)
+        cat = await _seed_catalog(s, store_id, price="100", qty=10)
+        await s.commit()
+    transport = httpx.ASGITransport(app=create_app())
+    async with sm() as helper_s:
+        async with CustomerDisplayAwareClient(
+            transport=transport, base_url="http://test", db_session=helper_s
+        ) as c:
+            created = await c.post(
+                "/api/v1/sales",
+                json={
+                    "lines": [_catalog_line(cat, 2)],  # total 200
+                    "buyer_contact_id": member_id,
+                    "tenders": [{"tender_type": "STORE_CREDIT", "amount": "200"}],
+                },
+                headers=_auth(token, idem),
+            )
+            assert created.status_code == 201, created.text
+            return store_id, member_id, int(created.json()["id"]), mgr_token
+
+
+async def test_void_store_credit_sale_commits_for_real() -> None:
+    """P0-1（2026-08 金流稽核）：作廢購物金銷售必須能真的 COMMIT。
+
+    DB 守衛 `sales_ledger_sale_debit_guard` 要求 SALE_VOID 沖正只能對應「已作廢的銷售」。
+    2026-08-01 拆分生命週期後，作廢記在 `sales.status='VOIDED'`；守衛若仍看
+    `invoice_status='VOID'`，電子發票關閉（或發票未核可）的作廢就會在 COMMIT 被擋。
+
+    **必須用真 commit 的 session**：conftest 的外層交易＋savepoint 讓
+    DEFERRABLE INITIALLY DEFERRED 的 constraint trigger 永不觸發，
+    既有的 savepoint 版 `test_void_reverses_store_credit_tender` 抓不到這個失效。
+    """
+    sm = app_db.get_sessionmaker()
+    store_id, member_id, sale_id, mgr_token = await _seed_store_credit_sale("void-real")
+    try:
+        async with sm() as s:
+            assert await StoreCreditService(s).get_balance(store_id, member_id) == Decimal(300)
+        transport = httpx.ASGITransport(app=create_app())
+        async with sm() as helper_s:
+            async with CustomerDisplayAwareClient(
+                transport=transport, base_url="http://test", db_session=helper_s
+            ) as c:
+                voided = await c.post(
+                    f"/api/v1/sales/{sale_id}/void",
+                    headers={"Authorization": f"Bearer {mgr_token}"},
+                )
+        assert voided.status_code == 200, voided.text
+        async with sm() as s:
+            # 購物金真的入回（COMMIT 之後仍在）
+            assert await StoreCreditService(s).get_balance(store_id, member_id) == Decimal(500)
+            rev = await s.scalar(
+                select(StoreCreditLedger).where(
+                    StoreCreditLedger.source_type == StoreCreditSourceType.SALE_VOID,
+                    StoreCreditLedger.source_id == sale_id,
+                    StoreCreditLedger.entry_type == StoreCreditEntryType.REVERSAL,
+                )
+            )
+            assert rev is not None and rev.signed_amount == Decimal(200)
+            status_after = await s.scalar(
+                text("SELECT status FROM sales WHERE id = :id"), {"id": sale_id}
+            )
+            assert status_after == "VOIDED"
+    finally:
+        await _cleanup_store(store_id)
+
+
+async def test_invoice_void_alone_does_not_require_credit_reversal() -> None:
+    """P0-2（2026-08 金流稽核）：發票作廢 ≠ 銷售作廢，不得要求購物金沖正。
+
+    同月整筆退貨會作廢原發票（ADR-014），F0501 核可後回寫 `invoice_status='VOID'`；
+    但退貨回補購物金走的是 REFUND/SALE_RETURN，**不會**有 SALE_VOID 沖正。
+    守衛若把 `invoice_status='VOID'` 當成「銷售已作廢」，這個回寫就會在 COMMIT 被擋，
+    連「平台已核可作廢」的回執事件都一起回滾。
+    """
+    sm = app_db.get_sessionmaker()
+    store_id, _member_id, sale_id, _mgr = await _seed_store_credit_sale("invvoid-real")
+    try:
+        async with sm() as s:
+            await s.execute(
+                text("UPDATE sales SET invoice_status='VOID' WHERE id=:id"), {"id": sale_id}
+            )
+            await s.commit()  # 不得因缺少 SALE_VOID 沖正而被擋
+        async with sm() as s:
+            after = await s.scalar(
+                text("SELECT invoice_status FROM sales WHERE id = :id"), {"id": sale_id}
+            )
+            assert after == "VOID"
+    finally:
+        await _cleanup_store(store_id)

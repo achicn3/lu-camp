@@ -459,7 +459,7 @@ DECLARE
   debit_abs NUMERIC;
   debit_contact INT;
 BEGIN
-  SELECT store_id, buyer_contact_id, invoice_status
+  SELECT store_id, buyer_contact_id, status
     INTO sale_store, sale_buyer, sale_status
     FROM sales WHERE id = p_sale_id;
   IF NOT FOUND THEN
@@ -479,8 +479,12 @@ BEGIN
   IF sc_tender > 0 AND debit_contact IS DISTINCT FROM sale_buyer THEN
     RAISE EXCEPTION '購物金扣抵對象必須為該銷售的買方';
   END IF;
-  -- 已作廢且有購物金扣抵 → 必須有對應沖正（第三輪 P2：raw UPDATE 設 VOID 不可漏沖回）
-  IF sc_tender > 0 AND sale_status = 'VOID' THEN
+  -- 已作廢且有購物金扣抵 → 必須有對應沖正（第三輪 P2：raw UPDATE 設作廢不可漏沖回）。
+  -- **判 sales.status，不判 invoice_status**（ADR-013／2026-08 金流稽核 P0-2）：後者是
+  -- 發票的狀態。同月整筆退貨會作廢原發票（ADR-014）並把 invoice_status 寫成 VOID，但退貨
+  -- 回補購物金走的是 REFUND/SALE_RETURN、本就沒有 SALE_VOID 沖正——用 invoice_status 判會
+  -- 把那次回寫整筆擋掉，連平台回執事件都一起回滾。
+  IF sc_tender > 0 AND sale_status = 'VOIDED' THEN
     PERFORM 1 FROM store_credit_ledger
      WHERE store_id = sale_store AND source_type = 'SALE_VOID' AND entry_type = 'REVERSAL'
        AND source_id = p_sale_id;
@@ -556,9 +560,12 @@ BEGIN
   -- SALE_VOID 沖正（第四輪 P1）：只能對應「已作廢」的同店銷售——擋 raw 在銷售仍生效時
   -- 沖回購物金（憑空回補餘額）。與收款側「VOID 必有沖正」合為雙向不變量。
   IF NEW.entry_type = 'REVERSAL' AND NEW.source_type = 'SALE_VOID' THEN
-    SELECT invoice_status INTO sale_status
+    -- **判 sales.status，不判 invoice_status**（ADR-013／2026-08 金流稽核 P0-1）：
+    -- 電子發票關閉時該筆交易根本沒有發票，invoice_status 恆為 NOT_ISSUED——用它判會讓
+    -- 每一次合法的「作廢購物金銷售」都在 COMMIT 被擋，店員只能改用人工調整去湊。
+    SELECT status INTO sale_status
       FROM sales WHERE id = NEW.source_id AND store_id = NEW.store_id;
-    IF NOT FOUND OR sale_status <> 'VOID' THEN
+    IF NOT FOUND OR sale_status <> 'VOIDED' THEN
       RAISE EXCEPTION 'SALE_VOID 沖正只能對應已作廢的同店銷售';
     END IF;
     RETURN NEW;
