@@ -117,11 +117,19 @@ created.buyoutCash = /單號 #(\d+)/.exec(doneText)?.[1];
 created.code1 = /序號條碼：([SL]\d+-[0-9A-F]+)/.exec(doneText)?.[1];
 await shot(page, "result-buyout", { locator: ".acq-result" });
 
-// 列印標籤
-await page.click('button:has-text("列印標籤")');
-await page.waitForSelector(".acq-print-labels .form-success", { timeout: 15000 });
-await page.waitForTimeout(400);
-await shot(page, "labels-printed", { locator: ".acq-print-labels" });
+// 列印標籤（真的會從 Brother QL-810W 吐一張紙）
+//
+// **不要改用假印表機來繞過標籤機沒開**：fake 會讓畫面照樣顯示「已送出列印」，
+// 截圖跟真印一模一樣，於是手冊會宣稱「本輪實機印過」而其實沒有——
+// docs/37 §5 列為最難察覺的失敗樣態。要跳過就明確跳過，並保留上一輪的真截圖。
+if (process.env.MANUAL_SKIP_LABEL_PRINT === "1") {
+  note("⚠ 已跳過標籤列印（MANUAL_SKIP_LABEL_PRINT=1）：labels-printed 沿用上一輪的實機截圖");
+} else {
+  await page.click('button:has-text("列印標籤")');
+  await page.waitForSelector(".acq-print-labels .form-success", { timeout: 15000 });
+  await page.waitForTimeout(400);
+  await shot(page, "labels-printed", { locator: ".acq-print-labels" });
+}
 
 // ══ 二、買斷（購物金撥款 ＋ 手持簽署）══
 await page.reload({ waitUntil: "networkidle" });
