@@ -1,4 +1,4 @@
-// 手冊 14c：折扣與贈品報表，以及設定頁的原因代碼管理（docs/32 §6）。
+// 手冊 14c：折扣與贈品報表，以及設定頁的贈品／折扣原因管理（docs/32 §6）。
 import { existsSync } from "node:fs";
 
 import { chromium } from "playwright";
@@ -36,10 +36,10 @@ await page.waitForTimeout(1500);
 await shot(page, "gifts", { fullPage: true });
 
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
-await page.waitForSelector("text=贈品原因代碼", { timeout: 20000 });
+await page.waitForSelector("text=贈品原因", { timeout: 20000 });
 await page.waitForTimeout(1500);
 await shot(page, "reason-cards", {
-  locator: '.card:has-text("贈品原因代碼")',
+  locator: '.card:has-text("贈品原因")',
 });
 
 await browser.close();

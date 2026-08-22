@@ -91,10 +91,10 @@ function HealthCard({
     <div className="card">
       <h2>備份健康度</h2>
       <div className="backup-key-warning">
-        <strong>兩組金鑰缺一即廢：</strong>備份檔以 AES 口令加密，另需 repo 的{" "}
-        <code>PII_ENC_KEY / HMAC_KEY / SECRET_KEY</code> 才能還原並解出加密個資。
-        請將 <code>.env.r2</code> 的 AES 口令與這三把金鑰<strong>同時抄存於店外安全處</strong>
-        ——任一遺失，備份將無法還原。
+        <strong>備份需要兩份密碼，缺一份就救不回來：</strong>
+        一份是備份檔本身的密碼，另一份是系統用來解開客人個資的金鑰。
+        請把這兩份<strong>都抄一份放在店外的安全地方</strong>（例如保險箱、或另一處住所）——
+        任何一份遺失，備份就還原不了。實際要抄哪些內容，請向系統維護者索取。
       </div>
       <div className="backup-health-grid" style={{ marginTop: 12 }}>
         <div className="backup-health-item">
@@ -248,7 +248,7 @@ function RunsCard({ runs }: { runs: BackupRunRead[] }) {
               <th>觸發</th>
               <th>狀態</th>
               <th>大小</th>
-              <th>SHA-256</th>
+              <th>檔案指紋</th>
             </tr>
           </thead>
           <tbody>
@@ -280,20 +280,34 @@ function RestoreStatusBadge({ status }: { status: RestoreRunRead["status"] }) {
       : status === "RUNNING"
         ? "backup-status--running"
         : "backup-status--failed";
-  const label = status === "VERIFIED" ? "四驗通過" : status === "RUNNING" ? "還原中" : "失敗";
+  const label = status === "VERIFIED" ? "檢查全數通過" : status === "RUNNING" ? "還原中" : "失敗";
   return <span className={`backup-status ${cls}`}>{label}</span>;
 }
+
+// 檢查項目的中文說明。名稱本身是後端的識別碼（動它等於改 API），
+// 所以只在顯示時對照成人話；對照表沒有的就照原樣顯示，不要憑空編一個名字。
+const VERIFY_LABELS: Record<string, string> = {
+  connect: "能連上還原的資料",
+  alembic_head: "資料表結構與現行版本相符",
+  table_counts: "各項資料筆數",
+  signature_bytea: "簽名圖檔可正常讀取",
+  backend_usable: "系統能正常查詢這份資料",
+};
 
 function VerificationList({ v }: { v: RestoreRunRead["verifications"] }) {
   if (!v || !Array.isArray(v.checks)) return null;
   return (
-    <ul className="backup-verify-list">
-      {(v.checks as { name: string; ok: boolean; detail: string }[]).map((c) => (
-        <li key={c.name}>
-          <span>{c.ok ? "✅" : "❌"}</span> <strong>{c.name}</strong>：{c.detail}
-        </li>
-      ))}
-    </ul>
+    <>
+      <p className="hint">以下是檢查明細，主要給系統維護者看：</p>
+      <ul className="backup-verify-list">
+        {(v.checks as { name: string; ok: boolean; detail: string }[]).map((c) => (
+          <li key={c.name}>
+            <span>{c.ok ? "✅" : "❌"}</span>{" "}
+            <strong>{VERIFY_LABELS[c.name] ?? c.name}</strong>：{c.detail}
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -351,9 +365,10 @@ function RestoreCard({
     <div className="card">
       <h2>還原（災難復原）</h2>
       <p className="hint">
-        還原一律倒進**獨立的驗證庫**（<code>lucamp_restore_&lt;時戳&gt;</code>）並自動四驗，
-        <strong>不影響現行營運資料</strong>。四驗通過後，正式切換需由店家停機執行受控腳本
-        <code>scripts/switch-to-restore.sh</code>（App 不會自動切換，避免中途失敗兩頭落空）。
+        還原一律先倒進<strong>另一份獨立的資料</strong>做檢查，
+        <strong>不會動到目前正在用的營運資料</strong>。四項檢查都通過之後，
+        要正式改用還原的那份，得由系統維護者在店休時間手動切換——
+        系統<strong>不會自動切換</strong>，避免切到一半失敗、兩邊都不能用。
       </p>
       {sources.length === 0 ? (
         <p className="hint">尚無可還原的備份（需先有一次成功備份）。</p>
@@ -378,7 +393,7 @@ function RestoreCard({
               setError(null);
             }}
           >
-            還原此備份到驗證庫…
+            還原這個備份來做檢查…
           </button>
         </div>
       )}
@@ -386,7 +401,7 @@ function RestoreCard({
       {confirming && chosen && (
         <div className="backup-confirm">
           <p className="form-error">
-            ⚠️ 高風險操作。將把「{fileName}」還原到獨立驗證庫並四驗。請輸入檔名並勾選確認。
+            ⚠️ 這是重大操作。系統會把「{fileName}」還原到另一份獨立的資料並自動檢查。請輸入檔名並勾選確認。
           </p>
           <label className="field">
             <span className="field-label">輸入備份檔名以確認：{fileName}</span>
@@ -400,7 +415,7 @@ function RestoreCard({
               onChange={(e) => setAck(e.target.checked)}
             />
             <span>
-              我了解此還原倒進獨立驗證庫、不影響現行資料，正式切換需另跑受控停機腳本。
+              我了解這次還原是倒進另一份獨立的資料、不影響目前營運，正式改用還需要維護者手動切換。
             </span>
           </label>
           <div className="backup-confirm-actions">
@@ -410,7 +425,7 @@ function RestoreCard({
               disabled={restore.isPending || typed.trim() !== fileName || !ack}
               onClick={() => restore.mutate()}
             >
-              {restore.isPending ? "觸發中…" : "確認還原到驗證庫"}
+              {restore.isPending ? "處理中…" : "確認開始還原"}
             </button>
             <button
               type="button"
@@ -440,7 +455,7 @@ function RestoreCard({
               <tr>
                 <th>時間</th>
                 <th>來源</th>
-                <th>驗證庫</th>
+                <th>還原到哪份資料</th>
                 <th>狀態</th>
               </tr>
             </thead>
@@ -454,7 +469,7 @@ function RestoreCard({
                     <RestoreStatusBadge status={r.status} />
                     {r.status === "VERIFIED" && (
                       <div className="backup-verify-ok">
-                        四驗通過，可切換（停機跑 switch-to-restore.sh {r.restore_db_name}）。
+                        四項檢查都通過，可以切換了。請系統維護者在店休時間執行切換（對象：{r.restore_db_name}）。
                       </div>
                     )}
                     {r.status === "FAILED" && r.last_error && (

@@ -46,7 +46,7 @@ class CampaignService:
             raise CampaignConflict("活動名稱不可為空")
         if not DISCOUNT_PCT_MIN <= discount_pct <= DISCOUNT_PCT_MAX:
             raise InvalidDiscountPct(
-                f"discount_pct 須介於 {DISCOUNT_PCT_MIN}-{DISCOUNT_PCT_MAX}，收到 {discount_pct}"
+                f"折扣百分比須介於 {DISCOUNT_PCT_MIN}-{DISCOUNT_PCT_MAX}，收到 {discount_pct}"
             )
         if ends_at <= starts_at:
             raise CampaignConflict("活動結束時間必須晚於開始時間")
@@ -71,7 +71,9 @@ class CampaignService:
         """DRAFT → ACTIVE。同店至多一個 ACTIVE（DB partial unique 擋併發/重複啟用）。"""
         campaign = await self._lock(store_id, campaign_id)
         if campaign.status != CampaignStatus.DRAFT:
-            raise CampaignConflict(f"只有草稿（DRAFT）活動可啟用，目前狀態 {campaign.status.value}")
+            raise CampaignConflict(
+                "只有『草稿』狀態的活動可以啟用。這筆已經不是草稿了，請重新整理頁面看最新狀態"
+            )
         before = campaign.status.value
         campaign.status = CampaignStatus.ACTIVE
         try:
@@ -87,7 +89,7 @@ class CampaignService:
         campaign = await self._lock(store_id, campaign_id)
         if campaign.status != CampaignStatus.ACTIVE:
             raise CampaignConflict(
-                f"只有生效中（ACTIVE）活動可結束，目前狀態 {campaign.status.value}"
+                "只有『進行中』的活動可以結束。這筆已經不是進行中了，請重新整理頁面看最新狀態"
             )
         before = campaign.status.value
         campaign.status = CampaignStatus.ENDED

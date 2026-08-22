@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { chromium } from "playwright";
 
-const FILE = join(homedir(), "tmp", "lu-camp-manual", "露營二手POS-系統操作手冊.html");
+const FILE = join(homedir(), "tmp", "lu-camp-manual", "露坑選物露營用品POS-系統操作手冊.html");
 const OUT = join(homedir(), "tmp", "lu-camp-manual", "qa");
 mkdirSync(OUT, { recursive: true });
 const url = pathToFileURL(FILE).href;

@@ -793,7 +793,7 @@ class AcquisitionService:
                 assert commission is not None  # schema 已驗證
                 if not COMMISSION_PCT_MIN <= commission <= COMMISSION_PCT_MAX:
                     raise InvalidCommissionPct(
-                        f"commission_pct 須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}"
+                        f"抽成百分比須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}"
                     )
                 cost = None
             created = await self._inventory.create_serialized_item(

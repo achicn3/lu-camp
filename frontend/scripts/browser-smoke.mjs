@@ -21,7 +21,7 @@ try {
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${SHOTS}/01-login.png` });
-  ok("登入頁載入", await page.locator("text=露營二手 POS").isVisible());
+  ok("登入頁載入", await page.locator("text=露坑選物露營用品 POS").isVisible());
 
   // 2) 錯誤密碼 → inline 錯誤
   await page.fill('input[name="username"]', "dev-manager");

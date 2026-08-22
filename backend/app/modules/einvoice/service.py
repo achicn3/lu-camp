@@ -654,7 +654,7 @@ class EInvoiceService:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
         if item.status is not UploadStatus.PENDING:
             raise EInvoiceQueueNotDroppable(
-                f"佇列項目非 PENDING（目前 {item.status.value}），不可拋檔"
+                "這筆不是『等待送出』的狀態，不能再送一次，請重新整理頁面看最新狀態"
             )
         if item.dropped_at is not None:
             return item  # 已拋檔確認、待 Turnkey 上傳：冪等 no-op，不重複寫檔
@@ -781,7 +781,7 @@ class EInvoiceService:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
         if item.status is not UploadStatus.PENDING:
             raise EInvoiceQueueNotDroppable(
-                f"佇列項目非 PENDING（目前 {item.status.value}），不可上送"
+                "這筆不是『等待送出』的狀態，不能再送一次，請重新整理頁面看最新狀態"
             )
         endpoint = self._AMEGO_ENDPOINTS.get(item.message_type)
         if endpoint is None:
@@ -1316,7 +1316,9 @@ class EInvoiceService:
         if item is None:
             raise EInvoiceQueueItemNotFound(f"佇列項目不存在或不屬於本店：id={queue_id}")
         if item.status is not UploadStatus.FAILED:
-            raise EInvoiceQueueNotRetryable(f"僅 FAILED 可重送，目前狀態：{item.status.value}")
+            raise EInvoiceQueueNotRetryable(
+                "只有『失敗』的項目可以重送。這筆目前不是失敗狀態，請重新整理頁面看最新狀態"
+            )
         if item.action is EInvoiceAction.ISSUE and item.invoice_id is not None:
             invoice = await self._repo.get_invoice(store_id, item.invoice_id)
             if invoice is not None and invoice.status is InvoiceStatus.VOID:

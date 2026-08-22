@@ -261,6 +261,15 @@ export function makeShot(dir) {
       }
       added = true;
     }
+    // **關掉所有動畫與轉場再拍**：對話框淡入到一半被拍下來會出現文字殘影
+    // （同一段字疊著偏移幾個 px），肉眼看得出來但自動檢查抓不到。
+    // 只影響截圖當下的呈現，不改任何行為。
+    await page.addStyleTag({
+      content: `*, *::before, *::after {
+        animation-duration: 0s !important; animation-delay: 0s !important;
+        transition-duration: 0s !important; transition-delay: 0s !important;
+      }`,
+    });
     await page.waitForTimeout(250);
     if (locator) {
       const el = typeof locator === "string" ? page.locator(locator).first() : locator;

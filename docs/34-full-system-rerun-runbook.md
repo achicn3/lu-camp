@@ -193,7 +193,7 @@ node build-manual.mjs      # 缺圖必須為 0
 node qa-manual.mjs         # 目標 26/26
 ```
 
-手冊輸出：`~/tmp/lu-camp-manual/露營二手POS-系統操作手冊.html`（單一檔案、圖片內嵌）。
+手冊輸出：`~/tmp/lu-camp-manual/露坑選物露營用品POS-系統操作手冊.html`（單一檔案、圖片內嵌）。
 
 ---
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { login } from "@/lib/auth";
+import { APP_TITLE } from "@/lib/branding";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,7 +33,7 @@ export default function LoginPage() {
   return (
     <main className="login-screen">
       <form className="login-card" onSubmit={onSubmit}>
-        <h1 className="login-title">露營二手 POS</h1>
+        <h1 className="login-title">{APP_TITLE}</h1>
         <label className="field">
           <span className="field-label">帳號</span>
           <input name="username" autoComplete="username" required autoFocus />

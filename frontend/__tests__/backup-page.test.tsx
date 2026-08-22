@@ -113,7 +113,7 @@ afterEach(() => {
 });
 
 describe("/backup", () => {
-  it("MANAGER：顯示金鑰保管提醒、健康度、備份設定與紀錄、還原卡與四驗", async () => {
+  it("MANAGER：顯示金鑰保管提醒、健康度、備份設定與紀錄、還原卡與檢查結果", async () => {
     loginAs("MANAGER");
     stubFetch((url) => {
       if (url.includes("/backup/health")) return json(HEALTH);
@@ -122,17 +122,17 @@ describe("/backup", () => {
       return null;
     });
     renderPage();
-    expect(await screen.findByText(/兩組金鑰缺一即廢/)).toBeDefined();
+    expect(await screen.findByText(/備份需要兩份密碼/)).toBeDefined();
     expect(screen.getByText("備份健康度")).toBeDefined();
     expect(screen.getByText("備份設定")).toBeDefined();
     // 紀錄表：成功狀態、大小格式化為 MB
     expect(screen.getByText("成功")).toBeDefined();
     expect(screen.getByText("3.00 MB")).toBeDefined();
-    // 還原卡＋還原紀錄的四驗通過與各檢查項
+    // 還原卡＋還原紀錄的檢查結果與各檢查項（顯示中文對照，不露後端識別碼）
     expect(screen.getByText("還原（災難復原）")).toBeDefined();
-    expect(await screen.findByText("四驗通過")).toBeDefined();
+    expect(await screen.findByText("檢查全數通過")).toBeDefined();
     expect(screen.getAllByText(/lucamp_restore_20260719_040000/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/alembic_head/)).toBeDefined();
+    expect(screen.getByText(/資料表結構與現行版本相符/)).toBeDefined();
   });
 
   it("還原選單只列最新 retention 份（不列已被修剪刪除的舊備份）", async () => {
@@ -237,9 +237,9 @@ describe("/backup", () => {
     // 選擇要還原的備份
     const select = await screen.findByRole("combobox");
     await userEvent.selectOptions(select, "backups/lucamp_x.dump.enc");
-    await userEvent.click(screen.getByRole("button", { name: /還原此備份到驗證庫/ }));
+    await userEvent.click(screen.getByRole("button", { name: /還原這個備份來做檢查/ }));
     // 確認按鈕在「輸入正確檔名＋勾選」前為 disabled
-    const confirmBtn = screen.getByRole("button", { name: "確認還原到驗證庫" });
+    const confirmBtn = screen.getByRole("button", { name: "確認開始還原" });
     expect((confirmBtn as HTMLButtonElement).disabled).toBe(true);
     await userEvent.type(screen.getByRole("textbox"), "lucamp_x.dump.enc");
     await userEvent.click(screen.getByRole("checkbox", { name: "知情同意" }));

@@ -137,7 +137,7 @@ class SubprocessR2RestoreBackend:
         r2_bucket: str,
     ) -> None:
         if not passphrase.strip() or not r2_access_key_id.strip() or not r2_bucket.strip():
-            raise RestoreError("還原憑證未設定（R2/AES 口令）——請確認 .env.r2")
+            raise RestoreError("雲端備份的金鑰尚未設定，無法還原，請聯絡系統維護者")
         self._docker = docker_bin
         self._container = db_container
         self._user = db_user

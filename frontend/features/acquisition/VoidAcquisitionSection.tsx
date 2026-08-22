@@ -66,7 +66,7 @@ export function VoidAcquisitionSection() {
   return (
     <div className="card acq-void-section">
       <h2>作廢收購（限管理者）</h2>
-      <p className="hint">輸入收購單號查詢後可作廢；作廢將對稱反轉庫存、現金與購物金並留稽核。</p>
+      <p className="hint">輸入收購單號查詢後可以作廢。作廢會把庫存、現金與購物金都退回原狀，並留下紀錄。</p>
       <form
         className="acq-void-lookup"
         onSubmit={(e) => {

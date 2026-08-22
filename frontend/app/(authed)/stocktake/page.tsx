@@ -222,8 +222,9 @@ function StocktakeDetail({
           <div className="card pos-dialog">
             <h2>確認盤點調整</h2>
             <p className="hint">
-              將依實點數校正現量並寫入庫存調整紀錄（盤盈 +{summary.over}、盤虧 −{summary.short}）。
-              此操作僅能執行一次且無法復原。
+              系統會把庫存數量改成你實際點到的數量，並留下一筆調整紀錄
+              （多出 {summary.over} 件、少了 {summary.short} 件）。
+              這個動作<strong>只能做一次，做完不能還原</strong>。
             </p>
             {confirmError !== null && (
               <p role="alert" className="form-error">

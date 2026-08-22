@@ -14,6 +14,7 @@ import {
 import { API_BASE_URL, kioskApi } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { verifyStaffCredentials } from "@/lib/auth";
+import { STORE_DISPLAY_NAME } from "@/lib/branding";
 import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
@@ -1013,7 +1014,7 @@ function Standby({
         <p className="kiosk-terminal-label">櫃檯 · {terminalName}</p>
       )}
       <div className="kiosk-standby-inner">
-        <h1 className="kiosk-standby-title">露營二手</h1>
+        <h1 className="kiosk-standby-title">{STORE_DISPLAY_NAME}</h1>
         <p className="kiosk-standby-sub">{message}</p>
         <div className="kiosk-standby-dot" aria-hidden />
       </div>

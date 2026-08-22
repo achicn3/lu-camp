@@ -144,7 +144,7 @@ function ScanBar({
       if (serialized.response.status !== 404) {
         throw new Error(
           extractDetail(serialized.error) ??
-            `查詢失敗（HTTP ${serialized.response.status}）`,
+            `查詢失敗（代碼 ${serialized.response.status}）`,
         );
       }
       const bulk = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
@@ -166,7 +166,7 @@ function ScanBar({
       if (bulk.response.status !== 404) {
         throw new Error(
           extractDetail(bulk.error) ??
-            `查詢失敗（HTTP ${bulk.response.status}）`,
+            `查詢失敗（代碼 ${bulk.response.status}）`,
         );
       }
       // 最後試一般商品（SKU）：廠商採購品（瓦斯罐/糧食等）在 POS 直接掃售。
@@ -190,7 +190,7 @@ function ScanBar({
       if (catalog.response.status !== 404) {
         throw new Error(
           extractDetail(catalog.error) ??
-            `查詢失敗（HTTP ${catalog.response.status}）`,
+            `查詢失敗（代碼 ${catalog.response.status}）`,
         );
       }
       throw new Error(`找不到此條碼：${code}`);
@@ -2798,9 +2798,9 @@ export default function PosPage() {
                     {reconcilePayment.isPending ? "查詢中…" : "向 LINE Pay 查詢結果"}
                   </button>
                   <details>
-                    <summary>平台仍查不到時，以外部證據人工裁定</summary>
+                    <summary>LINE Pay 那邊還是查不到時，由店長依實際情況判定</summary>
                     <label className="field">
-                      <span className="field-label">裁定原因</span>
+                      <span className="field-label">判定的依據</span>
                       <input
                         value={reconcileReason}
                         onChange={(event) => setReconcileReason(event.target.value)}
@@ -2849,7 +2849,7 @@ export default function PosPage() {
                   </details>
                 </>
               ) : (
-                <p className="hint">請請店長登入此頁執行平台查詢或人工裁定。</p>
+                <p className="hint">請店長登入這一頁，才能向 LINE Pay 查詢或自行判定結果。</p>
               )}
             </section>
           )}

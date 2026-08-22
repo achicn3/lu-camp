@@ -262,7 +262,7 @@ class StoreCreditService:
             raise StoreCreditConflict("CREDIT 只能來自 ACQUISITION（docs/16 §3.1）")
         if not (PREMIUM_RATE_MIN <= premium_rate <= PREMIUM_RATE_MAX):
             raise StoreCreditConflict(
-                f"溢價率 {premium_rate} 超出政策界線 [{PREMIUM_RATE_MIN}, {PREMIUM_RATE_MAX}]"
+                f"溢價率 {premium_rate} 超出允許範圍（{PREMIUM_RATE_MIN}～{PREMIUM_RATE_MAX}）"
             )
         await self._require_member(store_id, contact_id)
         amount = Decimal(round_ntd(cash_equivalent * (Decimal(1) + premium_rate)))

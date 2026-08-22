@@ -2020,7 +2020,7 @@ class SalesService:
         tenders = await self._repo.list_tenders(sale.id)
         if any(t.tender_type == TenderType.TAIWAN_PAY for t in tenders) and not manual_refund_ack:
             raise ManualRefundRequired(
-                "此單含台灣Pay 收款（無 API 退款）：作廢前請先於台灣Pay App 手動退款給客人，"
+                "這筆有台灣Pay 收款，系統無法自動退款：作廢前請先在台灣Pay 手機程式退款給客人，"
                 "並勾選確認後再作廢，以免客人已作廢卻仍被扣款"
             )
         # 寄售付款的鎖序是 settlement→cash_session；作廢也必須先鎖／反轉 settlement，

@@ -431,7 +431,7 @@ function DineInCard({
           </button>
         </div>
         <span className="hint">
-          清單順序即 POS 的按鈕順序。移除桌號不影響已結帳的歷史交易（存的是當時的字串）。
+          這裡的排列順序就是 POS 上按鈕的順序。移除桌號只影響之後能選的桌號，已經結帳的交易不受影響。
         </span>
       </div>
       <label className="field field-toggle">
@@ -675,7 +675,6 @@ function ReasonCard({
   kind: "gift-reasons" | "discount-reasons";
 }) {
   const queryClient = useQueryClient();
-  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [requiresNote, setRequiresNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -687,7 +686,7 @@ function ReasonCard({
         kind === "gift-reasons" ? "/api/v1/gift-reasons" : "/api/v1/discount-reasons",
         { params: { query: { include_inactive: true } } },
       );
-      if (!data) throw new Error(extractDetail(apiError) ?? "讀取原因代碼失敗");
+      if (!data) throw new Error(extractDetail(apiError) ?? "讀取原因清單失敗");
       return data;
     },
   });
@@ -702,7 +701,9 @@ function ReasonCard({
         kind === "gift-reasons" ? "/api/v1/gift-reasons" : "/api/v1/discount-reasons",
         {
           body: {
-            code: code.trim().toUpperCase(),
+            // 代號由系統產生：後端要求 ^[A-Z0-9_]+$，但那是給程式辨識用的，
+            // 沒有理由逼台灣門市的店員自己想一個英文字。店員只填中文名稱。
+            code: `R${Date.now().toString(36).toUpperCase()}`,
             name: name.trim(),
             requires_note: requiresNote,
             sort_order: 0,
@@ -713,7 +714,6 @@ function ReasonCard({
       return data;
     },
     onSuccess: () => {
-      setCode("");
       setName("");
       setRequiresNote(false);
       setError(null);
@@ -749,7 +749,7 @@ function ReasonCard({
     <div className="card">
       <h2>{title}</h2>
       <p className="hint">
-        停用的原因不再出現在 POS 選單，但歷史單據仍保留當初的名稱。代碼建立後不可修改。
+        停用的原因不再出現在 POS 的選單裡，但先前的單據仍會保留當初選的名稱。
       </p>
       {listQuery.isError && (
         <p role="alert" className="form-error">
@@ -759,7 +759,6 @@ function ReasonCard({
       <table className="data-table">
         <thead>
           <tr>
-            <th>代碼</th>
             <th>名稱</th>
             <th>備註必填</th>
             <th>狀態</th>
@@ -769,14 +768,13 @@ function ReasonCard({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={5} className="hint">
-                尚未建立原因代碼。
+              <td colSpan={4} className="hint">
+                尚未建立任何原因。
               </td>
             </tr>
           ) : (
             rows.map((row) => (
               <tr key={row.id}>
-                <td>{row.code}</td>
                 <td>{row.name}</td>
                 <td>{row.requires_note ? "是" : "否"}</td>
                 <td>{row.is_active ? "啟用中" : "已停用"}</td>
@@ -797,15 +795,6 @@ function ReasonCard({
       </table>
       <div className="reason-add">
         <label className="field">
-          <span>代碼（英數大寫）</span>
-          <input
-            value={code}
-            maxLength={30}
-            onChange={(e) => setCode(e.target.value)}
-            placeholder="例：SAMPLE"
-          />
-        </label>
-        <label className="field">
           <span>名稱</span>
           <input
             value={name}
@@ -825,7 +814,7 @@ function ReasonCard({
         <button
           type="button"
           className="btn-primary"
-          disabled={create.isPending || code.trim() === "" || name.trim() === ""}
+          disabled={create.isPending || name.trim() === ""}
           onClick={() => create.mutate()}
         >
           新增原因
@@ -874,7 +863,7 @@ function PremiumHistoryCard({ history }: { history: PremiumRateHistoryRead[] }) 
                 <td>{formatTaipeiDateTime(h.changed_at)}</td>
                 <td>{formatPct(h.old_rate)}</td>
                 <td>{formatPct(h.new_rate)}</td>
-                <td>{h.suggested_rate_at_change ? formatPct(h.suggested_rate_at_change) : "N/A"}</td>
+                <td>{h.suggested_rate_at_change ? formatPct(h.suggested_rate_at_change) : "無"}</td>
                 <td>{h.reason ?? "-"}</td>
               </tr>
             ))}
@@ -925,7 +914,7 @@ function SignatureRetentionReportCard({
                 <td>{formatTaipeiDateTime(row.signed_at)}</td>
                 <td>{formatTaipeiDateTime(row.retention_until)}</td>
                 <td>{formatTaipeiDateTime(row.reported_at)}</td>
-                <td>{row.signature_png_retained ? "仍保留（REPORT_ONLY）" : "已移除"}</td>
+                <td>{row.signature_png_retained ? "仍保留" : "已移除"}</td>
               </tr>
             ))}
           </tbody>
@@ -1031,8 +1020,8 @@ export default function SettingsPage() {
         ) : (
           <PremiumHistoryCard history={historyQuery.data ?? []} />
         )}
-        <ReasonCard title="贈品原因代碼" kind="gift-reasons" />
-        <ReasonCard title="折扣原因代碼" kind="discount-reasons" />
+        <ReasonCard title="贈品原因" kind="gift-reasons" />
+        <ReasonCard title="折扣原因" kind="discount-reasons" />
         {retentionReportQuery.isError ? (
           <ErrorCard title="簽名 PNG 待清理報表" message="讀取待清理報表失敗，請稍後再試" />
         ) : (

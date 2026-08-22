@@ -4,7 +4,7 @@ import { box, fig, figs, flow, meta, steps, table } from "./helpers.mjs";
 export const cover = `
 <h2 id="cover-info">文件資訊</h2>
 ${meta([
-  ["系統名稱", "露營二手 POS（門市營運系統）"],
+  ["系統名稱", "露坑選物露營用品 POS（門市營運系統）"],
   ["文件名稱", "系統操作手冊"],
   ["文件版本", "v1.5"],
   ["更新日期", "2026 年 8 月 2 日"],

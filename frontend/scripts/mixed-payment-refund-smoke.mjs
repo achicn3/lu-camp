@@ -190,7 +190,7 @@ async function pairKiosk(browser, managerToken, installationId) {
     token: managerToken,
     body: { pairing_code: pairingCode },
   });
-  await kioskPage.waitForSelector('h1:has-text("露營二手")', { timeout: 8_000 });
+  await kioskPage.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8_000 });
   return { kioskContext, kioskPage, terminal };
 }
 
@@ -317,7 +317,7 @@ try {
       },
     },
   );
-  await kioskPage.waitForSelector('h1:has-text("露營二手")', { timeout: 8_000 });
+  await kioskPage.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8_000 });
 
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.on("pageerror", (error) => ok("頁面沒有未捕捉例外", false, String(error)));

@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import KioskPage from "@/app/kiosk/page";
+import { STORE_DISPLAY_NAME } from "@/lib/branding";
 
 vi.mock("@/app/kiosk/SignatureCanvas", async () => {
   const React = await import("react");
@@ -888,7 +889,7 @@ describe("/kiosk 客顯", () => {
 
     renderPage();
 
-    expect(await screen.findByText("露營二手")).toBeTruthy();
+    expect(await screen.findByText(STORE_DISPLAY_NAME)).toBeTruthy();
     expect(await screen.findByText("櫃檯 · 主櫃檯")).toBeTruthy();
     await waitFor(() => {
       expect(window.localStorage.getItem("lu-camp.kiosk-signing")).toBeNull();

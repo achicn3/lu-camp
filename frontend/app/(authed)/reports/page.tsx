@@ -1103,7 +1103,7 @@ function SalesMarginPanel() {
               </thead>
               <tbody>
                 <tr>
-                  <td>買斷成本 (COGS)</td>
+                  <td>買斷成本</td>
                   <td><MoneyText value={report.owned_cogs} /></td>
                 </tr>
                 <tr>

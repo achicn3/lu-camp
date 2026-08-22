@@ -42,7 +42,7 @@ function useSignatureImage(
         });
         if (cancelled) return;
         if (!res.ok) {
-          setImg({ id: taskId, error: `影像載入失敗（HTTP ${res.status}）` });
+          setImg({ id: taskId, error: `簽名圖片載入失敗（代碼 ${res.status}）` });
           return;
         }
         const blob = await res.blob();
@@ -115,7 +115,7 @@ export function SignatureEvidenceDialog({
               狀態：{SIGNING_STATUS_LABELS[full.status] ?? full.status}
               {full.signed_at ? `｜簽署於 ${timeLabel(full.signed_at)}` : ""}
               {full.chosen_payout
-                ? `｜撥款 ${SIGNING_PAYOUT_LABELS[full.chosen_payout] ?? full.chosen_payout}`
+                ? `｜撥款 ${SIGNING_PAYOUT_LABELS[full.chosen_payout] ?? "未指定"}`
                 : ""}
             </p>
             {ref ? <p>綁定單據：{ref}</p> : null}

@@ -50,7 +50,7 @@ export function VoidConfirmDialog({
     <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="作廢收購確認">
       <div className="card pos-dialog acq-void-dialog">
         <h2>作廢收購單 #{acquisitionId}？</h2>
-        <p className="hint">作廢將對稱反轉庫存、現金與購物金並留稽核，無法復原。請填寫原因。</p>
+        <p className="hint">作廢會把庫存、現金與購物金都退回原狀，並留下紀錄，且無法還原。請填寫原因。</p>
         <label className="field">
           <span className="field-label">作廢原因</span>
           <textarea

@@ -107,7 +107,7 @@ try {
     { pairing_code: pairingCode },
   );
   ok("客顯與櫃檯配對", paired.status === 200, `status=${paired.status}`);
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8000 });
 
   // ── 店員端經 API 建立收購切結任務 ────────────────────────────────────
   const phone = uniquePhone();
@@ -376,7 +376,7 @@ try {
     voidedRecovery.status === 200,
     `status=${voidedRecovery.status}`,
   );
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 15000 });
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 15000 });
   ok("完成畫面到期自動回待機（無店員操作）", true);
   await page.screenshot({ path: join(SHOTS, "03b-standby.png"), fullPage: true });
 
@@ -421,10 +421,10 @@ try {
   // ── 釘選閘門（空窗）：取消 B → current=null 待機 → 建 C，C 仍須被閘門擋，不得因空窗
   //    被當成首張任務直接顯示（Codex K3 第十一輪 high）─────────────────────────
   await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskB.json.id}/cancel`);
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 }); // current=null → 待機
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8000 }); // current=null → 待機
   // 空窗（current=null）期間重整 → 釘選持久，仍非「首張」狀態（Codex K3 第十二輪）
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8000 });
   const taskC = await apiJson(mgrToken, "POST", "/api/v1/signing/tasks", {
     kind: "ACQUISITION_AFFIDAVIT",
     contact_id: contactId,
@@ -461,7 +461,7 @@ try {
 
   // ── 顧客購物車折扣用語：顧客只看到「折扣」，不出現內部用語「本行折抵」──────
   await apiJson(mgrToken, "POST", `/api/v1/signing/tasks/${taskC.json.id}/cancel`);
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8000 });
   const cashSession = await apiJson(mgrToken, "GET", "/api/v1/cash-sessions/current");
   if (cashSession.json === null) {
     await apiJson(mgrToken, "POST", "/api/v1/cash-sessions/open", {
@@ -542,7 +542,7 @@ try {
     `/api/v1/customer-display/terminals/${terminalId}/cart/cancel`,
     { expected_revision: cartPushed.json.revision, reason: "煙霧測試結束清場" },
   );
-  await page.waitForSelector('h1:has-text("露營二手")', { timeout: 8000 });
+  await page.waitForSelector('h1:has-text("露坑選物露營用品")', { timeout: 8000 });
 
 } catch (err) {
   ok("煙霧未拋例外", false, String(err?.message ?? err));

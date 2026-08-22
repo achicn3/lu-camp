@@ -10,7 +10,7 @@ import { backup, purchasing, reports, settings, signing, stocktake } from "./con
 import { admin, callTickets, coverage, faq, flows } from "./content-5.mjs";
 
 const IMAGES = JSON.parse(readFileSync(join(homedir(), "tmp", "lu-camp-manual", "images.json"), "utf8"));
-const OUT = process.argv[2] ?? join(homedir(), "tmp", "lu-camp-manual", "露營二手POS-系統操作手冊.html");
+const OUT = process.argv[2] ?? join(homedir(), "tmp", "lu-camp-manual", "露坑選物露營用品POS-系統操作手冊.html");
 
 const CHAPTERS = [
   { id: "ch-cover", num: "", title: "手冊首頁", html: cover },
@@ -389,8 +389,8 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>露營二手 POS — 系統操作手冊 v1.5</title>
-<meta name="description" content="露營二手 POS 門市營運系統的完整操作手冊，含實機截圖與逐步操作說明。" />
+<title>露坑選物露營用品 POS — 系統操作手冊 v1.5</title>
+<meta name="description" content="露坑選物露營用品 POS 門市營運系統的完整操作手冊，含實機截圖與逐步操作說明。" />
 <style>${css}</style>
 </head>
 <body id="top">
@@ -406,7 +406,7 @@ const html = `<!DOCTYPE html>
   <main class="main" id="main-content">
     <div class="topbar">
       <button type="button" id="menu-toggle" aria-expanded="false" aria-controls="sidebar">☰ 目錄</button>
-      <span class="doc-title">露營二手 POS — 系統操作手冊 v1.5</span>
+      <span class="doc-title">露坑選物露營用品 POS — 系統操作手冊 v1.5</span>
       <div class="search-box">
         <label class="sr-only" for="search-input">搜尋章節</label>
         <input type="search" id="search-input" placeholder="搜尋章節關鍵字，例如：退貨" aria-label="搜尋章節" autocomplete="off" />

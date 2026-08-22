@@ -24,7 +24,7 @@ export function useCurrentRole(): CurrentRole {
       const { data, response } = await api.GET("/api/v1/auth/me");
       // openapi-fetch 非 2xx 不會 throw、data 為 undefined → 顯式 throw 讓 React Query 重試，
       // 不靜默回退 stale JWT（Codex 波次三第二輪 P2）。
-      if (!data) throw new Error(`auth/me 失敗（HTTP ${response.status}）`);
+      if (!data) throw new Error(`讀取登入身分失敗（代碼 ${response.status}）`);
       return data;
     },
     enabled: getToken() !== null,
