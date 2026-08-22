@@ -50,9 +50,9 @@ export const INVOICE_STATUS_LABELS: Record<string, string> = {
 };
 
 /** 以對照表翻譯；查無則原樣回傳（避免吞掉未知後端值）。 */
-export function labelFor(map: Record<string, string>, value: string): string {
-  return map[value] ?? value;
-}
+import { labelFor } from "@/features/shared/labels";
+
+export { labelFor };
 
 /** 角色陣列轉中文（保留順序、去重）。 */
 export function rolesLabel(roles: readonly string[]): string {

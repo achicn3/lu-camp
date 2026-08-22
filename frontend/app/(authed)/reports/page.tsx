@@ -17,10 +17,10 @@ import {
   formatRate,
   isoDate,
   SETTLEMENT_STATUS_LABELS,
-  statusLabel,
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
+import { labelFor } from "@/features/shared/labels";
 import { InfoTip } from "@/features/shared/InfoTip";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -951,7 +951,7 @@ function DailyCashPanel() {
             {report.sessions.map((s) => (
               <tr key={s.session_id}>
                 <td className="money">{s.session_id}</td>
-                <td>{statusLabel(CASH_SESSION_STATUS_LABELS, s.status)}</td>
+                <td>{labelFor(CASH_SESSION_STATUS_LABELS, s.status)}</td>
                 <td>{formatTaipeiDateTime(s.opened_at)}</td>
                 <td><MoneyText value={s.opening_float} /></td>
                 <td><MoneyText value={s.cash_sales} /></td>
@@ -1414,7 +1414,7 @@ function ConsignmentPayablesPanel() {
                 <td><MoneyText value={row.gross} /></td>
                 <td><MoneyText value={row.commission_amount} /></td>
                 <td><MoneyText value={row.payout_amount} /></td>
-                <td>{statusLabel(SETTLEMENT_STATUS_LABELS, row.status)}</td>
+                <td>{labelFor(SETTLEMENT_STATUS_LABELS, row.status)}</td>
                 <td>{row.reclaim_needed ? "是" : "否"}</td>
                 <td>{formatTaipeiDateTime(row.sale_created_at)}</td>
               </tr>
@@ -1735,7 +1735,7 @@ function CampaignPerformancePanel() {
             {report.rows.map((row) => (
               <tr key={row.campaign_id}>
                 <td>{row.name}</td>
-                <td>{statusLabel(CAMPAIGN_STATUS_LABELS, row.status)}</td>
+                <td>{labelFor(CAMPAIGN_STATUS_LABELS, row.status)}</td>
                 <td>{row.discount_pct}%</td>
                 <td>
                   {fmtDate(row.starts_at)} ~ {fmtDate(row.ends_at)}

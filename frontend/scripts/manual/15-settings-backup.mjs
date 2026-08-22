@@ -9,7 +9,9 @@ await login(page);
 // ══ 設定 ══
 await page.goto(`${BASE}/settings`, { waitUntil: "networkidle" });
 await page.waitForTimeout(2000);
-await shot(page, "page", { content: true });
+// 這張是「設定頁有哪些卡片」的總覽，圖說會逐一點名——被高度上限裁掉就會
+// 承諾讀者看不到的東西（實際發生過：六張卡片只看得到四張）。刻意放寬。
+await shot(page, "page", { content: true, contentMaxHeight: 4600 });
 await shot(page, "general-card", { locator: '.card:has(h2:text("一般設定"))' });
 
 // 修改「購物金低消門檻」並儲存（改完必還原成原值）

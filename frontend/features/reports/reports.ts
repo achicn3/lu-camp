@@ -91,12 +91,6 @@ export const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
   CANCELLED: "已作廢",
 };
 
-/** 查不到對照時原樣顯示——寧可露出英文，也不要憑空編一個看似正確的中文。 */
-export function statusLabel(map: Record<string, string>, value: string | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  return map[value] ?? value;
-}
-
 export const EFFECTIVENESS_LABELS: Record<string, string> = {
   take_rate: "選用率",
   avg_premium_rate: "平均溢價率",

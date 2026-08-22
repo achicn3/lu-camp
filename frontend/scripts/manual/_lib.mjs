@@ -264,11 +264,18 @@ export function makeShot(dir) {
     // **關掉所有動畫與轉場再拍**：對話框淡入到一半被拍下來會出現文字殘影
     // （同一段字疊著偏移幾個 px），肉眼看得出來但自動檢查抓不到。
     // 只影響截圖當下的呈現，不改任何行為。
-    await page.addStyleTag({
-      content: `*, *::before, *::after {
+    //
+    // 加 id 判重：每拍一張就注入一次的話，一支 28 張的腳本會在同一頁塞 28 個
+    // 相同的 <style>。換頁後標籤會消失，所以仍要每次檢查、必要時補上。
+    await page.evaluate(() => {
+      if (document.getElementById("__manual_no_anim") !== null) return;
+      const style = document.createElement("style");
+      style.id = "__manual_no_anim";
+      style.textContent = `*, *::before, *::after {
         animation-duration: 0s !important; animation-delay: 0s !important;
         transition-duration: 0s !important; transition-delay: 0s !important;
-      }`,
+      }`;
+      document.head.appendChild(style);
     });
     await page.waitForTimeout(250);
     if (locator) {
