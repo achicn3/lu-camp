@@ -71,6 +71,32 @@ export function exclusiveEnd(isoDateStr: string): string {
 }
 
 /** Labels for effectiveness metrics (zh-TW). */
+// 報表裡的狀態欄位。**沒有對照表就會把 API 的英文值直接印在畫面上**——
+// 會員詳情的寄售分頁就這樣印了半年的 SOLD，目視截圖才發現。
+export const CASH_SESSION_STATUS_LABELS: Record<string, string> = {
+  OPEN: "開帳中",
+  CLOSED: "已結帳",
+};
+
+export const SETTLEMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: "待結算",
+  PAID: "已結算",
+  CANCELLED: "已取消",
+};
+
+export const CAMPAIGN_STATUS_LABELS: Record<string, string> = {
+  DRAFT: "草稿",
+  ACTIVE: "進行中",
+  ENDED: "已結束",
+  CANCELLED: "已作廢",
+};
+
+/** 查不到對照時原樣顯示——寧可露出英文，也不要憑空編一個看似正確的中文。 */
+export function statusLabel(map: Record<string, string>, value: string | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return map[value] ?? value;
+}
+
 export const EFFECTIVENESS_LABELS: Record<string, string> = {
   take_rate: "選用率",
   avg_premium_rate: "平均溢價率",

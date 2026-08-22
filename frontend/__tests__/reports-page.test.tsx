@@ -663,8 +663,8 @@ describe("ReportsPage", () => {
     });
     // Total variance appears in both session row and totals
     expect(screen.getAllByText("-200").length).toBeGreaterThanOrEqual(2);
-    // Session status
-    expect(screen.getByText("CLOSED")).toBeTruthy();
+    // 班別狀態顯示中文，不是 API 的英文值
+    expect(screen.getByText("已結帳")).toBeTruthy();
   });
 
   it("sales margin tab shows margin metrics", async () => {

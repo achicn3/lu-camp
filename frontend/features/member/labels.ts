@@ -22,6 +22,17 @@ export const SETTLEMENT_STATUS_LABELS: Record<string, string> = {
   CANCELLED: "已取消",
 };
 
+// 商品狀態。**序號品與散裝批的狀態值不同**，但同一個欄位會出現兩種來源
+// （寄售分頁列序號品，帶來的商品分頁兩者都有），所以合成一張表。
+export const ITEM_STATUS_LABELS: Record<string, string> = {
+  IN_STOCK: "在庫",
+  SOLD: "已售出",
+  RETURNED_TO_CONSIGNOR: "已退回寄售人",
+  WRITTEN_OFF: "已報廢",
+  ON_SALE: "販售中",
+  SOLD_OUT: "已售完",
+};
+
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   CASH: "現金",
   STORE_CREDIT: "購物金",

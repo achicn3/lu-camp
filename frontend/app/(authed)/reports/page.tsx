@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 
 import {
+  CAMPAIGN_STATUS_LABELS,
+  CASH_SESSION_STATUS_LABELS,
   EFFECTIVENESS_LABELS,
   FINANCIAL_GRANULARITY_OPTIONS,
   GRANULARITY_OPTIONS,
@@ -14,6 +16,8 @@ import {
   exclusiveEnd,
   formatRate,
   isoDate,
+  SETTLEMENT_STATUS_LABELS,
+  statusLabel,
   startOfDay,
   triggerDownload,
 } from "@/features/reports/reports";
@@ -928,7 +932,7 @@ function DailyCashPanel() {
         <table className="inv-table">
           <thead>
             <tr>
-              <th>Session</th>
+              <th>班別</th>
               <th>狀態</th>
               <th>開帳時間</th>
               <th>零用金</th>
@@ -947,7 +951,7 @@ function DailyCashPanel() {
             {report.sessions.map((s) => (
               <tr key={s.session_id}>
                 <td className="money">{s.session_id}</td>
-                <td>{s.status}</td>
+                <td>{statusLabel(CASH_SESSION_STATUS_LABELS, s.status)}</td>
                 <td>{formatTaipeiDateTime(s.opened_at)}</td>
                 <td><MoneyText value={s.opening_float} /></td>
                 <td><MoneyText value={s.cash_sales} /></td>
@@ -1410,7 +1414,7 @@ function ConsignmentPayablesPanel() {
                 <td><MoneyText value={row.gross} /></td>
                 <td><MoneyText value={row.commission_amount} /></td>
                 <td><MoneyText value={row.payout_amount} /></td>
-                <td>{row.status}</td>
+                <td>{statusLabel(SETTLEMENT_STATUS_LABELS, row.status)}</td>
                 <td>{row.reclaim_needed ? "是" : "否"}</td>
                 <td>{formatTaipeiDateTime(row.sale_created_at)}</td>
               </tr>
@@ -1731,7 +1735,7 @@ function CampaignPerformancePanel() {
             {report.rows.map((row) => (
               <tr key={row.campaign_id}>
                 <td>{row.name}</td>
-                <td>{row.status}</td>
+                <td>{statusLabel(CAMPAIGN_STATUS_LABELS, row.status)}</td>
                 <td>{row.discount_pct}%</td>
                 <td>
                   {fmtDate(row.starts_at)} ~ {fmtDate(row.ends_at)}

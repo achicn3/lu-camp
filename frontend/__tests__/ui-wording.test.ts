@@ -77,6 +77,27 @@ describe("畫面用詞", () => {
     expect(findAll((t) => STIFF.find((w) => t.includes(w)) ?? null)).toEqual([]);
   });
 
+  it("不把 API 回來的狀態值直接印在畫面上", () => {
+    // **這條是目視才發現的盲區**：上面幾條掃的是原始碼裡的字串字面值，
+    // 但 `<td>{it.status}</td>` 印出來的是 API 資料（例如 SOLD），程式碼裡看不到那個字。
+    // 會員詳情的寄售分頁就這樣把 SOLD 印在「狀態」欄上，其他欄都好好地用了 labelFor。
+    //
+    // 規則：名字像狀態／類型／方式的欄位，一律要經過對照表。
+    const RAW = /<td>\{(?:[a-z]\w*)\.(\w*(?:status|type|method|kind|mode|state))\}<\/td>/i;
+    const hits: string[] = [];
+    for (const root of ROOTS) {
+      for (const path of sources(root)) {
+        readFileSync(path, "utf8")
+          .split("\n")
+          .forEach((line, i) => {
+            const m = line.match(RAW);
+            if (m !== null) hits.push(`${path}:${i + 1} 「${line.trim()}」 ← ${m[1]} 未經對照表`);
+          });
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+
   it("沒有疊字", () => {
     // 「請請」「的的」這類手滑；中文疊詞（例如「剛剛」「常常」）不在此列，故只列黑名單。
     const DOUBLED = ["請請", "的的", "了了", "是是", "在在", "會會", "可可", "要要"];

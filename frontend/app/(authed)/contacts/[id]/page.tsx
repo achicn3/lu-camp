@@ -8,6 +8,7 @@ import { type FormEvent, useState } from "react";
 
 import {
   INVOICE_STATUS_LABELS,
+  ITEM_STATUS_LABELS,
   KIND_LABELS,
   MEMBER_TABS,
   PAYMENT_METHOD_LABELS,
@@ -364,7 +365,7 @@ function ConsignmentsTab({ contactId }: { contactId: number }) {
                       {it.name}
                       <span className="row-sub">{it.code}</span>
                     </td>
-                    <td>{it.item_status}</td>
+                    <td>{labelFor(ITEM_STATUS_LABELS, it.item_status)}</td>
                     <td>{it.commission_pct ?? "—"}</td>
                     <td>
                       <Money value={it.payout_amount} />
@@ -472,7 +473,7 @@ function SourcedTab({ contactId }: { contactId: number }) {
                     {it.name}
                     <span className="row-sub">{it.code}</span>
                   </td>
-                  <td>{it.status}</td>
+                  <td>{labelFor(ITEM_STATUS_LABELS, it.status)}</td>
                   <td>
                     <Money value={it.listed_price} />
                   </td>
