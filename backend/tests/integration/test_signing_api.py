@@ -17,6 +17,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token, hash_password
 from app.main import create_app
 from app.modules.contacts.models import Contact
+from app.modules.signing.agreements import CURRENT_AGREEMENT_VERSION
 from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -275,7 +276,9 @@ async def test_affidavit_requires_pairing_and_binds_agreement(
     await _pair(client, seeded)
     task = await _create_task(client, seeded)
     assert task["status"] == "PENDING"
-    assert task["agreement_version"] == 1
+    # 綁**當前版本**而不是寫死 1：切結書改版（例如 v2 的純排版修正）時，
+    # 這裡該跟著走，而不是紅燈叫人回來改數字。
+    assert task["agreement_version"] == CURRENT_AGREEMENT_VERSION
     assert task["content"]["seller_name"] == "王小明"
     assert await db_session.scalar(select(func.count()).select_from(AgreementVersion)) == 1
 
