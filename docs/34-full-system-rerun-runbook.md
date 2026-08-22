@@ -126,12 +126,13 @@ mkdir -p /tmp/manual-logs
 for s in 01-shell 02-cash-open 02b-cash-validation 03-contacts 04-kiosk-pair \
          05-acquisition 06-inventory 07-menu-campaigns \
          08-pos 08b-pos-mixed 08c-pos-consignment 08d-pos-mixed-cash \
-         08e-pos-mixed-linepay 08f-pos-gift-discount \
+         08e-pos-mixed-linepay 08f-pos-gift-discount 08g-pos-dinein \
          09-sales 09b-sales-void 09c-invoice-return-void 09d-invoice-disposition \
+         09e-manual-paper-invoice \
          10-consignment 11-purchasing 12-stocktake-signing 13-signing \
          14-reports 14b-reports-reconciliation 14c-reports-gift-discount \
          15-settings-backup 15b-settings-premium 16b-backup-error \
-         17-einvoice-linepay 18-cash-close; do
+         17-einvoice-linepay 18-cash-close 19-call-tickets; do
   echo "=== $s"
   # **不要寫成 `node ... | tail -5`**：管線的結束狀態取自 tail（幾乎必然成功），
   # node 非零離開會被吞掉，於是失敗的章節照樣往下跑，最後用缺圖／舊圖產出「看似完整」的手冊。

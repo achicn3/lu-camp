@@ -111,6 +111,14 @@ def _script_routes(routes: list[str]) -> dict[str, list[str]]:
             base = m.group(1) or "/"
             # 後面緊接 `/${…}` 代表帶了動態片段 → 對應到 `/xxx/[id]`
             found.add(dynamic[base] if m.group(2) and base in dynamic else base)
+        # **點連結進去的也算**：腳本常常是從列表點進動態頁（那才是店員實際的操作
+        # 路徑），網址不會以 `${BASE}/…` 的字面形式出現在原始碼裡，只會出現在
+        # `waitForURL(/\/contacts\/\d+$/)` 這種等待條件上。只認前者的話，
+        # 這類腳本一律被判定成沒覆蓋——那是**假缺口**，會害人多寫一支重複的腳本。
+        for base, route in dynamic.items():
+            escaped = base.replace("/", r"\/")
+            if re.search(r"waitForURL\([^)]*" + re.escape(escaped), text):
+                found.add(route)
         for route in found:
             out.setdefault(route, []).append(f.name)
     return out

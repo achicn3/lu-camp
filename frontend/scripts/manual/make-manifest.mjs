@@ -100,6 +100,34 @@ const STALE_HOURS = Number(process.env.MANUAL_STALE_HOURS ?? 48);
 // 用具名清單放行，而不是叫操作者拿 MANUAL_ALLOW_STALE=true 一次蓋掉全部——
 // 那會連「真的該重跑卻沒重跑」的圖一起放行，等於把這道防線關掉。
 // 新增項目前請先確認：它真的無法由腳本產生嗎？能產生就去修腳本，不要加進來。
+// 孤兒檔偵測：磁碟上有、但沒有任何 PICK 條目對應到的截圖。
+//
+// 這些是**腳本重新編號後留下的舊檔**（新增一個 shot，後面整段往後移一號，舊檔還在）。
+// 它們不只是佔空間——`resolveFile` 完整檔名優先，舊的 `05-daily-cash.png` 會贏過
+// 本批的 `06-daily-cash.png`，於是手冊收進 17 天前的畫面而**沒有任何警告**。
+// 2026-08-22 實際發生過，20 張圖全被換成舊的，靠陳舊偵測才抓到。
+//
+// 只警告不失敗：孤兒本身不會讓手冊出錯（那由陳舊偵測負責），
+// 但留著就是下一次誤用的種子，該清就清。
+function reportOrphans(manifest) {
+  const used = new Set(manifest.map((m) => m.file));
+  const orphans = [];
+  for (const dir of readdirSync(SHOTS_ROOT, { withFileTypes: true })) {
+    if (!dir.isDirectory()) continue;
+    for (const name of readdirSync(join(SHOTS_ROOT, dir.name))) {
+      if (!name.endsWith(".png")) continue;
+      const full = join(SHOTS_ROOT, dir.name, name);
+      if (!used.has(full)) orphans.push(`${dir.name}/${name}`);
+    }
+  }
+  if (orphans.length > 0) {
+    console.error(`\n⚠ ${orphans.length} 張截圖沒有被手冊收錄（多半是腳本重新編號後的舊檔）：`);
+    for (const o of orphans) console.error(`   ${o}`);
+    console.error("   舊檔會在同名比對時贏過本批的新檔，建議刪除。");
+  }
+  return orphans.length;
+}
+
 const MANUALLY_CAPTURED = ["17-einvoice-amego/"];
 const isManuallyCaptured = (id) => MANUALLY_CAPTURED.some((prefix) => id.startsWith(prefix));
 
@@ -118,6 +146,7 @@ writeFileSync(
   ),
 );
 console.log(`清單 ${manifest.length} 張；缺檔 ${missing.length}；最新截圖 ${new Date(newest).toISOString()}`);
+reportOrphans(manifest);
 if (missing.length) console.log(missing.join("\n"));
 if (ambiguous.length > 0) {
   console.error(`\n⚠ 有 ${ambiguous.length} 個 PICK 條目的 slug 對到多個檔案，無法判斷該收哪張：`);

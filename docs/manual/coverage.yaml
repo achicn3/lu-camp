@@ -48,7 +48,7 @@ screens:
     label: ""
     in_menu: false
     manager_only: false
-    scripts: ["20-member-centre.mjs"]
+    scripts: ["03-contacts.mjs"]
   - route: "/inventory"
     label: "庫存"
     in_menu: true
@@ -106,9 +106,9 @@ screens:
     scripts: ["12-stocktake-signing.mjs"]
 
 endpoints:
-  total: 109
+  total: 112
   by_auth:
-    登入即可: 66
+    登入即可: 69
     MANAGER: 40
     未驗證: 3
   unauthenticated:
