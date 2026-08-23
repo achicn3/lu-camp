@@ -1,5 +1,6 @@
 """core/money.py — NT$ 整數元四捨五入與定價輔助。"""
 
+import inspect
 from decimal import Decimal
 
 import pytest
@@ -41,6 +42,25 @@ def test_suggested_price_margin_99() -> None:
 def test_suggested_price_typical_rounds_to_integer_ntd() -> None:
     # 未稅 600/0.55 = 1090.909…；×1.05 = 1145.4545… → ROUND_HALF_UP → 1145
     assert suggested_price(Decimal("600"), 45, RATE) == 1145
+
+
+def test_suggested_price_precision_at_non_five_percent_rates() -> None:
+    """非 5% 稅率不得因中途截斷而少一元。
+
+    先除後乘會讓 Decimal 在 28 位有效位數處截斷：cost 282／margin 1／稅率 7.25%
+    得 305，但精確值是 305.5 → 應為 306。5% 下看不出來，而稅率是可設定的。
+    """
+    assert suggested_price(Decimal("282"), 1, Decimal("0.0725")) == 306
+
+
+def test_suggested_price_requires_explicit_tax_rate() -> None:
+    """`tax_rate` 必須是必填、**沒有預設值**（ADR-016 決策 3）。
+
+    給預設值等於把 5% 藏進程式碼（違反 §6「稅率不得寫死」），而且設定讀取失敗時
+    會靜默用錯的稅率算價，比明確報錯更危險。
+    """
+    sig = inspect.signature(suggested_price)
+    assert sig.parameters["tax_rate"].default is inspect.Parameter.empty
 
 
 def test_suggested_price_tax_rate_zero_falls_back_to_legacy_formula() -> None:

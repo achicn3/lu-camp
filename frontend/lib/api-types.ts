@@ -4,17 +4,84 @@
  */
 
 export interface paths {
-    "/api/v1/health": {
+    "/api/v1/acquisitions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health */
-        get: operations["getHealth"];
+        get?: never;
+        put?: never;
+        /**
+         * Create Acquisition
+         * @description 建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複
+         *     入庫/付現/入購物金；同 key 不同內容 409。
+         */
+        post: operations["createAcquisition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/acquisitions/{acquisition_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Acquisition */
+        get: operations["getAcquisition"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/acquisitions/{acquisition_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Acquisition Receipt
+         * @description 收購憑證聯的補印內容（docs/23 K6）。
+         *
+         *     憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。這支提供事後重組所需的
+         *     品項、賣方姓名與簽名任務——`AcquisitionRead` 沒有這些。
+         */
+        get: operations["getAcquisitionReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/acquisitions/{acquisition_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void Acquisition
+         * @description 作廢收購（限 MANAGER，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；整筆原子、失敗回滾。
+         *
+         *     冪等/併發：以收購列鎖＋ voided_at 狀態為準——重複作廢回 409（不雙重沖回）。
+         *     已作廢/含已售庫存/購物金已花 → 409；付現但無開帳 → 409；找不到 → 404；非 MANAGER → 403。
+         */
+        post: operations["voidAcquisition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -52,6 +119,580 @@ export interface paths {
         get: operations["getCurrentUser"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Backup Health */
+        get: operations["getBackupHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Restore
+         * @description 觸發還原到 throwaway 庫＋四驗（高危,強卡控）。正式庫不受影響;VERIFIED 後切換另跑受控腳本。
+         *
+         *     卡控：①MANAGER（require_role）②知情勾選 acknowledge ③打字確認 confirm_text＝該備份「檔名」。
+         */
+        post: operations["triggerRestore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/restores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Restore Runs */
+        get: operations["listRestoreRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backup/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backup Runs */
+        get: operations["listBackupRuns"];
+        put?: never;
+        /**
+         * Trigger Backup
+         * @description 立即備份（手動）：插 RUNNING＋commit 後回應,背景續跑實際 dump。R2 未設定 → 503。
+         */
+        post: operations["triggerBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/brands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Brands */
+        get: operations["listBrands"];
+        put?: never;
+        /**
+         * Create Brand
+         * @description 建立品牌（同名 get_or_create 冪等）；store 範圍。
+         */
+        post: operations["createBrand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Bulk Lots */
+        get: operations["listBulkLots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-lots/by-code/{lot_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Lot By Code
+         * @description POS 掃堆標籤：以 lot_code 取散裝堆（docs/04；標籤條碼即 Code 128 編 lot_code）。
+         */
+        get: operations["getBulkLotByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-lots/{lot_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Detail
+         * @description 散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。
+         */
+        get: operations["getBulkLotDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-lots/{lot_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Bulk Price
+         * @description 改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。
+         */
+        patch: operations["updateBulkPrice"];
+        trace?: never;
+    };
+    "/api/v1/call-tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Call Tickets
+         * @description 候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。
+         */
+        get: operations["listCallTickets"];
+        put?: never;
+        /**
+         * Create Call Ticket
+         * @description 登記一筆候位並配號（同店同日從 1 開始）。
+         */
+        post: operations["createCallTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/call-tickets/{ticket_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete Call Ticket
+         * @description 標記完成（**冪等**：已完成再按回原狀態，不報錯、不覆寫第一次的人與時間）。
+         */
+        post: operations["completeCallTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Campaigns */
+        get: operations["listCampaigns"];
+        put?: never;
+        /** Create Campaign */
+        post: operations["createCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Campaign */
+        get: operations["getCampaign"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Campaign */
+        post: operations["activateCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Campaign */
+        post: operations["cancelCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/{campaign_id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End Campaign */
+        post: operations["endCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Cash Session */
+        get: operations["getCurrentCashSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open Cash Session */
+        post: operations["openCashSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/{session_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close Cash Session */
+        post: operations["closeCashSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cash-sessions/{session_id}/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Cash Movements
+         * @description 列出本店指定現金班別的異動，最新一筆在前。
+         */
+        get: operations["listCashMovements"];
+        put?: never;
+        /**
+         * Record Cash Movement
+         * @description 手動現金調整（限 MANAGER；docs/10 §4）。
+         *
+         *     端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為
+         *     系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。
+         *     事由必填並隨 audit_log 留痕（CLAUDE.md §5）。
+         */
+        post: operations["recordCashMovement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Catalog */
+        get: operations["listCatalogProducts"];
+        put?: never;
+        /**
+         * Create Catalog Product
+         * @description 新增一般商品（上架，店員與管理者皆可）：廠商採購商品先建檔（初始庫存 0），
+         *     之後即可建採購單→收貨補庫存。SKU 可留白由系統產生；留白時必帶 Idempotency-Key，
+         *     同 key 重送回原商品；同店 SKU 或同 key 不同內容回 409。
+         */
+        post: operations["createCatalogProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/by-sku/{sku}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog By Sku
+         * @description POS 掃碼查一般商品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
+         *
+         *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
+         */
+        get: operations["getCatalogProductBySku"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog Detail
+         * @description 一般商品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。
+         */
+        get: operations["getCatalogProductDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Catalog Price
+         * @description 改一般商品售價（限管理者；寫稽核）。找不到→404。
+         */
+        patch: operations["updateCatalogPrice"];
+        trace?: never;
+    };
+    "/api/v1/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Categories */
+        get: operations["listCategories"];
+        put?: never;
+        /**
+         * Create Category
+         * @description 建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。
+         */
+        post: operations["createCategory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Category Target
+         * @description 更新分類目標毛利率（MANAGER）。
+         */
+        patch: operations["updateCategoryTarget"];
+        trace?: never;
+    };
+    "/api/v1/categories/{category_id}/pricing-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pricing Rules */
+        get: operations["listCategoryPricingRules"];
+        /**
+         * Update Pricing Rules
+         * @description 批次更新分類各成色帶定價規則（MANAGER）。
+         */
+        put: operations["updateCategoryPricingRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consignment/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Settlements
+         * @description 店內寄售結算列（可篩 status／寄售人手機，新到舊、分頁；§4 店別範圍）。
+         */
+        get: operations["listConsignmentSettlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consignment/settlements/{settlement_id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay Settlement
+         * @description 付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。
+         *
+         *     需開帳中（invariant #8）→ 否則 409；已付/已取消 → 409；找不到/他店 → 404。
+         *     併發/重送以結算列鎖為準，只一筆成功、不重複出帳。
+         */
+        post: operations["payConsignmentSettlement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -139,6 +780,26 @@ export interface paths {
         patch: operations["updateContact"];
         trace?: never;
     };
+    "/api/v1/contacts/{contact_id}/consignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Member Consignments
+         * @description 會員寄售品 + 結算狀態 + PENDING 應撥加總（裁示 #2）。
+         */
+        get: operations["listMemberConsignments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/contacts/{contact_id}/national-id": {
         parameters: {
             query?: never;
@@ -216,26 +877,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/contacts/{contact_id}/consignments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Member Consignments
-         * @description 會員寄售品 + 結算狀態 + PENDING 應撥加總（裁示 #2）。
-         */
-        get: operations["listMemberConsignments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/contacts/{contact_id}/sourced-items": {
         parameters: {
             query?: never;
@@ -256,7 +897,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/call-tickets": {
+    "/api/v1/contacts/{contact_id}/store-credit": {
         parameters: {
             query?: never;
             header?: never;
@@ -264,68 +905,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Call Tickets
-         * @description 候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。
+         * Get Store Credit
+         * @description 餘額＋異動歷史（分頁，新到舊）；店別範圍（§4）。
          */
-        get: operations["listCallTickets"];
-        put?: never;
-        /**
-         * Create Call Ticket
-         * @description 登記一筆候位並配號（同店同日從 1 開始）。
-         */
-        post: operations["createCallTicket"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/call-tickets/{ticket_id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Complete Call Ticket
-         * @description 標記完成（**冪等**：已完成再按回原狀態，不報錯、不覆寫第一次的人與時間）。
-         */
-        post: operations["completeCallTicket"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cash-sessions/open": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Open Cash Session */
-        post: operations["openCashSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cash-sessions/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Current Cash Session */
-        get: operations["getCurrentCashSession"];
+        get: operations["getStoreCredit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -334,35 +917,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/cash-sessions/{session_id}/movements": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Cash Movements
-         * @description 列出本店指定現金班別的異動，最新一筆在前。
-         */
-        get: operations["listCashMovements"];
-        put?: never;
-        /**
-         * Record Cash Movement
-         * @description 手動現金調整（限 MANAGER；docs/10 §4）。
-         *
-         *     端點**僅接受 MANUAL_ADJUST**：SALE_IN/BUYOUT_OUT/CONSIGNMENT_PAYOUT_OUT 為
-         *     系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。
-         *     事由必填並隨 audit_log 留痕（CLAUDE.md §5）。
-         */
-        post: operations["recordCashMovement"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/cash-sessions/{session_id}/close": {
+    "/api/v1/contacts/{contact_id}/store-credit/adjustments": {
         parameters: {
             query?: never;
             header?: never;
@@ -371,26 +926,44 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Close Cash Session */
-        post: operations["closeCashSession"];
+        /**
+         * Adjust Store Credit
+         * @description 人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負；冪等鍵必帶——
+         *     重試/雙擊不得重複改負債）。
+         */
+        post: operations["adjustStoreCredit"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/consignment/settlements": {
+    "/api/v1/customer-display/terminals": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Settlements
-         * @description 店內寄售結算列（可篩 status／寄售人手機，新到舊、分頁；§4 店別範圍）。
-         */
-        get: operations["listConsignmentSettlements"];
+        get?: never;
+        put?: never;
+        /** Register Terminal */
+        post: operations["registerPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Terminal */
+        get: operations["getPosTerminal"];
         put?: never;
         post?: never;
         delete?: never;
@@ -399,7 +972,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/consignment/settlements/{settlement_id}/pay": {
+    "/api/v1/customer-display/terminals/{terminal_id}/cart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Upsert Cart */
+        put: operations["upsertCustomerDisplayCart"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout": {
         parameters: {
             query?: never;
             header?: never;
@@ -408,21 +998,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Pay Settlement
-         * @description 付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。
-         *
-         *     需開帳中（invariant #8）→ 否則 409；已付/已取消 → 409；找不到/他店 → 404。
-         *     併發/重送以結算列鎖為準，只一筆成功、不重複出帳。
-         */
-        post: operations["payConsignmentSettlement"];
+        /** Begin Checkout */
+        post: operations["beginCustomerDisplayCheckout"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/acquisitions": {
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -431,27 +1015,23 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Create Acquisition
-         * @description 建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複
-         *     入庫/付現/入購物金；同 key 不同內容 409。
-         */
-        post: operations["createAcquisition"];
+        /** Cancel Cart */
+        post: operations["cancelCustomerDisplayCart"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/acquisitions/{acquisition_id}": {
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/current": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Acquisition */
-        get: operations["getAcquisition"];
+        /** Get Current Terminal Cart */
+        get: operations["getCurrentCustomerDisplayCart"];
         put?: never;
         post?: never;
         delete?: never;
@@ -460,7 +1040,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/acquisitions/{acquisition_id}/receipt": {
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Freeze Cart For Signature */
+        post: operations["freezeCustomerDisplayCartForSignature"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Cart Payment */
+        post: operations["reconcileCustomerDisplayPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/pair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pair Terminal */
+        post: operations["pairPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-display/terminals/{terminal_id}/unpair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unpair Terminal */
+        post: operations["unpairPosTerminal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discount-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Discount Reasons */
+        get: operations["listDiscountReasons"];
+        put?: never;
+        /** Create Discount Reason */
+        post: operations["createDiscountReason"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/discount-reasons/{reason_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Discount Reason */
+        patch: operations["updateDiscountReason"];
+        trace?: never;
+    };
+    "/api/v1/einvoice/queue": {
         parameters: {
             query?: never;
             header?: never;
@@ -468,13 +1151,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Acquisition Receipt
-         * @description 收購憑證聯的補印內容（docs/23 K6）。
-         *
-         *     憑證聯原本只在收購完成畫面印得出來，畫面一關就補不回來。這支提供事後重組所需的
-         *     品項、賣方姓名與簽名任務——`AcquisitionRead` 沒有這些。
+         * List Queue
+         * @description 上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。
          */
-        get: operations["getAcquisitionReceipt"];
+        get: operations["listEInvoiceQueue"];
         put?: never;
         post?: never;
         delete?: never;
@@ -483,7 +1163,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/acquisitions/{acquisition_id}/void": {
+    "/api/v1/einvoice/queue/{queue_id}/result": {
         parameters: {
             query?: never;
             header?: never;
@@ -493,13 +1173,1138 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Void Acquisition
-         * @description 作廢收購（限 MANAGER，F6.5）：對稱反轉庫存/現金/購物金，全程稽核；整筆原子、失敗回滾。
+         * Record Result
+         * @description 記錄平台回執並更新佇列/發票狀態（限 MANAGER）。
          *
-         *     冪等/併發：以收購列鎖＋ voided_at 狀態為準——重複作廢回 409（不雙重沖回）。
-         *     已作廢/含已售庫存/購物金已花 → 409；付現但無開帳 → 409；找不到 → 404；非 MANAGER → 403。
+         *     成功→UPLOADED、失敗→FAILED（可再 retry）。自動解析 Turnkey 回執檔的 importer
+         *     待收尾階段實作；此端點為手動/importer 共用的結果落庫出口。
          */
-        post: operations["voidAcquisition"];
+        post: operations["recordEInvoiceResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/queue/{queue_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Queue Item
+         * @description 重送失敗的佇列項目（限 MANAGER；FAILED→PENDING、attempts+1，不新配發票號碼）。
+         */
+        post: operations["retryEInvoiceQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/queue/{queue_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Queue Item
+         * @description 把 PENDING 佇列列上送 Amego（限 MANAGER；開立/作廢/折讓共用出口，docs/24）。
+         *
+         *     成功 → UPLOADED；平台拒絕 → 列轉 FAILED 後回 200（front 以 status/last_error 呈現，
+         *     可 retry）；傳輸中斷 → 502（已認領，重呼自動對帳）。
+         */
+        post: operations["sendEInvoiceQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/sales/{sale_id}/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue Invoice For Sale
+         * @description POS 結帳後開立（docs/24）：把該銷售的發票上送 Amego、回開立後發票（冪等）。
+         *
+         *     已開立 → 直接回原發票（重試/重印取號）。平台拒絕 → 502（佇列 FAILED 可重試）；
+         *     傳輸中斷（結果未知）→ 502（已認領，下次呼叫自動對帳）；未設定憑證 → 409。
+         */
+        post: operations["issueEInvoiceForSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/sales/{sale_id}/manual-invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Manual Invoice
+         * @description 登記手開紙本備用發票（docs/36；限 MANAGER）。
+         *
+         *     字軌用完/平台故障時店家改開紙本，這裡把那張紙登記進系統，並**取消待送的 F0401**
+         *     ——否則字軌恢復後重試會讓平台再開一張，同一筆交易兩張發票。
+         *     發票非待開立 / 金額不符 / 號碼重複 → 409。
+         */
+        post: operations["registerManualInvoiceForSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/sales/{sale_id}/proof-printed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Proof Printed
+         * @description 記下證明聯**已實際印出**（印表機回報成功後由前端呼叫）。
+         *
+         *     以印表機回報為準、而非產出內容時就記：內容拿到卻沒出紙正是要修的失效樣態，
+         *     先記會把失敗的那次算掉「列印一次」的額度，害真正的正本變成補印。
+         *     重複呼叫只保留最早那次。
+         */
+        post: operations["markEInvoiceProofPrinted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/einvoice/sales/{sale_id}/reprint-payload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get Reprint Payload
+         * @description 取這筆銷售的發票證明聯列印內容（base64 ESC/POS，由 Amego 產生）。
+         *
+         *     證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——整張版面一律由
+         *     平台產生。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
+         *
+         *     回傳的 `is_reprint` 指出這張會不會印上「補印」二字：從未印出者印**正本**，
+         *     已印過才印補印（要點 §26，見 service）。印表機回報成功後，前端須呼叫
+         *     `markEInvoiceProofPrinted` 把事實記回來，下一次才判斷得準。
+         */
+        post: operations["getEInvoiceReprintPayload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gift-reasons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Gift Reasons */
+        get: operations["listGiftReasons"];
+        put?: never;
+        /** Create Gift Reason */
+        post: operations["createGiftReason"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/gift-reasons/{reason_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Gift Reason */
+        patch: operations["updateGiftReason"];
+        trace?: never;
+    };
+    "/api/v1/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health */
+        get: operations["getHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Invoice
+         * @description 單張發票（店別範圍）。
+         */
+        get: operations["getInvoice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/item-name-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggest Item Names
+         * @description 收購頁品名輸入的提示清單（本店用過的品名，常用優先）。
+         */
+        get: operations["suggestItemNames"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/cart/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Kiosk Cart */
+        get: operations["getCurrentKioskCart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Kiosk Device */
+        get: operations["getKioskDevice"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/device-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Kiosk Device Session */
+        post: operations["createKioskDeviceSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Kiosk Events
+         * @description 只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。
+         */
+        get: operations["streamKioskEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Kiosk Heartbeat */
+        post: operations["recordKioskHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/pairing-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Kiosk Pairing Code */
+        post: operations["createKioskPairingCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current Kiosk Task
+         * @description 只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。
+         */
+        get: operations["getCurrentKioskTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Kiosk Task
+         * @description 手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
+         *
+         *     僅限此裝置目前的活動任務；終態/逾時/不存在一律 404，不能憑 ID 枚舉歷史內容。
+         */
+        get: operations["getKioskTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Acknowledge Kiosk Task */
+        post: operations["acknowledgeKioskTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Kiosk Task Activity */
+        post: operations["recordKioskTaskActivity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/tasks/{task_id}/sign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Kiosk Task */
+        post: operations["signKioskTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Menu Items */
+        get: operations["listMenuItems"];
+        put?: never;
+        /** Create Menu Item */
+        post: operations["createMenuItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/menu-items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Archive Menu Item */
+        delete: operations["archiveMenuItem"];
+        options?: never;
+        head?: never;
+        /** Update Menu Item */
+        patch: operations["updateMenuItem"];
+        trace?: never;
+    };
+    "/api/v1/product-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Product Models */
+        get: operations["listProductModels"];
+        put?: never;
+        /**
+         * Create Product Model
+         * @description 建立型號（歸屬指定品牌；同品牌同名 get_or_create 冪等）。品牌須屬本店。
+         */
+        post: operations["createProductModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Purchase Orders
+         * @description 狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。
+         *     q 以單號（純數字）或供應商名搜尋。
+         */
+        get: operations["listPurchaseOrders"];
+        put?: never;
+        /** Create Purchase Order */
+        post: operations["createPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Purchase Order */
+        get: operations["getPurchaseOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Purchase Order
+         * @description 取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。
+         */
+        post: operations["cancelPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Input Invoice
+         * @description 補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
+         */
+        post: operations["registerInputInvoice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Receive Purchase Order
+         * @description 分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
+         *
+         *     帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。
+         */
+        post: operations["receivePurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/purchase-orders/{purchase_order_id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Purchase Order
+         * @description 草稿送出 → 已下單（計入待到貨、可收貨）。
+         */
+        post: operations["submitPurchaseOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/campaign-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Campaign Performance
+         * @description 活動成效（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 其發出的折讓。唯讀。
+         */
+        get: operations["campaignPerformanceReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/consignment-payables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Consignment Payables
+         * @description 寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄；不輸出身分證。
+         */
+        get: operations["consignmentPayablesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/daily-cash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily Cash
+         * @description 每日現金對帳（docs/19 §2.2）：依 session 分列 + 當日合計；expected 與關帳同公式。
+         */
+        get: operations["dailyCashReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/daily-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily Summary
+         * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。
+         */
+        get: operations["dailySummaryReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/dine-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dine In
+         * @description 餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。
+         *
+         *     半開區間 [from, to)；to<=from → 422。
+         *
+         *     **口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；
+         *     客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
+         *     不可用購物金（docs/35），計價條件本就不同。
+         */
+        get: operations["dineInReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/discounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discounts
+         * @description 臨時折扣報表：依原因與店員彙總。半開區間 [from, to)；to<=from → 422。
+         *
+         *     無主管核准機制（店主裁示不設上限），這份報表是事後稽核的主要依據。
+         */
+        get: operations["discountReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/gifts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gifts
+         * @description 贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
+         *
+         *     贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
+         */
+        get: operations["giftReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Insights
+         * @description 經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
+         *
+         *     匯出（?format=csv|xlsx）輸出品牌＋類型暢銷排行；周轉/業態結構置於 meta。
+         */
+        get: operations["businessInsightsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/inventory-value": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inventory Value
+         * @description 庫存價值與庫齡（docs/19 §2.4）：自有成本/售價、寄售在庫另列、catalog 成本 N/A、自有庫齡。
+         */
+        get: operations["inventoryValueReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales-margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Margin
+         * @description 銷售 / 毛利（docs/19 §2.3）。半開區間 [from, to)；to<=from → 422。
+         */
+        get: operations["salesMarginReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/effectiveness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Effectiveness
+         * @description §5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。
+         */
+        get: operations["storeCreditEffectiveness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Flows */
+        get: operations["storeCreditFlows"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/liability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Liability */
+        get: operations["storeCreditLiability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/store-credit/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reconciliation */
+        get: operations["storeCreditReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trends
+         * @description 財務趨勢時間序列（docs/19 R6）：daily/weekly/monthly/quarterly KPI，餵趨勢圖。半開區間。
+         */
+        get: operations["financeTrendsReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Return */
+        post: operations["createReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Return
+         * @description 預覽本次退貨會如何處置原發票（折讓／作廢／轉人工），供畫面提示店員。
+         *
+         *     唯讀、不寫任何資料。**結果僅供提示**：實際送出時後端會以當下狀態重新判斷一次
+         *     （例如預覽時可作廢、送出前又冒出在途的折讓）。
+         */
+        post: operations["previewReturn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/returns/{return_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Return */
+        get: operations["getReturn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sales
+         * @description 交易紀錄列表。
+         *
+         *     `invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），
+         *     且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，
+         *     只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，
+         *     客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。
+         */
+        get: operations["listSales"];
+        put?: never;
+        /** Create Sale */
+        post: operations["createSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/linepay-refunds/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Pending Linepay Refunds
+         * @description 未定 LINE Pay 退款（退款對帳頁；docs/30 finding #3）：店長確認/解決卡住的退款。
+         */
+        get: operations["listPendingLinePayRefunds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/linepay-refunds/{attempt_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Linepay Refund
+         * @description 人工解決未定退款（docs/30 finding #3）：SUCCEEDED＝已於後台確認退款、FAILED＝確認未退款。
+         */
+        post: operations["resolveLinePayRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote Sale
+         * @description 結帳前試算（docs/21 C2b）：套生效活動回折後總額與各行折讓。唯讀——不扣庫存、不收款。
+         *
+         *     供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額導致收款不對齊 → 422）。
+         */
+        post: operations["quoteSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sale */
+        get: operations["getSale"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}/print-detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Print Sale Detail */
+        post: operations["printSaleDetail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sales/{sale_id}/void": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Void Sale */
+        post: operations["voidSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/serialized-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Serialized */
+        get: operations["listSerializedItems"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -564,606 +2369,6 @@ export interface paths {
          * @description 改序號品標價（限管理者；僅在庫；寫稽核）。找不到→404、非在庫→409。
          */
         patch: operations["updateSerializedPrice"];
-        trace?: never;
-    };
-    "/api/v1/catalog-products/by-sku/{sku}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Catalog By Sku
-         * @description POS 掃碼查一般商品：以 SKU 取件（他店/不存在一律 404，不洩漏跨店資料）。
-         *
-         *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
-         */
-        get: operations["getCatalogProductBySku"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog-products/{product_id}/price": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Catalog Price
-         * @description 改一般商品售價（限管理者；寫稽核）。找不到→404。
-         */
-        patch: operations["updateCatalogPrice"];
-        trace?: never;
-    };
-    "/api/v1/bulk-lots/{lot_id}/price": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Bulk Price
-         * @description 改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。
-         */
-        patch: operations["updateBulkPrice"];
-        trace?: never;
-    };
-    "/api/v1/item-name-suggestions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Suggest Item Names
-         * @description 收購頁品名輸入的提示清單（本店用過的品名，常用優先）。
-         */
-        get: operations["suggestItemNames"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/serialized-items": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Serialized */
-        get: operations["listSerializedItems"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog-products": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Catalog */
-        get: operations["listCatalogProducts"];
-        put?: never;
-        /**
-         * Create Catalog Product
-         * @description 新增一般商品（上架，店員與管理者皆可）：廠商採購商品先建檔（初始庫存 0），
-         *     之後即可建採購單→收貨補庫存。SKU 可留白由系統產生；留白時必帶 Idempotency-Key，
-         *     同 key 重送回原商品；同店 SKU 或同 key 不同內容回 409。
-         */
-        post: operations["createCatalogProduct"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog-products/{product_id}/detail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Catalog Detail
-         * @description 一般商品逐件明細：售價/現量＋經銷商進貨歷史（供應商/數量/單價/時間）＋異動歷史。
-         */
-        get: operations["getCatalogProductDetail"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/bulk-lots/by-code/{lot_code}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Bulk Lot By Code
-         * @description POS 掃堆標籤：以 lot_code 取散裝堆（docs/04；標籤條碼即 Code 128 編 lot_code）。
-         */
-        get: operations["getBulkLotByCode"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/brands": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Brands */
-        get: operations["listBrands"];
-        put?: never;
-        /**
-         * Create Brand
-         * @description 建立品牌（同名 get_or_create 冪等）；store 範圍。
-         */
-        post: operations["createBrand"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/product-models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Product Models */
-        get: operations["listProductModels"];
-        put?: never;
-        /**
-         * Create Product Model
-         * @description 建立型號（歸屬指定品牌；同品牌同名 get_or_create 冪等）。品牌須屬本店。
-         */
-        post: operations["createProductModel"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/categories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Categories */
-        get: operations["listCategories"];
-        put?: never;
-        /**
-         * Create Category
-         * @description 建立分類（查無即建，seed 各成色帶定價規則）；未給 target 用店層級 default_margin_pct。
-         */
-        post: operations["createCategory"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/categories/{category_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Category Target
-         * @description 更新分類目標毛利率（MANAGER）。
-         */
-        patch: operations["updateCategoryTarget"];
-        trace?: never;
-    };
-    "/api/v1/categories/{category_id}/pricing-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Pricing Rules */
-        get: operations["listCategoryPricingRules"];
-        /**
-         * Update Pricing Rules
-         * @description 批次更新分類各成色帶定價規則（MANAGER）。
-         */
-        put: operations["updateCategoryPricingRules"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/bulk-lots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Bulk Lots */
-        get: operations["listBulkLots"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/bulk-lots/{lot_id}/detail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Bulk Detail
-         * @description 散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。
-         */
-        get: operations["getBulkLotDetail"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/menu-items": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Menu Items */
-        get: operations["listMenuItems"];
-        put?: never;
-        /** Create Menu Item */
-        post: operations["createMenuItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/menu-items/{item_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Archive Menu Item */
-        delete: operations["archiveMenuItem"];
-        options?: never;
-        head?: never;
-        /** Update Menu Item */
-        patch: operations["updateMenuItem"];
-        trace?: never;
-    };
-    "/api/v1/suppliers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Suppliers
-         * @description 預設只列啟用中供應商（建單選單用）；include_inactive=true 列全部（供應商管理用）。
-         */
-        get: operations["listSuppliers"];
-        put?: never;
-        /** Create Supplier */
-        post: operations["createSupplier"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/suppliers/{supplier_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Supplier */
-        get: operations["getSupplier"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Supplier
-         * @description 編輯供應商名稱/聯絡方式/統編。
-         */
-        patch: operations["updateSupplier"];
-        trace?: never;
-    };
-    "/api/v1/suppliers/{supplier_id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Deactivate Supplier
-         * @description 停用供應商（不進建單選單，保留歷史）。
-         */
-        post: operations["deactivateSupplier"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/suppliers/{supplier_id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Activate Supplier
-         * @description 重新啟用供應商。
-         */
-        post: operations["activateSupplier"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Purchase Orders
-         * @description 狀態篩選可帶多值（?status=ORDERED&status=PARTIAL）；「待收貨」＝ORDERED＋PARTIAL。
-         *     q 以單號（純數字）或供應商名搜尋。
-         */
-        get: operations["listPurchaseOrders"];
-        put?: never;
-        /** Create Purchase Order */
-        post: operations["createPurchaseOrder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}/submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Submit Purchase Order
-         * @description 草稿送出 → 已下單（計入待到貨、可收貨）。
-         */
-        post: operations["submitPurchaseOrder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel Purchase Order
-         * @description 取消採購單 → 已取消（僅草稿/已下單且尚未收貨可取消）。
-         */
-        post: operations["cancelPurchaseOrder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Purchase Order */
-        get: operations["getPurchaseOrder"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}/receive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Receive Purchase Order
-         * @description 分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
-         *
-         *     帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。
-         */
-        post: operations["receivePurchaseOrder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/purchase-orders/{purchase_order_id}/receipts/{receipt_id}/invoice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Register Input Invoice
-         * @description 補登某收貨批次的進項發票（收貨時漏登；已登錄不可覆寫 → 409）。
-         */
-        post: operations["registerInputInvoice"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stocktakes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Stocktakes */
-        get: operations["listStocktakes"];
-        put?: never;
-        /**
-         * Create Stocktake
-         * @description 建立盤點單並快照店內所有一般商品的 system_qty。
-         */
-        post: operations["createStocktake"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stocktakes/{stocktake_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Stocktake */
-        get: operations["getStocktake"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stocktakes/{stocktake_id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm Stocktake
-         * @description 確認盤點：依實點數即時校正現量並寫 ADJUST 帳；DRAFT→CONFIRMED（僅一次）。
-         */
-        post: operations["confirmStocktake"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/api/v1/settings": {
@@ -1290,18 +2495,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/kiosk/tasks/current": {
+    "/api/v1/stocktakes": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        /** List Stocktakes */
+        get: operations["listStocktakes"];
+        put?: never;
         /**
-         * Get Current Kiosk Task
-         * @description 只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。
+         * Create Stocktake
+         * @description 建立盤點單並快照店內所有一般商品的 system_qty。
          */
-        get: operations["getCurrentKioskTask"];
+        post: operations["createStocktake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stocktakes/{stocktake_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Stocktake */
+        get: operations["getStocktake"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1310,381 +2533,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/kiosk/tasks/{task_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Kiosk Task
-         * @description 手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
-         *
-         *     僅限此裝置目前的活動任務；終態/逾時/不存在一律 404，不能憑 ID 枚舉歷史內容。
-         */
-        get: operations["getKioskTask"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/tasks/{task_id}/ack": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Acknowledge Kiosk Task */
-        post: operations["acknowledgeKioskTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/tasks/{task_id}/activity": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Record Kiosk Task Activity */
-        post: operations["recordKioskTaskActivity"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/tasks/{task_id}/sign": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sign Kiosk Task */
-        post: operations["signKioskTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Register Terminal */
-        post: operations["registerPosTerminal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Terminal */
-        get: operations["getPosTerminal"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Upsert Cart */
-        put: operations["upsertCustomerDisplayCart"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Current Terminal Cart */
-        get: operations["getCurrentCustomerDisplayCart"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart/begin-checkout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Begin Checkout */
-        post: operations["beginCustomerDisplayCheckout"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Cart */
-        post: operations["cancelCustomerDisplayCart"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Freeze Cart For Signature */
-        post: operations["freezeCustomerDisplayCartForSignature"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reconcile Cart Payment */
-        post: operations["reconcileCustomerDisplayPayment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/pair": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pair Terminal */
-        post: operations["pairPosTerminal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/customer-display/terminals/{terminal_id}/unpair": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Unpair Terminal */
-        post: operations["unpairPosTerminal"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/device-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Kiosk Device Session */
-        post: operations["createKioskDeviceSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/cart/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Current Kiosk Cart */
-        get: operations["getCurrentKioskCart"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Stream Kiosk Events
-         * @description 只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。
-         */
-        get: operations["streamKioskEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/device": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Kiosk Device */
-        get: operations["getKioskDevice"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/heartbeat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Record Kiosk Heartbeat */
-        post: operations["recordKioskHeartbeat"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/kiosk/pairing-codes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Kiosk Pairing Code */
-        post: operations["createKioskPairingCode"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Sales
-         * @description 交易紀錄列表。
-         *
-         *     `invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），
-         *     且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，
-         *     只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，
-         *     客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。
-         */
-        get: operations["listSales"];
-        put?: never;
-        /** Create Sale */
-        post: operations["createSale"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/quote": {
+    "/api/v1/stocktakes/{stocktake_id}/confirm": {
         parameters: {
             query?: never;
             header?: never;
@@ -1694,291 +2543,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Quote Sale
-         * @description 結帳前試算（docs/21 C2b）：套生效活動回折後總額與各行折讓。唯讀——不扣庫存、不收款。
-         *
-         *     供 POS 顯示折後價並送對齊折後總額的收款（避免前端自算金額導致收款不對齊 → 422）。
+         * Confirm Stocktake
+         * @description 確認盤點：依實點數即時校正現量並寫 ADJUST 帳；DRAFT→CONFIRMED（僅一次）。
          */
-        post: operations["quoteSale"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/{sale_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Sale */
-        get: operations["getSale"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/{sale_id}/void": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Void Sale */
-        post: operations["voidSale"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/{sale_id}/print-detail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Print Sale Detail */
-        post: operations["printSaleDetail"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/linepay-refunds/pending": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Pending Linepay Refunds
-         * @description 未定 LINE Pay 退款（退款對帳頁；docs/30 finding #3）：店長確認/解決卡住的退款。
-         */
-        get: operations["listPendingLinePayRefunds"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sales/linepay-refunds/{attempt_id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Resolve Linepay Refund
-         * @description 人工解決未定退款（docs/30 finding #3）：SUCCEEDED＝已於後台確認退款、FAILED＝確認未退款。
-         */
-        post: operations["resolveLinePayRefund"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/gift-reasons": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Gift Reasons */
-        get: operations["listGiftReasons"];
-        put?: never;
-        /** Create Gift Reason */
-        post: operations["createGiftReason"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/gift-reasons/{reason_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update Gift Reason */
-        patch: operations["updateGiftReason"];
-        trace?: never;
-    };
-    "/api/v1/discount-reasons": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Discount Reasons */
-        get: operations["listDiscountReasons"];
-        put?: never;
-        /** Create Discount Reason */
-        post: operations["createDiscountReason"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/discount-reasons/{reason_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Update Discount Reason */
-        patch: operations["updateDiscountReason"];
-        trace?: never;
-    };
-    "/api/v1/returns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Return */
-        post: operations["createReturn"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/returns/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Return
-         * @description 預覽本次退貨會如何處置原發票（折讓／作廢／轉人工），供畫面提示店員。
-         *
-         *     唯讀、不寫任何資料。**結果僅供提示**：實際送出時後端會以當下狀態重新判斷一次
-         *     （例如預覽時可作廢、送出前又冒出在途的折讓）。
-         */
-        post: operations["previewReturn"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/returns/{return_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Return */
-        get: operations["getReturn"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/stores/{store_id}/receipt-header": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Receipt Header
-         * @description 回傳指定門市的收據抬頭；門市不存在 → 404。
-         */
-        get: operations["getStoreReceiptHeader"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/contacts/{contact_id}/store-credit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Store Credit
-         * @description 餘額＋異動歷史（分頁，新到舊）；店別範圍（§4）。
-         */
-        get: operations["getStoreCredit"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/contacts/{contact_id}/store-credit/adjustments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Adjust Store Credit
-         * @description 人工校正（限 MANAGER、事由必填、寫稽核；餘額不可為負；冪等鍵必帶——
-         *     重試/雙擊不得重複改負債）。
-         */
-        post: operations["adjustStoreCredit"];
+        post: operations["confirmStocktake"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2007,41 +2575,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/reports/store-credit/liability": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Liability */
-        get: operations["storeCreditLiability"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/store-credit/flows": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Flows */
-        get: operations["storeCreditFlows"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/store-credit/effectiveness": {
+    "/api/v1/stores/{store_id}/receipt-header": {
         parameters: {
             query?: never;
             header?: never;
@@ -2049,10 +2583,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Effectiveness
-         * @description §5B 效益指標（MANAGER）。β/α/Δ 為估計值；α 為代理法，兌付樣本不足時報表加註。
+         * Get Receipt Header
+         * @description 回傳指定門市的收據抬頭；門市不存在 → 404。
          */
-        get: operations["storeCreditEffectiveness"];
+        get: operations["getStoreReceiptHeader"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2061,24 +2595,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/reports/store-credit/reconciliation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Reconciliation */
-        get: operations["storeCreditReconciliation"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/daily-cash": {
+    "/api/v1/suppliers": {
         parameters: {
             query?: never;
             header?: never;
@@ -2086,337 +2603,41 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Daily Cash
-         * @description 每日現金對帳（docs/19 §2.2）：依 session 分列 + 當日合計；expected 與關帳同公式。
+         * List Suppliers
+         * @description 預設只列啟用中供應商（建單選單用）；include_inactive=true 列全部（供應商管理用）。
          */
-        get: operations["dailyCashReport"];
+        get: operations["listSuppliers"];
         put?: never;
-        post?: never;
+        /** Create Supplier */
+        post: operations["createSupplier"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/reports/daily-summary": {
+    "/api/v1/suppliers/{supplier_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        /** Get Supplier */
+        get: operations["getSupplier"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         /**
-         * Daily Summary
-         * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。
+         * Update Supplier
+         * @description 編輯供應商名稱/聯絡方式/統編。
          */
-        get: operations["dailySummaryReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
+        patch: operations["updateSupplier"];
         trace?: never;
     };
-    "/api/v1/reports/trends": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Trends
-         * @description 財務趨勢時間序列（docs/19 R6）：daily/weekly/monthly/quarterly KPI，餵趨勢圖。半開區間。
-         */
-        get: operations["financeTrendsReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/insights": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Insights
-         * @description 經營洞察（#8）：品牌/類型暢銷彙整、周轉/滯銷摘要、業態營收結構。半開區間 [from, to)。
-         *
-         *     匯出（?format=csv|xlsx）輸出品牌＋類型暢銷排行；周轉/業態結構置於 meta。
-         */
-        get: operations["businessInsightsReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/inventory-value": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Inventory Value
-         * @description 庫存價值與庫齡（docs/19 §2.4）：自有成本/售價、寄售在庫另列、catalog 成本 N/A、自有庫齡。
-         */
-        get: operations["inventoryValueReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/consignment-payables": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Consignment Payables
-         * @description 寄售應付（docs/19 §2.5）：只計 PENDING 待付；PAID/CANCELLED/reclaim 分欄；不輸出身分證。
-         */
-        get: operations["consignmentPayablesReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/sales-margin": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Sales Margin
-         * @description 銷售 / 毛利（docs/19 §2.3）。半開區間 [from, to)；to<=from → 422。
-         */
-        get: operations["salesMarginReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/discounts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Discounts
-         * @description 臨時折扣報表：依原因與店員彙總。半開區間 [from, to)；to<=from → 422。
-         *
-         *     無主管核准機制（店主裁示不設上限），這份報表是事後稽核的主要依據。
-         */
-        get: operations["discountReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/dine-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Dine In
-         * @description 餐飲內用／外帶報表（docs/39）：組數、佔比、趨勢、客單價與時段分佈。
-         *
-         *     半開區間 [from, to)；to<=from → 422。
-         *
-         *     **口徑**：一筆含餐飲品項的結帳＝一組；佔比的分母是「有餐飲的單」而非全店訂單；
-         *     客單價只算 `MENU` 行。內用與外帶的客單價**不可直接比較**——外帶不累點、不折扣、
-         *     不可用購物金（docs/35），計價條件本就不同。
-         */
-        get: operations["dineInReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/gifts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Gifts
-         * @description 贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
-         *
-         *     贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
-         */
-        get: operations["giftReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reports/campaign-performance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Campaign Performance
-         * @description 活動成效（docs/21 C4）：每檔生效中/已結束活動期間的營運成效 + 其發出的折讓。唯讀。
-         */
-        get: operations["campaignPerformanceReport"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/campaigns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Campaigns */
-        get: operations["listCampaigns"];
-        put?: never;
-        /** Create Campaign */
-        post: operations["createCampaign"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/campaigns/{campaign_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Campaign */
-        get: operations["getCampaign"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/campaigns/{campaign_id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Activate Campaign */
-        post: operations["activateCampaign"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/campaigns/{campaign_id}/end": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** End Campaign */
-        post: operations["endCampaign"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/campaigns/{campaign_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Campaign */
-        post: operations["cancelCampaign"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/queue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Queue
-         * @description 上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。
-         */
-        get: operations["listEInvoiceQueue"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/sales/{sale_id}/issue": {
+    "/api/v1/suppliers/{supplier_id}/activate": {
         parameters: {
             query?: never;
             header?: never;
@@ -2426,20 +2647,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Issue Invoice For Sale
-         * @description POS 結帳後開立（docs/24）：把該銷售的發票上送 Amego、回開立後發票（冪等）。
-         *
-         *     已開立 → 直接回原發票（重試/重印取號）。平台拒絕 → 502（佇列 FAILED 可重試）；
-         *     傳輸中斷（結果未知）→ 502（已認領，下次呼叫自動對帳）；未設定憑證 → 409。
+         * Activate Supplier
+         * @description 重新啟用供應商。
          */
-        post: operations["issueEInvoiceForSale"];
+        post: operations["activateSupplier"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/einvoice/sales/{sale_id}/reprint-payload": {
+    "/api/v1/suppliers/{supplier_id}/deactivate": {
         parameters: {
             query?: never;
             header?: never;
@@ -2449,228 +2667,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Get Reprint Payload
-         * @description 取這筆銷售的發票證明聯列印內容（base64 ESC/POS，由 Amego 產生）。
-         *
-         *     證明聯的二維條碼含以財政部金鑰加密的驗證資訊，本地推算不出來——整張版面一律由
-         *     平台產生。用 POST 是因為它會實際呼叫外部平台（非純讀取）。
-         *
-         *     回傳的 `is_reprint` 指出這張會不會印上「補印」二字：從未印出者印**正本**，
-         *     已印過才印補印（要點 §26，見 service）。印表機回報成功後，前端須呼叫
-         *     `markEInvoiceProofPrinted` 把事實記回來，下一次才判斷得準。
+         * Deactivate Supplier
+         * @description 停用供應商（不進建單選單，保留歷史）。
          */
-        post: operations["getEInvoiceReprintPayload"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/sales/{sale_id}/proof-printed": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mark Proof Printed
-         * @description 記下證明聯**已實際印出**（印表機回報成功後由前端呼叫）。
-         *
-         *     以印表機回報為準、而非產出內容時就記：內容拿到卻沒出紙正是要修的失效樣態，
-         *     先記會把失敗的那次算掉「列印一次」的額度，害真正的正本變成補印。
-         *     重複呼叫只保留最早那次。
-         */
-        post: operations["markEInvoiceProofPrinted"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/sales/{sale_id}/manual-invoice": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Register Manual Invoice
-         * @description 登記手開紙本備用發票（docs/36；限 MANAGER）。
-         *
-         *     字軌用完/平台故障時店家改開紙本，這裡把那張紙登記進系統，並**取消待送的 F0401**
-         *     ——否則字軌恢復後重試會讓平台再開一張，同一筆交易兩張發票。
-         *     發票非待開立 / 金額不符 / 號碼重複 → 409。
-         */
-        post: operations["registerManualInvoiceForSale"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/queue/{queue_id}/send": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Send Queue Item
-         * @description 把 PENDING 佇列列上送 Amego（限 MANAGER；開立/作廢/折讓共用出口，docs/24）。
-         *
-         *     成功 → UPLOADED；平台拒絕 → 列轉 FAILED 後回 200（front 以 status/last_error 呈現，
-         *     可 retry）；傳輸中斷 → 502（已認領，重呼自動對帳）。
-         */
-        post: operations["sendEInvoiceQueueItem"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/queue/{queue_id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry Queue Item
-         * @description 重送失敗的佇列項目（限 MANAGER；FAILED→PENDING、attempts+1，不新配發票號碼）。
-         */
-        post: operations["retryEInvoiceQueue"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/einvoice/queue/{queue_id}/result": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record Result
-         * @description 記錄平台回執並更新佇列/發票狀態（限 MANAGER）。
-         *
-         *     成功→UPLOADED、失敗→FAILED（可再 retry）。自動解析 Turnkey 回執檔的 importer
-         *     待收尾階段實作；此端點為手動/importer 共用的結果落庫出口。
-         */
-        post: operations["recordEInvoiceResult"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/invoices/{invoice_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Invoice
-         * @description 單張發票（店別範圍）。
-         */
-        get: operations["getInvoice"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backup/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Backup Health */
-        get: operations["getBackupHealth"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backup/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Backup Runs */
-        get: operations["listBackupRuns"];
-        put?: never;
-        /**
-         * Trigger Backup
-         * @description 立即備份（手動）：插 RUNNING＋commit 後回應,背景續跑實際 dump。R2 未設定 → 503。
-         */
-        post: operations["triggerBackup"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backup/restores": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Restore Runs */
-        get: operations["listRestoreRuns"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/backup/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger Restore
-         * @description 觸發還原到 throwaway 庫＋四驗（高危,強卡控）。正式庫不受影響;VERIFIED 後切換另跑受控腳本。
-         *
-         *     卡控：①MANAGER（require_role）②知情勾選 acknowledge ③打字確認 confirm_text＝該備份「檔名」。
-         */
-        post: operations["triggerRestore"];
+        post: operations["deactivateSupplier"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2686,91 +2686,91 @@ export interface components {
          * @description 收購單輸入。BUYOUT/CONSIGNMENT 走 items；BULK_LOT 走 lot。
          */
         AcquisitionCreate: {
-            type: components["schemas"]["AcquisitionType"];
             /** Contact Id */
             contact_id: number;
-            /** Note */
-            note?: string | null;
             /** Items */
             items?: components["schemas"]["AcquisitionItemIn"][] | null;
             lot?: components["schemas"]["AcquisitionLotIn"] | null;
+            /** Note */
+            note?: string | null;
             /** @default CASH */
             payout_method: components["schemas"]["PayoutMethod"];
             /** Payout Split Cash */
             payout_split_cash?: number | string | null;
             /** Signature Task Id */
             signature_task_id?: number | null;
+            type: components["schemas"]["AcquisitionType"];
         };
         /**
          * AcquisitionItemIn
          * @description 序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。
          */
         AcquisitionItemIn: {
-            /** Name */
-            name: string;
+            /** Acquisition Cost */
+            acquisition_cost?: number | string | null;
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Commission Pct */
+            commission_pct?: number | null;
             grade: components["schemas"]["Grade"];
             /** Listed Price */
             listed_price: number | string;
-            /** Brand Id */
-            brand_id?: number | null;
+            /** Name */
+            name: string;
             /** Product Model Id */
             product_model_id?: number | null;
-            /** Category Id */
-            category_id?: number | null;
-            /** Acquisition Cost */
-            acquisition_cost?: number | string | null;
-            /** Commission Pct */
-            commission_pct?: number | null;
         };
         /**
          * AcquisitionLotIn
          * @description E 級散裝批入庫（BULK_LOT）。
          */
         AcquisitionLotIn: {
-            /** Name */
-            name: string;
+            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
             /** Acquisition Cost */
             acquisition_cost: number | string;
-            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
-            /** Total Qty */
-            total_qty: number;
-            /** Unit Price */
-            unit_price: number | string;
             /** Brand Id */
             brand_id?: number | null;
             /** Category Id */
             category_id?: number | null;
             /** Label */
             label?: string | null;
+            /** Name */
+            name: string;
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: number | string;
         };
         /**
          * AcquisitionRead
          * @description 收購單查詢輸出。
          */
         AcquisitionRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            type: components["schemas"]["AcquisitionType"];
-            /** Contact Id */
-            contact_id: number;
             /** Clerk User Id */
             clerk_user_id: number;
-            /** Total Cash Paid */
-            total_cash_paid: string | null;
-            payout_method: components["schemas"]["PayoutMethod"];
-            /** Payout Cash Amount */
-            payout_cash_amount: string | null;
-            /** Payout Credit Cash Equivalent */
-            payout_credit_cash_equivalent: string | null;
-            /** Note */
-            note: string | null;
+            /** Contact Id */
+            contact_id: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string | null;
+            /** Payout Cash Amount */
+            payout_cash_amount: string | null;
+            /** Payout Credit Cash Equivalent */
+            payout_credit_cash_equivalent: string | null;
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Store Id */
+            store_id: number;
+            /** Total Cash Paid */
+            total_cash_paid: string | null;
+            type: components["schemas"]["AcquisitionType"];
             /** Voided At */
             voided_at: string | null;
         };
@@ -2779,10 +2779,10 @@ export interface components {
          * @description 憑證聯上的一行：品名與金額（買斷為收購價、寄售為 0 元僅列示）。
          */
         AcquisitionReceiptItem: {
-            /** Name */
-            name: string;
             /** Amount */
             amount: string;
+            /** Name */
+            name: string;
         };
         /**
          * AcquisitionReceiptRead
@@ -2797,24 +2797,24 @@ export interface components {
         AcquisitionReceiptRead: {
             /** Acquisition Id */
             acquisition_id: number;
-            /** Store Id */
-            store_id: number;
-            /** Seller Name */
-            seller_name: string;
-            /** Items */
-            items: components["schemas"]["AcquisitionReceiptItem"][];
-            /** Total */
-            total: string;
-            payout_method: components["schemas"]["PayoutMethod"];
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Items */
+            items: components["schemas"]["AcquisitionReceiptItem"][];
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Seller Name */
+            seller_name: string;
             /** Signature Task Id */
             signature_task_id: number | null;
             /** Store Credit Granted */
             store_credit_granted: string | null;
+            /** Store Id */
+            store_id: number;
+            /** Total */
+            total: string;
             /** Voided At */
             voided_at: string | null;
         };
@@ -2825,24 +2825,24 @@ export interface components {
         AcquisitionResult: {
             /** Acquisition Id */
             acquisition_id: number;
-            type: components["schemas"]["AcquisitionType"];
             /** Contact Id */
             contact_id: number;
-            /** Total Cash Paid */
-            total_cash_paid: string | null;
-            payout_method: components["schemas"]["PayoutMethod"];
-            /** Payout Cash Amount */
-            payout_cash_amount: string | null;
-            /** Payout Credit Cash Equivalent */
-            payout_credit_cash_equivalent: string | null;
-            /** Payout Credit Granted */
-            payout_credit_granted: string | null;
-            /** Payout Credit Balance After */
-            payout_credit_balance_after: string | null;
             /** Item Codes */
             item_codes: string[];
             /** Lot Code */
             lot_code: string | null;
+            /** Payout Cash Amount */
+            payout_cash_amount: string | null;
+            /** Payout Credit Balance After */
+            payout_credit_balance_after: string | null;
+            /** Payout Credit Cash Equivalent */
+            payout_credit_cash_equivalent: string | null;
+            /** Payout Credit Granted */
+            payout_credit_granted: string | null;
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Total Cash Paid */
+            total_cash_paid: string | null;
+            type: components["schemas"]["AcquisitionType"];
         };
         /**
          * AcquisitionType
@@ -2868,15 +2868,15 @@ export interface components {
         AcquisitionVoidResult: {
             /** Acquisition Id */
             acquisition_id: number;
+            /** Reversed Cash */
+            reversed_cash: string;
+            /** Reversed Credit */
+            reversed_credit: string;
             /**
              * Voided At
              * Format: date-time
              */
             voided_at: string;
-            /** Reversed Cash */
-            reversed_cash: string;
-            /** Reversed Credit */
-            reversed_credit: string;
         };
         /**
          * AdjustmentScope
@@ -2889,16 +2889,16 @@ export interface components {
          * @description 未兌付負債帳齡分桶（依發出時間）。
          */
         AgingBuckets: {
-            /** Lt 30D */
-            lt_30d: string;
+            /** D180 365 */
+            d180_365: string;
             /** D30 90 */
             d30_90: string;
             /** D90 180 */
             d90_180: string;
-            /** D180 365 */
-            d180_365: string;
             /** Gt 365D */
             gt_365d: string;
+            /** Lt 30D */
+            lt_30d: string;
         };
         /** Format: date-time */
         AwareDateTime: string;
@@ -2907,20 +2907,20 @@ export interface components {
          * @description 備份健康度（docs/31 §5）：儀表板頂部一眼看「備份還健不健康」。
          */
         BackupHealthRead: {
+            /** Due Now */
+            due_now: boolean;
             /** Enabled */
             enabled: boolean;
             /** Interval Hours */
             interval_hours: number;
-            /** Retention */
-            retention: number;
-            /** Offpeak Hour */
-            offpeak_hour: number;
-            /** Last Success At */
-            last_success_at: string | null;
             /** Last Success Age Hours */
             last_success_age_hours: number | null;
-            /** Due Now */
-            due_now: boolean;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Offpeak Hour */
+            offpeak_hour: number;
+            /** Retention */
+            retention: number;
             /** Running */
             running: boolean;
         };
@@ -2929,31 +2929,31 @@ export interface components {
          * @description 一次備份執行的輸出（清單用）。
          */
         BackupRunRead: {
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /** Db Name */
+            db_name: string;
+            /** File Name */
+            file_name: string | null;
+            /** Finished At */
+            finished_at: string | null;
             /** Id */
             id: number;
-            trigger: components["schemas"]["BackupTrigger"];
-            status: components["schemas"]["BackupStatus"];
+            /** Last Error */
+            last_error: string | null;
+            /** R2 Key */
+            r2_key: string | null;
+            /** Sha256 */
+            sha256: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
             /**
              * Started At
              * Format: date-time
              */
             started_at: string;
-            /** Finished At */
-            finished_at: string | null;
-            /** Db Name */
-            db_name: string;
-            /** File Name */
-            file_name: string | null;
-            /** R2 Key */
-            r2_key: string | null;
-            /** Size Bytes */
-            size_bytes: number | null;
-            /** Sha256 */
-            sha256: string | null;
-            /** Last Error */
-            last_error: string | null;
-            /** Actor User Id */
-            actor_user_id: number | null;
+            status: components["schemas"]["BackupStatus"];
+            trigger: components["schemas"]["BackupTrigger"];
         };
         /**
          * BackupStatus
@@ -2999,68 +2999,68 @@ export interface components {
          * @description 散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。
          */
         BulkLotDetailRead: {
-            /** Id */
-            id: number;
-            /** Lot Code */
-            lot_code: string;
-            /** Name */
-            name: string;
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Acquisition Id */
+            acquisition_id: number | null;
+            /** Acquisition Type */
+            acquisition_type: string | null;
             /** Brand Id */
             brand_id: number | null;
             /** Category Id */
             category_id: number | null;
             grade: components["schemas"]["Grade"];
-            /** Acquisition Cost */
-            acquisition_cost: string;
-            /** Unit Price */
-            unit_price: string;
-            /** Total Qty */
-            total_qty: number;
-            /** Remaining Qty */
-            remaining_qty: number;
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
             /**
              * Intake Date
              * Format: date-time
              */
             intake_date: string;
+            /** Lot Code */
+            lot_code: string;
+            /** Name */
+            name: string;
+            /** Remaining Qty */
+            remaining_qty: number;
             source: components["schemas"]["ItemSourceRead"] | null;
-            /** Acquisition Id */
-            acquisition_id: number | null;
-            /** Acquisition Type */
-            acquisition_type: string | null;
-            /** History */
-            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * BulkLotRead
          * @description 散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。
          */
         BulkLotRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Lot Code */
-            lot_code: string;
-            /** Label */
-            label: string | null;
-            /** Name */
-            name: string;
+            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
+            /** Acquisition Cost */
+            acquisition_cost: string;
             /** Brand Id */
             brand_id: number | null;
             /** Category Id */
             category_id: number | null;
             grade: components["schemas"]["Grade"];
-            /** Acquisition Cost */
-            acquisition_cost: string;
-            acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
-            /** Unit Price */
-            unit_price: string;
-            /** Total Qty */
-            total_qty: number;
+            /** Id */
+            id: number;
+            /** Label */
+            label: string | null;
+            /** Lot Code */
+            lot_code: string;
+            /** Name */
+            name: string;
             /** Remaining Qty */
             remaining_qty: number;
             status: components["schemas"]["BulkLotStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * BulkLotStatus
@@ -3080,10 +3080,10 @@ export interface components {
          * @description 登記一筆候位（名稱必填，連結與備註選填）。
          */
         CallTicketCreateRequest: {
-            /** Name */
-            name: string;
             /** Link */
             link?: string | null;
+            /** Name */
+            name: string;
             /** Note */
             note?: string | null;
         };
@@ -3092,8 +3092,22 @@ export interface components {
          * @description 叫號單輸出。`ticket_date` 為**台北營業日**（每日重置的依據）。
          */
         CallTicketRead: {
+            /** Completed At */
+            completed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Id */
             id: number;
+            /** Link */
+            link: string | null;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            status: components["schemas"]["CallTicketStatus"];
             /** Store Id */
             store_id: number;
             /**
@@ -3103,20 +3117,6 @@ export interface components {
             ticket_date: string;
             /** Ticket No */
             ticket_no: number;
-            /** Name */
-            name: string;
-            /** Link */
-            link: string | null;
-            /** Note */
-            note: string | null;
-            status: components["schemas"]["CallTicketStatus"];
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Completed At */
-            completed_at: string | null;
         };
         /**
          * CallTicketStatus
@@ -3131,22 +3131,6 @@ export interface components {
          *     寄售品若開折扣（applies_consignment），一律按比例分攤——寄售人按折後價分潤（docs/21 §8.1）。
          */
         CampaignCreateRequest: {
-            /** Name */
-            name: string;
-            /** Discount Pct */
-            discount_pct: number;
-            starts_at: components["schemas"]["AwareDateTime"];
-            ends_at: components["schemas"]["AwareDateTime"];
-            /**
-             * Applies Owned Serialized
-             * @default true
-             */
-            applies_owned_serialized: boolean;
-            /**
-             * Applies Owned Bulk
-             * @default true
-             */
-            applies_owned_bulk: boolean;
             /**
              * Applies Catalog
              * @default false
@@ -3157,6 +3141,22 @@ export interface components {
              * @default false
              */
             applies_consignment: boolean;
+            /**
+             * Applies Owned Bulk
+             * @default true
+             */
+            applies_owned_bulk: boolean;
+            /**
+             * Applies Owned Serialized
+             * @default true
+             */
+            applies_owned_serialized: boolean;
+            /** Discount Pct */
+            discount_pct: number;
+            ends_at: components["schemas"]["AwareDateTime"];
+            /** Name */
+            name: string;
+            starts_at: components["schemas"]["AwareDateTime"];
         };
         /**
          * CampaignPerformanceReport
@@ -3168,10 +3168,10 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
-            /** Store Id */
-            store_id: number;
             /** Rows */
             rows: components["schemas"]["CampaignPerformanceRow"][];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * CampaignPerformanceRow
@@ -3182,72 +3182,72 @@ export interface components {
          *     gross_margin_rate 分母為已知成本營收，0/未知 → null（不假造）。
          */
         CampaignPerformanceRow: {
+            /** Campaign Discount Total */
+            campaign_discount_total: string;
             /** Campaign Id */
             campaign_id: number;
-            /** Name */
-            name: string;
-            status: components["schemas"]["CampaignStatus"];
             /** Discount Pct */
             discount_pct: number;
-            /**
-             * Starts At
-             * Format: date-time
-             */
-            starts_at: string;
             /**
              * Ends At
              * Format: date-time
              */
             ends_at: string;
-            /** Campaign Discount Total */
-            campaign_discount_total: string;
-            /** Gross Turnover */
-            gross_turnover: string;
-            /** Recognized Revenue */
-            recognized_revenue: string;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
             gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /** Name */
+            name: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            status: components["schemas"]["CampaignStatus"];
             /** Transaction Count */
             transaction_count: number;
         };
         /** CampaignRead */
         CampaignRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Name */
-            name: string;
-            /** Discount Pct */
-            discount_pct: number;
-            /** Applies Owned Serialized */
-            applies_owned_serialized: boolean;
-            /** Applies Owned Bulk */
-            applies_owned_bulk: boolean;
             /** Applies Catalog */
             applies_catalog: boolean;
             /** Applies Consignment */
             applies_consignment: boolean;
-            /**
-             * Starts At
-             * Format: date-time
-             */
-            starts_at: string;
-            /**
-             * Ends At
-             * Format: date-time
-             */
-            ends_at: string;
-            status: components["schemas"]["CampaignStatus"];
-            /** Created By */
-            created_by: number;
+            /** Applies Owned Bulk */
+            applies_owned_bulk: boolean;
+            /** Applies Owned Serialized */
+            applies_owned_serialized: boolean;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Created By */
+            created_by: number;
+            /** Discount Pct */
+            discount_pct: number;
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            status: components["schemas"]["CampaignStatus"];
+            /** Store Id */
+            store_id: number;
             /**
              * Updated At
              * Format: date-time
@@ -3276,28 +3276,28 @@ export interface components {
         };
         /** CartChangeRead */
         CartChangeRead: {
-            /** Type */
-            type: string;
+            /** From Qty */
+            from_qty?: number | null;
             /** Item Key */
             item_key: string;
             /** Name */
             name: string;
-            /** From Qty */
-            from_qty?: number | null;
             /** To Qty */
             to_qty?: number | null;
+            /** Type */
+            type: string;
         };
         /** CartFreezeRead */
         CartFreezeRead: {
             cart: components["schemas"]["StaffCartSessionRead"];
-            /** Signature Task Id */
-            signature_task_id: number;
-            signature_status: components["schemas"]["SignatureTaskStatus"];
             /**
              * Expires At
              * Format: date-time
              */
             expires_at: string;
+            signature_status: components["schemas"]["SignatureTaskStatus"];
+            /** Signature Task Id */
+            signature_task_id: number;
         };
         /** CartFreezeRequest */
         CartFreezeRequest: {
@@ -3306,36 +3306,42 @@ export interface components {
         };
         /** CartItemRead */
         CartItemRead: {
+            /** Discount Amount */
+            discount_amount: string;
             /** Item Key */
             item_key: string;
-            line_type: components["schemas"]["SaleLineType"];
             line_kind: components["schemas"]["SaleLineKind"];
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
+            /** Manual Discount Amount */
+            manual_discount_amount: string;
             /** Name */
             name: string;
+            /** Net Amount */
+            net_amount: string;
+            /** Original Unit Price */
+            original_unit_price: string | null;
             /** Qty */
             qty: number;
             /** Unit Price */
             unit_price: string;
-            /** Original Unit Price */
-            original_unit_price: string | null;
-            /** Discount Amount */
-            discount_amount: string;
-            /** Manual Discount Amount */
-            manual_discount_amount: string;
-            /** Line Total */
-            line_total: string;
-            /** Net Amount */
-            net_amount: string;
         };
         /** CartLineRequest */
         CartLineRequest: {
-            line_type: components["schemas"]["SaleLineType"];
-            /** Item Code */
-            item_code?: string | null;
-            /** Catalog Product Id */
-            catalog_product_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            /** @default NORMAL */
+            line_kind: components["schemas"]["SaleLineKind"];
+            line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
             /**
@@ -3343,25 +3349,9 @@ export interface components {
              * @default 1
              */
             qty: number;
-            /** @default NORMAL */
-            line_kind: components["schemas"]["SaleLineKind"];
-            /** Gift Reason Id */
-            gift_reason_id?: number | null;
-            /** Gift Note */
-            gift_note?: string | null;
         };
         /** CartSessionRead */
         CartSessionRead: {
-            /** Id */
-            id: number;
-            status: components["schemas"]["CartSessionStatus"];
-            /** Revision */
-            revision: number;
-            /** Pos Terminal Id */
-            pos_terminal_id: number;
-            /** Kiosk Device Id */
-            kiosk_device_id: number;
-            snapshot: components["schemas"]["CartSnapshotRead"];
             /** Changes */
             changes: components["schemas"]["CartChangeRead"][];
             /**
@@ -3369,6 +3359,16 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            /** Kiosk Device Id */
+            kiosk_device_id: number;
+            /** Pos Terminal Id */
+            pos_terminal_id: number;
+            /** Revision */
+            revision: number;
+            snapshot: components["schemas"]["CartSnapshotRead"];
+            status: components["schemas"]["CartSessionStatus"];
             /**
              * Updated At
              * Format: date-time
@@ -3383,88 +3383,88 @@ export interface components {
         CartSessionStatus: "DRAFT" | "FROZEN" | "PROCESSING" | "PAYMENT_UNCERTAIN" | "COMPLETED" | "CANCELLED" | "EXPIRED";
         /** CartSnapshotRead */
         CartSnapshotRead: {
+            /** Campaign Name */
+            campaign_name: string | null;
             /** Content Version */
             content_version: string;
-            /** Items */
-            items: components["schemas"]["CartItemRead"][];
-            /** Total */
-            total: string;
             /** Discount Total */
             discount_total: string;
             /** Gift Retail Value */
             gift_retail_value: string;
+            /** Items */
+            items: components["schemas"]["CartItemRead"][];
             /** Manual Discount Total */
             manual_discount_total: string;
-            /** Campaign Name */
-            campaign_name: string | null;
             member: components["schemas"]["MaskedMemberRead"] | null;
             /** Tenders */
             tenders: components["schemas"]["CartTenderRead"][];
+            /** Total */
+            total: string;
         };
         /** CartTenderRead */
         CartTenderRead: {
-            tender_type: components["schemas"]["TenderType"];
             /** Amount */
             amount: string;
+            tender_type: components["schemas"]["TenderType"];
         };
         /** CartTenderRequest */
         CartTenderRequest: {
-            tender_type: components["schemas"]["TenderType"];
             /** Amount */
             amount: number | string;
+            tender_type: components["schemas"]["TenderType"];
         };
         /** CartUpsertRequest */
         CartUpsertRequest: {
+            /** Adjustments */
+            adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
             /** Expected Revision */
             expected_revision?: number | null;
             /** Lines */
             lines: components["schemas"]["CartLineRequest"][];
-            /** Buyer Contact Id */
-            buyer_contact_id?: number | null;
-            /** Tenders */
-            tenders?: components["schemas"]["CartTenderRequest"][] | null;
-            /** Adjustments */
-            adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Table No */
             table_no?: string | null;
+            /** Tenders */
+            tenders?: components["schemas"]["CartTenderRequest"][] | null;
         };
         /**
          * CashMovementCreateRequest
          * @description 記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。
          */
         CashMovementCreateRequest: {
-            type: components["schemas"]["CashMovementType"];
             /** Amount */
             amount: number | string;
             /** Note */
             note: string;
+            type: components["schemas"]["CashMovementType"];
         };
         /**
          * CashMovementRead
          * @description 現金異動輸出。
          */
         CashMovementRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Session Id */
-            session_id: number;
-            type: components["schemas"]["CashMovementType"];
             /** Amount */
             amount: string;
-            /** Ref Type */
-            ref_type: string | null;
-            /** Ref Id */
-            ref_id: number | null;
-            /** Note */
-            note: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string | null;
+            /** Ref Id */
+            ref_id: number | null;
+            /** Ref Type */
+            ref_type: string | null;
+            /** Session Id */
+            session_id: number;
+            /** Store Id */
+            store_id: number;
+            type: components["schemas"]["CashMovementType"];
         };
         /**
          * CashMovementType
@@ -3497,28 +3497,28 @@ export interface components {
          * @description 現金班別輸出。
          */
         CashSessionRead: {
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: number | null;
+            /** Counted Amount */
+            counted_amount: string | null;
+            /** Expected Amount */
+            expected_amount: string | null;
             /** Id */
             id: number;
-            /** Store Id */
-            store_id: number;
-            status: components["schemas"]["CashSessionStatus"];
-            /** Opening Float */
-            opening_float: string;
-            /** Opened By */
-            opened_by: number;
             /**
              * Opened At
              * Format: date-time
              */
             opened_at: string;
-            /** Closed By */
-            closed_by: number | null;
-            /** Closed At */
-            closed_at: string | null;
-            /** Counted Amount */
-            counted_amount: string | null;
-            /** Expected Amount */
-            expected_amount: string | null;
+            /** Opened By */
+            opened_by: number;
+            /** Opening Float */
+            opening_float: string;
+            status: components["schemas"]["CashSessionStatus"];
+            /** Store Id */
+            store_id: number;
             /** Variance */
             variance: string | null;
         };
@@ -3536,45 +3536,45 @@ export interface components {
          *     reorder_point 為低庫存提醒點。
          */
         CatalogProductCreateRequest: {
-            /** Sku */
-            sku?: string | null;
+            /** Brand Id */
+            brand_id?: number | null;
             /** Name */
             name: string;
-            /** Unit Price */
-            unit_price: number | string;
             /**
              * Reorder Point
              * @default 0
              */
             reorder_point: number;
-            /** Brand Id */
-            brand_id?: number | null;
+            /** Sku */
+            sku?: string | null;
+            /** Unit Price */
+            unit_price: number | string;
         };
         /**
          * CatalogProductDetailRead
          * @description 一般商品明細（庫存逐件「詳細」）：售價/現量＋經銷商進貨歷史＋完整異動歷史。
          */
         CatalogProductDetailRead: {
-            /** Id */
-            id: number;
-            /** Sku */
-            sku: string;
-            /** Name */
-            name: string;
             /** Brand Id */
             brand_id: number | null;
-            /** Unit Price */
-            unit_price: string;
-            /** Unit Cost */
-            unit_cost?: string | null;
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Purchases */
+            purchases: components["schemas"]["CatalogPurchaseRead"][];
             /** Quantity On Hand */
             quantity_on_hand: number;
             /** Reorder Point */
             reorder_point: number;
-            /** Purchases */
-            purchases: components["schemas"]["CatalogPurchaseRead"][];
-            /** History */
-            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Sku */
+            sku: string;
+            /** Unit Cost */
+            unit_cost?: string | null;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * CatalogProductRead
@@ -3584,54 +3584,54 @@ export interface components {
          *     供低庫存提醒判斷是否已有補貨在路上、避免重複採購。清單以外的情境預設 0。
          */
         CatalogProductRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Sku */
-            sku: string;
-            /** Name */
-            name: string;
             /** Brand Id */
             brand_id: number | null;
-            /** Unit Price */
-            unit_price: string;
-            /** Quantity On Hand */
-            quantity_on_hand: number;
-            /** Reorder Point */
-            reorder_point: number;
+            /** Id */
+            id: number;
             /**
              * Incoming Qty
              * @default 0
              */
             incoming_qty: number;
+            /** Name */
+            name: string;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Point */
+            reorder_point: number;
+            /** Sku */
+            sku: string;
+            /** Store Id */
+            store_id: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * CatalogPurchaseRead
          * @description 一般商品的一筆進貨（供應商/訂購量/已收量/進貨單價/狀態/時間）。
          */
         CatalogPurchaseRead: {
-            /** Po Id */
-            po_id: number;
-            /** Supplier Id */
-            supplier_id: number;
-            /** Supplier Name */
-            supplier_name: string;
-            /** Qty */
-            qty: number;
-            /** Received Qty */
-            received_qty: number;
-            /** Unit Cost */
-            unit_cost: string;
-            /** Status */
-            status: string;
             /**
              * Ordered At
              * Format: date-time
              */
             ordered_at: string;
+            /** Po Id */
+            po_id: number;
+            /** Qty */
+            qty: number;
             /** Received At */
             received_at: string | null;
+            /** Received Qty */
+            received_qty: number;
+            /** Status */
+            status: string;
+            /** Supplier Id */
+            supplier_id: number;
+            /** Supplier Name */
+            supplier_name: string;
+            /** Unit Cost */
+            unit_cost: string;
         };
         /**
          * CategoryCreate
@@ -3668,28 +3668,22 @@ export interface components {
          * @description 寄售應付單列（docs/19 §2.5）。輸出寄售人姓名/電話，禁 national_id。
          */
         ConsignmentPayableRow: {
-            /** Settlement Id */
-            settlement_id: number;
+            /** Commission Amount */
+            commission_amount: string;
             /** Consignor Id */
             consignor_id: number | null;
             /** Consignor Name */
             consignor_name: string | null;
             /** Consignor Phone */
             consignor_phone: string | null;
-            /** Sale Id */
-            sale_id: number;
+            /** Gross */
+            gross: string;
             /** Item Code */
             item_code: string;
             /** Item Name */
             item_name: string;
-            /** Gross */
-            gross: string;
-            /** Commission Amount */
-            commission_amount: string;
             /** Payout Amount */
             payout_amount: string;
-            /** Status */
-            status: string;
             /** Reclaim Needed */
             reclaim_needed: boolean;
             /**
@@ -3697,6 +3691,12 @@ export interface components {
              * Format: date-time
              */
             sale_created_at: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Settlement Id */
+            settlement_id: number;
+            /** Status */
+            status: string;
         };
         /**
          * ConsignmentPayablesReport
@@ -3711,18 +3711,18 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /** Status Filter */
-            status_filter: string;
             /** Rows */
             rows: components["schemas"]["ConsignmentPayableRow"][];
-            /** Total Pending Payout */
-            total_pending_payout: string;
-            /** Total Paid Payout */
-            total_paid_payout: string;
+            /** Status Filter */
+            status_filter: string;
+            /** Store Id */
+            store_id: number;
             /** Total Cancelled Payout */
             total_cancelled_payout: string;
+            /** Total Paid Payout */
+            total_paid_payout: string;
+            /** Total Pending Payout */
+            total_pending_payout: string;
             /** Total Reclaim Needed Payout */
             total_reclaim_needed_payout: string;
         };
@@ -3731,46 +3731,46 @@ export interface components {
          * @description 寄售結算查詢輸出（付款工作清單／應付查詢／付款結果）。
          */
         ConsignmentSettlementRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Serialized Item Id */
-            serialized_item_id: number;
-            /** Sale Id */
-            sale_id: number;
-            /** Gross */
-            gross: string;
-            /** Commission Pct */
-            commission_pct: number;
             /** Commission Amount */
             commission_amount: string;
-            /** Payout Amount */
-            payout_amount: string;
-            status: components["schemas"]["ConsignmentSettlementStatus"];
-            /** Paid At */
-            paid_at: string | null;
-            /** Paid By */
-            paid_by: number | null;
-            /** Reclaim Needed */
-            reclaim_needed: boolean;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Item Code */
-            item_code?: string | null;
-            /** Item Name */
-            item_name?: string | null;
+            /** Commission Pct */
+            commission_pct: number;
             /** Consignor Id */
             consignor_id?: number | null;
             /** Consignor Name */
             consignor_name?: string | null;
             /** Consignor Phone */
             consignor_phone?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Gross */
+            gross: string;
+            /** Id */
+            id: number;
+            /** Item Code */
+            item_code?: string | null;
+            /** Item Name */
+            item_name?: string | null;
+            /** Paid At */
+            paid_at: string | null;
+            /** Paid By */
+            paid_by: number | null;
+            /** Payout Amount */
+            payout_amount: string;
+            /** Reclaim Needed */
+            reclaim_needed: boolean;
             /** Sale Created At */
             sale_created_at?: string | null;
+            /** Sale Id */
+            sale_id: number;
+            /** Serialized Item Id */
+            serialized_item_id: number;
+            status: components["schemas"]["ConsignmentSettlementStatus"];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * ConsignmentSettlementStatus
@@ -3784,25 +3784,25 @@ export interface components {
          *     收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。
          */
         ContactCreate: {
-            /** Name */
-            name: string;
-            /** Phone */
-            phone: string;
-            /** National Id */
-            national_id?: string | null;
             /** Address */
             address?: string | null;
-            /** Roles */
-            roles?: components["schemas"]["ContactRole"][];
+            /** Default Carrier Id */
+            default_carrier_id?: string | null;
+            /** Default Carrier Type */
+            default_carrier_type?: string | null;
             /**
              * Member Points
              * @default 0
              */
             member_points: number;
-            /** Default Carrier Type */
-            default_carrier_type?: string | null;
-            /** Default Carrier Id */
-            default_carrier_id?: string | null;
+            /** Name */
+            name: string;
+            /** National Id */
+            national_id?: string | null;
+            /** Phone */
+            phone: string;
+            /** Roles */
+            roles?: components["schemas"]["ContactRole"][];
             /** Source Note */
             source_note?: string | null;
         };
@@ -3827,30 +3827,30 @@ export interface components {
          * @description 聯絡人輸出：national_id 一律遮罩，不回明文。
          */
         ContactRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Name */
-            name: string;
-            /** Phone */
-            phone: string | null;
             /** Address */
             address: string | null;
-            /** Roles */
-            roles: string[];
-            /** Member Points */
-            member_points: number;
-            /** Default Carrier Type */
-            default_carrier_type: string | null;
             /** Default Carrier Id */
             default_carrier_id: string | null;
-            /** Source Note */
-            source_note: string | null;
-            /** National Id Masked */
-            national_id_masked: string | null;
+            /** Default Carrier Type */
+            default_carrier_type: string | null;
             /** Has National Id */
             has_national_id: boolean;
+            /** Id */
+            id: number;
+            /** Member Points */
+            member_points: number;
+            /** Name */
+            name: string;
+            /** National Id Masked */
+            national_id_masked: string | null;
+            /** Phone */
+            phone: string | null;
+            /** Roles */
+            roles: string[];
+            /** Source Note */
+            source_note: string | null;
+            /** Store Id */
+            store_id: number;
         };
         /**
          * ContactRole
@@ -3867,20 +3867,20 @@ export interface components {
          *     member_points 不在此編輯（走點數累積/校正路徑）。
          */
         ContactUpdate: {
-            /** Name */
-            name?: string | null;
-            /** Phone */
-            phone?: string | null;
-            /** National Id */
-            national_id?: string | null;
             /** Address */
             address?: string | null;
-            /** Roles */
-            roles?: components["schemas"]["ContactRole"][] | null;
-            /** Default Carrier Type */
-            default_carrier_type?: string | null;
             /** Default Carrier Id */
             default_carrier_id?: string | null;
+            /** Default Carrier Type */
+            default_carrier_type?: string | null;
+            /** Name */
+            name?: string | null;
+            /** National Id */
+            national_id?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Roles */
+            roles?: components["schemas"]["ContactRole"][] | null;
             /** Source Note */
             source_note?: string | null;
         };
@@ -3905,80 +3905,80 @@ export interface components {
          */
         DailyCashReport: {
             /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /**
              * Date
              * Format: date
              */
             date: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             /** Sessions */
             sessions: components["schemas"]["DailyCashSessionRow"][];
-            /** Total Opening Float */
-            total_opening_float: string;
-            /** Total Cash Sales */
-            total_cash_sales: string;
+            /** Store Id */
+            store_id: number;
             /** Total Acquisition Void In */
             total_acquisition_void_in: string;
             /** Total Buyout Out */
             total_buyout_out: string;
+            /** Total Cash Sales */
+            total_cash_sales: string;
             /** Total Consignment Payout Out */
             total_consignment_payout_out: string;
-            /** Total Sale Refund Out */
-            total_sale_refund_out: string;
-            /** Total Manual Adjust */
-            total_manual_adjust: string;
-            /** Total Expected */
-            total_expected: string;
             /** Total Counted */
             total_counted: string;
-            /** Total Variance */
-            total_variance: string;
+            /** Total Expected */
+            total_expected: string;
+            /** Total Manual Adjust */
+            total_manual_adjust: string;
+            /** Total Opening Float */
+            total_opening_float: string;
+            /** Total Sale Refund Out */
+            total_sale_refund_out: string;
             /** Total Store Credit Redeemed Display Only */
             total_store_credit_redeemed_display_only: string;
+            /** Total Variance */
+            total_variance: string;
         };
         /**
          * DailyCashSessionRow
          * @description 每日現金對帳——單一 session 列（docs/19 §2.2）。
          */
         DailyCashSessionRow: {
-            /** Session Id */
-            session_id: number;
-            /** Status */
-            status: string;
+            /** Acquisition Void In */
+            acquisition_void_in: string;
+            /** Buyout Out */
+            buyout_out: string;
+            /** Cash Sales */
+            cash_sales: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Closed By */
+            closed_by: number | null;
+            /** Consignment Payout Out */
+            consignment_payout_out: string;
+            /** Counted Amount */
+            counted_amount: string | null;
+            /** Expected Amount */
+            expected_amount: string;
+            /** Manual Adjust Total */
+            manual_adjust_total: string;
             /**
              * Opened At
              * Format: date-time
              */
             opened_at: string;
-            /** Closed At */
-            closed_at: string | null;
             /** Opened By */
             opened_by: number;
-            /** Closed By */
-            closed_by: number | null;
             /** Opening Float */
             opening_float: string;
-            /** Cash Sales */
-            cash_sales: string;
-            /** Acquisition Void In */
-            acquisition_void_in: string;
-            /** Buyout Out */
-            buyout_out: string;
-            /** Consignment Payout Out */
-            consignment_payout_out: string;
             /** Sale Refund Out */
             sale_refund_out: string;
-            /** Manual Adjust Total */
-            manual_adjust_total: string;
-            /** Expected Amount */
-            expected_amount: string;
-            /** Counted Amount */
-            counted_amount: string | null;
+            /** Session Id */
+            session_id: number;
+            /** Status */
+            status: string;
             /** Variance */
             variance: string | null;
         };
@@ -3989,80 +3989,80 @@ export interface components {
          *     營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。
          */
         DailySummaryReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** Acquisition Void In */
+            acquisition_void_in: string;
+            /** Avg Ticket */
+            avg_ticket: string | null;
+            /** Buyout Out */
+            buyout_out: string;
+            /** Cash Sales In */
+            cash_sales_in: string;
+            /** Cash Variance */
+            cash_variance: string;
+            /** Cogs */
+            cogs: string;
+            /** Consignment Commission Income */
+            consignment_commission_income: string;
+            /** Consignment Payout Out */
+            consignment_payout_out: string;
+            /** Counted Cash */
+            counted_cash: string;
             /**
              * Date
              * Format: date
              */
             date: string;
-            /** Gross Turnover */
-            gross_turnover: string;
-            /** Recognized Revenue */
-            recognized_revenue: string;
-            /** Net Sales Ex Tax */
-            net_sales_ex_tax: string;
-            /** Tax */
-            tax: string;
-            /** Consignment Commission Income */
-            consignment_commission_income: string;
-            /** Cogs */
-            cogs: string;
-            /** Gross Margin */
-            gross_margin: string;
-            /** Gross Margin Rate */
-            gross_margin_rate: string | null;
-            /** Unknown Cost Sales */
-            unknown_cost_sales: string;
-            /** Food Revenue */
-            food_revenue: string;
-            /** Secondhand Revenue */
-            secondhand_revenue: string;
-            /** Cash Sales In */
-            cash_sales_in: string;
-            /** Acquisition Void In */
-            acquisition_void_in: string;
-            /** Buyout Out */
-            buyout_out: string;
-            /** Consignment Payout Out */
-            consignment_payout_out: string;
-            /** Manual Adjust */
-            manual_adjust: string;
-            /** Total Cash Out */
-            total_cash_out: string;
-            /** Expected Cash */
-            expected_cash: string;
-            /** Counted Cash */
-            counted_cash: string;
-            /** Cash Variance */
-            cash_variance: string;
-            /** Store Credit Issued */
-            store_credit_issued: string;
-            /** Store Credit Redeemed */
-            store_credit_redeemed: string;
-            /** Transaction Count */
-            transaction_count: number;
-            /** Avg Ticket */
-            avg_ticket: string | null;
             /** Estimated Net Income */
             estimated_net_income: string | null;
             /** Estimated Net Income Note */
             estimated_net_income_note: string;
+            /** Expected Cash */
+            expected_cash: string;
+            /** Food Revenue */
+            food_revenue: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /** Manual Adjust */
+            manual_adjust: string;
+            /** Net Sales Ex Tax */
+            net_sales_ex_tax: string;
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /** Secondhand Revenue */
+            secondhand_revenue: string;
+            /** Store Credit Issued */
+            store_credit_issued: string;
+            /** Store Credit Redeemed */
+            store_credit_redeemed: string;
+            /** Store Id */
+            store_id: number;
+            /** Tax */
+            tax: string;
+            /** Total Cash Out */
+            total_cash_out: string;
+            /** Transaction Count */
+            transaction_count: number;
+            /** Unknown Cost Sales */
+            unknown_cost_sales: string;
         };
         /**
          * DineInHourBucket
          * @description **台北時間**的一個小時（0–23）。用 UTC 會讓尖峰整體位移 8 小時。
          */
         DineInHourBucket: {
-            /** Hour */
-            hour: number;
             /** Dine In Groups */
             dine_in_groups: number;
+            /** Hour */
+            hour: number;
             /** Takeout Groups */
             takeout_groups: number;
         };
@@ -4078,13 +4078,6 @@ export interface components {
          */
         DineInReport: {
             /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /**
              * Date From
              * Format: date-time
              */
@@ -4094,13 +4087,20 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             /** Granularity */
             granularity: string;
+            /** Hourly */
+            hourly: components["schemas"]["DineInHourBucket"][];
+            /** Store Id */
+            store_id: number;
             summary: components["schemas"]["DineInSummary"];
             /** Trend */
             trend: components["schemas"]["DineInTrendBucket"][];
-            /** Hourly */
-            hourly: components["schemas"]["DineInHourBucket"][];
         };
         /** DineInSummary */
         DineInSummary: {
@@ -4116,17 +4116,17 @@ export interface components {
          *     而漏轉的症狀是「數字全對、日期悄悄差一天」——最難發現的一種錯。
          */
         DineInTrendBucket: {
+            /** Dine In Groups */
+            dine_in_groups: number;
+            /** Dine In Revenue */
+            dine_in_revenue: string;
             /**
              * Period
              * Format: date
              */
             period: string;
-            /** Dine In Groups */
-            dine_in_groups: number;
             /** Takeout Groups */
             takeout_groups: number;
-            /** Dine In Revenue */
-            dine_in_revenue: string;
             /** Takeout Revenue */
             takeout_revenue: string;
         };
@@ -4135,12 +4135,12 @@ export interface components {
          * @description 一位店員在期間內打出的折扣（無核准機制 → 事後稽核靠這個看得出異常）。
          */
         DiscountClerkRow: {
+            /** Adjustment Count */
+            adjustment_count: number;
             /** Clerk User Id */
             clerk_user_id: number;
             /** Clerk Username */
             clerk_username: string;
-            /** Adjustment Count */
-            adjustment_count: number;
             /** Discount Total */
             discount_total: string;
         };
@@ -4149,18 +4149,18 @@ export interface components {
          * @description 一個折扣原因在期間內的使用情形。
          */
         DiscountReasonRow: {
-            /** Reason Id */
-            reason_id: number | null;
-            /** Reason Name */
-            reason_name: string;
             /** Adjustment Count */
             adjustment_count: number;
+            /** Discount Total */
+            discount_total: string;
             /** Item Discount Total */
             item_discount_total: string;
             /** Order Discount Total */
             order_discount_total: string;
-            /** Discount Total */
-            discount_total: string;
+            /** Reason Id */
+            reason_id: number | null;
+            /** Reason Name */
+            reason_name: string;
         };
         /**
          * DiscountReport
@@ -4170,13 +4170,12 @@ export interface components {
          *     重算會讓歷史折扣跟著漂。無主管核准機制，這份報表是事後稽核的主要依據。
          */
         DiscountReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** Adjustment Count */
+            adjustment_count: number;
+            /** By Clerk */
+            by_clerk: components["schemas"]["DiscountClerkRow"][];
+            /** By Reason */
+            by_reason: components["schemas"]["DiscountReasonRow"][];
             /**
              * Date From
              * Format: date-time
@@ -4189,16 +4188,17 @@ export interface components {
             date_to: string;
             /** Discount Total */
             discount_total: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             /** Item Discount Total */
             item_discount_total: string;
             /** Order Discount Total */
             order_discount_total: string;
-            /** Adjustment Count */
-            adjustment_count: number;
-            /** By Reason */
-            by_reason: components["schemas"]["DiscountReasonRow"][];
-            /** By Clerk */
-            by_clerk: components["schemas"]["DiscountClerkRow"][];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * EInvoiceAction
@@ -4231,39 +4231,39 @@ export interface components {
          * @description 上傳佇列項目輸出（GET /einvoice/queue）。
          */
         EInvoiceQueueItemRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
             action: components["schemas"]["EInvoiceAction"];
-            message_type: components["schemas"]["EInvoiceMessageType"];
-            /** Invoice Id */
-            invoice_id: number | null;
             /** Allowance Id */
             allowance_id: number | null;
-            status: components["schemas"]["UploadStatus"];
             /** Attempts */
             attempts: number;
-            /** Xml Path */
-            xml_path: string | null;
-            /** Xml Sha256 */
-            xml_sha256: string | null;
-            /** Dropped At */
-            dropped_at: string | null;
-            /** Uploaded At */
-            uploaded_at: string | null;
-            /** Last Error */
-            last_error: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Dropped At */
+            dropped_at: string | null;
+            /** Id */
+            id: number;
+            /** Invoice Id */
+            invoice_id: number | null;
+            /** Last Error */
+            last_error: string | null;
+            message_type: components["schemas"]["EInvoiceMessageType"];
+            status: components["schemas"]["UploadStatus"];
+            /** Store Id */
+            store_id: number;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
+            /** Uploaded At */
+            uploaded_at: string | null;
+            /** Xml Path */
+            xml_path: string | null;
+            /** Xml Sha256 */
+            xml_sha256: string | null;
         };
         /**
          * EInvoiceQueueListRead
@@ -4285,34 +4285,37 @@ export interface components {
          *     此輸入讓平台結果可先被記錄並驅動佇列/發票狀態。
          */
         EInvoiceResultRequest: {
-            /** Success */
-            success: boolean;
+            /** Delivery Attempt */
+            delivery_attempt?: number | null;
             /**
              * Kind
              * @default PROCESS
              */
             kind: string;
-            /** Status Code */
-            status_code?: string | null;
             /** Message */
             message?: string | null;
             /** Source Ref */
             source_ref?: string | null;
-            /** Delivery Attempt */
-            delivery_attempt?: number | null;
+            /** Status Code */
+            status_code?: string | null;
+            /** Success */
+            success: boolean;
         };
         /**
          * EffectivenessReport
          * @description §5B 效益指標報表（單期間）。estimate_fields 所列為估計值，須於 UI 標示。
          */
         EffectivenessReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** Alpha Incremental */
+            alpha_incremental: string | null;
+            /** Alpha Method Note */
+            alpha_method_note: string;
+            /** Alpha Sample Insufficient */
+            alpha_sample_insufficient: boolean;
+            /** Avg Premium Rate */
+            avg_premium_rate: string | null;
+            /** Beta Retention */
+            beta_retention: string | null;
             /**
              * Date From
              * Format: date-time
@@ -4323,52 +4326,49 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
-            /** Take Rate */
-            take_rate: string | null;
-            /** Avg Premium Rate */
-            avg_premium_rate: string | null;
-            /** Beta Retention */
-            beta_retention: string | null;
-            /** Excess Spend Rate */
-            excess_spend_rate: string | null;
-            /** Alpha Incremental */
-            alpha_incremental: string | null;
-            /** Gross Margin M */
-            gross_margin_m: string | null;
             /** Delta Per 1000 */
             delta_per_1000: string | null;
-            /** Redemption Count */
-            redemption_count: number;
-            /** Alpha Sample Insufficient */
-            alpha_sample_insufficient: boolean;
             /** Estimate Fields */
             estimate_fields: string[];
-            /** Alpha Method Note */
-            alpha_method_note: string;
+            /** Excess Spend Rate */
+            excess_spend_rate: string | null;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Gross Margin M */
+            gross_margin_m: string | null;
+            /** Redemption Count */
+            redemption_count: number;
+            /** Store Id */
+            store_id: number;
+            /** Take Rate */
+            take_rate: string | null;
         };
         /** FlowRow */
         FlowRow: {
+            /** Adjustment Net */
+            adjustment_net: string;
+            /** Issued */
+            issued: string;
+            /** Issued Gross */
+            issued_gross: string;
+            /** Issued Reversed */
+            issued_reversed: string;
+            /** Net Change */
+            net_change: string;
             /**
              * Period
              * Format: date
              */
             period: string;
-            /** Issued */
-            issued: string;
             /** Redeemed */
             redeemed: string;
-            /** Net Change */
-            net_change: string;
-            /** Issued Gross */
-            issued_gross: string;
-            /** Issued Reversed */
-            issued_reversed: string;
             /** Redeemed Gross */
             redeemed_gross: string;
             /** Redeemed Reversed */
             redeemed_reversed: string;
-            /** Adjustment Net */
-            adjustment_net: string;
         };
         /**
          * FlowsReport
@@ -4376,15 +4376,6 @@ export interface components {
          */
         FlowsReport: {
             /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /** Granularity */
-            granularity: string;
-            /**
              * Date From
              * Format: date-time
              */
@@ -4394,40 +4385,49 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Granularity */
+            granularity: string;
             /** Rows */
             rows: components["schemas"]["FlowRow"][];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * GiftProductRow
          * @description 被當成贈品送出去最多的品項。
          */
         GiftProductRow: {
+            /** Cost */
+            cost: string;
             /** Description */
             description: string;
             /** Gift Qty */
             gift_qty: number;
             /** Retail Value */
             retail_value: string;
-            /** Cost */
-            cost: string;
         };
         /**
          * GiftReasonRow
          * @description 一個贈送原因在期間內送出的數量、原價價值與成本。
          */
         GiftReasonRow: {
-            /** Reason Id */
-            reason_id: number | null;
-            /** Reason Name */
-            reason_name: string;
+            /** Cost */
+            cost: string;
             /** Gift Count */
             gift_count: number;
             /** Gift Qty */
             gift_qty: number;
+            /** Reason Id */
+            reason_id: number | null;
+            /** Reason Name */
+            reason_name: string;
             /** Retail Value */
             retail_value: string;
-            /** Cost */
-            cost: string;
         };
         /**
          * GiftReport
@@ -4438,13 +4438,12 @@ export interface components {
          *     `GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。
          */
         GiftReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** By Product */
+            by_product: components["schemas"]["GiftProductRow"][];
+            /** By Reason */
+            by_reason: components["schemas"]["GiftReasonRow"][];
+            /** Cost */
+            cost: string;
             /**
              * Date From
              * Format: date-time
@@ -4455,16 +4454,17 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             /** Gift Qty */
             gift_qty: number;
             /** Retail Value */
             retail_value: string;
-            /** Cost */
-            cost: string;
-            /** By Reason */
-            by_reason: components["schemas"]["GiftReasonRow"][];
-            /** By Product */
-            by_product: components["schemas"]["GiftProductRow"][];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * GoodsReceiptRead
@@ -4473,6 +4473,7 @@ export interface components {
         GoodsReceiptRead: {
             /** Id */
             id: number;
+            invoice?: components["schemas"]["InputInvoiceRead"] | null;
             /**
              * Received At
              * Format: date-time
@@ -4480,7 +4481,6 @@ export interface components {
             received_at: string;
             /** Received By */
             received_by: number;
-            invoice?: components["schemas"]["InputInvoiceRead"] | null;
         };
         /**
          * Grade
@@ -4509,64 +4509,61 @@ export interface components {
          *     settings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。
          */
         InputInvoiceIn: {
-            /** Invoice Number */
-            invoice_number: string;
             /**
              * Invoice Date
              * Format: date
              */
             invoice_date: string;
+            /** Invoice Number */
+            invoice_number: string;
             /** Invoice Total */
             invoice_total: number | string;
         };
         /** InputInvoiceRead */
         InputInvoiceRead: {
-            /** Invoice Number */
-            invoice_number: string;
             /**
              * Invoice Date
              * Format: date
              */
             invoice_date: string;
-            /** Invoice Total */
-            invoice_total: string;
             /** Invoice Net */
             invoice_net: string;
+            /** Invoice Number */
+            invoice_number: string;
             /** Invoice Tax */
             invoice_tax: string;
+            /** Invoice Total */
+            invoice_total: string;
         };
         /**
          * InsightsBreakdownRow
          * @description 經營洞察：單一品牌或類型的售出彙整列。
          */
         InsightsBreakdownRow: {
+            /** Avg Days In Stock */
+            avg_days_in_stock: number | null;
+            /** Avg Unit Price */
+            avg_unit_price: string;
             /** Key */
             key: number | null;
             /** Label */
             label: string;
-            /** Units Sold */
-            units_sold: number;
-            /** Revenue */
-            revenue: string;
             /** Margin */
             margin: string;
-            /** Avg Unit Price */
-            avg_unit_price: string;
-            /** Avg Days In Stock */
-            avg_days_in_stock: number | null;
+            /** Revenue */
+            revenue: string;
+            /** Units Sold */
+            units_sold: number;
         };
         /**
          * InsightsReport
          * @description 經營洞察報表（#8）：品牌/類型暢銷、周轉/滯銷、業態結構。趨勢另走 /reports/trends。
          */
         InsightsReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** Brand Breakdown */
+            brand_breakdown: components["schemas"]["InsightsBreakdownRow"][];
+            /** Category Breakdown */
+            category_breakdown: components["schemas"]["InsightsBreakdownRow"][];
             /**
              * Date From
              * Format: date-time
@@ -4577,42 +4574,45 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
-            /** Brand Breakdown */
-            brand_breakdown: components["schemas"]["InsightsBreakdownRow"][];
-            /** Category Breakdown */
-            category_breakdown: components["schemas"]["InsightsBreakdownRow"][];
-            turnover: components["schemas"]["InsightsTurnover"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             revenue_mix: components["schemas"]["InsightsRevenueMix"];
+            /** Store Id */
+            store_id: number;
+            turnover: components["schemas"]["InsightsTurnover"];
         };
         /**
          * InsightsRevenueMix
          * @description 經營洞察：業態營收結構（認列口徑：寄售只認抽成）。
          */
         InsightsRevenueMix: {
-            /** Secondhand */
-            secondhand: string;
             /** Consignment Commission */
             consignment_commission: string;
             /** Food */
             food: string;
+            /** Secondhand */
+            secondhand: string;
         };
         /**
          * InsightsTurnover
          * @description 經營洞察：周轉 / 滯銷摘要。
          */
         InsightsTurnover: {
-            /** In Stock Over 90D */
-            in_stock_over_90d: number;
             /** Avg Turnover Days */
             avg_turnover_days: number | null;
-            /** Owned Serialized */
-            owned_serialized: number;
-            /** Consignment Serialized */
-            consignment_serialized: number;
             /** Bulk On Sale */
             bulk_on_sale: number;
             /** Catalog In Stock */
             catalog_in_stock: number;
+            /** Consignment Serialized */
+            consignment_serialized: number;
+            /** In Stock Over 90D */
+            in_stock_over_90d: number;
+            /** Owned Serialized */
+            owned_serialized: number;
         };
         /**
          * InventoryValueReport
@@ -4623,101 +4623,101 @@ export interface components {
          *     已售/退場（SOLD/SOLD_OUT/RETURNED/WRITTEN_OFF、remaining=0）不入在庫。
          */
         InventoryValueReport: {
-            /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /** Owned Serialized Count */
-            owned_serialized_count: number;
-            /** Owned Serialized Cost */
-            owned_serialized_cost: string;
-            /** Owned Serialized Retail */
-            owned_serialized_retail: string;
-            /** Owned Bulk Remaining Qty */
-            owned_bulk_remaining_qty: number;
-            /** Owned Bulk Cost */
-            owned_bulk_cost: string;
-            /** Owned Bulk Retail */
-            owned_bulk_retail: string;
-            /** Total Owned Cost Value */
-            total_owned_cost_value: string;
-            /** Total Owned Retail Value */
-            total_owned_retail_value: string;
-            /** Consignment Serialized Count */
-            consignment_serialized_count: number;
-            /** Consignment Bulk Remaining Qty */
-            consignment_bulk_remaining_qty: number;
-            /** Consignment Inventory Gross */
-            consignment_inventory_gross: string;
-            /** Catalog Total Qty */
-            catalog_total_qty: number;
-            /** Catalog Retail Value */
-            catalog_retail_value: string;
             /** Catalog Cost Value */
             catalog_cost_value: string | null;
+            /** Catalog Retail Value */
+            catalog_retail_value: string;
+            /** Catalog Total Qty */
+            catalog_total_qty: number;
             /**
              * Catalog Unknown Cost Qty
              * @default 0
              */
             catalog_unknown_cost_qty: number;
+            /** Consignment Bulk Remaining Qty */
+            consignment_bulk_remaining_qty: number;
+            /** Consignment Inventory Gross */
+            consignment_inventory_gross: string;
+            /** Consignment Serialized Count */
+            consignment_serialized_count: number;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Owned Bulk Cost */
+            owned_bulk_cost: string;
+            /** Owned Bulk Remaining Qty */
+            owned_bulk_remaining_qty: number;
+            /** Owned Bulk Retail */
+            owned_bulk_retail: string;
             owned_cost_aging: components["schemas"]["AgingBuckets"];
+            /** Owned Serialized Cost */
+            owned_serialized_cost: string;
+            /** Owned Serialized Count */
+            owned_serialized_count: number;
+            /** Owned Serialized Retail */
+            owned_serialized_retail: string;
+            /** Store Id */
+            store_id: number;
+            /** Total Owned Cost Value */
+            total_owned_cost_value: string;
+            /** Total Owned Retail Value */
+            total_owned_retail_value: string;
         };
         /**
          * InvoiceRead
          * @description 發票輸出（GET /invoices/{id}）。
          */
         InvoiceRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Sale Id */
-            sale_id: number;
-            invoice_type: components["schemas"]["InvoiceType"];
-            /** Invoice No */
-            invoice_no: string | null;
-            /** Invoice Date */
-            invoice_date: string | null;
-            /** Invoice Time */
-            invoice_time: string | null;
-            /** Random Number */
-            random_number: string | null;
             /** Barcode Text */
             barcode_text: string | null;
-            /** Qrcode Left */
-            qrcode_left: string | null;
-            /** Qrcode Right */
-            qrcode_right: string | null;
-            /** Buyer Tax Id */
-            buyer_tax_id: string | null;
             /** Buyer Name */
             buyer_name: string | null;
-            /** Carrier Type */
-            carrier_type: string | null;
+            /** Buyer Tax Id */
+            buyer_tax_id: string | null;
             /** Carrier Id */
             carrier_id: string | null;
-            /** Donate Mark */
-            donate_mark: boolean;
-            /** Npoban */
-            npoban: string | null;
-            /** Print Mark */
-            print_mark: boolean;
-            /** Net */
-            net: string;
-            /** Tax */
-            tax: string;
-            /** Total */
-            total: string;
-            status: components["schemas"]["InvoiceStatus"];
-            issue_channel: components["schemas"]["EInvoiceIssueChannel"];
+            /** Carrier Type */
+            carrier_type: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Donate Mark */
+            donate_mark: boolean;
+            /** Id */
+            id: number;
+            /** Invoice Date */
+            invoice_date: string | null;
+            /** Invoice No */
+            invoice_no: string | null;
+            /** Invoice Time */
+            invoice_time: string | null;
+            invoice_type: components["schemas"]["InvoiceType"];
+            issue_channel: components["schemas"]["EInvoiceIssueChannel"];
+            /** Net */
+            net: string;
+            /** Npoban */
+            npoban: string | null;
+            /** Print Mark */
+            print_mark: boolean;
+            /** Qrcode Left */
+            qrcode_left: string | null;
+            /** Qrcode Right */
+            qrcode_right: string | null;
+            /** Random Number */
+            random_number: string | null;
+            /** Sale Id */
+            sale_id: number;
+            status: components["schemas"]["InvoiceStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
         };
         /**
          * InvoiceReprintPayloadRead
@@ -4762,10 +4762,10 @@ export interface components {
             at: string;
             /** Event */
             event: string;
-            /** Qty */
-            qty: number;
             /** Note */
             note?: string | null;
+            /** Qty */
+            qty: number;
         };
         /**
          * ItemSourceRead
@@ -4774,12 +4774,12 @@ export interface components {
         ItemSourceRead: {
             /** Contact Id */
             contact_id: number | null;
+            /** Kind */
+            kind: string;
             /** Name */
             name: string | null;
             /** Phone */
             phone: string | null;
-            /** Kind */
-            kind: string;
         };
         /** KioskActivityRequest */
         KioskActivityRequest: {
@@ -4791,14 +4791,14 @@ export interface components {
          * @description 客顯渲染所需最小購物車視圖；不暴露櫃檯／裝置內部識別。
          */
         KioskCartSessionRead: {
+            /** Changes */
+            changes: components["schemas"]["CartChangeRead"][];
             /** Id */
             id: number;
-            status: components["schemas"]["CartSessionStatus"];
             /** Revision */
             revision: number;
             snapshot: components["schemas"]["CartSnapshotRead"];
-            /** Changes */
-            changes: components["schemas"]["CartChangeRead"][];
+            status: components["schemas"]["CartSessionStatus"];
             /**
              * Updated At
              * Format: date-time
@@ -4807,14 +4807,14 @@ export interface components {
         };
         /** KioskDeviceLoginRequest */
         KioskDeviceLoginRequest: {
-            /** Username */
-            username: string;
-            /** Password */
-            password: string;
             /** Installation Id */
             installation_id: string;
             /** Label */
             label: string;
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
         };
         /** KioskDeviceRead */
         KioskDeviceRead: {
@@ -4822,35 +4822,35 @@ export interface components {
             device_id: number;
             /** Label */
             label: string;
+            paired_terminal: components["schemas"]["TerminalSummary"] | null;
             /** Pairing Code */
             pairing_code: string | null;
             /** Pairing Code Expires At */
             pairing_code_expires_at: string | null;
-            paired_terminal: components["schemas"]["TerminalSummary"] | null;
         };
         /** KioskDeviceSessionRead */
         KioskDeviceSessionRead: {
+            /** Csrf Token */
+            csrf_token: string;
             /** Device Id */
             device_id: number;
             /** Label */
             label: string;
-            /** Csrf Token */
-            csrf_token: string;
+            paired_terminal: components["schemas"]["TerminalSummary"] | null;
             /** Pairing Code */
             pairing_code: string | null;
             /** Pairing Code Expires At */
             pairing_code_expires_at: string | null;
-            paired_terminal: components["schemas"]["TerminalSummary"] | null;
         };
         /** KioskHeartbeatRead */
         KioskHeartbeatRead: {
-            /** Online */
-            online: boolean;
             /**
              * Last Seen At
              * Format: date-time
              */
             last_seen_at: string;
+            /** Online */
+            online: boolean;
         };
         /** KioskHeartbeatRequest */
         KioskHeartbeatRequest: {
@@ -4861,85 +4861,85 @@ export interface components {
         };
         /** KioskSignRequest */
         KioskSignRequest: {
-            /** Signature Image Base64 */
-            signature_image_base64: string;
             chosen_payout?: components["schemas"]["PayoutMethod"] | null;
             /** Idempotency Key */
             idempotency_key?: string | null;
+            /** Signature Image Base64 */
+            signature_image_base64: string;
         };
         /** KioskSummary */
         KioskSummary: {
-            /** Id */
-            id: number;
-            /** Label */
-            label: string;
-            /** Online */
-            online: boolean;
-            /** Last Seen At */
-            last_seen_at: string | null;
             /** Current Session Id */
             current_session_id: number | null;
             /** Displayed Revision */
             displayed_revision: number;
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /** Online */
+            online: boolean;
         };
         /**
          * KioskTaskRead
          * @description 客顯最小任務視圖；不送店別、會員主鍵、來源單據或歷史綁定資訊。
          */
         KioskTaskRead: {
-            /** Id */
-            id: number;
-            kind: components["schemas"]["SignatureTaskKind"];
-            status: components["schemas"]["SignatureTaskStatus"];
+            /** Agreement Body */
+            agreement_body: string | null;
+            /** Agreement Title */
+            agreement_title: string | null;
+            chosen_payout: components["schemas"]["PayoutMethod"] | null;
             /** Content */
             content: {
                 [key: string]: unknown;
             };
-            chosen_payout: components["schemas"]["PayoutMethod"] | null;
             /** Expires At */
             expires_at: string | null;
-            /** Agreement Title */
-            agreement_title: string | null;
-            /** Agreement Body */
-            agreement_body: string | null;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["SignatureTaskKind"];
+            status: components["schemas"]["SignatureTaskStatus"];
         };
         /**
          * LiabilityReport
          * @description §5A 購物金負債報表。
          */
         LiabilityReport: {
+            aging_buckets: components["schemas"]["AgingBuckets"];
             /**
              * Generated At
              * Format: date-time
              */
             generated_at: string;
+            /** Liability Health Ratio */
+            liability_health_ratio: string | null;
+            /** Per Member */
+            per_member: components["schemas"]["MemberBalanceRow"][];
             /** Store Id */
             store_id: number;
             /** Total Outstanding */
             total_outstanding: string;
-            aging_buckets: components["schemas"]["AgingBuckets"];
-            /** Per Member */
-            per_member: components["schemas"]["MemberBalanceRow"][];
-            /** Liability Health Ratio */
-            liability_health_ratio: string | null;
         };
         /**
          * LinePayRefundAttemptRead
          * @description 未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。
          */
         LinePayRefundAttemptRead: {
-            /** Id */
-            id: number;
-            /** Order Id */
-            order_id: string;
             /** Amount */
             amount: string;
-            status: components["schemas"]["LinePayRefundStatus"];
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            /** Order Id */
+            order_id: string;
+            status: components["schemas"]["LinePayRefundStatus"];
         };
         /**
          * LinePayRefundResolveRequest
@@ -4964,10 +4964,10 @@ export interface components {
          * @description 登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。
          */
         LoginRequest: {
-            /** Username */
-            username: string;
             /** Password */
             password: string;
+            /** Username */
+            username: string;
         };
         /**
          * ManualInvoiceRegisterRequest
@@ -4978,21 +4978,21 @@ export interface components {
          *     不一定寫得清楚，不強迫店員亂填。
          */
         ManualInvoiceRegisterRequest: {
-            /** Invoice No */
-            invoice_no: string;
             /**
              * Invoice Date
              * Format: date
              */
             invoice_date: string;
+            /** Invoice No */
+            invoice_no: string;
             /** Invoice Time */
             invoice_time?: string | null;
+            /** Note */
+            note?: string | null;
             /** Random Number */
             random_number?: string | null;
             /** Total */
             total: number | string;
-            /** Note */
-            note?: string | null;
         };
         /** MaskedMemberRead */
         MaskedMemberRead: {
@@ -5001,32 +5001,32 @@ export interface components {
         };
         /** MemberBalanceRow */
         MemberBalanceRow: {
+            /** Balance */
+            balance: string;
             /** Contact Id */
             contact_id: number;
             /** Name */
             name: string;
-            /** Balance */
-            balance: string;
         };
         /**
          * MemberConsignmentRead
          * @description 寄售品一列；若為已售序號品則帶其結算資訊。
          */
         MemberConsignmentRead: {
-            /** Kind */
-            kind: string;
             /** Code */
             code: string;
-            /** Name */
-            name: string;
-            /** Item Status */
-            item_status: string;
+            /** Commission Amount */
+            commission_amount?: string | null;
             /** Commission Pct */
             commission_pct: number | null;
             /** Gross */
             gross?: string | null;
-            /** Commission Amount */
-            commission_amount?: string | null;
+            /** Item Status */
+            item_status: string;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
             /** Payout Amount */
             payout_amount?: string | null;
             /** Settlement Status */
@@ -5046,10 +5046,10 @@ export interface components {
         };
         /** MemberOverviewCounts */
         MemberOverviewCounts: {
-            /** Purchases */
-            purchases: number;
             /** Consigned Items */
             consigned_items: number;
+            /** Purchases */
+            purchases: number;
         };
         /**
          * MemberOverviewRead
@@ -5057,194 +5057,194 @@ export interface components {
          */
         MemberOverviewRead: {
             contact: components["schemas"]["ContactRead"];
+            counts: components["schemas"]["MemberOverviewCounts"];
             /** Member Points */
             member_points: number;
-            /** Store Credit Balance */
-            store_credit_balance: string;
             /** Pending Consignment Payout */
             pending_consignment_payout: string;
-            counts: components["schemas"]["MemberOverviewCounts"];
             /** Recent Purchases */
             recent_purchases: components["schemas"]["MemberPurchaseRead"][];
+            /** Store Credit Balance */
+            store_credit_balance: string;
         };
         /**
          * MemberPurchaseDetailRead
          * @description 單筆消費明細（lines + tenders）。
          */
         MemberPurchaseDetailRead: {
-            /** Sale Id */
-            sale_id: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Subtotal */
-            subtotal: string;
-            /** Tax */
-            tax: string;
-            /** Total */
-            total: string;
-            /** Payment Method */
-            payment_method: string;
-            /** Status */
-            status: string;
             /** Invoice Status */
             invoice_status: string;
             /** Lines */
             lines: components["schemas"]["MemberPurchaseLineRead"][];
+            /** Payment Method */
+            payment_method: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Status */
+            status: string;
+            /** Subtotal */
+            subtotal: string;
+            /** Tax */
+            tax: string;
             /** Tenders */
             tenders: components["schemas"]["MemberPurchaseTenderRead"][];
+            /** Total */
+            total: string;
         };
         /** MemberPurchaseLineRead */
         MemberPurchaseLineRead: {
-            /** Line Type */
-            line_type: string;
             /** Description */
             description: string;
-            /** Qty */
-            qty: number;
-            /** Unit Price */
-            unit_price: string;
+            /**
+             * Line Kind
+             * @default NORMAL
+             */
+            line_kind: string;
             /** Line Total */
             line_total: string;
-            /**
-             * Net Amount
-             * @default 0
-             */
-            net_amount: string;
+            /** Line Type */
+            line_type: string;
             /**
              * Manual Discount Amount
              * @default 0
              */
             manual_discount_amount: string;
             /**
-             * Line Kind
-             * @default NORMAL
+             * Net Amount
+             * @default 0
              */
-            line_kind: string;
+            net_amount: string;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * MemberPurchaseRead
          * @description 消費紀錄一列（清單摘要）。
          */
         MemberPurchaseRead: {
-            /** Sale Id */
-            sale_id: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Total */
-            total: string;
-            /** Payment Method */
-            payment_method: string;
-            /** Status */
-            status: string;
             /** Invoice Status */
             invoice_status: string;
             /** Line Count */
             line_count: number;
+            /** Payment Method */
+            payment_method: string;
+            /** Sale Id */
+            sale_id: number;
+            /** Status */
+            status: string;
+            /** Total */
+            total: string;
         };
         /** MemberPurchaseTenderRead */
         MemberPurchaseTenderRead: {
-            /** Tender Type */
-            tender_type: string;
             /** Amount */
             amount: string;
+            /** Tender Type */
+            tender_type: string;
         };
         /**
          * MemberSourcedItemRead
          * @description 會員帶來的商品（買斷+寄售合併清單；不含成本）。
          */
         MemberSourcedItemRead: {
-            /** Source Type */
-            source_type: string;
-            /** Kind */
-            kind: string;
-            /** Code */
-            code: string;
-            /** Name */
-            name: string;
-            /** Status */
-            status: string;
             /** Acquisition Id */
             acquisition_id: number | null;
+            /** Code */
+            code: string;
             /**
              * Intake Date
              * Format: date-time
              */
             intake_date: string;
+            /** Kind */
+            kind: string;
             /** Listed Price */
             listed_price: string;
+            /** Name */
+            name: string;
+            /** Source Type */
+            source_type: string;
+            /** Status */
+            status: string;
         };
         /**
          * MemberWithCreditRead
          * @description 會員清單列：基本資料 + 點數 + 購物金餘額（整數元字串）。national_id 一律遮罩。
          */
         MemberWithCreditRead: {
+            /** Has National Id */
+            has_national_id: boolean;
             /** Id */
             id: number;
+            /** Member Points */
+            member_points: number;
             /** Name */
             name: string;
             /** Phone */
             phone: string | null;
             /** Roles */
             roles: string[];
-            /** Member Points */
-            member_points: number;
-            /** Has National Id */
-            has_national_id: boolean;
             /** Store Credit Balance */
             store_credit_balance: string;
         };
         /** MenuItemCreateRequest */
         MenuItemCreateRequest: {
-            /** Name */
-            name: string;
-            /** Unit Price */
-            unit_price: number | string;
             /** Category */
             category?: string | null;
+            /** Name */
+            name: string;
             /**
              * Sort Order
              * @default 0
              */
             sort_order: number;
+            /** Unit Price */
+            unit_price: number | string;
         };
         /** MenuItemRead */
         MenuItemRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Name */
-            name: string;
-            /** Unit Price */
-            unit_price: string;
             /** Category */
             category: string | null;
+            /** Id */
+            id: number;
             /** Is Available */
             is_available: boolean;
+            /** Name */
+            name: string;
             /** Sort Order */
             sort_order: number;
+            /** Store Id */
+            store_id: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * MenuItemUpdateRequest
          * @description 部分更新；未提供的欄位不變。category 可明確設為 null 以清空。
          */
         MenuItemUpdateRequest: {
-            /** Name */
-            name?: string | null;
-            /** Unit Price */
-            unit_price?: number | string | null;
             /** Category */
             category?: string | null;
-            /** Sort Order */
-            sort_order?: number | null;
             /** Is Available */
             is_available?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
         };
         /**
          * OwnershipType
@@ -5265,21 +5265,21 @@ export interface components {
          * @description 單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。
          */
         PaymentMethodTotal: {
+            /** Fee */
+            fee: string;
             /** Method */
             method: string;
             /** Received */
             received: string;
-            /** Fee */
-            fee: string;
         };
         /** PaymentReconciliationRead */
         PaymentReconciliationRead: {
+            cart: components["schemas"]["StaffCartSessionRead"];
             /**
              * Outcome
              * @enum {string}
              */
             outcome: "SUCCESS_CONFIRMED" | "FAILED_CONFIRMED" | "STILL_UNCERTAIN";
-            cart: components["schemas"]["StaffCartSessionRead"];
         };
         /** PaymentReconciliationRequest */
         PaymentReconciliationRequest: {
@@ -5288,12 +5288,12 @@ export interface components {
              * @enum {string}
              */
             action: "QUERY_PROVIDER" | "MANUAL_SUCCESS" | "MANUAL_FAILED";
-            /** Reason */
-            reason?: string | null;
-            /** Evidence Type */
-            evidence_type?: string | null;
             /** Evidence Reference */
             evidence_reference?: string | null;
+            /** Evidence Type */
+            evidence_type?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * PayoutMethod
@@ -5306,23 +5306,23 @@ export interface components {
          * @description 溢價率變更留痕輸出（docs/16 §1.3）。
          */
         PremiumRateHistoryRead: {
-            /** Id */
-            id: number;
-            /** Changed By */
-            changed_by: number;
             /**
              * Changed At
              * Format: date-time
              */
             changed_at: string;
-            /** Old Rate */
-            old_rate: string;
+            /** Changed By */
+            changed_by: number;
+            /** Id */
+            id: number;
             /** New Rate */
             new_rate: string;
-            /** Suggested Rate At Change */
-            suggested_rate_at_change: string | null;
+            /** Old Rate */
+            old_rate: string;
             /** Reason */
             reason: string | null;
+            /** Suggested Rate At Change */
+            suggested_rate_at_change: string | null;
         };
         /**
          * PremiumSuggestionResponse
@@ -5332,25 +5332,25 @@ export interface components {
          *     為審計用 JSONB 快照（各視窗指標、綜合值、正規化權重、各約束中間值）。溢價率以字串表示。
          */
         PremiumSuggestionResponse: {
-            /** Store Id */
-            store_id: number;
+            /** Constraint Values */
+            constraint_values: {
+                [key: string]: unknown;
+            };
+            /** Engine Version */
+            engine_version: string;
             /**
              * For Date
              * Format: date
              */
             for_date: string;
-            /** Suggested Rate */
-            suggested_rate: string;
             /** Insufficient Data */
             insufficient_data: boolean;
-            /** Engine Version */
-            engine_version: string;
+            /** Store Id */
+            store_id: number;
+            /** Suggested Rate */
+            suggested_rate: string;
             /** Window Metrics */
             window_metrics: {
-                [key: string]: unknown;
-            };
-            /** Constraint Values */
-            constraint_values: {
                 [key: string]: unknown;
             };
         };
@@ -5408,17 +5408,15 @@ export interface components {
          * @description 型號輸出（收購頁 combobox；選型號帶出其品牌）。
          */
         ProductModelRead: {
-            /** Id */
-            id: number;
             /** Brand Id */
             brand_id: number;
+            /** Id */
+            id: number;
             /** Name */
             name: string;
         };
         /** PurchaseOrderCreate */
         PurchaseOrderCreate: {
-            /** Supplier Id */
-            supplier_id: number;
             /** Lines */
             lines: components["schemas"]["PurchaseOrderLineCreate"][];
             /**
@@ -5426,6 +5424,8 @@ export interface components {
              * @default false
              */
             submit: boolean;
+            /** Supplier Id */
+            supplier_id: number;
         };
         /** PurchaseOrderLineCreate */
         PurchaseOrderLineCreate: {
@@ -5438,60 +5438,60 @@ export interface components {
         };
         /** PurchaseOrderLineRead */
         PurchaseOrderLineRead: {
-            /** Id */
-            id: number;
             /** Catalog Product Id */
             catalog_product_id: number;
+            /** Id */
+            id: number;
+            /** Line Total */
+            line_total: string;
             /** Qty */
             qty: number;
             /** Received Qty */
             received_qty: number;
             /** Unit Cost */
             unit_cost: string;
-            /** Line Total */
-            line_total: string;
         };
         /** PurchaseOrderRead */
         PurchaseOrderRead: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
             /** Id */
             id: number;
+            /** Lines */
+            lines: components["schemas"]["PurchaseOrderLineRead"][];
+            /**
+             * Ordered At
+             * Format: date-time
+             */
+            ordered_at: string;
+            /** Ordered By */
+            ordered_by: number;
+            /**
+             * Receipts
+             * @default []
+             */
+            receipts: components["schemas"]["GoodsReceiptRead"][];
+            /** Received At */
+            received_at: string | null;
+            /** Received By */
+            received_by: number | null;
+            status: components["schemas"]["PurchaseOrderStatus"];
             /** Store Id */
             store_id: number;
             /** Supplier Id */
             supplier_id: number;
             /** Supplier Name */
             supplier_name: string;
-            status: components["schemas"]["PurchaseOrderStatus"];
-            /** Ordered By */
-            ordered_by: number;
-            /**
-             * Ordered At
-             * Format: date-time
-             */
-            ordered_at: string;
-            /** Received At */
-            received_at: string | null;
-            /** Received By */
-            received_by: number | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
+            /** Total Cost */
+            total_cost: string;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
-            /** Total Cost */
-            total_cost: string;
-            /** Lines */
-            lines: components["schemas"]["PurchaseOrderLineRead"][];
-            /**
-             * Receipts
-             * @default []
-             */
-            receipts: components["schemas"]["GoodsReceiptRead"][];
         };
         /**
          * PurchaseOrderStatus
@@ -5530,48 +5530,48 @@ export interface components {
          *     POS 選單只拿得到啟用中的；管理頁會連停用的一起列出（停用不實刪）。
          */
         ReasonRead: {
-            /** Id */
-            id: number;
             /** Code */
             code: string;
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
             /** Name */
             name: string;
             /** Requires Note */
             requires_note: boolean;
             /** Sort Order */
             sort_order: number;
-            /** Is Active */
-            is_active: boolean;
         };
         /**
          * ReasonUpdateRequest
          * @description 修改原因代碼。停用不實刪：歷史單據引用過的原因不能因為後台刪掉就消失。
          */
         ReasonUpdateRequest: {
+            /** Is Active */
+            is_active?: boolean | null;
             /** Name */
             name?: string | null;
             /** Requires Note */
             requires_note?: boolean | null;
             /** Sort Order */
             sort_order?: number | null;
-            /** Is Active */
-            is_active?: boolean | null;
         };
         /**
          * ReceiptHeaderRead
          * @description 收據／明細聯抬頭（店名/統編/地址/電話/發票字軌資訊）。
          */
         ReceiptHeaderRead: {
-            /** Name */
-            name: string;
-            /** Tax Id */
-            tax_id: string | null;
             /** Address */
             address: string | null;
-            /** Phone */
-            phone: string | null;
             /** Invoice Track Info */
             invoice_track_info: string | null;
+            /** Name */
+            name: string;
+            /** Phone */
+            phone: string | null;
+            /** Tax Id */
+            tax_id: string | null;
         };
         /**
          * ReceiveLineIn
@@ -5588,66 +5588,66 @@ export interface components {
          * @description 分批收貨請求：各明細本次實收量＋選填進項發票（供應商發票隨貨時一併登錄）。
          */
         ReceivePurchaseOrderRequest: {
+            invoice?: components["schemas"]["InputInvoiceIn"] | null;
             /** Lines */
             lines: components["schemas"]["ReceiveLineIn"][];
-            invoice?: components["schemas"]["InputInvoiceIn"] | null;
         };
         /** ReceivePurchaseOrderResult */
         ReceivePurchaseOrderResult: {
+            purchase_order: components["schemas"]["PurchaseOrderRead"];
             /** Receipt Id */
             receipt_id: number;
-            purchase_order: components["schemas"]["PurchaseOrderRead"];
         };
         /**
          * ReconciliationReport
          * @description §4 對帳：全帳戶 I-3（SUM==快取==最新 balance_after）+ 全域總負債。
          */
         ReconciliationReport: {
+            /** Cached Total Outstanding */
+            cached_total_outstanding: string;
+            /** Cached Total Trustworthy */
+            cached_total_trustworthy: boolean;
             /**
              * Generated At
              * Format: date-time
              */
             generated_at: string;
-            /** Store Id */
-            store_id: number;
+            /** Ledger Total Outstanding */
+            ledger_total_outstanding: string;
             /** Mismatches */
             mismatches: {
                 [key: string]: unknown;
             }[];
-            /** Ledger Total Outstanding */
-            ledger_total_outstanding: string;
-            /** Cached Total Outstanding */
-            cached_total_outstanding: string;
-            /** Cached Total Trustworthy */
-            cached_total_trustworthy: boolean;
+            /** Store Id */
+            store_id: number;
         };
         /**
          * RestoreRunRead
          * @description 一次還原執行的輸出（docs/31 §6）：四驗結果供 UI 呈現;VERIFIED 才代表救得回。
          */
         RestoreRunRead: {
+            /** Actor User Id */
+            actor_user_id: number;
+            /** Finished At */
+            finished_at: string | null;
             /** Id */
             id: number;
-            status: components["schemas"]["RestoreStatus"];
-            /** Source R2 Key */
-            source_r2_key: string;
+            /** Last Error */
+            last_error: string | null;
             /** Restore Db Name */
             restore_db_name: string;
+            /** Source R2 Key */
+            source_r2_key: string;
             /**
              * Started At
              * Format: date-time
              */
             started_at: string;
-            /** Finished At */
-            finished_at: string | null;
+            status: components["schemas"]["RestoreStatus"];
             /** Verifications */
             verifications: {
                 [key: string]: unknown;
             } | null;
-            /** Last Error */
-            last_error: string | null;
-            /** Actor User Id */
-            actor_user_id: number;
         };
         /**
          * RestoreStatus
@@ -5663,33 +5663,33 @@ export interface components {
          * @description 觸發還原（高危,強卡控）：需 MANAGER＋打字確認（confirm_text＝該備份檔名）＋知情勾選。
          */
         RestoreTriggerRequest: {
-            /** Source R2 Key */
-            source_r2_key: string;
-            /** Confirm Text */
-            confirm_text: string;
             /** Acknowledge */
             acknowledge: boolean;
+            /** Confirm Text */
+            confirm_text: string;
+            /** Source R2 Key */
+            source_r2_key: string;
         };
         /** ReturnCreateRequest */
         ReturnCreateRequest: {
-            /** Sale Id */
-            sale_id: number;
-            /** Reason */
-            reason: string;
-            /** Lines */
-            lines: components["schemas"]["ReturnLineRequest"][];
-            /**
-             * Taiwan Pay Refund Confirmed
-             * @default false
-             */
-            taiwan_pay_refund_confirmed: boolean;
+            /** Consent Signature Task Id */
+            consent_signature_task_id?: number | null;
             /**
              * Invoice Recalled
              * @default false
              */
             invoice_recalled: boolean;
-            /** Consent Signature Task Id */
-            consent_signature_task_id?: number | null;
+            /** Lines */
+            lines: components["schemas"]["ReturnLineRequest"][];
+            /** Reason */
+            reason: string;
+            /** Sale Id */
+            sale_id: number;
+            /**
+             * Taiwan Pay Refund Confirmed
+             * @default false
+             */
+            taiwan_pay_refund_confirmed: boolean;
             /** Unreturned Gift Note */
             unreturned_gift_note?: string | null;
         };
@@ -5697,42 +5697,42 @@ export interface components {
         ReturnLineRead: {
             /** Id */
             id: number;
-            /** Sale Line Id */
-            sale_line_id: number;
             /** Qty */
             qty: number;
             /** Refund Amount */
             refund_amount: string;
+            /** Sale Line Id */
+            sale_line_id: number;
         };
         /** ReturnLineRequest */
         ReturnLineRequest: {
-            /** Sale Line Id */
-            sale_line_id: number;
             /** Qty */
             qty: number;
+            /** Sale Line Id */
+            sale_line_id: number;
         };
         /**
          * ReturnPreviewRead
          * @description 預覽結果。**僅供畫面提示**，送出時後端會以當下狀態重新判斷一次（條件可能已變）。
          */
         ReturnPreviewRead: {
-            /** Is Full Return */
-            is_full_return: boolean;
             /** Invoice Action */
             invoice_action: string;
+            /** Is Full Return */
+            is_full_return: boolean;
             /**
              * Manual Paper Resolvable
              * @default false
              */
             manual_paper_resolvable: boolean;
-            /** Requires Paper Recall */
-            requires_paper_recall: boolean;
-            /** Requires Customer Consent */
-            requires_customer_consent: boolean;
             /** Reason */
             reason: string;
             /** Refund Total */
             refund_total: string;
+            /** Requires Customer Consent */
+            requires_customer_consent: boolean;
+            /** Requires Paper Recall */
+            requires_paper_recall: boolean;
             /**
              * Unreturned Gifts
              * @default []
@@ -5746,23 +5746,13 @@ export interface components {
          *     不可放在 sale detail——店員尚未選定退哪些品項時，後端無從得知是否會構成累計全退。
          */
         ReturnPreviewRequest: {
-            /** Sale Id */
-            sale_id: number;
             /** Lines */
             lines: components["schemas"]["ReturnLineRequest"][];
+            /** Sale Id */
+            sale_id: number;
         };
         /** ReturnRead */
         ReturnRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Sale Id */
-            sale_id: number;
-            /** Refund Amount */
-            refund_amount: string;
-            /** Reason */
-            reason: string;
             /** Clerk User Id */
             clerk_user_id: number;
             /**
@@ -5770,18 +5760,28 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
             /** Lines */
             lines: components["schemas"]["ReturnLineRead"][];
+            /** Reason */
+            reason: string;
+            /** Refund Amount */
+            refund_amount: string;
             /** Refund Tenders */
             refund_tenders: components["schemas"]["ReturnTenderRead"][];
+            /** Sale Id */
+            sale_id: number;
+            /** Store Id */
+            store_id: number;
         };
         /** ReturnTenderRead */
         ReturnTenderRead: {
+            /** Amount */
+            amount: string;
             /** Id */
             id: number;
             tender_type: components["schemas"]["TenderType"];
-            /** Amount */
-            amount: string;
         };
         /**
          * SaleAdjustmentRequest
@@ -5791,16 +5791,16 @@ export interface components {
          *     同一份明細順序。ITEM 必須指定索引，ORDER 不得指定。
          */
         SaleAdjustmentRequest: {
-            scope: components["schemas"]["AdjustmentScope"];
             method: components["schemas"]["CalculationMethod"];
-            /** Value */
-            value: number | string;
-            /** Target Line Index */
-            target_line_index?: number | null;
-            /** Reason Id */
-            reason_id?: number | null;
             /** Note */
             note?: string | null;
+            /** Reason Id */
+            reason_id?: number | null;
+            scope: components["schemas"]["AdjustmentScope"];
+            /** Target Line Index */
+            target_line_index?: number | null;
+            /** Value */
+            value: number | string;
         };
         /**
          * SaleCreateRequest
@@ -5810,26 +5810,26 @@ export interface components {
          *     伺服器端計算的 total（否則 422），且每種 tender_type 至多一筆。
          */
         SaleCreateRequest: {
-            /** Lines */
-            lines: components["schemas"]["SaleLineCreateRequest"][];
-            /** Buyer Contact Id */
-            buyer_contact_id?: number | null;
-            /** Tenders */
-            tenders?: components["schemas"]["SaleTenderRequest"][] | null;
-            /** Signature Task Id */
-            signature_task_id?: number | null;
-            /** Cart Session Id */
-            cart_session_id?: number | null;
-            /** Cart Revision */
-            cart_revision?: number | null;
-            invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
-            /** Expected Einvoice Enabled */
-            expected_einvoice_enabled?: boolean | null;
             /** Adjustments */
             adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
+            /** Cart Revision */
+            cart_revision?: number | null;
+            /** Cart Session Id */
+            cart_session_id?: number | null;
+            /** Expected Einvoice Enabled */
+            expected_einvoice_enabled?: boolean | null;
+            invoice?: components["schemas"]["SaleInvoiceInfoRequest"] | null;
+            /** Lines */
+            lines: components["schemas"]["SaleLineCreateRequest"][];
             service_mode?: components["schemas"]["ServiceMode"] | null;
+            /** Signature Task Id */
+            signature_task_id?: number | null;
             /** Table No */
             table_no?: string | null;
+            /** Tenders */
+            tenders?: components["schemas"]["SaleTenderRequest"][] | null;
         };
         /**
          * SaleInvoiceInfoRequest
@@ -5839,10 +5839,10 @@ export interface components {
          *     載具與捐贈擇一。載具目前僅收手機條碼（`/` 開頭＋7 碼，CarrierType 3J0002）。
          */
         SaleInvoiceInfoRequest: {
-            /** Buyer Tax Id */
-            buyer_tax_id?: string | null;
             /** Buyer Name */
             buyer_name?: string | null;
+            /** Buyer Tax Id */
+            buyer_tax_id?: string | null;
             /** Mobile Carrier */
             mobile_carrier?: string | null;
             /** Npoban */
@@ -5869,13 +5869,19 @@ export interface components {
          * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。
          */
         SaleLineCreateRequest: {
-            line_type: components["schemas"]["SaleLineType"];
-            /** Item Code */
-            item_code?: string | null;
-            /** Catalog Product Id */
-            catalog_product_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            /** @default NORMAL */
+            line_kind: components["schemas"]["SaleLineKind"];
+            line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
             /**
@@ -5883,12 +5889,6 @@ export interface components {
              * @default 1
              */
             qty: number;
-            /** @default NORMAL */
-            line_kind: components["schemas"]["SaleLineKind"];
-            /** Gift Reason Id */
-            gift_reason_id?: number | null;
-            /** Gift Note */
-            gift_note?: string | null;
         };
         /**
          * SaleLineKind
@@ -5908,53 +5908,53 @@ export interface components {
          * @description 銷售明細輸出。
          */
         SaleLineRead: {
-            /** Id */
-            id: number;
-            line_type: components["schemas"]["SaleLineType"];
-            /** Serialized Item Id */
-            serialized_item_id: number | null;
-            /** Catalog Product Id */
-            catalog_product_id: number | null;
             /** Bulk Lot Id */
             bulk_lot_id: number | null;
-            /** Menu Item Id */
-            menu_item_id: number | null;
+            /** Catalog Product Id */
+            catalog_product_id: number | null;
             /** Description */
             description: string;
-            /** Qty */
-            qty: number;
-            /** Unit Price */
-            unit_price: string;
-            /** Line Total */
-            line_total: string;
-            /** Original Unit Price */
-            original_unit_price?: string | null;
             /**
              * Discount Amount
              * @default 0
              */
             discount_amount: string;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Name */
+            gift_reason_name?: string | null;
+            /** Id */
+            id: number;
             /** @default NORMAL */
             line_kind: components["schemas"]["SaleLineKind"];
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
             /**
              * Manual Discount Amount
              * @default 0
              */
             manual_discount_amount: string;
+            /** Menu Item Id */
+            menu_item_id: number | null;
             /**
              * Net Amount
              * @default 0
              */
             net_amount: string;
-            /** Gift Reason Name */
-            gift_reason_name?: string | null;
-            /** Gift Note */
-            gift_note?: string | null;
+            /** Original Unit Price */
+            original_unit_price?: string | null;
+            /** Qty */
+            qty: number;
             /**
              * Returned Qty
              * @default 0
              */
             returned_qty: number;
+            /** Serialized Item Id */
+            serialized_item_id: number | null;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * SaleLineType
@@ -5967,103 +5967,108 @@ export interface components {
          * @description 試算單行輸出：折後實際成交＋折讓留痕。
          */
         SaleQuoteLineRead: {
-            line_type: components["schemas"]["SaleLineType"];
             /** Description */
             description: string;
-            /** Qty */
-            qty: number;
-            /** Unit Price */
-            unit_price: string;
-            /** Line Total */
-            line_total: string;
-            /** Original Unit Price */
-            original_unit_price: string | null;
             /** Discount Amount */
             discount_amount: string;
             line_kind: components["schemas"]["SaleLineKind"];
+            /** Line Total */
+            line_total: string;
+            line_type: components["schemas"]["SaleLineType"];
             /** Manual Discount Amount */
             manual_discount_amount: string;
             /** Net Amount */
             net_amount: string;
+            /** Original Unit Price */
+            original_unit_price: string | null;
+            /** Qty */
+            qty: number;
+            /** Unit Price */
+            unit_price: string;
         };
         /**
          * SaleQuoteRequest
          * @description 結帳前試算請求（docs/21 C2b）：購物車明細（+買方），回折後總額供 POS 顯示與對齊收款。
          */
         SaleQuoteRequest: {
-            /** Lines */
-            lines: components["schemas"]["SaleLineCreateRequest"][];
-            /** Buyer Contact Id */
-            buyer_contact_id?: number | null;
             /** Adjustments */
             adjustments?: components["schemas"]["SaleAdjustmentRequest"][] | null;
+            /** Buyer Contact Id */
+            buyer_contact_id?: number | null;
+            /** Lines */
+            lines: components["schemas"]["SaleLineCreateRequest"][];
         };
         /**
          * SaleQuoteResponse
          * @description 結帳前試算輸出：套生效活動後的折後總額與各行折讓；唯讀。
          */
         SaleQuoteResponse: {
-            /** Total */
-            total: string;
             /** Campaign Id */
             campaign_id: number | null;
             /** Campaign Name */
             campaign_name: string | null;
-            /** Lines */
-            lines: components["schemas"]["SaleQuoteLineRead"][];
             /** Food Subtotal */
             food_subtotal: string;
-            /** Store Credit Max */
-            store_credit_max: string;
-            /** Store Credit Min Spend */
-            store_credit_min_spend: string;
             /** Gift Retail Value */
             gift_retail_value: string;
             /** Item Discount Amount */
             item_discount_amount: string;
+            /** Lines */
+            lines: components["schemas"]["SaleQuoteLineRead"][];
             /** Order Discount Amount */
             order_discount_amount: string;
+            /** Store Credit Max */
+            store_credit_max: string;
+            /** Store Credit Min Spend */
+            store_credit_min_spend: string;
+            /** Total */
+            total: string;
         };
         /**
          * SaleRead
          * @description 銷售單輸出（含明細與收款明細）。
          */
         SaleRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Clerk User Id */
-            clerk_user_id: number;
             /** Buyer Contact Id */
             buyer_contact_id: number | null;
-            /** Subtotal */
-            subtotal: string;
-            /** Tax */
-            tax: string;
-            /** Total */
-            total: string;
-            payment_method: components["schemas"]["PaymentMethod"];
-            invoice_status: components["schemas"]["SaleInvoiceStatus"];
-            status: components["schemas"]["SaleStatus"];
+            /** Clerk User Id */
+            clerk_user_id: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            service_mode?: components["schemas"]["ServiceMode"] | null;
-            /** Table No */
-            table_no?: string | null;
+            /**
+             * Gift Retail Value
+             * @default 0
+             */
+            gift_retail_value: string;
+            /** Id */
+            id: number;
+            invoice_status: components["schemas"]["SaleInvoiceStatus"];
             /**
              * Lines
              * @default []
              */
             lines: components["schemas"]["SaleLineRead"][];
+            payment_method: components["schemas"]["PaymentMethod"];
+            service_mode?: components["schemas"]["ServiceMode"] | null;
+            status: components["schemas"]["SaleStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Subtotal */
+            subtotal: string;
+            /** Table No */
+            table_no?: string | null;
+            /** Tax */
+            tax: string;
             /**
              * Tenders
              * @default []
              */
             tenders: components["schemas"]["SaleTenderRead"][];
+            /** Total */
+            total: string;
             /**
              * Total Discount
              * @default 0
@@ -6074,11 +6079,6 @@ export interface components {
              * @default 0
              */
             total_manual_discount: string;
-            /**
-             * Gift Retail Value
-             * @default 0
-             */
-            gift_retail_value: string;
         };
         /**
          * SaleStatus
@@ -6098,41 +6098,38 @@ export interface components {
          * @description 銷售單摘要輸出（列表用，不含明細）。
          */
         SaleSummaryRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Subtotal */
-            subtotal: string;
-            /** Tax */
-            tax: string;
-            /** Total */
-            total: string;
-            invoice_status: components["schemas"]["SaleInvoiceStatus"];
-            status: components["schemas"]["SaleStatus"];
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            invoice_issue_channel?: components["schemas"]["EInvoiceIssueChannel"] | null;
+            invoice_status: components["schemas"]["SaleInvoiceStatus"];
             payment_method: components["schemas"]["PaymentMethod"];
-            /** Buyer Contact Id */
-            buyer_contact_id: number | null;
+            service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Signature Task Id */
             signature_task_id: number | null;
-            service_mode?: components["schemas"]["ServiceMode"] | null;
+            status: components["schemas"]["SaleStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Subtotal */
+            subtotal: string;
             /** Table No */
             table_no?: string | null;
-            invoice_issue_channel?: components["schemas"]["EInvoiceIssueChannel"] | null;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
         };
         /**
          * SaleTenderRead
          * @description 收款明細輸出（SC-3）。
          */
         SaleTenderRead: {
-            /** Id */
-            id: number;
-            tender_type: components["schemas"]["TenderType"];
             /** Amount */
             amount: string;
             /**
@@ -6140,6 +6137,9 @@ export interface components {
              * @default 0
              */
             fee_amount: string;
+            /** Id */
+            id: number;
+            tender_type: components["schemas"]["TenderType"];
         };
         /**
          * SaleTenderRequest
@@ -6149,24 +6149,33 @@ export interface components {
          *     僅 LINE_PAY 需要（其他型別帶入即拒）。單次使用、會過期，不寫入 log/稽核。
          */
         SaleTenderRequest: {
-            tender_type: components["schemas"]["TenderType"];
             /** Amount */
             amount: number | string;
             /** Line Pay One Time Key */
             line_pay_one_time_key?: string | null;
+            tender_type: components["schemas"]["TenderType"];
         };
         /**
          * SalesMarginReport
          * @description 銷售 / 毛利報表（docs/19 §2.3）。未作廢銷售；買斷認成本、寄售只認抽成、catalog 成本 N/A。
          */
         SalesMarginReport: {
+            /** Bulk Cogs */
+            bulk_cogs: string;
+            /** Cash Received */
+            cash_received: string;
             /**
-             * Generated At
-             * Format: date-time
+             * Catalog Cogs
+             * @default 0
              */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
+            catalog_cogs: string;
+            /** Consignment Commission Income */
+            consignment_commission_income: string;
+            /**
+             * Contribution Margin
+             * @default 0
+             */
+            contribution_margin: string;
             /**
              * Date From
              * Format: date-time
@@ -6177,144 +6186,135 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
-            /** Gross Turnover */
-            gross_turnover: string;
-            /** Recognized Revenue */
-            recognized_revenue: string;
-            /** Owned Cogs */
-            owned_cogs: string;
-            /** Bulk Cogs */
-            bulk_cogs: string;
-            /**
-             * Catalog Cogs
-             * @default 0
-             */
-            catalog_cogs: string;
-            /** Consignment Commission Income */
-            consignment_commission_income: string;
-            /** Gross Margin */
-            gross_margin: string;
-            /** Gross Margin Rate */
-            gross_margin_rate: string | null;
-            /** Unknown Cost Sales */
-            unknown_cost_sales: string;
             /** Food Revenue */
             food_revenue: string;
-            /** Secondhand Revenue */
-            secondhand_revenue: string;
-            /** Cash Received */
-            cash_received: string;
-            /** Store Credit Redeemed */
-            store_credit_redeemed: string;
-            /** Transaction Count */
-            transaction_count: number;
-            /** Payment Fee Total */
-            payment_fee_total: string;
-            /** Net Margin */
-            net_margin: string;
-            /** Payment Methods */
-            payment_methods: components["schemas"]["PaymentMethodTotal"][];
             /**
-             * Manual Discount Total
-             * @default 0
+             * Generated At
+             * Format: date-time
              */
-            manual_discount_total: string;
-            /**
-             * Gift Retail Value
-             * @default 0
-             */
-            gift_retail_value: string;
+            generated_at: string;
             /**
              * Gift Cost
              * @default 0
              */
             gift_cost: string;
             /**
-             * Contribution Margin
+             * Gift Retail Value
              * @default 0
              */
-            contribution_margin: string;
+            gift_retail_value: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
+            /**
+             * Manual Discount Total
+             * @default 0
+             */
+            manual_discount_total: string;
+            /** Net Margin */
+            net_margin: string;
+            /** Owned Cogs */
+            owned_cogs: string;
+            /** Payment Fee Total */
+            payment_fee_total: string;
+            /** Payment Methods */
+            payment_methods: components["schemas"]["PaymentMethodTotal"][];
+            /** Recognized Revenue */
+            recognized_revenue: string;
+            /** Secondhand Revenue */
+            secondhand_revenue: string;
+            /** Store Credit Redeemed */
+            store_credit_redeemed: string;
+            /** Store Id */
+            store_id: number;
+            /** Transaction Count */
+            transaction_count: number;
+            /** Unknown Cost Sales */
+            unknown_cost_sales: string;
         };
         /**
          * SerializedItemDetailRead
          * @description 序號品明細（庫存逐件「詳細」）：含成本/售價/來源/收購/售出/完整異動歷史。
          */
         SerializedItemDetailRead: {
-            /** Id */
-            id: number;
-            /** Item Code */
-            item_code: string;
-            /** Name */
-            name: string;
+            /** Acquisition Cost */
+            acquisition_cost: string | null;
+            /** Acquisition Id */
+            acquisition_id: number | null;
+            /** Acquisition Type */
+            acquisition_type: string | null;
             /** Brand Id */
             brand_id: number | null;
             /** Category Id */
             category_id: number | null;
-            grade: components["schemas"]["Grade"];
-            ownership_type: components["schemas"]["OwnershipType"];
-            status: components["schemas"]["SerializedItemStatus"];
             /** Commission Pct */
             commission_pct: number | null;
-            /** Listed Price */
-            listed_price: string;
-            /** Acquisition Cost */
-            acquisition_cost: string | null;
+            grade: components["schemas"]["Grade"];
+            /** History */
+            history: components["schemas"]["ItemHistoryEvent"][];
+            /** Id */
+            id: number;
             /**
              * Intake Date
              * Format: date-time
              */
             intake_date: string;
+            /** Item Code */
+            item_code: string;
+            /** Listed Price */
+            listed_price: string;
+            /** Margin */
+            margin: string | null;
+            /** Name */
+            name: string;
+            ownership_type: components["schemas"]["OwnershipType"];
+            /** Sale Id */
+            sale_id: number | null;
             /** Sold Date */
             sold_date: string | null;
             /** Sold Price */
             sold_price: string | null;
-            /** Margin */
-            margin: string | null;
             source: components["schemas"]["ItemSourceRead"] | null;
-            /** Acquisition Id */
-            acquisition_id: number | null;
-            /** Acquisition Type */
-            acquisition_type: string | null;
-            /** Sale Id */
-            sale_id: number | null;
-            /** History */
-            history: components["schemas"]["ItemHistoryEvent"][];
+            status: components["schemas"]["SerializedItemStatus"];
         };
         /**
          * SerializedItemRead
          * @description 序號品輸出（POS 掃碼查件/庫存列表；不含 acquisition_cost）。
          */
         SerializedItemRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Item Code */
-            item_code: string;
-            /** Name */
-            name: string;
             /** Brand Id */
             brand_id: number | null;
-            /** Product Model Id */
-            product_model_id: number | null;
             /** Category Id */
             category_id: number | null;
-            grade: components["schemas"]["Grade"];
-            ownership_type: components["schemas"]["OwnershipType"];
-            /** Consignor Id */
-            consignor_id: number | null;
             /** Commission Pct */
             commission_pct: number | null;
-            /** Listed Price */
-            listed_price: string;
-            status: components["schemas"]["SerializedItemStatus"];
+            /** Consignor Id */
+            consignor_id: number | null;
+            grade: components["schemas"]["Grade"];
+            /** Id */
+            id: number;
             /**
              * Intake Date
              * Format: date-time
              */
             intake_date: string;
+            /** Item Code */
+            item_code: string;
+            /** Listed Price */
+            listed_price: string;
+            /** Name */
+            name: string;
+            ownership_type: components["schemas"]["OwnershipType"];
+            /** Product Model Id */
+            product_model_id: number | null;
             /** Sold Date */
             sold_date: string | null;
+            status: components["schemas"]["SerializedItemStatus"];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * SerializedItemStatus
@@ -6337,72 +6337,72 @@ export interface components {
          * @description 單一服務型態（內用或外帶）在期間內的統計。
          */
         ServiceModeStats: {
+            /** Avg Ticket */
+            avg_ticket: string;
+            /** Fnb Revenue */
+            fnb_revenue: string;
+            /** Gross Total */
+            gross_total: string;
             /** Groups */
             groups: number;
             /** Share */
             share: string;
-            /** Fnb Revenue */
-            fnb_revenue: string;
-            /** Avg Ticket */
-            avg_ticket: string;
-            /** Gross Total */
-            gross_total: string;
         };
         /**
          * SettingsRead
          * @description 單店設定輸出。
          */
         SettingsRead: {
-            /** Store Id */
-            store_id: number;
-            /** Einvoice Enabled */
-            einvoice_enabled: boolean;
-            /** Tax Rate */
-            tax_rate: string;
-            /** Default Commission Pct */
-            default_commission_pct: number;
-            /** Default Margin Pct */
-            default_margin_pct: number;
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories: boolean;
-            /** Require Acquisition Affidavit */
-            require_acquisition_affidavit: boolean;
-            /** Signature Png Retention Days */
-            signature_png_retention_days: number;
-            /** Signature Cleanup Enforcement Mode */
-            signature_cleanup_enforcement_mode: string;
-            /** Premium Rate */
-            premium_rate: string;
-            /** Premium Rate Min */
-            premium_rate_min: string;
-            /** Premium Rate Max */
-            premium_rate_max: string;
-            /** Monthly Fixed Cash Outflow */
-            monthly_fixed_cash_outflow: string;
-            /** Store Credit Min Spend */
-            store_credit_min_spend: string;
-            /** Store Credit Engine Params */
-            store_credit_engine_params: {
-                [key: string]: unknown;
-            };
-            /** Linepay Enabled */
-            linepay_enabled: boolean;
-            /** Linepay Fee Pct */
-            linepay_fee_pct: string;
-            /** Taiwanpay Fee Pct */
-            taiwanpay_fee_pct: string;
             /** Backup Enabled */
             backup_enabled: boolean;
             /** Backup Interval Hours */
             backup_interval_hours: number;
-            /** Backup Retention */
-            backup_retention: number;
             /** Backup Offpeak Hour */
             backup_offpeak_hour: number;
+            /** Backup Retention */
+            backup_retention: number;
+            /** Default Commission Pct */
+            default_commission_pct: number;
+            /** Default Margin Pct */
+            default_margin_pct: number;
             /** Dine In Tables */
             dine_in_tables: string[];
+            /** Einvoice Enabled */
+            einvoice_enabled: boolean;
+            /** Linepay Enabled */
+            linepay_enabled: boolean;
+            /** Linepay Fee Pct */
+            linepay_fee_pct: string;
+            /** Monthly Fixed Cash Outflow */
+            monthly_fixed_cash_outflow: string;
+            /** Premium Rate */
+            premium_rate: string;
+            /** Premium Rate Max */
+            premium_rate_max: string;
+            /** Premium Rate Min */
+            premium_rate_min: string;
             /** Print Kitchen Ticket */
             print_kitchen_ticket: boolean;
+            /** Require Acquisition Affidavit */
+            require_acquisition_affidavit: boolean;
+            /** Signature Cleanup Enforcement Mode */
+            signature_cleanup_enforcement_mode: string;
+            /** Signature Png Retention Days */
+            signature_png_retention_days: number;
+            /** Store Credit Engine Params */
+            store_credit_engine_params: {
+                [key: string]: unknown;
+            };
+            /** Store Credit Min Spend */
+            store_credit_min_spend: string;
+            /** Store Id */
+            store_id: number;
+            /** Taiwanpay Fee Pct */
+            taiwanpay_fee_pct: string;
+            /** Tax Rate */
+            tax_rate: string;
         };
         /**
          * SettingsUpdateRequest
@@ -6412,95 +6412,95 @@ export interface components {
          *     的動態關係由 service 驗證（界線可被同一 PATCH 一併更動）。
          */
         SettingsUpdateRequest: {
-            /** Einvoice Enabled */
-            einvoice_enabled?: boolean | null;
-            /** Tax Rate */
-            tax_rate?: number | string | null;
-            /** Default Commission Pct */
-            default_commission_pct?: number | null;
-            /** Default Margin Pct */
-            default_margin_pct?: number | null;
             /** Allow Clerk Manage Categories */
             allow_clerk_manage_categories?: boolean | null;
-            /** Require Acquisition Affidavit */
-            require_acquisition_affidavit?: boolean | null;
-            /** Signature Png Retention Days */
-            signature_png_retention_days?: number | null;
-            /** Signature Cleanup Enforcement Mode */
-            signature_cleanup_enforcement_mode?: "REPORT_ONLY" | null;
-            /** Premium Rate */
-            premium_rate?: number | string | null;
-            /** Premium Rate Min */
-            premium_rate_min?: number | string | null;
-            /** Premium Rate Max */
-            premium_rate_max?: number | string | null;
-            /** Monthly Fixed Cash Outflow */
-            monthly_fixed_cash_outflow?: number | string | null;
-            /** Store Credit Min Spend */
-            store_credit_min_spend?: number | string | null;
-            /** Store Credit Engine Params */
-            store_credit_engine_params?: {
-                [key: string]: unknown;
-            } | null;
-            /** Premium Change Reason */
-            premium_change_reason?: string | null;
-            /** Linepay Enabled */
-            linepay_enabled?: boolean | null;
-            /** Linepay Fee Pct */
-            linepay_fee_pct?: number | string | null;
-            /** Taiwanpay Fee Pct */
-            taiwanpay_fee_pct?: number | string | null;
             /** Backup Enabled */
             backup_enabled?: boolean | null;
             /** Backup Interval Hours */
             backup_interval_hours?: number | null;
-            /** Backup Retention */
-            backup_retention?: number | null;
             /** Backup Offpeak Hour */
             backup_offpeak_hour?: number | null;
+            /** Backup Retention */
+            backup_retention?: number | null;
+            /** Default Commission Pct */
+            default_commission_pct?: number | null;
+            /** Default Margin Pct */
+            default_margin_pct?: number | null;
             /** Dine In Tables */
             dine_in_tables?: string[] | null;
+            /** Einvoice Enabled */
+            einvoice_enabled?: boolean | null;
+            /** Linepay Enabled */
+            linepay_enabled?: boolean | null;
+            /** Linepay Fee Pct */
+            linepay_fee_pct?: number | string | null;
+            /** Monthly Fixed Cash Outflow */
+            monthly_fixed_cash_outflow?: number | string | null;
+            /** Premium Change Reason */
+            premium_change_reason?: string | null;
+            /** Premium Rate */
+            premium_rate?: number | string | null;
+            /** Premium Rate Max */
+            premium_rate_max?: number | string | null;
+            /** Premium Rate Min */
+            premium_rate_min?: number | string | null;
             /** Print Kitchen Ticket */
             print_kitchen_ticket?: boolean | null;
+            /** Require Acquisition Affidavit */
+            require_acquisition_affidavit?: boolean | null;
+            /** Signature Cleanup Enforcement Mode */
+            signature_cleanup_enforcement_mode?: "REPORT_ONLY" | null;
+            /** Signature Png Retention Days */
+            signature_png_retention_days?: number | null;
+            /** Store Credit Engine Params */
+            store_credit_engine_params?: {
+                [key: string]: unknown;
+            } | null;
+            /** Store Credit Min Spend */
+            store_credit_min_spend?: number | string | null;
+            /** Taiwanpay Fee Pct */
+            taiwanpay_fee_pct?: number | string | null;
+            /** Tax Rate */
+            tax_rate?: number | string | null;
         };
         /** SignatureRetentionReportItem */
         SignatureRetentionReportItem: {
-            /** Task Id */
-            task_id: number;
             kind: components["schemas"]["SignatureTaskKind"];
-            /**
-             * Signed At
-             * Format: date-time
-             */
-            signed_at: string;
-            /**
-             * Retention Until
-             * Format: date-time
-             */
-            retention_until: string;
             /**
              * Reported At
              * Format: date-time
              */
             reported_at: string;
+            /**
+             * Retention Until
+             * Format: date-time
+             */
+            retention_until: string;
             /** Signature Png Retained */
             signature_png_retained: boolean;
+            /**
+             * Signed At
+             * Format: date-time
+             */
+            signed_at: string;
+            /** Task Id */
+            task_id: number;
         };
         /** SignatureTaskCreate */
         SignatureTaskCreate: {
-            kind: components["schemas"]["SignatureTaskKind"];
             /** Contact Id */
             contact_id?: number | null;
             /** Content */
             content: {
                 [key: string]: unknown;
             };
-            /** Terminal Id */
-            terminal_id?: number | null;
-            /** Ref Type */
-            ref_type?: string | null;
+            kind: components["schemas"]["SignatureTaskKind"];
             /** Ref Id */
             ref_id?: number | null;
+            /** Ref Type */
+            ref_type?: string | null;
+            /** Terminal Id */
+            terminal_id?: number | null;
         };
         /**
          * SignatureTaskKind
@@ -6510,54 +6510,54 @@ export interface components {
         SignatureTaskKind: "ACQUISITION_AFFIDAVIT" | "STORE_CREDIT_USE" | "TRANSACTION_ACK" | "RETURN_INVOICE_CONSENT";
         /** SignatureTaskRead */
         SignatureTaskRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            kind: components["schemas"]["SignatureTaskKind"];
-            status: components["schemas"]["SignatureTaskStatus"];
+            /** Agreement Body */
+            agreement_body?: string | null;
+            /** Agreement Title */
+            agreement_title?: string | null;
+            /** Agreement Version */
+            agreement_version: number | null;
+            /** Bound Acquisition Id */
+            bound_acquisition_id?: number | null;
+            /** Bound Sale Id */
+            bound_sale_id?: number | null;
+            chosen_payout: components["schemas"]["PayoutMethod"] | null;
+            /** Consumed At */
+            consumed_at: string | null;
             /** Contact Id */
             contact_id: number | null;
             /** Content */
             content: {
                 [key: string]: unknown;
             };
-            /** Agreement Version */
-            agreement_version: number | null;
-            chosen_payout: components["schemas"]["PayoutMethod"] | null;
-            /** Has Signature */
-            has_signature: boolean;
-            /** Signed At */
-            signed_at: string | null;
-            /** Voided At */
-            voided_at: string | null;
-            /** Expired At */
-            expired_at: string | null;
-            /** Failed At */
-            failed_at: string | null;
-            /** Consumed At */
-            consumed_at: string | null;
-            /** Expires At */
-            expires_at: string | null;
-            /** Ref Type */
-            ref_type: string | null;
-            /** Ref Id */
-            ref_id: number | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Bound Acquisition Id */
-            bound_acquisition_id?: number | null;
-            /** Bound Sale Id */
-            bound_sale_id?: number | null;
-            /** Agreement Title */
-            agreement_title?: string | null;
-            /** Agreement Body */
-            agreement_body?: string | null;
+            /** Expired At */
+            expired_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Failed At */
+            failed_at: string | null;
+            /** Has Signature */
+            has_signature: boolean;
+            /** Id */
+            id: number;
+            kind: components["schemas"]["SignatureTaskKind"];
+            /** Ref Id */
+            ref_id: number | null;
+            /** Ref Type */
+            ref_type: string | null;
+            /** Signed At */
+            signed_at: string | null;
             /** Signer Name */
             signer_name?: string | null;
+            status: components["schemas"]["SignatureTaskStatus"];
+            /** Store Id */
+            store_id: number;
+            /** Voided At */
+            voided_at: string | null;
         };
         /**
          * SignatureTaskStatus
@@ -6568,32 +6568,32 @@ export interface components {
         /** SignatureTaskVoidRequest */
         SignatureTaskVoidRequest: {
             /**
+             * Reason
+             * @default 店員撤回簽署
+             */
+            reason: string;
+            /**
              * Reason Code
              * @default STAFF_WITHDRAWN
              * @enum {string}
              */
             reason_code: "STAFF_WITHDRAWN" | "CONTENT_CHANGED" | "KIOSK_FAILURE_CASH_FALLBACK" | "OTHER";
-            /**
-             * Reason
-             * @default 店員撤回簽署
-             */
-            reason: string;
         };
         /**
          * StaffCartAdjustmentRead
          * @description 還原用的折扣意圖。
          */
         StaffCartAdjustmentRead: {
-            scope: components["schemas"]["AdjustmentScope"];
             method: components["schemas"]["CalculationMethod"];
-            /** Value */
-            value: string;
-            /** Target Line Index */
-            target_line_index?: number | null;
-            /** Reason Id */
-            reason_id?: number | null;
             /** Note */
             note?: string | null;
+            /** Reason Id */
+            reason_id?: number | null;
+            scope: components["schemas"]["AdjustmentScope"];
+            /** Target Line Index */
+            target_line_index?: number | null;
+            /** Value */
+            value: string;
         };
         /**
          * StaffCartLineRead
@@ -6601,35 +6601,35 @@ export interface components {
          *     回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。
          */
         StaffCartLineRead: {
-            line_type: components["schemas"]["SaleLineType"];
-            /** Item Code */
-            item_code?: string | null;
-            /** Catalog Product Id */
-            catalog_product_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
+            /** Catalog Product Id */
+            catalog_product_id?: number | null;
+            /** Gift Note */
+            gift_note?: string | null;
+            /** Gift Reason Id */
+            gift_reason_id?: number | null;
+            /** Item Code */
+            item_code?: string | null;
+            line_kind: components["schemas"]["SaleLineKind"];
+            line_type: components["schemas"]["SaleLineType"];
             /** Menu Item Id */
             menu_item_id?: number | null;
             /** Qty */
             qty: number;
-            line_kind: components["schemas"]["SaleLineKind"];
-            /** Gift Reason Id */
-            gift_reason_id?: number | null;
-            /** Gift Note */
-            gift_note?: string | null;
         };
         /**
          * StaffCartPayloadRead
          * @description POS 還原購物車所需的原始請求內容。
          */
         StaffCartPayloadRead: {
-            /** Lines */
-            lines: components["schemas"]["StaffCartLineRead"][];
             /**
              * Adjustments
              * @default []
              */
             adjustments: components["schemas"]["StaffCartAdjustmentRead"][];
+            /** Lines */
+            lines: components["schemas"]["StaffCartLineRead"][];
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Table No */
             table_no?: string | null;
@@ -6639,16 +6639,10 @@ export interface components {
          * @description POS 恢復工作階段所需的內部資料；客顯 response model 絕不包含這些欄位。
          */
         StaffCartSessionRead: {
-            /** Id */
-            id: number;
-            status: components["schemas"]["CartSessionStatus"];
-            /** Revision */
-            revision: number;
-            /** Pos Terminal Id */
-            pos_terminal_id: number;
-            /** Kiosk Device Id */
-            kiosk_device_id: number;
-            snapshot: components["schemas"]["CartSnapshotRead"];
+            /** Active Signature Task Id */
+            active_signature_task_id: number | null;
+            /** Buyer Contact Id */
+            buyer_contact_id: number | null;
             /** Changes */
             changes: components["schemas"]["CartChangeRead"][];
             /**
@@ -6656,24 +6650,30 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            staff_payload?: components["schemas"]["StaffCartPayloadRead"] | null;
-            /** Buyer Contact Id */
-            buyer_contact_id: number | null;
-            /** Active Signature Task Id */
-            active_signature_task_id: number | null;
+            /** Id */
+            id: number;
+            /** Kiosk Device Id */
+            kiosk_device_id: number;
             /** Payment Order Id */
             payment_order_id: string | null;
             /** Payment Uncertain At */
             payment_uncertain_at: string | null;
             /** Payment Uncertain Reason */
             payment_uncertain_reason: string | null;
+            /** Pos Terminal Id */
+            pos_terminal_id: number;
+            /** Revision */
+            revision: number;
             /** Sale Id */
             sale_id: number | null;
+            snapshot: components["schemas"]["CartSnapshotRead"];
+            staff_payload?: components["schemas"]["StaffCartPayloadRead"] | null;
+            status: components["schemas"]["CartSessionStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /**
          * StocktakeConfirmRequest
@@ -6695,37 +6695,37 @@ export interface components {
         };
         /** StocktakeLineRead */
         StocktakeLineRead: {
-            /** Id */
-            id: number;
             /** Catalog Product Id */
             catalog_product_id: number;
-            /** System Qty */
-            system_qty: number;
             /** Counted Qty */
             counted_qty: number | null;
+            /** Id */
+            id: number;
+            /** System Qty */
+            system_qty: number;
             /** Variance */
             variance: number | null;
         };
         /** StocktakeRead */
         StocktakeRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            status: components["schemas"]["StocktakeStatus"];
-            /** Created By */
-            created_by: number;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: number | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Confirmed By */
-            confirmed_by: number | null;
-            /** Confirmed At */
-            confirmed_at: string | null;
+            /** Created By */
+            created_by: number;
+            /** Id */
+            id: number;
             /** Lines */
             lines: components["schemas"]["StocktakeLineRead"][];
+            status: components["schemas"]["StocktakeStatus"];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * StocktakeStatus
@@ -6748,10 +6748,10 @@ export interface components {
          * @description 餘額＋異動歷史（GET /contacts/{id}/store-credit）。
          */
         StoreCreditBalanceRead: {
-            /** Contact Id */
-            contact_id: number;
             /** Balance */
             balance: string;
+            /** Contact Id */
+            contact_id: number;
             /** Entries */
             entries: components["schemas"]["StoreCreditEntryRead"][];
         };
@@ -6760,31 +6760,31 @@ export interface components {
          * @description 帳本分錄輸出。
          */
         StoreCreditEntryRead: {
-            /** Id */
-            id: number;
-            entry_type: components["schemas"]["StoreCreditEntryType"];
-            /** Signed Amount */
-            signed_amount: string;
             /** Balance After */
             balance_after: string;
             /** Cash Equivalent */
             cash_equivalent: string | null;
-            /** Premium Rate Applied */
-            premium_rate_applied: string | null;
-            source_type: components["schemas"]["StoreCreditSourceType"];
-            /** Source Id */
-            source_id: number | null;
-            /** Reversal Of Id */
-            reversal_of_id: number | null;
-            /** Reason */
-            reason: string | null;
-            /** Created By */
-            created_by: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Created By */
+            created_by: number;
+            entry_type: components["schemas"]["StoreCreditEntryType"];
+            /** Id */
+            id: number;
+            /** Premium Rate Applied */
+            premium_rate_applied: string | null;
+            /** Reason */
+            reason: string | null;
+            /** Reversal Of Id */
+            reversal_of_id: number | null;
+            /** Signed Amount */
+            signed_amount: string;
+            /** Source Id */
+            source_id: number | null;
+            source_type: components["schemas"]["StoreCreditSourceType"];
         };
         /**
          * StoreCreditEntryType
@@ -6804,32 +6804,32 @@ export interface components {
         StoreCreditSourceType: "ACQUISITION" | "SALE" | "SALE_RETURN" | "SALE_VOID" | "ACQUISITION_ROLLBACK" | "MANUAL";
         /** SupplierCreate */
         SupplierCreate: {
-            /** Name */
-            name: string;
             /** Contact */
             contact?: string | null;
+            /** Name */
+            name: string;
             /** Tax Id */
             tax_id?: string | null;
         };
         /** SupplierRead */
         SupplierRead: {
-            /** Id */
-            id: number;
-            /** Store Id */
-            store_id: number;
-            /** Name */
-            name: string;
             /** Contact */
             contact: string | null;
-            /** Tax Id */
-            tax_id: string | null;
-            /** Is Active */
-            is_active: boolean;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Store Id */
+            store_id: number;
+            /** Tax Id */
+            tax_id: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -6844,10 +6844,10 @@ export interface components {
          *     名稱有帶時不可為空白。
          */
         SupplierUpdate: {
-            /** Name */
-            name?: string | null;
             /** Contact */
             contact?: string | null;
+            /** Name */
+            name?: string | null;
             /** Tax Id */
             tax_id?: string | null;
         };
@@ -6914,31 +6914,31 @@ export interface components {
          * @description 財務趨勢單一期間（docs/19 R6）。period 為桶起始日。
          */
         TrendRow: {
+            /** Cogs */
+            cogs: string;
+            /** Food Revenue */
+            food_revenue: string;
+            /** Gross Margin */
+            gross_margin: string;
+            /** Gross Margin Rate */
+            gross_margin_rate: string | null;
+            /** Gross Turnover */
+            gross_turnover: string;
             /**
              * Period
              * Format: date
              */
             period: string;
-            /** Gross Turnover */
-            gross_turnover: string;
             /** Recognized Revenue */
             recognized_revenue: string;
-            /** Food Revenue */
-            food_revenue: string;
             /** Secondhand Revenue */
             secondhand_revenue: string;
-            /** Gross Margin */
-            gross_margin: string;
-            /** Gross Margin Rate */
-            gross_margin_rate: string | null;
-            /** Cogs */
-            cogs: string;
-            /** Total Cash Out */
-            total_cash_out: string;
             /** Store Credit Issued */
             store_credit_issued: string;
             /** Store Credit Redeemed */
             store_credit_redeemed: string;
+            /** Total Cash Out */
+            total_cash_out: string;
             /** Transaction Count */
             transaction_count: number;
         };
@@ -6951,13 +6951,6 @@ export interface components {
          */
         TrendsReport: {
             /**
-             * Generated At
-             * Format: date-time
-             */
-            generated_at: string;
-            /** Store Id */
-            store_id: number;
-            /**
              * Date From
              * Format: date-time
              */
@@ -6967,24 +6960,31 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
             /** Granularity */
             granularity: string;
             /** Rows */
             rows: components["schemas"]["TrendRow"][];
+            /** Store Id */
+            store_id: number;
         };
         /**
          * UnreturnedGiftRead
          * @description 本單尚未退回的贈品。退主商品卻不收回贈品，店員必須明確說明原因。
          */
         UnreturnedGiftRead: {
-            /** Sale Line Id */
-            sale_line_id: number;
             /** Description */
             description: string;
             /** Qty */
             qty: number;
             /** Retail Value */
             retail_value: string;
+            /** Sale Line Id */
+            sale_line_id: number;
         };
         /**
          * UploadStatus
@@ -6997,16 +6997,16 @@ export interface components {
         UploadStatus: "PENDING" | "UPLOADED" | "FAILED" | "CANCELLED";
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -7017,11 +7017,48 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    getHealth: {
+    createAcquisition: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAcquisition: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                acquisition_id: number;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -7032,7 +7069,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HealthResponse"];
+                    "application/json": components["schemas"]["AcquisitionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getAcquisitionReceipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voidAcquisition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acquisition_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcquisitionVoidRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionVoidResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7086,6 +7198,1177 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurrentUserResponse"];
+                };
+            };
+        };
+    };
+    getBackupHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupHealthRead"];
+                };
+            };
+        };
+    };
+    triggerRestore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreTriggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listRestoreRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listBackupRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    triggerBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupRunRead"];
+                };
+            };
+        };
+    };
+    listBrands: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrandCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listBulkLots: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["BulkLotStatus"] | null;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getBulkLotByCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getBulkLotDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateBulkPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCallTickets: {
+        parameters: {
+            query?: {
+                include_done?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCallTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CallTicketCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    completeCallTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTicketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCampaigns: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CampaignStatus"] | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activateCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    endCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"] | null;
+                };
+            };
+        };
+    };
+    openCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashSessionOpenRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    closeCashSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashSessionCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCashMovements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashMovementRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordCashMovement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashMovementCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashMovementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCatalogProducts: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                low_stock?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogProductCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCatalogProductBySku: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCatalogProductDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCatalogPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PriceUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCategories: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createCategory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCategoryTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CategoryTargetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listCategoryPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRuleRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCategoryPricingRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PricingRulesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PricingRuleRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listConsignmentSettlements: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ConsignmentSettlementStatus"] | null;
+                phone?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentSettlementRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    payConsignmentSettlement: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                settlement_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentSettlementRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7289,6 +8572,40 @@ export interface operations {
             };
         };
     };
+    listMemberConsignments: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberConsignmentsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     revealContactNationalId: {
         parameters: {
             query?: never;
@@ -7419,40 +8736,6 @@ export interface operations {
             };
         };
     };
-    listMemberConsignments: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                contact_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemberConsignmentsRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     listMemberSourcedItems: {
         parameters: {
             query?: {
@@ -7489,10 +8772,521 @@ export interface operations {
             };
         };
     };
-    listCallTickets: {
+    getStoreCredit: {
         parameters: {
             query?: {
-                include_done?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreCreditBalanceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adjustStoreCredit: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                contact_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoreCreditAdjustRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreCreditEntryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    registerPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsertCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    beginCustomerDisplayCheckout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartBeginCheckoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffCartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancelCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartCancelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentCustomerDisplayCart: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffCartSessionRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    freezeCustomerDisplayCartForSignature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CartFreezeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CartFreezeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcileCustomerDisplayPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentReconciliationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentReconciliationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pairPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalPairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpairPosTerminal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                terminal_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TerminalUnpairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TerminalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listDiscountReasons: {
+        parameters: {
+            query?: {
+                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
+                include_inactive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createDiscountReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateDiscountReason: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reason_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReasonUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReasonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listEInvoiceQueue: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["UploadStatus"] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -7508,7 +9302,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CallTicketRead"][];
+                    "application/json": components["schemas"]["EInvoiceQueueListRead"];
                 };
             };
             /** @description Validation Error */
@@ -7522,45 +9316,47 @@ export interface operations {
             };
         };
     };
-    createCallTicket: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CallTicketCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CallTicketRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    completeCallTicket: {
+    recordEInvoiceResult: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ticket_id: number;
+                queue_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EInvoiceResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retryEInvoiceQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                queue_id: number;
             };
             cookie?: never;
         };
@@ -7572,7 +9368,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CallTicketRead"];
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
                 };
             };
             /** @description Validation Error */
@@ -7586,65 +9382,12 @@ export interface operations {
             };
         };
     };
-    openCashSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CashSessionOpenRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CashSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getCurrentCashSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CashSessionRead"] | null;
-                };
-            };
-        };
-    };
-    listCashMovements: {
+    sendEInvoiceQueueItem: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                session_id: number;
+                queue_id: number;
             };
             cookie?: never;
         };
@@ -7656,7 +9399,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CashMovementRead"][];
+                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
                 };
             };
             /** @description Validation Error */
@@ -7670,28 +9413,24 @@ export interface operations {
             };
         };
     };
-    recordCashMovement: {
+    issueEInvoiceForSale: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                session_id: number;
+                sale_id: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CashMovementCreateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CashMovementRead"];
+                    "application/json": components["schemas"]["InvoiceRead"];
                 };
             };
             /** @description Validation Error */
@@ -7705,18 +9444,18 @@ export interface operations {
             };
         };
     };
-    closeCashSession: {
+    registerManualInvoiceForSale: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                session_id: number;
+                sale_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CashSessionCloseRequest"];
+                "application/json": components["schemas"]["ManualInvoiceRegisterRequest"];
             };
         };
         responses: {
@@ -7726,7 +9465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CashSessionRead"];
+                    "application/json": components["schemas"]["InvoiceRead"];
                 };
             };
             /** @description Validation Error */
@@ -7740,13 +9479,71 @@ export interface operations {
             };
         };
     };
-    listConsignmentSettlements: {
+    markEInvoiceProofPrinted: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getEInvoiceReprintPayload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceReprintPayloadRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listGiftReasons: {
         parameters: {
             query?: {
-                status?: components["schemas"]["ConsignmentSettlementStatus"] | null;
-                phone?: string | null;
-                limit?: number;
-                offset?: number;
+                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
+                include_inactive?: boolean;
             };
             header?: never;
             path?: never;
@@ -7760,7 +9557,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConsignmentSettlementRead"][];
+                    "application/json": components["schemas"]["ReasonRead"][];
                 };
             };
             /** @description Validation Error */
@@ -7774,51 +9571,16 @@ export interface operations {
             };
         };
     };
-    payConsignmentSettlement: {
+    createGiftReason: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                settlement_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConsignmentSettlementRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createAcquisition: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AcquisitionCreate"];
+                "application/json": components["schemas"]["ReasonCreateRequest"];
             };
         };
         responses: {
@@ -7828,7 +9590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcquisitionResult"];
+                    "application/json": components["schemas"]["ReasonRead"];
                 };
             };
             /** @description Validation Error */
@@ -7842,80 +9604,18 @@ export interface operations {
             };
         };
     };
-    getAcquisition: {
+    updateGiftReason: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                acquisition_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AcquisitionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getAcquisitionReceipt: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                acquisition_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AcquisitionReceiptRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    voidAcquisition: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                acquisition_id: number;
+                reason_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AcquisitionVoidRequest"];
+                "application/json": components["schemas"]["ReasonUpdateRequest"];
             };
         };
         responses: {
@@ -7925,7 +9625,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AcquisitionVoidResult"];
+                    "application/json": components["schemas"]["ReasonRead"];
                 };
             };
             /** @description Validation Error */
@@ -7939,12 +9639,32 @@ export interface operations {
             };
         };
     };
-    getSerializedItemByCode: {
+    getHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    getInvoice: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                item_code: string;
+                invoice_id: number;
             };
             cookie?: never;
         };
@@ -7956,174 +9676,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SerializedItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getSerializedItemDetail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SerializedItemDetailRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateSerializedPrice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PriceUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SerializedItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getCatalogProductBySku: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sku: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProductRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateCatalogPrice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                product_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PriceUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProductRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateBulkPrice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lot_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PriceUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkLotRead"];
+                    "application/json": components["schemas"]["InvoiceRead"];
                 };
             };
             /** @description Validation Error */
@@ -8169,91 +9722,78 @@ export interface operations {
             };
         };
     };
-    listSerializedItems: {
-        parameters: {
-            query?: {
-                status?: components["schemas"]["SerializedItemStatus"] | null;
-                ownership?: components["schemas"]["OwnershipType"] | null;
-                category_id?: number | null;
-                brand_id?: number | null;
-                min_age_days?: number | null;
-                oldest_first?: boolean;
-                q?: string | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SerializedItemRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listCatalogProducts: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                low_stock?: boolean;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProductRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createCatalogProduct: {
+    getCurrentKioskCart: {
         parameters: {
             query?: never;
-            header?: {
-                "Idempotency-Key"?: string | null;
+            header?: never;
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
             };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskCartSessionRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getKioskDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskDeviceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createKioskDeviceSession: {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CatalogProductCreateRequest"];
+                "application/json": components["schemas"]["KioskDeviceLoginRequest"];
             };
         };
         responses: {
@@ -8263,7 +9803,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CatalogProductRead"];
+                    "application/json": components["schemas"]["KioskDeviceSessionRead"];
                 };
             };
             /** @description Validation Error */
@@ -8277,110 +9817,51 @@ export interface operations {
             };
         };
     };
-    getCatalogProductDetail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                product_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProductDetailRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getBulkLotByCode: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lot_code: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkLotRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listBrands: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BrandRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createBrand: {
+    streamKioskEvents: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordKioskHeartbeat: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BrandCreate"];
+                "application/json": components["schemas"]["KioskHeartbeatRequest"];
             };
         };
         responses: {
@@ -8390,7 +9871,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BrandRead"];
+                    "application/json": components["schemas"]["KioskHeartbeatRead"];
                 };
             };
             /** @description Validation Error */
@@ -8404,16 +9885,47 @@ export interface operations {
             };
         };
     };
-    listProductModels: {
+    createKioskPairingCode: {
         parameters: {
-            query?: {
-                brand_id?: number | null;
-                q?: string | null;
-                limit?: number;
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
             };
+            path?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskDeviceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentKioskTask: {
+        parameters: {
+            query?: never;
             header?: never;
             path?: never;
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody?: never;
         responses: {
@@ -8423,7 +9935,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductModelRead"][];
+                    "application/json": components["schemas"]["KioskTaskRead"] | null;
                 };
             };
             /** @description Validation Error */
@@ -8437,116 +9949,90 @@ export interface operations {
             };
         };
     };
-    createProductModel: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProductModelCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProductModelRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listCategories: {
-        parameters: {
-            query?: {
-                q?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CategoryRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createCategory: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CategoryCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CategoryRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateCategoryTarget: {
+    getKioskTask: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                category_id: number;
+                task_id: number;
             };
-            cookie?: never;
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledgeKioskTask: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                task_id: number;
+            };
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KioskTaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recordKioskTaskActivity: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                task_id: number;
+            };
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
+            };
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CategoryTargetUpdate"];
+                "application/json": components["schemas"]["KioskActivityRequest"];
             };
         };
         responses: {
@@ -8556,7 +10042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CategoryRead"];
+                    "application/json": components["schemas"]["KioskTaskRead"];
                 };
             };
             /** @description Validation Error */
@@ -8570,49 +10056,22 @@ export interface operations {
             };
         };
     };
-    listCategoryPricingRules: {
+    signKioskTask: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
             path: {
-                category_id: number;
+                task_id: number;
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PricingRuleRead"][];
-                };
+            cookie?: {
+                lu_camp_kiosk_session?: string | null;
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateCategoryPricingRules: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                category_id: number;
-            };
-            cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PricingRulesUpdate"];
+                "application/json": components["schemas"]["KioskSignRequest"];
             };
         };
         responses: {
@@ -8622,72 +10081,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PricingRuleRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listBulkLots: {
-        parameters: {
-            query?: {
-                status?: components["schemas"]["BulkLotStatus"] | null;
-                q?: string | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkLotRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getBulkLotDetail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lot_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkLotDetailRead"];
+                    "application/json": components["schemas"]["KioskTaskRead"];
                 };
             };
             /** @description Validation Error */
@@ -8831,13 +10225,12 @@ export interface operations {
             };
         };
     };
-    listSuppliers: {
+    listProductModels: {
         parameters: {
             query?: {
+                brand_id?: number | null;
                 q?: string | null;
                 limit?: number;
-                offset?: number;
-                include_inactive?: boolean;
             };
             header?: never;
             path?: never;
@@ -8851,7 +10244,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SupplierRead"][];
+                    "application/json": components["schemas"]["ProductModelRead"][];
                 };
             };
             /** @description Validation Error */
@@ -8865,7 +10258,7 @@ export interface operations {
             };
         };
     };
-    createSupplier: {
+    createProductModel: {
         parameters: {
             query?: never;
             header?: never;
@@ -8874,73 +10267,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SupplierCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getSupplier: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                supplier_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateSupplier: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                supplier_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SupplierUpdate"];
+                "application/json": components["schemas"]["ProductModelCreate"];
             };
         };
         responses: {
@@ -8950,69 +10277,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SupplierRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    deactivateSupplier: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                supplier_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    activateSupplier: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                supplier_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SupplierRead"];
+                    "application/json": components["schemas"]["ProductModelRead"];
                 };
             };
             /** @description Validation Error */
@@ -9093,7 +10358,7 @@ export interface operations {
             };
         };
     };
-    submitPurchaseOrder: {
+    getPurchaseOrder: {
         parameters: {
             query?: never;
             header?: never;
@@ -9155,16 +10420,21 @@ export interface operations {
             };
         };
     };
-    getPurchaseOrder: {
+    registerInputInvoice: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 purchase_order_id: number;
+                receipt_id: number;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InputInvoiceIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -9172,7 +10442,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PurchaseOrderRead"];
+                    "application/json": components["schemas"]["InputInvoiceRead"];
                 };
             };
             /** @description Validation Error */
@@ -9232,21 +10502,16 @@ export interface operations {
             };
         };
     };
-    registerInputInvoice: {
+    submitPurchaseOrder: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 purchase_order_id: number;
-                receipt_id: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["InputInvoiceIn"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -9254,7 +10519,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InputInvoiceRead"];
+                    "application/json": components["schemas"]["PurchaseOrderRead"];
                 };
             };
             /** @description Validation Error */
@@ -9268,9 +10533,858 @@ export interface operations {
             };
         };
     };
-    listStocktakes: {
+    campaignPerformanceReport: {
         parameters: {
             query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignPerformanceReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consignmentPayablesReport: {
+        parameters: {
+            query?: {
+                status?: "PENDING" | "PAID" | "CANCELLED" | "ALL";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsignmentPayablesReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dailyCashReport: {
+        parameters: {
+            query: {
+                date: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyCashReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dailySummaryReport: {
+        parameters: {
+            query: {
+                date: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailySummaryReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dineInReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                granularity?: string;
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DineInReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discountReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiscountReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    giftReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GiftReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    businessInsightsReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inventoryValueReport: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryValueReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    salesMarginReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SalesMarginReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditEffectiveness: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectivenessReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditFlows: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                granularity?: "day" | "week" | "month";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowsReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditLiability: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiabilityReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storeCreditReconciliation: {
+        parameters: {
+            query?: {
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    financeTrendsReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                granularity?: "day" | "week" | "month" | "quarter";
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrendsReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createReturn: {
+        parameters: {
+            query?: {
+                manual_paper_disposed?: boolean;
+            };
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReturnPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getReturn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                return_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReturnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listSales: {
+        parameters: {
+            query?: {
+                from?: components["schemas"]["AwareDateTime"] | null;
+                to?: components["schemas"]["AwareDateTime"] | null;
+                limit?: number;
+                offset?: number;
+                invoice_registerable?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleSummaryRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createSale: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listPendingLinePayRefunds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinePayRefundAttemptRead"][];
+                };
+            };
+        };
+    };
+    resolveLinePayRefund: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attempt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinePayRefundResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinePayRefundAttemptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    quoteSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaleQuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleQuoteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    printSaleDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    voidSale: {
+        parameters: {
+            query?: {
+                manual_refund_ack?: boolean;
+                manual_paper_disposed?: boolean;
+            };
+            header?: never;
+            path: {
+                sale_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaleRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listSerializedItems: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SerializedItemStatus"] | null;
+                ownership?: components["schemas"]["OwnershipType"] | null;
+                category_id?: number | null;
+                brand_id?: number | null;
+                min_age_days?: number | null;
+                oldest_first?: boolean;
+                q?: string | null;
                 limit?: number;
                 offset?: number;
             };
@@ -9286,7 +11400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StocktakeRead"][];
+                    "application/json": components["schemas"]["SerializedItemRead"][];
                 };
             };
             /** @description Validation Error */
@@ -9300,32 +11414,12 @@ export interface operations {
             };
         };
     };
-    createStocktake: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StocktakeRead"];
-                };
-            };
-        };
-    };
-    getStocktake: {
+    getSerializedItemByCode: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                stocktake_id: number;
+                item_code: string;
             };
             cookie?: never;
         };
@@ -9337,7 +11431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StocktakeRead"];
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */
@@ -9351,18 +11445,49 @@ export interface operations {
             };
         };
     };
-    confirmStocktake: {
+    getSerializedItemDetail: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                stocktake_id: number;
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateSerializedPrice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StocktakeConfirmRequest"];
+                "application/json": components["schemas"]["PriceUpdateRequest"];
             };
         };
         responses: {
@@ -9372,7 +11497,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StocktakeRead"];
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */
@@ -9667,727 +11792,11 @@ export interface operations {
             };
         };
     };
-    getCurrentKioskTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskTaskRead"] | null;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getKioskTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                task_id: number;
-            };
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskTaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    acknowledgeKioskTask: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                task_id: number;
-            };
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskTaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    recordKioskTaskActivity: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                task_id: number;
-            };
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KioskActivityRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskTaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    signKioskTask: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                task_id: number;
-            };
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KioskSignRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskTaskRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    registerPosTerminal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TerminalCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getPosTerminal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upsertCustomerDisplayCart: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CartUpsertRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CartSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getCurrentCustomerDisplayCart: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffCartSessionRead"] | null;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    beginCustomerDisplayCheckout: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CartBeginCheckoutRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffCartSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancelCustomerDisplayCart: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CartCancelRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CartSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    freezeCustomerDisplayCartForSignature: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CartFreezeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CartFreezeRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reconcileCustomerDisplayPayment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PaymentReconciliationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentReconciliationRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pairPosTerminal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TerminalPairRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    unpairPosTerminal: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                terminal_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TerminalUnpairRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TerminalRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createKioskDeviceSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KioskDeviceLoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskDeviceSessionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getCurrentKioskCart: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskCartSessionRead"] | null;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    streamKioskEvents: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getKioskDevice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskDeviceRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    recordKioskHeartbeat: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-CSRF-Token"?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KioskHeartbeatRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskHeartbeatRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createKioskPairingCode: {
-        parameters: {
-            query?: never;
-            header?: {
-                "X-CSRF-Token"?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                lu_camp_kiosk_session?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KioskDeviceRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listSales: {
+    listStocktakes: {
         parameters: {
             query?: {
-                from?: components["schemas"]["AwareDateTime"] | null;
-                to?: components["schemas"]["AwareDateTime"] | null;
                 limit?: number;
                 offset?: number;
-                invoice_registerable?: boolean;
             };
             header?: never;
             path?: never;
@@ -10401,7 +11810,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SaleSummaryRead"][];
+                    "application/json": components["schemas"]["StocktakeRead"][];
                 };
             };
             /** @description Validation Error */
@@ -10415,20 +11824,14 @@ export interface operations {
             };
         };
     };
-    createSale: {
+    createStocktake: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SaleCreateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             201: {
@@ -10436,7 +11839,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SaleRead"];
+                    "application/json": components["schemas"]["StocktakeRead"];
+                };
+            };
+        };
+    };
+    getStocktake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stocktake_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StocktakeRead"];
                 };
             };
             /** @description Validation Error */
@@ -10450,16 +11875,18 @@ export interface operations {
             };
         };
     };
-    quoteSale: {
+    confirmStocktake: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                stocktake_id: number;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SaleQuoteRequest"];
+                "application/json": components["schemas"]["StocktakeConfirmRequest"];
             };
         };
         responses: {
@@ -10469,7 +11896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SaleQuoteResponse"];
+                    "application/json": components["schemas"]["StocktakeRead"];
                 };
             };
             /** @description Validation Error */
@@ -10483,103 +11910,7 @@ export interface operations {
             };
         };
     };
-    getSale: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SaleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    voidSale: {
-        parameters: {
-            query?: {
-                manual_refund_ack?: boolean;
-                manual_paper_disposed?: boolean;
-            };
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SaleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    printSaleDetail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SaleRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listPendingLinePayRefunds: {
+    storeCreditPremiumSuggestionToday: {
         parameters: {
             query?: never;
             header?: never;
@@ -10594,343 +11925,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LinePayRefundAttemptRead"][];
-                };
-            };
-        };
-    };
-    resolveLinePayRefund: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                attempt_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LinePayRefundResolveRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LinePayRefundAttemptRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listGiftReasons: {
-        parameters: {
-            query?: {
-                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
-                include_inactive?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createGiftReason: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateGiftReason: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                reason_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listDiscountReasons: {
-        parameters: {
-            query?: {
-                /** @description 連停用的原因一起列出（管理頁用；POS 選單不需要） */
-                include_inactive?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createDiscountReason: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateDiscountReason: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                reason_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReasonUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReasonRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createReturn: {
-        parameters: {
-            query?: {
-                manual_paper_disposed?: boolean;
-            };
-            header: {
-                "Idempotency-Key": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReturnCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReturnRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    previewReturn: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReturnPreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReturnPreviewRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getReturn: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                return_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReturnRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PremiumSuggestionResponse"];
                 };
             };
         };
@@ -10966,16 +11961,16 @@ export interface operations {
             };
         };
     };
-    getStoreCredit: {
+    listSuppliers: {
         parameters: {
             query?: {
+                q?: string | null;
                 limit?: number;
                 offset?: number;
+                include_inactive?: boolean;
             };
             header?: never;
-            path: {
-                contact_id: number;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -10986,7 +11981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreCreditBalanceRead"];
+                    "application/json": components["schemas"]["SupplierRead"][];
                 };
             };
             /** @description Validation Error */
@@ -11000,20 +11995,16 @@ export interface operations {
             };
         };
     };
-    adjustStoreCredit: {
+    createSupplier: {
         parameters: {
             query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                contact_id: number;
-            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StoreCreditAdjustRequest"];
+                "application/json": components["schemas"]["SupplierCreate"];
             };
         };
         responses: {
@@ -11023,7 +12014,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoreCreditEntryRead"];
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */
@@ -11037,585 +12028,12 @@ export interface operations {
             };
         };
     };
-    storeCreditPremiumSuggestionToday: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PremiumSuggestionResponse"];
-                };
-            };
-        };
-    };
-    storeCreditLiability: {
-        parameters: {
-            query?: {
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LiabilityReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    storeCreditFlows: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                granularity?: "day" | "week" | "month";
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FlowsReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    storeCreditEffectiveness: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EffectivenessReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    storeCreditReconciliation: {
-        parameters: {
-            query?: {
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconciliationReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dailyCashReport: {
-        parameters: {
-            query: {
-                date: string;
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DailyCashReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dailySummaryReport: {
-        parameters: {
-            query: {
-                date: string;
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DailySummaryReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    financeTrendsReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                granularity?: "day" | "week" | "month" | "quarter";
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TrendsReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    businessInsightsReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InsightsReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    inventoryValueReport: {
-        parameters: {
-            query?: {
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InventoryValueReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    consignmentPayablesReport: {
-        parameters: {
-            query?: {
-                status?: "PENDING" | "PAID" | "CANCELLED" | "ALL";
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConsignmentPayablesReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    salesMarginReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SalesMarginReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    discountReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DiscountReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dineInReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                granularity?: string;
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DineInReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    giftReport: {
-        parameters: {
-            query: {
-                from: components["schemas"]["AwareDateTime"];
-                to: components["schemas"]["AwareDateTime"];
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GiftReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    campaignPerformanceReport: {
-        parameters: {
-            query?: {
-                format?: "json" | "csv" | "xlsx";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignPerformanceReport"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listCampaigns: {
-        parameters: {
-            query?: {
-                status?: components["schemas"]["CampaignStatus"] | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    createCampaign: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CampaignCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getCampaign: {
+    getSupplier: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                campaign_id: number;
+                supplier_id: number;
             };
             cookie?: never;
         };
@@ -11627,7 +12045,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CampaignRead"];
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */
@@ -11641,235 +12059,18 @@ export interface operations {
             };
         };
     };
-    activateCampaign: {
+    updateSupplier: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                campaign_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    endCampaign: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                campaign_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancelCampaign: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                campaign_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CampaignRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    listEInvoiceQueue: {
-        parameters: {
-            query?: {
-                status?: components["schemas"]["UploadStatus"] | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EInvoiceQueueListRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    issueEInvoiceForSale: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InvoiceRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getEInvoiceReprintPayload: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InvoiceReprintPayloadRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    markEInvoiceProofPrinted: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    registerManualInvoiceForSale: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sale_id: number;
+                supplier_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualInvoiceRegisterRequest"];
+                "application/json": components["schemas"]["SupplierUpdate"];
             };
         };
         responses: {
@@ -11879,7 +12080,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvoiceRead"];
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */
@@ -11893,12 +12094,12 @@ export interface operations {
             };
         };
     };
-    sendEInvoiceQueueItem: {
+    activateSupplier: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                queue_id: number;
+                supplier_id: number;
             };
             cookie?: never;
         };
@@ -11910,7 +12111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */
@@ -11924,12 +12125,12 @@ export interface operations {
             };
         };
     };
-    retryEInvoiceQueue: {
+    deactivateSupplier: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                queue_id: number;
+                supplier_id: number;
             };
             cookie?: never;
         };
@@ -11941,208 +12142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    recordEInvoiceResult: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                queue_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EInvoiceResultRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EInvoiceQueueItemRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getInvoice: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                invoice_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["InvoiceRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    getBackupHealth: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupHealthRead"];
-                };
-            };
-        };
-    };
-    listBackupRuns: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupRunRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    triggerBackup: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupRunRead"];
-                };
-            };
-        };
-    };
-    listRestoreRuns: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RestoreRunRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    triggerRestore: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RestoreTriggerRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RestoreRunRead"];
+                    "application/json": components["schemas"]["SupplierRead"];
                 };
             };
             /** @description Validation Error */

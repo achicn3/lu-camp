@@ -412,16 +412,17 @@ function ItemRowCard({
   const autoTaxApplies = type !== "CONSIGNMENT";
   const syncedResale = useRef<number | null>(resale);
   const syncedTaxRate = useRef<number | null>(taxRate);
+  const syncedType = useRef<AcqType>(type);
   const autoFilled = useRef<string | null>(null);
   useEffect(() => {
-    // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
-    // **這一行必須在更新 ref 之前**：在寄售分頁動過的估計轉售價若把變更訊號吃掉，
-    // 切回買斷時就不會補算，上架售價會留白或停在舊值。
-    if (type === "CONSIGNMENT") return;
     const resaleChanged = syncedResale.current !== resale;
     const taxRateChanged = syncedTaxRate.current !== taxRate;
+    const typeChanged = syncedType.current !== type;
     syncedResale.current = resale;
     syncedTaxRate.current = taxRate;
+    syncedType.current = type;
+    // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
+    if (type === "CONSIGNMENT") return;
     if (resale === null || taxRate === null) return;
     const target = taxInclusivePrice(resale, taxRate);
     if (target === null) return;
@@ -431,13 +432,18 @@ function ItemRowCard({
       return;
     }
     // 只有兩種情況會寫入：
-    // 1. 店員動了估計轉售價 → 一律覆蓋（店主裁示 2026-08-22）。
-    // 2. 稅率設定剛到位 → 僅在上架售價還空著、或仍是我們上次自動填的值時才補；
-    //    否則會把店員已經手打好的價格無聲換掉（實測可差數百元）。
-    // **店員自己編輯上架售價（含清空重打）不在此列**——清空就自動填回去的話，
+    // 1. **店員在買斷分頁親自改了估計轉售價** → 一律覆蓋（店主裁示 2026-08-22）。
+    // 2. 稅率設定剛到位、或從寄售分頁切回買斷 → 僅在上架售價還空著、或仍是我們上次
+    //    自動填的值時才補；否則會把店員已經手打好的價格無聲換掉。
+    //
+    // 為什麼「切分頁」不能走第 1 條：切分頁是導覽動作，不是定價決定。店員在寄售分頁
+    // 手打了與寄售人談定的架上價 2000，只是點一下「買斷」看看，回來就變成 2100
+    // ——客人多付 100、應付寄售人多 50，而且全程沒有任何提示（第三輪 M-1 實機重現）。
+    // **店員自己編輯上架售價（含清空重打）也不在此列**——清空就自動填回去的話，
     // 他連重打的機會都沒有。
     const stillOurs = row.listedPrice === "" || row.listedPrice === autoFilled.current;
-    if (!(resaleChanged || (taxRateChanged && stillOurs))) return;
+    const directResaleEdit = resaleChanged && !typeChanged;
+    if (!(directResaleEdit || ((taxRateChanged || typeChanged) && stillOurs))) return;
     autoFilled.current = next;
     onChangeRef.current({ listedPrice: next });
   }, [resale, taxRate, type, row.listedPrice]);

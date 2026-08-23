@@ -224,10 +224,12 @@ describe("AcquisitionPage", () => {
     expect(listed.value).toBe(""); // 還沒有稅率，不能亂猜
     await userEvent.type(listed, "2500");
     expect(listed.value).toBe("2500");
+    // 先填收購價，這樣稅率一落地就會出現「毛利 N%」——用它當「設定真的回來了」的正訊號。
+    // 原本等的是「紅字消失」，但載入中本來就沒有紅字，waitFor 第一個 tick 就通過，
+    // 等於在設定尚未落地的瞬間斷言，什麼都沒驗到（第三輪 M-2）。
+    await userEvent.type(screen.getByLabelText("收購價"), "1000");
     releaseSettings?.(); // 設定這時才回來
-    await waitFor(() =>
-      expect(screen.queryByText(/讀不到稅率設定/)).toBeNull(),
-    );
+    expect(await screen.findByText(/毛利 /)).toBeTruthy();
     expect(listed.value).toBe("2500"); // 店員打的價格必須原封不動
   });
 
@@ -272,6 +274,40 @@ describe("AcquisitionPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
 
     await waitFor(() => expect(listed().value).toBe("1800"));
+  });
+
+  it("在寄售分頁手打上架售價後切到買斷再切回，價格不得被加稅", async () => {
+    // 切分頁是導覽動作、不是定價決定。談定的架上價 2000 若因為點一下「買斷」就變 2100，
+    // 客人多付 100、應付寄售人多 50，而且沒有任何提示（第三輪 M-1）。
+    stub();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2000");
+    const listed = () =>
+      screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    expect(listed().value).toBe(""); // 寄售不自動加稅
+    await userEvent.type(listed(), "2000"); // 與寄售人談定的架上價
+
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+    await waitFor(() => expect(listed().value).toBe("2000"));
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    expect(listed().value).toBe("2000");
+  });
+
+  it("在寄售分頁填了估計轉售價、上架售價還空著 → 切回買斷要補算", async () => {
+    stub();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2000");
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement)
+          .value,
+      ).toBe("2100"),
+    );
   });
 
   it("寄售分頁不自動加稅，也不出現「帶入含稅價格」快捷", async () => {

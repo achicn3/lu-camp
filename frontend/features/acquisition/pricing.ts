@@ -12,8 +12,9 @@ export function roundNtd(value: number): number {
 /**
  * 稅率轉基點整數（如 0.05 → 500）。
  *
- * 含稅換算一律走「乘基點再除 10000」而不是 `× (1 + rate)`：後者在二進位浮點下可能算出
- * 2110.4999999999998 這種值，剛好落在 .5 的金額就會少一元。稅率最多四位小數（DB Numeric(5,4)）。
+ * 稅率最多四位小數（DB Numeric(5,4)），先轉整數基點，讓後續換算都在整數比值上做——
+ * 真正會掉一元的是**除法**那半（見 `suggestedListedPrice`），單純的 `× (1 + rate)`
+ * 實測沒有偏差（n 1–5,000,000 × 稅率 0.05/0.10/0.20/0.0025，與基點寫法零差異）。
  */
 function rateBasisPoints(taxRate: number): number {
   return Math.round(taxRate * 10000);

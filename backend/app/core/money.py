@@ -53,8 +53,12 @@ def suggested_price(acquisition_cost: Decimal, margin_pct: int, tax_rate: Decima
         raise InvalidMargin(f"margin_pct 須介於 {MARGIN_MIN}-{MARGIN_MAX}，收到 {margin_pct}")
     if not Decimal(0) <= tax_rate < Decimal(1):
         raise InvalidTaxRate(f"稅率須介於 0（含）至 1（不含），收到 {tax_rate}")
-    divisor = Decimal(1) - Decimal(margin_pct) / Decimal(100)
-    return round_ntd(acquisition_cost / divisor * (Decimal(1) + tax_rate))
+    # **先乘後除**：先除會讓 Decimal 在 28 位有效位數處截斷，之後再乘就補不回來。
+    # 例 cost 282／margin 1／稅率 7.25%：先除後乘得 305，精確值是 305.5 → 應為 306。
+    # 5% 下看不出來（實測零誤差），非 5% 的稅率才會現形——而稅率是可設定的。
+    return round_ntd(
+        acquisition_cost * Decimal(100) * (Decimal(1) + tax_rate) / Decimal(100 - margin_pct)
+    )
 
 
 def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:

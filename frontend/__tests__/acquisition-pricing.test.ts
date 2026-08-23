@@ -79,6 +79,10 @@ describe("suggestedListedPrice", () => {
     // cost 87 / margin 10：未稅 96.666…×1.05 = 101.5 整。
     // 純浮點除法會算成 101.49999999999999 而少一元（後端 Decimal 得 102）。
     expect(suggestedListedPrice(87, 10, RATE)).toBe(102);
+    // cost 41 / margin 18：精確值 41 × 105 ÷ 82 = 52.5 整 → 53。
+    // 最自然的浮點寫法 `(cost/(1-m/100))*(1+rate)` 會算成 52.49999999999999 → 52
+    // （該寫法在 cost 1–30000 × margin 0–99 中有 2.26% 的組合少一元）。
+    expect(suggestedListedPrice(41, 18, RATE)).toBe(53);
     expect(suggestedListedPrice(1000, 45, RATE)).toBe(1909);
   });
   it("稅率 0 → 等同舊行為", () => {
