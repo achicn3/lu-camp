@@ -29,7 +29,16 @@ const SELLER = {
   has_national_id: true,
 };
 
-function stub(over: { drawer?: boolean } = {}) {
+/** 讓測試可以延後或弄壞 /settings 的回應（稅率晚到／讀不到的路徑）。 */
+let releaseSettings: (() => void) | null = null;
+
+function stub(over: { drawer?: boolean; taxRate?: string; settingsFails?: boolean; holdSettings?: boolean } = {}) {
+  releaseSettings = null;
+  const gate = over.holdSettings
+    ? new Promise<void>((resolve) => {
+        releaseSettings = resolve;
+      })
+    : null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -39,7 +48,13 @@ function stub(over: { drawer?: boolean } = {}) {
         return json([{ id: 1, name: "登山服飾", target_margin_pct: 45 }]);
       }
       if (url.includes("/settings")) {
-        return json({ premium_rate: "0.1000", default_margin_pct: 45, tax_rate: "0.0500" });
+        if (gate) await gate;
+        if (over.settingsFails) return json({ detail: "boom" }, 500);
+        return json({
+          premium_rate: "0.1000",
+          default_margin_pct: 45,
+          tax_rate: over.taxRate ?? "0.0500",
+        });
       }
       if (url.includes("/cash-sessions/current")) {
         return over.drawer === false ? json(null, 404) : json({ id: 1, status: "OPEN" });
@@ -164,7 +179,7 @@ describe("AcquisitionPage", () => {
   it("打完估計轉售價（未稅）→ 上架售價自動帶入含稅價", async () => {
     stub();
     renderPage();
-    const resale = await screen.findByLabelText("估計轉售價");
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     await waitFor(() =>
       expect((screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value).toBe("2111"),
@@ -174,7 +189,7 @@ describe("AcquisitionPage", () => {
   it("估計轉售價再改一次 → 上架售價一律跟著換（即使已手動改過）", async () => {
     stub();
     renderPage();
-    const resale = await screen.findByLabelText("估計轉售價");
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
     await waitFor(() => expect(listed.value).toBe("2111"));
@@ -186,6 +201,98 @@ describe("AcquisitionPage", () => {
     await userEvent.clear(resale);
     await userEvent.type(resale, "1000");
     await waitFor(() => expect(listed.value).toBe("1050"));
+  });
+
+  it("稅率不是 5% 時也要正確換算（稅率取自 settings，不得寫死）", async () => {
+    stub({ taxRate: "0.1000" });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+      ).toBe("2211"),
+    );
+  });
+
+  it("稅率設定晚到時，不得蓋掉店員已手打的上架售價", async () => {
+    stub({ holdSettings: true });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    expect(listed.value).toBe(""); // 還沒有稅率，不能亂猜
+    await userEvent.type(listed, "2500");
+    expect(listed.value).toBe("2500");
+    releaseSettings?.(); // 設定這時才回來
+    await waitFor(() =>
+      expect(screen.queryByText(/讀不到稅率設定/)).toBeNull(),
+    );
+    expect(listed.value).toBe("2500"); // 店員打的價格必須原封不動
+  });
+
+  it("稅率設定晚到、上架售價還空著時才自動補上", async () => {
+    stub({ holdSettings: true });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    expect(listed.value).toBe("");
+    releaseSettings?.();
+    await waitFor(() => expect(listed.value).toBe("2111"));
+  });
+
+  it("讀不到稅率設定時，明講不能自動換算（不可靜默）", async () => {
+    stub({ settingsFails: true });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    expect(
+      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+    ).toBe("");
+    expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
+  });
+
+  it("切到散裝分頁再切回買斷，店員手打的上架售價不得被改掉", async () => {
+    // ItemRowCard 在切分頁時會 unmount；同步用的 ref 若歸零，remount 會被當成
+    // 「店員剛動了估計轉售價」而覆蓋手打值（實測曾 1800 → 1050，少收 750）。
+    stub();
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "1000");
+    const listed = () =>
+      screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    await waitFor(() => expect(listed().value).toBe("1050"));
+    await userEvent.clear(listed());
+    await userEvent.type(listed(), "1800");
+    expect(listed().value).toBe("1800");
+
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
+    expect(await screen.findByText("散裝批")).toBeTruthy();
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+
+    await waitFor(() => expect(listed().value).toBe("1800"));
+  });
+
+  it("寄售分頁不自動加稅，也不出現「帶入含稅價格」快捷", async () => {
+    stub();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2000");
+    await waitFor(() => expect(screen.queryByText(/帶入含稅價格/)).toBeNull());
+    expect(
+      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("設定還在載入時，不得先喊「讀不到稅率設定」", async () => {
+    stub({ holdSettings: true });
+    renderPage();
+    await screen.findByLabelText("估計轉售價", { selector: "input" });
+    expect(screen.queryByText(/讀不到稅率設定/)).toBeNull();
+    releaseSettings?.();
+    await waitFor(() => expect(screen.queryByText(/讀不到稅率設定/)).toBeNull());
   });
 
   it("blocks submit with validation errors when nothing filled", async () => {

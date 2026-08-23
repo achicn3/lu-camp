@@ -39,15 +39,22 @@ def discounted_price(unit_price: Decimal, discount_pct: int) -> int:
     return round_ntd(unit_price * Decimal(100 - discount_pct) / Decimal(100))
 
 
-def suggested_price(acquisition_cost: Decimal, margin_pct: int) -> int:
-    """建議含稅售價 = round_ntd(收購價 / (1 - margin_pct/100))。
+def suggested_price(acquisition_cost: Decimal, margin_pct: int, tax_rate: Decimal) -> int:
+    """建議**含稅**上架售價 = round_ntd(收購價 ÷ (1 − margin_pct/100) × (1 + tax_rate))（§7.9）。
+
+    目標毛利對**未稅**售價談：標價含稅（§6），但那 5% 是代政府收的、不是店家毛利。
+    先算未稅售價、最後才加稅，**只四捨五入一次**——先把未稅取整再加稅會多一次捨入誤差。
 
     margin_pct 為整數百分數，限 0-99；>=100 或 <0 會除以零/負值，視為錯誤。
+    tax_rate 為小數稅率（如 0.05），限 0 ≤ rate < 1，取自 settings、不得寫死。
+    tax_rate=0 時退化為舊式（2026-08-23 前的定義），供向後相容比對。
     """
     if not MARGIN_MIN <= margin_pct <= MARGIN_MAX:
         raise InvalidMargin(f"margin_pct 須介於 {MARGIN_MIN}-{MARGIN_MAX}，收到 {margin_pct}")
+    if not Decimal(0) <= tax_rate < Decimal(1):
+        raise InvalidTaxRate(f"稅率須介於 0（含）至 1（不含），收到 {tax_rate}")
     divisor = Decimal(1) - Decimal(margin_pct) / Decimal(100)
-    return round_ntd(acquisition_cost / divisor)
+    return round_ntd(acquisition_cost / divisor * (Decimal(1) + tax_rate))
 
 
 def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:

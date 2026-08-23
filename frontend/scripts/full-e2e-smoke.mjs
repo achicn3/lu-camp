@@ -183,6 +183,12 @@ try {
   // 成色、定價
   await page.locator(".acq-row select").first().selectOption("A");
   await page.fill('input[aria-label="估計轉售價"]', "2400");
+  // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
+  await page.waitForFunction(
+    () => (document.querySelector('input[aria-label="上架售價（含稅）"]')?.value ?? "") !== "",
+    null,
+    { timeout: 5000 },
+  );
   await page.fill('input[aria-label="收購價"]', "900");
   await page.fill('input[aria-label="上架售價（含稅）"]', "1800");
   await shot(page, "buyout1-filled");
@@ -216,6 +222,12 @@ try {
   await comboPickExisting("分類", "帳", "帳篷").then(({ opt: o }) => o.click());
   await page.locator(".acq-row select").first().selectOption("B");
   await page.fill('input[aria-label="估計轉售價"]', "3000");
+  // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
+  await page.waitForFunction(
+    () => (document.querySelector('input[aria-label="上架售價（含稅）"]')?.value ?? "") !== "",
+    null,
+    { timeout: 5000 },
+  );
   await page.fill('input[aria-label="收購價"]', "2500");
   await page.fill('input[aria-label="上架售價（含稅）"]', "3000");
   // 撥款改「購物金」

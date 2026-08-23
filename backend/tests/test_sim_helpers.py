@@ -6,10 +6,8 @@ import base64
 import random
 import zlib
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-import pytest
 from qa_e2e.sim_helpers import (
     build_schedule,
     daily_sales_target,
@@ -17,7 +15,6 @@ from qa_e2e.sim_helpers import (
     make_phone,
     signature_png,
     simulation_day_start,
-    suggested_price,
 )
 
 from app.core.national_id import is_valid_national_id
@@ -42,13 +39,6 @@ def test_daily_sales_weekend_higher_on_average() -> None:
     weekday_avg = sum(daily_sales_target(50, 2, rng) for _ in range(200)) / 200
     weekend_avg = sum(daily_sales_target(50, 6, rng) for _ in range(200)) / 200
     assert weekend_avg > weekday_avg * 1.5
-
-
-def test_suggested_price_matches_margin_formula() -> None:
-    assert suggested_price(1000, 45) == Decimal(1818)  # 1000/0.55 = 1818.18 → 1818
-    assert suggested_price(1800, 0) == Decimal(1800)
-    with pytest.raises(ValueError):
-        suggested_price(1000, 100)
 
 
 def test_signature_png_structure_and_variety() -> None:

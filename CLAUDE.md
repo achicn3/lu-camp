@@ -79,7 +79,14 @@
 6. 散裝批（bulk_lot，E 級）：售出按該堆 `unit_price` 計價、`remaining_qty` 扣減後不得 < 0、歸零轉 `SOLD_OUT`；每件成本 = `acquisition_cost ÷ total_qty`。各堆價格相互獨立。
 7. 退已售寄售品須反轉 `consignment_settlement`（未付→`CANCELLED`；已付→`reclaim_needed=true`），不可留下虛假應付或已實現抽成。
 8. 影響現金的操作（收現、收購/散裝付現、寄售付款、退貨退現）必須在開帳中的 `cash_session` 下進行，否則拒絕並提示開帳。
-9. 收購定價輔助（定價計算機）：`建議售價 = round_ntd(收購價 ÷ (1 − margin_pct/100))`，為含稅整數元；`margin_pct` 為整數百分數（`default_margin_pct` 放 `settings`，預設 45），店員可手動覆蓋。**邊界：`margin_pct` 限 0–99**（≥100 會除以零/負值），超出範圍必須被擋下並回錯。
+9. 收購定價輔助（定價計算機）：**目標毛利一律對「未稅」售價談**——標價含稅（§6），但那 5% 是代政府收的、不是店家毛利。
+   - `建議未稅售價 = 收購價 ÷ (1 − margin_pct/100)`
+   - `建議上架售價（含稅） = round_ntd(建議未稅售價 × (1 + tax_rate))`，**全程只四捨五入一次**（先取整未稅再加稅會多一次捨入誤差）
+   - `毛利率 = (未稅售價 − 收購成本) ÷ 未稅售價`；未稅由含稅價還原，與 `split_tax_inclusive` 同式：`round_ntd(含稅 ÷ (1 + tax_rate))`
+
+   `tax_rate` 取自 `settings`，**不得寫死**；`margin_pct` 為整數百分數（`default_margin_pct` 放 `settings`，預設 45），店員可手動覆蓋。**邊界：`margin_pct` 限 0–99**（≥100 會除以零/負值），超出範圍必須被擋下並回錯。
+
+   > 2026-08-23 起改此口徑。原式為「收購價 ÷ (1 − margin/100) 即含稅價」，等於把應繳的稅算進毛利——設 45% 實拿只有 42%。見 `docs/adr/ADR-016-margin-on-tax-exclusive-price.md`。`tax_rate=0` 時新式退化為舊式。
 
 ## 8. 溝通規則
 

@@ -56,6 +56,12 @@ try {
   await page.click('button:has-text("建立「登山服飾」")');
 
   await page.fill('input[aria-label="估計轉售價"]', "3000");
+  // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
+  await page.waitForFunction(
+    () => (document.querySelector('input[aria-label="上架售價（含稅）"]')?.value ?? "") !== "",
+    null,
+    { timeout: 5000 },
+  );
   await page.waitForSelector("text=建議最高收購成本");
   await page.fill('input[aria-label="收購價"]', "1000");
   await page.fill('input[aria-label="上架售價（含稅）"]', "3000");

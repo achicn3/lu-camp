@@ -63,7 +63,8 @@ GET    /api/v1/product-models?q=&brand_id=     # autocomplete 型號(可依品�
 POST   /api/v1/product-models                  # 新增型號(品牌+品名+分類)
 GET    /api/v1/product-models/{id}/pricing?acquisition_cost=
        # 回該型號收購/售出價歷史 + 依 settings.default_margin_pct 算出的建議含稅售價
-       # 建議售價 = round_ntd(acquisition_cost / (1 - margin_pct/100))；margin_pct 限 0-99
+       # 建議上架售價（含稅）= round_ntd(acquisition_cost / (1 - margin_pct/100) * (1 + tax_rate))
+       # 目標毛利對未稅計（ADR-016）；margin_pct 限 0-99、tax_rate 取自 settings
 ```
 
 ## Acquisition（收購/寄售入庫）

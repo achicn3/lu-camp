@@ -6,7 +6,6 @@ import {
   maxAcquisitionCost,
   payableTotal,
   splitValid,
-  suggestedBulkUnitPrice,
   suggestedListedPrice,
   taxInclusivePrice,
 } from "@/features/acquisition/pricing";
@@ -71,9 +70,16 @@ describe("suggestedListedPrice", () => {
     expect(suggestedListedPrice(800, 0, RATE)).toBe(840);
   });
   it("只四捨五入一次（不先取整未稅再取整含稅）", () => {
-    // 未稅 = 100/0.55 = 181.8181…；×1.05 = 190.909… → 191
-    // 若先取整未稅（182）再 ×1.05 = 191.1 → 191（此例同值，但規則以單次取整為準）
-    expect(suggestedListedPrice(100, 45, RATE)).toBe(191);
+    // 未稅 = 600/0.55 = 1090.909…；單次取整 ×1.05 → 1145.4545… → 1145
+    // 兩段式（先取整未稅 1091 再 ×1.05 = 1145.55）會得 1146 → 這條才分得出來
+    expect(suggestedListedPrice(600, 45, RATE)).toBe(1145);
+  });
+
+  it("與後端 core/money.suggested_price 逐值一致（.5 邊界不得掉一元）", () => {
+    // cost 87 / margin 10：未稅 96.666…×1.05 = 101.5 整。
+    // 純浮點除法會算成 101.49999999999999 而少一元（後端 Decimal 得 102）。
+    expect(suggestedListedPrice(87, 10, RATE)).toBe(102);
+    expect(suggestedListedPrice(1000, 45, RATE)).toBe(1909);
   });
   it("稅率 0 → 等同舊行為", () => {
     expect(suggestedListedPrice(550, 45, 0)).toBe(1000);
@@ -81,19 +87,6 @@ describe("suggestedListedPrice", () => {
   it("margin out of 0–99 → null", () => {
     expect(suggestedListedPrice(100, 100, RATE)).toBeNull();
     expect(suggestedListedPrice(100, -1, RATE)).toBeNull();
-  });
-});
-
-describe("suggestedBulkUnitPrice", () => {
-  it("回**含稅**每件價：每件成本 ÷ (1 − margin/100) × (1 + 稅率)", () => {
-    // 每件成本 30 → 未稅 60 → 含稅 63
-    expect(suggestedBulkUnitPrice(300, 10, 50, RATE)).toBe(63);
-  });
-  it("稅率 0 → 等同舊行為", () => {
-    expect(suggestedBulkUnitPrice(300, 10, 50, 0)).toBe(60);
-  });
-  it("qty<=0 → null", () => {
-    expect(suggestedBulkUnitPrice(300, 0, 50, RATE)).toBeNull();
   });
 });
 

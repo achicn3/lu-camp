@@ -12,9 +12,7 @@ import random
 import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
-from decimal import Decimal
 
-from app.core.money import round_ntd
 from app.core.time import STORE_TIME_ZONE
 
 # 身分證字母 → 兩位數字（戶役政編碼）
@@ -63,13 +61,6 @@ def simulation_day_start(now: datetime, total_days: int, day_index: int) -> date
     # _shift_day 的新列依序加 75 秒；23:58 基準會讓前兩列落在 23:59:15 / 00:00:30。
     wall_time = time(23, 58) if day_index % 45 == 22 else time(10)
     return datetime.combine(target_date, wall_time, tzinfo=STORE_TIME_ZONE).astimezone(UTC)
-
-
-def suggested_price(cost: int, margin_pct: int) -> Decimal:
-    """收購定價計算機（CLAUDE.md §7-9）：round_ntd(cost ÷ (1 − margin/100))。"""
-    if not 0 <= margin_pct <= 99:
-        raise ValueError("margin_pct 限 0–99")
-    return Decimal(round_ntd(Decimal(cost) / (Decimal(1) - Decimal(margin_pct) / Decimal(100))))
 
 
 def signature_png(rng: random.Random, width: int = 240, height: int = 100) -> str:

@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
+from app.core.money import suggested_price
 from app.core.time import store_date
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
@@ -98,7 +99,6 @@ from qa_e2e.sim_helpers import (
     make_phone,
     signature_png,
     simulation_day_start,
-    suggested_price,
 )
 
 _ALLOWED = {"development", "dev", "local"}
@@ -548,6 +548,10 @@ async def _sign_affidavit(
 
 async def _do_buyout(sim: Sim, day: int) -> None:
     seller = _RNG.choice(sim.seller_ids)
+    # 稅率取自該店 settings（§6 不得寫死）：建議售價自 2026-08-23 起為含稅價（§7.9）。
+    tax_rate = Decimal(
+        (await StoreSettingsService(sim.s).get_effective_settings(sim.store_id)).tax_rate
+    )
     n_items = _RNG.randint(1, 3)
     items: list[AcquisitionItemIn] = []
     aff_items: list[dict[str, str]] = []
@@ -561,7 +565,7 @@ async def _do_buyout(sim: Sim, day: int) -> None:
             AcquisitionItemIn(
                 name=f"{bname} {gname}",
                 grade=_RNG.choice([Grade.S, Grade.A, Grade.A, Grade.B, Grade.C]),
-                listed_price=suggested_price(cost, margin),
+                listed_price=Decimal(suggested_price(Decimal(cost), margin, tax_rate)),
                 acquisition_cost=Decimal(cost),
             )
         )

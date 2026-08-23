@@ -1130,6 +1130,8 @@ class InventoryService:
         return lot.acquisition_cost / Decimal(lot.total_qty)
 
     @staticmethod
-    def suggested_listed_price(acquisition_cost: Decimal, margin_pct: int) -> int:
-        """收購定價輔助（含稅整數元）；委派 core/money。"""
-        return suggested_price(acquisition_cost, margin_pct)
+    def suggested_listed_price(
+        acquisition_cost: Decimal, margin_pct: int, tax_rate: Decimal
+    ) -> int:
+        """收購定價輔助（**含稅**整數元）；委派 core/money（§7.9：目標毛利對未稅談）。"""
+        return suggested_price(acquisition_cost, margin_pct, tax_rate)

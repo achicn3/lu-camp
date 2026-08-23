@@ -343,6 +343,7 @@ function ItemRowCard({
   onRemove,
   refreshCategories,
   taxRate,
+  taxRateUnavailable,
 }: {
   type: AcqType;
   index: number;
@@ -353,6 +354,8 @@ function ItemRowCard({
   refreshCategories: () => void;
   /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
   taxRate: number | null;
+  /** 設定**已回來**但拿不到可用稅率——只有這時才該對店員喊錯，載入中不算。 */
+  taxRateUnavailable: boolean;
 }) {
   const category = categories.find((c) => c.id === row.categoryId) ?? null;
 
@@ -392,11 +395,6 @@ function ItemRowCard({
   const resaleTaxInclusive =
     resale !== null && taxRate !== null ? taxInclusivePrice(resale, taxRate) : null;
 
-  // 一律同步：估計轉售價（或稅率）一有值就把上架售價換成含稅價（店主裁示 2026-08-22）。
-  // 店員之後仍可自行改上架售價——改它不會動到下面的相依，所以不會被蓋掉；
-  // 但只要再動估計轉售價，就會再覆蓋一次，這是刻意的。
-  // 放 effect 而不是輸入框的 onChange：設定（稅率）比店員打字晚到時，onChange 那次算不出
-  // 含稅價就永遠補不回來了，上架售價會安靜地留空。
   // onChange 由父層以行內箭頭函式傳入、每次 render 都換身分，不能進相依陣列
   // （會變成每次 render 都覆蓋一次上架售價）。改以 ref 取最新的一份；
   // 寫入放在 effect 裡，render 階段寫 ref 是 React 不允許的。
@@ -404,10 +402,45 @@ function ItemRowCard({
   useEffect(() => {
     onChangeRef.current = onChange;
   });
+  // 上一次同步時的估計轉售價，與我們自己填進去的那個值。
+  // 用來分辨「店員動了估計轉售價」與「只是稅率設定晚到」——前者要覆蓋，後者不可以。
+  // **初始值用當下的 resale/taxRate，不是 null**：切到散裝分頁時整個 ItemRowCard 會 unmount，
+  // 切回來 remount 若把 ref 歸零，就會被當成「店員剛動了估計轉售價」而覆蓋掉他手打的價格
+  // （實測：手打 1800 → 切散裝再切回 → 變 1050，少收 750 元）。
+  // 寄售目前不做自動加稅（ADR-016 Follow-up 2）：標籤、說明與快捷鍵都要跟著誠實，
+  // 不能對寄售流程說「會自動加稅帶進來」。
+  const autoTaxApplies = type !== "CONSIGNMENT";
+  const syncedResale = useRef<number | null>(resale);
+  const syncedTaxRate = useRef<number | null>(taxRate);
+  const autoFilled = useRef<string | null>(null);
   useEffect(() => {
-    if (resaleTaxInclusive === null) return;
-    onChangeRef.current({ listedPrice: String(resaleTaxInclusive) });
-  }, [resaleTaxInclusive]);
+    // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
+    // **這一行必須在更新 ref 之前**：在寄售分頁動過的估計轉售價若把變更訊號吃掉，
+    // 切回買斷時就不會補算，上架售價會留白或停在舊值。
+    if (type === "CONSIGNMENT") return;
+    const resaleChanged = syncedResale.current !== resale;
+    const taxRateChanged = syncedTaxRate.current !== taxRate;
+    syncedResale.current = resale;
+    syncedTaxRate.current = taxRate;
+    if (resale === null || taxRate === null) return;
+    const target = taxInclusivePrice(resale, taxRate);
+    if (target === null) return;
+    const next = String(target);
+    if (next === row.listedPrice) {
+      autoFilled.current = next; // 值已相同：認領它，避免之後誤判成「店員手打的」
+      return;
+    }
+    // 只有兩種情況會寫入：
+    // 1. 店員動了估計轉售價 → 一律覆蓋（店主裁示 2026-08-22）。
+    // 2. 稅率設定剛到位 → 僅在上架售價還空著、或仍是我們上次自動填的值時才補；
+    //    否則會把店員已經手打好的價格無聲換掉（實測可差數百元）。
+    // **店員自己編輯上架售價（含清空重打）不在此列**——清空就自動填回去的話，
+    // 他連重打的機會都沒有。
+    const stillOurs = row.listedPrice === "" || row.listedPrice === autoFilled.current;
+    if (!(resaleChanged || (taxRateChanged && stillOurs))) return;
+    autoFilled.current = next;
+    onChangeRef.current({ listedPrice: next });
+  }, [resale, taxRate, type, row.listedPrice]);
 
   function searchBrands(q: string): Promise<ComboOption[]> {
     return api
@@ -497,8 +530,14 @@ function ItemRowCard({
         </label>
         <label className="field">
           <span className="field-label">
-            估計轉售價（未稅）
-            <InfoTip text="你評估這件商品能為店裡賺回多少，也就是「不含稅、實際入袋」的金額。系統用它算出建議最高收購成本，並自動把加了稅的價格填到下面的上架售價。" />
+            {autoTaxApplies ? "估計轉售價（未稅）" : "估計轉售價"}
+            <InfoTip
+              text={
+                autoTaxApplies
+                  ? "你評估這件商品能為店裡賺回多少，也就是「不含稅、實際入袋」的金額。系統用它算出建議最高收購成本，並自動把加了稅的價格填到下面的上架售價。"
+                  : "你評估這件大概能賣多少，只用來當參考。寄售的定價與分潤另有規則，這個數字不會自動帶到下面的上架售價。"
+              }
+            />
           </span>
           <input
             aria-label="估計轉售價"
@@ -541,7 +580,13 @@ function ItemRowCard({
       <label className="field">
         <span className="field-label">
           上架售價（含稅）
-          <InfoTip text="客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價會自動加稅帶進來，你也可以直接改這裡。" />
+          <InfoTip
+            text={
+              autoTaxApplies
+                ? "客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價會自動加稅帶進來，你也可以直接改這裡。"
+                : "客人實際要付的含稅價格，會存入系統並印在標籤上。寄售請直接輸入與寄售人談定的架上價。"
+            }
+          />
           {category !== null && cost !== null && taxRate !== null && (
             <button
               type="button"
@@ -559,7 +604,7 @@ function ItemRowCard({
           )}
           {/* 估計轉售價是未稅（店家實際入袋），上架售價是含稅（客人付的）。
               輸入時已自動同步；這顆按鈕是給「手動改過之後想把含稅價再帶回來」用的。 */}
-          {resaleTaxInclusive !== null && (
+          {autoTaxApplies && resaleTaxInclusive !== null && (
             <button
               type="button"
               className="acq-link"
@@ -575,11 +620,19 @@ function ItemRowCard({
           value={row.listedPrice}
           onChange={(e) => onChange({ listedPrice: e.target.value })}
         />
-        {margin !== null && (
-          <span className="hint">
-            毛利 {margin}%
-            {category !== null && margin < category.target_margin_pct ? "（低於目標）" : ""}
+        {taxRateUnavailable ? (
+          // 沉默是最糟的：說明泡泡承諾「會自動加稅」，稅率讀不到時卻什麼都沒發生，
+          // 店員多半就把心裡那個未稅數字直接打進去，每件少收一個稅額。
+          <span className="form-error">
+            讀不到稅率設定，無法自動換算含稅價——請直接輸入客人要付的含稅價格。
           </span>
+        ) : (
+          margin !== null && (
+            <span className="hint">
+              毛利 {margin}%
+              {category !== null && margin < category.target_margin_pct ? "（低於目標）" : ""}
+            </span>
+          )
         )}
       </label>
     </div>
@@ -806,6 +859,9 @@ export default function AcquisitionPage() {
   // 若讓 NaN 流下去，上架售價欄位會被填成字串 "NaN"，比不自動帶入更糟。
   const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
   const taxRate = Number.isFinite(rawTaxRate) ? rawTaxRate : null;
+  // 「還在載入」不等於「讀不到」：查詢尚未回來就喊錯誤，等於在後端慢或網路抖一下時
+  // 叫店員自行加稅——他照做之後那筆就少收一個稅額，而且不會被之後的自動同步修正。
+  const taxRateUnavailable = settings.isFetched && taxRate === null;
   const drawerOpen = drawer.data != null;
 
   const payable = isBulk
@@ -1153,6 +1209,7 @@ export default function AcquisitionPage() {
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })
               }
               taxRate={taxRate}
+              taxRateUnavailable={taxRateUnavailable}
             />
           ))}
           <button type="button" className="btn-ghost" onClick={() => setRows((p) => [...p, emptyItem()])}>

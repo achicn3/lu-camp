@@ -18,6 +18,9 @@ from app.shared.exceptions import (
     InvalidTaxRate,
 )
 
+# 營業稅率：測試用的固定值（正式環境一律取自 settings，§6 不得寫死）。
+RATE = Decimal("0.05")
+
 
 def test_round_ntd_half_up() -> None:
     assert round_ntd(Decimal("100.5")) == 101
@@ -27,23 +30,51 @@ def test_round_ntd_half_up() -> None:
 
 
 def test_suggested_price_margin_zero_equals_cost() -> None:
-    assert suggested_price(Decimal("1000"), 0) == 1000
+    assert suggested_price(Decimal("1000"), 0, RATE) == 1050
 
 
 def test_suggested_price_margin_99() -> None:
     # 1000 / (1 - 0.99) = 1000 / 0.01 = 100000
-    assert suggested_price(Decimal("1000"), 99) == 100000
+    assert suggested_price(Decimal("1000"), 99, RATE) == 105000
 
 
 def test_suggested_price_typical_rounds_to_integer_ntd() -> None:
-    # 600 / 0.55 = 1090.909… → ROUND_HALF_UP → 1091
-    assert suggested_price(Decimal("600"), 45) == 1091
+    # 未稅 600/0.55 = 1090.909…；×1.05 = 1145.4545… → ROUND_HALF_UP → 1145
+    assert suggested_price(Decimal("600"), 45, RATE) == 1145
+
+
+def test_suggested_price_tax_rate_zero_falls_back_to_legacy_formula() -> None:
+    """稅率 0 時必須回到 2026-08-23 前的舊式。
+
+    這條的用處是：日後有人把 tax_rate 誤傳成 0，測試會證明那是「沒加稅」，
+    而不是新公式壞了。
+    """
+    assert suggested_price(Decimal("600"), 45, Decimal(0)) == 1091
+    assert suggested_price(Decimal("1000"), 45, Decimal(0)) == 1818
+
+
+def test_suggested_price_rounds_once_not_twice() -> None:
+    """釘住「只四捨五入一次」——挑的必須是兩種實作會分家的輸入，否則這條測試沒有鑑別力。
+
+    600/45%：未稅 1090.909…
+      單次取整：1090.909… × 1.05 = 1145.4545… → **1145**
+      兩段式  ：先取整未稅 1091 → × 1.05 = 1145.55 → **1146**
+    """
+    assert suggested_price(Decimal("600"), 45, RATE) == 1145
+    # 對照組：1000/45% 在兩種實作下同為 1909，單看它分不出來，故不能只靠這一條。
+    assert suggested_price(Decimal("1000"), 45, RATE) == 1909
+
+
+@pytest.mark.parametrize("rate", [Decimal("-0.01"), Decimal("1"), Decimal("1.5")])
+def test_suggested_price_invalid_tax_rate_raises(rate: Decimal) -> None:
+    with pytest.raises(InvalidTaxRate):
+        suggested_price(Decimal("1000"), 45, rate)
 
 
 @pytest.mark.parametrize("margin", [100, 150, -1])
 def test_suggested_price_invalid_margin_raises(margin: int) -> None:
     with pytest.raises(InvalidMargin):
-        suggested_price(Decimal("1000"), margin)
+        suggested_price(Decimal("1000"), margin, RATE)
 
 
 def test_split_tax_inclusive_exact() -> None:

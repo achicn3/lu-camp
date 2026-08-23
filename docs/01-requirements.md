@@ -54,7 +54,7 @@
   - `brand` 為輕主檔（店員可當場新增）；`product_model` 為型號主檔（品牌 + 品名/型號 + 分類）。
   - 收購時品名「**自由輸入 + 優先 autocomplete 既有 `product_model`**」；選既有 → 自動帶入品牌/分類與該型號的收購/售出價歷史；輸入全新 → 順手建一筆 `product_model`。
   - 入庫的 `serialized_item`/`bulk_lot`/`catalog_product` 帶 `brand_id`；`serialized_item` 可選 `product_model_id`（供型號層級的歷史與報表）。
-- **定價輔助（定價計算機）**：主算法用目標毛利率 `建議售價 = round_ntd(收購價 ÷ (1 − margin_pct/100))`，為**含稅整數元**；`default_margin_pct` 放 `settings`（整數百分數，預設 45），`margin_pct` 限 0–99。同時顯示該型號歷史售價當參考；店員可手動覆蓋任一數字（毛利率或建議售價）。價格歷史由既有 `acquisition`/`sale` 紀錄依 `product_model_id` 聚合取得。
+- **定價輔助（定價計算機）**：主算法用目標毛利率，且**目標毛利對未稅售價計**（ADR-016）：`建議未稅售價 = 收購價 ÷ (1 − margin_pct/100)`、`建議上架售價（含稅）= round_ntd(建議未稅售價 × (1 + tax_rate))`（只四捨五入一次，`tax_rate` 取自 `settings`）；`default_margin_pct` 放 `settings`（整數百分數，預設 45），`margin_pct` 限 0–99。同時顯示該型號歷史售價當參考；店員可手動覆蓋任一數字（毛利率或建議售價）。價格歷史由既有 `acquisition`/`sale` 紀錄依 `product_model_id` 聚合取得。
 - **條碼列印**：識別碼（`item_code`/`lot_code`）一旦建檔即固定不變。入庫時可批次列印標籤（`/acquisitions/{id}/print-labels`）；序號品與散裝堆事後皆可隨時**補印**（`/serialized-items/{id}/print-label`、`/bulk-lots/{id}/print-label`，補印留稽核）。標籤以 1D Code 128 編碼識別碼。
 - 寫入 `stock_movement`（IN）。
 

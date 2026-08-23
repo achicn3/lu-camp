@@ -87,23 +87,13 @@ export function suggestedListedPrice(
   taxRate: number,
 ): number | null {
   if (targetMarginPct < 0 || targetMarginPct > 99) return null;
-  const net = costNtd / (1 - targetMarginPct / 100);
-  return roundNtd((net * (10000 + rateBasisPoints(taxRate))) / 10000);
-}
-
-/**
- * 散裝建議每件**含稅**均一價 = 每件成本 ÷ (1 − margin/100) × (1 + 稅率)。
- * qty>0、margin 0–99，否則 null。與序號品同口徑（只四捨五入一次）。
- */
-export function suggestedBulkUnitPrice(
-  lotCostNtd: number,
-  qty: number,
-  targetMarginPct: number,
-  taxRate: number,
-): number | null {
-  if (qty <= 0 || targetMarginPct < 0 || targetMarginPct > 99) return null;
-  const net = lotCostNtd / qty / (1 - targetMarginPct / 100);
-  return roundNtd((net * (10000 + rateBasisPoints(taxRate))) / 10000);
+  // 全程整數比值，中途不落到浮點：`cost / (1 − m/100)` 這半原本是浮點除法，
+  // 剛好落在 .5 的商會算成 …49999999 而少一元（實測與後端在 2.76% 的輸入上不一致，
+  // 例：cost 87、margin 10、稅率 5% → 後端 102、前端 101）。
+  //   未稅 = cost × 100 ÷ (100 − m)；含稅 = 未稅 × (10000 + bp) ÷ 10000
+  const numerator = costNtd * 100 * (10000 + rateBasisPoints(taxRate));
+  const denominator = (100 - targetMarginPct) * 10000;
+  return roundNtd(numerator / denominator);
 }
 
 /** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */
