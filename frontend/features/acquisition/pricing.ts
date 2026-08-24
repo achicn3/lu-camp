@@ -24,12 +24,14 @@ function rateBasisPoints(taxRate: number): number {
   return Math.round(taxRate * BASIS_POINTS_PER_UNIT);
 }
 
-/** 正數整數比值 ROUND_HALF_UP；BigInt 避免合法 Numeric(12,0) 的中間乘法失真。 */
-function roundPositiveRatio(numerator: bigint, denominator: bigint): number {
-  return Number(
-    (ROUND_HALF_UP_FACTOR * numerator + denominator) /
-      (ROUND_HALF_UP_FACTOR * denominator),
-  );
+/** 整數比值 ROUND_HALF_UP；BigInt 避免合法 Numeric(12,0) 的中間乘法失真。 */
+function roundRatio(numerator: bigint, denominator: bigint): number {
+  const negative = numerator < BigInt(0);
+  const magnitude = negative ? -numerator : numerator;
+  const rounded =
+    (ROUND_HALF_UP_FACTOR * magnitude + denominator) /
+    (ROUND_HALF_UP_FACTOR * denominator);
+  return Number(negative ? -rounded : rounded);
 }
 
 /**
@@ -42,14 +44,14 @@ export function taxInclusivePrice(netNtd: number, taxRate: number): number | nul
   if (netNtd <= 0) return null;
   const numerator =
     BigInt(netNtd) * BigInt(BASIS_POINTS_PER_UNIT + rateBasisPoints(taxRate));
-  return roundPositiveRatio(numerator, BigInt(BASIS_POINTS_PER_UNIT));
+  return roundRatio(numerator, BigInt(BASIS_POINTS_PER_UNIT));
 }
 
 /** 含稅 → 未稅（整數元）；與後端 `core/money.split_tax_inclusive` 同式：round(total / (1+rate))。 */
 export function netOfTaxInclusive(grossNtd: number, taxRate: number): number {
   const numerator = BigInt(grossNtd) * BigInt(BASIS_POINTS_PER_UNIT);
   const denominator = BigInt(BASIS_POINTS_PER_UNIT + rateBasisPoints(taxRate));
-  return roundPositiveRatio(numerator, denominator);
+  return roundRatio(numerator, denominator);
 }
 
 /** 分類×成色帶定價規則（由 API PricingRuleRead 映射來；min_price_multiple 已 parse 為 number）。 */
@@ -89,7 +91,8 @@ export function marginPct(
   if (listedTaxInclusiveNtd <= 0) return null;
   const net = netOfTaxInclusive(listedTaxInclusiveNtd, taxRate);
   if (net <= 0) return null;
-  return roundNtd(((net - costNtd) / net) * PERCENT_POINTS_PER_UNIT);
+  const numerator = BigInt(net - costNtd) * BigInt(PERCENT_POINTS_PER_UNIT);
+  return roundRatio(numerator, BigInt(net));
 }
 
 /**
@@ -116,7 +119,7 @@ export function suggestedListedPrice(
     BigInt(PERCENT_POINTS_PER_UNIT - targetMarginPct) * BigInt(BASIS_POINTS_PER_UNIT);
   // 正數有理數的 ROUND_HALF_UP：floor(n/d + 1/2)。BigInt 避免 Numeric(12,0)
   // 合法大額在中間乘法超出 Number.MAX_SAFE_INTEGER 後掉一元。
-  return roundPositiveRatio(numerator, denominator);
+  return roundRatio(numerator, denominator);
 }
 
 /** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */

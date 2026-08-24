@@ -70,6 +70,10 @@ describe("marginPct", () => {
   it("稅率 0 時等同含稅＝未稅", () => {
     expect(marginPct(1000, 600, 0)).toBe(40);
   });
+  it("剛好半個百分點時精確四捨五入，不得被浮點誤差壓低", () => {
+    // 含稅 42 → 未稅 40；(40 − 17) / 40 × 100 = 57.5%，應顯示 58%。
+    expect(marginPct(42, 17, RATE)).toBe(58);
+  });
   it("listed<=0 → null", () => {
     expect(marginPct(0, 100, RATE)).toBeNull();
   });
