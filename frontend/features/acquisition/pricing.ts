@@ -92,9 +92,13 @@ export function suggestedListedPrice(
   // 剛好落在 .5 的商會算成 …49999999 而少一元（實測與後端在 2.76% 的輸入上不一致，
   // 例：cost 87、margin 10、稅率 5% → 後端 102、前端 101）。
   //   未稅 = cost × 100 ÷ (100 − m)；含稅 = 未稅 × (10000 + bp) ÷ 10000
-  const numerator = costNtd * 100 * (10000 + rateBasisPoints(taxRate));
-  const denominator = (100 - targetMarginPct) * 10000;
-  return roundNtd(numerator / denominator);
+  const numerator =
+    BigInt(costNtd) * BigInt(100) * BigInt(10000 + rateBasisPoints(taxRate));
+  const denominator = BigInt(100 - targetMarginPct) * BigInt(10000);
+  // 正數有理數的 ROUND_HALF_UP：floor(n/d + 1/2)。BigInt 避免 Numeric(12,0)
+  // 合法大額在中間乘法超出 Number.MAX_SAFE_INTEGER 後掉一元。
+  const two = BigInt(2);
+  return Number((two * numerator + denominator) / (two * denominator));
 }
 
 /** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */

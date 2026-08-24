@@ -343,6 +343,7 @@ function ItemRowCard({
   onRemove,
   refreshCategories,
   taxRate,
+  taxRateLoading,
   taxRateUnavailable,
 }: {
   type: AcqType;
@@ -354,6 +355,8 @@ function ItemRowCard({
   refreshCategories: () => void;
   /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
   taxRate: number | null;
+  /** settings 尚在載入；提示店員先不要把未稅價直接當成含稅價輸入。 */
+  taxRateLoading: boolean;
   /** 設定**已回來**但拿不到可用稅率——只有這時才該對店員喊錯，載入中不算。 */
   taxRateUnavailable: boolean;
 }) {
@@ -593,7 +596,7 @@ function ItemRowCard({
                 : "客人實際要付的含稅價格，會存入系統並印在標籤上。寄售請直接輸入與寄售人談定的架上價。"
             }
           />
-          {category !== null && cost !== null && taxRate !== null && (
+          {autoTaxApplies && category !== null && cost !== null && taxRate !== null && (
             <button
               type="button"
               className="acq-link"
@@ -626,14 +629,16 @@ function ItemRowCard({
           value={row.listedPrice}
           onChange={(e) => onChange({ listedPrice: e.target.value })}
         />
-        {taxRateUnavailable ? (
+        {autoTaxApplies && taxRateLoading ? (
+          <span className="hint">正在讀取稅率設定，暫時無法自動換算含稅價。</span>
+        ) : autoTaxApplies && taxRateUnavailable ? (
           // 沉默是最糟的：說明泡泡承諾「會自動加稅」，稅率讀不到時卻什麼都沒發生，
           // 店員多半就把心裡那個未稅數字直接打進去，每件少收一個稅額。
           <span className="form-error">
             讀不到稅率設定，無法自動換算含稅價——請直接輸入客人要付的含稅價格。
           </span>
         ) : (
-          margin !== null && (
+          autoTaxApplies && margin !== null && (
             <span className="hint">
               毛利 {margin}%
               {category !== null && margin < category.target_margin_pct ? "（低於目標）" : ""}
@@ -864,7 +869,9 @@ export default function AcquisitionPage() {
   // 營業稅率取自 settings（§6 不得寫死）。未載入或值不可用時一律為 null、不做含稅換算——
   // 若讓 NaN 流下去，上架售價欄位會被填成字串 "NaN"，比不自動帶入更糟。
   const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
-  const taxRate = Number.isFinite(rawTaxRate) ? rawTaxRate : null;
+  const taxRate =
+    Number.isFinite(rawTaxRate) && rawTaxRate >= 0 && rawTaxRate < 1 ? rawTaxRate : null;
+  const taxRateLoading = !settings.isFetched;
   // 「還在載入」不等於「讀不到」：查詢尚未回來就喊錯誤，等於在後端慢或網路抖一下時
   // 叫店員自行加稅——他照做之後那筆就少收一個稅額，而且不會被之後的自動同步修正。
   const taxRateUnavailable = settings.isFetched && taxRate === null;
@@ -1215,6 +1222,7 @@ export default function AcquisitionPage() {
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })
               }
               taxRate={taxRate}
+              taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
             />
           ))}

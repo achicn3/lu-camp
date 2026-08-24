@@ -1,17 +1,21 @@
 // UX 用語與提示煙霧（報表說明 tooltip／效益指標備註／對帳收斂／收購品名提示＋選定標籤）。
 // 需：backend:8000、frontend:3000、已 seed dev-manager。截圖輸出 SMOKE_SHOTS。
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
-const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
+const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
+const API_BASE = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 // 不寫死家目錄：他人 checkout 下會 EACCES/ENOENT（Codex P3）。
 const SHOTS =
   process.env.SMOKE_SHOTS ?? join(homedir() || tmpdir(), "tmp", "lu-camp-uxfix", "wording");
 const USER = process.env.SMOKE_USERNAME ?? "dev-manager";
 const PASS = process.env.SEED_USER_PASSWORD ?? "dev-test-123456";
+const ITEM_NAME_QUERY = "UX煙霧帳篷";
 
 mkdirSync(SHOTS, { recursive: true });
 let pass = 0;
@@ -26,6 +30,72 @@ function ok(name, cond, detail = "") {
   }
 }
 
+async function apiJson(path, { method = "GET", token = null, body, headers = {}, expected = [200] } = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
+      ...headers,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!expected.includes(response.status)) {
+    throw new Error(`${method} ${path} expected ${expected.join("/")} got ${response.status}: ${text}`);
+  }
+  return data;
+}
+
+/** 新資料庫沒有「歷史品名」可驗；只在缺 fixture 時透過正式 API 建一筆寄售品。 */
+async function ensureItemNameFixture() {
+  const login = await apiJson("/api/v1/auth/login", {
+    method: "POST",
+    body: { username: USER, password: PASS },
+  });
+  const token = login?.access_token;
+  if (!token) throw new Error("登入 API 未回傳 access_token");
+
+  const query = encodeURIComponent(ITEM_NAME_QUERY);
+  const existing = await apiJson(`/api/v1/item-name-suggestions?q=${query}&limit=1`, { token });
+  if (Array.isArray(existing) && existing.length > 0) return;
+
+  const runId = randomUUID().slice(0, 8);
+  const seller = await apiJson("/api/v1/contacts", {
+    method: "POST",
+    token,
+    expected: [201],
+    body: {
+      name: `UX 煙霧寄售人 ${runId}`,
+      phone: uniquePhone(),
+      national_id: validNationalId(),
+      roles: ["SELLER"],
+      member_points: 0,
+      source_note: "ux-wording-smoke fixture",
+    },
+  });
+  await apiJson("/api/v1/acquisitions", {
+    method: "POST",
+    token,
+    expected: [201],
+    headers: { "Idempotency-Key": `ux-wording-${randomUUID()}`.slice(0, 80) },
+    body: {
+      type: "CONSIGNMENT",
+      contact_id: seller.id,
+      note: "ux-wording-smoke fixture",
+      items: [
+        {
+          name: `${ITEM_NAME_QUERY} ${runId}`,
+          grade: "A",
+          listed_price: "1000",
+          commission_pct: 50,
+        },
+      ],
+    },
+  });
+}
+
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
@@ -37,6 +107,7 @@ try {
   await page.fill('input[name="password"]', PASS);
   await page.click('button[type="submit"]');
   await page.waitForURL((u) => !u.pathname.endsWith("/login"), { timeout: 15000 });
+  await ensureItemNameFixture();
 
   // ── 1) 今日營運：營收三指標有 ⓘ 說明，且說明是白話（含實例）──
   await page.goto(`${BASE}/reports`, { waitUntil: "networkidle" });
@@ -75,7 +146,7 @@ try {
   await page.waitForSelector('input[aria-label="品名"]', { timeout: 15000 });
   const nameInput = page.locator('input[aria-label="品名"]').first();
   ok("品名欄位掛上建議清單", (await nameInput.getAttribute("list")) !== null);
-  await nameInput.fill("帳");
+  await nameInput.fill(ITEM_NAME_QUERY);
   await page.waitForTimeout(900); // debounce 200ms + 往返
   const optionCount = await page.evaluate(() => {
     const input = document.querySelector('input[aria-label="品名"]');

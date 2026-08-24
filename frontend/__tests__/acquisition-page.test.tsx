@@ -255,6 +255,17 @@ describe("AcquisitionPage", () => {
     expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
   });
 
+  it("稅率超出 0（含）到 1（不含）時視為不可用，不得拿來算價", async () => {
+    stub({ taxRate: "1.0000" });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    expect(
+      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+    ).toBe("");
+    expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
+  });
+
   it("切到散裝分頁再切回買斷，店員手打的上架售價不得被改掉", async () => {
     // ItemRowCard 在切分頁時會 unmount；同步用的 ref 若歸零，remount 會被當成
     // 「店員剛動了估計轉售價」而覆蓋手打值（實測曾 1800 → 1050，少收 750）。
@@ -322,13 +333,59 @@ describe("AcquisitionPage", () => {
     ).toBe("");
   });
 
+  it("切到寄售後不得沿用買斷成本顯示「套用建議」", async () => {
+    stub();
+    renderPage();
+    const category = await screen.findByLabelText("分類");
+    await userEvent.click(category);
+    await userEvent.click(await screen.findByRole("option", { name: "登山服飾" }));
+    await userEvent.type(screen.getByLabelText("收購價"), "1200");
+    expect(await screen.findByRole("button", { name: /套用建議/ })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    expect(screen.queryByRole("button", { name: /套用建議/ })).toBeNull();
+  });
+
+  it("切到寄售後不得用隱藏的買斷成本顯示毛利", async () => {
+    stub();
+    renderPage();
+    await userEvent.type(await screen.findByLabelText("收購價"), "1200");
+    await userEvent.type(
+      screen.getByLabelText("上架售價（含稅）", { selector: "input" }),
+      "2000",
+    );
+    expect(await screen.findByText(/毛利 /)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    expect(screen.queryByText(/毛利 /)).toBeNull();
+  });
+
+  it("寄售不使用自動加稅時，不顯示買斷流程的稅率錯誤", async () => {
+    stub({ settingsFails: true });
+    renderPage();
+    expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    expect(screen.queryByText(/讀不到稅率設定/)).toBeNull();
+  });
+
   it("設定還在載入時，不得先喊「讀不到稅率設定」", async () => {
     stub({ holdSettings: true });
     renderPage();
     await screen.findByLabelText("估計轉售價", { selector: "input" });
     expect(screen.queryByText(/讀不到稅率設定/)).toBeNull();
+    expect(screen.getByText(/正在讀取稅率設定/)).toBeTruthy();
     releaseSettings?.();
-    await waitFor(() => expect(screen.queryByText(/讀不到稅率設定/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/正在讀取稅率設定/)).toBeNull());
+  });
+
+  it("寄售不使用自動加稅時，不顯示買斷流程的稅率載入提示", async () => {
+    stub({ holdSettings: true });
+    renderPage();
+    expect(await screen.findByText(/正在讀取稅率設定/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
+    expect(screen.queryByText(/正在讀取稅率設定/)).toBeNull();
   });
 
   it("blocks submit with validation errors when nothing filled", async () => {

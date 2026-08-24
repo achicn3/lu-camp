@@ -85,6 +85,11 @@ describe("suggestedListedPrice", () => {
     expect(suggestedListedPrice(41, 18, RATE)).toBe(53);
     expect(suggestedListedPrice(1000, 45, RATE)).toBe(1909);
   });
+  it("合法的 Numeric(12,0) 大額輸入仍與後端 Decimal 逐元一致", () => {
+    // 精確值 284633213106 × 105 ÷ 60 = 498108122935.5 → ROUND_HALF_UP 498108122936。
+    // 直接用 Number 做大分子乘法會超出安全整數，曾少算 1 元。
+    expect(suggestedListedPrice(284633213106, 40, RATE)).toBe(498108122936);
+  });
   it("稅率 0 → 等同舊行為", () => {
     expect(suggestedListedPrice(550, 45, 0)).toBe(1000);
   });
