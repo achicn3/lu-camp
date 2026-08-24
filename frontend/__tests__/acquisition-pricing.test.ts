@@ -4,6 +4,7 @@ import {
   creditPremiumPreview,
   marginPct,
   maxAcquisitionCost,
+  netOfTaxInclusive,
   payableTotal,
   splitValid,
   suggestedListedPrice,
@@ -42,9 +43,20 @@ describe("taxInclusivePrice", () => {
   it("非 5% 的稅率也要能算（稅率放 settings，不得寫死）", () => {
     expect(taxInclusivePrice(1000, 0.1)).toBe(1100);
   });
+  it("合法 Numeric(12,0) 大額仍以精確 ROUND_HALF_UP 換成含稅價", () => {
+    // 精確值 901042174999 × 10001 / 10000 = 901132279216.4999，應捨為 901132279216。
+    expect(taxInclusivePrice(901042174999, 0.0001)).toBe(901132279216);
+  });
   it("未稅 <= 0 → null", () => {
     expect(taxInclusivePrice(0, RATE)).toBeNull();
     expect(taxInclusivePrice(-1, RATE)).toBeNull();
+  });
+});
+
+describe("netOfTaxInclusive", () => {
+  it("合法 Numeric(12,0) 大額仍以精確 ROUND_HALF_UP 還原未稅價", () => {
+    // 精確值 835101086759 × 10000 / 10001 = 835017585000.4999…，應捨為 835017585000。
+    expect(netOfTaxInclusive(835101086759, 0.0001)).toBe(835017585000);
   });
 });
 

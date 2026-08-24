@@ -1,8 +1,13 @@
 // F6 收購定價輔助純邏輯（docs/10 §/acquisition）：雙重約束的建議最高收購成本、毛利率、
 // 建議售價、散裝均一價、應付總額、SPLIT 驗證、購物金溢價試算。無 DOM 依賴 → 可單元測試。
 //
-// 金額皆正整數元；以 Math.round（正數＝ROUND_HALF_UP，鏡射後端 core/money.round_ntd）收整。
+// 金額皆正整數元；一律以 ROUND_HALF_UP 鏡射後端 core/money.round_ntd，可能超出
+// Number 安全整數的中間乘法改用 BigInt 整數比值收整。
 // 這些為「鑑價輔助」估計值，非持久化金額；實際成本/售價由店員輸入。
+
+const BASIS_POINTS_PER_UNIT = 10_000;
+const PERCENT_POINTS_PER_UNIT = 100;
+const ROUND_HALF_UP_FACTOR = BigInt(2);
 
 /** 正數金額收整到整數元（ROUND_HALF_UP）。 */
 export function roundNtd(value: number): number {
@@ -12,12 +17,19 @@ export function roundNtd(value: number): number {
 /**
  * 稅率轉基點整數（如 0.05 → 500）。
  *
- * 稅率最多四位小數（DB Numeric(5,4)），先轉整數基點，讓後續換算都在整數比值上做——
- * 真正會掉一元的是**除法**那半（見 `suggestedListedPrice`），單純的 `× (1 + rate)`
- * 實測沒有偏差（n 1–5,000,000 × 稅率 0.05/0.10/0.20/0.0025，與基點寫法零差異）。
+ * 稅率最多四位小數（DB Numeric(5,4)），先轉整數基點，讓後續換算都能用 BigInt
+ * 整數比值完成，避免 Numeric(12,0) 合法大額的中間乘法超出安全整數。
  */
 function rateBasisPoints(taxRate: number): number {
-  return Math.round(taxRate * 10000);
+  return Math.round(taxRate * BASIS_POINTS_PER_UNIT);
+}
+
+/** 正數整數比值 ROUND_HALF_UP；BigInt 避免合法 Numeric(12,0) 的中間乘法失真。 */
+function roundPositiveRatio(numerator: bigint, denominator: bigint): number {
+  return Number(
+    (ROUND_HALF_UP_FACTOR * numerator + denominator) /
+      (ROUND_HALF_UP_FACTOR * denominator),
+  );
 }
 
 /**
@@ -28,12 +40,16 @@ function rateBasisPoints(taxRate: number): number {
  */
 export function taxInclusivePrice(netNtd: number, taxRate: number): number | null {
   if (netNtd <= 0) return null;
-  return roundNtd((netNtd * (10000 + rateBasisPoints(taxRate))) / 10000);
+  const numerator =
+    BigInt(netNtd) * BigInt(BASIS_POINTS_PER_UNIT + rateBasisPoints(taxRate));
+  return roundPositiveRatio(numerator, BigInt(BASIS_POINTS_PER_UNIT));
 }
 
 /** 含稅 → 未稅（整數元）；與後端 `core/money.split_tax_inclusive` 同式：round(total / (1+rate))。 */
 export function netOfTaxInclusive(grossNtd: number, taxRate: number): number {
-  return roundNtd((grossNtd * 10000) / (10000 + rateBasisPoints(taxRate)));
+  const numerator = BigInt(grossNtd) * BigInt(BASIS_POINTS_PER_UNIT);
+  const denominator = BigInt(BASIS_POINTS_PER_UNIT + rateBasisPoints(taxRate));
+  return roundPositiveRatio(numerator, denominator);
 }
 
 /** 分類×成色帶定價規則（由 API PricingRuleRead 映射來；min_price_multiple 已 parse 為 number）。 */
@@ -52,7 +68,7 @@ export interface PricingRule {
 export function maxAcquisitionCost(resaleNtd: number, rule: PricingRule): number | null {
   if (resaleNtd <= 0) return null;
   const ceilingPct = Math.max(rule.discountCeilingPct, rule.minMarginPct);
-  const byMargin = resaleNtd * (1 - ceilingPct / 100);
+  const byMargin = resaleNtd * (1 - ceilingPct / PERCENT_POINTS_PER_UNIT);
   const byMultiple =
     rule.minPriceMultiple > 0 ? resaleNtd / rule.minPriceMultiple : byMargin;
   return Math.max(0, roundNtd(Math.min(byMargin, byMultiple)));
@@ -73,7 +89,7 @@ export function marginPct(
   if (listedTaxInclusiveNtd <= 0) return null;
   const net = netOfTaxInclusive(listedTaxInclusiveNtd, taxRate);
   if (net <= 0) return null;
-  return roundNtd(((net - costNtd) / net) * 100);
+  return roundNtd(((net - costNtd) / net) * PERCENT_POINTS_PER_UNIT);
 }
 
 /**
@@ -93,12 +109,14 @@ export function suggestedListedPrice(
   // 例：cost 87、margin 10、稅率 5% → 後端 102、前端 101）。
   //   未稅 = cost × 100 ÷ (100 − m)；含稅 = 未稅 × (10000 + bp) ÷ 10000
   const numerator =
-    BigInt(costNtd) * BigInt(100) * BigInt(10000 + rateBasisPoints(taxRate));
-  const denominator = BigInt(100 - targetMarginPct) * BigInt(10000);
+    BigInt(costNtd) *
+    BigInt(PERCENT_POINTS_PER_UNIT) *
+    BigInt(BASIS_POINTS_PER_UNIT + rateBasisPoints(taxRate));
+  const denominator =
+    BigInt(PERCENT_POINTS_PER_UNIT - targetMarginPct) * BigInt(BASIS_POINTS_PER_UNIT);
   // 正數有理數的 ROUND_HALF_UP：floor(n/d + 1/2)。BigInt 避免 Numeric(12,0)
   // 合法大額在中間乘法超出 Number.MAX_SAFE_INTEGER 後掉一元。
-  const two = BigInt(2);
-  return Number((two * numerator + denominator) / (two * denominator));
+  return roundPositiveRatio(numerator, denominator);
 }
 
 /** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */
