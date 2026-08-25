@@ -782,6 +782,13 @@ async def test_mixed_store_credit_linepay_returns_credit_first_then_line_delta(
     )
     assert txn is not None and txn.refunded_amount == Decimal("100")
     assert await credit.get_balance(store_id, member.id) == Decimal("300")
+    margin = await SalesService(db_session).margin_breakdown(
+        store_id,
+        datetime.now(UTC) - timedelta(days=1),
+        datetime.now(UTC) + timedelta(days=1),
+    )
+    assert ("STORE_CREDIT", Decimal(0), Decimal(0)) in margin.payment_methods
+    assert ("LINE_PAY", Decimal(600), Decimal(14)) in margin.payment_methods
 
 
 @pytest.mark.asyncio

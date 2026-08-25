@@ -334,3 +334,10 @@ async def test_sales_margin_csv_export(client: httpx.AsyncClient, db_session: As
     assert resp.status_code == 200
     text = resp.content.decode("utf-8-sig")
     assert "毛利" in text and "營業額" in text and "毛利率" in text
+    assert "支付手續費合計" in text
+    assert "淨毛利（扣支付手續費）" in text
+    assert "退回贈品成本" in text
+    assert "淨贈品成本" in text
+    assert "貢獻毛利（淨毛利扣淨贈品成本）" in text
+    assert "付款方式 CASH 淨收款" in text
+    assert "付款方式 CASH 手續費" in text

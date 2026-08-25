@@ -170,9 +170,53 @@ class MarginBreakdown:
     manual_discount_total: Decimal = Decimal(0)
     gift_retail_value: Decimal = Decimal(0)
     gift_cost: Decimal = Decimal(0)
-    # 貢獻毛利＝淨毛利 − 贈品成本：贈品成本不進 gross_margin（營收 0 加全額成本會讓
-    # 毛利率失真），但店家真正賺到多少要看得見。
+    gift_returned_retail_value: Decimal = Decimal(0)
+    gift_returned_cost: Decimal = Decimal(0)
+    net_gift_retail_value: Decimal = Decimal(0)
+    net_gift_cost: Decimal = Decimal(0)
+    # 貢獻毛利＝淨毛利 − 淨贈品成本：贈品成本不進 gross_margin（營收 0 加全額成本會讓
+    # 毛利率失真）；退回則在退貨發生日沖回原成交成本快照。
     contribution_margin: Decimal = Decimal(0)
+
+
+@dataclass(frozen=True)
+class GiftLineSnapshot:
+    """退回報表所需的原贈品成交快照。"""
+
+    reason_id: int | None
+    reason_name: str
+    description: str
+    qty: int
+    retail_unit_price: Decimal
+    cost: Decimal | None
+
+
+def _net_payment_methods(
+    sale_methods: tuple[tuple[str, Decimal, Decimal], ...],
+    refunds: dict[TenderType, Decimal],
+) -> tuple[tuple[str, Decimal, Decimal], ...]:
+    """各付款方式淨收款＝銷售收款−退貨退款；原支付手續費不因退款消失。"""
+    sales = {TenderType(method): (received, fee) for method, received, fee in sale_methods}
+    return tuple(
+        (
+            tender_type.value,
+            sales.get(tender_type, (Decimal(0), Decimal(0)))[0]
+            - refunds.get(tender_type, Decimal(0)),
+            sales.get(tender_type, (Decimal(0), Decimal(0)))[1],
+        )
+        for tender_type in TenderType
+        if tender_type in sales or tender_type in refunds
+    )
+
+
+def _contribution_margin(
+    gross_margin: Decimal,
+    payment_fee_total: Decimal,
+    gift_cost: Decimal,
+    gift_returned_cost: Decimal,
+) -> Decimal:
+    """貢獻毛利＝毛利−支付手續費−送出贈品成本＋退回贈品成本。"""
+    return gross_margin - payment_fee_total - gift_cost + gift_returned_cost
 
 
 @dataclass(frozen=True)
@@ -1998,7 +2042,12 @@ class SalesService:
         return await self._repo.discount_totals_by_campaign(store_id)
 
     async def margin_breakdown(
-        self, store_id: int, date_from: datetime, date_to: datetime
+        self,
+        store_id: int,
+        date_from: datetime,
+        date_to: datetime,
+        *,
+        include_payment_and_gift_details: bool = True,
     ) -> MarginBreakdown:
         """期間銷售/毛利彙總（單一口徑，R2/R5/R6 共用）。寄售抽成經 consignment service 取。
 
@@ -2009,7 +2058,18 @@ class SalesService:
         from app.modules.returns.service import ReturnsService
 
         comp = await self._repo.margin_components(store_id, date_from, date_to)
-        adj = await ReturnsService(self._session).margin_adjustments(store_id, date_from, date_to)
+        returns = ReturnsService(self._session)
+        adj = await returns.margin_adjustments(store_id, date_from, date_to)
+        refund_rows, gift_returns = (
+            await returns.report_adjustments(store_id, date_from, date_to)
+            if include_payment_and_gift_details
+            else ([], [])
+        )
+        refund_tenders = dict(refund_rows)
+        gift_returned_retail_value = sum((row.retail_value for row in gift_returns), Decimal(0))
+        gift_returned_cost = sum((row.cost for row in gift_returns), Decimal(0))
+        net_gift_retail_value = comp.gift_retail_value - gift_returned_retail_value
+        net_gift_cost = comp.gift_cost - gift_returned_cost
         comp = replace(
             comp,
             owned_serialized_revenue=comp.owned_serialized_revenue - adj.owned_serialized_revenue,
@@ -2060,6 +2120,7 @@ class SalesService:
             if known_cost_revenue > 0
             else None
         )
+        payment_methods = _net_payment_methods(comp.payment_methods, refund_tenders)
         return MarginBreakdown(
             gross_turnover=gross_turnover,
             recognized_revenue=recognized_revenue,
@@ -2070,20 +2131,29 @@ class SalesService:
             gross_margin=gross_margin,
             gross_margin_rate=rate,
             unknown_cost_sales=comp.unknown_cost_revenue,
-            cash_received=comp.cash_received,
-            store_credit_redeemed=comp.store_credit_redeemed,
+            cash_received=comp.cash_received - refund_tenders.get(TenderType.CASH, Decimal(0)),
+            store_credit_redeemed=comp.store_credit_redeemed
+            - refund_tenders.get(TenderType.STORE_CREDIT, Decimal(0)),
             transaction_count=comp.transaction_count,
             food_revenue=comp.menu_revenue,
             secondhand_revenue=recognized_revenue - comp.menu_revenue,
             payment_fee_total=comp.payment_fee_total,
             net_margin=gross_margin - comp.payment_fee_total,
-            payment_methods=comp.payment_methods,
+            payment_methods=payment_methods,
             manual_discount_total=comp.manual_discount_total,
             gift_retail_value=comp.gift_retail_value,
             gift_cost=comp.gift_cost,
-            # 扣掉贈品成本後的實際貢獻。贈品成本**不進 gross_margin**——營收 0 加全額成本
-            # 會讓毛利率失真；它的代價要單獨看見。
-            contribution_margin=gross_margin - comp.payment_fee_total - comp.gift_cost,
+            gift_returned_retail_value=gift_returned_retail_value,
+            gift_returned_cost=gift_returned_cost,
+            net_gift_retail_value=net_gift_retail_value,
+            net_gift_cost=net_gift_cost,
+            # 贈品成本**不進 gross_margin**；退回成本在退貨日沖回，故扣的是期間淨成本。
+            contribution_margin=_contribution_margin(
+                gross_margin,
+                comp.payment_fee_total,
+                comp.gift_cost,
+                gift_returned_cost,
+            ),
         )
 
     async def serialized_sold_rows(
@@ -2384,6 +2454,23 @@ class SalesService:
     ]:
         """贈品的期間彙總（依原因、依品項）。"""
         return await self._repo.gift_rows(store_id, date_from, date_to)
+
+    async def gift_line_snapshots(
+        self, store_id: int, sale_line_ids: list[int]
+    ) -> dict[int, GiftLineSnapshot]:
+        """依贈品銷售行 ID 取得成交快照；跨模組報表不可直接讀 sales 資料表。"""
+        rows = await self._repo.gift_line_snapshots(store_id, sale_line_ids)
+        return {
+            line_id: GiftLineSnapshot(
+                reason_id=reason_id,
+                reason_name=reason_name,
+                description=description,
+                qty=qty,
+                retail_unit_price=retail or Decimal(0),
+                cost=cost,
+            )
+            for line_id, reason_id, reason_name, description, qty, retail, cost in rows
+        }
 
     async def list_gift_reasons(
         self, store_id: int, *, include_inactive: bool = False

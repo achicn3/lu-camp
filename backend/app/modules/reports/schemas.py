@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, PlainSerializer
+from pydantic import BaseModel, Field, PlainSerializer
 
 from app.shared.enums import CampaignStatus
 
@@ -119,10 +119,12 @@ class DailyCashReport(BaseModel):
 
 
 class PaymentMethodTotal(BaseModel):
-    """單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。"""
+    """單一付款方式的期間淨收款（銷售收款減退貨退款）與原支付手續費。"""
 
     method: str  # TenderType 值（CASH/STORE_CREDIT/LINE_PAY/TAIWAN_PAY）
-    received: NTDAmount  # 該方式收款額合計
+    received: NTDAmount = Field(
+        description="該方式淨收款（銷售收款減退貨退款）；退貨-only 期間可為負數"
+    )
     fee: NTDAmount  # 該方式手續費合計（現金/購物金為 0）
 
 
@@ -145,8 +147,8 @@ class SalesMarginReport(BaseModel):
     # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
     food_revenue: NTDAmount
     secondhand_revenue: NTDAmount
-    cash_received: NTDAmount
-    store_credit_redeemed: NTDAmount
+    cash_received: NTDAmount = Field(description="現金淨收款（銷售收現減退現）")
+    store_credit_redeemed: NTDAmount = Field(description="購物金淨收款（購物金兌付減退回購物金）")
     transaction_count: int
     # 支付手續費（docs/30 §7 決策 1）：手續費為店家成本、獨立支出行；gross_margin 不含（認列營收
     # 不變），另提供 net_margin = gross_margin − payment_fee_total。payment_methods 依 tender 分列。
@@ -158,13 +160,17 @@ class SalesMarginReport(BaseModel):
     manual_discount_total: NTDAmount = Decimal(0)
     gift_retail_value: NTDAmount = Decimal(0)
     gift_cost: NTDAmount = Decimal(0)
-    contribution_margin: NTDAmount = Decimal(0)  # 淨毛利 − 贈品成本
+    gift_returned_retail_value: NTDAmount = Decimal(0)
+    gift_returned_cost: NTDAmount = Decimal(0)
+    net_gift_retail_value: NTDAmount = Decimal(0)
+    net_gift_cost: NTDAmount = Decimal(0)
+    contribution_margin: NTDAmount = Decimal(0)  # 淨毛利 − 淨贈品成本
 
 
 class DailySummaryReport(BaseModel):
     """每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。
 
-    營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。
+    營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利。
     """
 
     generated_at: datetime
@@ -199,8 +205,6 @@ class DailySummaryReport(BaseModel):
     # 概覽
     transaction_count: int
     avg_ticket: NTDAmountOpt  # 客單價＝營業額 ÷ 筆數；0 筆 → null
-    estimated_net_income: NTDAmountOpt  # 估算淨利＝毛利 − 當日攤提固定支出；未設 → null
-    estimated_net_income_note: str  # 明確標註為估計（固定營業費用未逐日記錄）
 
 
 class TrendRow(BaseModel):
@@ -409,7 +413,7 @@ class DiscountClerkRow(BaseModel):
 
 
 class GiftReasonRow(BaseModel):
-    """一個贈送原因在期間內送出的數量、原價價值與成本。"""
+    """一個贈送原因在期間內送出、退回與淨額。"""
 
     reason_id: int | None
     reason_name: str
@@ -417,14 +421,20 @@ class GiftReasonRow(BaseModel):
     gift_qty: int  # 件數
     retail_value: NTDAmount
     cost: NTDAmount
+    returned_gift_qty: int
+    returned_retail_value: NTDAmount
+    returned_cost: NTDAmount
+    net_gift_qty: int
+    net_retail_value: NTDAmount
+    net_cost: NTDAmount
 
 
 class GiftReport(BaseModel):
-    """贈品報表：送了什麼、送了多少、成本多少。
+    """贈品報表：期間送出、退回與淨額。
 
     贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利
-    （營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動
-    `GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。
+    （營收 0 加全額成本會讓毛利率失真）。既有欄位保留期間送出總額，另列退回與淨額；
+    退回歸屬退貨發生日。
     """
 
     generated_at: datetime
@@ -434,17 +444,29 @@ class GiftReport(BaseModel):
     gift_qty: int
     retail_value: NTDAmount
     cost: NTDAmount
+    returned_gift_qty: int
+    returned_retail_value: NTDAmount
+    returned_cost: NTDAmount
+    net_gift_qty: int
+    net_retail_value: NTDAmount
+    net_cost: NTDAmount
     by_reason: list[GiftReasonRow]
     by_product: list["GiftProductRow"]
 
 
 class GiftProductRow(BaseModel):
-    """被當成贈品送出去最多的品項。"""
+    """一個品項在期間內送出、退回與淨額。"""
 
     description: str
     gift_qty: int
     retail_value: NTDAmount
     cost: NTDAmount
+    returned_gift_qty: int
+    returned_retail_value: NTDAmount
+    returned_cost: NTDAmount
+    net_gift_qty: int
+    net_retail_value: NTDAmount
+    net_cost: NTDAmount
 
 
 class CampaignPerformanceReport(BaseModel):

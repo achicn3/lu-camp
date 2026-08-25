@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.sales.models import Sale, SaleLine
-from app.shared.enums import OwnershipType, SaleLineKind, SaleLineType, SaleStatus
+from app.shared.enums import OwnershipType, SaleLineKind, SaleLineType, SaleStatus, TenderType
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,15 @@ class ReturnsMarginAdjustments:
     catalog_cogs: Decimal = Decimal(0)  # 缺成本自有序號（unknown 桶）
 
 
+@dataclass(frozen=True)
+class GiftReturnQuantity:
+    """一個原銷售行在期間前與期間內的累積退回數量。"""
+
+    sale_line_id: int
+    prior_qty: int
+    period_qty: int
+
+
 class ReturnsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -43,6 +52,86 @@ class ReturnsRepository:
         self._session.add(customer_return)
         await self._session.flush()
         return customer_return
+
+    async def refund_tender_totals(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[TenderType, Decimal]]:
+        """期間退款渠道總額；與贈品退回量分開查，避免各自報表掃描不需要的資料。"""
+        tender_stmt = (
+            select(ReturnTender.tender_type, func.coalesce(func.sum(ReturnTender.amount), 0))
+            .join(CustomerReturn, CustomerReturn.id == ReturnTender.return_id)
+            .where(
+                CustomerReturn.store_id == store_id,
+                CustomerReturn.created_at >= date_from,
+                CustomerReturn.created_at < date_to,
+            )
+            .group_by(ReturnTender.tender_type)
+        )
+        return [
+            (TenderType(str(tender_type)), Decimal(amount))
+            for tender_type, amount in (await self._session.execute(tender_stmt)).all()
+        ]
+
+    async def period_return_sale_line_ids(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[int]:
+        """期間內有退貨事件的銷售行 ID；供 service 經 sales 篩出贈品。"""
+        rows = await self._session.scalars(
+            select(ReturnLine.sale_line_id)
+            .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
+            .where(
+                CustomerReturn.store_id == store_id,
+                CustomerReturn.created_at >= date_from,
+                CustomerReturn.created_at < date_to,
+            )
+            .distinct()
+        )
+        return [int(line_id) for line_id in rows]
+
+    async def return_quantities_for_sale_line_ids(
+        self,
+        store_id: int,
+        date_from: datetime,
+        date_to: datetime,
+        sale_line_ids: list[int],
+    ) -> list[GiftReturnQuantity]:
+        """指定銷售行在期間前／期間內的退回量；呼叫端須先篩成贈品行。"""
+        if not sale_line_ids:
+            return []
+        prior_qty = func.coalesce(
+            func.sum(case((CustomerReturn.created_at < date_from, ReturnLine.qty), else_=0)),
+            0,
+        )
+        period_qty = func.coalesce(
+            func.sum(
+                case(
+                    (CustomerReturn.created_at >= date_from, ReturnLine.qty),
+                    else_=0,
+                )
+            ),
+            0,
+        )
+        rows = (
+            await self._session.execute(
+                select(ReturnLine.sale_line_id, prior_qty, period_qty)
+                .join(CustomerReturn, CustomerReturn.id == ReturnLine.return_id)
+                .where(
+                    CustomerReturn.store_id == store_id,
+                    CustomerReturn.created_at < date_to,
+                    ReturnLine.sale_line_id.in_(sale_line_ids),
+                )
+                .group_by(ReturnLine.sale_line_id)
+                .having(period_qty > 0)
+            )
+        ).all()
+        return [
+            GiftReturnQuantity(
+                sale_line_id=int(line_id),
+                prior_qty=int(prior),
+                period_qty=int(period),
+            )
+            for line_id, prior, period in rows
+        ]
 
     async def add_line(self, line: ReturnLine) -> ReturnLine:
         self._session.add(line)

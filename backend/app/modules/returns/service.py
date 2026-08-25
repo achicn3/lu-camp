@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.money import round_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.einvoice.service import EInvoiceService
@@ -23,11 +24,15 @@ from app.modules.returns.invoice_policy import (
 )
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
 from app.modules.returns.refund import line_refund_amount, refund_entitlement
-from app.modules.returns.repository import ReturnsMarginAdjustments, ReturnsRepository
+from app.modules.returns.repository import (
+    GiftReturnQuantity,
+    ReturnsMarginAdjustments,
+    ReturnsRepository,
+)
 from app.modules.sales.linepay import LinePayClient
 from app.modules.sales.models import SaleLine, SaleTender
 from app.modules.sales.repository import SalesRepository
-from app.modules.sales.service import SalesService
+from app.modules.sales.service import GiftLineSnapshot, SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.shared.enums import (
@@ -56,6 +61,30 @@ from app.shared.exceptions import (
 class ReturnLineInput:
     sale_line_id: int
     qty: int
+
+
+@dataclass(frozen=True)
+class GiftReturnAdjustment:
+    """期間內退回的贈品，金額取原銷售行快照並歸屬退貨發生日。"""
+
+    reason_id: int | None
+    reason_name: str
+    description: str
+    qty: int
+    retail_value: Decimal
+    cost: Decimal
+
+
+def _gift_return_cost(
+    cost_snapshot: Decimal | None, *, line_qty: int, prior_qty: int, period_qty: int
+) -> Decimal:
+    """以累積差額分攤本期退回成本，避免分批四捨五入漂移。"""
+    if cost_snapshot is None:
+        return Decimal(0)
+    return Decimal(
+        round_ntd(cost_snapshot * Decimal(prior_qty + period_qty) / Decimal(line_qty))
+        - round_ntd(cost_snapshot * Decimal(prior_qty) / Decimal(line_qty))
+    )
 
 
 def _return_fingerprint(sale_id: int, requested: dict[int, int], reason: str) -> str:
@@ -95,6 +124,7 @@ def _refund_identity(
 
 
 _TAIPEI_TZ = ZoneInfo("Asia/Taipei")
+_GIFT_SNAPSHOT_BATCH_SIZE = 500
 
 
 def _invoice_lines_fully_returned(
@@ -352,6 +382,83 @@ class ReturnsService:
     ) -> "ReturnsMarginAdjustments":
         """期間退貨的毛利扣減（D-8(1)；供 sales.margin_breakdown 同源扣除，read-only）。"""
         return await self._repo.margin_adjustments(store_id, date_from, date_to)
+
+    async def gift_return_adjustments(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[GiftReturnAdjustment]:
+        """期間退回贈品：returns 數量與 sales 成交快照經各自 service／repository 取得。"""
+        candidate_ids = await self._repo.period_return_sale_line_ids(store_id, date_from, date_to)
+        snapshots = await self._gift_snapshots(store_id, candidate_ids)
+        quantities: list[GiftReturnQuantity] = []
+        gift_ids = list(snapshots)
+        for start in range(0, len(gift_ids), _GIFT_SNAPSHOT_BATCH_SIZE):
+            quantities.extend(
+                await self._repo.return_quantities_for_sale_line_ids(
+                    store_id,
+                    date_from,
+                    date_to,
+                    gift_ids[start : start + _GIFT_SNAPSHOT_BATCH_SIZE],
+                )
+            )
+        return await self._gift_adjustments_from_quantities(
+            store_id, quantities, snapshots=snapshots
+        )
+
+    async def report_adjustments(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> tuple[list[tuple[TenderType, Decimal]], list[GiftReturnAdjustment]]:
+        """分別取得退款渠道與已篩選的贈品退回，避免普通退貨參與歷史贈品聚合。"""
+        tenders = await self._repo.refund_tender_totals(store_id, date_from, date_to)
+        gifts = await self.gift_return_adjustments(store_id, date_from, date_to)
+        return tenders, gifts
+
+    async def _gift_adjustments_from_quantities(
+        self,
+        store_id: int,
+        quantities: list[GiftReturnQuantity],
+        *,
+        snapshots: dict[int, GiftLineSnapshot] | None = None,
+    ) -> list[GiftReturnAdjustment]:
+        if snapshots is None:
+            snapshots = await self._gift_snapshots(
+                store_id, [row.sale_line_id for row in quantities]
+            )
+        adjustments: list[GiftReturnAdjustment] = []
+        for quantity in quantities:
+            snapshot = snapshots.get(quantity.sale_line_id)
+            if snapshot is None:
+                continue
+            adjustments.append(
+                GiftReturnAdjustment(
+                    reason_id=snapshot.reason_id,
+                    reason_name=snapshot.reason_name,
+                    description=snapshot.description,
+                    qty=quantity.period_qty,
+                    retail_value=snapshot.retail_unit_price * quantity.period_qty,
+                    cost=_gift_return_cost(
+                        snapshot.cost,
+                        line_qty=snapshot.qty,
+                        prior_qty=quantity.prior_qty,
+                        period_qty=quantity.period_qty,
+                    ),
+                )
+            )
+        return adjustments
+
+    async def _gift_snapshots(
+        self, store_id: int, sale_line_ids: list[int]
+    ) -> dict[int, GiftLineSnapshot]:
+        """經 sales service 分批辨識贈品，避免退貨量大時產生無上限的單一 IN。"""
+        sales = SalesService(self._session)
+        snapshots: dict[int, GiftLineSnapshot] = {}
+        for start in range(0, len(sale_line_ids), _GIFT_SNAPSHOT_BATCH_SIZE):
+            snapshots.update(
+                await sales.gift_line_snapshots(
+                    store_id,
+                    sale_line_ids[start : start + _GIFT_SNAPSHOT_BATCH_SIZE],
+                )
+            )
+        return snapshots
 
     async def returned_qty_for_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
         """該銷售各明細已退貨累積量（退貨頁算可退餘量用，read-only）。"""

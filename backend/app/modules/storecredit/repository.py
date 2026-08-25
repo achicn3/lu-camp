@@ -184,6 +184,19 @@ class StoreCreditRepository:
         value = await self._session.scalar(stmt)
         return Decimal(value if value is not None else 0)
 
+    async def ledger_balances_by_contact(self, store_id: int) -> dict[int, Decimal]:
+        """帳本推導的各會員餘額；報表不得以可失真的 account cache 代替。"""
+        stmt = (
+            select(
+                StoreCreditLedger.contact_id,
+                func.coalesce(func.sum(StoreCreditLedger.signed_amount), 0),
+            )
+            .where(StoreCreditLedger.store_id == store_id)
+            .group_by(StoreCreditLedger.contact_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {int(contact_id): Decimal(balance) for contact_id, balance in rows}
+
     async def total_outstanding(self, store_id: int) -> Decimal:
         """全域總負債 = Σ 正餘額（docs/16 §4 對帳）。"""
         stmt = select(func.coalesce(func.sum(StoreCreditAccount.balance), 0)).where(

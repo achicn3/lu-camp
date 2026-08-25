@@ -20,6 +20,8 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import CatalogProduct
 from app.modules.inventory.service import InventoryService
+from app.modules.returns.models import CustomerReturn
+from app.modules.sales.models import Sale
 from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -70,7 +72,10 @@ async def _member_points(session: AsyncSession, member_id: int) -> int:
 
 async def _seed_catalog(session: AsyncSession, store_id: int, *, price: str, qty: int) -> int:
     product = CatalogProduct(
-        store_id=store_id, sku="SKU-D8", name="瓦斯罐", unit_price=Decimal(price),
+        store_id=store_id,
+        sku="SKU-D8",
+        name="瓦斯罐",
+        unit_price=Decimal(price),
         quantity_on_hand=qty,
     )
     session.add(product)
@@ -164,7 +169,7 @@ async def test_margin_breakdown_subtracts_returns_in_window(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
     """毛利報表扣退貨：自有序號品售 3000/成本 500，退貨後營收與成本雙扣。"""
-    token, store_id, _, _ = await _seed(db_session)
+    token, store_id, clerk_id, _ = await _seed(db_session)
     item = await InventoryService(db_session).create_serialized_item(
         store_id,
         item_code="S1-D8TEST01",
@@ -183,13 +188,21 @@ async def test_margin_breakdown_subtracts_returns_in_window(
     assert sale_resp.status_code == 201, sale_resp.text
     sale = sale_resp.json()
 
+    now = datetime.now(UTC)
+    sale_row = await db_session.get(Sale, sale["id"])
+    assert sale_row is not None
+    sale_row.created_at = now - timedelta(days=2)
+    await db_session.flush()
+
     svc = SalesService(db_session)
-    t0 = datetime.now(UTC) - timedelta(days=1)
-    t1 = datetime.now(UTC) + timedelta(days=1)
-    before = await svc.margin_breakdown(store_id, t0, t1)
+    sale_from = now - timedelta(days=3)
+    sale_to = now - timedelta(days=1)
+    before = await svc.margin_breakdown(store_id, sale_from, sale_to)
     assert before.recognized_revenue == Decimal("3000")
     assert before.owned_cogs == Decimal("500")
     assert before.gross_margin == Decimal("2500")
+    assert before.cash_received == Decimal("3000")
+    assert before.payment_methods == (("CASH", Decimal("3000"), Decimal("0")),)
 
     resp = await client.post(
         "/api/v1/returns",
@@ -201,20 +214,78 @@ async def test_margin_breakdown_subtracts_returns_in_window(
         headers=_auth(token, idem="d8-ret-4"),
     )
     assert resp.status_code == 201, resp.text
+    returned = await db_session.get(CustomerReturn, resp.json()["id"])
+    assert returned is not None
+    returned.created_at = now
+    await db_session.flush()
     db_session.expire_all()
 
-    after = await svc.margin_breakdown(store_id, t0, t1)
-    assert after.recognized_revenue == Decimal("0")
-    assert after.owned_cogs == Decimal("0")
-    assert after.gross_margin == Decimal("0")
+    # 退貨不回寫原銷售期；原銷售期仍完整呈現收款與毛利。
+    sale_only = await svc.margin_breakdown(store_id, sale_from, sale_to)
+    assert sale_only.recognized_revenue == Decimal("3000")
+    assert sale_only.cash_received == Decimal("3000")
 
-    # 退貨日不在查詢區間 → 不影響該區間（退貨歸屬退貨發生日）
-    only_sale_window = await svc.margin_breakdown(
-        store_id, t0 - timedelta(days=2), t0
+    # 退貨期沒有新銷售，退款渠道與營收／成本均以負值歸在退貨日。
+    return_only = await svc.margin_breakdown(
+        store_id, now - timedelta(hours=1), now + timedelta(days=1)
     )
-    assert only_sale_window.recognized_revenue == Decimal("0")  # 窗外皆無
-    full_again = await svc.margin_breakdown(store_id, t0, t1)
+    assert return_only.recognized_revenue == Decimal("-3000")
+    assert return_only.owned_cogs == Decimal("-500")
+    assert return_only.gross_margin == Decimal("-2500")
+    assert return_only.cash_received == Decimal("-3000")
+    assert return_only.payment_methods == (("CASH", Decimal("-3000"), Decimal("0")),)
+
+    clerk = await db_session.get(User, clerk_id)
+    assert clerk is not None
+    clerk.role = UserRole.MANAGER
+    other_store = Store(name="退貨報表隔離門市")
+    db_session.add(other_store)
+    await db_session.flush()
+    other_manager = User(
+        store_id=other_store.id,
+        username=f"d8-other-{other_store.id}",
+        password_hash="h",
+        role=UserRole.MANAGER,
+    )
+    db_session.add(other_manager)
+    await db_session.flush()
+    manager_token = encode_access_token(user_id=clerk_id, role="MANAGER", store_id=store_id)
+    other_token = encode_access_token(
+        user_id=other_manager.id, role="MANAGER", store_id=other_store.id
+    )
+    report_params = {
+        "from": (now - timedelta(hours=1)).isoformat(),
+        "to": (now + timedelta(days=1)).isoformat(),
+    }
+    json_report = await client.get(
+        "/api/v1/reports/sales-margin",
+        params=report_params,
+        headers=_auth(manager_token),
+    )
+    assert json_report.status_code == 200
+    assert json_report.json()["cash_received"] == "-3000"
+    assert json_report.json()["payment_methods"] == [
+        {"method": "CASH", "received": "-3000", "fee": "0"}
+    ]
+    csv_report = await client.get(
+        "/api/v1/reports/sales-margin",
+        params={**report_params, "format": "csv"},
+        headers=_auth(manager_token),
+    )
+    assert csv_report.status_code == 200
+    assert "付款方式 CASH 淨收款,'-3000" in csv_report.content.decode("utf-8-sig")
+    isolated = await client.get(
+        "/api/v1/reports/sales-margin",
+        params=report_params,
+        headers=_auth(other_token),
+    )
+    assert isolated.status_code == 200
+    assert isolated.json()["cash_received"] == "0"
+    assert isolated.json()["payment_methods"] == []
+
+    full_again = await svc.margin_breakdown(store_id, sale_from, now + timedelta(days=1))
     assert full_again.gross_turnover == Decimal("0")
+    assert full_again.cash_received == Decimal("0")
 
     _ = item
 

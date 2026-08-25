@@ -1,6 +1,7 @@
 """returns API integration tests（Phase 4B：退貨、退現、回補庫存）。"""
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -22,6 +23,7 @@ from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.returns.models import CustomerReturn, ReturnLine
 from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
@@ -468,6 +470,13 @@ async def test_store_credit_sale_return_refunds_credit_without_cash_movement(
         await db_session.scalars(select(CustomerReturn).where(CustomerReturn.sale_id == sale["id"]))
     ).all()
     assert len(returns) == 2
+    margin = await SalesService(db_session).margin_breakdown(
+        store_id,
+        datetime.now(UTC) - timedelta(days=1),
+        datetime.now(UTC) + timedelta(days=1),
+    )
+    assert margin.store_credit_redeemed == Decimal(0)
+    assert ("STORE_CREDIT", Decimal(0), Decimal(0)) in margin.payment_methods
 
 
 async def test_mixed_return_refunds_store_credit_first_then_cash_delta(
@@ -687,6 +696,13 @@ async def test_mixed_return_requires_taiwan_pay_confirmation_only_for_external_d
         ("TAIWAN_PAY", "100"),
     ]
     assert await credit.get_balance(store_id, member_id) == Decimal("300")
+    margin = await SalesService(db_session).margin_breakdown(
+        store_id,
+        datetime.now(UTC) - timedelta(days=1),
+        datetime.now(UTC) + timedelta(days=1),
+    )
+    assert ("STORE_CREDIT", Decimal(0), Decimal(0)) in margin.payment_methods
+    assert ("TAIWAN_PAY", Decimal(0), Decimal(0)) in margin.payment_methods
 
 
 async def test_create_serialized_consignment_return_restocks_and_cancels_settlement(

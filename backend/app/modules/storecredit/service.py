@@ -586,8 +586,8 @@ class StoreCreditService:
     # ── SC-4 報表資料（read-only；docs/16 §5A）──
 
     async def per_member_balances(self, store_id: int) -> list[tuple[int, Decimal]]:
-        """各會員正餘額（balance > 0），供負債報表逐會員列示。"""
-        balances = await self._repo.balances_by_contact(store_id)
+        """帳本推導的各會員正餘額（balance > 0），供負債報表逐會員列示。"""
+        balances = await self._repo.ledger_balances_by_contact(store_id)
         return [(cid, bal) for cid, bal in sorted(balances.items()) if bal > 0]
 
     async def balances_for(self, store_id: int, contact_ids: list[int]) -> dict[int, Decimal]:
@@ -601,7 +601,7 @@ class StoreCreditService:
         """未兌付負債帳齡分桶（FIFO 沖銷發出列；docs/16 §5A）。"""
         lots_rows = await self._repo.positive_lots(store_id)
         positive_sum = await self._repo.positive_sum_by_contact(store_id)
-        balances = await self._repo.balances_by_contact(store_id)
+        balances = await self._repo.ledger_balances_by_contact(store_id)
         per_contact: dict[int, list[IssuedLot]] = {}
         for contact_id, amount, issued_at in lots_rows:
             per_contact.setdefault(contact_id, []).append(
@@ -617,7 +617,7 @@ class StoreCreditService:
             for key, value in contact_buckets.items():
                 buckets[key] += value
         return {
-            "total_outstanding": await self._repo.total_outstanding(store_id),
+            "total_outstanding": await self._repo.ledger_total_outstanding(store_id),
             "buckets": buckets,
         }
 

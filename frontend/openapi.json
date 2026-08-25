@@ -3610,7 +3610,7 @@
         "type": "object"
       },
       "DailySummaryReport": {
-        "description": "每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。\n\n營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。",
+        "description": "每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。\n\n營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利。",
         "properties": {
           "acquisition_void_in": {
             "title": "Acquisition Void In",
@@ -3658,21 +3658,6 @@
           "date": {
             "format": "date",
             "title": "Date",
-            "type": "string"
-          },
-          "estimated_net_income": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Estimated Net Income"
-          },
-          "estimated_net_income_note": {
-            "title": "Estimated Net Income Note",
             "type": "string"
           },
           "expected_cash": {
@@ -3779,9 +3764,7 @@
           "store_credit_issued",
           "store_credit_redeemed",
           "transaction_count",
-          "avg_ticket",
-          "estimated_net_income",
-          "estimated_net_income_note"
+          "avg_ticket"
         ],
         "title": "DailySummaryReport",
         "type": "object"
@@ -4560,7 +4543,7 @@
         "type": "object"
       },
       "GiftProductRow": {
-        "description": "被當成贈品送出去最多的品項。",
+        "description": "一個品項在期間內送出、退回與淨額。",
         "properties": {
           "cost": {
             "title": "Cost",
@@ -4574,8 +4557,32 @@
             "title": "Gift Qty",
             "type": "integer"
           },
+          "net_cost": {
+            "title": "Net Cost",
+            "type": "string"
+          },
+          "net_gift_qty": {
+            "title": "Net Gift Qty",
+            "type": "integer"
+          },
+          "net_retail_value": {
+            "title": "Net Retail Value",
+            "type": "string"
+          },
           "retail_value": {
             "title": "Retail Value",
+            "type": "string"
+          },
+          "returned_cost": {
+            "title": "Returned Cost",
+            "type": "string"
+          },
+          "returned_gift_qty": {
+            "title": "Returned Gift Qty",
+            "type": "integer"
+          },
+          "returned_retail_value": {
+            "title": "Returned Retail Value",
             "type": "string"
           }
         },
@@ -4583,13 +4590,19 @@
           "description",
           "gift_qty",
           "retail_value",
-          "cost"
+          "cost",
+          "returned_gift_qty",
+          "returned_retail_value",
+          "returned_cost",
+          "net_gift_qty",
+          "net_retail_value",
+          "net_cost"
         ],
         "title": "GiftProductRow",
         "type": "object"
       },
       "GiftReasonRow": {
-        "description": "一個贈送原因在期間內送出的數量、原價價值與成本。",
+        "description": "一個贈送原因在期間內送出、退回與淨額。",
         "properties": {
           "cost": {
             "title": "Cost",
@@ -4602,6 +4615,18 @@
           "gift_qty": {
             "title": "Gift Qty",
             "type": "integer"
+          },
+          "net_cost": {
+            "title": "Net Cost",
+            "type": "string"
+          },
+          "net_gift_qty": {
+            "title": "Net Gift Qty",
+            "type": "integer"
+          },
+          "net_retail_value": {
+            "title": "Net Retail Value",
+            "type": "string"
           },
           "reason_id": {
             "anyOf": [
@@ -4621,6 +4646,18 @@
           "retail_value": {
             "title": "Retail Value",
             "type": "string"
+          },
+          "returned_cost": {
+            "title": "Returned Cost",
+            "type": "string"
+          },
+          "returned_gift_qty": {
+            "title": "Returned Gift Qty",
+            "type": "integer"
+          },
+          "returned_retail_value": {
+            "title": "Returned Retail Value",
+            "type": "string"
           }
         },
         "required": [
@@ -4629,13 +4666,19 @@
           "gift_count",
           "gift_qty",
           "retail_value",
-          "cost"
+          "cost",
+          "returned_gift_qty",
+          "returned_retail_value",
+          "returned_cost",
+          "net_gift_qty",
+          "net_retail_value",
+          "net_cost"
         ],
         "title": "GiftReasonRow",
         "type": "object"
       },
       "GiftReport": {
-        "description": "贈品報表：送了什麼、送了多少、成本多少。\n\n贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利\n（營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動\n`GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。",
+        "description": "贈品報表：期間送出、退回與淨額。\n\n贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利\n（營收 0 加全額成本會讓毛利率失真）。既有欄位保留期間送出總額，另列退回與淨額；\n退回歸屬退貨發生日。",
         "properties": {
           "by_product": {
             "items": {
@@ -4674,8 +4717,32 @@
             "title": "Gift Qty",
             "type": "integer"
           },
+          "net_cost": {
+            "title": "Net Cost",
+            "type": "string"
+          },
+          "net_gift_qty": {
+            "title": "Net Gift Qty",
+            "type": "integer"
+          },
+          "net_retail_value": {
+            "title": "Net Retail Value",
+            "type": "string"
+          },
           "retail_value": {
             "title": "Retail Value",
+            "type": "string"
+          },
+          "returned_cost": {
+            "title": "Returned Cost",
+            "type": "string"
+          },
+          "returned_gift_qty": {
+            "title": "Returned Gift Qty",
+            "type": "integer"
+          },
+          "returned_retail_value": {
+            "title": "Returned Retail Value",
             "type": "string"
           },
           "store_id": {
@@ -4691,6 +4758,12 @@
           "gift_qty",
           "retail_value",
           "cost",
+          "returned_gift_qty",
+          "returned_retail_value",
+          "returned_cost",
+          "net_gift_qty",
+          "net_retail_value",
+          "net_cost",
           "by_reason",
           "by_product"
         ],
@@ -6826,7 +6899,7 @@
         "type": "string"
       },
       "PaymentMethodTotal": {
-        "description": "單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。",
+        "description": "單一付款方式的期間淨收款（銷售收款減退貨退款）與原支付手續費。",
         "properties": {
           "fee": {
             "title": "Fee",
@@ -6837,6 +6910,7 @@
             "type": "string"
           },
           "received": {
+            "description": "該方式淨收款（銷售收款減退貨退款）；退貨-only 期間可為負數",
             "title": "Received",
             "type": "string"
           }
@@ -9107,6 +9181,7 @@
             "type": "string"
           },
           "cash_received": {
+            "description": "現金淨收款（銷售收現減退現）",
             "title": "Cash Received",
             "type": "string"
           },
@@ -9153,6 +9228,16 @@
             "title": "Gift Retail Value",
             "type": "string"
           },
+          "gift_returned_cost": {
+            "default": "0",
+            "title": "Gift Returned Cost",
+            "type": "string"
+          },
+          "gift_returned_retail_value": {
+            "default": "0",
+            "title": "Gift Returned Retail Value",
+            "type": "string"
+          },
           "gross_margin": {
             "title": "Gross Margin",
             "type": "string"
@@ -9175,6 +9260,16 @@
           "manual_discount_total": {
             "default": "0",
             "title": "Manual Discount Total",
+            "type": "string"
+          },
+          "net_gift_cost": {
+            "default": "0",
+            "title": "Net Gift Cost",
+            "type": "string"
+          },
+          "net_gift_retail_value": {
+            "default": "0",
+            "title": "Net Gift Retail Value",
             "type": "string"
           },
           "net_margin": {
@@ -9205,6 +9300,7 @@
             "type": "string"
           },
           "store_credit_redeemed": {
+            "description": "購物金淨收款（購物金兌付減退回購物金）",
             "title": "Store Credit Redeemed",
             "type": "string"
           },
@@ -18010,7 +18106,7 @@
     },
     "/api/v1/reports/daily-summary": {
       "get": {
-        "description": "每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。",
+        "description": "每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金一覽。",
         "operationId": "dailySummaryReport",
         "parameters": [
           {
@@ -18224,7 +18320,7 @@
     },
     "/api/v1/reports/gifts": {
       "get": {
-        "description": "贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。\n\n贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。",
+        "description": "贈品報表：依原因與品項彙總送出、退回及淨額。[from, to)；to<=from → 422。\n\n贈品原價不計入營業額、成本不混入商品毛利；退回歸屬退貨發生日。",
         "operationId": "giftReport",
         "parameters": [
           {

@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import httpx
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -131,6 +132,33 @@ async def test_liability_report(client: httpx.AsyncClient, db_session: AsyncSess
     assert body["per_member"][0]["balance"] == "500"
     # monthly_fixed_cash_outflow 未設（0）→ 健康比 N/A（null）
     assert body["liability_health_ratio"] is None
+
+
+async def test_liability_report_uses_ledger_when_balance_cache_is_wrong(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """負債報表以 append-only 帳本為準，快取失真時不可顯示錯誤負債。"""
+    mgr, _clerk, store_id, member_id, mgr_id = await _seed(db_session)
+    await StoreCreditService(db_session).credit(
+        store_id,
+        member_id,
+        cash_equivalent=Decimal(500),
+        premium_rate=Decimal(0),
+        source_type=StoreCreditSourceType.ACQUISITION,
+        source_id=1,
+        created_by=mgr_id,
+    )
+    await db_session.execute(
+        text("UPDATE store_credit_accounts SET balance = 999 WHERE store_id = :store_id"),
+        {"store_id": store_id},
+    )
+
+    resp = await client.get("/api/v1/reports/store-credit/liability", headers=_auth(mgr))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_outstanding"] == "500"
+    assert body["aging_buckets"]["lt_30d"] == "500"
+    assert body["per_member"] == [{"contact_id": member_id, "name": "會員甲", "balance": "500"}]
 
 
 async def test_liability_health_ratio_uses_monthly_outflow(
