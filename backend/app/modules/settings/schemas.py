@@ -130,12 +130,12 @@ class SettingsUpdateRequest(BaseModel):
             raise ValueError("金額必須為整數元")
         return value
 
-    @field_validator("premium_rate", "premium_rate_min", "premium_rate_max")
+    @field_validator("tax_rate", "premium_rate", "premium_rate_min", "premium_rate_max")
     @classmethod
     def _rate_scale(cls, value: Decimal | None) -> Decimal | None:
         # DB 為 Numeric(5,4)：限四位小數，避免 API/留痕記 5dp 而 DB 落 4dp 不一致（Codex P2）。
         if value is not None and value != value.quantize(Decimal("0.0001")):
-            raise ValueError("溢價率最多四位小數")
+            raise ValueError("費率最多四位小數")
         return value
 
     @field_validator("linepay_fee_pct", "taiwanpay_fee_pct")

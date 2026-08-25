@@ -69,6 +69,10 @@ class UnknownCashMovementType(DomainError):
     """對帳時遇到未知的現金異動類型，拒絕靜默計算以免算錯現金。"""
 
 
+class CashAmountOutOfRange(DomainError):
+    """錢櫃關帳的應有金額或差額超過資料庫可儲存範圍。"""
+
+
 class ContactNotFound(DomainError):
     """收購指定的 contact 不存在（或不屬於本店）。"""
 

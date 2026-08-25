@@ -24,6 +24,7 @@ from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import Grade, OwnershipType, SaleLineType, SerializedItemStatus, UserRole
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 async def _count(session: AsyncSession, model: Any, store_id: int) -> int:
@@ -100,10 +101,10 @@ async def test_sale_rolls_back_entirely_when_cash_step_fails(
             assert cat_after is not None and cat_after.quantity_on_hand == 10
     finally:
         async with sm() as s:
+            await delete_cash_movements_for_test(s, store_id=store_id)
             for model in (
                 SaleLine,
                 StockMovement,
-                CashMovement,
                 ConsignmentSettlement,
                 Sale,
                 SerializedItem,

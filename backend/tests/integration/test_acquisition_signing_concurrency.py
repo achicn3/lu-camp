@@ -19,7 +19,7 @@ from app.core.crypto import get_pii_cipher, national_id_blind_index
 from app.modules.acquisition.models import Acquisition
 from app.modules.acquisition.schemas import AcquisitionCreate, AcquisitionItemIn
 from app.modules.acquisition.service import AcquisitionService
-from app.modules.cashdrawer.models import CashMovement, CashSession
+from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, SerializedItem, StockMovement
@@ -29,6 +29,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import Grade, PayoutMethod, SignatureTaskKind, UserRole
 from app.shared.exceptions import SignatureContentMismatch, SignatureTaskConflict
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 from tests.integration.customer_display_helpers import (
     delete_customer_display_rows,
     ensure_paired_customer_display,
@@ -149,7 +150,7 @@ async def test_identity_edit_serialized_with_binding() -> None:
         # 本測試以真 session 提交資料；FK 順序清列，不留殘餘干擾其他測試。
         async with sm() as s:
             await delete_customer_display_rows(s, store_id=store_id)
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))
@@ -260,7 +261,7 @@ async def test_void_in_progress_serializes_replay() -> None:
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
             await s.execute(delete(BulkLot).where(BulkLot.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))

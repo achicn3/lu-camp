@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit import write_audit_log
 from app.core.canonical import canonical_json_bytes
-from app.core.money import discounted_price, round_ntd, split_tax_inclusive
+from app.core.money import MAX_NTD, discounted_price, round_ntd, split_tax_inclusive
 from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
@@ -35,7 +35,15 @@ from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
-from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
+from app.modules.sales import linepay as sales_linepay
+from app.modules.sales.inputs import (
+    LINEPAY_RETURN_RECOVERY_KIND,
+    InvoiceInfoInput,
+    LinePayReturnRecovery,
+    LinePayReturnRecoveryLine,
+    SaleLineInput,
+    TenderInput,
+)
 from app.modules.sales.linepay import (
     RETURN_CODE_ALREADY_REFUNDED,
     LinePayClient,
@@ -330,9 +338,7 @@ def _adjustment_target_identity(
         return target_key
     target = lines[index]
     item_key = SalesService._cart_item_key(target)
-    occurrence = sum(
-        1 for line in lines[:index] if SalesService._cart_item_key(line) == item_key
-    )
+    occurrence = sum(1 for line in lines[:index] if SalesService._cart_item_key(line) == item_key)
     return f"{item_key}#{occurrence}x{target.qty}"
 
 
@@ -423,9 +429,7 @@ def _cart_fingerprint(
                     "target_key": _adjustment_target_identity(a.target_key, lines),
                     "reason_id": a.reason_id,
                 }
-                for a in sorted(
-                    adjustments, key=lambda a: a.scope is not AdjustmentScope.ITEM
-                )
+                for a in sorted(adjustments, key=lambda a: a.scope is not AdjustmentScope.ITEM)
             ]
         ),
     }
@@ -433,6 +437,11 @@ def _cart_fingerprint(
 
 
 class SalesService:
+    @staticmethod
+    def configured_linepay_client() -> LinePayClient | None:
+        """依目前執行環境設定建立 LINE Pay client；每次呼叫才取得。"""
+        return sales_linepay.linepay_client_from_config()
+
     def __init__(
         self,
         session: AsyncSession,
@@ -477,6 +486,8 @@ class SalesService:
                 raise InvalidSaleTender("收款金額必須為整數元")
             if t.amount <= 0:
                 raise InvalidSaleTender("收款金額必須為正")
+            if t.amount > MAX_NTD:
+                raise InvalidSaleTender(f"收款金額不可超過資料庫金額上限 {MAX_NTD}")
         if len(tenders) > 1 and (len(tenders) != 2 or TenderType.STORE_CREDIT not in seen):
             raise InvalidSaleTender("混合付款只支援購物金搭配現金、LINE Pay 或台灣Pay其中一種")
         return tenders
@@ -839,6 +850,19 @@ class SalesService:
         #   先 check(orderId) 防重複扣款。無鍵則無法安全重試 → 擋。
         # ②每筆 LINE_PAY 須帶 oneTimeKey（掃客人碼）。③client 必須注入（router 依 config 建）。
         if line_pay_tenders:
+            if cart is None:
+                raise InvalidSaleTender("LINE Pay 收款必須使用已配對的客顯購物車")
+            # 一般請款仍要求原客顯保持配對，避免拿別台購物車的一次性碼扣款。
+            # 但 provider 已確認成功的 PAYMENT_UNCERTAIN 補單只落本地帳：此時客顯可能已故障
+            # 而解除配對，權威依據是後端保存的 cart/order/result，不會再呼叫 pay。
+            if reconciled_linepay_result is None:
+                pairing = await self._display_repo.get_active_pairing_for_terminal(
+                    store_id,
+                    cart.pos_terminal_id,
+                    for_update=True,
+                )
+                if pairing is None or pairing.kiosk_device_id != cart.kiosk_device_id:
+                    raise InvalidSaleTender("LINE Pay 收款前，客顯必須維持配對並連接原購物車")
             if idempotency_key is None:
                 raise InvalidSaleTender("LINE Pay 收款必須帶冪等鍵（Idempotency-Key）")
             # PAYMENT_UNCERTAIN 對帳成功後，原 POS 瀏覽器可能已重整而失去原
@@ -981,6 +1005,8 @@ class SalesService:
                 store_id, sale.id, line, consignment_sales, campaign, discountable_flags
             )
             total += line_total
+            if total > MAX_NTD:
+                raise InvalidSaleTender(f"銷售總額不可超過資料庫金額上限 {MAX_NTD}")
             if line.line_type == SaleLineType.MENU:
                 food_subtotal += line_total
 
@@ -999,9 +1025,7 @@ class SalesService:
         # 零元單只允許「整單都是贈品」（店主裁示：門市活動可能單獨送小物）。
         # 一般銷售仍須 > 0：折到 0 元＝變相贈品，要免費請用贈品，否則贈品的數量與成本
         # 在報表上統計不到（pricing 那層也擋著同一條線）。
-        gift_only = bool(lines) and all(
-            line.line_kind is SaleLineKind.GIFT for line in lines
-        )
+        gift_only = bool(lines) and all(line.line_kind is SaleLineKind.GIFT for line in lines)
         if total < 0 or (total == 0 and not gift_only):
             raise InvalidSaleTender("銷售總額必須大於 0（整單免費請全部以贈品開立）")
 
@@ -1406,6 +1430,7 @@ class SalesService:
         client: LinePayClient | None,
         *,
         refund_key: str,
+        recovery_payload: dict[str, object] | None = None,
     ) -> bool:
         """對 LINE Pay 銷售退某金額（退貨部分退款；docs/30 §5）。跨模組經 service（§2）。
 
@@ -1428,6 +1453,10 @@ class SalesService:
                 f"LINE Pay 退款額超過原收款（原 {txn.amount}、已退 {txn.refunded_amount}）；"
                 "此退貨可能已退款，請至 LINE Pay 後台確認後人工處理"
             )
+        if this_key_done:
+            # 平台已退款：本次只補完本地交易。背景復原與使用者重試都走這條，絕不再打 refund。
+            await self._apply_ledger_truth(store_id, txn)
+            return True
         if client is None:
             raise LinePayChargeFailed("LINE Pay 尚未設定（缺 Channel 憑證），無法退款")
         await self._durable_line_pay_refund(
@@ -1436,6 +1465,8 @@ class SalesService:
             refund_key=refund_key,
             amount=amount,
             client=client,
+            recovery_kind="RETURN" if recovery_payload is not None else None,
+            recovery_payload=recovery_payload,
         )
         await self._apply_ledger_truth(store_id, txn)
         return True
@@ -1532,6 +1563,101 @@ class SalesService:
         """結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁；Codex 第三輪 #3）。"""
         return await self._repo.list_pending_refund_attempts(store_id)
 
+    async def list_succeeded_linepay_return_recovery_ids(self, *, limit: int) -> list[int]:
+        """列出待補本地退貨的 provider-success 日誌；供背景排程逐筆開交易。"""
+        return await self._repo.list_succeeded_return_recovery_ids(limit=limit)
+
+    async def has_unrecovered_linepay_return(self, store_id: int, sale_id: int) -> bool:
+        """退款已在平台成立但本地未完成時，禁止另一筆退貨越過它。"""
+        return await self._repo.has_unrecovered_return_refund(store_id, sale_id)
+
+    @staticmethod
+    def _required_recovery_int(payload: dict[str, object], key: str) -> int:
+        value = payload.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise ValueError(f"退款復原 payload 缺少合法 {key}")
+        return value
+
+    async def get_linepay_return_recovery(
+        self, attempt_id: int, *, for_update: bool = False
+    ) -> LinePayReturnRecovery | None:
+        """解析退款復原日誌；鎖定須遵守 sale→attempt 的全域順序。"""
+        attempt = await self._repo.get_refund_attempt_by_id(attempt_id, for_update=for_update)
+        if (
+            attempt is None
+            or attempt.status is not LinePayRefundStatus.SUCCEEDED
+            or attempt.recovery_kind != LINEPAY_RETURN_RECOVERY_KIND
+            or attempt.recovered_at is not None
+        ):
+            return None
+        payload = attempt.recovery_payload
+        if not isinstance(payload, dict):
+            raise ValueError("退款復原紀錄缺少 payload")
+        raw_lines = payload.get("lines")
+        if not isinstance(raw_lines, list) or not raw_lines:
+            raise ValueError("退款復原 payload 缺少 lines")
+        lines: list[LinePayReturnRecoveryLine] = []
+        for raw in raw_lines:
+            if not isinstance(raw, dict):
+                raise ValueError("退款復原 line 格式錯誤")
+            lines.append(
+                LinePayReturnRecoveryLine(
+                    sale_line_id=self._required_recovery_int(raw, "sale_line_id"),
+                    qty=self._required_recovery_int(raw, "qty"),
+                )
+            )
+        reason = payload.get("reason")
+        idempotency_key = payload.get("idempotency_key")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("退款復原 payload 缺少 reason")
+        if not isinstance(idempotency_key, str) or not idempotency_key:
+            raise ValueError("退款復原 payload 缺少 idempotency_key")
+        consent_signature_task_id = payload.get("consent_signature_task_id")
+        if isinstance(consent_signature_task_id, bool) or not (
+            consent_signature_task_id is None or isinstance(consent_signature_task_id, int)
+        ):
+            raise ValueError("退款復原 payload 的 consent_signature_task_id 格式錯誤")
+        unreturned_gift_note = payload.get("unreturned_gift_note")
+        if unreturned_gift_note is not None and not isinstance(unreturned_gift_note, str):
+            raise ValueError("退款復原 payload 的 unreturned_gift_note 格式錯誤")
+        return LinePayReturnRecovery(
+            attempt_id=attempt.id,
+            refund_key=attempt.refund_key,
+            store_id=attempt.store_id,
+            sale_id=self._required_recovery_int(payload, "sale_id"),
+            lines=tuple(lines),
+            reason=reason,
+            actor_user_id=self._required_recovery_int(payload, "actor_user_id"),
+            idempotency_key=idempotency_key,
+            taiwan_pay_refund_confirmed=payload.get("taiwan_pay_refund_confirmed") is True,
+            invoice_recalled=payload.get("invoice_recalled") is True,
+            consent_signature_task_id=consent_signature_task_id,
+            unreturned_gift_note=unreturned_gift_note,
+            manual_paper_disposed=payload.get("manual_paper_disposed") is True,
+        )
+
+    async def mark_linepay_return_recovered(self, attempt_id: int) -> bool:
+        return await self._repo.mark_return_recovery_succeeded(
+            attempt_id, recovered_at=datetime.now(UTC)
+        )
+
+    async def mark_linepay_return_recovered_by_key(self, store_id: int, refund_key: str) -> bool:
+        """主退貨 transaction 成功收尾時，以同一 durable key 關閉背景復原工作。"""
+        return await self._repo.mark_return_recovery_succeeded_by_key(
+            store_id,
+            refund_key,
+            recovered_at=datetime.now(UTC),
+        )
+
+    async def mark_linepay_return_recovery_failed(
+        self, attempt_id: int, *, error_type: str
+    ) -> bool:
+        return await self._repo.mark_return_recovery_failed(
+            attempt_id,
+            # 不持久化可能含顧客／商品資料的 exception 文字；店長只需知道類型並重試。
+            error=f"自動復原失敗：{error_type}",
+        )
+
     async def resolve_linepay_refund(
         self,
         store_id: int,
@@ -1547,6 +1673,16 @@ class SalesService:
         """
         if resolution not in (LinePayRefundStatus.SUCCEEDED, LinePayRefundStatus.FAILED):
             raise InvalidSaleTender("退款解決結果只能為 SUCCEEDED（已退款）或 FAILED（未退款）")
+        candidate = await self._repo.get_refund_attempt(store_id, attempt_id)
+        if candidate is None:
+            raise SaleItemNotFound(f"找不到退款對帳紀錄 {attempt_id}")
+        # 人工裁定會把 PENDING 變成 SUCCEEDED，必須和退貨共用 sale→attempt 鎖序；否則退貨
+        # 可能先通過「尚未成功」guard，裁定再插隊成功，退貨接著以新 key 重送第二筆平台退款。
+        txn = await self._repo.get_linepay_by_order_id(store_id, candidate.order_id)
+        if txn is not None:
+            sale = await self._repo.lock_sale(store_id, txn.sale_id)
+            if sale is None:
+                raise SaleItemNotFound(f"退款對帳紀錄 {attempt_id} 找不到原銷售")
         attempt = await self._repo.get_refund_attempt(store_id, attempt_id, for_update=True)
         if attempt is None:
             raise SaleItemNotFound(f"找不到退款對帳紀錄 {attempt_id}")
@@ -1577,6 +1713,8 @@ class SalesService:
         refund_key: str,
         amount: Decimal,
         client: LinePayClient,
+        recovery_kind: str | None = None,
+        recovery_payload: dict[str, object] | None = None,
     ) -> None:
         """向平台送退款，以**獨立交易**的 append-only 日誌防重退（Codex adversarial finding #1）。
 
@@ -1610,6 +1748,18 @@ class SalesService:
                         "LINE Pay 退款對帳鍵與既有紀錄的店別/訂單/金額不符，拒絕重用；"
                         "請至 LINE Pay 後台確認後人工處理"
                     )
+                if (
+                    recovery_payload is not None
+                    and existing.recovery_payload is not None
+                    and existing.recovery_payload != recovery_payload
+                ):
+                    raise LinePayRefundAmbiguous(
+                        "LINE Pay 退款復原內容與既有紀錄不符，拒絕覆寫；請由店長對帳"
+                    )
+                if recovery_payload is not None and existing.recovery_payload is None:
+                    existing.recovery_kind = recovery_kind
+                    existing.recovery_payload = recovery_payload
+                    await ledger.commit()
                 if existing.status == LinePayRefundStatus.SUCCEEDED:
                     return  # 前次已退款成功 → 跳過不重退（防重退核心）
                 if existing.status == LinePayRefundStatus.PENDING:
@@ -1634,11 +1784,22 @@ class SalesService:
                         order_id=order_id,
                         amount=amount,
                         status=LinePayRefundStatus.PENDING,
+                        recovery_kind=recovery_kind,
+                        recovery_payload=recovery_payload,
                     )
                 )
             else:
+                if (
+                    recovery_payload is not None
+                    and row.recovery_payload is not None
+                    and row.recovery_payload != recovery_payload
+                ):
+                    raise LinePayRefundAmbiguous("LINE Pay 退款復原內容與既有紀錄不符")
                 row.status = LinePayRefundStatus.PENDING
                 row.return_code = None
+                if recovery_payload is not None:
+                    row.recovery_kind = recovery_kind
+                    row.recovery_payload = recovery_payload
             await ledger.commit()
 
         # Phase 2：呼叫平台（傳輸錯誤 → 保留 PENDING 並上拋，下次重試即 ambiguous）
@@ -2422,8 +2583,17 @@ class SalesService:
         discountable: list[bool] = []
         for line in lines:
             ql = await self._quote_line(store_id, line, campaign, discountable)
+            self._ensure_numeric_12_amounts(
+                ql.unit_price,
+                ql.line_total,
+                ql.original_unit_price,
+                ql.discount_amount,
+                ql.net_amount,
+            )
             quoted.append(ql)
             total += ql.net_amount
+            if total > MAX_NTD:
+                raise SaleLineInvalid(f"銷售總額不可超過資料庫金額上限 {MAX_NTD}")
             if ql.line_type == SaleLineType.MENU:
                 food_subtotal += ql.net_amount
 
@@ -2639,9 +2809,7 @@ class SalesService:
             raise InvalidDiscount("折扣原因不存在、不屬本店或已停用")
         if reason.requires_note and not (request.note or "").strip():
             raise InvalidDiscount(f"折扣原因「{reason.name}」必須填寫備註")
-        return replace(
-            request, reason_name=reason.name, note=(request.note or "").strip() or None
-        )
+        return replace(request, reason_name=reason.name, note=(request.note or "").strip() or None)
 
     async def _apply_manual_adjustments(
         self,
@@ -2891,6 +3059,12 @@ class SalesService:
         return _AppliedDiscount(Decimal(0), retail_unit_price, Decimal(0), None)
 
     @staticmethod
+    def _ensure_numeric_12_amounts(*values: Decimal | None) -> None:
+        """所有會寫入 Numeric(12,0) 的明細金額，在 flush 前先轉為可理解的領域錯誤。"""
+        if any(value is not None and abs(value) > MAX_NTD for value in values):
+            raise SaleLineInvalid(f"銷售明細金額超過資料庫金額上限 {MAX_NTD}")
+
+    @staticmethod
     def _line_amounts(
         disc: _AppliedDiscount,
         *,
@@ -2905,12 +3079,20 @@ class SalesService:
         `cost`＝成交當下的成本（本行合計），凍結於此——日後調整商品成本不會回頭改寫歷史毛利。
         """
         line_total = disc.unit_price * qty
+        discount_amount = disc.discount_per_unit * qty
+        SalesService._ensure_numeric_12_amounts(
+            disc.unit_price,
+            line_total,
+            disc.original_unit_price,
+            discount_amount,
+            cost,
+        )
         fields: dict[str, object] = {
             "unit_price": disc.unit_price,
             "line_total": line_total,
             "net_amount": line_total,
             "original_unit_price": disc.original_unit_price,
-            "discount_amount": disc.discount_per_unit * qty,
+            "discount_amount": discount_amount,
             "campaign_id": disc.campaign_id,
             "cost_snapshot": cost,
         }
@@ -2947,6 +3129,12 @@ class SalesService:
             if gift is not None
             else _compute_discount(campaign, product.unit_price, applies=applies)
         )
+        amounts = self._line_amounts(
+            disc,
+            qty=line.qty,
+            cost=None if product.unit_cost is None else product.unit_cost * line.qty,
+            gift=gift,
+        )
         await self._inventory.sell_catalog_items(product.id, line.qty)
         await self._inventory.record_stock_out(
             store_id,
@@ -2965,12 +3153,7 @@ class SalesService:
                 catalog_product_id=product.id,
                 description=product.name,
                 qty=line.qty,
-                **self._line_amounts(
-                    disc,
-                    qty=line.qty,
-                    cost=None if product.unit_cost is None else product.unit_cost * line.qty,
-                    gift=gift,
-                ),
+                **amounts,
             )
         )
         return disc.unit_price * line.qty
@@ -3004,6 +3187,12 @@ class SalesService:
             if gift is not None
             else _compute_discount(campaign, lot.unit_price, applies=applies)
         )
+        amounts = self._line_amounts(
+            disc,
+            qty=line.qty,
+            cost=InventoryService.per_piece_cost(lot) * line.qty,
+            gift=gift,
+        )
         # 原子扣減 remaining_qty（不足 → InsufficientStock；歸零自動轉 SOLD_OUT）。
         await self._inventory.sell_bulk_lot_items(lot.id, line.qty)
         await self._inventory.record_stock_out(
@@ -3023,12 +3212,7 @@ class SalesService:
                 bulk_lot_id=lot.id,
                 description=lot.name,
                 qty=line.qty,
-                **self._line_amounts(
-                    disc,
-                    qty=line.qty,
-                    cost=InventoryService.per_piece_cost(lot) * line.qty,
-                    gift=gift,
-                ),
+                **amounts,
             )
         )
         return disc.unit_price * line.qty

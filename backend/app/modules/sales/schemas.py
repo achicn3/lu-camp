@@ -9,6 +9,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.pricing import DiscountRequest
@@ -119,6 +120,7 @@ class SaleTenderRequest(BaseModel):
             raise ValueError("金額必須為整數元")
         if value <= 0:
             raise ValueError("金額必須為正")
+        ensure_ntd_fits_numeric_12(value)
         return value
 
     @model_validator(mode="after")
@@ -230,9 +232,7 @@ class SaleAdjustmentRequest(BaseModel):
             scope=self.scope,
             method=self.method,
             value=self.value,
-            target_key=(
-                None if self.target_line_index is None else str(self.target_line_index)
-            ),
+            target_key=(None if self.target_line_index is None else str(self.target_line_index)),
             reason_id=self.reason_id,
             note=self.note,
         )
@@ -503,7 +503,7 @@ class SaleSummaryRead(BaseModel):
 
 
 class LinePayRefundAttemptRead(BaseModel):
-    """未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。"""
+    """未定或平台成功但本地待復原的 LINE Pay 退款；不含復原 payload／PII。"""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -511,6 +511,9 @@ class LinePayRefundAttemptRead(BaseModel):
     order_id: str
     amount: NTDAmount
     status: LinePayRefundStatus
+    recovery_attempts: int
+    recovery_error: str | None
+    recovered_at: datetime | None
     created_at: datetime
 
 

@@ -19,6 +19,21 @@ COMMISSION_PCT_MIN = 0
 COMMISSION_PCT_MAX = 100
 DISCOUNT_PCT_MIN = 1
 DISCOUNT_PCT_MAX = 99
+# PostgreSQL Numeric(12,0) 可精確保存的最大新台幣整數元。
+MAX_NTD = Decimal("999999999999")
+
+
+def ensure_ntd_fits_numeric_12(
+    value: Decimal,
+    *,
+    field: str = "金額",
+    absolute: bool = False,
+) -> Decimal:
+    """確認金額可精確寫入 PostgreSQL Numeric(12,0)，保留原 Decimal。"""
+    if abs(value) > MAX_NTD:
+        qualifier = "絕對值" if absolute else ""
+        raise ValueError(f"{field}{qualifier}不可超過 {MAX_NTD}")
+    return value
 
 
 def round_ntd(value: Decimal) -> int:

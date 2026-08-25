@@ -348,3 +348,21 @@ class CustomerDisplayRepository:
             .with_for_update(skip_locked=True)
         )
         return list(rows)
+
+    async def list_recent_payment_uncertain_targets(
+        self,
+        cutoff: datetime,
+        *,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        rows = await self._session.execute(
+            select(CartSession.store_id, CartSession.pos_terminal_id)
+            .where(
+                CartSession.status == CartSessionStatus.PAYMENT_UNCERTAIN,
+                CartSession.payment_uncertain_at.is_not(None),
+                CartSession.payment_uncertain_at >= cutoff,
+            )
+            .order_by(CartSession.payment_uncertain_at.asc(), CartSession.id.asc())
+            .limit(limit)
+        )
+        return [(int(store_id), int(terminal_id)) for store_id, terminal_id in rows]

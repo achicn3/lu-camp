@@ -223,6 +223,63 @@ export function clearPendingReceive(poId: number): void {
   }
 }
 
+// ── 人工現金調整 pending 冪等（依 cash session 保存鍵＋原始內容）────────────────
+export interface PendingCashAdjustment {
+  key: string;
+  amount: number;
+  note: string;
+}
+
+const CASH_ADJUST_IDEM_PREFIX = "lu-camp.cash-adjust-pending-idem";
+const memoryCashAdjust = new Map<number, PendingCashAdjustment>();
+
+function cashAdjustStorageKey(sessionId: number): string {
+  return `${CASH_ADJUST_IDEM_PREFIX}.${sessionId}`;
+}
+
+export function loadPendingCashAdjustment(sessionId: number): PendingCashAdjustment | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(cashAdjustStorageKey(sessionId));
+    if (stored != null) {
+      const parsed = JSON.parse(stored) as Partial<PendingCashAdjustment>;
+      if (
+        typeof parsed.key === "string" &&
+        typeof parsed.amount === "number" &&
+        Number.isSafeInteger(parsed.amount) &&
+        typeof parsed.note === "string"
+      ) {
+        const entry = { key: parsed.key, amount: parsed.amount, note: parsed.note };
+        memoryCashAdjust.set(sessionId, entry);
+        return entry;
+      }
+    }
+  } catch {
+    // 讀取／解析失敗：退回記憶體後備。
+  }
+  return memoryCashAdjust.get(sessionId) ?? null;
+}
+
+export function savePendingCashAdjustment(
+  sessionId: number,
+  entry: PendingCashAdjustment,
+): void {
+  memoryCashAdjust.set(sessionId, entry);
+  try {
+    globalThis.localStorage?.setItem(cashAdjustStorageKey(sessionId), JSON.stringify(entry));
+  } catch {
+    // 配額／隱私政策：本頁生命週期內仍由記憶體後備保護重試。
+  }
+}
+
+export function clearPendingCashAdjustment(sessionId: number): void {
+  memoryCashAdjust.delete(sessionId);
+  try {
+    globalThis.localStorage?.removeItem(cashAdjustStorageKey(sessionId));
+  } catch {
+    // 清除失敗不阻斷已完成的調整。
+  }
+}
+
 // ── 依 scope 持久化「內容指紋 → 冪等鍵」（LINE Pay 結帳/退貨；Codex 第二輪 #2/#3）─────
 // 結帳/退貨的冪等鍵只存 React ref/useMemo 會在頁面重整、元件重掛（如關開對話框）時遺失。若外部
 // 收款/退款已成立、但本地 commit 前崩潰/回應遺失，換新鍵便換出新 orderId → 可能對客人重複扣款/

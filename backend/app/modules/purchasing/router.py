@@ -1,7 +1,5 @@
 """purchasing 路由：供應商、採購單與補貨收貨。"""
 
-import hashlib
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -73,25 +71,6 @@ def _map_domain_error(exc: DomainError) -> HTTPException:
     )
 
 
-def _receive_fingerprint(purchase_order_id: int, payload: ReceivePurchaseOrderRequest) -> str:
-    """收貨請求指紋：同 Idempotency-Key 重送時用以辨識「同一請求（回放）」vs「不同請求（409）」。"""
-    canonical = {
-        "purchase_order_id": purchase_order_id,
-        "lines": sorted((line.line_id, line.qty) for line in payload.lines),
-        "invoice": (
-            None
-            if payload.invoice is None
-            else [
-                payload.invoice.invoice_number,
-                payload.invoice.invoice_date.isoformat(),
-                str(payload.invoice.invoice_total),
-            ]
-        ),
-    }
-    blob = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
-
-
 @router.post(
     "/suppliers",
     response_model=SupplierRead,
@@ -130,12 +109,8 @@ async def list_suppliers(
     return [SupplierRead.model_validate(supplier) for supplier in suppliers]
 
 
-@router.get(
-    "/suppliers/{supplier_id}", response_model=SupplierRead, operation_id="getSupplier"
-)
-async def get_supplier(
-    supplier_id: int, session: SessionDep, user: CurrentUserDep
-) -> SupplierRead:
+@router.get("/suppliers/{supplier_id}", response_model=SupplierRead, operation_id="getSupplier")
+async def get_supplier(supplier_id: int, session: SessionDep, user: CurrentUserDep) -> SupplierRead:
     svc = PurchasingService(session)
     try:
         supplier = await svc.get_supplier(user.store_id, supplier_id)
@@ -329,15 +304,12 @@ async def receive_purchase_order(
     payload: ReceivePurchaseOrderRequest,
     session: SessionDep,
     user: CurrentUserDep,
-    idempotency_key: Annotated[
-        str, Header(alias="Idempotency-Key", min_length=1, max_length=80)
-    ],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=80)],
 ) -> ReceivePurchaseOrderResult:
     """分批收貨：各明細本次實收量＋選填進項發票；全收足轉已收貨，否則部分到貨。
 
     帶 Idempotency-Key：同 key 重送只入庫一次、回原結果（防網路重試重複入庫，docs/19）。
     """
-    fingerprint = _receive_fingerprint(purchase_order_id, payload)
     svc = PurchasingService(session)
     try:
         purchase_order, receipt = await svc.receive_purchase_order(
@@ -346,7 +318,6 @@ async def receive_purchase_order(
             actor_user_id=user.id,
             lines=payload.lines,
             idempotency_key=idempotency_key,
-            request_fingerprint=fingerprint,
             invoice=payload.invoice,
         )
     except DomainError as exc:
@@ -363,7 +334,6 @@ async def receive_purchase_order(
                     actor_user_id=user.id,
                     lines=payload.lines,
                     idempotency_key=idempotency_key,
-                    request_fingerprint=fingerprint,
                     invoice=payload.invoice,
                 )
             except DomainError as replay_exc:

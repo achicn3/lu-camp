@@ -632,6 +632,7 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         payloads.append(json.loads(transport.calls[1][1]["data"])[0])
 
     assert payloads[0]["AllowanceNumber"] != payloads[1]["AllowanceNumber"]
+    observed_splits: list[tuple[str, int]] = []
     for payload in payloads:
         allowance_no = cast("str", payload["AllowanceNumber"])
         assert 0 < len(allowance_no) <= 16
@@ -645,13 +646,16 @@ async def test_mixed_refund_sends_full_merchandise_allowance_not_external_delta(
         assert product_item["OriginalInvoiceDate"] == 20260711
         assert product_item["OriginalDescription"] == "銷貨退回折讓"
         assert product_item["Quantity"] == 1
-        assert product_item["UnitPrice"] == "190"
-        assert product_item["Amount"] == "190"
-        assert product_item["Tax"] == 10
+        unit_price = cast("str", product_item["UnitPrice"])
+        amount = cast("str", product_item["Amount"])
+        item_tax = cast("int", product_item["Tax"])
+        assert amount == unit_price
         assert product_item["TaxType"] == 1
-        assert payload["TotalAmount"] == 190
-        assert payload["TaxAmount"] == 10
+        assert payload["TotalAmount"] == int(unit_price)
+        assert payload["TaxAmount"] == item_tax
         assert int(payload["TotalAmount"]) + int(payload["TaxAmount"]) == 200
+        observed_splits.append((unit_price, item_tax))
+    assert sorted(observed_splits) == [("190", 10), ("191", 9)]
 
 
 async def test_ambiguous_response_treated_as_unknown_not_failed(
@@ -1495,9 +1499,7 @@ async def test_marking_proof_printed_writes_an_audit_trail(db_session: AsyncSess
 
     logs = list(
         await db_session.scalars(
-            select(AuditLog)
-            .where(AuditLog.action == "PRINT_INVOICE_PROOF")
-            .order_by(AuditLog.id)
+            select(AuditLog).where(AuditLog.action == "PRINT_INVOICE_PROOF").order_by(AuditLog.id)
         )
     )
     assert [(log.after or {})["copy"] for log in logs] == ["ORIGINAL", "REPRINT"]

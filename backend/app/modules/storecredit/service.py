@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import round_ntd
+from app.core.money import MAX_NTD, round_ntd
 from app.modules.contacts.service import ContactService
 from app.modules.reports.aging import BUCKET_KEYS, IssuedLot, age_outstanding
 from app.modules.storecredit.models import StoreCreditLedger
@@ -107,8 +107,12 @@ class StoreCreditService:
         # 各自捨入，非整數金額將使「SUM == balance_after == 快取」不變量破裂。
         if signed_amount != signed_amount.to_integral_value():
             raise StoreCreditConflict("分錄金額必須為整數元")
+        if abs(signed_amount) > MAX_NTD:
+            raise StoreCreditConflict(f"分錄金額不可超過資料庫金額上限 {MAX_NTD}")
         if cash_equivalent is not None and cash_equivalent != cash_equivalent.to_integral_value():
             raise StoreCreditConflict("現金等值必須為整數元")
+        if cash_equivalent is not None and abs(cash_equivalent) > MAX_NTD:
+            raise StoreCreditConflict(f"現金等值不可超過資料庫金額上限 {MAX_NTD}")
         # 多分店隔離（§4，adversarial review high）：contact 必須屬於本店——
         # 否則會建立「A 店 contact 配 B 店帳戶」的越界配對。所有寫入路徑統一在此守。
         if await self._contacts.get_contact(store_id, contact_id) is None:
@@ -156,6 +160,8 @@ class StoreCreditService:
             raise InsufficientStoreCredit(
                 f"contact {contact_id} 購物金餘額不足（{account.balance} {signed_amount:+}）"
             )
+        if new_balance > MAX_NTD:
+            raise StoreCreditConflict(f"購物金餘額不可超過資料庫金額上限 {MAX_NTD}")
         # savepoint 包插入：跨帳戶極端競態仍可能撞唯一約束（帳戶鎖只序列化同帳戶），
         # 撞到時交易未廢，重查一次轉成冪等回列或 409，不冒 IntegrityError 500。
         try:

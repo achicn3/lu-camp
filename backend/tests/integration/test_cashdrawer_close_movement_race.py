@@ -22,6 +22,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import CashMovementType, CashSessionStatus, UserRole
 from app.shared.exceptions import CashSessionAlreadyClosed, NoOpenCashSession
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 OPENING = Decimal("1000")
 SALE_IN = Decimal("500")
@@ -94,7 +95,7 @@ async def test_close_and_sale_in_race_keeps_reconciliation_consistent() -> None:
     finally:
         async with sm() as s:
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))
             await s.execute(delete(Store).where(Store.id == store_id))

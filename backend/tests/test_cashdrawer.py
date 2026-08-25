@@ -98,8 +98,24 @@ async def test_expected_formula_and_variance_recorded(db_session: AsyncSession) 
     await svc.record_movement(store_id, CashMovementType.BUYOUT_OUT, Decimal("200"))
     await svc.record_movement(store_id, CashMovementType.CONSIGNMENT_PAYOUT_OUT, Decimal("100"))
     await svc.record_movement(store_id, CashMovementType.SALE_REFUND_OUT, Decimal("120"))
-    await svc.record_movement(store_id, CashMovementType.MANUAL_ADJUST, Decimal("50"))
-    await svc.record_movement(store_id, CashMovementType.MANUAL_ADJUST, Decimal("-30"))
+    await svc.record_movement(
+        store_id,
+        CashMovementType.MANUAL_ADJUST,
+        Decimal("50"),
+        actor_user_id=user_id,
+        note="現金多出",
+        idempotency_key="expected-plus",
+        idempotency_fingerprint="1" * 64,
+    )
+    await svc.record_movement(
+        store_id,
+        CashMovementType.MANUAL_ADJUST,
+        Decimal("-30"),
+        actor_user_id=user_id,
+        note="現金短少",
+        idempotency_key="expected-minus",
+        idempotency_fingerprint="2" * 64,
+    )
 
     # 1000 + (500+300) - 200 - 100 - 120 + (50-30) = 1400
     expected = await svc.expected_amount(cs)
@@ -162,6 +178,9 @@ async def test_manual_adjust_writes_audit_log_with_actor(db_session: AsyncSessio
         actor_user_id=user_id,
         ref_type="adjust",
         ref_id=7,
+        note="現金短少",
+        idempotency_key="audit-manual-adjust",
+        idempotency_fingerprint="3" * 64,
     )
 
     rows = await _audit_rows(db_session, "CASH_MANUAL_ADJUST")

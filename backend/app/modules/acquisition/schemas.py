@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.money import MAX_NTD, ensure_ntd_fits_numeric_12
 from app.modules.acquisition.models import Acquisition
 from app.shared.enums import AcquisitionType, BulkAcquisitionBasis, Grade, PayoutMethod
 
@@ -32,6 +33,7 @@ def _ensure_whole_nonneg(value: Decimal, field: str) -> Decimal:
         raise ValueError(f"{field} 不可為負")
     if value != value.to_integral_value():
         raise ValueError(f"{field} 必須為整數元（無角分）")
+    ensure_ntd_fits_numeric_12(value, field=f"{field} ")
     # 正規化（Codex：冪等指紋不可受 "1000.0"/"1000"/1000 形式差異影響）：
     # 一律回整數形 Decimal，下游序列化/指紋/持久化全 canonical。
     return Decimal(value.to_integral_value())
@@ -129,9 +131,11 @@ class AcquisitionCreate(BaseModel):
                     raise ValueError("BUYOUT 每筆 item 必須提供 acquisition_cost")
                 if item.commission_pct is not None:
                     raise ValueError("BUYOUT item 不應提供 commission_pct")
-            else:  # CONSIGNMENT
-                if item.commission_pct is None:
-                    raise ValueError("CONSIGNMENT 每筆 item 必須提供 commission_pct")
+            # CONSIGNMENT 可省略逐件值；service 會在同一交易內套用店內設定的預設抽成。
+        if self.type == AcquisitionType.BUYOUT:
+            total = sum((item.acquisition_cost or Decimal(0) for item in self.items), Decimal(0))
+            if total > MAX_NTD:
+                raise ValueError(f"BUYOUT 應付總額不可超過 {MAX_NTD}")
         return self
 
 

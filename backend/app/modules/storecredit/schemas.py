@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType
 
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
@@ -54,6 +55,7 @@ class StoreCreditAdjustRequest(BaseModel):
             raise ValueError("金額必須為整數元")
         if value == 0:
             raise ValueError("金額不可為零")
+        ensure_ntd_fits_numeric_12(value, absolute=True)
         return value
 
     @field_validator("reason")

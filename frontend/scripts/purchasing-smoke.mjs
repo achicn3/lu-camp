@@ -103,6 +103,8 @@ try {
   const invoiceNo = `AB${Date.now().toString().slice(-8)}`;
   await page.fill('input[aria-label="發票號碼"]', invoiceNo);
   await page.fill('input[aria-label="發票日期"]', "2026-07-11");
+  await page.fill('input[aria-label="發票未稅金額"]', "1000");
+  await page.fill('input[aria-label="發票稅額"]', "50");
   await page.fill('input[aria-label="發票含稅金額"]', "1050");
   await page.screenshot({ path: `${SHOTS}/04-receive-partial.png`, fullPage: true });
   await page.click('[role="dialog"] button:has-text("確認收貨")');

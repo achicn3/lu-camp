@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.modules.sales.inputs import SaleLineInput
 from app.modules.sales.pricing import DiscountRequest
 from app.modules.sales.schemas import SaleAdjustmentRequest
@@ -139,6 +140,7 @@ class CartTenderRequest(BaseModel):
     def _whole_ntd(cls, value: Decimal) -> Decimal:
         if value != value.to_integral_value():
             raise ValueError("付款金額必須為整數元")
+        ensure_ntd_fits_numeric_12(value, field="付款金額")
         return value
 
 

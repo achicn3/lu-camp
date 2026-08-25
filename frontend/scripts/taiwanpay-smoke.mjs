@@ -1,6 +1,6 @@
 // 台灣Pay（docs/30 P1 前端）瀏覽器煙霧測試：
-// 設定頁「行動支付設定」卡（LINE Pay 開關＋手續費率）→ POS 以台灣Pay 收款（非現金、不需開帳、
-// 顯示店家負擔手續費）→ 結帳完成收款方式顯示「台灣Pay」。
+// 設定頁「行動支付設定」卡（LINE Pay 開關＋手續費率）→ POS 分別顯示台灣Pay／LINE Pay
+// HALF_UP 手續費 → 以台灣Pay 收款 → 結帳完成收款方式顯示「台灣Pay」。
 // 執行：node scripts/taiwanpay-smoke.mjs
 // 需 backend:8000 + frontend:3000 已起、dev-manager 可登入。
 import { randomUUID } from "node:crypto";
@@ -34,6 +34,9 @@ function idem(label) {
 }
 function money(amount) {
   return Number(amount).toLocaleString("en-US", { maximumFractionDigits: 0 });
+}
+function feeAtThreeTenThousandths(amount) {
+  return Number((BigInt(amount) * BigInt(3) + BigInt(5_000)) / BigInt(10_000));
 }
 
 async function apiJson(path, { method = "GET", token = null, body, headers = {}, expected = [200] } = {}) {
@@ -92,6 +95,15 @@ async function createSerializedFixture(token, sellerId, { name, price, cost }) {
 
 async function prepareFixtures() {
   const token = await loginApi();
+  const currentCashSession = await apiJson("/api/v1/cash-sessions/current", { token });
+  if (currentCashSession === null) {
+    await apiJson("/api/v1/cash-sessions/open", {
+      method: "POST",
+      token,
+      body: { opening_float: "2000" },
+      expected: [201],
+    });
+  }
   const runId = `${Date.now()}-${randomUUID().slice(0, 6)}`;
   const seller = await apiJson("/api/v1/contacts", {
     method: "POST",
@@ -108,23 +120,23 @@ async function prepareFixtures() {
   });
   const item = await createSerializedFixture(token, seller.id, {
     name: `台灣Pay 帳篷 ${runId}`,
-    price: 1500,
+    price: 5000,
     cost: 600,
   });
-  // 設手續費率：台灣Pay 2%、LINE Pay 1.5% 且啟用（驗設定頁欄位＋POS 手續費顯示）。
+  // 0.03% 可實測 5,000 × 0.0003 = 1.5 必須 HALF_UP 為 2，而非受 float 影響變 1。
   await apiJson("/api/v1/settings", {
     method: "PATCH",
     token,
-    body: { taiwanpay_fee_pct: "0.0200", linepay_fee_pct: "0.0150", linepay_enabled: true },
+    body: { taiwanpay_fee_pct: "0.0003", linepay_fee_pct: "0.0003", linepay_enabled: true },
   });
-  // 折後總額以 quote 為準（demo seed 有生效活動「開幕九折」，售價 ×0.9）。手續費＝折後 ×2%。
+  // 折後總額以 quote 為準；預期值用整數公式算，避免測試本身重複 JavaScript float 錯誤。
   const quote = await apiJson("/api/v1/sales/quote", {
     method: "POST",
     token,
     body: { lines: [{ line_type: "SERIALIZED", item_code: item.code, qty: 1 }] },
   });
   const total = Number.parseInt(String(quote.total).replace(/,/g, ""), 10);
-  const fee = Math.round(total * 0.02);
+  const fee = feeAtThreeTenThousandths(total);
   ok("API 測試資料＋費率設定完成", true, `item=${item.code} 折後=${total} 手續費=${fee}`);
   return { item, total, fee };
 }
@@ -154,11 +166,11 @@ try {
   const taiwanpayFee = page.locator('input[name="taiwanpay_fee_pct"]');
   ok("行動支付設定卡出現", true);
   ok("LINE Pay 開關反映啟用", await linepayToggle.isChecked());
-  ok("LINE Pay 費率顯示 1.5", (await linepayFee.inputValue()) === "1.5", await linepayFee.inputValue());
-  ok("台灣Pay 費率顯示 2", (await taiwanpayFee.inputValue()) === "2", await taiwanpayFee.inputValue());
+  ok("LINE Pay 費率顯示 0.03", (await linepayFee.inputValue()) === "0.03", await linepayFee.inputValue());
+  ok("台灣Pay 費率顯示 0.03", (await taiwanpayFee.inputValue()) === "0.03", await taiwanpayFee.inputValue());
   await page.screenshot({ path: `${SHOTS}/01-settings-mobile-payment.png` });
 
-  // 2) POS：台灣Pay 收款（非現金，不需開帳）
+  // 2) POS：台灣Pay 收款
   await page.goto(`${BASE}/pos`, { waitUntil: "networkidle" });
   await page.waitForSelector('input[name="code"]');
   await page.fill('input[name="code"]', item.code);
@@ -166,27 +178,39 @@ try {
   await page.waitForSelector(`text=${item.name}`);
   ok("掃描序號品加入購物車", true);
 
+  // 同一個真後端報價先切 LINE Pay，驗證共用 Decimal/BigInt 捨入顯示，但不送平台請款。
+  await page.locator(".pos-tender-mode", { hasText: "LINE Pay" }).click();
+  await page.waitForSelector('input[name="linepay_one_time_key"]');
+  const linepayFeeHint = await page.locator(".pos-tender .hint", { hasText: "LINE Pay 收款" }).textContent();
+  ok(
+    `LINE Pay HALF_UP 手續費顯示（店家負擔 ${fee}）`,
+    (linepayFeeHint?.includes(money(fee)) && linepayFeeHint?.includes("店家負擔")) ?? false,
+    linepayFeeHint ?? "",
+  );
+  await page.screenshot({ path: `${SHOTS}/02-pos-linepay-fee.png` });
+
   await page.locator(".pos-tender-mode", { hasText: "台灣Pay" }).click();
-  // 手續費提示（店家負擔 = 折後總額 × 2%）
+  // 手續費提示（店家負擔 = 折後總額 × 0.03%）
   await page.waitForSelector("text=本筆手續費");
   const feeHint = await page.locator(".pos-tender .hint", { hasText: "台灣Pay 收款" }).textContent();
   ok(
-    `台灣Pay 手續費提示顯示（店家負擔 ${fee}）`,
+    `台灣Pay HALF_UP 手續費顯示（店家負擔 ${fee}）`,
     (feeHint?.includes(money(fee)) && feeHint?.includes("店家負擔")) ?? false,
     feeHint ?? "",
   );
-  await page.screenshot({ path: `${SHOTS}/02-pos-taiwanpay-tender.png` });
+  await page.screenshot({ path: `${SHOTS}/03-pos-taiwanpay-fee.png` });
 
-  // 結帳按鈕未被開帳擋（非現金不需開帳）
+  // 完成台灣Pay收款確認後可結帳。
+  await page.locator(".pos-payment-confirm input").check();
   const checkoutBtn = page.locator('button:has-text("結帳")');
-  ok("台灣Pay 不需開帳即可結帳（結帳鍵啟用）", !(await checkoutBtn.isDisabled()));
+  ok("確認台灣Pay已收款後結帳鍵啟用", !(await checkoutBtn.isDisabled()));
   await checkoutBtn.click();
   await page.waitForSelector("text=已完成");
   const methodDd = page.locator(".pos-complete .stat-list dd").filter({ hasText: /^台灣Pay$/ });
   ok("結帳完成收款方式＝台灣Pay", await methodDd.isVisible());
   const totalDd = await page.locator(".pos-complete .stat-list dd").first().textContent();
   ok(`完成總額 = ${money(total)}`, totalDd?.includes(money(total)) ?? false, totalDd ?? "");
-  await page.screenshot({ path: `${SHOTS}/03-pos-taiwanpay-complete.png` });
+  await page.screenshot({ path: `${SHOTS}/04-pos-taiwanpay-complete.png` });
 
   // 3) 後端驗證：最近一筆 sale 明細 payment_method=TAIWAN_PAY、tender fee_amount 正確、非現金
   const token = await loginApi();

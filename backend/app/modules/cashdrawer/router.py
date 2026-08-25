@@ -5,7 +5,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -18,10 +18,11 @@ from app.modules.cashdrawer.schemas import (
     CashSessionRead,
 )
 from app.modules.cashdrawer.service import CashDrawerService
-from app.shared.enums import CashMovementType
 from app.shared.exceptions import (
+    CashAmountOutOfRange,
     CashSessionAlreadyClosed,
     CashSessionAlreadyOpen,
+    IdempotencyKeyConflict,
     NoOpenCashSession,
 )
 
@@ -89,6 +90,10 @@ async def record_cash_movement(
     payload: CashMovementCreateRequest,
     session: SessionDep,
     user: ManagerDep,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=80),
+    ],
 ) -> CashMovementRead:
     """手動現金調整（限 MANAGER；docs/10 §4）。
 
@@ -96,25 +101,19 @@ async def record_cash_movement(
     系統內部流程產生的營業現金流，開放 API 灌入等同允許捏造現金帳（Codex P1）。
     事由必填並隨 audit_log 留痕（CLAUDE.md §5）。
     """
-    if payload.type != CashMovementType.MANUAL_ADJUST:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="此端點僅接受 MANUAL_ADJUST；系統類型由內部流程產生",
-        )
     svc = CashDrawerService(session)
-    current = await svc.get_current_session(user.store_id)
-    if current is None or current.id != session_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="此 session 非開帳中或不存在"
+    try:
+        movement = await svc.record_manual_adjustment(
+            user.store_id,
+            session_id=session_id,
+            amount=payload.amount,
+            actor_user_id=user.id,
+            note=payload.note,
+            idempotency_key=idempotency_key,
         )
-    movement = await svc.record_movement(
-        user.store_id,
-        payload.type,
-        payload.amount,
-        actor_user_id=user.id,
-        ref_type="manual",
-        note=payload.note,
-    )
+    except (NoOpenCashSession, IdempotencyKeyConflict) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return CashMovementRead.from_model(movement)
 
@@ -136,7 +135,7 @@ async def close_cash_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到現金班別")
     try:
         closed = await svc.close_session(cs, payload.counted_amount, user.id)
-    except (CashSessionAlreadyClosed, NoOpenCashSession) as exc:
+    except (CashAmountOutOfRange, CashSessionAlreadyClosed, NoOpenCashSession) as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()

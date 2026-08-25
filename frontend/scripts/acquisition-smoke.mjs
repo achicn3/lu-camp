@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
+const API = process.env.SMOKE_API_BASE ?? "http://localhost:8000";
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
 const RUN = Date.now();
 const SELLER_NAME = `王賣家-${String(RUN).slice(-6)}`;
@@ -20,11 +21,34 @@ function ok(name, pass, detail = "") {
   console.log(`${pass ? "✅" : "❌"} ${name}${detail ? `：${detail}` : ""}`);
 }
 
+async function apiJson(path, { method = "GET", token, body } = {}) {
+  const response = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) throw new Error(`${method} ${path} → ${response.status}: ${await response.text()}`);
+  return response.json();
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 
 try {
+  const { access_token: token } = await apiJson("/api/v1/auth/login", {
+    method: "POST",
+    body: { username: "dev-manager", password: "dev-test-123456" },
+  });
+  await apiJson("/api/v1/settings", {
+    method: "PATCH",
+    token,
+    body: { default_commission_pct: 37 },
+  });
+
   // 1) 登入
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
@@ -39,6 +63,23 @@ try {
   await page.waitForURL(`${BASE}/acquisition`);
   await page.waitForSelector('[role="tab"]:has-text("買斷")');
   ok("收購頁載入＋中文分頁", await page.locator('[role="tab"]:has-text("寄售")').isVisible());
+
+  // 寄售抽成：新列即時參照系統設定，並可逐件覆寫。
+  await page.click('[role="tab"]:has-text("寄售")');
+  const commissionInputs = page.locator('label:has-text("抽成 %（寄售）") input');
+  await commissionInputs.first().waitFor();
+  ok("寄售新列顯示設定的 37% 抽成", (await commissionInputs.first().inputValue()) === "37");
+  await page.click('button:has-text("＋ 新增一列")');
+  await commissionInputs.nth(1).waitFor();
+  await commissionInputs.nth(1).fill("42");
+  ok(
+    "逐件修改不影響其他品項",
+    (await commissionInputs.first().inputValue()) === "37" &&
+      (await commissionInputs.nth(1).inputValue()) === "42",
+  );
+  await page.screenshot({ path: `${SHOTS}/00-consignment-commission.png` });
+  await page.locator(".acq-row").nth(1).locator('button:has-text("移除")').click();
+  await page.click('[role="tab"]:has-text("買斷")');
 
   // 3) 建立賣方
   await page.click('button:has-text("建立新賣方")');

@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import round_ntd
+from app.core.money import MAX_NTD, round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
 from app.modules.acquisition.models import Acquisition
 from app.modules.acquisition.repository import AcquisitionRepository
@@ -254,6 +254,8 @@ class AcquisitionService:
             lot_cost = Decimal(data.lot.acquisition_cost)
             if lot_cost < 0:
                 raise InvalidPayoutSplit("收購成本不可為負（schema 繞過防護）")
+            if lot_cost > MAX_NTD:
+                raise InvalidPayoutSplit(f"收購成本不可超過資料庫金額上限 {MAX_NTD}")
             return Decimal(round_ntd(lot_cost))
         total = Decimal(0)
         for item in data.items or []:
@@ -262,7 +264,11 @@ class AcquisitionService:
                 # 第十輪：model_construct 帶負成本會持久化「負撥款腿」且無任何
                 # 現金/帳本副作用——在純算階段（零寫入）即拒。
                 raise InvalidPayoutSplit("收購成本不可為負（schema 繞過防護）")
+            if cost > MAX_NTD:
+                raise InvalidPayoutSplit(f"收購成本不可超過資料庫金額上限 {MAX_NTD}")
             total += cost
+            if total > MAX_NTD:
+                raise InvalidPayoutSplit(f"收購應付總額不可超過資料庫金額上限 {MAX_NTD}")
         return Decimal(round_ntd(total))
 
     @staticmethod
@@ -475,6 +481,14 @@ class AcquisitionService:
         ):
             raise InvalidPayoutSplit("CONSIGNMENT 不撥款，不可指定撥款方式/拆分")
         pays_out = data.type in _CASH_PAYING
+        default_commission_pct: int | None = None
+        if data.type == AcquisitionType.CONSIGNMENT:
+            # 未逐件覆寫時，以本交易讀到的店內預設抽成落成商品快照。共享鎖會讓設定 PATCH
+            # 等到寄售建單 commit 後才生效，避免同張單讀到兩個不同版本的預設值。
+            await self._settings.lock_store_shared(store_id)
+            default_commission_pct = int(
+                (await self._settings.get_effective_settings(store_id)).default_commission_pct
+            )
 
         # 手持切結綁定（docs/23 K4，D2）：帶 signature_task_id 時，驗證其為本店本會員之已簽
         # 收購切結（AFFIDAVIT/SIGNED），撥款與客人手持端所選一致（D7），且**收購的品項/金額/
@@ -597,7 +611,11 @@ class AcquisitionService:
             item_codes: list[str] = []
         else:
             item_codes, total_cash = await self._create_serialized_items(
-                store_id, contact.id, acquisition.id, data
+                store_id,
+                contact.id,
+                acquisition.id,
+                data,
+                default_commission_pct=default_commission_pct,
             )
             lot_code = None
 
@@ -772,7 +790,13 @@ class AcquisitionService:
                 raise InvalidAcquisitionCategory(f"分類 {category_id} 不屬於 store {store_id}")
 
     async def _create_serialized_items(
-        self, store_id: int, contact_id: int, acquisition_id: int, data: AcquisitionCreate
+        self,
+        store_id: int,
+        contact_id: int,
+        acquisition_id: int,
+        data: AcquisitionCreate,
+        *,
+        default_commission_pct: int | None,
     ) -> tuple[list[str], Decimal]:
         assert data.items is not None  # schema 已驗證
         item_codes: list[str] = []
@@ -789,8 +813,12 @@ class AcquisitionService:
             else:  # CONSIGNMENT
                 ownership = OwnershipType.CONSIGNMENT
                 consignor_id = contact_id
-                commission = item.commission_pct
-                assert commission is not None  # schema 已驗證
+                commission = (
+                    item.commission_pct
+                    if item.commission_pct is not None
+                    else default_commission_pct
+                )
+                assert commission is not None  # 寄售入口已在寫入前讀取店內預設
                 if not COMMISSION_PCT_MIN <= commission <= COMMISSION_PCT_MAX:
                     raise InvalidCommissionPct(
                         f"抽成百分比須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}"

@@ -40,6 +40,7 @@ from app.shared.enums import (
     UserRole,
 )
 from app.shared.exceptions import SettlementNotPending
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 async def _seed_committed(sm: object) -> tuple[int, int, int]:
@@ -80,7 +81,7 @@ async def _seed_committed(sm: object) -> tuple[int, int, int]:
 async def _cleanup(sm: object, store_id: int) -> None:
     async with sm() as s:  # type: ignore[operator]
         await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
-        await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+        await delete_cash_movements_for_test(s, store_id=store_id)
         await s.execute(
             delete(ConsignmentSettlement).where(ConsignmentSettlement.store_id == store_id)
         )
@@ -170,7 +171,7 @@ async def test_concurrent_pay_only_one_succeeds(real_client: httpx.AsyncClient) 
     finally:
         async with sm() as s:
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(
                 delete(ConsignmentSettlement).where(ConsignmentSettlement.store_id == store_id)
             )

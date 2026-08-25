@@ -938,8 +938,7 @@ function ReturnDialog({
   );
 }
 
-// LINE Pay 退款對帳（docs/30 finding #3）：結果未定（PENDING）的退款——店長於 LINE Pay 後台確認
-// 實際是否退款後，於此標記已退款（SUCCEEDED）或未退款可重試（FAILED），解除卡住的退貨/作廢。
+// LINE Pay 退款對帳：PENDING 由店長查平台裁定；SUCCEEDED 則代表平台已退、背景正在補本地退貨。
 function LinePayReconcilePanel() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -978,8 +977,8 @@ function LinePayReconcilePanel() {
     <div className="card" style={{ borderColor: "var(--danger, #b00)", marginBottom: "1rem" }}>
       <h2>LINE Pay 退款對帳（需處理）</h2>
       <p className="hint">
-        以下退款結果未定（呼叫 LINE Pay 後崩潰或回應遺失）。請先至 LINE Pay
-        後台確認該筆是否已退款，再於此標記——標記前該筆退貨/作廢會被擋下以免超退。
+        結果未定的退款請先至 LINE Pay 後台確認；平台已成功但本地尚未完成者，系統會每分鐘
+        自動重試本地退貨，不會再次送退款。
       </p>
       {error !== null && (
         <p role="alert" className="form-error">
@@ -992,6 +991,7 @@ function LinePayReconcilePanel() {
             <th>訂單號</th>
             <th>金額</th>
             <th>時間</th>
+            <th>狀態</th>
             <th>處理</th>
           </tr>
         </thead>
@@ -1002,22 +1002,33 @@ function LinePayReconcilePanel() {
               <td>${formatNtd(parseNtd(a.amount) ?? 0)}</td>
               <td>{formatTaipeiDateTime(a.created_at)}</td>
               <td>
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={resolve.isPending}
-                  onClick={() => resolve.mutate({ id: a.id, resolution: "SUCCEEDED" })}
-                >
-                  確認已退款
-                </button>{" "}
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={resolve.isPending}
-                  onClick={() => resolve.mutate({ id: a.id, resolution: "FAILED" })}
-                >
-                  確認未退款（可重試）
-                </button>
+                {a.status === "PENDING"
+                  ? "待查平台"
+                  : a.recovery_error ?? `本地自動復原中（已試 ${a.recovery_attempts} 次）`}
+              </td>
+              <td>
+                {a.status === "PENDING" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={resolve.isPending}
+                      onClick={() => resolve.mutate({ id: a.id, resolution: "SUCCEEDED" })}
+                    >
+                      確認已退款
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={resolve.isPending}
+                      onClick={() => resolve.mutate({ id: a.id, resolution: "FAILED" })}
+                    >
+                      確認未退款（可重試）
+                    </button>
+                  </>
+                ) : (
+                  "不需再次退款"
+                )}
               </td>
             </tr>
           ))}

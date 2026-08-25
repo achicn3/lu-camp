@@ -342,9 +342,7 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
     # 6. 散裝批 remaining_qty 不得 < 0
     negative = await _count(session, "bulk_lots", f"store_id = {store_id} AND remaining_qty < 0")
     lots = await _count(session, "bulk_lots", f"store_id = {store_id}")
-    results.append(
-        InvariantResult("散裝批餘量不為負", negative == 0, f"檢查 {lots} 堆")
-    )
+    results.append(InvariantResult("散裝批餘量不為負", negative == 0, f"檢查 {lots} 堆"))
 
     # 6b. 散裝批 remaining_qty ＝ total_qty − 已售件數 ＋ 已退件數；歸零者須為 SOLD_OUT
     #
@@ -382,9 +380,7 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
         "bulk_lots",
         f"store_id = {store_id} AND ((remaining_qty = 0) <> (status = 'SOLD_OUT'))",
     )
-    results.append(
-        InvariantResult("散裝批歸零即 SOLD_OUT", bad_status == 0, f"檢查 {lots} 堆")
-    )
+    results.append(InvariantResult("散裝批歸零即 SOLD_OUT", bad_status == 0, f"檢查 {lots} 堆"))
 
     # 一般商品庫存不得為負（採購收貨加、銷售扣）
     neg_stock = await _count(
@@ -424,8 +420,7 @@ async def verify_invariants(session: AsyncSession, store_id: int) -> list[Invari
         session,
         "sale_lines l JOIN sales s ON s.id = l.sale_id"
         " JOIN serialized_items i ON i.id = l.serialized_item_id",
-        f"l.store_id = {store_id} AND s.status <> 'VOIDED'"
-        " AND i.ownership_type = 'CONSIGNMENT'",
+        f"l.store_id = {store_id} AND s.status <> 'VOIDED' AND i.ownership_type = 'CONSIGNMENT'",
     )
     results.append(
         InvariantResult(
@@ -681,8 +676,11 @@ async def seed_acquisitions(
         await StoreSettingsService(session).get_effective_settings(store_id)
     ).default_commission_pct
     made = {
-        "buyout": 0, "consignment": 0, "bulk_lots": 0,
-        "buyout_orders": 0, "consignment_orders": 0,
+        "buyout": 0,
+        "consignment": 0,
+        "bulk_lots": 0,
+        "buyout_orders": 0,
+        "consignment_orders": 0,
     }
 
     def _item(kind: AcquisitionType) -> AcquisitionItemIn:
@@ -742,9 +740,7 @@ async def seed_acquisitions(
                 elif roll < 0.26:
                     seller = rng.choice(member_seller_ids)
                     payout = PayoutMethod.SPLIT
-                    total = sum(
-                        (i.acquisition_cost or Decimal(0) for i in items), Decimal(0)
-                    )
+                    total = sum((i.acquisition_cost or Decimal(0) for i in items), Decimal(0))
                     # 一半現金一半購物金（整數元；購物金部分由後端推導）
                     split_cash = Decimal(int(total / 2))
                     if split_cash <= 0 or split_cash >= total:
@@ -773,8 +769,7 @@ async def seed_acquisitions(
                     contact_id=seller,
                     content={
                         "items": [
-                            {"name": i.name, "amount": str(i.acquisition_cost or 0)}
-                            for i in items
+                            {"name": i.name, "amount": str(i.acquisition_cost or 0)} for i in items
                         ],
                         "total": str(total),
                     },
@@ -901,9 +896,7 @@ async def seed_kiosk(session: AsyncSession, store_id: int, manager_id: int) -> K
     """
     kiosk_password = os.environ.get("SEED_KIOSK_PASSWORD", "").strip()
     if not kiosk_password:
-        raise SeedFailed(
-            "SEED_KIOSK_PASSWORD 未設定；簽署任務需要一個 KIOSK 帳號（密碼不入 repo）"
-        )
+        raise SeedFailed("SEED_KIOSK_PASSWORD 未設定；簽署任務需要一個 KIOSK 帳號（密碼不入 repo）")
     await upsert_dev_user(
         session,
         DevUserSeed(
@@ -1026,9 +1019,7 @@ _CAMPAIGNS: tuple[tuple[str, int, int, int], ...] = (
 )
 
 
-async def seed_campaigns(
-    session: AsyncSession, store_id: int, manager_id: int, today: date
-) -> int:
+async def seed_campaigns(session: AsyncSession, store_id: int, manager_id: int, today: date) -> int:
     """建立歷史門市活動（皆已結束）。
 
     **不在銷售期間真的套用折扣**：`create_sale` 讀的是 `datetime.now(UTC)`，
@@ -1106,9 +1097,7 @@ async def seed_mixed_fnb_sales(
         dine_in = rng.random() < 0.6
         basket = _fnb_basket(menu_items, rng, dine_in=dine_in)
         day = today - timedelta(days=rng.randrange(1, 120))
-        amount = item.listed_price + sum(
-            (m.unit_price * qty for m, qty in basket), Decimal(0)
-        )
+        amount = item.listed_price + sum((m.unit_price * qty for m, qty in basket), Decimal(0))
         try:
             sale = await sales_svc.create_sale(
                 store_id,
@@ -1237,9 +1226,7 @@ async def seed_credit_suggestions(
     made = 0
     for offset in range(days, 0, -1):
         for_date = today - timedelta(days=offset)
-        await svc.suggestion_today(
-            store_id, today=for_date, now=moment_of(for_date, 23, 0)
-        )
+        await svc.suggestion_today(store_id, today=for_date, now=moment_of(for_date, 23, 0))
         made += 1
     await session.commit()
     return made
@@ -1395,9 +1382,7 @@ async def store_credit_checkout(
         store_id,
         kiosk.terminal_id,
         CartUpsertRequest(
-            lines=[
-                CartLineRequest(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)
-            ],
+            lines=[CartLineRequest(line_type=SaleLineType.SERIALIZED, item_code=item.item_code)],
             buyer_contact_id=buyer_contact_id,
             tenders=[
                 CartTenderRequest(tender_type=TenderType.STORE_CREDIT, amount=credit_amount),
@@ -1644,9 +1629,7 @@ async def seed_settings(
     if einvoice:
         # 開啟後，每筆銷售都會**在同一交易內於本機**建立待開立發票＋F0401 佇列列。
         # 這一步不碰網路；實際上傳是另一支 worker。
-        patch = SettingsUpdateRequest(
-            dine_in_tables=list(_DINE_IN_TABLES), einvoice_enabled=True
-        )
+        patch = SettingsUpdateRequest(dine_in_tables=list(_DINE_IN_TABLES), einvoice_enabled=True)
     await StoreSettingsService(session).update_settings(
         store_id, actor_user_id=manager_id, patch=patch
     )
@@ -1699,9 +1682,7 @@ async def seed_menu(session: AsyncSession, store_id: int, manager_id: int) -> li
     return items
 
 
-async def seed_suppliers(
-    session: AsyncSession, store_id: int
-) -> list[Supplier]:
+async def seed_suppliers(session: AsyncSession, store_id: int) -> list[Supplier]:
     """建立供應商；已存在同名者沿用（腳本可重跑）。"""
     svc = PurchasingService(session)
     made: list[Supplier] = []
@@ -1794,7 +1775,6 @@ async def restock_catalog(
             actor_user_id=manager_id,
             lines=receive_lines,
             idempotency_key=key,
-            request_fingerprint=key,
         )
         # 採購與收貨的時點也要回填，否則整年的進貨全落在今天
         order.created_at = moment
@@ -1808,8 +1788,18 @@ async def restock_catalog(
 # 餐飲季節性：與裝備**相反**——夏天露營旺、賣吃喝；冬天裝備旺、餐飲淡。
 # 兩者高峰不同時間，共用一張季節表會讓全年曲線變成假的同步波動。
 _FNB_SEASONALITY = {
-    1: 0.75, 2: 0.85, 3: 0.95, 4: 1.10, 5: 1.15, 6: 1.20,
-    7: 1.30, 8: 1.30, 9: 1.10, 10: 1.00, 11: 0.85, 12: 0.80,
+    1: 0.75,
+    2: 0.85,
+    3: 0.95,
+    4: 1.10,
+    5: 1.15,
+    6: 1.20,
+    7: 1.30,
+    8: 1.30,
+    9: 1.10,
+    10: 1.00,
+    11: 0.85,
+    12: 0.80,
 }
 
 # 內用佔比（docs/39 §3.2 的分母是「有餐飲的單」）。假日較多人坐下來吃。
@@ -1871,8 +1861,18 @@ _BULK_KINDS: tuple[tuple[str, int, int, int], ...] = (
 # 主動送東西來」，但那會讓 10–2 月的裝備旺季把貨架抽乾——實測跑到 10 月時在庫
 # 只剩 35 件。真實店家在旺季前會**主動去調貨**，不會坐等客人上門。
 _INTAKE_SEASONALITY = {
-    1: 1.30, 2: 0.90, 3: 1.30, 4: 1.30, 5: 1.25, 6: 0.85,
-    7: 0.80, 8: 0.85, 9: 1.00, 10: 1.05, 11: 1.00, 12: 1.05,
+    1: 1.30,
+    2: 0.90,
+    3: 1.30,
+    4: 1.30,
+    5: 1.25,
+    6: 0.85,
+    7: 0.80,
+    8: 0.85,
+    9: 1.00,
+    10: 1.05,
+    11: 1.00,
+    12: 1.05,
 }
 
 
@@ -1880,8 +1880,18 @@ _INTAKE_SEASONALITY = {
 _HOLIDAY_MULTIPLIER = 2.7  # 週六日約平日 2.5–3 倍
 # 裝備類季節性：10 月–翌年 2 月旺季，6–8 月淡季（約旺季 40%）
 _GEAR_SEASONALITY = {
-    1: 1.00, 2: 0.95, 3: 0.70, 4: 0.60, 5: 0.55, 6: 0.40,
-    7: 0.40, 8: 0.45, 9: 0.70, 10: 1.00, 11: 1.05, 12: 1.00,
+    1: 1.00,
+    2: 0.95,
+    3: 0.70,
+    4: 0.60,
+    5: 0.55,
+    6: 0.40,
+    7: 0.40,
+    8: 0.45,
+    9: 0.70,
+    10: 1.00,
+    11: 1.05,
+    12: 1.00,
 }
 
 
@@ -1925,9 +1935,9 @@ _SLOW_MOVER_SALE_RATE = 0.02
 
 def moment_of(day: date, hour: int, minute: int = 0) -> datetime:
     """台北營業日的某個時點，轉成 UTC。**時間序全靠回填**，故到處都要用。"""
-    return datetime(
-        day.year, day.month, day.day, hour, minute, tzinfo=STORE_TIME_ZONE
-    ).astimezone(UTC)
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=STORE_TIME_ZONE).astimezone(
+        UTC
+    )
 
 
 def _business_hour(day: date, rng: random.Random) -> int:
@@ -2000,11 +2010,22 @@ async def seed_daily_sales(
         )
     )
     made = {
-        "sales": 0, "sessions": 0, "buyout": 0, "consignment": 0,
-        "dine_in": 0, "takeout": 0, "purchase_orders": 0, "catalog_lines": 0,
-        "bulk_lots": 0, "bulk_lines": 0,
-        "buyout_orders": 0, "consignment_orders": 0, "settlements_paid": 0,
-        "returns": 0, "voided": 0, "credit_sales": 0,
+        "sales": 0,
+        "sessions": 0,
+        "buyout": 0,
+        "consignment": 0,
+        "dine_in": 0,
+        "takeout": 0,
+        "purchase_orders": 0,
+        "catalog_lines": 0,
+        "bulk_lots": 0,
+        "bulk_lines": 0,
+        "buyout_orders": 0,
+        "consignment_orders": 0,
+        "settlements_paid": 0,
+        "returns": 0,
+        "voided": 0,
+        "credit_sales": 0,
     }
     # 暖身期的產出**分開計數**：§7.4 的目標數字談的是 12 個月視窗，
     # 把暖身期混進去會讓「達標」變成假的。
@@ -2068,10 +2089,20 @@ async def seed_daily_sales(
         # 補貨：低於補貨點就開採購單並收貨。**走完整 PO → 收貨流程**，
         # 庫存異動、成本快照與採購單狀態機才會真的被觸發。
         if catalog and suppliers:
-            bump("purchase_orders", await restock_catalog(
-                session, store_id, manager_id, suppliers, catalog, rng,
-                day=day, moment=opened.opened_at, cost_by_sku=cost_by_sku,
-            ))
+            bump(
+                "purchase_orders",
+                await restock_catalog(
+                    session,
+                    store_id,
+                    manager_id,
+                    suppliers,
+                    catalog,
+                    rng,
+                    day=day,
+                    moment=opened.opened_at,
+                    cost_by_sku=cost_by_sku,
+                ),
+            )
 
         # **當日收購與當日銷售共用同一個班別**——現實中收購付現與銷售收現就是同一個抽屜。
         # 先前把收購全部塞進單一班別，該班別的應有現金變成 −720 萬（實測踩過）。
@@ -2156,8 +2187,12 @@ async def seed_daily_sales(
                 item = pool[cursor]
                 cursor += 1
             moment = datetime(
-                day.year, day.month, day.day,
-                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+                day.year,
+                day.month,
+                day.day,
+                _business_hour(day, rng),
+                rng.randrange(60),
+                tzinfo=STORE_TIME_ZONE,
             ).astimezone(UTC)
             # **臨時折扣**（docs/32）：店員議價、瑕疵折讓、熟客優惠。約 18% 的單有折扣。
             # 折扣改變成交價，故收款金額必須用 service 報回來的 total，不能用牌價。
@@ -2181,9 +2216,15 @@ async def seed_daily_sales(
                 if use > 0 and use >= min_spend and item.listed_price - use > 0:
                     try:
                         credit_sale = await store_credit_checkout(
-                            session, store_id, manager_id, kiosk,
-                            item=item, buyer_contact_id=holder, credit_amount=use,
-                            rng=rng, idempotency_key=f"seed-sc-{day.isoformat()}-{i}",
+                            session,
+                            store_id,
+                            manager_id,
+                            kiosk,
+                            item=item,
+                            buyer_contact_id=holder,
+                            credit_amount=use,
+                            rng=rng,
+                            idempotency_key=f"seed-sc-{day.isoformat()}-{i}",
                         )
                     except DomainError:
                         credit_holders.pop(holder_idx)
@@ -2244,11 +2285,7 @@ async def seed_daily_sales(
                     break
             # **台灣Pay**（docs/30）：店員另用台灣Pay App 收款、免串 API，系統只記錄。
             # 非現金，不進抽屜——現金對帳的應有現金不含這些（§7 不變量 #4）。
-            pay_type = (
-                TenderType.TAIWAN_PAY
-                if rng.random() < taiwanpay_pct
-                else TenderType.CASH
-            )
+            pay_type = TenderType.TAIWAN_PAY if rng.random() < taiwanpay_pct else TenderType.CASH
             sale = await sales_svc.create_sale(
                 store_id,
                 manager_id,
@@ -2284,16 +2321,18 @@ async def seed_daily_sales(
                 continue
             amount = sum((p.unit_price * qty for p, qty in cat_basket), Decimal(0))
             moment = datetime(
-                day.year, day.month, day.day,
-                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+                day.year,
+                day.month,
+                day.day,
+                _business_hour(day, rng),
+                rng.randrange(60),
+                tzinfo=STORE_TIME_ZONE,
             ).astimezone(UTC)
             sale = await sales_svc.create_sale(
                 store_id,
                 manager_id,
                 lines=[
-                    SaleLineInput(
-                        line_type=SaleLineType.CATALOG, catalog_product_id=p.id, qty=qty
-                    )
+                    SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=p.id, qty=qty)
                     for p, qty in cat_basket
                 ],
                 tenders=[TenderInput(tender_type=TenderType.CASH, amount=amount)],
@@ -2307,9 +2346,7 @@ async def seed_daily_sales(
         # **散裝批**：一堆可分次賣（§7 不變量 #6：remaining_qty 扣減後不得 < 0、歸零轉 SOLD_OUT）。
         open_lots = list(
             await session.scalars(
-                select(BulkLot).where(
-                    BulkLot.store_id == store_id, BulkLot.remaining_qty > 0
-                )
+                select(BulkLot).where(BulkLot.store_id == store_id, BulkLot.remaining_qty > 0)
             )
         )
         n_bulk = _daily_sale_count(day, rng, base=bulk_per_day) if open_lots else 0
@@ -2320,18 +2357,18 @@ async def seed_daily_sales(
             lot = rng.choice(open_lots)
             qty = min(lot.remaining_qty, rng.choices([1, 2, 3, 5], [5, 3, 2, 1])[0])
             moment = datetime(
-                day.year, day.month, day.day,
-                _business_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+                day.year,
+                day.month,
+                day.day,
+                _business_hour(day, rng),
+                rng.randrange(60),
+                tzinfo=STORE_TIME_ZONE,
             ).astimezone(UTC)
             sale = await sales_svc.create_sale(
                 store_id,
                 manager_id,
-                lines=[
-                    SaleLineInput(line_type=SaleLineType.BULK_LOT, bulk_lot_id=lot.id, qty=qty)
-                ],
-                tenders=[
-                    TenderInput(tender_type=TenderType.CASH, amount=lot.unit_price * qty)
-                ],
+                lines=[SaleLineInput(line_type=SaleLineType.BULK_LOT, bulk_lot_id=lot.id, qty=qty)],
+                tenders=[TenderInput(tender_type=TenderType.CASH, amount=lot.unit_price * qty)],
                 buyer_contact_id=(rng.choice(member_ids) if rng.random() < 0.35 else None),
                 idempotency_key=f"seed-bulk-{day.isoformat()}-{i}",
             )
@@ -2347,8 +2384,12 @@ async def seed_daily_sales(
             basket = _fnb_basket(menu_items, rng, dine_in=dine_in)
             amount = sum((item.unit_price * qty for item, qty in basket), Decimal(0))
             moment = datetime(
-                day.year, day.month, day.day,
-                _fnb_hour(day, rng), rng.randrange(60), tzinfo=STORE_TIME_ZONE,
+                day.year,
+                day.month,
+                day.day,
+                _fnb_hour(day, rng),
+                rng.randrange(60),
+                tzinfo=STORE_TIME_ZONE,
             ).astimezone(UTC)
             sale = await sales_svc.create_sale(
                 store_id,
@@ -2562,8 +2603,13 @@ async def run(
             # 平台發票號碼——為了補一欄報表資料不值得。
             menu_items = await seed_menu(session, store_id, manager_id)
             made = await seed_mixed_fnb_sales(
-                session, store_id, manager_id, menu_items, rng,
-                store_date(utc_now()), count=only_mixed,
+                session,
+                store_id,
+                manager_id,
+                menu_items,
+                rng,
+                store_date(utc_now()),
+                count=only_mixed,
             )
             report = SeedReport()
             report.counts["餐飲＋二手混合單"] = made
@@ -2581,9 +2627,7 @@ async def run(
         # **先推高 id 序列**：平台單號由本地 id 導出，共用測試帳號上低號早被用掉了。
         await bump_platform_id_sequences(session, sale_id_base)
         # 相依鏈第 0 步：設定。內用桌號沒維護的話，**任何內用單都開不出來**。
-        await seed_settings(
-            session, store_id, manager_id, einvoice=einvoice, linepay=linepay
-        )
+        await seed_settings(session, store_id, manager_id, einvoice=einvoice, linepay=linepay)
         # 相依鏈第 1 步：聯絡人。後續的收購只能掛在有 national_id 的賣方身上。
         contacts = await seed_contacts(session, store_id, rng)
         # 相依鏈第 2 步：菜單。餐飲不扣庫存，是銷售量的主要來源（§7.4.1）。
@@ -2632,16 +2676,12 @@ async def run(
         # 銷售跑完之後才盤點（要盤到有進出過的庫存）與建活動紀錄
         today = store_date(utc_now())
         campaigns_made = await seed_campaigns(session, store_id, manager_id, today)
-        stocktakes_made = await seed_stocktakes(
-            session, store_id, manager_id, rng, today, count=4
-        )
+        stocktakes_made = await seed_stocktakes(session, store_id, manager_id, rng, today, count=4)
         tickets_made = await seed_call_tickets(session, store_id, manager_id, rng)
         acks_made = await seed_transaction_acks(
             session, store_id, manager_id, kiosk, rng, count=ack_count
         )
-        suggestions = await seed_credit_suggestions(
-            session, store_id, today, days=min(days, 120)
-        )
+        suggestions = await seed_credit_suggestions(session, store_id, today, days=min(days, 120))
         manual_invoices = (
             await seed_manual_paper_invoices(
                 session, store_id, manager_id, rng, count=manual_invoice_count
@@ -2727,9 +2767,7 @@ async def run(
         )
         report.counts["（暖身期）銷售"] = daily["warmup_sales"]
         report.counts["（暖身期）班別"] = daily["warmup_sessions"]
-        report.counts["（暖身期）收購件數"] = (
-            daily["warmup_buyout"] + daily["warmup_consignment"]
-        )
+        report.counts["（暖身期）收購件數"] = daily["warmup_buyout"] + daily["warmup_consignment"]
         report.counts["聯絡人"] = await _count(session, "contacts", f"store_id = {store_id}")
         report.invariants = await verify_invariants(session, store_id)
         return report

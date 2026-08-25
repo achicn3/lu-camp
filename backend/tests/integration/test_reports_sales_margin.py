@@ -5,6 +5,7 @@ catalog 成本未知 → unknown_cost_sales、不假造毛利；作廢不計；�
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -20,6 +21,7 @@ from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.menu.models import MenuItem
 from app.modules.sales.models import Sale
+from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
@@ -269,6 +271,14 @@ async def test_bulk_cogs_rounds_per_line(
     assert body["gross_turnover"] == "500"
     assert body["bulk_cogs"] == "333"
     assert body["gross_margin"] == "167"
+
+    # 購物金溢價分析引擎也必須讀同一個結帳成本快照，不能用 1000 / 3 重算出小數毛利。
+    period = await SalesService(db_session).period_margin(
+        store_id,
+        datetime(2000, 1, 1, tzinfo=UTC),
+        datetime(2100, 1, 1, tzinfo=UTC),
+    )
+    assert period["buyout_margin"] == Decimal("167")
 
 
 async def test_voided_sale_excluded(client: httpx.AsyncClient, db_session: AsyncSession) -> None:

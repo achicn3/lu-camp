@@ -615,14 +615,26 @@ describe("/purchasing", () => {
 
   it("重複發票 409 會清除 pending，修正後以新鍵和新發票重送", async () => {
     loginAs("CLERK");
-    const calls: { key: string | undefined; invoice: string | undefined }[] = [];
+    const calls: {
+      key: string | undefined;
+      invoice: string | undefined;
+      net: string | undefined;
+      tax: string | undefined;
+      total: string | undefined;
+    }[] = [];
     stubFetch((url, init) => {
       if (url.includes("/suppliers")) return json([SUPPLIER]);
       if (url.includes("/catalog-products")) return json([CATALOG]);
       if (url.includes("/receive") && init.method === "POST") {
         const body = JSON.parse(String(init.body));
         const invoice = body.invoice?.invoice_number as string | undefined;
-        calls.push({ key: headerVal(init), invoice });
+        calls.push({
+          key: headerVal(init),
+          invoice,
+          net: body.invoice?.invoice_net,
+          tax: body.invoice?.invoice_tax,
+          total: body.invoice?.invoice_total,
+        });
         if (invoice === "AB12345678") {
           return json(
             { detail: "此發票號碼（同日期）已登錄於其他採購單，不可重複入帳" },
@@ -643,9 +655,12 @@ describe("/purchasing", () => {
     await user.type(screen.getByLabelText("本次實收 瓦斯罐"), "3");
     await user.type(screen.getByLabelText("發票號碼"), "AB12345678");
     await user.type(screen.getByLabelText("發票日期"), "2026-07-11");
+    await user.type(screen.getByLabelText("發票未稅金額"), "999");
+    await user.type(screen.getByLabelText("發票稅額"), "51");
     await user.type(screen.getByLabelText("發票含稅金額"), "1050");
     await user.click(screen.getByRole("button", { name: "確認收貨" }));
     await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({ net: "999", tax: "51", total: "1050" });
     expect(loadPendingReceive(ORDERED_PO.id)).toBeNull();
 
     await user.clear(screen.getByLabelText("發票號碼"));

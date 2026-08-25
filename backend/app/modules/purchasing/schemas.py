@@ -4,9 +4,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 from sqlalchemy import inspect
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, PurchaseOrderLine
 from app.shared.enums import PurchaseOrderStatus
 
@@ -56,6 +57,7 @@ class PurchaseOrderLineCreate(BaseModel):
             raise ValueError("unit_cost 必須為整數元")
         if value <= 0:
             raise ValueError("unit_cost 必須為正")
+        ensure_ntd_fits_numeric_12(value, field="unit_cost ")
         return value
 
 
@@ -145,20 +147,31 @@ class PurchaseOrderRead(BaseModel):
 class InputInvoiceIn(BaseModel):
     """進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。
 
-    號碼＝2 英文大寫＋8 數字；金額為含稅整數元字串（>0）。未稅/稅額由後端以
-    settings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。
+    號碼＝2 英文大寫＋8 數字；三個金額照錄供應商原始發票，後端只驗證皆為整數元且
+    invoice_net + invoice_tax = invoice_total，不以補登當下設定重算歷史憑證。
     """
 
     invoice_number: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")
     invoice_date: date
+    invoice_net: NTDAmount
+    invoice_tax: NTDAmount
     invoice_total: NTDAmount
 
-    @field_validator("invoice_total")
+    @field_validator("invoice_net", "invoice_tax", "invoice_total")
     @classmethod
-    def _positive_whole(cls, v: Decimal) -> Decimal:
-        if v <= 0 or v != v.to_integral_value():
-            raise ValueError("發票金額必須為正整數元")
-        return v
+    def _whole_nonnegative(cls, v: Decimal) -> Decimal:
+        if v < 0 or v != v.to_integral_value():
+            raise ValueError("發票金額必須為非負整數元")
+        ensure_ntd_fits_numeric_12(v, field="發票金額")
+        return Decimal(v.to_integral_value())
+
+    @model_validator(mode="after")
+    def _amounts_match_original_invoice(self) -> "InputInvoiceIn":
+        if self.invoice_total <= 0:
+            raise ValueError("發票總額必須為正整數元")
+        if self.invoice_net + self.invoice_tax != self.invoice_total:
+            raise ValueError("原始發票未稅額＋稅額必須等於總額")
+        return self
 
 
 class ReceiveLineIn(BaseModel):
@@ -198,9 +211,7 @@ class GoodsReceiptRead(BaseModel):
     @classmethod
     def from_model(cls, receipt: "GoodsReceipt") -> "GoodsReceiptRead":
         invoice = (
-            InputInvoiceRead.model_validate(receipt)
-            if receipt.invoice_number is not None
-            else None
+            InputInvoiceRead.model_validate(receipt) if receipt.invoice_number is not None else None
         )
         return cls.model_validate(
             {

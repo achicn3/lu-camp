@@ -34,6 +34,7 @@ from app.shared.enums import (
     StoreCreditSourceType,
     UserRole,
 )
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 from tests.integration.customer_display_helpers import (
     CustomerDisplayAwareClient,
     delete_customer_display_rows,
@@ -148,6 +149,28 @@ async def test_default_no_tenders_is_single_cash(
     assert len(body["tenders"]) == 1
     assert body["tenders"][0]["tender_type"] == "CASH"
     assert body["tenders"][0]["amount"] == "200"
+
+
+async def test_standard_fixture_forces_deferred_tender_guard(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """一般 savepoint fixture 也明確喚醒 COMMIT-time 收款對平守衛。"""
+    token, _mgr, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    response = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_catalog_line(cat, 2)]},
+        headers=_auth(token, "deferred-guard-fixture"),
+    )
+    assert response.status_code == 201, response.text
+
+    await db_session.execute(
+        text("UPDATE sale_tenders SET amount = 199 WHERE sale_id = :sale_id"),
+        {"sale_id": response.json()["id"]},
+    )
+    with pytest.raises(DBAPIError, match="收款明細加總"):
+        await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    await db_session.rollback()
 
 
 async def test_full_store_credit_tender(
@@ -323,7 +346,7 @@ async def test_insufficient_store_credit_rolls_back_whole_sale() -> None:
             from app.modules.cashdrawer.models import CashSession
 
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(
                 text("DELETE FROM serialized_items WHERE store_id = :s"), {"s": store_id}
@@ -770,7 +793,7 @@ async def test_void_without_reversal_blocked() -> None:
 
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
@@ -858,7 +881,7 @@ async def test_sale_void_reversal_requires_voided_sale() -> None:
 
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
@@ -938,7 +961,7 @@ async def test_moving_tender_rechecks_origin_sale() -> None:
 
             await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
             await s.execute(
                 text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id}
@@ -1161,7 +1184,7 @@ async def _cleanup_store(store_id: int) -> None:
         await s.execute(text("DELETE FROM return_lines WHERE store_id = :s"), {"s": store_id})
         await s.execute(text("DELETE FROM returns WHERE store_id = :s"), {"s": store_id})
         await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
-        await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+        await delete_cash_movements_for_test(s, store_id=store_id)
         await s.execute(text("DELETE FROM sale_lines WHERE store_id = :s"), {"s": store_id})
         await s.execute(text("DELETE FROM stock_movements WHERE store_id = :s"), {"s": store_id})
         await delete_customer_display_rows(s, store_id=store_id)

@@ -161,8 +161,8 @@ class GoodsReceipt(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     # 進項發票（裁示 2026-07-11）：供應商開立的發票於**收貨時**選填登錄（漏登可事後補登一次）。
-    # 號碼＝2 英文＋8 數字；金額整數元；net＋tax 由 total 以 split_tax_inclusive 拆分（§6），
-    # DB CHECK 守恆與一致性（要嘛全空、要嘛號碼/日期/三金額齊備且 net+tax=total）。
+    # 號碼＝2 英文＋8 數字；三個整數金額照錄原始發票，DB CHECK 守恆與一致性
+    # （要嘛全空、要嘛號碼/日期/三金額齊備且 net+tax=total）。
     invoice_number: Mapped[str | None] = mapped_column(String(10))
     invoice_date: Mapped[date | None] = mapped_column(Date)
     invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))

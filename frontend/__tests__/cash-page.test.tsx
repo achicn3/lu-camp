@@ -46,7 +46,8 @@ function stubFetch(route: FetchRoute) {
       const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
       const body =
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
-      const resp = route(url, { method, body } as RequestInit);
+      const headers = input instanceof Request ? input.headers : init?.headers;
+      const resp = route(url, { method, body, headers } as RequestInit);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
     }),
@@ -181,10 +182,13 @@ describe("/cash", () => {
   it("MANAGER 看得到手動調整並可送出；含事由", async () => {
     loginAs("MANAGER");
     const bodies: string[] = [];
+    const idempotencyKeys: string[] = [];
     stubFetch((url, init) => {
       if (url.includes("/cash-sessions/current")) return json(OPEN_SESSION);
       if (url.includes("/movements") && init?.method === "POST") {
         bodies.push(String(init.body));
+        const headers = new Headers(init.headers);
+        idempotencyKeys.push(headers.get("Idempotency-Key") ?? "");
         return json({ id: 1, session_id: 9, store_id: 1, type: "MANUAL_ADJUST" }, 201);
       }
       if (url.includes("/movements")) return json([]);
@@ -200,6 +204,7 @@ describe("/cash", () => {
     expect(parsed.type).toBe("MANUAL_ADJUST");
     expect(parsed.amount).toBe("-200");
     expect(parsed.note).toBe("找錯錢回沖");
+    expect(idempotencyKeys[0]).not.toBe("");
   });
 
   it("開帳中顯示手動調整清單，包含正負金額與事由", async () => {

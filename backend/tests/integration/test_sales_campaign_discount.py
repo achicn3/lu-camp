@@ -214,6 +214,69 @@ async def test_quote_returns_discounted_total_for_pos(
     assert sale.total == Decimal(900)
 
 
+async def test_quote_and_checkout_amount_fields_match_for_every_inventory_line_type(
+    ctx: dict[str, int], db_session: AsyncSession
+) -> None:
+    """報價與成交雖分讀寫路徑，所有落盤金額欄都由此契約鎖成同一口徑。"""
+    await _make_campaign(
+        db_session,
+        ctx["store_id"],
+        ctx["clerk_id"],
+        pct=17,
+        owned_serialized=True,
+        owned_bulk=True,
+        catalog=True,
+    )
+    code = await _serialized(
+        db_session, ctx["store_id"], ownership=OwnershipType.OWNED, price="1001"
+    )
+    catalog_id = await _catalog(db_session, ctx["store_id"], price="333")
+    bulk_id = await _bulk(db_session, ctx["store_id"], price="77")
+    inputs = [
+        SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=code),
+        SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=catalog_id, qty=2),
+        SaleLineInput(line_type=SaleLineType.BULK_LOT, bulk_lot_id=bulk_id, qty=3),
+    ]
+    service = SalesService(db_session)
+    quote = await service.quote_sale(ctx["store_id"], lines=inputs)
+    sale = await service.create_sale(
+        ctx["store_id"],
+        ctx["clerk_id"],
+        lines=inputs,
+        tenders=[TenderInput(tender_type=TenderType.CASH, amount=quote.total)],
+    )
+    persisted = list(
+        (
+            await db_session.scalars(
+                select(SaleLine).where(SaleLine.sale_id == sale.id).order_by(SaleLine.id)
+            )
+        ).all()
+    )
+
+    assert sale.total == quote.total
+    assert len(persisted) == len(quote.lines)
+    for quoted, actual in zip(quote.lines, persisted, strict=True):
+        assert (
+            actual.line_type,
+            actual.description,
+            actual.qty,
+            actual.unit_price,
+            actual.line_total,
+            actual.original_unit_price,
+            actual.discount_amount,
+            actual.net_amount,
+        ) == (
+            quoted.line_type,
+            quoted.description,
+            quoted.qty,
+            quoted.unit_price,
+            quoted.line_total,
+            quoted.original_unit_price,
+            quoted.discount_amount,
+            quoted.net_amount,
+        )
+
+
 async def test_full_price_tender_under_campaign_is_rejected(
     ctx: dict[str, int], db_session: AsyncSession
 ) -> None:

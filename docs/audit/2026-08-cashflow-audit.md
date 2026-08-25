@@ -1,411 +1,1714 @@
 # 金流程式碼稽核（2026-08）
 
-唯讀稽核。本文件是本次稽核的唯一輸出，稽核期間不修改任何實作或測試。
+本文件前半先列修正後結論，後半保留 2026-08-24 修正前的唯讀稽核快照，方便逐項追溯。
+2026-08-24 經店長解除唯讀限制後，已在 `fix/cashflow-audit-findings` 分支完成程式、migration、
+前端與測試修正。
 
-- 稽核基準：`main` @ `93cd4b7`
-- 範圍：收購/寄售建單與定價、購物金帳本、寄售結算抽成、錢櫃現金異動、稅額與四捨五入、
-  收據/發票金額來源，以及以上的 DB transaction 邊界與併發控制。
-- 範圍外：前端樣式/文案、硬體代理印表機協定細節、認證授權、作廢/更正流程設計。
+- 稽核基準：`main` @ `fa005ed`（2026-08-24）
+- 修正基準：工作樹 `fix/cashflow-audit-findings`（驗證至 2026-08-25）。
+- 本輪狀態：階段 1、階段 2、修正與驗證完成；正式環境 migration 套用後仍需做一次部署查驗。
+- 範圍：收購／寄售建單與定價、購物金帳本、寄售結算、錢櫃現金、稅額、收據／帳單／發票金額來源，以及其 transaction／併發／外部副作用邊界。
+- 範圍外：前端樣式與 i18n、硬體代理協定細節、認證授權、作廢／更正流程設計。
+- 舊基準 `93cd4b7` 的階段 2 結論未沿用；以下結論均依目前基準重新查證。
+
+## 修正後結論（白話版）
+
+目前沒有仍待施工的 P0／P1／P2。修正後又做了一輪規格、程式分層與實機流程交叉 review；
+review 找到的 LINE Pay 解除配對後補單、寄售預設抽成送值、退款識別碼漂移、簽署逾期補帳、
+Numeric 邊界與分層／smoke 缺口都已處理。另有 3 項依店長裁示接受現況：散裝成本可有整批 1 元尾差、稅率固定
+5% 時不另改歷史報表算法，以及不特別限制 100% 抽成。還有 1 項不是程式問題，而是上線後
+要確認 migration 真的已套到正式 DB。最後一輪 Standards 與 Spec 對抗 review 均為 clean。
+
+| 分類 | 尚未處理 | 已處理／受控 | 店長接受現況 | 說明 |
+|---|---:|---:|---:|---|
+| P0 | 0 | 1 | 0 | LINE Pay 收款必須有客顯；不確定結果自動查原單，不會自動再扣款 |
+| P1 | 0 | 6 | 3 | 接受散裝 1 元尾差、固定 5% 的歷史摘要算法，以及不限制 100% 抽成 |
+| P2 | 0 | 11 | 0 | DB 守衛、migration、分層、測試隔離、契約與瀏覽器 smoke 均已補齊 |
+| 待確認 | 1 | 2 | 1 | 只剩正式 DB 套版後查 trigger／constraint；Amego 與進項發票已定案 |
+
+### 修正後 A–E 判定
+
+| 類別 | 判定 | 白話結論 |
+|---|---|---|
+| A. 數值正確性 | **符合（含 2 項裁示口徑）** | 後端用 Decimal／整數元；前端費率改用十進位字串＋BigInt；稅與折讓尾差能對回原發票。散裝逐件成本的整批 1 元尾差依裁示允許。 |
+| B. 帳本完整性 | **符合** | 購物金與錢櫃帳一般 DML 都是 insert-only；測試若要清資料，只能在每個 pytest process 專用、跑完即刪除的 DB。 |
+| C. 原子性與併發 | **符合（外部金流採可復原流程）** | DB 內主檔、明細、庫存、購物金與錢櫃仍同一交易；LINE Pay 無法與本地 DB 共用 transaction，改以持久狀態、原單查詢及本地補完處理斷點。 |
+| D. 冪等性 | **符合** | 銷售、收購、退貨、購物金、寄售付款與人工現金調整都有冪等鍵／唯一約束；LINE Pay 復原不會再送一次收款或退款。 |
+| E. 邊界條件 | **符合（含 100% 抽成裁示口徑）** | 0 元贈品單、全額購物金、餘額不足、負數輸入與寄售拆帳均有 service 或 DB 守衛。系統仍允許輸入 100% 抽成；若真的發生，0 元付款會被 DB 擋下並整筆回滾，不會錯付，但該結算會維持待付。店長裁示實務上不會使用，不另限制。 |
+
+## P0：修正後狀態
+
+### P0-1：已處理 — LINE Pay 不再允許跳過客顯，失敗時可自動查原單
+
+`backend/app/modules/sales/service.py:850-863`
+
+```python
+if line_pay_tenders:
+    if cart is None:
+        raise InvalidSaleTender("LINE Pay 收款必須使用已配對的客顯購物車")
+    if reconciled_linepay_result is None:
+        pairing = await self._display_repo.get_active_pairing_for_terminal(...)
+        if pairing is None or pairing.kiosk_device_id != cart.kiosk_device_id:
+            raise InvalidSaleTender("LINE Pay 收款前，客顯必須維持配對並連接原購物車")
+```
+
+`backend/app/modules/customerdisplay/background_service.py:62-80`
+
+```python
+for store_id, terminal_id in targets:
+    async with factory() as session:
+        outcome = await reconcile_uncertain_payment_target(
+            session, store_id=store_id, terminal_id=terminal_id, linepay_client=linepay_client
+        )
+```
+
+**白話：** 一般請款沒有客顯、或原客顯已解除配對，都不會先扣款。平台結果不確定時，背景
+工作只查原本的 order，不呼叫 `pay`；即使這段時間故障客顯已被解除配對，查到平台成功仍會
+依後端保存資料補完本地銷售。整合測試先真的呼叫解除配對，再驗證補單成功：
+`backend/tests/integration/test_customer_display_cart_api.py:989-1016`。
+
+## P1：修正後狀態
+
+### P1-1：已處理 — 寄售強制抽成，預設讀系統設定，仍可逐件改
+
+`backend/app/modules/acquisition/service.py:485-491`
+
+```python
+if data.type == AcquisitionType.CONSIGNMENT:
+    await self._settings.lock_store_shared(store_id)
+    default_commission_pct = int(
+        (await self._settings.get_effective_settings(store_id)).default_commission_pct
+    )
+```
+
+`backend/app/modules/acquisition/service.py:816-820`
+
+```python
+commission = (
+    item.commission_pct if item.commission_pct is not None else default_commission_pct
+)
+```
+
+`frontend/app/(authed)/acquisition/page.tsx:959-970`
+
+```typescript
+body.items = rows.map((r) => ({
+  // ...
+  ...(type === "BUYOUT"
+    ? { acquisition_cost: ntd(r.acquisitionCost) }
+    : r.commissionPct === ""
+      ? {}
+      : { commission_pct: parseNtd(r.commissionPct) }),
+}));
+```
+
+**白話：** 欄位沒手改時，畫面仍會顯示當下查到的預設值，但送出時不把它冒充成逐件覆寫；
+後端會在建單交易中鎖住設定並讀最新值。真的手改的品項才送 `commission_pct`。
+`frontend/__tests__/acquisition-commission-page.test.tsx:77-154` 已驗證未手改的 request 沒有該欄位；
+實機瀏覽器另驗證新列顯示系統設定 37，且第二件可獨立改為 42、第一件仍維持 37。
+
+### P1-2：店長接受現況 — 散裝逐件成本允許整批 1 元尾差
+
+`backend/tests/integration/test_reports_sales_margin.py:265-273`
+
+```python
+# 1000 ÷ 3 每件以 HALF_UP 記 333；售出一件 500，毛利 167。
+assert body["bulk_cogs"] == "333"
+assert body["gross_margin"] == "167"
+```
+
+**白話：** 系統以「成交當下每件整數元成本」記帳，所以 1,000 元三件會是每件 333 元，
+整批可能差 1 元。店長已明確允許，不另做尾件分攤。
+
+### P1-3：已處理 — 散裝毛利全部改讀成交成本快照
+
+`backend/app/modules/inventory/service.py:403-405`
+
+```python
+sold_price = line.net_amount
+sold_cost = line.cost_snapshot
+```
+
+**白話：** 商品頁、毛利報表與購物金效益分析都以成交時已落盤的 `cost_snapshot` 為準，
+不再有一邊顯示 333、另一邊重算 333.333… 的情況。
+
+### P1-4：已處理 — 多次部分折讓最後一定精確沖回原發票
+
+`backend/app/modules/einvoice/service.py:601-609`
+
+```python
+if cumulative_total == invoice.total:
+    target_cumulative_net = Decimal(invoice.net)
+preferred_net = target_cumulative_net - prior_net
+net = min(max(preferred_net, min_net), max_net)
+tax = total - net
+```
+
+**白話：** 每次折讓看「累計已退多少」分配未稅與稅；最後全退時直接以原發票 net／tax
+為終點，所以不會留下 1 元稅額沖不掉。
+
+### P1-5：店長接受現況 — 固定 5% 期間保留目前歷史摘要算法
+
+`backend/app/modules/reports/service.py:887`
+
+```python
+net_ex_tax, tax = split_tax_inclusive(margin.recognized_revenue, settings.tax_rate)
+```
+
+**白話：** 每日摘要仍以查詢時設定拆稅；店長裁示目前稅率固定 5%，因此不施工。在固定 5%
+的前提下數字不會漂移；若未來真的允許改稅率，這一項必須重新開案。
+
+### P1-6：已處理 — 前端費率不再用浮點數四捨五入
+
+`frontend/lib/money.ts:28-35`
+
+```typescript
+const scale = BigInt(10_000);
+const numerator = BigInt(amountNtd) * rateUnits;
+const rounded = (BigInt(2) * magnitude + scale) / (BigInt(2) * scale);
+```
+
+**白話：** API 的 Decimal 費率保持字串，轉成整數比例後才算 HALF_UP；例如 5,000 ×
+0.0003 不會因 JavaScript float 變成 1.499999… 而少顯示 1 元。
+
+### P1-7：已處理 — 人工錢櫃調整可安全重試
+
+`backend/app/modules/cashdrawer/router.py:92-95`
+
+```python
+idempotency_key: Annotated[
+    str, Header(alias="Idempotency-Key", min_length=1, max_length=80)
+]
+```
+
+`backend/app/modules/cashdrawer/models.py:68`
+
+```python
+Index(
+    "uq_cash_movements_store_idempotency_key",
+    "store_id", "idempotency_key", unique=True,
+    postgresql_where=text("idempotency_key IS NOT NULL"),
+)
+```
+
+`frontend/scripts/cash-smoke.mjs:59-114`
+
+```javascript
+const committed = await route.fetch();
+await route.fulfill({
+  status: 503,
+  body: JSON.stringify({ detail: "模擬後端已入帳、但回應在網路中遺失" }),
+});
+// 使用者直接再點一次；兩次 request 必須沿用同一 key，DB 只准有一筆。
+```
+
+**白話：** 最常見的真實情境不是使用者故意連點，而是後端已入帳、Wi-Fi 卻在回應途中斷掉。
+畫面會保留原內容讓使用者直接重試；同一筆調整會拿回原紀錄。同一 key 若換金額或事由則回
+409，不會把不同內容誤認成同一筆。實機測試真的先讓後端入帳，再把回應改成 503；重試後
+確認兩次沿用同一 key，PostgreSQL 只有一筆 137 元異動。
+
+### P1-8：已處理 — LINE Pay 已退款但本地失敗時會自動補完，絕不重退
+
+`backend/app/modules/sales/inputs.py:73-80`
+
+```python
+class LinePayReturnRecovery:
+    attempt_id: int
+    refund_key: str
+    store_id: int
+    sale_id: int
+    lines: tuple[LinePayReturnRecoveryLine, ...]
+```
+
+`backend/app/modules/returns/service.py:153-172`
+
+```python
+await self.create_return(
+    ...,
+    # SUCCEEDED 日誌已是平台真相；None 只允許套用日誌，不再送 refund。
+    linepay_client=None,
+    reconciled_linepay_refund_key=recovery.refund_key,
+    allow_expired_provider_consent=True,
+)
+```
+
+**白話：** 呼叫平台前先把本地退貨所需內容持久保存。若平台已成功但本地 transaction 掛掉，
+背景排程直接沿用平台成功當時保存的 `refund_key`，不會因為期間又完成另一筆退貨、累計已退數量
+改變而換成新 key。尚未補完時，一般人工退貨也會被
+`backend/app/modules/returns/service.py:440-443` 阻擋，避免使用者重送第二次平台退款。
+
+`backend/app/modules/signing/service.py:1084-1118`
+
+```python
+valid_status = task.status is SignatureTaskStatus.SIGNED or (
+    allow_expired_provider_recovery and task.status is SignatureTaskStatus.EXPIRED
+)
+# 仍逐項核對退貨品項、發票、處置方式與退款金額後才 consume。
+```
+
+**逾期同意的口徑：** 正常新退貨仍只能用 `SIGNED` 同意；唯一例外是 LINE Pay 已經退款成功、
+現在只補本地帳，而且必須是同一張銷售、同一批品項、同一張發票、同一處置與同一退款金額。
+背景工作也改成先補這類不可逆的外部退款，再做 TTL 清理：
+`backend/app/modules/customerdisplay/background_service.py:119-140`。
+
+`backend/app/modules/sales/service.py:1676-1688`
+
+```python
+candidate = await self._repo.get_refund_attempt(store_id, attempt_id)
+txn = await self._repo.get_linepay_by_order_id(store_id, candidate.order_id)
+if txn is not None:
+    sale = await self._repo.lock_sale(store_id, txn.sale_id)
+attempt = await self._repo.get_refund_attempt(store_id, attempt_id, for_update=True)
+```
+
+**併發口徑：** 正常退貨、背景補帳與店長人工裁定現在都固定先鎖銷售單、再鎖退款紀錄。
+因此店長不能在另一個退貨剛通過檢查後插隊把 `PENDING` 改成 `SUCCEEDED`，背景排程也不會以
+相反鎖序和正常退貨互卡。鎖序契約測試在
+`backend/tests/test_linepay_refund_lock_order.py:11-107`。
+
+整合測試
+`backend/tests/integration/test_linepay_refund_recovery.py:187-260,269-341` 已驗證「另一筆退貨先完成」
+仍只補原退款、人工重送會被擋，以及完全相符的逾期同意可補帳；實機瀏覽器另由店長按
+「確認已退款」，再等待真實背景排程自動收斂成 `RETURNED|REFUNDED|137|IN_STOCK|1`。
+
+### P1-9：店長接受現況 — 不特別限制 100% 抽成
+
+`backend/app/modules/acquisition/schemas.py:27-28,52`
+
+```python
+COMMISSION_PCT_MIN = 0
+COMMISSION_PCT_MAX = 100
+commission_pct: int | None = Field(
+    default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX
+)
+```
+
+`backend/app/modules/consignment/service.py:224-236`
+
+```python
+commission_amount = commission(gross, commission_pct)
+payout = gross - Decimal(commission_amount)
+# ...
+payout_amount=payout,
+```
+
+`backend/app/modules/cashdrawer/models.py:75`
+
+```python
+CheckConstraint("amount <> 0", name="ck_cash_movement_amount_nonzero")
+```
+
+**白話：** 系統仍接受 0–100。若有人真的把單品設成 100%，賣家實拿會算成 0；付款時因
+0 元現金異動不合法，整筆 transaction 會回滾，結算維持 `PENDING`，所以不會錯付或少一筆
+現金帳，但使用者重試同一內容仍會失敗。店長已明確裁示實務上不會發生，不加限制，也不做
+0 元付款特例。
+
+## P2：修正後狀態
+
+### P2-1：已處理 — 稅率與費率最多四位小數
+
+`backend/app/modules/settings/schemas.py:133-139`
+
+```python
+@field_validator("tax_rate", "premium_rate", "premium_rate_min", "premium_rate_max")
+def _rate_scale(cls, value: Decimal | None) -> Decimal | None:
+    if value is not None and value != value.quantize(Decimal("0.0001")):
+        raise ValueError("費率最多四位小數")
+```
+
+### P2-2：已處理 — 寫入 Numeric(12,0) 前擋住輸入值與衍生值溢位
+
+`backend/app/core/money.py:22-36`
+
+```python
+MAX_NTD = Decimal("999999999999")
+
+def ensure_ntd_fits_numeric_12(value: Decimal, *, field: str = "金額", absolute: bool = False) -> Decimal:
+    if abs(value) > MAX_NTD:
+        raise ValueError(...)
+    return value
+```
+
+除了單一輸入欄位，購物金新餘額、錢櫃關帳應有金額與差額等「真的會寫進
+`Numeric(12,0)`」的衍生值，也在寫 DB 前擋下。採購單只持久化數量與單價，沒有明細小計或
+整單總額欄位，因此只限制單價本身，不把 `數量 × 單價` 當成 DB 欄位上限：
+
+`backend/app/modules/purchasing/schemas.py:48-66`
+
+```python
+class PurchaseOrderLineCreate(BaseModel):
+    qty: int = Field(gt=0)
+    unit_cost: NTDAmount
+
+    @field_validator("unit_cost")
+    def _positive_whole(cls, value: Decimal) -> Decimal:
+        ensure_ntd_fits_numeric_12(value, field="unit_cost ")
+        return value
+```
+
+`backend/tests/test_money_schema_limits.py:80-87` 與
+`backend/tests/integration/test_purchasing_api.py:539-560` 證明數量與單價各自可寫 DB 時，即使兩者
+乘積超過 `MAX_NTD` 仍可建立，不會用不存在的 DB 欄位限制合法採購單。
+
+`backend/app/modules/storecredit/service.py:104-115,158-164`
+
+```python
+if abs(signed_amount) > MAX_NTD:
+    raise StoreCreditConflict(...)
+if cash_equivalent is not None and abs(cash_equivalent) > MAX_NTD:
+    raise StoreCreditConflict(...)
+# ...
+if new_balance > MAX_NTD:
+    raise StoreCreditConflict(...)
+```
+
+`backend/app/modules/cashdrawer/service.py:258-263`
+
+```python
+if abs(expected) > MAX_NTD:
+    raise CashAmountOutOfRange(...)
+variance = counted_amount - expected
+if abs(variance) > MAX_NTD:
+    raise CashAmountOutOfRange(...)
+```
+
+**白話：** 這兩種不是一般單筆交易會碰到，而是帳戶／錢櫃長期累加、資料匯入或異常大量
+交易時才可能發生。原本會到 PostgreSQL 寫入才爆成 500；現在會在 service 明確拒絕，整筆
+transaction 回滾，不留下半套帳。購物金案例由
+`backend/tests/integration/test_store_credit.py:153-196` 覆蓋；錢櫃案例由
+`backend/tests/integration/test_cashdrawer_api.py:391-454` 覆蓋。
+
+### P2-3：已處理 — 錢櫃帳由 DB 背書 insert-only 與金額形狀
+
+`backend/app/modules/cashdrawer/models.py:75`
+
+```python
+CheckConstraint("amount <> 0", name="ck_cash_movement_amount_nonzero")
+CheckConstraint("type = 'MANUAL_ADJUST' OR amount > 0",
+                name="ck_cash_movement_system_amount_positive")
+```
+
+`backend/app/modules/cashdrawer/schemas.py:75-82`
+
+```python
+value = _whole(v, allow_negative=True)
+if value == 0:
+    raise ValueError("人工現金調整金額不可為零")
+```
+
+**白話：** API 現在會把 0 元人工調整當成可理解的 422 輸入錯誤，不再一路送到 DB 才變成
+500；真正繞過 API 的寫入仍由 DB CHECK 擋住。
+
+`backend/app/modules/cashdrawer/models.py:125`
+
+```sql
+CREATE TRIGGER trg_cash_movement_immutable
+BEFORE UPDATE OR DELETE ON cash_movements
+FOR EACH ROW EXECUTE FUNCTION cash_movement_immutable()
+```
+
+### P2-4：已處理 — migration 不再引用會漂移的 live model 常數
+
+`backend/alembic/versions/a8c1f4e7b2d5_cashflow_audit_guards.py:7`
+
+```python
+All trigger SQL is frozen in this revision. Do not import model constants here.
+```
+
+此 migration 會收斂完整購物金 trigger 集合，並加入錢櫃、寄售與 LINE Pay 退款復原欄位；
+`backend/tests/test_cashflow_audit_migration.py:14-26` 檢查 migration 無 live import 且名稱齊全。
+
+### P2-5：已處理 — 測試 trigger bypass 被隔離在一次性測試 DB
+
+`backend/tests/db_safety.py:13`
+
+```python
+TEST_DATABASE_NAME = f"{_base_name}_test_{os.getpid()}"
+os.environ["DATABASE_URL"] = _base_url.set(database=TEST_DATABASE_NAME).render_as_string(...)
+```
+
+`backend/tests/conftest.py:37-77` 在 suite 開始建立該 DB，結束精確刪除此 DB。現金帳測試清理 helper
+另會先檢查 DB 名稱含 `_test_`，不符合就拒絕停用 trigger。正式／開發 DB 不在清理範圍。
+
+### P2-6：已處理 — 一般 fixture 明確觸發 deferred 金流守衛
+
+`backend/tests/integration/test_sales_tenders.py:167-172`
+
+```python
+with pytest.raises(DBAPIError, match="收款明細加總"):
+    await db_session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+```
+
+### P2-7：已受控 — 報價與成交以可執行契約鎖住同一金額結果
+
+`backend/tests/integration/test_sales_campaign_discount.py:258`
+
+```python
+assert sale.total == quote.total
+for quoted, actual in zip(quote.lines, persisted, strict=True):
+    assert (actual.unit_price, actual.line_total, actual.discount_amount, actual.net_amount) == (
+        quoted.unit_price, quoted.line_total, quoted.discount_amount, quoted.net_amount
+    )
+```
+
+**白話：** 依本輪「不做重構」原則，沒有搬動深層定價架構；改以序號品、一般品、散裝品的
+逐欄契約測試防止日後報價與成交悄悄漂移。
+
+### P2-8：已處理 — 寄售結算恆等式由 DB 強制
+
+`backend/app/modules/consignment/models.py:26-37`
+
+```python
+CheckConstraint("commission_pct BETWEEN 0 AND 100", ...)
+CheckConstraint("commission_amount + payout_amount = gross", ...)
+```
+
+直接改壞 `payout_amount` 或把抽成改成 101 都會被 DB 拒絕：
+`backend/tests/test_sales.py:219-234`。
+
+### P2-9：已處理 — LINE Pay 背景排程只負責定時喚醒 service
+
+`backend/app/modules/customerdisplay/scheduler.py:14-30`
+
+```python
+async def scheduler_loop(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        carts, tasks, retention_due = await CustomerDisplayBackgroundService.sweep_once()
+```
+
+`backend/app/modules/customerdisplay/background_service.py:83-117`
+
+```python
+async def _recover_refund_attempt(session, attempt_id):
+    if not await ReturnsService(session).recover_succeeded_linepay_refund(attempt_id):
+        return False
+    await session.commit()
+    return True
+```
+
+**白話：** scheduler 現在只管「每分鐘叫醒一次」；先補外部已成功退款、再清理簽署 TTL、
+每筆各自 commit／rollback 的業務順序與 transaction 邊界都在 background service。它只跨模組
+呼叫 service；退款復原協調集中在 returns service，sales 讀寫仍走自己的 service／repository，
+沒有另一條背景路徑繞過正常金流規則。靜態分層契約由
+`backend/tests/test_customerdisplay_scheduler_boundary.py:4-16` 鎖住。
+
+### P2-10：已處理 — 人工現金調整的冪等內容由 service 定義
+
+`backend/app/modules/cashdrawer/service.py:156-187`
+
+```python
+async def record_manual_adjustment(...):
+    fingerprint = hashlib.sha256(
+        canonical_json_bytes({
+            "session_id": session_id,
+            "type": CashMovementType.MANUAL_ADJUST.value,
+            "amount": amount,
+            "note": note,
+        })
+    ).hexdigest()
+    return await self.record_movement(...)
+```
+
+`backend/app/modules/cashdrawer/router.py:103-116` 只呼叫此 service 並 commit／處理 409。這讓
+HTTP router 不必自己決定「同一冪等鍵是否為同一筆錢」的業務規則。
+
+### P2-11：已處理 — 五條受影響金流 UI 都有真後端／PostgreSQL smoke
+
+`frontend/scripts/purchasing-smoke.mjs:99-110`
+
+```javascript
+await page.fill('input[aria-label="發票未稅金額"]', "1000");
+await page.fill('input[aria-label="發票稅額"]', "50");
+await page.fill('input[aria-label="發票含稅金額"]', "1050");
+await page.click('[role="dialog"] button:has-text("確認收貨")');
+```
+
+**白話：** smoke 現在不是只填總額；它會像現場人員一樣輸入原始發票未稅、稅額、含稅
+總額，再真的送到後端與 PostgreSQL。此次隔離環境實跑 19/19 通過並保存操作截圖。
+
+`frontend/scripts/acquisition-smoke.mjs:67-80`
+
+```javascript
+ok("寄售新列顯示設定的 37% 抽成", (await commissionInputs.first().inputValue()) === "37");
+await commissionInputs.nth(1).fill("42");
+ok("逐件修改不影響其他品項", ...);
+```
+
+`frontend/scripts/linepay-refund-recovery-smoke.mjs:174-200`
+
+```javascript
+await row.getByRole("button", { name: "確認已退款" }).click();
+await row.getByText("不需再次退款", { exact: true }).waitFor();
+// 等真實背景排程後查 DB 最終狀態
+finalState === "RETURNED|REFUNDED|137|IN_STOCK|1";
+```
+
+`frontend/scripts/taiwanpay-smoke.mjs:181-213`
+
+```javascript
+await page.locator(".pos-tender-mode", { hasText: "LINE Pay" }).click();
+ok("LINE Pay HALF_UP 手續費顯示", linepayFeeHint?.includes(money(fee)) ?? false);
+await page.locator(".pos-tender-mode", { hasText: "台灣Pay" }).click();
+ok("台灣Pay HALF_UP 手續費顯示", feeHint?.includes(money(fee)) ?? false);
+await checkoutBtn.click();
+```
+
+另有 `frontend/scripts/cash-smoke.mjs:59-114` 的「已入帳但回應遺失後重試」。五條隔離實機
+結果分別為：採購 19/19、寄售抽成 17/17、錢櫃重試 4/4、LINE Pay 退款復原 5/5、POS
+行動支付費率 14/14。最後一條真的以 5,000 元、0.03% 費率切換 LINE Pay／台灣 Pay，兩邊
+畫面都顯示 HALF_UP 後的 2 元，並以台灣 Pay 完成結帳；API 與 DB tender 也都是金額 5,000、
+手續費 2。
+
+## 待確認：修正後狀態
+
+### 待確認-1：仍需部署後查驗 — 正式 DB 是否已套用新 migration
+
+`backend/alembic/versions/a8c1f4e7b2d5_cashflow_audit_guards.py:175`
+
+```python
+def upgrade() -> None:
+    ...
+    op.execute(_CASH_IMMUTABLE_FUNCTION)
+    op.execute(_CASH_IMMUTABLE_TRIGGER)
+```
+
+**需要的資訊：** 正式環境執行 `alembic upgrade head` 後的 revision，以及 `pg_trigger`／
+`pg_constraint` 查詢結果。repo 內 migration 已備妥，但本 session 沒有正式 DB 部署權限，不能把
+「程式碼已存在」寫成「正式 DB 已生效」。
+
+### 待確認-2：已定案並處理 — 進項發票照原始發票登錄
+
+`backend/app/modules/purchasing/schemas.py:160-186`
+
+```python
+invoice_net: NTDAmount
+invoice_tax: NTDAmount
+invoice_total: NTDAmount
+```
+
+```python
+if self.invoice_net + self.invoice_tax != self.invoice_total:
+    raise ValueError("原始發票未稅額＋稅額必須等於總額")
+```
+
+不再用補登當天的系統稅率反推歷史憑證。
+
+### 待確認-3：已查官方規格並處理 — Amego 單價最多七位小數
+
+光貿[官方 API 文件](https://invoice.amego.tw/api_doc/)載明 `UnitPrice` 最多 7 位小數，
+`DetailAmountRound=1` 可令明細小計四捨五入為整數。現況：
+
+`backend/app/modules/einvoice/amego.py:62-64`
+
+```python
+return _decimal_str(value.quantize(Decimal("0.0000001"), rounding=ROUND_HALF_UP))
+```
+
+`backend/app/modules/einvoice/amego.py:126`
+
+```python
+"DetailAmountRound": 1,
+```
+
+測試 `backend/tests/test_einvoice_amego.py:184-195` 驗證 100 ÷ 3 送 `33.3333333`，而權威
+`Amount` 仍是 `100`。
+
+### 待確認-4：店長已裁示 — 現階段固定 5%
+
+沒有修改稅額公式或把非 5% 行為另做一套。此裁示同時是 P1-5 接受現況的前提；未來若開放
+店別改稅率，需重新稽核歷史報表與發票稅率快照的一致性。
+
+## 修正後驗證
+
+- 前端：TypeScript、ESLint、Vitest 全數通過；55 個測試檔、482 筆測試。
+- 後端：Ruff 與 mypy 全數通過（mypy 檢查 184 個 app 來源檔）；完整 pytest 共 1,556 筆全數通過，
+  總覆蓋率 88.36%（門檻 80%）。完整測試從空白的一次性 DB 跑 `alembic upgrade head`，
+  因此也實際驗證了整條 migration 可建庫。
+- DB 重點測試：LINE Pay 收款對帳／退款復原、錢櫃 DB trigger、寄售結算 CHECK、折讓稅尾差、
+  migration 凍結、deferred tender guard、報價／成交一致、Numeric 上界均已納入自動測試。
+- 實機流程：以隔離的真 PostgreSQL、真 backend 與 Playwright 操作頁面。採購原始發票 19/19；
+  寄售抽成畫面預設 37、逐件可改 42（17/17）；錢櫃模擬「後端已入帳、回應遺失」後由使用者
+  重試，同一 key 且 DB 只有一筆 +137（4/4）；店長確認 LINE Pay 已退款後，真實背景排程自動
+  補完本地退貨，DB 最終為 `RETURNED|REFUNDED|137|IN_STOCK|1`（最新 service／鎖序版重跑 5/5）；POS 同時驗證 LINE Pay／
+  台灣 Pay 的 5,000 × 0.03% 均顯示 2 元，並完成台灣 Pay 結帳與 DB tender 核對（14/14）。
 
 ---
 
-## 階段 1：金額相關程式碼盤點
+以下為修正前唯讀稽核快照；其中的「不符合／待確認」是當時狀態，現況以本文件上方
+「修正後結論」為準。
 
-「DB 寫入」＝該檔本身會 `session.add` / UPDATE / DELETE / `commit`；
-「外部副作用」＝網路呼叫、SSE 推送、觸發列印等 DB 以外的作用。
+## 階段 1：金額相關 model／service／endpoint 盤點
 
-### 1.1 共用金額核心
+欄位口徑：
 
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
+- 「DB 寫入」是指該列所列檔案在一般執行路徑會執行 DML、`flush`、`commit`，或間接呼叫這類路徑；單純 ORM/schema 定義另行標示。
+- 「外部副作用」是 DB 以外的作用，例如 LINE Pay／Amego HTTP、SSE、檔案／物件儲存、實體列印或開錢櫃。
+- 同一 router 同時有讀寫端點時，以「寫端點」標示；職責欄列出本次金流稽核相關端點。
+
+| 模組 | 檔案 | 職責 | 是否觸及 DB 寫入 | 是否有外部副作用 |
 |---|---|---|---|---|
-| core | `backend/app/core/money.py` | `round_ntd` / `discounted_price` / `suggested_price` / `split_tax_inclusive` / `commission`；全系統唯一的四捨五入與稅拆分實作 | 否 | 否 |
-| core | `backend/app/core/audit.py` | 稽核紀錄寫入（金額異動留痕） | 是 | 否 |
-| frontend | `frontend/lib/money.ts` | `parseNtd` / `formatNtd`：整數元解析與顯示 | 否 | 否 |
-
-### 1.2 銷售 / POS
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| sales | `backend/app/modules/sales/models.py` | `sales`(subtotal/tax/total)、`sale_lines`(unit_price/line_total/discount_amount/manual_discount_amount/net_amount/cost_snapshot)、`sale_tenders`(amount/fee_amount)、購物金套用(requested_value/applied_amount)、`linepay_*`(amount/refunded_amount) | 是（ORM 定義） | 否 |
-| sales | `backend/app/modules/sales/service.py` | 結帳主流程：報價、活動折扣、手動折扣、贈品、稅拆、tender 分配、購物金扣抵、LINE Pay 收/退、作廢、毛利計算、冪等重放 | 是 | 是（LINE Pay HTTP） |
-| sales | `backend/app/modules/sales/pricing.py` | 折扣計算與**最大餘額法**分攤（`apply_discounts`、`_allocate_largest_remainder`） | 否 | 否 |
-| sales | `backend/app/modules/sales/repository.py` | 銷售/明細/tender 讀寫、毛利彙總（`period_margin`、`margin_breakdown`） | 是 | 否 |
-| sales | `backend/app/modules/sales/router.py` | `POST /sales`、`POST /sales/quote`、`POST /sales/{id}/void`、`POST /sales/{id}/print-detail`、LINE Pay 退款待處理/解決 | 是（commit） | 否 |
-| sales | `backend/app/modules/sales/linepay.py` | LINE Pay Offline 收款/退款 client | 否 | 是（HTTP） |
-| sales | `backend/app/modules/sales/inputs.py` / `schemas.py` | 邊界金額型別與驗證 | 否 | 否 |
-| sales | `backend/app/modules/sales/reasons*.py` | 贈品/折扣原因主檔 | 是 | 否 |
-| campaigns | `backend/app/modules/campaigns/service.py`、`router.py` | 限時活動折扣率與生效區間（結帳時取用） | 是 | 否 |
-
-### 1.3 收購（買斷 / 散裝）與定價
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| acquisition | `backend/app/modules/acquisition/models.py` | `acquisitions.total_cash_paid`、`payout_cash_amount`、`payout_credit_cash_equivalent` | 是（ORM 定義） | 否 |
-| acquisition | `backend/app/modules/acquisition/service.py` | 建單：收購總額計算、現金/購物金拆分（`_split_payout`）、序號品與散裝堆建立、錢櫃現金支出、購物金撥入、切結書綁定、作廢反轉、冪等重放 | 是 | 否 |
-| acquisition | `backend/app/modules/acquisition/router.py` | `POST /acquisitions`、`GET /{id}`、`GET /{id}/receipt`、`POST /{id}/void` | 是（commit） | 否 |
-| inventory | `backend/app/modules/inventory/models.py` | `serialized_items`(acquisition_cost/listed_price)、`bulk_lots`(acquisition_cost/unit_price/remaining_qty)、`catalog_products`(unit_price/unit_cost)、`category_pricing_rules`(min_price_multiple) | 是（ORM 定義） | 否 |
-| inventory | `backend/app/modules/inventory/service.py`、`repository.py`、`router.py` | 售價維護（序號品/商品/散裝堆改價）、庫存狀態機、散裝扣量、定價規則 | 是 | 否 |
-| inventory | `backend/app/modules/inventory/pricing_defaults.py` | 分類定價規則 seed 常數（折扣上限/最低毛利/最低倍數） | 否 | 否 |
-| menu | `backend/app/modules/menu/models.py`、`service.py`、`router.py` | 餐飲品項 `unit_price` 維護 | 是 | 否 |
-
-### 1.4 寄售
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| consignment | `backend/app/modules/consignment/models.py` | `consignment_settlements`(gross / commission_amount / payout_amount / 狀態 / reclaim_needed) | 是（ORM 定義） | 否 |
-| consignment | `backend/app/modules/consignment/service.py` | 售出時建結算單、抽成計算、`pay_settlement` 付款（含錢櫃現金流出、冪等鍵）、退貨/作廢時反轉結算 | 是 | 否 |
-| consignment | `backend/app/modules/consignment/repository.py`、`router.py` | 結算清單、`POST /consignment/settlements/{id}/pay` | 是 | 否 |
-
-### 1.5 購物金帳本
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| storecredit | `backend/app/modules/storecredit/models.py` | `store_credit_ledger`(signed_amount / balance_after / cash_equivalent / premium_rate_applied)、`store_credit_accounts.balance`、建議率紀錄 | 是（ORM 定義） | 否 |
-| storecredit | `backend/app/modules/storecredit/service.py` | `credit` / `debit` / `refund_for_sale_return` / `reverse*` / `adjust` / `get_balance(_for_update)` / `reconcile`；帳本唯一寫入點（`_write_entry`） | 是 | 否 |
-| storecredit | `backend/app/modules/storecredit/repository.py` | 帳戶列鎖（`lock_account`）、分錄插入、餘額 SUM、鏈結驗證（`rows_violating_chain`） | 是 | 否 |
-| storecredit | `backend/app/modules/storecredit/engine.py` | 加碼率建議引擎（純函式，含 `round_half_pp`） | 否 | 否 |
-| storecredit | `backend/app/modules/storecredit/metrics.py`、`suggestion_service.py` | 加碼率指標與建議紀錄 | 是（suggestion_service） | 否 |
-| storecredit | `backend/app/modules/storecredit/router.py` | `GET /contacts/{id}/store-credit`、`POST .../adjustments` | 是（commit） | 否 |
-
-### 1.6 錢櫃現金
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| cashdrawer | `backend/app/modules/cashdrawer/models.py` | `cash_sessions`(opening_float/counted_amount/expected_amount/variance)、`cash_movements.amount` | 是（ORM 定義） | 否 |
-| cashdrawer | `backend/app/modules/cashdrawer/service.py` | 開帳、記錄異動（`record_movement`）、應有現金推算（`expected_amount`）、分項彙總、結帳對帳 | 是 | 否 |
-| cashdrawer | `backend/app/modules/cashdrawer/router.py` | `POST /cash-sessions/open`、`/{id}/movements`、`/{id}/close` | 是（commit） | 否 |
-
-### 1.7 退貨 / 退款
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| returns | `backend/app/modules/returns/models.py` | `customer_returns.refund_amount`、明細 refund_amount、退款分項 amount | 是（ORM 定義） | 否 |
-| returns | `backend/app/modules/returns/service.py` | 退貨預覽/建立、退款分配、庫存回復、購物金沖回、錢櫃退現、寄售結算反轉、發票處置決策與折讓 | 是 | 否 |
-| returns | `backend/app/modules/returns/refund.py` | 差額法退款計算（`refund_entitlement`、`line_refund_amount`），純函式 | 否 | 否 |
-| returns | `backend/app/modules/returns/invoice_policy.py` | 退貨時作廢 vs 折讓的純決策邏輯 | 否 | 否 |
-| returns | `backend/app/modules/returns/router.py` | `POST /returns`、`POST /returns/preview`、`GET /returns/{id}` | 是（commit） | 否 |
-
-### 1.8 電子發票 / 稅
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| einvoice | `backend/app/modules/einvoice/models.py` | `invoices`(net/tax/total/tax_rate)、折讓(net/tax/total)、上傳佇列 | 是（ORM 定義） | 否 |
-| einvoice | `backend/app/modules/einvoice/service.py` | 開立/手開登記/作廢/折讓、佇列送出與結果回寫、補印 payload、證明聯列印標記 | 是 | 是（經 amego client） |
-| einvoice | `backend/app/modules/einvoice/amego.py` | Amego API client（開立/作廢/折讓/查詢） | 否 | 是（HTTP） |
-| einvoice | `backend/app/modules/einvoice/serializer.py`、`dropper.py`、`repository.py`、`router.py` | payload 組裝、佇列丟棄、佇列端點 | 是（repository/router/dropper） | 否 |
-| settings | `backend/app/modules/settings/models.py`、`service.py`、`router.py` | `tax_rate`、`premium_rate(_min/_max)`、`store_credit_min_spend`、`linepay_fee_pct`、`taiwanpay_fee_pct`、發票開關等 | 是 | 否 |
-
-### 1.9 採購（進項）
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| purchasing | `backend/app/modules/purchasing/models.py` | `purchase_order_lines.unit_cost`、進項發票 `invoice_total/net/tax` | 是（ORM 定義） | 否 |
-| purchasing | `backend/app/modules/purchasing/service.py`、`repository.py`、`router.py` | 採購單建立/送出/取消、收貨入庫成本、進項發票登記（含稅拆分） | 是 | 否 |
-| stocktake | `backend/app/modules/stocktake/*` | 盤點（數量，不直接記金額；影響庫存價值報表） | 是 | 否 |
-
-### 1.10 報表（讀取金額，不寫入）
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| reports | `backend/app/modules/reports/finance_router.py` | 每日現金/摘要、趨勢、洞察、庫存價值、寄售應付、銷售毛利、折扣、內用、贈品、活動成效 | 否 | 否 |
-| reports | `backend/app/modules/reports/router.py` | 購物金負債/流量/成效/對帳 | 否 | 否 |
-| reports | `backend/app/modules/reports/service.py`、`aging.py`、`export.py` | 報表彙總、帳齡 FIFO 分桶、CSV/Excel 匯出 | 否 | 是（產生檔案回應） |
-
-### 1.11 金額的呈現與列印來源
-
-| 模組 | 檔案 | 職責 | DB 寫入 | 外部副作用 |
-|---|---|---|---|---|
-| customerdisplay | `backend/app/modules/customerdisplay/models.py` | `cart_sessions.snapshot`(JSONB，含客顯金額)、`cart_session_events`（DB trigger 強制 insert-only） | 是（ORM 定義） | 否 |
-| customerdisplay | `backend/app/modules/customerdisplay/service.py`、`repository.py`、`router.py` | 購物車快照與版本推進、kiosk 配對、SSE 推送 | 是 | 是（SSE） |
-| signing | `backend/app/modules/signing/models.py`、`service.py`、`router.py` | 簽署任務 `content` JSONB（含收購/購物金金額快照）、內容雜湊與消耗 | 是 | 否 |
-| frontend | `frontend/lib/agent.ts` | 送明細聯 / 發票證明聯 / 收購憑證聯 / 標籤 / 開錢櫃到硬體代理 | 否 | 是（HTTP 至代理、實體列印） |
-| hardware-agent | `hardware-agent/agent/drivers/escpos_receipt.py` | ESC/POS 版面排版（只排版、不做金額運算） | 否 | 是（列印） |
-| frontend | `frontend/features/*`（pos / acquisition / returns / reports / settings…） | 畫面金額組裝與顯示 | 否 | 否 |
-
-### 1.12 資料庫金額欄位型別（既有事實）
-
-- 幾乎所有金額欄位為 `NUMERIC(12, 0)`（整數元）。
-- 費率欄位為 `NUMERIC(5, 4)`：`settings.tax_rate`、`premium_rate(_min/_max)`、`linepay_fee_pct`、
-  `taiwanpay_fee_pct`、`invoices.tax_rate`、`store_credit_ledger.premium_rate_applied`。
-- `inventory.category_pricing_rules.min_price_multiple` 為 `NUMERIC(5, 2)`（倍數，非金額）。
-- **例外**：`sales/models.py:280` `SaleStoreCreditApplication.requested_value` 為 `NUMERIC(12, 2)`，
-  與同表 `applied_amount`（`NUMERIC(12, 0)`）及全系統整數元慣例不一致 → 列入階段 2 查證。
-
----
-
----
+| 共用金額核心 | `backend/app/core/money.py` | 新台幣整數元 `round_ntd`、折扣、含稅定價、含稅拆稅、寄售抽成 | 否 | 否 |
+| 金額 canonical／冪等指紋 | `backend/app/core/canonical.py` | Decimal canonical JSON；拒絕 float，供銷售等流程建立穩定指紋 | 否 | 否 |
+| DB session／transaction 基礎 | `backend/app/core/db.py` | async engine、session factory、每 request session 生命週期；各 router 的 commit／rollback 基礎 | 否（僅提供 session） | 否 |
+| 金額異動稽核 | `backend/app/core/audit.py` | `audit_log` model 與 insert-only 寫入；保存改價、付款、現金調整等 before／after | 是（INSERT／flush） | 否 |
+| 系統金流設定－model／邊界 | `backend/app/modules/settings/models.py`<br>`backend/app/modules/settings/defaults.py`<br>`backend/app/modules/settings/schemas.py` | `tax_rate`、寄售預設抽成、購物金溢價率與最低消費、行動支付費率、發票開關的型別、預設值與輸入輸出 | 否（schema／ORM 定義） | 否 |
+| 系統金流設定－service／endpoint | `backend/app/modules/settings/repository.py`<br>`backend/app/modules/settings/service.py`<br>`backend/app/modules/settings/router.py` | 讀寫設定、溢價率歷史；`GET/PATCH /settings`、`GET /settings/premium-rate/history` | 是（UPDATE／INSERT／commit） | 否 |
+| 收購－model | `backend/app/modules/acquisition/models.py` | 收購／寄售單頭、現金腿與購物金現金等值；含收購－庫存－購物金 DB 背書 guard | 否（ORM／constraint DDL 定義） | 否 |
+| 收購－repository／service | `backend/app/modules/acquisition/repository.py`<br>`backend/app/modules/acquisition/service.py` | 買斷、寄售、散裝建單；加總收購成本、拆現金／購物金撥款、建庫存、寫錢櫃與購物金、產生補印憑證資料；作廢入口僅列入盤點、不在本輪展開 | 是（跨模組 INSERT／UPDATE／flush） | 否 |
+| 收購－schema／endpoint | `backend/app/modules/acquisition/schemas.py`<br>`backend/app/modules/acquisition/router.py` | 金額字串邊界；`POST /acquisitions`、`GET /acquisitions/{id}`、`GET /acquisitions/{id}/receipt`、作廢端點（僅盤點） | 是（寫端點 commit） | 否；列印由前端／硬體代理另觸發 |
+| 庫存與上架定價－model | `backend/app/modules/inventory/models.py` | 序號品收購成本／上架價、散裝批總成本／單價／數量、一般商品售價／成本、分類最低倍數 | 否（ORM 定義） | 否 |
+| 庫存與上架定價－repository／service | `backend/app/modules/inventory/repository.py`<br>`backend/app/modules/inventory/service.py`<br>`backend/app/modules/inventory/pricing_defaults.py` | 改價、含稅建議售價、散裝每件成本、庫存狀態轉移與原子扣量、估值資料來源 | 是（INSERT／條件 UPDATE／flush） | 否 |
+| 庫存與上架定價－endpoint | `backend/app/modules/inventory/schemas.py`<br>`backend/app/modules/inventory/router.py` | 序號品／散裝／一般商品讀取與改價、商品建立、分類定價規則讀寫 | 是（寫端點 commit） | 否 |
+| 餐飲品項價格 | `backend/app/modules/menu/models.py`<br>`backend/app/modules/menu/repository.py`<br>`backend/app/modules/menu/service.py`<br>`backend/app/modules/menu/schemas.py`<br>`backend/app/modules/menu/router.py` | `menu_items.unit_price` 建立、修改與 POS 取價；`/menu-items` 讀寫端點 | 是（寫端點 INSERT／UPDATE／commit） | 否 |
+| 活動折扣／折扣原因 | `backend/app/modules/campaigns/models.py`<br>`backend/app/modules/campaigns/repository.py`<br>`backend/app/modules/campaigns/service.py`<br>`backend/app/modules/campaigns/schemas.py`<br>`backend/app/modules/campaigns/router.py`<br>`backend/app/modules/sales/reasons.py`<br>`backend/app/modules/sales/reasons_router.py` | 活動折扣率、生效狀態、適用品類；贈品／臨時折扣原因主檔；`/campaigns`、`/gift-reasons`、`/discount-reasons` | 是（主檔 INSERT／UPDATE／commit） | 否 |
+| 銷售／POS－model | `backend/app/modules/sales/models.py` | 銷售總額與稅額、明細原價／成交價／折扣／淨額／成本快照、tender 與手續費、購物金套用、LINE Pay 交易／退款嘗試；含跨表 DB guard | 否（ORM／constraint DDL 定義） | 否 |
+| 銷售／POS－定價純邏輯 | `backend/app/modules/sales/pricing.py` | 訂單／品項折扣與最大餘額法分攤 | 否 | 否 |
+| 銷售／POS－repository／service | `backend/app/modules/sales/repository.py`<br>`backend/app/modules/sales/service.py` | 報價、結帳、折扣、贈品、總額拆稅、tender 對平、購物金核銷、錢櫃收現、庫存扣減、寄售結算、毛利／手續費彙總、冪等重放；作廢邏輯僅列入盤點 | 是（跨模組 INSERT／UPDATE／flush；部分 durable commit） | 是（LINE Pay 收款／退款 HTTP） |
+| 銷售／POS－輸入輸出／endpoint | `backend/app/modules/sales/inputs.py`<br>`backend/app/modules/sales/schemas.py`<br>`backend/app/modules/sales/router.py` | 金額字串 schema；`POST /sales`、`POST /sales/quote`、銷售查詢、`POST /sales/{id}/print-detail`、LINE Pay 退款對帳；作廢端點僅盤點 | 是（寫端點 commit／rollback） | 是（建立 LINE Pay client 並由 service 呼叫平台）；此端點不直接列印 |
+| LINE Pay client | `backend/app/modules/sales/linepay.py` | LINE Pay Offline 收款、查詢、退款的簽章、order id 與 HTTP transport | 否 | 是（LINE Pay HTTP） |
+| 購物金－model／DB guard | `backend/app/modules/storecredit/models.py` | append-only ledger、`signed_amount`、`balance_after`、現金等值／溢價率、帳戶快取餘額、建議率紀錄與 DB triggers／constraints | 否（ORM／constraint DDL 定義） | 否 |
+| 購物金－repository／service | `backend/app/modules/storecredit/repository.py`<br>`backend/app/modules/storecredit/service.py` | 帳戶列鎖、唯一分錄插入、入帳／扣抵／退款回補／沖正／人工校正、快取餘額、SUM 重算與鏈結對帳；購物金唯一一般寫入介面 | 是（INSERT ledger、UPDATE account、flush） | 否 |
+| 購物金－schema／endpoint | `backend/app/modules/storecredit/schemas.py`<br>`backend/app/modules/storecredit/router.py` | `GET /contacts/{id}/store-credit`、`POST .../adjustments`、當日溢價建議 | 是（校正與建議紀錄 commit） | 否 |
+| 購物金－建議／效益指標 | `backend/app/modules/storecredit/engine.py`<br>`backend/app/modules/storecredit/metrics.py`<br>`backend/app/modules/storecredit/suggestion_service.py` | 溢價建議純計算、效益指標、每日建議快照 | 是（suggestion service 寫建議紀錄；engine／metrics 純讀算） | 否 |
+| 寄售結算－model | `backend/app/modules/consignment/models.py` | `gross`、抽成率、`commission_amount`、`payout_amount`、付款／追回狀態 | 否（ORM 定義） | 否 |
+| 寄售結算－repository／service | `backend/app/modules/consignment/repository.py`<br>`backend/app/modules/consignment/service.py` | 售出建立結算、抽成與應付計算、付款列鎖／冪等、錢櫃現金流出、報表彙總；退貨／作廢反轉僅盤點相關寫入 | 是（INSERT／UPDATE／flush） | 否 |
+| 寄售結算－schema／endpoint | `backend/app/modules/consignment/schemas.py`<br>`backend/app/modules/consignment/router.py` | `GET /consignment/settlements`、`POST /consignment/settlements/{id}/pay` | 是（付款端點 commit） | 否 |
+| 錢櫃－model | `backend/app/modules/cashdrawer/models.py` | 開帳金、實點、應有、差異與每筆 cash movement 金額 | 否（ORM 定義） | 否 |
+| 錢櫃－repository／service | `backend/app/modules/cashdrawer/repository.py`<br>`backend/app/modules/cashdrawer/service.py` | 開帳、班別／movement 列鎖、銷售收現／收購付現／寄售付款／退貨退現／人工調整、應有現金與結帳差異 | 是（INSERT／UPDATE／flush） | 否；不直接驅動實體錢櫃 |
+| 錢櫃－schema／endpoint | `backend/app/modules/cashdrawer/schemas.py`<br>`backend/app/modules/cashdrawer/router.py` | `/cash-sessions` 開帳、current、movements、close | 是（寫端點 commit） | 否 |
+| 退貨／退款－model | `backend/app/modules/returns/models.py` | 退貨單／明細退款額、退款 tender 金額 | 否（ORM 定義） | 否 |
+| 退貨／退款－純計算 | `backend/app/modules/returns/refund.py`<br>`backend/app/modules/returns/invoice_policy.py` | 累計差額退款額與退貨時發票處置決策 | 否 | 否 |
+| 退貨／退款－repository／service／endpoint | `backend/app/modules/returns/repository.py`<br>`backend/app/modules/returns/service.py`<br>`backend/app/modules/returns/schemas.py`<br>`backend/app/modules/returns/router.py` | `POST /returns/preview`、`POST /returns`、退貨查詢；退款分配、庫存回復、購物金回補、錢櫃退現、寄售結算反轉、發票折讓佇列 | 是（跨模組 INSERT／UPDATE／commit） | 是（LINE Pay 退款 HTTP）；發票平台交付由 e-invoice 路徑處理 |
+| 電子發票／折讓－model | `backend/app/modules/einvoice/models.py` | 發票／折讓的未稅、稅、含稅總額與稅率快照；上傳 queue／結果事件 | 否（ORM 定義） | 否 |
+| 電子發票／折讓－repository／service／序列化 | `backend/app/modules/einvoice/repository.py`<br>`backend/app/modules/einvoice/service.py`<br>`backend/app/modules/einvoice/serializer.py`<br>`backend/app/modules/einvoice/dropper.py` | 依銷售總額建發票、總額層拆稅、登記紙本、折讓、queue 認領／送出／結果回寫、補印 payload 與證明聯列印標記；作廢路徑僅盤點 | 是（INSERT／UPDATE／多階段 commit） | 是（Amego HTTP；舊 Turnkey outbox 檔案曝光） |
+| Amego client | `backend/app/modules/einvoice/amego.py` | 開立／查詢／作廢／折讓／補印 API payload、解析與 HTTP transport | 否 | 是（Amego HTTP） |
+| 電子發票／折讓－schema／endpoint | `backend/app/modules/einvoice/schemas.py`<br>`backend/app/modules/einvoice/router.py` | `/invoices/{id}`、`/einvoice/queue`、銷售開票、補印資料、證明聯列印標記、紙本登記、queue 送出／重試／結果回報；作廢路徑僅盤點 | 是（寫端點 commit；送出端點有多階段落庫） | 是（Amego HTTP／補印資料取得） |
+| 採購／進項－model | `backend/app/modules/purchasing/models.py` | 採購明細單位成本、收貨與進項發票含稅／未稅／稅額 | 否（ORM 定義） | 否 |
+| 採購／進項－service／endpoint | `backend/app/modules/purchasing/repository.py`<br>`backend/app/modules/purchasing/service.py`<br>`backend/app/modules/purchasing/schemas.py`<br>`backend/app/modules/purchasing/router.py` | 採購單建立／收貨入庫成本、進項發票登記與拆稅；`/purchase-orders`、`/purchase-orders/{id}/receipts/{receipt_id}/invoice` 等端點 | 是（INSERT／UPDATE／commit） | 否 |
+| 會員金額彙總 facade | `backend/app/modules/contacts/member_service.py`<br>`backend/app/modules/contacts/member_schemas.py`<br>`backend/app/modules/contacts/service.py`<br>`backend/app/modules/contacts/router.py` | 會員購買金額／tender、購物金餘額、寄售待付與抽成、來源商品價格；`/contacts/{id}/overview`、purchases、consignments、sourced-items | 混合：金額彙總端點唯讀；同 router 的聯絡人寫端點會 commit | 否 |
+| 財務／購物金報表 | `backend/app/modules/reports/service.py`<br>`backend/app/modules/reports/aging.py`<br>`backend/app/modules/reports/export.py`<br>`backend/app/modules/reports/router.py`<br>`backend/app/modules/reports/finance_router.py`<br>`backend/app/modules/reports/schemas.py` | 現金日報、摘要、趨勢、庫存價值、寄售應付、銷售毛利／折扣／活動、購物金負債／流量／效益／對帳與匯出 | 否（讀取／彙總） | 否（僅回傳 JSON／CSV／Excel response） |
+| 客顯購物車／付款協調－model | `backend/app/modules/customerdisplay/models.py` | server-authoritative cart JSONB 金額快照、tender、revision、付款狀態與 append-only event | 否（ORM／constraint DDL 定義） | 否 |
+| 客顯購物車／付款協調－service／endpoint | `backend/app/modules/customerdisplay/repository.py`<br>`backend/app/modules/customerdisplay/service.py`<br>`backend/app/modules/customerdisplay/schemas.py`<br>`backend/app/modules/customerdisplay/router.py` | 客顯購物車報價快照、購物金簽署凍結、checkout、付款不確定狀態與對帳；`/customer-display/*`、`/kiosk/*`、SSE | 是（cart／event／付款狀態 INSERT／UPDATE／commit） | 是（SSE；LINE Pay 查詢／收款；背景 sweep） |
+| 簽署金額快照 | `backend/app/modules/signing/models.py`<br>`backend/app/modules/signing/repository.py`<br>`backend/app/modules/signing/service.py`<br>`backend/app/modules/signing/schemas.py`<br>`backend/app/modules/signing/router.py` | 收購切結與購物金核銷的 content JSONB 金額快照、內容指紋、簽署／消耗狀態；`/signing/*`、`/kiosk/tasks/*` | 是（task／event INSERT／UPDATE／commit） | 否 |
+| 前端共用金額／付款摘要 | `frontend/lib/money.ts`<br>`frontend/lib/payment.ts`<br>`frontend/features/settings/helpers.ts`<br>`frontend/features/reports/reports.ts` | NTD 解析／顯示、tender 付款摘要、費率／百分比與報表數值顯示 | 否 | 否 |
+| 前端收購定價 | `frontend/features/acquisition/pricing.ts`<br>`frontend/features/acquisition/validation.ts` | 含稅建議售價、未稅反推、毛利率、應付總額、現金／購物金拆分與溢價預覽 | 否 | 否 |
+| 前端 POS／退款／採購／現金計算 | `frontend/features/pos/cart.ts`<br>`frontend/features/pos/discounts.ts`<br>`frontend/features/pos/tender.ts`<br>`frontend/features/returns/refund.ts`<br>`frontend/features/returns/plan.ts`<br>`frontend/features/purchasing/purchasing.ts`<br>`frontend/features/cash/money-input.ts`<br>`frontend/features/inventory/inventory.ts` | 購物車加總、折扣 payload、tender 計畫與找零、退貨預覽、採購草稿總額、現金輸入與庫存價格解析 | 否 | 否 |
+| 前端 API／冪等邊界 | `frontend/lib/api.ts`<br>`frontend/lib/api-types.ts`<br>`frontend/lib/idempotency.ts` | 型別化 API、金額字串合約、收購／銷售／收貨等重試用 idempotency key 保存與清除 | 間接（呼叫後端寫入端點） | 是（後端 HTTP） |
+| 前端金流操作畫面 | `frontend/app/(authed)/pos/page.tsx`<br>`frontend/app/(authed)/sales/page.tsx`<br>`frontend/app/(authed)/acquisition/page.tsx`<br>`frontend/app/(authed)/cash/page.tsx`<br>`frontend/app/(authed)/consignment/page.tsx`<br>`frontend/app/(authed)/inventory/page.tsx`<br>`frontend/app/(authed)/menu/page.tsx`<br>`frontend/app/(authed)/campaigns/page.tsx`<br>`frontend/app/(authed)/purchasing/page.tsx`<br>`frontend/app/(authed)/reports/page.tsx`<br>`frontend/app/(authed)/settings/page.tsx`<br>`frontend/app/(authed)/contacts/page.tsx`<br>`frontend/app/(authed)/contacts/[id]/page.tsx` | 送出建單／結帳／付款／改價／折扣／現金／設定請求，顯示後端金額，並協調列印／開錢櫃 | 間接（呼叫後端 API） | 是（後端與 hardware-agent HTTP、實體列印／開錢櫃） |
+| 前端客顯／SSE | `frontend/features/customer-display/PosCustomerDisplay.tsx`<br>`frontend/app/kiosk/page.tsx` | 顯示後端 cart snapshot、送簽署／付款狀態、SSE 重連 | 間接（呼叫後端 API） | 是（HTTP／SSE） |
+| 前端列印金額轉送 | `frontend/lib/agent.ts` | 將後端 `SaleRead`、`InvoiceRead`、`AcquisitionReceiptRead` 金額原樣組成 hardware-agent payload；發票用 `invoice.net/tax/total` | 否 | 是（hardware-agent HTTP、列印／開錢櫃） |
+| 硬體代理列印資料 model | `hardware-agent/agent/interfaces.py` | 收據明細、tender、收購憑證、發票未稅／稅／含稅金額的字串 payload；代理宣告只排版不計價 | 否 | 否 |
+| 硬體代理列印／錢櫃 endpoint | `hardware-agent/agent/main.py`<br>`hardware-agent/agent/routers/print.py`<br>`hardware-agent/agent/devices.py`<br>`hardware-agent/agent/drivers/escpos_receipt.py`<br>`hardware-agent/agent/drivers/einvoice_format.py`<br>`hardware-agent/agent/drivers/brother_label.py` | `/print/detail`、`/print/acquisition`、`/print/einvoice`、`/print/raw`、`/print/label`、`/drawer/open` 等入口與金額／價格排版；協定細節不在本稽核展開 | 否 | 是（實體列印／開錢櫃） |
+| 備份／還原跨切面 | `backend/app/modules/backup/service.py`<br>`backend/app/modules/backup/restore.py`<br>`backend/app/modules/backup/restore_service.py`<br>`backend/app/modules/backup/backend.py`<br>`backend/app/modules/backup/router.py` | 整庫備份、R2／本機保存、還原到拋棄式 DB 並驗證 `sales`、`return_tenders`、`cash_sessions`、`store_credit_ledger`、`invoices` 等金流表；`/backup/*` | 是（備份／還原 metadata；拋棄式 DB restore） | 是（pg_dump／pg_restore、檔案、R2、背景工作） |
 
 ## 階段 2：逐條查證
 
-證據一律引「檔案:行號」＋原始碼片段。判定用「符合 / 不符合 / 待確認」。
-本節只描述現況、風險與成因，不提修法。
+本階段僅作靜態原始碼、migration、fixture 與 git 歷史的唯讀查證；未執行測試、未連線或查詢任何部署中資料庫，也未修改實作或測試。
 
----
+### 結論摘要
 
-# P0：會產生錯帳或掉錢
+| 嚴重度 | 數量 | 摘要 |
+|---|---:|---|
+| P0 | 1 | LINE Pay 可在沒有客顯購物車時先完成平台扣款；若其後本機交易失敗，後端沒有可持久化的付款待對帳載體 |
+| P1 | 8 | 寄售預設抽成、散裝成本、折讓稅尾差、歷史報表稅率、前端 float、人工現金調整冪等、LINE Pay 退款外部邊界 |
+| P2 | 8 | 稅率 scale、Numeric 上界、現金帳 DB 守衛、購物金 migration／fixture／deferred-trigger 測試、報價與成交雙實作、寄售結算 DB 不變量 |
+| 待確認 | 4 | 部署 DB trigger 實況、進項發票稅率政策、Amego 單價 scale、營業稅率是否允許店別調整 |
 
-## P0-1　購物金銷售「作廢」在真實 COMMIT 下會被資料庫守衛擋掉
+### A–E 查核矩陣
 
-**判定：不符合。**
+| 編號 | 查核項目 | 判定 | 證據／結論 |
+|---|---|---|---|
+| A-1 | 金額全程 Decimal／整數；float 與 JSON | **不符合** | 後端核心與 API 輸出為 `Decimal`／字串，canonical JSON 拒絕 float；但前端費用與購物金溢價預覽以 `number × number`、`Math.round` 計算，存在 1 元顯示差，見 P1-6。 |
+| A-2 | DB Numeric precision／scale 與程式端一致 | **不符合** | 多數金額 DB 為 `Numeric(12,0)`，輸入守整數但未普遍守 12 位上界；`tax_rate` DB 為 `Numeric(5,4)`，PATCH 未守四位 scale，見 P2-1、P2-2。 |
+| A-3 | 四捨五入時機／方向在後端、前端、發票一致 | **不符合** | 核心後端統一 `ROUND_HALF_UP`，售價與稅額只在最後／總額層 round；發票與列印沿用落盤值。前端 `Math.round` 路徑不完全等價，散裝成本另在 DB scale coercion 才隱式取整，見 P1-2、P1-6。 |
+| A-4 | 5% 含稅反推、逐項與總額課稅的 1 元差 | **不符合** | 銷售與原發票使用 `net=round(total/(1+rate))`、`tax=total-net`，符合總額層口徑；但多筆折讓各自拆稅會使全退累計的 net/tax 與原發票相差 1 元，見 P1-4。營業稅是否必須固定 5% 見待確認-4。 |
+| B-1 | 購物金帳本 append-only，含 migration／fixture | **不符合** | production repository 只 INSERT 且 model 定義 UPDATE/DELETE trigger；但 migration 引用可變的 live constant，測試／模擬亦有停用 trigger 後 DELETE/TRUNCATE 的路徑，見 P2-4、P2-5 與待確認-1。 |
+| B-2 | 餘額即時 SUM 或快取；重算／對帳 | **符合** | 對外讀 `store_credit_accounts.balance` 快取；每次寫入鎖帳戶、先比對 `SUM`／最新 `balance_after`／快取，DB trigger 原子同步；`reconcile()` 可全鏈重算並只回報不符。 |
+| B-3 | 餘額小於 0 的可達路徑 | **符合** | 一般 service 寫入在 `new_balance < 0` 時拒絕；ledger 與 account 另有 `balance_after >= 0`、`balance >= 0` DB CHECK。未發現 production 寫入可達負餘額。 |
+| C-1 | 主檔、明細、庫存、購物金、錢櫃、寄售結算同一 DB transaction | **符合** | 銷售、收購、退貨、寄售付款的 service 只 flush，由同一 request session 在 router 尾端一次 commit；收購另以 savepoint 保證 service 例外不留半套。外部 LINE Pay 不屬同一 DB transaction，另見 C-4。 |
+| C-2 | async session 跨 task 共用／commit 時序 | **符合** | `get_session()` 每 request 建立一個 session；背景 sweeper 自行向 session factory 取新 session。SSE 長連線只在同一 generator task 唯讀，且每輪 rollback 釋放 transaction。未發現金流 request session 被交給 `create_task()`。 |
+| C-3 | 同會員／同商品併發鎖策略 | **符合** | 購物金以 account `FOR UPDATE`；現金 movement／關帳以 cash session `FOR UPDATE`；序號品先按 id 上鎖，散裝與一般商品以條件 UPDATE 扣量；寄售付款鎖 settlement 並以 transaction advisory lock 序列化冪等鍵。 |
+| C-4 | 外部副作用在 commit 後才觸發 | **不符合** | 實體列印／開櫃在前端收到成功回應後觸發；Amego 先 commit queue claim 再曝光。LINE Pay 收款與退款則在主交易 commit 前呼叫平台，見 P0-1、P1-8。 |
+| D-1 | 重複結帳、前端重試、SSE 重連不重複帳／扣款 | **不符合** | 銷售／收購／退貨／購物金／寄售付款均有回放、唯一鍵或列鎖；SSE 重連只 invalidate 後 GET 全量狀態。但人工現金調整沒有冪等鍵，重送會再 INSERT，見 P1-7；無客顯 LINE Pay 的失敗後對帳見 P0-1。 |
+| D-2 | idempotency key 或唯一約束 | **不符合** | `sales` 有 `(store_id,idempotency_key)` unique，購物金有來源 unique／manual key unique，收購與退貨亦有 unique；人工現金調整 request/model 無 key 或唯一約束，見 P1-7。 |
+| E-1 | 0 元交易 | **符合** | 銷售只允許全單贈品為 0 元且不產生 tender／發票；BUYOUT／BULK_LOT 應付總額必須大於 0。 |
+| E-2 | 全額購物金支付 | **符合** | 沒有 CASH tender 時不要求開帳；購物金仍要求會員、已凍結客顯購物車、簽署與帳戶鎖定餘額相符。 |
+| E-3 | 購物金不足 | **符合** | 扣抵走同帳戶列鎖，權威 `SUM + signed_amount` 小於 0 即拒絕，整筆銷售由 router rollback。 |
+| E-4 | 負數金額 | **符合** | 對外金額 schema 與 service 普遍拒絕負數；`MANUAL_ADJUST` 明確允許正負以表達現金校正，且需 manager／事由／audit。 |
+| E-5 | 寄售抽成後賣家實拿＋店家抽成恆等售價 | **符合（production service）** | `commission_amount=round_ntd(gross*pct/100)`，`payout=gross-commission_amount`，所以 service 建立的列恆等；DB 本身未背書此等式，見 P2-8。 |
 
-DB 層有一道 deferred constraint trigger，規定「SALE_VOID 沖正只能對應已作廢的銷售」，
-而它判定「已作廢」用的是 **`sales.invoice_status = 'VOID'`**：
+### 符合項目的主要實碼證據
 
-`backend/app/modules/sales/models.py:551-566`
-```sql
-CREATE OR REPLACE FUNCTION sales_ledger_sale_debit_guard() RETURNS trigger AS $$
-DECLARE
-  sale_status TEXT;
-BEGIN
-  IF NEW.entry_type = 'REVERSAL' AND NEW.source_type = 'SALE_VOID' THEN
-    SELECT invoice_status INTO sale_status
-      FROM sales WHERE id = NEW.source_id AND store_id = NEW.store_id;
-    IF NOT FOUND OR sale_status <> 'VOID' THEN
-      RAISE EXCEPTION 'SALE_VOID 沖正只能對應已作廢的同店銷售';
-    END IF;
-```
-掛法（`backend/app/modules/sales/models.py:589-591`）：
-```sql
-CREATE CONSTRAINT TRIGGER trg_ledger_sale_debit_backing
-AFTER INSERT OR UPDATE ON store_credit_ledger
-DEFERRABLE INITIALLY DEFERRED
-```
+後端金額核心使用 Decimal 與 `ROUND_HALF_UP`，含稅拆分在總額層只做一次，抽成以差額導出應付額：
 
-但 2026-08-01 的重構已把「銷售是否作廢」搬到 `sales.status`，並明文禁止再用 invoice_status 代替：
+`backend/app/core/money.py:24`
 
-`backend/app/shared/enums.py:161-163`
-```
-**VOIDED 是「這筆銷售是否有效」的唯一事實來源**：報表、清單與後續操作一律以
-`sale.status != VOIDED` 判斷，不得再用 `invoice_status == VOID` 代替——後者是
-**發票**的狀態，電子發票關閉時根本沒有發票，兩者語意不同（見 ADR）。
-```
-
-`void_sale()` 現在只設 `sale.status`，`invoice_status` 交由發票實況決定
-（`backend/app/modules/sales/service.py:2054-2101`）：
 ```python
-        before = sale.status.value
-        sale.status = SaleStatus.VOIDED
-        ...
-        await self._storecredit.reverse_for_sale_void(       # ← 插入 REVERSAL/SALE_VOID
-            sale.store_id, sale.id, created_by=actor_user_id
+def round_ntd(value: Decimal) -> int:
+    """四捨五入（ROUND_HALF_UP）到整數元。"""
+    return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+```
+
+`backend/app/core/money.py:64`
+
+```python
+def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
+    """將含稅總額拆為（未稅 net, 稅額 tax），保證 net + tax = total（整數元、不差一元）。
+
+    稅於發票總額層級推算一次（不逐項算稅，見 CLAUDE.md §6）：
+    `net = round_ntd(total / (1 + rate))`、`tax = total − net`。
+    rate 為小數稅率（如 0.05），限 0 ≤ rate < 1。
+    """
+```
+
+`backend/app/core/money.py:73`
+
+```python
+total_ntd = round_ntd(total)
+net = round_ntd(total / (Decimal(1) + rate))
+tax = total_ntd - net
+```
+
+金額證據用的 canonical JSON 明確拒絕 float：
+
+`backend/app/core/canonical.py:19`
+
+```python
+if isinstance(value, Decimal):
+    return format(value, "f")
+if isinstance(value, float):
+    raise ValueError("canonical JSON 不接受浮點數；金額必須用十進位字串")
+```
+
+購物金寫入先鎖帳戶並重算帳本，負餘額在寫入前拒絕：
+
+`backend/app/modules/storecredit/service.py:131`
+
+```python
+account = await self._repo.lock_account(store_id, contact_id)
+replay = await self._find_replay_locked(
+    store_id,
+    entry_type=entry_type,
+    source_type=source_type,
+    source_id=source_id,
+    reversal_of_id=reversal_of_id,
+    fingerprint=fingerprint,
+    idempotency_key=idempotency_key,
+)
+```
+
+`backend/app/modules/storecredit/service.py:146`
+
+```python
+ledger_balance = await self._repo.sum_signed(store_id, contact_id)
+latest_after = await self._repo.latest_balance_after(store_id, contact_id)
+cached = Decimal(account.balance)
+if cached != ledger_balance or (latest_after is not None and latest_after != cached):
+    raise StoreCreditConflict(
+        f"contact {contact_id} 帳本/快取不一致（帳本 {ledger_balance}、"
+        f"快取 {cached}），寫入中止——請先執行對帳處理"
+    )
+new_balance = ledger_balance + signed_amount
+if new_balance < 0:
+    raise InsufficientStoreCredit(
+        f"contact {contact_id} 購物金餘額不足（{account.balance} {signed_amount:+}）"
+    )
+```
+
+銷售的本機金流副作用同在 service 內，路由最後才 commit：
+
+`backend/app/modules/sales/service.py:1081`
+
+```python
+await self._apply_tenders(
+    store_id,
+    sale,
+    plan,
+    clerk_user_id,
+    buyer_contact_id,
+    settings,
+    idempotency_key=idempotency_key,
+    linepay_client=linepay_client,
+    reconciled_linepay_order_id=reconciled_order_id if line_pay_tenders else None,
+    reconciled_linepay_result=reconciled_linepay_result,
+    linepay_attempt=linepay_attempt,
+)
+```
+
+`backend/app/modules/sales/router.py:389`
+
+```python
+try:
+    lines = await svc.get_lines(sale.id)
+    tenders = await svc.get_tenders(sale.id)
+    await session.commit()
+```
+
+收購將建單、入庫、現金與購物金放在 savepoint／外層同一 transaction：
+
+`backend/app/modules/acquisition/service.py:431`
+
+```python
+try:
+    async with self._session.begin_nested():
+        return await self._create_acquisition_impl(
+            store_id, clerk_user_id, data, idempotency_key
         )
-        ...
-        if voided_invoice is not None:
-            if voided_invoice.status is not InvoiceStatus.VOID:
-                sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
-            elif voided_invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
-                sale.invoice_status = SaleInvoiceStatus.VOID
-            else:
-                sale.invoice_status = SaleInvoiceStatus.NOT_ISSUED
 ```
-`void_invoice_for_sale` 在沒有發票時直接 no-op（`backend/app/modules/einvoice/service.py:456-458`）：
+
+`backend/app/modules/acquisition/service.py:611`
+
 ```python
-        invoice = await self._repo.find_invoice_by_sale(store_id, sale_id)
-        if invoice is None:
-            return None
+if cash_part > 0:
+    await self._cash.record_movement(
+        store_id,
+        CashMovementType.BUYOUT_OUT,
+        cash_part,
+        actor_user_id=clerk_user_id,
+        ref_type="acquisition",
+        ref_id=acquisition.id,
+    )
+if credit_part > 0:
 ```
 
-**後果**：電子發票關閉（或發票尚未核可）時，作廢一筆用購物金付款的銷售，
-交易結束時 `invoice_status` 仍是 `NOT_ISSUED`，deferred trigger 於 COMMIT 觸發並
-`RAISE EXCEPTION` → 整筆作廢失敗。`invoice_status` 會等於 `'VOID'` 的只剩手開紙本一條路
-（`service.py:2099`）與 F0501 平台核可回呼（`service.py:2192`）。
+`backend/app/modules/acquisition/router.py:151`
 
-**為什麼測試沒抓到**：測試把每個案例包在外層交易裡、session 以 savepoint 加入，
-應用層的 `commit()` 只是釋放 savepoint，**不是真正的 COMMIT**，因此
-DEFERRABLE INITIALLY DEFERRED 的 constraint trigger 在一般 pytest 路徑永遠不會觸發。
-
-`backend/tests/conftest.py:4-8`
-```
-- 每個測試在獨立的外層交易中執行，結束時 rollback，資料不落地、測試間不互相污染。
-- session 以 join_transaction_mode="create_savepoint" 加入外層交易，
-  因此即使測試內呼叫 commit()，也只是釋放 savepoint，外層 rollback 仍會整批丟棄。
-```
-既有的 `backend/tests/integration/test_sales_tenders.py:389` 「作廢購物金銷售」用的正是這種
-session，所以綠燈；而同檔 `:794` 那個**真的開獨立 session、真的 commit** 的測試
-（`test_sale_void_reversal_requires_voided_sale`）反而是在斷言這道守衛「有效」，
-其註解 `# 銷售仍 NOT_ISSUED（未作廢）→ 直插 SALE_VOID 沖正應被擋`（`:822`）
-正是重構前的舊語意。
-
-**成因**：拆分生命週期的 commit `1999361`（2026-08-01）沒有動到 `backend/app/modules/sales/models.py`
-（`git show --stat 1999361` 檔案清單裡沒有它），也沒有任何 migration 更新這兩個函式
-（全 72 支 migration 中只有 `f1a2b3c4d5e6_add_sale_tenders_and_payment_methods.py:81` 安裝過它們）。
-
-**待確認（線上確證）**：本稽核為唯讀、未對資料庫執行任何操作。要坐實成「線上已壞」需其一：
-(a) 對真資料庫執行一次「購物金付款 → 作廢」並觀察 COMMIT 是否 RAISE；
-(b) 查 `pg_get_functiondef('sales_ledger_sale_debit_guard'::regproc)` 確認線上函式體
-與 `models.py` 目前定義一致（見 P2-2：這兩者有可能不一致）。
-
-## P0-2　同月整筆退貨（購物金付款）在發票作廢回執落地時會被同一組守衛擋掉
-
-**判定：不符合。**（與 P0-1 同根因、方向相反）
-
-收款側守衛要求「`invoice_status='VOID'` 且有購物金收款 ⟹ 必須存在 SALE_VOID 沖正」：
-
-`backend/app/modules/sales/models.py:462-489`
-```sql
-  SELECT store_id, buyer_contact_id, invoice_status
-    INTO sale_store, sale_buyer, sale_status
-    FROM sales WHERE id = p_sale_id;
-  ...
-  -- 已作廢且有購物金扣抵 → 必須有對應沖正（第三輪 P2：raw UPDATE 設 VOID 不可漏沖回）
-  IF sc_tender > 0 AND sale_status = 'VOID' THEN
-    PERFORM 1 FROM store_credit_ledger
-     WHERE store_id = sale_store AND source_type = 'SALE_VOID' AND entry_type = 'REVERSAL'
-       AND source_id = p_sale_id;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION '已作廢的購物金銷售必須有對應的沖正分錄（SALE_VOID）';
-    END IF;
-  END IF;
-```
-觸發器掛在 `sales` 上（`backend/app/modules/sales/models.py:529-532`）：
-```sql
-CREATE CONSTRAINT TRIGGER trg_sales_tender_total
-AFTER INSERT OR UPDATE ON sales
-DEFERRABLE INITIALLY DEFERRED
-```
-
-但「同月整筆退貨 ⟹ 作廢原發票」的路徑（ADR-014）並**不會**產生 SALE_VOID 沖正——
-退貨回補購物金走的是 REFUND/SALE_RETURN：
-
-`backend/app/modules/returns/service.py:595-603`
 ```python
-        if store_credit_refund > 0:
-            ...
-            await StoreCreditService(self._session).refund_for_sale_return(
-                store_id,
-                sale.buyer_contact_id,
-                amount=store_credit_refund,
-                return_id=customer_return.id,
-                created_by=actor_user_id,
-            )
+await session.commit()
+return result
 ```
-而該路徑最終會把 `invoice_status` 推到 `VOID`
-（`backend/app/modules/sales/service.py:2181-2192`，由 F0501 核可回呼呼叫）：
+
+同商品／同會員／同錢櫃的主要鎖定證據：
+
+`backend/app/modules/storecredit/repository.py:29`
+
 ```python
-    async def mark_invoice_voided(self, store_id: int, sale_id: int) -> None:
-        """平台**確認**作廢（F0501 核可）後才把 invoice_status 轉 VOID。
-        ...
-            sale.invoice_status = SaleInvoiceStatus.VOID
+stmt = (
+    select(StoreCreditAccount)
+    .where(
+        StoreCreditAccount.store_id == store_id,
+        StoreCreditAccount.contact_id == contact_id,
+    )
+    .with_for_update()
+    .execution_options(populate_existing=True)
+)
 ```
 
-**後果**：購物金付款的銷售在同月整筆退貨後，F0501 平台核可的回執寫回
-（`UPDATE sales SET invoice_status='VOID'`）會在 COMMIT 時 RAISE，回執處理永遠失敗，
-發票狀態卡在 `PENDING_VOID`。同 P0-1，pytest 的 savepoint 環境抓不到。
+`backend/app/modules/cashdrawer/service.py:92`
 
----
-
-# P1：特定條件下數字不一致
-
-## P1-1　散裝每件成本除不盡時，COGS 逐筆被資料庫默默四捨五入，加總 ≠ 收購成本
-
-**判定：不符合。**
-
-每件成本是精確除法、**不取整**：
-
-`backend/app/modules/inventory/service.py:1127-1130`
 ```python
-    def per_piece_cost(lot: BulkLot) -> Decimal:
-        """每件成本 = acquisition_cost / total_qty。"""
-        return lot.acquisition_cost / Decimal(lot.total_qty)
+併發保證：以 FOR UPDATE 鎖開帳中的 session 列，與 close_session 互斥（DB 層原子，
+非先查狀態再插入）。若關帳已先一步轉 CLOSED，這裡的條件式查詢即查不到 OPEN → 拒絕，
+避免現金異動落進已關閉的 session 而被對帳漏算。T6/T7/T11 的現金寫入都經此一處。
 ```
-成交時直接乘上數量寫進 `cost_snapshot`，中間沒有任何 `round_ntd`：
 
-`backend/app/modules/sales/service.py:3024-3031`
+`backend/app/modules/inventory/repository.py:667`
+
 ```python
-                **self._line_amounts(
-                    disc,
-                    qty=line.qty,
-                    cost=InventoryService.per_piece_cost(lot) * line.qty,
-                    gift=gift,
-                ),
+new_remaining = BulkLot.remaining_qty - qty
+stmt = (
+    update(BulkLot)
+    .where(BulkLot.id == lot_id, BulkLot.remaining_qty >= qty)
 ```
-而該欄是 `Numeric(12, 0)`（`backend/app/modules/sales/models.py:186`）：
+
+銷售冪等由 request key、內容 fingerprint 與 DB unique 一起背書：
+
+`backend/app/modules/sales/models.py:58`
+
 ```python
-    cost_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+__tablename__ = "sales"
+__table_args__ = (
+    UniqueConstraint("store_id", "idempotency_key", name="uq_sales_store_idempotency_key"),
 ```
-→ 取整發生在 PostgreSQL 的型別轉換，不是在 `core/money.round_ntd()`，
-與 CLAUDE.md §6「邊界以 ROUND_HALF_UP quantize 到整數元」的規定路徑不同。
 
-**實際偏差**（本機以相同算式驗證）：
-```
-per piece 333.3333333333333333333333333  單件落庫 333  ×3 = 999   （收購成本 1000）
-```
-報表的自有散裝 COGS 直接加總 `cost_snapshot`：
+`backend/app/modules/sales/service.py:775`
 
-`backend/app/modules/sales/repository.py:774-778`
 ```python
-            owned_bulk_revenue += net_amount
-            if cost_snapshot is not None:
-                owned_bulk_cogs += cost_snapshot
-            elif total_qty and total_qty > 0:
-                owned_bulk_cogs += round_ntd(acquisition_cost * Decimal(qty) / Decimal(total_qty))
+if idempotency_key is not None:
+    replay = await self.find_idempotent_replay(
+        store_id,
+        idempotency_key,
+        lines=lines,
+        buyer_contact_id=buyer_contact_id,
+        tenders=normalized_tenders,
+        invoice_info=invoice_info,
+        adjustments=adjustments,
+        service_mode=service_mode,
+        table_no=normalized_table_no,
+    )
+    if replay is not None:
+        return replay
 ```
-→ 整堆賣完後，認列成本比實際收購成本少（或多）數元，毛利同額偏差。
 
-**測試涵蓋**：既有測試只用整除的例子（`backend/tests/test_inventory.py:149-153`，
-1000 ÷ 8 = 125），除不盡的情形沒有任何測試。
+SSE 只通知重讀、沒有重放金流寫入：
 
-## P1-2　同一批散裝有兩套 COGS 口徑（四捨五入 vs 精確值）
+`frontend/app/kiosk/page.tsx:329`
 
-**判定：不符合。**
+```tsx
+const reload = () => {
+  setStreamConnected(true);
+  void queryClient.invalidateQueries({ queryKey: ["kiosk", "cart"] });
+  void queryClient.invalidateQueries({ queryKey: ["kiosk", "current"] });
+  void queryClient.invalidateQueries({ queryKey: ["kiosk", "device"] });
+};
+source.addEventListener("open", reload);
+source.addEventListener("state", reload);
+```
 
-`margin_breakdown` 用落庫的整數 `cost_snapshot`（見上），
-`goods_margin_and_revenue` 卻用**未取整**的精確除法：
+0 元與全額購物金的邊界由成交端明確分支：
 
-`backend/app/modules/sales/repository.py:531-535`
+`backend/app/modules/sales/service.py:1002`
+
 ```python
-        for acquisition_cost, total_qty, qty, net_amount in bulk:
-            goods_revenue += net_amount
-            if total_qty and total_qty > 0:
-                cost = acquisition_cost * Decimal(qty) / Decimal(total_qty)
-                buyout_margin += net_amount - cost
+gift_only = bool(lines) and all(
+    line.line_kind is SaleLineKind.GIFT for line in lines
+)
+if total < 0 or (total == 0 and not gift_only):
+    raise InvalidSaleTender("銷售總額必須大於 0（整單免費請全部以贈品開立）")
 ```
-兩者對同一批交易會算出不同毛利。目前 `goods_margin_and_revenue` 只餵給溢價建議引擎
-（`backend/app/modules/sales/service.py:1824`，唯一呼叫點），且該處已自陳另一項口徑差異：
 
-`backend/app/modules/sales/service.py:1820-1823`
+`backend/app/modules/sales/service.py:883`
+
 ```python
-        # 已知限制（裁示 2026-07-16「其餘文件化」）：此處**不套**退貨扣減。period_margin
-        # 僅供 SC-5b 溢價建議引擎（分析用、非帳務），D-8 退貨扣減已在 margin_breakdown
-        # （R2/R5/R6/C4 主帳務口徑）落實；影響量在模擬中為全期營收 0.05%。
+if has_cash and await self._cash.get_current_session(store_id) is None:
+    raise NoOpenCashSession("結帳收現必須在開帳中的 cash_session 下進行，請先開帳")
 ```
-但「四捨五入 vs 精確值」這一項並未被記錄為已知限制。
 
-## P1-3　分次折讓會讓沖回的銷項稅與原發票稅額對不平
+寄售抽成以相減建立應付，production service 路徑恆等：
 
-**判定：不符合。**
+`backend/app/modules/consignment/service.py:227`
 
-發票與折讓各自在**自己的總額層級**拆稅，兩者互不相干：
-
-`backend/app/modules/einvoice/service.py:601-609`
 ```python
-        prior = await self._repo.sum_allowances_total(store_id, invoice_id)
-        if prior + total > invoice.total:
-            raise AllowanceExceedsInvoice(
-                f"折讓累計 {prior + total} 超過原發票總額 {invoice.total}"
-            )
-
-        net, tax = split_tax_inclusive(total, Decimal(invoice.tax_rate))
+commission_amount = commission(gross, commission_pct)
+payout = gross - Decimal(commission_amount)
 ```
-守衛只看 **total 累計**，沒有守 `Σ allowance.net ≤ invoice.net` 或
-「全額折讓時 Σ tax 必須等於 invoice.tax」。
 
-**實際偏差**（以 `core/money.split_tax_inclusive` 的算式驗證）：
+收據與發票證明聯的金額不在硬體代理重算，而是沿用後端落盤輸出：
+
+`frontend/lib/agent.ts:76`
+
+```ts
+await postAgent("/print/einvoice", {
+  sale_id: invoice.sale_id,
+  invoice_number: invoice.invoice_no,
+  invoice_date: invoice.invoice_date,
+  invoice_time: invoice.invoice_time,
+  random_code: invoice.random_number ?? "    ",
+  sales_amount: invoice.net,
+  tax_amount: invoice.tax,
+  total_amount: invoice.total,
 ```
-invoice 100 -> (net 95, tax 5)
-allowance 50 -> (net 48, tax 2)
-兩張 50 元折讓合計 -> net 96, tax 4
+
+`hardware-agent/agent/drivers/escpos_receipt.py:166`
+
+```python
+out += _line(f"未稅　 {sale.subtotal}")
+out += _line(f"營業稅 {sale.tax}")
+out += _line(f"總計　 {sale.total}")
 ```
-整張 100 元發票分兩次各退 50 元，全部折讓完之後，沖回的銷項稅只有 4 元，
-原發票課的是 5 元 → 稅額殘留 1 元。一次退 100 元則無此問題（net 95 / tax 5）。
-這正是稽核範圍中問的「逐項加總與總額課稅是否會產生 1 元差」，答案是**會**，
-而且發生在折讓維度。
 
-## P1-4　進項發票的稅額是用本店稅率推算，不是憑證上的實際稅額
+## P0：會產生錯帳或掉錢
 
-**判定：不符合（且為刻意設計，風險未被記錄）。**
+### P0-1：無客顯購物車的 LINE Pay 可能已扣款，但後端沒有可持久化的待對帳紀錄
 
-`backend/app/modules/purchasing/schemas.py:145-161`
+**現況：** POS 一般付款允許沒有配對 kiosk；此時 `cart_session_id` 送 `null`。LINE Pay `pay()` 在銷售 transaction commit 前執行。若平台已成功但後續 flush／commit 失敗，router 先 rollback，再嘗試記錄 `PAYMENT_UNCERTAIN`；但沒有 `cart_session_id` 時該函式在任何落庫前直接丟 409。
+
+`frontend/app/(authed)/pos/page.tsx:1899`
+
+```tsx
+let checkoutCart: DisplayCart | null = null;
+```
+
+`frontend/app/(authed)/pos/page.tsx:1945`
+
+```tsx
+} else if (plan.storeCredit > 0) {
+  throw new Error("購物金付款必須先配對並連線顧客螢幕");
+}
+```
+
+`frontend/app/(authed)/pos/page.tsx:1970`
+
+```tsx
+tenders: toTenders(plan, { linePayKey }) ?? null,
+// 已簽且折抵額相符才綁定（後端亦精確比對＋單次使用守護）。
+signature_task_id: signed && !signMismatch ? signTaskId : null,
+cart_session_id: checkoutCart?.id ?? null,
+cart_revision: checkoutCart?.revision ?? null,
+```
+
+`backend/app/modules/sales/service.py:1337`
+
+```python
+result = await client.pay(
+    order_id=order_id,
+    amount=tender.amount,
+    one_time_key=tender.line_pay_one_time_key,
+    product_name="門市消費",
+)
+```
+
+`backend/app/modules/sales/router.py:389`
+
+```python
+try:
+    lines = await svc.get_lines(sale.id)
+    tenders = await svc.get_tenders(sale.id)
+    await session.commit()
+except Exception as exc:
+    await session.rollback()
+```
+
+`backend/app/modules/sales/router.py:163`
+
+```python
+if payload.cart_session_id is None or payload.tenders is None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="LINE Pay 結果不明，且缺少 POS 購物車可供對帳；禁止直接重試",
+    )
+```
+
+**風險／為什麼：** 這條可達路徑會形成「平台已有扣款、sales／tender／LINE Pay transaction 均未 commit、後端也沒有 PAYMENT_UNCERTAIN 載體」的錯帳。前端雖保存冪等鍵、同瀏覽器重試可用相同 `order_id` check-first 復原，但該鍵不是伺服器端持久對帳事實；瀏覽器狀態遺失或改由其他終端處理時，系統內無紀錄可定位這筆已扣款。
+
+## P1：特定條件下數字不一致
+
+### P1-1：寄售建單的預設抽成固定為 50%，沒有使用系統 `default_commission_pct`
+
+**現況：** 設定 API 回傳可調整的 `default_commission_pct`，收購頁也已載入整份 settings；但新明細固定初始化為字串 `"50"`，提交時直接送該列值。後端將 request 值原樣快照到寄售品，售出後又以此快照建立結算。
+
+`backend/app/modules/settings/schemas.py:30`
+
+```python
+store_id: int
+einvoice_enabled: bool
+tax_rate: RateOut
+default_commission_pct: int
+default_margin_pct: int
+```
+
+`frontend/app/(authed)/acquisition/page.tsx:72`
+
+```tsx
+function emptyItem(): ItemDraft & { estimatedResale: string; rowKey: string } {
+  return {
+    // 穩定的列識別：用 index 當 React key 時，刪除中間列會讓後面的列沿用同一個元件實例，
+    // 連帶把前一列的內部狀態（如已選標籤）帶過去。不進 API payload（逐欄挑選）。
+    rowKey: newIdempotencyKey(),
+    name: "",
+    grade: "",
+    categoryId: null,
+    brandId: null,
+    productModelId: null,
+    listedPrice: "",
+    acquisitionCost: "",
+    commissionPct: "50",
+```
+
+`frontend/app/(authed)/acquisition/page.tsx:814`
+
+```tsx
+const settings = useQuery({
+  queryKey: ["settings"],
+  queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
+});
+```
+
+`frontend/app/(authed)/acquisition/page.tsx:941`
+
+```tsx
+...(type === "BUYOUT"
+  ? { acquisition_cost: ntd(r.acquisitionCost) }
+  : { commission_pct: parseNtd(r.commissionPct) }),
+```
+
+`backend/app/modules/acquisition/service.py:789`
+
+```python
+else:  # CONSIGNMENT
+    ownership = OwnershipType.CONSIGNMENT
+    consignor_id = contact_id
+    commission = item.commission_pct
+```
+
+**風險／為什麼：** 當店家設定非 50% 的預設抽成時，新寄售列仍顯示並送出 50%。後續結算依法採用商品快照，因此店家抽成與賣家實拿會依錯誤的建單比例計算，而不是系統設定的預設比例。
+
+### P1-2：散裝每件成本不先分配尾差，寫入 `Numeric(12,0)` 時會丟失整批成本
+
+**現況：** 每件成本使用精確除法，成交行把 `per_piece_cost × qty` 直接指定給 `cost_snapshot`；欄位卻是整數 scale 0。
+
+`backend/app/modules/inventory/service.py:1127`
+
+```python
+@staticmethod
+def per_piece_cost(lot: BulkLot) -> Decimal:
+    """每件成本 = acquisition_cost / total_qty。"""
+    return lot.acquisition_cost / Decimal(lot.total_qty)
+```
+
+`backend/app/modules/sales/service.py:3026`
+
+```python
+**self._line_amounts(
+    disc,
+    qty=line.qty,
+    cost=InventoryService.per_piece_cost(lot) * line.qty,
+    gift=gift,
+),
+```
+
+`backend/app/modules/sales/models.py:184`
+
+```python
+# 成交當下的成本（本行合計）。凍結於此，日後調整商品成本不會回頭改寫歷史毛利。
+# NULL＝無成本可知（餐飲、或未填成本的商品），報表沿用既有「成本未知」口徑。
+cost_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+```
+
+**風險／為什麼：** 整批成本 1,000 元、3 件分三次各售 1 件時，每行送入 `333.333…`，DB 各自轉成 333，三行成本合計 999，不再等於原整批 1,000。這不是顯示問題；`cost_snapshot` 是毛利報表採用的持久成本事實。
+
+### P1-3：兩支散裝毛利報表對同一成交採用不同成本基準
+
+**現況：** `goods_margin_and_revenue()` 仍以批次總成本做未取整精確除法；`margin_components()` 優先讀已落盤的整數 `cost_snapshot`，只有舊資料沒有快照才另行 round。
+
+`backend/app/modules/sales/repository.py:531`
+
+```python
+for acquisition_cost, total_qty, qty, net_amount in bulk:
+    goods_revenue += net_amount
+    if total_qty and total_qty > 0:
+        cost = acquisition_cost * Decimal(qty) / Decimal(total_qty)
+        buyout_margin += net_amount - cost
+```
+
+`backend/app/modules/sales/repository.py:770`
+
+```python
+for consignor_id, acquisition_cost, total_qty, qty, net_amount, cost_snapshot in bulk:
+    if consignor_id is not None:  # 寄售散裝：全額計流水，無抽成基礎、不認自有成本
+        consignment_bulk_revenue += net_amount
+        continue
+    owned_bulk_revenue += net_amount
+    if cost_snapshot is not None:
+        owned_bulk_cogs += cost_snapshot
+    elif total_qty and total_qty > 0:
+        owned_bulk_cogs += round_ntd(acquisition_cost * Decimal(qty) / Decimal(total_qty))
+```
+
+**風險／為什麼：** 同一行在購物金效益用的 `period_margin()` 與主要 R2／R5／R6 毛利報表可能得到小數成本與整數成本兩個答案；P1-2 的尾差會因此直接表現在跨報表數字不一致。
+
+### P1-4：部分折讓逐筆拆稅，累計全退時可能無法沖回原發票的 net／tax
+
+**現況：** 折讓只檢查累計 `total` 不超過原發票；每張折讓再各自呼叫 `split_tax_inclusive(total, invoice.tax_rate)`。
+
+`backend/app/modules/einvoice/service.py:594`
+
+```python
+prior = await self._repo.sum_allowances_total(store_id, invoice_id)
+if prior + total > invoice.total:
+    raise AllowanceExceedsInvoice(
+        f"折讓累計 {prior + total} 超過原發票總額 {invoice.total}"
+    )
+
+net, tax = split_tax_inclusive(total, Decimal(invoice.tax_rate))
+```
+
+`backend/app/modules/einvoice/service.py:601`
+
+```python
+allowance = InvoiceAllowance(
+    store_id=store_id,
+    invoice_id=invoice_id,
+    return_id=return_id,
+    net=Decimal(net),
+    tax=Decimal(tax),
+    total=Decimal(net + tax),
+)
+```
+
+**風險／為什麼：** 5% 下原發票總額 100 會拆為 net 95／tax 5；兩張各 50 的折讓會各拆為 net 48／tax 2，累計成 net 96／tax 4。含稅總額仍對平 100，但全退後稅額少沖 1、未稅多沖 1。
+
+### P1-5：每日摘要用查詢當下的稅率重算歷史認列營收
+
+**現況：** 銷售與發票落盤時保存當時的 net／tax，發票也保存 `tax_rate`；每日摘要卻讀目前 settings，再對歷史期間的 `recognized_revenue` 重拆一次。
+
+`backend/app/modules/einvoice/models.py:129`
+
+```python
+net: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 未稅
+tax: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 稅額
+total: Mapped[Decimal] = mapped_column(Numeric(12, 0))  # 含稅總額
+# 結帳當下稅率快照（Codex 第九輪）：F0401 金額/TaxRate 以此計——結帳後改 settings
+# 稅率不得改變已落地發票的申報內容。
+tax_rate: Mapped[Decimal] = mapped_column(Numeric(5, 4), server_default=text("0.05"))
+```
+
+`backend/app/modules/reports/service.py:871`
+
+```python
+start, end = store_day_bounds(report_date)
+cash = await self.daily_cash(store_id, report_date)
+margin = await self._sales.margin_breakdown(store_id, start, end)
+settings = await self._settings.get_effective_settings(store_id)
+```
+
+`backend/app/modules/reports/service.py:887`
+
+```python
+net_ex_tax, tax = split_tax_inclusive(margin.recognized_revenue, settings.tax_rate)
+```
+
+**風險／為什麼：** 查詢歷史日期前若店別稅率設定已變動，該日摘要的「除稅淨額／稅額」會隨查詢時點改變，且不再是成交或發票當下的稅率快照口徑。
+
+### P1-6：前端 `Math.round` 與後端 Decimal HALF_UP 在合法四位費率下可差 1 元
+
+**現況：** POS 手續費提示與收購購物金溢價預覽以 JS `number` 相乘後 `Math.round`；後端以 Decimal 乘法與 `round_ntd` 落盤。
+
+`frontend/app/(authed)/pos/page.tsx:569`
+
+```tsx
+{plan.taiwanPay > 0 && (
+  <>
+    <p className="hint">
+      台灣Pay 收款 <Money value={plan.taiwanPay} />（請於台灣Pay App 完成收款）
+      {taiwanpayFeePct > 0 && (
+        <>
+          {" "}
+          · 本筆手續費{" "}
+          <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
+```
+
+`frontend/features/acquisition/pricing.ts:13`
+
+```ts
+export function roundNtd(value: number): number {
+  return Math.round(value);
+}
+```
+
+`frontend/features/acquisition/pricing.ts:136`
+
+```ts
+export function creditPremiumPreview(creditEquivNtd: number, premiumRate: number): number {
+  return roundNtd(creditEquivNtd * premiumRate);
+}
+```
+
+`backend/app/modules/sales/service.py:1250`
+
+```python
+elif tender.tender_type == TenderType.TAIWAN_PAY:
+    # 非現金、不進抽屜、無外部 API（店員於台灣Pay App 收款）；僅記手續費快照。
+    fee = Decimal(round_ntd(tender.amount * settings.taiwanpay_fee_pct))
+```
+
+`backend/app/modules/storecredit/service.py:268`
+
+```python
+amount = Decimal(round_ntd(cash_equivalent * (Decimal(1) + premium_rate)))
+```
+
+**風險／為什麼：** 合法費率 `0.0003`、金額 5,000 時，精確乘積是 1.5，後端 HALF_UP 得 2；JS 的實際乘積是 `1.4999999999999998`，`Math.round` 得 1。POS 費用提示與購物金溢價預覽可比後端落盤少 1 元。
+
+### P1-7：人工錢櫃調整沒有 idempotency key 或唯一約束
+
+**現況：** `POST /cash-sessions/{id}/movements` 的輸入只有類型、金額、事由；router 每次都呼叫 `record_movement()`，repository 每次都新增一列。
+
+`backend/app/modules/cashdrawer/schemas.py:57`
+
+```python
+class CashMovementCreateRequest(BaseModel):
+    """記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。"""
+
+    type: CashMovementType
+    amount: NTDAmount
+    note: str = Field(min_length=1, max_length=200)  # 事由必填（留痕，§5）
+```
+
+`backend/app/modules/cashdrawer/router.py:110`
+
+```python
+movement = await svc.record_movement(
+    user.store_id,
+    payload.type,
+    payload.amount,
+    actor_user_id=user.id,
+    ref_type="manual",
+    note=payload.note,
+)
+await session.commit()
+```
+
+`backend/app/modules/cashdrawer/repository.py:57`
+
+```python
+async def add_movement(self, movement: CashMovement) -> CashMovement:
+    self._session.add(movement)
+    await self._session.flush()
+    return movement
+```
+
+**風險／為什麼：** 雙擊、逾時後重試或代理重送同一人工調整時，兩次都會成功 INSERT；`expected_amount()` 又會把兩列都加總，造成應有現金與關帳差異重複增減。
+
+### P1-8：LINE Pay 退款成功發生在退貨主交易 commit 前
+
+**現況：** 退貨主交易先呼叫 `refund_line_pay_amount()`；退款實作以獨立 transaction 提交 PENDING、呼叫平台、再獨立提交 SUCCEEDED，退貨 router 最後才 commit 主交易。
+
+`backend/app/modules/returns/service.py:603`
+
+```python
+refund_identity = _refund_identity(sale.id, requested, clean_reason, previous)
+await SalesService(self._session).refund_line_pay_amount(
+    store_id,
+    sale.id,
+    linepay_refund,
+    linepay_client,
+    refund_key=f"s{store_id}:return:{refund_identity}",
+)
+```
+
+`backend/app/modules/sales/service.py:1623`
+
+```python
+async with sm() as ledger:
+    row = await ledger.scalar(
+        select(LinePayRefundAttempt)
+        .where(LinePayRefundAttempt.refund_key == refund_key)
+        .with_for_update()
+    )
+```
+
+`backend/app/modules/sales/service.py:1640`
+
+```python
+    row.status = LinePayRefundStatus.PENDING
+    row.return_code = None
+await ledger.commit()
+```
+
+`backend/app/modules/sales/service.py:1644`
+
+```python
+# Phase 2：呼叫平台（傳輸錯誤 → 保留 PENDING 並上拋，下次重試即 ambiguous）
+result = await client.refund(order_id=order_id, refund_amount=amount)
+```
+
+`backend/app/modules/returns/router.py:121`
+
+```python
+except DomainError as exc:
+    await session.rollback()
+    raise _map_domain_error(exc) from exc
+await session.commit()
+return ReturnRead.from_model(customer_return)
+```
+
+**風險／為什麼：** 平台退款成功後若退貨主交易 commit 失敗，外部已退款，但退貨單、庫存、錢櫃／購物金回補與折讓可能仍未成立。獨立退款帳可防止再次退款，下一次重試會依 SUCCEEDED 累計補回本地 `refunded_amount`；在重試完成前，平台與本地帳務仍不一致，若無後續處理則持續不一致。
+
+## P2：可維護性風險
+
+### P2-1：`tax_rate` 的 API scale 驗證少於 DB 的 `Numeric(5,4)`
+
+**現況：** DB 稅率是四位小數；PATCH 只限制數值範圍。相同 DB scale 的溢價率與支付費率都有明確四位 validator，唯獨 `tax_rate` 未列入。
+
+`backend/app/modules/settings/models.py:52`
+
+```python
+tax_rate: Mapped[Decimal] = mapped_column(
+    Numeric(5, 4), server_default=text("0.05"), nullable=False
+)
+```
+
+`backend/app/modules/settings/schemas.py:69`
+
+```python
+einvoice_enabled: bool | None = None
+tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
+default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
+```
+
+`backend/app/modules/settings/schemas.py:133`
+
+```python
+@field_validator("premium_rate", "premium_rate_min", "premium_rate_max")
+@classmethod
+def _rate_scale(cls, value: Decimal | None) -> Decimal | None:
+    # DB 為 Numeric(5,4)：限四位小數，避免 API/留痕記 5dp 而 DB 落 4dp 不一致（Codex P2）。
+    if value is not None and value != value.quantize(Decimal("0.0001")):
+        raise ValueError("溢價率最多四位小數")
+    return value
+```
+
+**風險／為什麼：** 五位以上稅率可通過 API，後續在 DB coercion 才改成四位；request／audit／即時運算與重新讀取的設定可能不是同一精度。
+
+### P2-2：多個 `Numeric(12,0)` 金額入口沒有一致的 12 位上界
+
+**現況：** 代表性的收購與現金 schema 只守整數／非負，沒有 `<= 999999999999`；對應 DB 欄位為 `Numeric(12,0)`。同一專案的 settings 金額則已有 12 位上界。
+
+`backend/app/modules/acquisition/schemas.py:30`
+
+```python
+def _ensure_whole_nonneg(value: Decimal, field: str) -> Decimal:
+    if value < 0:
+        raise ValueError(f"{field} 不可為負")
+    if value != value.to_integral_value():
+        raise ValueError(f"{field} 必須為整數元（無角分）")
+    # 正規化（Codex：冪等指紋不可受 "1000.0"/"1000"/1000 形式差異影響）：
+    # 一律回整數形 Decimal，下游序列化/指紋/持久化全 canonical。
+    return Decimal(value.to_integral_value())
+```
+
+`backend/app/modules/inventory/models.py:142`
+
+```python
+acquisition_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+consignor_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
+commission_pct: Mapped[int | None] = mapped_column()
+listed_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+```
+
+`backend/app/modules/settings/schemas.py:82`
+
+```python
+monthly_fixed_cash_outflow: (
+    Annotated[Decimal, Field(ge=0, le=Decimal("999999999999"))] | None
+) = None
+```
+
+**風險／為什麼：** 13 位以上金額可通過部分 API／service 驗證，直到 flush／commit 才由 DB 拒絕；相同 Numeric 規格在不同入口呈現 422 或資料庫錯誤兩種行為。
+
+### P2-3：`cash_movements` 宣告 append-only，但 DB 沒有不可變與金額形狀守衛
+
+**現況：** model docstring 稱 append-only，repository 也只有一般新增路徑；但 model 沒有 UPDATE／DELETE trigger、金額非零／類型方向 CHECK，且 `record_movement()` 本身直接接受傳入 amount。
+
+`backend/app/modules/cashdrawer/models.py:60`
+
+```python
+class CashMovement(Base):
+    """現金異動（append-only 帳；無 updated_at）。"""
+
+    __tablename__ = "cash_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("cash_sessions.id"), index=True)
+    type: Mapped[CashMovementType] = mapped_column(_enum_col(CashMovementType))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+```
+
+`backend/app/modules/cashdrawer/service.py:99`
+
+```python
+movement = CashMovement(
+    store_id=store_id,
+    session_id=session.id,
+    type=movement_type,
+    amount=amount,
+    ref_type=ref_type,
+    ref_id=ref_id,
+    note=note,
+)
+```
+
+**風險／為什麼：** production HTTP 入口限制為 MANUAL_ADJUST，正常跨模組呼叫也傳正值；但 raw DML、migration、fixture 或未來直接 service 呼叫能更新／刪除現金歷史，或以負值寫入 SALE_IN 等系統類型，使 `expected_amount()` 依類型再加減後反轉經濟方向。
+
+### P2-4：購物金初始 migration 從 live model import trigger DDL
+
+**現況：** migration 沒有凍結自身的 trigger SQL，而是 import 執行當下的 `LEDGER_IMMUTABLE_DDL`；目前多個鏈結／快取 trigger 也只由這個既有 revision 迴圈安裝。
+
+`backend/alembic/versions/c5d1e8a2b7f4_add_store_credit_ledger.py:13`
+
+```python
+import sqlalchemy as sa
+from alembic import op
+
+from app.modules.storecredit.models import LEDGER_IMMUTABLE_DDL, LEDGER_IMMUTABLE_DROP_DDL
+```
+
+`backend/alembic/versions/c5d1e8a2b7f4_add_store_credit_ledger.py:183`
+
+```python
+for ddl in LEDGER_IMMUTABLE_DDL:
+    op.execute(ddl)
+```
+
+`backend/app/modules/storecredit/models.py:366`
+
+```python
+    """
+CREATE TRIGGER trg_store_credit_cache_sync
+AFTER INSERT ON store_credit_ledger
+FOR EACH ROW EXECUTE FUNCTION store_credit_cache_sync()
+""",
+)
+```
+
+**風險／為什麼：** 新建資料庫執行同一 revision 時會套用「目前」tuple；早已跑過該 revision 的資料庫不會因 model tuple 後來增加 trigger 而自動重跑，導致相同 Alembic revision 可能有不同 DB 守衛集合。
+
+### P2-5：測試／模擬 fixture 會停用或繞過購物金帳本不可變保護
+
+**現況：** 部分 integration cleanup 將 replication role 設為 replica 後直接 DELETE；另有 cleanup 以 TRUNCATE 清空帳本與帳戶。
+
+`backend/tests/integration/test_sales_signing_concurrency.py:337`
+
+```python
+async with sm() as s:
+    await delete_customer_display_rows(s, store_id=store_id)
+    await s.execute(text("SET session_replication_role = replica"))
+    for model in (SaleTender, SaleLine, StockMovement, CashMovement, CashSession, AuditLog):
+        await s.execute(delete(model).where(model.store_id == store_id))
+    await s.execute(delete(Sale).where(Sale.store_id == store_id))
+    await s.execute(
+        text("DELETE FROM store_credit_ledger WHERE store_id = :sid"), {"sid": store_id}
+    )
+```
+
+`backend/tests/integration/test_acquisition_payout.py:635`
+
+```python
+finally:
+    async with sm() as s:
+        await s.execute(text("TRUNCATE store_credit_ledger, store_credit_accounts"))
+        await s.execute(text("DELETE FROM acquisitions"))
+```
+
+**風險／為什麼：** production 路徑仍由 trigger 保護，但「全 repo 完全 append-only」不成立；fixture 若非完全隔離到測試資料庫，會具備刪除不可變財務歷史的能力，且 TRUNCATE 不走 row-level UPDATE/DELETE trigger。
+
+### P2-6：一般測試 transaction 可能不觸發 `DEFERRABLE INITIALLY DEFERRED` 金流守衛
+
+**現況：** tender 對平／購物金雙向綁定的 constraint trigger 明確延遲到 transaction commit；共用 fixture 把測試 session 放在外層 transaction 的 savepoint，測試結束一律 rollback 外層 transaction。
+
+`backend/app/modules/sales/models.py:406`
+
+```python
+# 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：
+#  (A) 對平：Σ sale_tenders.amount 必須等於 sales.total（現金＋購物金須與總額對平）。
+#  (B) 購物金 ↔ 帳本雙向綁定（負債級）：STORE_CREDIT 收款金額必須對應一筆等額、同店、
+```
+
+`backend/tests/conftest.py:68`
+
+```python
+async def db_session() -> AsyncGenerator[AsyncSession]:
+    """產出一個與 DB 隔離的 session：測試結束自動 rollback。"""
+    connection = await test_engine.connect()
+    trans = await connection.begin()
+    session = AsyncSession(
+        bind=connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
+```
+
+`backend/tests/conftest.py:77`
+
+```python
+try:
+    yield session
+finally:
+    await session.close()
+    await trans.rollback()
+```
+
+**風險／為什麼：** router 的 `session.commit()` 在此 fixture 下通常只完成 savepoint；真正 transaction-level deferred trigger 到外層 rollback 前未必執行。測試即使走完 201，也不等於 production commit-time 金流守衛已被覆蓋。
+
+### P2-7：報價與成交仍各自解析品項與計算活動折後價
+
+**現況：** 兩條路徑共用 `_compute_discount()` 與 `apply_discounts()`，但 `_quote_line()` 與 `_process_*()` 仍各自取品項、判斷寄售／贈品／活動適用性並組金額。
+
+`backend/app/modules/sales/service.py:2491`
+
+```python
+async def _quote_line(
+    self,
+    store_id: int,
+    line: SaleLineInput,
+    campaign: Campaign | None,
+    discountable_out: list[bool] | None = None,
+) -> QuoteLine:
+    """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。
+
+    必須與 `_process_line` 得出**完全相同**的金額——客顯購物車快照由此建立，
+    結帳時會與實際成交明細逐欄位比對，兩邊不一致就會整筆結帳失敗。
+    """
+```
+
+`backend/app/modules/sales/service.py:2945`
+
+```python
+disc = (
+    self._gift_discount(product.unit_price)
+    if gift is not None
+    else _compute_discount(campaign, product.unit_price, applies=applies)
+)
+```
+
+**風險／為什麼：** 任何只改其中一路的定價規則會讓 POS 顯示／簽署快照與實際成交不同；有客顯簽署時會在逐欄比較失敗並阻斷結帳，沒有該比較的普通結帳則可能只在提交時得到與先前 quote 不同的金額。
+
+### P2-8：寄售結算的金額恆等式只由 service 保證，DB 沒有背書
+
+**現況：** service 會以 `payout=gross-commission` 建列；model 的三個金額只是獨立 Numeric 欄位，未宣告 `commission_amount + payout_amount = gross`、抽成範圍或非負 CHECK。
+
+`backend/app/modules/consignment/service.py:227`
+
+```python
+commission_amount = commission(gross, commission_pct)
+payout = gross - Decimal(commission_amount)
+settlement = ConsignmentSettlement(
+    store_id=store_id,
+    serialized_item_id=serialized_item_id,
+    sale_id=sale_id,
+    gross=gross,
+    commission_pct=commission_pct,
+    commission_amount=Decimal(commission_amount),
+    payout_amount=payout,
+)
+```
+
+`backend/app/modules/consignment/models.py:24`
+
+```python
+__tablename__ = "consignment_settlements"
+
+id: Mapped[int] = mapped_column(primary_key=True)
+store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+serialized_item_id: Mapped[int] = mapped_column(ForeignKey("serialized_items.id"), index=True)
+sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+gross: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+commission_pct: Mapped[int] = mapped_column()
+commission_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+payout_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+```
+
+**風險／為什麼：** production service 產生的列對平；raw DML、migration、fixture 或未來新增直寫路徑可建立不對平結算，付款流程會直接以 `payout_amount` 出現金，報表則另讀 `commission_amount`，兩者可彼此矛盾。
+
+## 待確認
+
+### 待確認-1：部署中資料庫是否實際具備目前 model 列出的全部購物金 triggers
+
+`backend/app/modules/storecredit/models.py:229`
+
+```python
+LEDGER_IMMUTABLE_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION store_credit_ledger_immutable() RETURNS trigger AS $$
+```
+
+`backend/alembic/versions/c5d1e8a2b7f4_add_store_credit_ledger.py:183`
+
+```python
+for ddl in LEDGER_IMMUTABLE_DDL:
+    op.execute(ddl)
+```
+
+**待確認原因：** P2-4 只能從 repo 證明 migration 定義可漂移，無法從原始碼判定既有 production DB 在何時執行過哪一版 tuple。
+
+**判定所需資訊：** 各部署 DB 的 Alembic revision、`pg_trigger`／`pg_proc` 實際清單與函式定義 checksum，至少包含 immutable、reversal guard、credit guard、balance chain guard、cache sync。
+
+### 待確認-2：進項發票是否一律可用「登錄當下店別稅率」反推 net／tax
+
+`backend/app/modules/purchasing/schemas.py:145`
+
 ```python
 class InputInvoiceIn(BaseModel):
     """進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。
@@ -413,944 +1716,75 @@ class InputInvoiceIn(BaseModel):
     號碼＝2 英文大寫＋8 數字；金額為含稅整數元字串（>0）。未稅/稅額由後端以
     settings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。
     """
-
-    invoice_number: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")
-    invoice_date: date
-    invoice_total: NTDAmount
 ```
-`backend/app/modules/purchasing/service.py:299-311`
+
+`backend/app/modules/purchasing/service.py:334`
+
 ```python
-    def _invoice_fields(
-        invoice: "InputInvoiceIn", tax_rate: Decimal
-    ) -> dict[str, object]:
-        """進項發票欄位＋稅額拆分（§6：net = round_ntd(total/(1+rate))、tax = total − net）。"""
-        net, tax = split_tax_inclusive(Decimal(invoice.invoice_total), tax_rate)
+settings = await self._settings.get_effective_settings(store_id)
+for key, value in self._invoice_fields(invoice, Decimal(settings.tax_rate)).items():
+    setattr(receipt, key, value)
 ```
-供應商開的若是免稅、零稅率，或其系統的進位方式不同，`invoice_net` / `invoice_tax`
-就與手上那張憑證不符，且畫面上無從察覺（使用者只輸入總額）。
 
-## P1-5　手動現金調整沒有冪等保護，重送會產生第二筆調整
+**待確認原因：** 程式不收供應商發票上已載明的未稅額／稅額／稅別，而是以補登當下的店別設定重算。repo 內沒有足夠業務證據可判定供應商是否可能為免稅／零稅率，或發票日期與補登日期間是否可能跨稅率。
 
-**判定：不符合。**
+**判定所需資訊：** 進項發票允許的稅別、供應商發票實際欄位、稅率變更時的歷史政策，以及帳務是否要求逐字採用原憑證 net／tax。
 
-`backend/app/modules/cashdrawer/router.py:81-119`
+### 待確認-3：Amego `UnitPrice` 是否接受任意長的小數字串
+
+`backend/app/modules/einvoice/amego.py:88`
+
 ```python
-@router.post(
-    "/{session_id}/movements",
-    response_model=CashMovementRead,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="recordCashMovement",
-)
-async def record_cash_movement(
-    session_id: int,
-    payload: CashMovementCreateRequest,
-    session: SessionDep,
-    user: ManagerDep,
-) -> CashMovementRead:
+# Amount（實收小計）為權威；折扣行的 UnitPrice 以小計÷數量表示（兩者一致，
+# 避免平台以 Quantity×UnitPrice 驗算時對不上）。
+effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
 ```
-簽章裡沒有 `Idempotency-Key` 標頭，service 也沒有任何去重
-（`backend/app/modules/cashdrawer/service.py:75-124` 只鎖 session 後直接 `add_movement`）。
-全系統其他影響金錢的端點都有：`sales`(`router.py:222`)、`returns`(`router.py:68`)、
-`acquisitions`(`router.py:117`)、`consignment` 付款(`router.py:68`)、
-`store-credit` 校正(`router.py:68`)、`purchasing` 收貨(`router.py:333`)。
 
-**後果**：雙擊或網路重試會寫兩筆 `MANUAL_ADJUST`，`expected_amount` 直接被改兩次
-（`backend/app/modules/cashdrawer/service.py:142-143`：`total += movement.amount`），
-關帳的 variance 隨之失真。且該表沒有任何唯一約束可兜底（見 P2-1）。
+`backend/app/modules/einvoice/amego.py:93`
 
-## P1-6　發票品項單價在小計除不盡時會送出 20 位以上小數
-
-**判定：不符合。**
-
-`backend/app/modules/einvoice/amego.py:88-99`
 ```python
-        # Amount（實收小計）為權威；折扣行的 UnitPrice 以小計÷數量表示（兩者一致，
-        # 避免平台以 Quantity×UnitPrice 驗算時對不上）。
-        effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
-        items.append(
-            {
-                "Description": line.description[:_DESCRIPTION_MAX],
-                "Quantity": line.qty,
-                "UnitPrice": _decimal_str(effective_unit),
-                "Amount": _decimal_str(Decimal(line.net_amount)),
+"Description": line.description[:_DESCRIPTION_MAX],
+"Quantity": line.qty,
+"UnitPrice": _decimal_str(effective_unit),
+"Amount": _decimal_str(Decimal(line.net_amount)),
+"TaxType": _TAX_TYPE_TAXABLE,
 ```
-`_decimal_str` 只做 normalize、不限位數（`backend/app/modules/einvoice/amego.py:55-58`）：
+
+`backend/app/modules/einvoice/amego.py:55`
+
 ```python
 def _decimal_str(value: Decimal) -> str:
     """Decimal → 無指數、無尾零字串（"450"、"52.5"）；金額欄位以字串傳輸。"""
     text = format(value.normalize(), "f")
     return text
 ```
-`Decimal` 預設 28 位有效位數，`net_amount` 除不盡（例：qty 3、整單折扣後實付 200）時
-`UnitPrice` 會是 `"66.66666666666666666666666667"`。註解本身承認目的是讓平台
-「以 Quantity×UnitPrice 驗算時對不上」不發生，但這個寫法在除不盡時仍然對不上
-（66.666…×3 ≠ 200）。此欄位只在「有臨時折扣且 qty > 1 且分攤後除不盡」時才會出現。
 
-**待確認**：Amego 平台對 `UnitPrice` 的小數位上限、以及是否真的驗算
-`Quantity × UnitPrice == Amount`。本 repo 內查不到對真平台的實測佐證。
+**待確認原因：** 例如實付 100、數量 3 會產生長循環小數的 Decimal 字串；本 repo 的 docs／schema 未提供 Amego `UnitPrice` 最大 scale 或平台驗算容差，無法判定是否會拒單。
 
----
+**判定所需資訊：** 目前串接之 Amego API 版本的 `ProductItem.UnitPrice` precision／scale、`Quantity × UnitPrice` 與 `Amount` 的驗算規則，以及真平台對循環小數案例的回應。
 
-# P2：可維護性風險
+### 待確認-4：營業稅率是固定 5%，或允許每店由設定調整
 
-## P2-1　`cash_movements` 自稱 append-only，但沒有任何 DB 保護
+`backend/app/modules/settings/models.py:52`
 
-`backend/app/modules/cashdrawer/models.py:59-60`
 ```python
-class CashMovement(Base):
-    """現金異動（append-only 帳；無 updated_at）。"""
+tax_rate: Mapped[Decimal] = mapped_column(
+    Numeric(5, 4), server_default=text("0.05"), nullable=False
+)
 ```
-該表沒有不可變 trigger、沒有 `amount` 的正負/整數 CHECK、沒有 `type` 與符號的一致性約束
-（`backend/app/modules/cashdrawer/models.py:59-76` 全文只有欄位定義）。
-對照 `store_credit_ledger` 有 15 條 CHECK ＋ 5 個 trigger
-（`backend/app/modules/storecredit/models.py:107-153, 229-371`）。
-應用層目前沒有任何 UPDATE/DELETE `cash_movements` 的路徑（已全庫搜尋確認），
-所以現況正確，但這條不變量完全靠自律。
 
-## P2-2　金流相關的 DB trigger 只在「建表 migration」以 import 常數的方式安裝
+`backend/app/modules/settings/schemas.py:69`
 
-`backend/alembic/versions/c5d1e8a2b7f4_add_store_credit_ledger.py:16,183-184`
 ```python
-from app.modules.storecredit.models import LEDGER_IMMUTABLE_DDL, LEDGER_IMMUTABLE_DROP_DDL
-...
-    for ddl in LEDGER_IMMUTABLE_DDL:
-        op.execute(ddl)
-```
-`backend/alembic/versions/f1a2b3c4d5e6_add_sale_tenders_and_payment_methods.py:81`
-```python
-    for ddl in SALE_TENDER_TOTAL_GUARD_DDL + SALE_LEDGER_BACKING_DDL:
-```
-migration 執行的是**當下模組常數的內容**，而不是撰寫該 migration 當時的內容。
-後果有二：
-1. 之後往常數裡新增/修改 trigger，**不會**有 migration 把它套到已存在的資料庫
-   （全 72 支 migration 中沒有任何一支重新安裝這些函式）。
-2. 因此「程式碼裡的 trigger 定義」與「線上資料庫裡的 trigger 定義」可能不同，
-   讀 code 無法斷定線上行為——這也是 P0-1／P0-2 需要線上確證的原因。
-
-## P2-3　DEFERRABLE constraint trigger 在一般測試路徑永不觸發
-
-見 P0-1 的 conftest 引文。所有 `DEFERRABLE INITIALLY DEFERRED` 的守衛
-（`trg_sale_tenders_total`、`trg_sales_tender_total`、`trg_ledger_sale_debit_backing`）
-只有少數手動另開 sessionmaker、真的 `commit()` 的測試會踩到
-（如 `backend/tests/integration/test_sales_tenders.py:794`）。
-結果是：這一層 DB 不變量的迴歸保護遠比表面測試數字薄。
-
-## P2-4　試算與成交是兩份平行實作，靠註解維持一致
-
-`backend/app/modules/sales/service.py:2498-2502`
-```python
-        """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。
-
-        必須與 `_process_line` 得出**完全相同**的金額——客顯購物車快照由此建立，
-        結帳時會與實際成交明細逐欄位比對，兩邊不一致就會整筆結帳失敗。
-        """
-```
-`_quote_line`（`:2491`）與 `_process_line`（`:2752`）各自完整重寫了序號/一般/散裝/餐飲
-四種品項的折扣與金額邏輯。只有走客顯購物車的結帳才會被指紋比對抓到不一致；
-不走客顯的一般結帳沒有這層保護（收款總額對不上會 422，但金額本身無交叉驗證）。
-
-## P2-5　`tax_rate` 缺小數位數驗證，其餘費率都有
-
-`backend/app/modules/settings/schemas.py:70`
-```python
-    tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
-```
-對照同檔 `:133-147` 的 `premium_rate` / `linepay_fee_pct` / `taiwanpay_fee_pct`：
-```python
-    @field_validator("premium_rate", "premium_rate_min", "premium_rate_max")
-    @classmethod
-    def _rate_scale(cls, value: Decimal | None) -> Decimal | None:
-        # DB 為 Numeric(5,4)：限四位小數，避免 API/留痕記 5dp 而 DB 落 4dp 不一致（Codex P2）。
-        if value is not None and value != value.quantize(Decimal("0.0001")):
-            raise ValueError("溢價率最多四位小數")
-```
-`settings.tax_rate` 同為 `Numeric(5, 4)`（`backend/app/modules/settings/models.py:52-54`），
-輸入 5 位小數會被 DB 靜默捨入，同一請求內記憶體中的物件仍保有原值。
-
-## P2-6　前端手續費顯示走 JS 浮點數
-
-`frontend/app/(authed)/pos/page.tsx:577,616`
-```tsx
-                <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
-                <Money value={Math.round(plan.linePay * linepayFeePct)} />
-```
-後端落帳用 Decimal（`backend/app/modules/sales/service.py:1253,1257`）：
-```python
-                fee = Decimal(round_ntd(tender.amount * settings.taiwanpay_fee_pct))
-```
-`Math.round` 對正數與 ROUND_HALF_UP 一致，但 `plan.linePay * linepayFeePct` 是二進位浮點乘法，
-剛好落在 .5 的金額可能與後端差 1 元。影響僅止於畫面（權威值是後端寫進 `fee_amount` 的那筆）。
-
-## P2-7　測試清理以關閉 replication role 的方式繞過帳本不可變 trigger
-
-`backend/tests/integration/test_sales_signing_concurrency.py:339-345`
-```python
-            await s.execute(text("SET session_replication_role = replica"))
-            ...
-            await s.execute(
-                text("DELETE FROM store_credit_ledger WHERE store_id = :sid"), {"sid": store_id}
-            )
-```
-只發生在測試庫，本身不是缺陷；但它證明「帳本不可變」在資料庫層是可被有權限者
-一行指令關掉的（`TRUNCATE` 同樣不觸發 row trigger，見同目錄多支測試）。
-這是稽核題目「有無任何 UPDATE / DELETE 路徑（含 migration、測試 fixture）」的完整答案：
-**應用程式碼與 migration 皆無；測試 fixture 有，且是刻意繞過 trigger。**
-
-## P2-8　LINE Pay 退款日誌的鎖定查詢未帶 store_id
-
-`backend/app/modules/sales/service.py:1618-1622`
-```python
-            row = await ledger.scalar(
-                select(LinePayRefundAttempt)
-                .where(LinePayRefundAttempt.refund_key == refund_key)
-                .with_for_update()
-            )
-```
-同函式開頭的既有列檢查有帶 `store_id`（`:1592-1607`），這裡沒有。
-目前安全，因為 `refund_key` 全域唯一（`backend/app/modules/sales/models.py:393`）
-且所有產生點都帶 `s{store_id}:` 前綴（`:1391`、`:610`）——但這是命名慣例撐著，不是型別或約束撐著。
-
----
-
-# 各項查證對照表
-
-## A. 數值正確性
-
-| 項目 | 判定 | 證據 |
-|---|---|---|
-| 金額全程 Decimal／整數，無 float 進入計算路徑 | 符合 | 全庫無 `float(` 用於金額；`grep ": float"` 只命中天數/小時數（`reports/schemas.py:467`、`backup/service.py:41`）。前端金額為整數 number（`frontend/lib/money.ts`），API 邊界一律字串（各 schema 的 `NTDAmount` PlainSerializer） |
-| JSON 序列化不出現 float | 符合 | 金額欄一律 `PlainSerializer(lambda d: str(d))`／`format_ntd`（如 `reports/schemas.py:17`、`cashdrawer/schemas.py:15`） |
-| DB Numeric precision/scale 與程式端一致 | **部分不符合** | 金額欄一致為 `Numeric(12,0)`；但 P1-1 的散裝成本靠 DB 隱式捨入、P2-5 的 tax_rate 缺 4dp 驗證。`sale_adjustments.requested_value` 為 `Numeric(12,2)`（`sales/models.py:280`）——經查為**刻意**：該欄存的是使用者輸入值（可能是百分比 12.5），實際折扣額落在整數的 `applied_amount`（`:281`），非缺陷 |
-| 四捨五入時機（逐項 vs 總額）與方向一致 | 符合（一處例外） | 稅一律只在總額層級算一次（`core/money.py:57-71`、`einvoice/service.py:216`）；折扣分攤用最大餘額法且每行留 1 元（`sales/pricing.py:122-169`）；退款用差額法（`returns/refund.py:25-45`）；點數沖回同樣用差額法（`returns/service.py:640-647`）。例外＝P1-1 的散裝成本 |
-| 後端／前端顯示／發票三處一致 | 符合 | 前端應付總額取後端 quote（`frontend/app/(authed)/pos/page.tsx:1546-1548`），未就緒即鎖住結帳鍵；收據明細印 `net_amount`（`hardware-agent/agent/drivers/escpos_receipt.py:110`）；發票品項亦印 `net_amount` 且強制 `Σ = invoice.total`（`einvoice/amego.py:87,100-102`）。硬體代理全程只排版、無任何金額運算 |
-| 5% 稅：含稅反推未稅算式 | 符合 | `net = round_ntd(total/(1+rate))`、`tax = total − net`，恆等 `net+tax=total`，並有 DB CHECK `ck_invoices_net_tax_total`（`einvoice/models.py:81`） |
-| 逐項加總 vs 總額課稅的 1 元差 | **不符合** | 見 P1-3（折讓維度會差 1 元） |
-
-補充：階段 1 曾記下 `escpos_receipt.py:110` 的 `line.net_amount or line.line_total` 疑似
-把 0 元贈品行 fallback 掉。查證後**不成立**：該欄型別是 `str | None`
-（`hardware-agent/agent/interfaces.py:65`），贈品行的值是字串 `"0"`（truthy），
-fallback 只在舊版呼叫端沒帶（None）時才生效。
-
-## B. 帳本完整性
-
-| 項目 | 判定 | 證據 |
-|---|---|---|
-| 購物金帳本真的 append-only | 符合 | 應用層只有 `insert_entry`（`storecredit/repository.py:54`）；DB 有 `trg_store_credit_ledger_immutable` 拒絕 UPDATE/DELETE（`storecredit/models.py:229-241`）；migration 無資料修改路徑；唯一的 DELETE 在測試 fixture 且刻意關 trigger（見 P2-7） |
-| 餘額是即時 SUM 還是快取 | 兩者都有，且互相校驗 | `accounts.balance` 為快取，由 DB trigger `store_credit_cache_sync` 以帳本的 `balance_after` 覆寫（`storecredit/models.py:351-365`）；`balance_after` 本身由 `store_credit_balance_chain_guard` 驗證等於滾動和（`:313-342`）；寫入前另在鎖內三方比對，不一致即中止（`storecredit/service.py:139-148`） |
-| 重算與對帳機制 | 符合 | `StoreCreditService.reconcile()`（`storecredit/service.py:523`）逐帳戶比對 SUM／快取／最新 balance_after 並回報孤兒帳本，經 `GET /reports/store-credit/reconciliation`（`reports/router.py:200`）暴露；只回報不自動修正 |
-| 餘額 < 0 的可達路徑 | 未發現 | 三重防線：service 計算後檢查（`storecredit/service.py:152-155`）、DB CHECK `ck_scl_balance_after_nonneg`（`storecredit/models.py:144`）、帳戶 CHECK `ck_sca_balance_nonneg`（`:185`）。收購作廢遇餘額不足會整筆擋下轉人工（`acquisition/service.py:735-739`） |
-
-## C. 原子性與併發
-
-| 項目 | 判定 | 證據 |
-|---|---|---|
-| 主檔／明細／庫存／購物金／錢櫃在同一交易 | 符合 | service 層只 `flush`、不 `commit`，由 router 單點 commit（`sales/service.py:9-11` 的模組說明；`sales/router.py:392` 唯一 commit）。收購另在 service 邊界包 savepoint（`acquisition/service.py:392-397`） |
-| async session 跨 task 共用 | 符合（一處刻意例外） | session 由 `Depends(get_session)` per-request；排程各自開 sessionmaker（`customerdisplay/scheduler.py:20-21`、`backup/scheduler.py:135`）。刻意例外＝LINE Pay 退款日誌用**獨立交易**（`sales/service.py:1610-1638`），目的是讓日誌在主交易回滾後存活 |
-| 同一會員／同一商品的鎖策略 | 符合 | 購物金：帳戶列 `FOR UPDATE` 序列化（`storecredit/repository.py:27`、service `:130`）＋ DB trigger 內再鎖一次（`storecredit/models.py:321-323`）。序號品：售前依 id 升冪預鎖（`sales/service.py:966`）＋原子狀態轉移。錢櫃：開帳 session `FOR UPDATE`（`cashdrawer/service.py:96`）。寄售結算：`get_for_update`＋advisory lock（`consignment/service.py:51-52`）。全域鎖序有明文：cash → store_credit（`sales/service.py:1226-1230`）、settlement → cash_session（`consignment/service.py:48`、`returns/service.py:551-553`） |
-| 外部副作用在 commit 之後 | 部分符合（結構性限制） | 列印由前端在收到 200（即 commit 後）才呼叫代理（`frontend/lib/agent.ts`）；SSE 是輪詢已提交狀態、每輪 `rollback` 結束唯讀交易（`customerdisplay/router.py:280-296`）；Amego 上送採兩階段「先 commit 認領、再打 API」（`einvoice/service.py:757-768`）。**LINE Pay 收款是唯一在 commit 前呼叫外部 API 的路徑**（`sales/service.py:1259-1265`），無法避免，其緩解是 check-first ＋ 由冪等鍵導出的 orderId ＋ `PAYMENT_UNCERTAIN` 記錄（`sales/router.py:246-256`） |
-
-## D. 冪等性
-
-| 項目 | 判定 | 證據 |
-|---|---|---|
-| 重複結帳 | 符合 | `Idempotency-Key` 必填（`sales/router.py:222`）＋內容指紋比對（`sales/service.py:774-786`）＋DB 唯一約束 `uq_sales_store_idempotency_key`（`sales/models.py:60`）＋撞約束後回原單（`sales/router.py:288-318`） |
-| 前端重試 | 符合 | 同指紋恆得同鍵並持久化到 localStorage＋記憶體後備（`frontend/lib/idempotency.ts` 的 `getOrCreatePersistedIdemKey`）；409 不可丟棄鍵（`canDiscardIdempotencyKey`） |
-| SSE 斷線重連 | 符合 | SSE 只送版本號、不帶金額、不寫入（`customerdisplay/router.py:274`） |
-| 重複扣款（LINE Pay） | 符合 | orderId 綁 (店, 冪等鍵, 金額)、先 `check` 再 `pay`、平台金額不符即拒（`sales/service.py:1291-1330`）；退款走 append-only 日誌，PENDING 一律 fail-closed 轉人工（`sales/service.py:1572-1655`） |
-| 其他金流端點 | 符合 | 收購／退貨／寄售付款／購物金校正／採購收貨皆必帶鍵（見 P1-5 的清單） |
-| **手動現金調整** | **不符合** | 見 P1-5 |
-
-## E. 邊界條件
-
-| 項目 | 判定 | 證據 |
-|---|---|---|
-| 0 元交易 | 符合 | 僅「整單皆贈品」允許 0 元（`sales/service.py:1000-1006`），且不得有收款明細；DB 端另有 deferred 守衛複驗「有明細且全為贈品」（`sales/models.py:428-444`） |
-| 全額購物金支付 | 符合 | 不碰現金、不要求開帳（`sales/service.py:876-878`）；須經已凍結客顯購物車＋簽署（`:861-874`）；扣抵後餘額須等於客人所簽（`:1128-1146`） |
-| 購物金不足 | 符合 | `InsufficientStoreCredit` 於 `_write_entry` 拋出（`storecredit/service.py:152`），整筆結帳回滾 |
-| 負數金額 | 符合 | 收款（`sales/schemas.py:115-122`）、收購（`acquisition/schemas.py:30-37`）、售價（`inventory/schemas.py:91-94`）、現金（`cashdrawer/schemas.py:19-23`，另擋科學記號 `:36-42`）皆驗證非負整數。`MANUAL_ADJUST` 刻意允許負值 |
-| 寄售抽成進位後恆等 | **符合** | `commission_amount = round_ntd(gross × pct/100)`、`payout = gross − commission_amount`（`consignment/service.py:230-231`），兩者皆整數且相加恆等於 `gross`，無捨入殘留。`commission()` 另擋 pct 超出 0–100（`core/money.py:75-83`） |
-
----
-
-# 待確認
-
-1. **P0-1／P0-2 的線上確證**：需對真資料庫（真 COMMIT）跑一次「購物金付款 → 作廢」，
-   或查 `pg_get_functiondef` 比對線上函式體。本稽核唯讀、未對任何資料庫執行操作。
-2. **線上資料庫是否具備 `models.py` 目前定義的全部 trigger**（P2-2）：
-   需查 `pg_trigger` / `pg_proc`。這會直接影響 P0 與 B 節多項結論的適用範圍。
-3. **B2C 電子發票證明聯的銷售額／稅額欄口徑**：送 Amego 的 B2C payload 是
-   `SalesAmount = 含稅總額、TaxAmount = 0`（`einvoice/amego.py:110-113`，依 `docs/24:49-54`），
-   但列印證明聯送的是本地拆分後的 `invoice.net` / `invoice.tax`
-   （`frontend/lib/agent.ts:83-85`）。兩者對同一張發票的表述不同。
-   需要的資訊：B2C 收銀機發票證明聯上「銷售額／稅額」欄的法定填法，
-   以及 Amego 補印版面（平台產生）是怎麼印的——後者才是與平台紀錄一致的那一份。
-4. **Amego 對 `UnitPrice` 的小數位限制與驗算規則**（P1-6）：需平台文件或一次真平台實測。
-5. **散裝除不盡時的成本尾差歸屬**（P1-1）：這是業務規則問題（尾差要落在最後一件、
-   還是允許整批成本與 COGS 差幾元），本檔不臆測。
-6. **進項發票遇免稅／零稅率供應商的處理方式**（P1-4）：需店主裁示是否會有這類供應商。
-
----
-
-## 階段 3：對真實資料庫的唯讀確證
-
-**方法與界線**：本階段只對本機 PostgreSQL（`127.0.0.1:1234`，容器 `lu-camp-db-1`）執行 `SELECT`。
-未建立、未修改、未刪除任何物件或資料列，未執行測試、未啟動或重啟任何服務。
-查詢腳本放在 session scratchpad，不進 repo。
-
-現存資料庫與狀態（`pg_database` / `alembic_version` / `information_schema.tables`）：
-
-| 資料庫 | public 表數 | alembic_version | 備註 |
-|---|---|---|---|
-| `lucamp` | **1** | `a9b0c1d2e3f4` | `.env` 的 `DATABASE_URL` 目標，但**只剩 `alembic_version` 一張表** |
-| `lucamp_manual` | 59 | `f2a7c4e19b83`（＝head） | 執行中的 backend 實際連的就是這個庫（`pg_stat_activity`：4 conns） |
-| `lucamp_sim` | 58 | `b5d7f9a1c3e2` | 180 天模擬 |
-| `lucamp_e2e` | 59 | `e1f3a5c7b9d2` | |
-| `lucamp_pytest` | **1** | `f5a6b7c8d9e0` | conftest session 結束 `drop_all`，只剩 `alembic_version` |
-
-資料量（`lucamp_manual` / `lucamp_sim`）：sales 18,123 / 5,310；sale_tenders 19,034 / 5,388；
-store_credit_ledger 1,703 / 238；cash_movements 22,963 / 6,217。
-
----
-
-### 3.1　待確認 #1、#2 已結案
-
-**線上 guard 函式體與 `models.py` 一致，確實是 `invoice_status` 版本。**
-`pg_proc.prosrc` 於 `lucamp` / `lucamp_manual` / `lucamp_sim` / `lucamp_pytest` **四個庫全部**回傳：
-
-```
-sales_ledger_sale_debit_guard:
-   | SELECT invoice_status INTO sale_status
-   | IF NOT FOUND OR sale_status <> 'VOID' THEN
-sales_verify_store_credit_consistency:
-   | SELECT store_id, buyer_contact_id, invoice_status
-   | IF sc_tender > 0 AND sale_status = 'VOID' THEN
+einvoice_enabled: bool | None = None
+tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
+default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
 ```
 
-**trigger 確實掛著**（`pg_trigger`，以有資料的 `lucamp_manual` 為例，`lucamp_sim` 相同）：
+**待確認原因：** 程式以 5% 為預設但允許 PATCH 為 0 到 1 之間任意稅率。本任務描述指定「5% 營業稅」，但 repo 同時把稅率視為店別設定；無法僅憑程式判定哪一項才是業務政策。
 
-```
-sale_tenders         trg_sale_tenders_total                   deferrable=True initdeferred=True
-sales                trg_sales_tender_total                   deferrable=True initdeferred=True
-store_credit_ledger  trg_ledger_sale_debit_backing            deferrable=True initdeferred=True
-store_credit_ledger  trg_ledger_return_refund_backing         deferrable=True initdeferred=True
-store_credit_ledger  trg_store_credit_ledger_acq_source_guard deferrable=True initdeferred=True
-store_credit_ledger  trg_store_credit_ledger_immutable        deferrable=False
-store_credit_ledger  trg_store_credit_reversal_guard          deferrable=False
-store_credit_ledger  trg_store_credit_credit_guard            deferrable=False
-store_credit_ledger  trg_store_credit_balance_chain_guard     deferrable=False
-store_credit_ledger  trg_store_credit_cache_sync              deferrable=False
-cart_session_events  trg_cart_session_events_immutable        deferrable=False
-```
+**判定所需資訊：** 店別是否可能為免稅／零稅率／不同稅制，以及 production 是否允許一般管理者調整 `tax_rate`。
 
-→ **P0-1 與 P0-2 的程式碼推論在資料庫層獲得證實**：守衛存在、且判定欄位是 `invoice_status`。
+## 範圍外缺口（一行）
 
-同時證實 **P2-1**：`cash_movements` 在所有庫都**沒有任何 trigger**。
-
-### 3.2　P0-1／P0-2：已確證存在，但**尚未被觸發過**
-
-| 查詢 | `lucamp_manual` | `lucamp_sim` | `lucamp_e2e` |
-|---|---|---|---|
-| `status='VOIDED'` 且有 STORE_CREDIT 收款的銷售 | **0** | **0** | **0** |
-| `status='RETURNED'` 且有 STORE_CREDIT 收款的銷售 | **0** | **0** | — |
-| 作廢單的 `invoice_status` 分布 | `NOT_ISSUED` 236、`PENDING_VOID` 10 | `NOT_ISSUED` 89 | `NOT_ISSUED` 7 |
-
-**修正階段 2 的嚴重度描述**：這兩條的失敗模式是 **fail-closed**——守衛會讓那次 COMMIT 整筆
-RAISE、交易回滾，**不會**寫出錯誤的金額或帳本列。所以它們至今沒有污染任何一筆資料
-（作廢單 `invoice_status` 分布也印證：現有 335 筆作廢單全部沒有購物金腿）。
-
-實際危害是「**唯一的反轉手段失效**」：
-- P0-1：店員打錯一筆購物金付款的單，作廢會直接失敗且錯誤訊息是資料庫的
-  `SALE_VOID 沖正只能對應已作廢的同店銷售`（對店員不可解）。此時能做的只剩人工調整
-  現金/購物金去「湊」——那才是真正產生錯帳的地方。
-- P0-2：購物金付款的單同月整筆退貨後，F0501 平台核可的回執寫回會永久失敗，
-  發票在平台上已作廢、本地卻停在 `PENDING_VOID`——**這一條會直接造成帳實不符**
-  （本地發票狀態與平台紀錄不一致），仍屬 P0。
-
-`lucamp_manual` 有 266 張 `VOID`/`VOID_PENDING` 發票、其中 23 張 `void_reason='FULL_RETURN'`，
-代表「整筆退貨作廢發票」的流程已經真的在跑；只是還沒有任何一筆同時用到購物金。
-兩者交集一旦發生就會踩到。
-
-### 3.3　P1-1（散裝 COGS 尾差）：已在真實資料中量測到
-
-對「已完售的自有散裝批」比對 `Σ cost_snapshot` 與 `bulk_lots.acquisition_cost`：
-
-| 資料庫 | 完售自有散裝批 | Σ COGS ≠ 收購成本 | 除不盡的自有散裝批 |
-|---|---|---|---|
-| `lucamp_sim` | 40 | **25** | **39 / 40** |
-| `lucamp_manual` | 4 | **2** | **324 / 329** |
-| `lucamp_e2e` | 4 | 0 | 6 / 14 |
-
-實例（`lucamp_sim`）：
-```
-lot=29 收購成本=1131 件數=34 ΣCOGS=1132 差=+1
-lot=32 收購成本=756  件數=26 ΣCOGS=754  差=-2
-lot=7  收購成本=940  件數=41 ΣCOGS=943  差=+3
-lot=15 收購成本=1880 件數=31 ΣCOGS=1883 差=+3
-```
-
-→ 這不是邊角案例：**98% 以上的散裝批收購成本都不能被件數整除**，
-完售後認列成本與實際收購成本相差 −2 ～ +3 元，**兩個方向都會發生**，
-每批獨立累積、不會互相抵銷。P1-1 從「推論」升級為「已量測」。
-
-### 3.4　P1-3、P1-6：觸發前提目前為零（latent）
-
-| 前提 | `lucamp_manual` | `lucamp_sim` |
-|---|---|---|
-| 分次折讓（同一張發票 >1 張折讓單） | **0** 張 | 0 張 |
-| 已全額折讓的發票（可比對稅額守恆） | **0** 張 | 0 張 |
-| 已開發票、`qty>1` 且 `net_amount % qty ≠ 0` 的品項行 | **0** 行 | 0 行 |
-
-`lucamp_manual` 有 292 張折讓，全部是「一張發票一張折讓」，所以 P1-3 的 1 元稅差還沒出現；
-P1-6 的長小數 `UnitPrice` 也還沒送出過。兩者都是**只要出現分次退貨/多件品折扣就會發生**。
-
-### 3.5　「符合」項的實證（非抽樣，全表比對）
-
-以下全部在 `lucamp_manual`（18,123 筆銷售）與 `lucamp_sim`（5,310 筆）**兩庫皆為 0 例外**：
-
-| 不變量 | 結果 |
-|---|---|
-| `Σ sale_tenders.amount = sales.total` | 0 筆不對平 |
-| `sales.subtotal + sales.tax = sales.total` | 0 筆不符 |
-| `Σ sale_lines.net_amount = sales.total` | 0 筆不符 |
-| 一般行 `net_amount = line_total − manual_discount_amount` | 0 行不符 |
-| `invoices.net + tax = total` 且 `net = round(total/(1+tax_rate))` | 0 張不符 |
-| 寄售 `gross = commission_amount + payout_amount` | 2,705 + 260 筆全符 |
-| 寄售 `commission_amount = round(gross × pct/100)` | 0 筆不符 |
-| 購物金帳戶快取 `balance` = 帳本 `Σ signed_amount` | 316 + 138 個帳戶全符 |
-| 帳本滾動鏈 `balance_after` = 累計和（window function 重算） | 0 列斷裂 |
-| `balance_after < 0` | 0 列 |
-| 錢櫃 `expected = 開帳 + Σ(IN) − Σ(OUT) ± 調整`（重算 vs 落庫） | 487 + 200 個已關帳班別，0 個不符 |
-| 錢櫃 `variance = counted − expected` | 0 個不符 |
-
-→ B 節（帳本完整性）、E 節（寄售恆等）、以及 §7.4 現金對帳公式，不只程式碼正確，
-在兩份數千至兩萬筆的真實資料上也逐列驗過。
-
-### 3.6　階段 2 遺漏、階段 3 補上的兩道帳本守衛
-
-`pg_trigger` 列出了兩個階段 2 沒讀到的守衛，已補讀原始碼，**判定：正確，無 stale 語意**：
-
-- `store_credit_ledger_acq_source_guard`（`backend/app/modules/acquisition/models.py:266-289`）：
-  CREDIT/ACQUISITION 分錄必須對應同店同對象、`payout_credit_cash_equivalent` 等值的收購頭。
-  沖正（REVERSAL）在函式開頭即 early return，不受影響。
-- `return_ledger_refund_guard`（`backend/app/modules/returns/models.py:242-278`）：
-  REFUND/SALE_RETURN 分錄的店、會員、金額必須與 `return_tenders` 的購物金退款列一致。
-
-兩者都以 `entry_type`／`source_type` 判定，沒有引用 `invoice_status`，因此不受 2026-08-01
-生命週期拆分影響。
-
-### 3.7　新增觀察
-
-**O-1（P2）`.env` 指向的 `lucamp` 是一個只剩 `alembic_version` 的空殼庫。**
-`public` schema 只有 1 張表，`alembic_version` 停在 `a9b0c1d2e3f4`（head 是 `f2a7c4e19b83`）。
-表被 `drop_all` 掃掉、版本戳沒跟著清。任何人照 `.env` 連上去或對它 `alembic upgrade head`，
-都會得到「版本說已升級到一半、但沒有任何表」的狀態——升級會在第一支 migration 就
-`relation does not exist`。實際跑的 backend 連的是 `lucamp_manual`（`pg_stat_activity` 確認），
-所以目前沒有影響，但 `.env` 與現實不符這件事本身就是踩雷點。
-
-**O-2（P2）五個庫五個不同的 alembic 版本**（見 3.0 的表）。只有 `lucamp_manual` 在 head。
-配合 P2-2（trigger 只在建表 migration 安裝），代表「哪個庫有哪些守衛」取決於它是什麼時候建的，
-無法從 repo 推斷——本次要靠 `pg_trigger` 實查才能確定，就是這個原因。
-
-**O-3（P2）文件漂移**：`backend/app/modules/sales/repository.py:460` 的 docstring 仍寫
-```
-作廢單以 invoice_status != VOID 排除（與毛利口徑一致）。
-```
-但同函式的實際查詢已是 `Sale.status != SaleStatus.VOIDED`（`:471`）。程式碼正確、註解過時。
-這是掃描 2026-08-01 重構遺留時的副產品——**應用程式碼層面只找到這一處註解漂移，
-沒有其他 `invoice_status` 被當成「銷售是否有效」使用的實作**（全庫 grep 確認），
-遺留全部集中在兩支 DB 函式。
-
----
-
-## 稽核狀態總結（階段 3 後）
-
-| 編號 | 事項 | 程式碼證據 | 真實資料 |
-|---|---|---|---|
-| P0-1 | 購物金銷售作廢被 DB 守衛擋掉 | 已確證（含線上 `pg_proc`） | 尚未觸發（0 筆） |
-| P0-2 | 購物金＋整筆退貨的 F0501 回執寫回失敗 | 已確證（含線上 `pg_proc`） | 尚未觸發（0 筆） |
-| P1-1 | 散裝 COGS 逐件捨入、加總 ≠ 收購成本 | 已確證 | **已發生**（sim 25/40 批，−2～+3 元） |
-| P1-2 | 兩套散裝 COGS 口徑 | 已確證 | 影響僅溢價建議引擎 |
-| P1-3 | 分次折讓稅額不守恆 | 已確證（算式驗證） | 尚未觸發（0 張分次折讓） |
-| P1-4 | 進項稅額以本店稅率推算 | 已確證（刻意設計） | 需業務裁示 |
-| P1-5 | 手動現金調整無冪等鍵 | 已確證 | 無法從資料回溯判斷是否發生過 |
-| P1-6 | 發票 UnitPrice 長小數 | 已確證 | 尚未觸發（0 行） |
-| P2-1 | `cash_movements` 無 DB 保護 | 已確證 | 線上 `pg_trigger` 確認無 trigger |
-| P2-2 | trigger 只在建表 migration 安裝 | 已確證 | O-2 印證（五庫五版本） |
-| P2-3~P2-8 | 見階段 2 | 已確證 | — |
-| O-1~O-3 | 階段 3 新增 | 已確證 | — |
-
-**仍未解的待確認**（需要 repo 以外的資訊，本稽核無法自行判定）：
-
-1. **B2C 電子發票證明聯的銷售額／稅額欄法定填法**——送平台的是
-   `SalesAmount=含稅總額、TaxAmount=0`，印在紙上的是本地拆分的 `net`/`tax`，兩者不同。
-   需要：法規口徑，或 Amego 補印版面（平台產生那一份）的實際內容。
-2. **Amego 對 `UnitPrice` 的小數位限制、是否驗算 `Quantity × UnitPrice = Amount`**（P1-6）。
-3. **散裝除不盡時的成本尾差要落在哪**（P1-1）——業務規則問題，不臆測。
-4. **進項發票是否會遇到免稅／零稅率供應商**（P1-4）——需店主裁示。
-
----
-
-## 階段 4：收尾（四個先前未掃到的角落）
-
-### 4.1　報價後改價：POS 是安全的，但 API 合約留了一條無金額確認的路
-
-**判定：符合（POS 路徑）／P2（API 合約）。**
-
-改價端點沒有任何「與進行中結帳」的互斥
-（`backend/app/modules/inventory/router.py:90-110,130-146,148-169`，三個 PATCH 都是改完就 commit）。
-`/sales/quote` 與 `POST /sales` 是兩次獨立讀取，中間店長改價完全可能。
-
-POS 之所以安全，是因為它**一定會送 tenders**，而後端要求 Σ tenders = total：
-
-`frontend/features/pos/tender.ts:210-231`
-```ts
-export function toTenders(plan, opts = {}) {
-  const tenders = [];
-  if (plan.storeCredit > 0) tenders.push({ tender_type: "STORE_CREDIT", ... });
-  if (plan.cash > 0)        tenders.push({ tender_type: "CASH", ... });
-  ...
-  return tenders.length > 0 ? tenders : undefined;
-}
-```
-只有全部腿都是 0 時才回 `undefined`，而那種情況 `validatePlan` 已先擋
-（`:112-118`：`plan.cash + plan.storeCredit + plan.taiwanPay + plan.linePay !== total` → 不可結帳）。
-所以價格一變，後端算出的 total 就對不上送來的 tenders → **422，fail-closed，客人不會被靜默多收**。
-
-**但 API 合約允許省略 tenders**：
-
-`backend/app/modules/sales/service.py:494-496`
-```python
-        if tenders is None:
-            return [TenderInput(tender_type=TenderType.CASH, amount=total)]
-```
-任何省略 tenders 的呼叫端（舊版前端、腳本、未來的自助結帳）都會被收「後端當下重算的金額」，
-沒有任何一方確認過那個數字。目前沒有這種呼叫端；這是合約層面的敞口，不是現行缺陷。
-
-### 4.2　購物金負債的兩套加總：刻意雙軌，實測一致
-
-`backend/app/modules/storecredit/repository.py:175-194` 同時提供
-`ledger_total_outstanding()`（由帳本 group by contact 取正餘額加總）與
-`total_outstanding()`（由 `store_credit_accounts.balance` 取正值加總）。
-兩者刻意並存，正是 I-3 對帳的兩端。階段 3 已逐帳戶比對過
-（`lucamp_manual` 316 個、`lucamp_sim` 138 個帳戶，**0 個不一致**），
-且帳齡與 consumed 的計算一致排除了「已被沖正的原始 CREDIT」
-（`:198-241` 的 `_not_reversed()`），不會把作廢收購的入帳算成有效負債。**判定：符合。**
-
-### 4.3　發票證明聯：**正本是我們排版、補印是平台排版**——同一張發票兩種版面
-
-**判定：不符合（升級為 P1-7）。**
-
-- **正本**由前端本地組版，金額取本地拆分值：
-  `frontend/app/(authed)/pos/page.tsx:1426` → `printEInvoice(invoice, sale, ...)` →
-  `frontend/lib/agent.ts:83-85`
-  ```ts
-      sales_amount: invoice.net,
-      tax_amount: invoice.tax,
-      total_amount: invoice.total,
-  ```
-- **補印**整張版面由 Amego 產生、原樣轉印：
-  `frontend/app/(authed)/sales/page.tsx:1093-1097` → `printRaw(data.base64_data)`，
-  來源是 `backend/app/modules/einvoice/service.py:1113-1155` 的 `/json/invoice_print`。
-
-而送給平台的 B2C payload 是 `SalesAmount = 含稅總額、TaxAmount = 0`
-（`backend/app/modules/einvoice/amego.py:110-113`，依 `docs/24:49-54` 的規則）。
-
-→ **同一張 B2C 發票，正本上的「銷售額／稅額」是我們算的 net/tax，補印上的是平台依其
-紀錄印的（TaxAmount=0）。兩張紙很可能不一樣。** 這不再只是法規口徑問題，是可當場驗證的
-版面不一致：印一張正本、再印一張補印，並排比對即知。
-
-（B2B 無此問題：`sales_amount, tax_amount = int(invoice.net), int(invoice.tax)`，與本地一致。）
-
-### 4.4　電子發票回執：兩階段設計正確，但 P0-2 會連帶打破它的核心保證
-
-**判定：設計符合，惟受 P0-2 波及。**
-
-`record_result` 的鎖序（sale → queue）與「回執事件永不回滾」的規則都寫得很明確：
-
-`backend/app/modules/einvoice/router.py:355-366`
-```python
-    except EInvoiceResultNotApplicable as exc:
-        # 規則：**回執事件一旦落庫、永不回滾**（Codex 第八輪）——未認領的回執本身就是
-        # 值得稽核的異常證據；commit 保留事件後回 409（佇列/發票未被 service 變更）。
-        await session.commit()
-```
-
-但 P0-2 的觸發點正是這條路徑的最後一步：F0501 成功回執 → `mark_invoice_voided()` →
-`UPDATE sales SET invoice_status='VOID'` → 走到 `router.py:371` 的 `await session.commit()`
-→ deferred trigger RAISE。
-
-**連帶後果**：那次 commit 是「保留回執事件」的同一次 commit，它一起被回滾。
-於是不只發票狀態收斂不了，**連「平台已核可作廢」這個稽核事件都留不下來**——
-系統設計明文承諾的「回執事件永不回滾」在這個組合下不成立。這使 P0-2 比階段 2 判定的更嚴重。
-
----
-
-## 需要你裁示／提供的事項
-
-以下是這份稽核靠讀 code 和查資料庫**無法自行決定**的部分。
-
-### ❶ 最要緊：P0-1／P0-2 要不要修、什麼時候修
-
-兩者是同一個根因：2026-08-01 拆分銷售與發票生命週期時，漏改了兩支資料庫 guard 函式
-（`sales_ledger_sale_debit_guard`、`sales_verify_store_credit_consistency`），
-它們至今仍以 `invoice_status = 'VOID'` 判斷「銷售是否作廢」。
-
-- 目前**沒有污染任何資料**（實測：0 筆作廢的購物金銷售、0 筆購物金整筆退貨）。
-- 但只要店裡出現「用購物金付款的單要作廢」或「用購物金付款的單同月整筆退貨」，
-  就會撞上——前者作廢直接失敗，後者發票狀態永久卡住且連稽核事件都留不下。
-- 修正需要一支新的 alembic migration（`CREATE OR REPLACE FUNCTION` 改判 `sales.status`），
-  屬**改程式碼**，本 session 的規則明令不做。
-
-**我需要你決定：是否要我另開一個 session 來修這兩支函式。**
-
-### ❷ 散裝成本尾差要怎麼記（P1-1）
-
-98% 以上的散裝批收購成本除不盡件數，完售後認列成本與實際收購成本差 −2～+3 元。
-這是業務規則問題，我不臆測：
-
-- 選項 A：尾差落在最後一件（用差額法，和退款/點數同一套做法）——加總必然等於收購成本。
-- 選項 B：接受每批幾元誤差，但至少在應用層明確 `round_ntd`，不要靠資料庫隱式捨入。
-- 選項 C：現況不動，只補一條文件說明。
-
-**我需要你選一個方向**（實作留待後續 session）。
-
-### ❸ 三個我拿不到的外部事實
-
-| 事項 | 我需要的東西 |
-|---|---|
-| P1-7 正本 vs 補印版面不一致 | **最快的驗證方式：找一張已開立的 B2C 發票，印一次正本、再印一次補印，把兩張紙並排拍給我看。** 只要「銷售額／稅額」兩欄一致，這條就解除 |
-| P1-6 發票 UnitPrice 長小數 | Amego 對 `UnitPrice` 的小數位上限，以及它是否驗算 `Quantity × UnitPrice = Amount`。你手上的 Amego 技術文件或窗口回覆即可 |
-| P1-4 進項發票稅額 | 你的供應商裡會不會出現免稅／零稅率的（例如農產品、部分服務）。若一律 5% 應稅，這條可以降級 |
-
-### ❹ 兩個環境層面的提醒（不需裁示，但你應該知道）
-
-- `.env` 的 `DATABASE_URL` 指向的 `lucamp` 已經是空殼庫（只剩 `alembic_version`，
-  版本戳還停在非 head 的 `a9b0c1d2e3f4`）。實際跑的 backend 連的是 `lucamp_manual`。
-  照 `.env` 連上去或對它跑 `alembic upgrade head` 都會壞。
-- 現存 5 個庫有 5 個不同的 alembic 版本，只有 `lucamp_manual` 在 head。
-  配合「trigger 只在建表 migration 安裝」這件事，**哪個庫有哪些守衛只能實查、不能推斷**。
-
-### ❺ 本稽核的執行界線（讓你確認我沒越線）
-
-- 沒有新增／修改／刪除 `backend/`、`frontend/`、`hardware-agent/` 的任何檔案（`git status` 僅 `?? docs/audit/`）。
-- 沒有跑測試、沒有啟動或重啟任何服務、沒有下 migration。
-- 對本機 PostgreSQL **只執行 `SELECT`**（`pg_database` / `pg_proc` / `pg_trigger` /
-  `pg_stat_activity` / `alembic_version` 與各業務表的彙總查詢），查詢腳本放在 session
-  scratchpad、不進 repo。若你認為連唯讀查詢都不該做，請告訴我，往後只讀原始碼。
-
----
-
-## 階段 5：裁示與補掃（2026-08-22）
-
-### 5.1　店主裁示
-
-| 事項 | 裁示 | 依據 |
-|---|---|---|
-| P1-1 散裝成本尾差 | **不修**（選項 C：現況不動，本檔即為文件記錄） | 實測誤差規模見下 |
-| 唯讀 SQL 查詢 | **允許**（本稽核往後仍可對本機 DB 執行 SELECT） | 2026-08-22 |
-| `.env` 指向空殼庫 / 多庫版本不一 | 已知悉，本檔記錄即可 | 2026-08-22 |
-| P1-7 正本 vs 補印版面 | 店主將實際印出兩張並提供照片後再判定 | 待照片 |
-
-**P1-1 誤差規模實測**（支撐「不修」的裁示）：
-
-| 資料庫 | 完售自有散裝批 | 該批收購成本合計 | 淨誤差 | 絕對誤差合計 | 單批最大 |
-|---|---|---|---|---|---|
-| `lucamp_sim` | 31 批 | 46,466 元 | **+13 元** | 49 元 | −6 元 |
-| `lucamp_manual` | 2 批 | 974 元 | **+3 元** | 3 元 | +2 元 |
-
-`lucamp_sim` 的 +13 元對照全期銷售總額 11,964,042 元 ＝ **0.0001%**；
-且誤差正負皆有、不朝單一方向累積。**結論：規模不具帳務意義，維持現況。**
-唯一保留的說明：這個取整發生在 PostgreSQL 的型別轉換，不在 `core/money.round_ntd()`，
-與 CLAUDE.md §6 描述的路徑不同——日後若有人改動 `cost_snapshot` 的型別或算式，
-不會有任何測試或守衛提醒。
-
-### 5.2　補掃三處（宣告範圍內、階段 2–4 只做結構性確認者）
-
-**(a) 客顯購物車與實際成交的金額比對：符合，且是逐欄 byte-exact。**
-
-`backend/app/modules/sales/service.py:583-608`
-```python
-            visible = {
-                "name": persisted.description,
-                "qty": persisted.qty,
-                "line_kind": persisted.line_kind.value,
-                "unit_price": format(persisted.unit_price, "f"),
-                "original_unit_price": ...,
-                "discount_amount": format(persisted.discount_amount, "f"),
-                "manual_discount_amount": format(persisted.manual_discount_amount, "f"),
-                "line_total": format(persisted.line_total, "f"),
-                "net_amount": format(persisted.net_amount, "f"),
-            }
-        ...
-        if cart.snapshot.get("items") != actual_items:
-            raise SignatureContentMismatch("實際成交商品、數量、單價或折扣與客顯購物車不一致")
-```
-收款拆分（`:610-615`）與內用桌號（`:619-625`）也一併比對。
-客人螢幕上看到的每一個金額欄位，都必須與實際落盤的成交明細完全相同，否則整筆結帳失敗。
-
-**(b) 報表的散裝成本口徑：與主帳務一致（P1-2 只有一個離群者）。**
-
-`backend/app/modules/reports/service.py:446`（洞察報表）與 `:238`（庫存價值）都用
-`round_ntd(acq_cost × 件數 ÷ 整堆件數)`。這在數學上與落盤的 `cost_snapshot`
-（＝`per_piece_cost × qty` 經 `Numeric(12,0)` 取整）**同值**——同一個數量、同一個
-ROUND_HALF_UP（PostgreSQL numeric 對正數即 half-away-from-zero）。故洞察／庫存價值／
-`margin_breakdown` 三者一致。
-P1-2 的離群者仍只有 `backend/app/modules/sales/repository.py:534`（完全不取整），
-且只餵溢價建議引擎。
-
-**(c) 標籤列印的價格來源：來自後端，但解析失敗會靜默印 0 元。**
-
-`frontend/app/(authed)/acquisition/page.tsx:572,581`
-```tsx
-        await printLabel(code, data.name, parseNtd(data.listed_price) ?? 0);
-        ...
-        await printLabel(lot, data.name, parseNtd(data.unit_price) ?? 0);
-```
-價格取自後端重查的 `listed_price` / `unit_price`（權威），路徑正確。
-但 `parseNtd` 只接受純整數字串，任何非預期格式（如 `"1000.00"`）會回 `null`，
-`?? 0` 於是**印出一張 0 元的價格標籤**而不是報錯。目前後端序列化恆為整數字串，
-不會發生；列為 P2-9（fail-open 到 0，方向錯誤——金額解析失敗應該擋，不該當 0）。
-
-### 5.3　宣告範圍的涵蓋度結論
-
-`docs/audit` 開頭列的 in-scope 七項，逐項都已到「讀完關鍵路徑原始碼 ＋ 對真實資料驗證」的程度：
-
-| in-scope 項目 | 狀態 |
-|---|---|
-| 收購與寄售建單、定價與金額計算（買斷/寄售/散裝） | 完成（含 `_split_payout`、切結內容比對、散裝建堆） |
-| 購物金帳本：寫入路徑、餘額計算、核銷 | 完成（單一寫入點 ＋ 5 個 DB trigger ＋ 454 帳戶逐一比對） |
-| 寄售結算與抽成 | 完成（2,965 筆恆等式全數驗過） |
-| 錢櫃現金異動 | 完成（687 個已關帳班別公式重算 0 例外） |
-| 稅額計算、含稅未稅換算、四捨五入 | 完成（發現 P1-3 折讓稅差） |
-| 收據／帳單／發票列印的金額來源 | 完成（明細聯、證明聯正本、證明聯補印、收購憑證聯、商品標籤五條路徑） |
-| DB transaction 邊界與併發控制 | 完成（發現 P0-1／P0-2，並以 `pg_trigger`/`pg_proc` 實查佐證） |
-
-**未再深入者，皆為宣告的範圍外**：前端樣式/文案、硬體代理印表機協定、認證授權（D-4 另案）、
-作廢/更正流程的設計（F6.5 缺口只記一行，未展開）。
-
----
-
-## 階段 6：追加裁示與其後果（2026-08-22）
-
-### 6.1　P1-6 發票單價小數：裁示「填到小數第 2 位」
-
-**店主裁示**：已與光貿確認，`UnitPrice` **可以填小數，填到第 2 位即可**。
-
-→ P1-6 由「待確認」轉為**已確認的缺陷**：現行程式送出的是未限位數的 `Decimal` 除法結果
-（最長 28 位有效位數），與裁示不符。
-
-`backend/app/modules/einvoice/amego.py:90-96`
-```python
-        effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
-        items.append(
-            {
-                "Description": line.description[:_DESCRIPTION_MAX],
-                "Quantity": line.qty,
-                "UnitPrice": _decimal_str(effective_unit),
-                "Amount": _decimal_str(Decimal(line.net_amount)),
-```
-
-**但「填到 2 位」會產生一個新的、無法靠取整消除的後果**，必須先釐清：
-
-除不盡時，**任何** 2 位小數的單價乘上數量都不會等於實付金額：
-
-| 實付 (Amount) | 數量 | 現行送出的 UnitPrice | 取 2 位小數 | 數量 × 2 位單價 | 差額 |
-|---:|---:|---|---:|---:|---:|
-| 200 | 3 | 66.66666666666666666666666667 | 66.67 | 200.01 | **+0.01** |
-| 100 | 3 | 33.33333333333333333333333333 | 33.33 | 99.99 | **−0.01** |
-| 500 | 7 | 71.42857142857142857142857143 | 71.43 | 500.01 | **+0.01** |
-| 1000 | 6 | 166.6666666666666666666666667 | 166.67 | 1000.02 | **+0.02** |
-| 333 | 2 | 166.5 | 166.50 | 333.00 | ±0 |
-| 199 | 3 | 66.33333333333333333333333333 | 66.33 | 198.99 | **−0.01** |
-
-而現行程式碼的註解明說，把單價寫成「小計÷數量」的**目的**就是要避免這種驗算落差：
-
-`backend/app/modules/einvoice/amego.py:88-89`
-```python
-        # Amount（實收小計）為權威；折扣行的 UnitPrice 以小計÷數量表示（兩者一致，
-        # 避免平台以 Quantity×UnitPrice 驗算時對不上）。
-```
-
-→ **仍待確認**：光貿是否會以 `Quantity × UnitPrice` 驗算 `Amount`。
-- 若**不驗算**（以 `Amount` 為權威，`UnitPrice` 僅供版面顯示）：填 2 位小數即可，本項單純改取整。
-- 若**會驗算且要求相符**：填 2 位小數解不掉，差 0.01～0.02 分會被退件——這時要處理的
-  就不是取整，而是「一行多件又有折扣」這個結構本身。
-
-其餘送往光貿的金額欄位不受影響：G0401 折讓的 `UnitPrice`／`Amount` 皆取整數 `net`、
-`Quantity` 固定 1（`backend/app/modules/einvoice/amego.py:209-215`），不會產生小數。
-
-### 6.2　P1-4 進項發票：裁示「要能勾選該單免稅」
-
-**店主裁示**：供應商**可能會開免稅發票**；登記進項發票時應讓使用者**勾選該張是否免稅**。
-
-→ P1-4 由「風險／待確認」轉為**已確認的功能缺口**。現況是無條件以本店 `tax_rate` 反推：
-
-`backend/app/modules/purchasing/service.py:299-311`
-```python
-    def _invoice_fields(
-        invoice: "InputInvoiceIn", tax_rate: Decimal
-    ) -> dict[str, object]:
-        """進項發票欄位＋稅額拆分（§6：net = round_ntd(total/(1+rate))、tax = total − net）。"""
-        net, tax = split_tax_inclusive(Decimal(invoice.invoice_total), tax_rate)
-```
-輸入端也沒有任何課稅別欄位：
-
-`backend/app/modules/purchasing/schemas.py:152-154`
-```python
-    invoice_number: str = Field(pattern=r"^[A-Z]{2}[0-9]{8}$")
-    invoice_date: date
-    invoice_total: NTDAmount
-```
-
-**影響面（已查證，範圍很小）**：`invoice_net` / `invoice_tax` 目前**只有一個消費端**——
-採購頁的顯示：
-
-`frontend/app/(authed)/purchasing/page.tsx:669-670`
-```tsx
-                      {money(r.invoice.invoice_total)}｜未稅 {money(r.invoice.invoice_net)}／稅{" "}
-                      {money(r.invoice.invoice_tax)}
-```
-全庫搜尋確認**沒有任何報表把 `invoice_tax` 加總**（系統目前不產進項稅額申報數字）。
-所以免稅發票目前造成的錯誤僅止於「採購頁上那一行顯示的未稅/稅額是錯的」，
-還沒有流入任何彙總或申報用途。
-
-**尚待釐清（不臆測）**：同一張進項發票是否可能**部分應稅、部分免稅**。
-若可能，「整張打勾」的模型就不夠用；若你的供應商一張發票只會是單一課稅別，打勾即足夠。
-
-### 6.3　P1-7 證明聯正本 vs 補印
-
-店主將實際印出正本與補印各一張後提供照片，屆時比對「銷售額／稅額」兩欄再結案。
-狀態維持「待確認」。
-
----
-
-## 階段 7：P1-7 結案、其餘裁示（2026-08-22）
-
-### 7.1　P1-7（正本 vs 補印版面不一致）：**撤銷，不成立**
-
-**證據一：證明聯版面根本不印銷售額／稅額。**
-
-`hardware-agent/agent/drivers/escpos_receipt.py:349-388`
-```python
-    def print_einvoice(self, invoice: InvoicePayload) -> None:
-        """列印電子發票證明聯（附件一格式一；記載順序固定、不得增刪/變更）。
-
-        順序：營業人識別標章 → 「電子發票證明聯」 → 年期別 → 字軌號碼 →
-        交易日期時間 → 隨機碼/總計 → 賣方（買方）統編 → 一維條碼 → 左右二維條碼。
-        """
-        ...
-        out += _line(f"隨機碼:{invoice.random_code} 總計:{invoice.total_amount}")  # 6/7
-```
-記載項目由「電子發票實施作業要點」附件一格式一規定、不得增刪，其中**沒有**銷售額與稅額欄。
-
-**證據二：店主提供的實機照片（2026-08-22，發票 ZA-10062325）。**
-兩張證明聯的可見欄位為：店名／「電子發票證明聯」／115年07-08月／ZA-10062325／
-`2026-08-22 21:17:19`／`隨機碼:8374 總計:110`／`賣方12345678`／一維條碼／左右二維條碼。
-**兩張皆無銷售額、稅額欄。**
-
-→ 前端 `frontend/lib/agent.ts:83-85` 傳給代理的 `sales_amount` / `tax_amount`
-是**未被使用的欄位**（`InvoicePayload` 有定義但版面不引用），因此
-「正本印本地拆分值、補印印平台值」的不一致**不可能發生在紙上**。P1-7 撤銷。
-
-殘留一條 P2-10（純冗餘、無帳務風險）：`printEInvoice` 仍在 payload 帶
-`sales_amount` / `tax_amount`，代理端從不渲染；此為未使用欄位。
-
-### 7.2　照片衍生的新觀察（待店主確認，非本次稽核範圍內的金額問題）
-
-照片中兩張證明聯的字軌、開立時間、隨機碼、總計完全相同，且**兩張皆未見「補印」字樣**。
-系統的補印邏輯建立在「補印會被加註」這個假設上：
-
-`backend/app/modules/einvoice/service.py:1131-1135`
-```
-        **正本還是補印，由「印出來過沒有」決定**（電子發票實施作業要點 §26）：
-        證明聯以列印一次為限，從未印出（例：開立成功但回應斷線）時那一次還沒用掉，
-        要印**正本**；已印過才印補印——補印會加註「補印」二字，且依法須併同原聯
-        才能兌獎，誤用等於給客人一張兌不了獎的紙。
-```
-**待店主確認**：這兩張是「正本＋補印」還是「兩張正本」。
-- 若其中一張是補印卻未加註 → 客人可能持有兩張外觀相同的證明聯，重複兌領獎金的責任
-  歸營業人，需另案處理（涉及 Amego 的 `reprint` 參數行為，非本稽核範圍）。
-- 若兩張都是正本 → 表示 `proof-printed` 的標記未生效，「列印一次為限」的計數沒起作用。
-
-### 7.3　追加裁示
-
-| 事項 | 裁示 | 後續 |
-|---|---|---|
-| P1-6 光貿是否驗算 `數量 × 單價` | **不驗算**（以 `Amount` 為權威） | 「填到小數第 2 位」可行，改為取整至 2dp 即可 |
-| P1-4 進項發票是否可能混稅別 | **不會**（一張發票單一課稅別） | 「整張打勾免稅」的模型足夠 |
-| P0-1 / P0-2 | **核准修復** | 見下 |
-
-### 7.4　本檔的性質變更
-
-自 2026-08-22 店主核准修復 P0-1／P0-2 起，本 session 的「唯讀、不改任何實作」約束
-由店主明示解除（僅就核准的修復範圍）。稽核結論本身不再變動；
-後續修復以獨立分支、依 `CLAUDE.md` 的 TDD 與四道門進行，修復內容不回寫本檔的發現段落。
-
----
-
-## 階段 8：由實機照片衍生的新發現（2026-08-22）
-
-### 8.1　P1-8　完成頁的「重印證明聯」印出的是**第二張正本**，且無任何阻擋
-
-**來源**：店主提供的兩張證明聯照片，操作為「結帳 → 從導向的完成頁 → 馬上按『重印證明聯』」。
-兩張的字軌、時間、隨機碼、總計完全相同，且**皆無「補印」字樣**。
-
-**成因（已於程式碼確認）**：完成頁的按鈕與交易紀錄的補印是**兩條不同的路徑**。
-
-完成頁（`frontend/app/(authed)/pos/page.tsx:1420-1426`）走**本地排版**，也就是正本：
-```tsx
-  const printProof = useMutation({
-    mutationFn: async ({ invoice, sale }) => {
-      ...
-      await printEInvoice(invoice, sale, { taxId: header.tax_id, name: header.name });
-```
-交易紀錄（`frontend/app/(authed)/sales/page.tsx:1093-1097`）走**平台排版**，會依
-`proof_printed_at` 決定 `reprint` 旗標，因此有「補印」字樣：
-```tsx
-        "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
-      ...
-      await printRaw(data.base64_data);
-```
-
-按鈕本身**常駐**、只在列印中停用（`frontend/app/(authed)/pos/page.tsx:2231-2238`）：
-```tsx
-                <button
-                  type="button"
-                  className="btn-ghost pos-invoice-reprint"
-                  disabled={printProof.isPending}
-                  onClick={() =>
-                    printProof.mutate({ invoice: completedInvoice, sale: completed })
-                  }
-                >
-                  {printProof.isPending ? "列印中…" : "重印證明聯"}
-                </button>
-```
-沒有任何「已成功印過就不給按」的條件。
-
-**開發者其實知道這個危險**，但只處理了「記錄失敗」那條分支的文案，
-沒有擋住「記錄成功之後再按一次」（`frontend/app/(authed)/pos/page.tsx:1442-1444`）：
-```tsx
-        err instanceof ProofRecordError
-          ? `證明聯已印出，但系統沒記錄到（${err.message}）。請勿重印，重印會多出一張正本。`
-          : `發票已開立，但證明聯列印失敗：${err.message}（可按重印）`,
-```
-
-**連帶的證據不一致**：第二次列印後仍會 POST `proof-printed`，
-而後端依 `printed_before is not None` 把稽核記成 `copy="REPRINT"`
-（`backend/app/modules/einvoice/service.py:1177-1180`）——
-**紙上是正本、稽核說是補印**，事後要舉證反而指向錯誤的方向。
-
-按鈕文案「重印證明聯」也與實際行為不符：它是「列印失敗時的重試」，不是「補印」。
-
-### 8.2　店主裁示（2026-08-22）
-
-| 事項 | 裁示 |
-|---|---|
-| P1-8 完成頁重印會多出一張正本 | **維持現況，不修**（現實中列印失敗、缺紙、代理離線等突發狀況多，需要能重試） |
-| 交易紀錄的補印是否保留「補印」字樣 | 店主要求**拿掉**，理由同上 |
-
-**稽核意見（僅記錄，不阻擋裁示）**：「補印」註記與「列印一次為限」並非本系統的設計選擇，
-而是《電子發票實施作業要點》第 26 點的要求；補印聯依法須併同原聯才能兌獎。
-拿掉註記後，同一張發票會存在多張外觀完全相同、且都像正本的證明聯，
-重複兌領獎金的責任歸營業人。此為法遵取捨，決定權在店主。
-拿掉註記的實作屬另一件事，須另開分支處理（本檔僅記錄裁示）。
+作廢／更正流程依任務規則不展開；本輪只在交易與帳本整合證據中讀到既有入口，未對 F6.5 的完整性作判定。

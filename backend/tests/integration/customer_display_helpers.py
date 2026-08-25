@@ -31,6 +31,12 @@ class SignedCartContext:
     cart_revision: int
 
 
+@dataclass(frozen=True)
+class AuthoritativeCartContext:
+    cart_session_id: int
+    cart_revision: int
+
+
 def signature_png_base64() -> str:
     magic = b"\x89PNG\r\n\x1a\n"
 
@@ -142,6 +148,41 @@ async def signed_store_credit_sale_payload(
     }
 
 
+async def prepare_authoritative_cart(
+    session: AsyncSession,
+    *,
+    store_id: int,
+    actor_user_id: int,
+    payload: dict[str, object],
+) -> AuthoritativeCartContext:
+    """Create the paired authoritative DRAFT cart required by ordinary payments."""
+    terminal, _device = await ensure_paired_customer_display(
+        session,
+        store_id=store_id,
+        actor_user_id=actor_user_id,
+    )
+    cart_request = CartUpsertRequest.model_validate(
+        {
+            "expected_revision": None,
+            "lines": payload["lines"],
+            "buyer_contact_id": payload.get("buyer_contact_id"),
+            "tenders": payload.get("tenders"),
+            "service_mode": payload.get("service_mode"),
+            "table_no": payload.get("table_no"),
+        }
+    )
+    cart = await CustomerDisplayService(session).upsert_cart(
+        store_id,
+        terminal.id,
+        cart_request,
+        actor_user_id=actor_user_id,
+    )
+    return AuthoritativeCartContext(
+        cart_session_id=cart.id,
+        cart_revision=cart.revision,
+    )
+
+
 async def prepare_signed_store_credit_cart(
     session: AsyncSession,
     *,
@@ -228,8 +269,7 @@ async def return_consent_content(
     )
     return {
         "return_lines": [
-            {"sale_line_id": line_id, "qty": qty}
-            for line_id, qty in sorted(return_lines.items())
+            {"sale_line_id": line_id, "qty": qty} for line_id, qty in sorted(return_lines.items())
         ],
         "invoice_id": invoice.id if invoice is not None else None,
         "invoice_action": preview["invoice_action"],

@@ -573,9 +573,7 @@ class SigningService:
             "items": items,
             "refund_total": str(refund_total),
             "invoice_action_label": label,
-            "consent_note": (
-                f"本人同意就上列退貨品項，由店家{label}，並確認退款金額無誤。"
-            ),
+            "consent_note": (f"本人同意就上列退貨品項，由店家{label}，並確認退款金額無誤。"),
         }
 
     def _canonical_affidavit_client_fields(self, content: dict[str, object]) -> dict[str, object]:
@@ -1067,6 +1065,7 @@ class SigningService:
         invoice_id: int,
         invoice_action: str,
         refund_total: Decimal,
+        allow_expired_provider_recovery: bool = False,
     ) -> SignatureTask:
         """退貨的發票處置同意：驗證並於同一交易內一次性轉 CONSUMED。
 
@@ -1082,9 +1081,12 @@ class SigningService:
         task = await self._repo.get_for_update(store_id, task_id)
         if task is None:
             raise SignatureTaskNotFound(f"簽署任務 {task_id} 不存在或不屬本店")
+        valid_status = task.status is SignatureTaskStatus.SIGNED or (
+            allow_expired_provider_recovery and task.status is SignatureTaskStatus.EXPIRED
+        )
         if (
             task.kind is not SignatureTaskKind.RETURN_INVOICE_CONSENT
-            or task.status is not SignatureTaskStatus.SIGNED
+            or not valid_status
             or task.ref_type != "sale"
             or task.ref_id != sale_id
         ):
@@ -1097,20 +1099,22 @@ class SigningService:
                 "客人簽署同意的退貨品項/數量與本次退貨不符，請重新請客人確認簽名"
             )
         if task.content.get("invoice_id") != invoice_id:
-            raise SignatureContentMismatch(
-                "客人簽署同意的是另一張發票，請重新請客人確認簽名"
-            )
+            raise SignatureContentMismatch("客人簽署同意的是另一張發票，請重新請客人確認簽名")
         if task.content.get("invoice_action") != invoice_action:
             raise SignatureContentMismatch(
-                "發票處置方式在簽署後已改變（例如已跨月或期間出現其他折讓），"
-                "請重新請客人確認簽名"
+                "發票處置方式在簽署後已改變（例如已跨月或期間出現其他折讓），請重新請客人確認簽名"
             )
         if task.content.get("refund_total") != str(refund_total):
-            raise SignatureContentMismatch(
-                "退款金額與客人簽署同意的金額不符，請重新請客人確認簽名"
-            )
+            raise SignatureContentMismatch("退款金額與客人簽署同意的金額不符，請重新請客人確認簽名")
         return await self.consume_task(
-            task, reason_code="RETURN_INVOICE_CONSENT", sale_id=sale_id
+            task,
+            reason_code=(
+                "RETURN_INVOICE_CONSENT_PROVIDER_RECOVERY"
+                if task.status is SignatureTaskStatus.EXPIRED
+                else "RETURN_INVOICE_CONSENT"
+            ),
+            sale_id=sale_id,
+            allow_expired_provider_recovery=allow_expired_provider_recovery,
         )
 
     async def consume_task(
@@ -1120,9 +1124,19 @@ class SigningService:
         reason_code: str,
         actor_user_id: int | None = None,
         sale_id: int | None = None,
+        allow_expired_provider_recovery: bool = False,
     ) -> SignatureTask:
-        """單據成立交易內把已鎖定的 SIGNED 任務一次性轉 CONSUMED。"""
-        if task.status is not SignatureTaskStatus.SIGNED:
+        """單據成立交易內把已鎖定的簽署任務一次性轉 CONSUMED。
+
+        一般流程只接受 SIGNED；唯一例外是平台退款已成功的本地復原，可消費內容完全相符、
+        但在背景補帳前被 TTL 標成 EXPIRED 的退貨同意。
+        """
+        from_status = task.status
+        if from_status is not SignatureTaskStatus.SIGNED and not (
+            allow_expired_provider_recovery
+            and from_status is SignatureTaskStatus.EXPIRED
+            and task.kind is SignatureTaskKind.RETURN_INVOICE_CONSENT
+        ):
             raise SignatureTaskNotPending(f"簽署任務 {task.id} 非 SIGNED，不可綁定")
         now = datetime.now(UTC)
         task.status = SignatureTaskStatus.CONSUMED
@@ -1130,7 +1144,7 @@ class SigningService:
         task.expires_at = None
         await self._record_event(
             task,
-            from_status=SignatureTaskStatus.SIGNED,
+            from_status=from_status,
             to_status=SignatureTaskStatus.CONSUMED,
             reason_code=reason_code,
             actor_user_id=actor_user_id,
@@ -1201,7 +1215,7 @@ class SigningService:
         self,
         task: SignatureTask,
         *,
-        actor_user_id: int,
+        actor_user_id: int | None,
     ) -> SignatureTask:
         if task.status is not SignatureTaskStatus.SIGNED:
             raise SignatureTaskNotPending("付款對帳後只能恢復 SIGNED 任務")

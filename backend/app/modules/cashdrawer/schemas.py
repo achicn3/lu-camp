@@ -6,10 +6,11 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.shared.enums import CashMovementType, CashSessionStatus
 
@@ -21,6 +22,7 @@ def _whole(value: Decimal, *, allow_negative: bool) -> Decimal:
         raise ValueError("金額不可為負")
     if value != value.to_integral_value():
         raise ValueError("金額必須為整數元（無角分）")
+    ensure_ntd_fits_numeric_12(value, absolute=True)
     return value
 
 
@@ -57,7 +59,7 @@ class CashSessionCloseRequest(BaseModel):
 class CashMovementCreateRequest(BaseModel):
     """記一筆現金異動（MANUAL_ADJUST 可正可負；其餘類型非負）。"""
 
-    type: CashMovementType
+    type: Literal[CashMovementType.MANUAL_ADJUST]
     amount: NTDAmount
     note: str = Field(min_length=1, max_length=200)  # 事由必填（留痕，§5）
 
@@ -74,7 +76,10 @@ class CashMovementCreateRequest(BaseModel):
     @classmethod
     def _check(cls, v: Decimal) -> Decimal:
         # 允許負值；MANUAL_ADJUST 才可負，其他類型的非負限制在 service 層守。
-        return _whole(v, allow_negative=True)
+        value = _whole(v, allow_negative=True)
+        if value == 0:
+            raise ValueError("人工現金調整金額不可為零")
+        return value
 
 
 class CashSessionRead(BaseModel):

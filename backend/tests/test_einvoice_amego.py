@@ -150,18 +150,14 @@ def test_f0401_b2b_split_tax() -> None:
 
 def test_f0401_carrier_and_donation_fields() -> None:
     carrier = _invoice(carrier_type="3J0002", carrier_id="/ABC+123", print_mark=False)
-    data = build_f0401_data(
-        carrier, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7"
-    )
+    data = build_f0401_data(carrier, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7")
     assert data["CarrierType"] == "3J0002"
     assert data["CarrierId1"] == "/ABC+123"
     assert data["CarrierId2"] == "/ABC+123"
     assert "NPOBAN" not in data
 
     donate = _invoice(donate_mark=True, npoban="919", print_mark=False)
-    data2 = build_f0401_data(
-        donate, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7"
-    )
+    data2 = build_f0401_data(donate, [_line("帳篷", 1, "1000", "1000")], order_id="S1-7")
     assert data2["NPOBAN"] == "919"
     assert "CarrierType" not in data2
 
@@ -179,6 +175,20 @@ def test_f0401_discounted_line_uses_effective_unit_price() -> None:
     assert item["Amount"] == "900"
     assert item["UnitPrice"] == "450"
     assert data["SalesAmount"] == 900
+
+
+def test_f0401_caps_repeating_unit_price_at_amego_seven_decimal_places() -> None:
+    """光貿 UnitPrice 最多 7 位小數；整數元 Amount 由 DetailAmountRound=1 保持權威。"""
+    inv = _invoice(net=Decimal(95), tax=Decimal(5), total=Decimal(100))
+    data = build_f0401_data(
+        inv,
+        [_line("營繩", 3, "40", "100")],
+        order_id="S1-7",
+    )
+    item = cast("list[dict[str, object]]", data["ProductItem"])[0]
+    assert item["UnitPrice"] == "33.3333333"
+    assert item["Amount"] == "100"
+    assert data["DetailAmountRound"] == 1
 
 
 def test_f0401_rejects_line_total_mismatch_with_invoice_total() -> None:
@@ -325,9 +335,7 @@ async def test_client_posts_signed_form() -> None:
     assert form["time"] == "1700000000"
     data = form["data"]
     assert json.loads(data) == [{"CancelInvoiceNumber": "AB00001111"}]
-    assert form["sign"] == hashlib.md5(
-        f"{data}1700000000unit-test-app-key".encode()
-    ).hexdigest()
+    assert form["sign"] == hashlib.md5(f"{data}1700000000unit-test-app-key".encode()).hexdigest()
 
 
 async def test_client_requires_credentials() -> None:
@@ -544,6 +552,7 @@ def test_parse_query_invoice_voided_accepts_pending_void_in_wait() -> None:
 
 def test_allowance_original_invoice_check_fails_closed_on_unknown_items() -> None:
     """product_item 含非物件/缺字軌時不得被靜默略過（否則撞號折讓會被誤記成功）。"""
+
     def _resp(items: object) -> dict[str, object]:
         return {
             "code": 0,
@@ -586,6 +595,7 @@ def test_allowance_original_invoice_check_fails_closed_on_unknown_items() -> Non
 
 def test_create_date_bounds_never_escape_as_non_amego_error() -> None:
     """超大 epoch 不得逃逸成 OverflowError（會變 500 且 last_error 空白）。"""
+
     def _resp(create_date: object) -> dict[str, object]:
         return {
             "code": 0,
@@ -620,6 +630,7 @@ def test_pending_void_never_bypasses_identity_and_status_checks() -> None:
 
     上一輪把 wait 檢查放最前面，導致金額不符的撞號紀錄只要掛著待作廢就被判定已作廢。
     """
+
     def _resp(**over: object) -> dict[str, object]:
         data: dict[str, object] = {
             "invoice_type": "C0401",
@@ -716,6 +727,7 @@ def test_query_issued_requires_issued_type_and_known_wait() -> None:
     重現過：兩者在身分、金額、時間、狀態都相符時都會回 AmegoIssueResult，
     使本地與平台直接矛盾。
     """
+
     def _resp(**over: object) -> dict[str, object]:
         data: dict[str, object] = {
             "invoice_number": "AB00001111",
@@ -764,6 +776,7 @@ def test_query_issued_requires_issued_type_and_known_wait() -> None:
 
 def test_void_blocks_on_conflicting_pending_actions() -> None:
     """作廢前若平台掛著相斥的待處理動作（待折讓），不可逕自再送 F0501。"""
+
     def _resp(wait: object) -> dict[str, object]:
         return {
             "code": 0,
@@ -788,6 +801,7 @@ def test_allowance_blocks_on_original_invoice_pending_void_or_cancel() -> None:
     原發票若被作廢，掛在它底下的折讓就不成立，本地卻會永久留著 ALLOWANCE。
     先前只擋 D0501/B0501，C0501／C0701 會被放行（已重現）。
     """
+
     def _resp(wait: list[object]) -> dict[str, object]:
         return {
             "code": 0,
@@ -901,17 +915,13 @@ def test_invoice_print_payload_pins_big5_encoding() -> None:
     TM-T82III 是台灣機、以 BIG5 解碼，於是整張紙除了點陣圖那幾個字以外
     全是亂碼——而且**回應 HTTP 200、位元組長度也正常**，只有印出來才看得見。
     """
-    data = build_invoice_print_data(
-        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III
-    )
+    data = build_invoice_print_data(order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III)
     assert data["printer_lang"] == AMEGO_PRINTER_LANG_BIG5
 
 
 def test_invoice_print_payload_queries_by_order_id_and_marks_reprint() -> None:
     """以 order_id 查（發票號碼正是斷線時弄丟的東西），並標記為補印。"""
-    data = build_invoice_print_data(
-        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III
-    )
+    data = build_invoice_print_data(order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III)
     assert data["type"] == "order"
     assert data["order_id"] == "S1-123"
     assert data["printer_type"] == AMEGO_PRINTER_TYPE_TM_T82III

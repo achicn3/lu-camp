@@ -1,5 +1,7 @@
 """purchasing 業務邏輯：供應商、採購單與一次性收貨入庫。"""
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -7,7 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import split_tax_inclusive
+from app.core.money import MAX_NTD
 from app.modules.inventory.service import InventoryService
 from app.modules.purchasing.models import (
     GoodsReceipt,
@@ -23,7 +25,6 @@ from app.modules.purchasing.schemas import (
     SupplierCreate,
     SupplierUpdate,
 )
-from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import PurchaseOrderStatus
 from app.shared.exceptions import (
     CrossStoreReference,
@@ -45,7 +46,6 @@ class PurchasingService:
         self._session = session
         self._repo = PurchasingRepository(session)
         self._inventory = InventoryService(session)
-        self._settings = StoreSettingsService(session)
 
     async def create_supplier(self, store_id: int, payload: SupplierCreate) -> Supplier:
         name = payload.name.strip()
@@ -151,6 +151,14 @@ class PurchasingService:
         *,
         actor_user_id: int,
     ) -> PurchaseOrder:
+        # service 也守一次，避免內部呼叫以 model_construct 繞過 API schema 後，直到 DB flush
+        # 才得到 Numeric overflow 的 500。所有檢查都在主檔/明細寫入之前。
+        for line in payload.lines:
+            unit_cost = Decimal(line.unit_cost)
+            if line.qty <= 0 or unit_cost <= 0 or unit_cost != unit_cost.to_integral_value():
+                raise InvalidPurchaseOrder("採購數量與單價必須為正整數")
+            if unit_cost > MAX_NTD:
+                raise InvalidPurchaseOrder(f"採購單價不可超過資料庫金額上限 {MAX_NTD}")
         # 鎖定供應商列：擋下「並發停用 vs 建單」競態，並禁止用停用中的供應商建單（後端強制，
         # 不僅靠前端選單隱藏——停用才是可執行的業務控制，Codex 對抗審 high）。
         supplier = await self._repo.get_supplier_for_update(store_id, payload.supplier_id)
@@ -297,17 +305,14 @@ class PurchasingService:
         return await self._repo.get_purchase_order(store_id, purchase_order_id)
 
     @staticmethod
-    def _invoice_fields(
-        invoice: "InputInvoiceIn", tax_rate: Decimal
-    ) -> dict[str, object]:
-        """進項發票欄位＋稅額拆分（§6：net = round_ntd(total/(1+rate))、tax = total − net）。"""
-        net, tax = split_tax_inclusive(Decimal(invoice.invoice_total), tax_rate)
+    def _invoice_fields(invoice: "InputInvoiceIn") -> dict[str, object]:
+        """Copy the three authoritative amounts printed on the supplier's invoice."""
         return {
             "invoice_number": invoice.invoice_number,
             "invoice_date": invoice.invoice_date,
             "invoice_total": Decimal(invoice.invoice_total),
-            "invoice_net": Decimal(net),
-            "invoice_tax": Decimal(tax),
+            "invoice_net": Decimal(invoice.invoice_net),
+            "invoice_tax": Decimal(invoice.invoice_tax),
         }
 
     async def register_input_invoice(
@@ -331,8 +336,7 @@ class PurchasingService:
             raise InputInvoiceAlreadySet(
                 f"收貨批次 {receipt_id} 已登錄發票 {receipt.invoice_number}，不可覆寫"
             )
-        settings = await self._settings.get_effective_settings(store_id)
-        for key, value in self._invoice_fields(invoice, Decimal(settings.tax_rate)).items():
+        for key, value in self._invoice_fields(invoice).items():
             setattr(receipt, key, value)
         await self._session.flush()
         return receipt
@@ -345,7 +349,6 @@ class PurchasingService:
         actor_user_id: int,
         lines: list["ReceiveLineIn"],
         idempotency_key: str,
-        request_fingerprint: str,
         invoice: "InputInvoiceIn | None" = None,
     ) -> tuple[PurchaseOrder, GoodsReceipt]:
         """分批收貨：對指定明細各收 qty（不得超過待收），更新庫存＋寫庫存異動，
@@ -354,6 +357,11 @@ class PurchasingService:
         冪等（防網路重試重複入庫）：同店同 idempotency_key 只成立一筆收貨——重送且指紋相符回原
         結果、不重複加庫存；指紋不符 → 409。並行首寫競態由唯一索引擋下（router 收攏回放）。
         """
+        request_fingerprint = self._receive_fingerprint(
+            purchase_order_id,
+            lines=lines,
+            invoice=invoice,
+        )
         # 前置回放：同 key 已有收貨 → 指紋相符回原結果、不同 → 衝突。
         existing = await self._repo.get_receipt_by_idempotency_key(store_id, idempotency_key)
         if existing is not None:
@@ -386,9 +394,7 @@ class PurchasingService:
             seen.add(item.line_id)
             po_line = line_by_id.get(item.line_id)
             if po_line is None:
-                raise InvalidPurchaseOrder(
-                    f"明細 {item.line_id} 不屬於採購單 {purchase_order_id}"
-                )
+                raise InvalidPurchaseOrder(f"明細 {item.line_id} 不屬於採購單 {purchase_order_id}")
             remaining = po_line.qty - po_line.received_qty
             if item.qty > remaining:
                 raise InvalidPurchaseOrder(
@@ -400,8 +406,7 @@ class PurchasingService:
 
         invoice_fields: dict[str, object] = {}
         if invoice is not None:
-            settings = await self._settings.get_effective_settings(store_id)
-            invoice_fields = self._invoice_fields(invoice, Decimal(settings.tax_rate))
+            invoice_fields = self._invoice_fields(invoice)
         # 先建收貨批次取得 id，庫存異動以 ref_type="goods_receipt" 指向本批。
         # 冪等鍵/指紋落在同一交易：並行首寫互撞由 (store, key) 唯一索引擋下（router 回放）。
         receipt = await self._repo.add_receipt(
@@ -447,3 +452,29 @@ class PurchasingService:
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
         return refreshed, receipt
+
+    @staticmethod
+    def _receive_fingerprint(
+        purchase_order_id: int,
+        *,
+        lines: list["ReceiveLineIn"],
+        invoice: "InputInvoiceIn | None",
+    ) -> str:
+        """定義收貨業務請求的穩定指紋，供同鍵回放或衝突判定。"""
+        canonical = {
+            "purchase_order_id": purchase_order_id,
+            "lines": sorted((line.line_id, line.qty) for line in lines),
+            "invoice": (
+                None
+                if invoice is None
+                else [
+                    invoice.invoice_number,
+                    invoice.invoice_date.isoformat(),
+                    str(invoice.invoice_net),
+                    str(invoice.invoice_tax),
+                    str(invoice.invoice_total),
+                ]
+            ),
+        }
+        blob = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()

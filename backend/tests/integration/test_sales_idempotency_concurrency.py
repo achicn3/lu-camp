@@ -25,6 +25,7 @@ from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 @pytest_asyncio.fixture
@@ -140,7 +141,7 @@ async def _cleanup(sm: async_sessionmaker[AsyncSession], store_id: int) -> None:
         await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
         await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
         await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
-        await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+        await delete_cash_movements_for_test(s, store_id=store_id)
         await s.execute(delete(Sale).where(Sale.store_id == store_id))
         await s.execute(delete(CatalogProduct).where(CatalogProduct.store_id == store_id))
         await s.execute(delete(CashSession).where(CashSession.store_id == store_id))

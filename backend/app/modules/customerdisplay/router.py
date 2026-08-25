@@ -607,15 +607,14 @@ async def reconcile_cart_payment(
     session: SessionDep,
     user: ManagerDep,
 ) -> PaymentReconciliationRead:
-    from app.modules.sales.linepay import linepay_client_from_config
-
     try:
-        outcome, cart = await CustomerDisplayService(session).reconcile_payment(
+        service = CustomerDisplayService(session)
+        outcome, cart = await service.reconcile_payment(
             user.store_id,
             terminal_id,
             action=body.action,
             actor_user_id=user.id,
-            linepay_client=linepay_client_from_config(),
+            linepay_client=service.configured_linepay_client(),
             reason=body.reason,
             evidence_type=body.evidence_type,
             evidence_reference=body.evidence_reference,

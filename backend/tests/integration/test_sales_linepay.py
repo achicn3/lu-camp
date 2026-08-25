@@ -8,6 +8,7 @@
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TypedDict
 from uuid import uuid4
 
 import pytest
@@ -47,7 +48,10 @@ from app.shared.exceptions import (
     LinePayTransportError,
     ManualRefundRequired,
 )
-from tests.integration.customer_display_helpers import prepare_signed_store_credit_cart
+from tests.integration.customer_display_helpers import (
+    prepare_authoritative_cart,
+    prepare_signed_store_credit_cart,
+)
 
 _CHECK_NOT_FOUND: dict[str, object] = {
     "returnCode": "1150",
@@ -151,20 +155,75 @@ def _tender(amount: str) -> list[TenderInput]:
     ]
 
 
+class _LinePayCartKwargs(TypedDict):
+    cart_session_id: int
+    cart_revision: int
+
+
+async def _linepay_cart_kwargs(
+    session: AsyncSession,
+    *,
+    store_id: int,
+    clerk_id: int,
+    lines: list[SaleLineInput],
+    tenders: list[TenderInput],
+) -> _LinePayCartKwargs:
+    cart = await prepare_authoritative_cart(
+        session,
+        store_id=store_id,
+        actor_user_id=clerk_id,
+        payload={
+            "lines": [
+                {
+                    "line_type": line.line_type.value,
+                    "item_code": line.item_code,
+                    "catalog_product_id": line.catalog_product_id,
+                    "bulk_lot_id": line.bulk_lot_id,
+                    "menu_item_id": line.menu_item_id,
+                    "qty": line.qty,
+                }
+                for line in lines
+            ],
+            "tenders": [
+                {
+                    "tender_type": tender.tender_type.value,
+                    "amount": str(tender.amount),
+                    "line_pay_one_time_key": tender.line_pay_one_time_key,
+                }
+                for tender in tenders
+            ],
+        },
+    )
+    return {
+        "cart_session_id": cart.cart_session_id,
+        "cart_revision": cart.cart_revision,
+    }
+
+
 @pytest.mark.asyncio
 async def test_linepay_success_non_cash_with_fee_and_txn(db_session: AsyncSession) -> None:
     # 無開帳（非現金不需開帳）：LINE Pay 收款仍成立。
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="S1", price="1000")
     transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_SUCCESS)
+    lines = _line("S1")
+    tenders = _tender("1000")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
 
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=_line("S1"),
-        tenders=_tender("1000"),
+        lines=lines,
+        tenders=tenders,
         idempotency_key="pos-key-1",
         linepay_client=_client(transport),
+        **cart_kwargs,
     )
 
     assert sale.payment_method == PaymentMethod.LINE_PAY
@@ -216,6 +275,15 @@ async def test_linepay_reject_fails_closed_rolls_back(db_session: AsyncSession) 
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="S2", price="500")
     transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_REJECT)
+    lines = _line("S2")
+    tenders = _tender("500")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
 
     # fail-closed：拒付 → 拋 LinePayChargeFailed，create_sale 全程不 commit（router 回滾整筆，
     # 序號品/收款皆不落地）。此 harness 單交易回滾會連 seed 一併清，故以「明確拋出」為 fail-closed
@@ -224,10 +292,11 @@ async def test_linepay_reject_fails_closed_rolls_back(db_session: AsyncSession) 
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("S2"),
-            tenders=_tender("500"),
+            lines=lines,
+            tenders=tenders,
             idempotency_key="pos-key-2",
             linepay_client=_client(transport),
+            **cart_kwargs,
         )
 
 
@@ -239,14 +308,24 @@ async def test_linepay_check_first_reuses_completed_without_recharge(
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="S3", price="800")
     transport = ScriptedTransport(check_resp=_CHECK_COMPLETE, pay_resp=_PAY_SUCCESS)
+    lines = _line("S3")
+    tenders = _tender("800")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
 
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=_line("S3"),
-        tenders=_tender("800"),
+        lines=lines,
+        tenders=tenders,
         idempotency_key="pos-key-3",
         linepay_client=_client(transport),
+        **cart_kwargs,
     )
     assert transport.check_calls == 1
     assert transport.pay_calls == 0  # 未重複扣款
@@ -263,15 +342,25 @@ async def test_linepay_transport_error_fails_closed(db_session: AsyncSession) ->
     transport = ScriptedTransport(
         check_resp=_CHECK_NOT_FOUND, pay_error=LinePayTransportError("網路逾時")
     )
+    lines = _line("S4")
+    tenders = _tender("300")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     # 傳輸錯誤（結果未知）→ fail-closed：沿 LinePayTransportError 上拋，整筆不成立（router 回滾）。
     with pytest.raises(LinePayTransportError):
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("S4"),
-            tenders=_tender("300"),
+            lines=lines,
+            tenders=tenders,
             idempotency_key="pos-key-4",
             linepay_client=_client(transport),
+            **cart_kwargs,
         )
 
 
@@ -280,14 +369,24 @@ async def test_linepay_disabled_rejected(db_session: AsyncSession) -> None:
     store_id, clerk_id = await _seed(db_session, linepay_enabled=False)
     await _seed_item(db_session, store_id, code="S5", price="100")
     transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_SUCCESS)
+    lines = _line("S5")
+    tenders = _tender("100")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     with pytest.raises(LinePayChargeFailed):
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("S5"),
-            tenders=_tender("100"),
+            lines=lines,
+            tenders=tenders,
             idempotency_key="pos-key-5",
             linepay_client=_client(transport),
+            **cart_kwargs,
         )
     assert transport.pay_calls == 0  # 未啟用：連 API 都不呼叫
 
@@ -297,14 +396,24 @@ async def test_linepay_requires_idempotency_key(db_session: AsyncSession) -> Non
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="S6", price="100")
     transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_SUCCESS)
+    lines = _line("S6")
+    tenders = _tender("100")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     with pytest.raises(InvalidSaleTender):
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("S6"),
-            tenders=_tender("100"),
+            lines=lines,
+            tenders=tenders,
             idempotency_key=None,
             linepay_client=_client(transport),
+            **cart_kwargs,
         )
 
 
@@ -358,13 +467,23 @@ async def _make_linepay_sale(
     code: str,
 ) -> Sale:
     await _seed_item(db_session, store_id, code=code, price="1000")
+    lines = _line(code)
+    tenders = _tender("1000")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     return await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=_line(code),
-        tenders=_tender("1000"),
+        lines=lines,
+        tenders=tenders,
         idempotency_key=f"key-{code}",
         linepay_client=_client(transport),
+        **cart_kwargs,
     )
 
 
@@ -458,22 +577,32 @@ async def _make_2line_linepay_sale(
     """建 2 行 LINE Pay 銷售（S-A 600 + S-B 400 = 1000），供部分/全額退貨測試。"""
     await _seed_item(db_session, store_id, code="RA", price="600")
     await _seed_item(db_session, store_id, code="RB", price="400")
+    lines = [
+        SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RA"),
+        SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RB"),
+    ]
+    tenders = [
+        TenderInput(
+            tender_type=TenderType.LINE_PAY,
+            amount=Decimal("1000"),
+            line_pay_one_time_key="OTK-2line",
+        )
+    ]
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     return await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=[
-            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RA"),
-            SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code="RB"),
-        ],
-        tenders=[
-            TenderInput(
-                tender_type=TenderType.LINE_PAY,
-                amount=Decimal("1000"),
-                line_pay_one_time_key="OTK-2line",
-            )
-        ],
+        lines=lines,
+        tenders=tenders,
         idempotency_key="key-2line",
         linepay_client=_client(transport),
+        **cart_kwargs,
     )
 
 
@@ -696,14 +825,24 @@ async def test_charge_check_first_rejects_amount_mismatch(db_session: AsyncSessi
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="AM", price="1000")
     transport = ScriptedTransport(check_resp=_CHECK_COMPLETE_WRONG_AMOUNT, pay_resp=_PAY_SUCCESS)
+    lines = _line("AM")
+    tenders = _tender("1000")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     with pytest.raises(LinePayChargeFailed):
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("AM"),
-            tenders=_tender("1000"),
+            lines=lines,
+            tenders=tenders,
             idempotency_key="am-key",
             linepay_client=_client(transport),
+            **cart_kwargs,
         )
     assert transport.pay_calls == 0  # 金額不符即拒、不改呼 pay
 
@@ -934,12 +1073,22 @@ async def test_linepay_requires_one_time_key(db_session: AsyncSession) -> None:
     store_id, clerk_id = await _seed(db_session)
     await _seed_item(db_session, store_id, code="S7", price="100")
     transport = ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=_PAY_SUCCESS)
+    lines = _line("S7")
+    tenders = [TenderInput(tender_type=TenderType.LINE_PAY, amount=Decimal("100"))]
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session,
+        store_id=store_id,
+        clerk_id=clerk_id,
+        lines=lines,
+        tenders=tenders,
+    )
     with pytest.raises(InvalidSaleTender):
         await SalesService(db_session).create_sale(
             store_id,
             clerk_id,
-            lines=_line("S7"),
-            tenders=[TenderInput(tender_type=TenderType.LINE_PAY, amount=Decimal("100"))],
+            lines=lines,
+            tenders=tenders,
             idempotency_key="pos-key-7",
             linepay_client=_client(transport),
+            **cart_kwargs,
         )

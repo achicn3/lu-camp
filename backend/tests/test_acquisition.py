@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog
+from app.core.money import MAX_NTD
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
     AcquisitionItemIn,
@@ -23,6 +24,8 @@ from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
 from app.modules.inventory.models import BulkLot, SerializedItem, StockMovement
+from app.modules.settings.schemas import SettingsUpdateRequest
+from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
@@ -41,6 +44,7 @@ from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
     InvalidCommissionPct,
+    InvalidPayoutSplit,
     NoOpenCashSession,
 )
 
@@ -160,6 +164,50 @@ async def test_consignment_creates_items_no_cash(db_session: AsyncSession) -> No
         .where(CashMovement.ref_id == result.acquisition_id)
     )
     assert cash_count == 0
+
+
+async def test_consignment_uses_store_default_commission_unless_item_overrides_it(
+    db_session: AsyncSession,
+) -> None:
+    store_id, clerk_id, contact_id = await _seed(db_session)
+    await StoreSettingsService(db_session).update_settings(
+        store_id,
+        actor_user_id=clerk_id,
+        patch=SettingsUpdateRequest(default_commission_pct=37),
+    )
+    data = AcquisitionCreate(
+        type=AcquisitionType.CONSIGNMENT,
+        contact_id=contact_id,
+        items=[
+            AcquisitionItemIn(
+                name="採店內預設",
+                grade=Grade.A,
+                listed_price=Decimal("2000"),
+            ),
+            AcquisitionItemIn(
+                name="逐件覆寫",
+                grade=Grade.B,
+                listed_price=Decimal("1000"),
+                commission_pct=42,
+            ),
+        ],
+    )
+
+    result = await AcquisitionService(db_session).create_acquisition(
+        store_id,
+        clerk_id,
+        data,
+        idempotency_key=f"svc-{next(_svc_idem)}",
+    )
+
+    commissions = list(
+        await db_session.scalars(
+            select(SerializedItem.commission_pct)
+            .where(SerializedItem.acquisition_id == result.acquisition_id)
+            .order_by(SerializedItem.id)
+        )
+    )
+    assert commissions == [37, 42]
 
 
 async def test_consignment_without_open_drawer_succeeds(db_session: AsyncSession) -> None:
@@ -284,6 +332,39 @@ async def test_commission_pct_out_of_range_rejected(db_session: AsyncSession) ->
         )
 
 
+async def test_buyout_total_overflow_is_rejected_at_service_boundary(
+    db_session: AsyncSession,
+) -> None:
+    """內部呼叫繞過 Pydantic 重驗時，也不可讓 Numeric overflow 落到 DB flush。"""
+    store_id, clerk_id, contact_id = await _seed(db_session)
+    expensive = AcquisitionItemIn(
+        name="高價品",
+        grade=Grade.A,
+        listed_price=MAX_NTD,
+        acquisition_cost=MAX_NTD,
+    )
+    extra = AcquisitionItemIn(
+        name="配件",
+        grade=Grade.A,
+        listed_price=Decimal(1),
+        acquisition_cost=Decimal(1),
+    )
+    valid = AcquisitionCreate(
+        type=AcquisitionType.BUYOUT,
+        contact_id=contact_id,
+        items=[expensive],
+    )
+    bypassed = valid.model_copy(update={"items": [expensive, extra]})
+
+    with pytest.raises(InvalidPayoutSplit, match="資料庫金額上限"):
+        await AcquisitionService(db_session).create_acquisition(
+            store_id,
+            clerk_id,
+            bypassed,
+            idempotency_key=f"svc-{next(_svc_idem)}",
+        )
+
+
 async def test_acquisition_writes_audit_without_pii(db_session: AsyncSession) -> None:
     """收購寫 CREATE_ACQUISITION 稽核，含彙總可溯源，但不得有 national_id 明文。"""
     store_id, clerk_id, contact_id = await _seed(db_session)
@@ -385,13 +466,15 @@ def test_buyout_item_rejects_commission() -> None:
         )
 
 
-def test_consignment_item_requires_commission() -> None:
-    with pytest.raises(ValidationError):
-        AcquisitionCreate(
-            type=AcquisitionType.CONSIGNMENT,
-            contact_id=1,
-            items=[AcquisitionItemIn(name="x", grade=Grade.A, listed_price=Decimal("100"))],
-        )
+def test_consignment_item_may_defer_commission_to_store_setting() -> None:
+    payload = AcquisitionCreate(
+        type=AcquisitionType.CONSIGNMENT,
+        contact_id=1,
+        items=[AcquisitionItemIn(name="x", grade=Grade.A, listed_price=Decimal("100"))],
+    )
+
+    assert payload.items is not None
+    assert payload.items[0].commission_pct is None
 
 
 def test_bulk_lot_requires_lot() -> None:

@@ -11,9 +11,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.core.money import MAX_NTD
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.inventory.models import CatalogProduct, StockMovement
+from app.modules.purchasing.schemas import PurchaseOrderCreate, PurchaseOrderLineCreate
+from app.modules.purchasing.service import PurchasingService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import ItemKind, StockDirection, StockReason, UserRole
@@ -252,9 +255,7 @@ async def test_create_draft_cannot_receive_until_submitted(
     assert early.status_code == 409, early.text
 
     # 送出 → ORDERED
-    submitted = await client.post(
-        f"/api/v1/purchase-orders/{po_id}/submit", headers=_auth(token)
-    )
+    submitted = await client.post(f"/api/v1/purchase-orders/{po_id}/submit", headers=_auth(token))
     assert submitted.status_code == 200, submitted.text
     assert submitted.json()["status"] == "ORDERED"
 
@@ -371,9 +372,7 @@ async def test_cancel_draft_and_ordered_but_not_received(
     draft = await _create_po(
         client, token, supplier_id=supplier_id, catalog_product_id=catalog_id, submit=False
     )
-    cancelled = await client.post(
-        f"/api/v1/purchase-orders/{draft}/cancel", headers=_auth(token)
-    )
+    cancelled = await client.post(f"/api/v1/purchase-orders/{draft}/cancel", headers=_auth(token))
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "CANCELLED"
 
@@ -395,9 +394,7 @@ async def test_cancel_draft_and_ordered_but_not_received(
         json={"lines": [{"line_id": line_id, "qty": 4}]},
         headers=_recv_headers(token),
     )
-    blocked = await client.post(
-        f"/api/v1/purchase-orders/{partial}/cancel", headers=_auth(token)
-    )
+    blocked = await client.post(f"/api/v1/purchase-orders/{partial}/cancel", headers=_auth(token))
     assert blocked.status_code == 409, blocked.text
 
 
@@ -491,9 +488,7 @@ async def test_submit_records_submit_actor(
     draft = await client.get(f"/api/v1/purchase-orders/{po_id}", headers=_auth(token_a))
     assert draft.json()["ordered_by"] == clerk_a
 
-    submitted = await client.post(
-        f"/api/v1/purchase-orders/{po_id}/submit", headers=_auth(token_b)
-    )
+    submitted = await client.post(f"/api/v1/purchase-orders/{po_id}/submit", headers=_auth(token_b))
     assert submitted.status_code == 200, submitted.text
     assert submitted.json()["ordered_by"] == manager.id
 
@@ -541,6 +536,30 @@ async def test_create_purchase_order_rejects_cross_store_supplier(
     assert resp.status_code == 422, resp.text
 
 
+async def test_purchase_order_quantity_times_unit_cost_above_numeric_limit_is_created(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """採購明細不儲存小計；qty 與 unit_cost 各自可儲存時，不限制兩者乘積。"""
+    token, store_id, clerk_id = await _seed_store(db_session)
+    product_a = await _seed_catalog(db_session, store_id, sku="OVERFLOW-A")
+    supplier_id = await _create_supplier(client, token)
+    expensive = PurchaseOrderLineCreate(
+        catalog_product_id=product_a,
+        qty=2,
+        unit_cost=MAX_NTD,
+    )
+    payload = PurchaseOrderCreate(supplier_id=supplier_id, lines=[expensive])
+
+    purchase_order = await PurchasingService(db_session).create_purchase_order(
+        store_id,
+        payload,
+        actor_user_id=clerk_id,
+    )
+
+    assert [(line.qty, line.unit_cost) for line in purchase_order.lines] == [(2, MAX_NTD)]
+
+
 async def test_create_supplier_blank_name_returns_422(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -560,9 +579,7 @@ async def test_list_suppliers_returns_created(
     assert created["is_active"] is True  # 新建預設啟用
 
 
-async def test_get_and_update_supplier(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_get_and_update_supplier(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     """查看單一供應商；編輯名稱/聯絡/統編後反映；不存在 → 404。"""
     token, _store_id, _ = await _seed_store(db_session)
     supplier_id = await _create_supplier(client, token, name="舊名稱")
@@ -625,9 +642,7 @@ async def test_cannot_create_or_submit_order_with_inactive_supplier(
     assert resp.status_code == 422, resp.text
 
     # 草稿供應商已停用 → 送出被擋 422
-    submitted = await client.post(
-        f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token)
-    )
+    submitted = await client.post(f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token))
     assert submitted.status_code == 422, submitted.text
 
 
@@ -638,9 +653,7 @@ async def test_supplier_rename_does_not_rewrite_po_history(
     token, store_id, _ = await _seed_store(db_session)
     catalog_id = await _seed_catalog(db_session, store_id)
     supplier_id = await _create_supplier(client, token, name="原名商")
-    po_id = await _create_po(
-        client, token, supplier_id=supplier_id, catalog_product_id=catalog_id
-    )
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=catalog_id)
 
     # 改名
     await client.patch(
@@ -673,9 +686,7 @@ async def test_submit_snapshots_supplier_name_at_submit_time(
     await client.patch(
         f"/api/v1/suppliers/{supplier_id}", json={"name": "送出時名"}, headers=_auth(token)
     )
-    submitted = await client.post(
-        f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token)
-    )
+    submitted = await client.post(f"/api/v1/purchase-orders/{draft}/submit", headers=_auth(token))
     assert submitted.status_code == 200, submitted.text
     assert submitted.json()["supplier_name"] == "送出時名"  # 快照＝送出當下的名
 
@@ -709,9 +720,7 @@ async def test_deactivate_supplier_hides_from_default_list_but_keeps_record(
     token, _store_id, _ = await _seed_store(db_session)
     supplier_id = await _create_supplier(client, token, name="待停用商")
 
-    deact = await client.post(
-        f"/api/v1/suppliers/{supplier_id}/deactivate", headers=_auth(token)
-    )
+    deact = await client.post(f"/api/v1/suppliers/{supplier_id}/deactivate", headers=_auth(token))
     assert deact.status_code == 200 and deact.json()["is_active"] is False
 
     # 預設清單（建單選單）不含停用者
@@ -897,10 +906,10 @@ async def test_list_purchase_orders_filters_by_status_and_paginates(
 # ── 進項發票（收貨時登錄；漏登可補登）──────────────────────────────────
 
 
-async def test_receive_with_input_invoice_stores_and_splits_tax(
+async def test_receive_with_input_invoice_stores_original_document_amounts(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    """收貨帶進項發票 → 落庫且稅額拆分（total 1050、5% → net 1000/tax 50）；收貨批次可見。"""
+    """收貨帶進項發票 → 原票三金額照錄，不以補登當下設定重新拆稅。"""
     token, store_id, _clerk_id = await _seed_store(db_session)
     product_id = await _seed_catalog(db_session, store_id)
     supplier_id = await _create_supplier(client, token)
@@ -913,6 +922,8 @@ async def test_receive_with_input_invoice_stores_and_splits_tax(
         invoice={
             "invoice_number": "AB12345678",
             "invoice_date": "2026-07-11",
+            "invoice_net": "999",
+            "invoice_tax": "51",
             "invoice_total": "1050",
         },
     )
@@ -923,8 +934,8 @@ async def test_receive_with_input_invoice_stores_and_splits_tax(
         "invoice_number": "AB12345678",
         "invoice_date": "2026-07-11",
         "invoice_total": "1050",
-        "invoice_net": "1000",
-        "invoice_tax": "50",
+        "invoice_net": "999",
+        "invoice_tax": "51",
     }
 
 
@@ -947,6 +958,8 @@ async def test_receive_without_invoice_then_backfill_once(
         json={
             "invoice_number": "CD98765432",
             "invoice_date": "2026-07-11",
+            "invoice_net": "2000",
+            "invoice_tax": "100",
             "invoice_total": "2100",
         },
         headers=_auth(token),
@@ -960,6 +973,8 @@ async def test_receive_without_invoice_then_backfill_once(
         json={
             "invoice_number": "EF11111111",
             "invoice_date": "2026-07-11",
+            "invoice_net": "951",
+            "invoice_tax": "48",
             "invoice_total": "999",
         },
         headers=_auth(token),
@@ -981,6 +996,8 @@ async def test_backfill_unknown_receipt_returns_409(
         json={
             "invoice_number": "GH22222222",
             "invoice_date": "2026-07-11",
+            "invoice_net": "476",
+            "invoice_tax": "24",
             "invoice_total": "500",
         },
         headers=_auth(token),
@@ -1003,6 +1020,8 @@ async def test_invoice_number_format_rejected(
         invoice={
             "invoice_number": "1234567890",
             "invoice_date": "2026-07-11",
+            "invoice_net": "1000",
+            "invoice_tax": "50",
             "invoice_total": "1050",
         },
     )
@@ -1022,6 +1041,8 @@ async def test_duplicate_invoice_number_rejected_across_pos(
     invoice = {
         "invoice_number": "ZZ55667788",
         "invoice_date": "2026-07-11",
+        "invoice_net": "1000",
+        "invoice_tax": "50",
         "invoice_total": "1050",
     }
     first = await _receive_all(client, token, po1, invoice=invoice)

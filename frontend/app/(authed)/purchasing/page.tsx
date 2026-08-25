@@ -707,6 +707,8 @@ function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: num
   const queryClient = useQueryClient();
   const [number, setNumber] = useState("");
   const [dateStr, setDateStr] = useState("");
+  const [net, setNet] = useState("");
+  const [tax, setTax] = useState("");
   const [total, setTotal] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const backfill = useMutation({
@@ -718,6 +720,8 @@ function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: num
           body: {
             invoice_number: number.trim().toUpperCase(),
             invoice_date: dateStr,
+            invoice_net: net.trim(),
+            invoice_tax: tax.trim(),
             invoice_total: total.trim(),
           },
         },
@@ -749,6 +753,20 @@ function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: num
           aria-label="補登發票日期"
         />
         <input
+          value={net}
+          onChange={(e) => setNet(e.target.value)}
+          inputMode="numeric"
+          placeholder="原票未稅額"
+          aria-label="補登發票未稅金額"
+        />
+        <input
+          value={tax}
+          onChange={(e) => setTax(e.target.value)}
+          inputMode="numeric"
+          placeholder="原票稅額"
+          aria-label="補登發票稅額"
+        />
+        <input
           value={total}
           onChange={(e) => setTotal(e.target.value)}
           inputMode="numeric"
@@ -758,7 +776,7 @@ function BackfillInvoiceForm({ poId, receiptId }: { poId: number; receiptId: num
         <button
           type="button"
           className="btn-secondary"
-          disabled={backfill.isPending || !number || !dateStr || !total}
+          disabled={backfill.isPending || !number || !dateStr || !net || !tax || !total}
           onClick={() => backfill.mutate()}
         >
           補登
@@ -776,9 +794,11 @@ function PurchaseOrderList() {
   const [receiveError, setReceiveError] = useState<string | null>(null);
   // 本次各明細實收量（line_id → 字串）。開啟收貨對話框時預設帶入待收量。
   const [receiveQty, setReceiveQty] = useState<Record<number, string>>({});
-  // 進項發票（選填；三欄全空＝不登錄，可事後補登）。開啟/取消都清空避免跨單殘留誤登。
+  // 進項發票（選填；全空＝不登錄，可事後補登）。三個金額照錄原始發票，不在前端重算。
   const [invNumber, setInvNumber] = useState("");
   const [invDate, setInvDate] = useState("");
+  const [invNet, setInvNet] = useState("");
+  const [invTax, setInvTax] = useState("");
   const [invTotal, setInvTotal] = useState("");
   const [rowError, setRowError] = useState<string | null>(null);
   // 復原提示（非錯誤）：偵測到上一次未確認收貨、已和解時告知店員確認剩餘數量。
@@ -787,6 +807,8 @@ function PurchaseOrderList() {
   const resetInvoiceDraft = () => {
     setInvNumber("");
     setInvDate("");
+    setInvNet("");
+    setInvTax("");
     setInvTotal("");
   };
   function openReceive(po: PurchaseOrder) {
@@ -891,13 +913,25 @@ function PurchaseOrderList() {
           throw new Error("本次實收量不可超過待收量");
         }
       }
-      const hasInvoice = invNumber.trim() !== "" || invDate !== "" || invTotal.trim() !== "";
+      const invoiceParts = [
+        invNumber.trim(),
+        invDate,
+        invNet.trim(),
+        invTax.trim(),
+        invTotal.trim(),
+      ];
+      const hasInvoice = invoiceParts.some((value) => value !== "");
+      if (hasInvoice && invoiceParts.some((value) => value === "")) {
+        throw new Error("進項發票號碼、日期、原票未稅額、稅額與總額都要填寫");
+      }
       const body: PurchaseOrderReceiveBody = hasInvoice
         ? {
             lines,
             invoice: {
               invoice_number: invNumber.trim().toUpperCase(),
               invoice_date: invDate,
+              invoice_net: invNet.trim(),
+              invoice_tax: invTax.trim(),
               invoice_total: invTotal.trim(),
             },
           }
@@ -1201,6 +1235,24 @@ function PurchaseOrderList() {
                   value={invDate}
                   onChange={(e) => setInvDate(e.target.value)}
                   aria-label="發票日期"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">原票未稅金額（整數元）</span>
+                <input
+                  value={invNet}
+                  onChange={(e) => setInvNet(e.target.value)}
+                  inputMode="numeric"
+                  aria-label="發票未稅金額"
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">原票稅額（整數元）</span>
+                <input
+                  value={invTax}
+                  onChange={(e) => setInvTax(e.target.value)}
+                  inputMode="numeric"
+                  aria-label="發票稅額"
                 />
               </label>
               <label className="field">

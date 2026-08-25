@@ -122,9 +122,7 @@ def _payload_first(payload: object, *, ctx: str) -> dict[str, object]:
     raise EInvoiceDropError(f"{ctx}：凍結 payload 形狀不明，拒絕上送（需人工對帳）")
 
 
-def _assert_payload_targets(
-    payload: object, field: str, expected: str, *, ctx: str
-) -> None:
+def _assert_payload_targets(payload: object, field: str, expected: str, *, ctx: str) -> None:
     """凍結 payload 的**外部識別碼**必須等於本佇列列的目標。
 
     對帳查的是本地推導出來的識別碼，真正 POST 出去的卻是 frozen payload。兩者若不一致
@@ -277,8 +275,7 @@ class EInvoiceService:
         await self._session.refresh(invoice)
         if invoice.status is not InvoiceStatus.PENDING:
             raise ManualInvoiceNotRegisterable(
-                f"發票狀態 {invoice.status.value}，不可登記手開紙本"
-                "（僅待開立的發票可登記）"
+                f"發票狀態 {invoice.status.value}，不可登記手開紙本（僅待開立的發票可登記）"
             )
         if Decimal(total) != Decimal(invoice.total):
             raise ManualInvoiceNotRegisterable(
@@ -405,9 +402,7 @@ class EInvoiceService:
         客端從 sale.invoice_status 推導會把「電子發票關閉、根本沒有發票」的單也列進來，
         按下去只會 404。
         """
-        return await self._repo.list_pending_invoice_sale_ids(
-            store_id, limit=limit, offset=offset
-        )
+        return await self._repo.list_pending_invoice_sale_ids(store_id, limit=limit, offset=offset)
 
     async def assert_platform_voidable(
         self, store_id: int, sale_id: int, *, manual_paper_disposed: bool = False
@@ -573,14 +568,15 @@ class EInvoiceService:
         稅拆分**一律用原發票的稅率快照**（invoice.tax_rate；Codex 第十輪）：呼叫端不得
         注入活 settings 稅率——結帳後改稅率，折讓的銷項稅沖回必須仍與原發票同口徑。
         """
-        invoice = await self._repo.get_invoice(store_id, invoice_id)
+        # 同一發票的折讓以發票列為序列化錨點：兩筆並發部分退貨不可同時讀到相同累計值，
+        # 否則可能超額折讓，也無法正確分配最後一筆稅額尾差。
+        invoice = await self._repo.get_invoice(store_id, invoice_id, for_update=True)
         if invoice is None:
             raise InvoiceNotFound(f"發票不存在或不屬於本店：id={invoice_id}")
         if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
             # 手開紙本（docs/36）：平台上沒有這張發票，G0401 會指向不存在的原發票。
             raise ManualPaperInvoiceOperation(
-                "本筆為手開紙本發票，系統不代管折讓；"
-                "請依國稅局程序開立紙本折讓證明單並留存。"
+                "本筆為手開紙本發票，系統不代管折讓；請依國稅局程序開立紙本折讓證明單並留存。"
             )
         if invoice.status is not InvoiceStatus.ISSUED:
             raise InvoiceNotIssued(
@@ -591,13 +587,34 @@ class EInvoiceService:
             if existing is not None:
                 raise DuplicateAllowanceForReturn(f"退貨單 {return_id} 已有折讓，不可重複開立")
 
-        prior = await self._repo.sum_allowances_total(store_id, invoice_id)
-        if prior + total > invoice.total:
+        prior_net, prior_tax, prior_total = await self._repo.sum_allowances_amounts(
+            store_id,
+            invoice_id,
+        )
+        cumulative_total = prior_total + total
+        if cumulative_total > invoice.total:
             raise AllowanceExceedsInvoice(
-                f"折讓累計 {prior + total} 超過原發票總額 {invoice.total}"
+                f"折讓累計 {cumulative_total} 超過原發票總額 {invoice.total}"
             )
 
-        net, tax = split_tax_inclusive(total, Decimal(invoice.tax_rate))
+        target_cumulative_net: Decimal
+        if cumulative_total == invoice.total:
+            target_cumulative_net = Decimal(invoice.net)
+        else:
+            target_net_int, _target_tax_int = split_tax_inclusive(
+                cumulative_total,
+                Decimal(invoice.tax_rate),
+            )
+            target_cumulative_net = Decimal(target_net_int)
+        preferred_net = target_cumulative_net - prior_net
+        # 相容升級前已逐筆拆稅的發票：把本次未稅額夾在「剩餘未稅/稅額」容許區間內。
+        # 如此每張折讓仍為非負整數，累計全退時一定精確等於原發票 net/tax。
+        remaining_net = Decimal(invoice.net) - prior_net
+        remaining_tax = Decimal(invoice.tax) - prior_tax
+        min_net = max(Decimal(0), total - remaining_tax)
+        max_net = min(total, remaining_net)
+        net = min(max(preferred_net, min_net), max_net)
+        tax = total - net
         allowance = InvoiceAllowance(
             store_id=store_id,
             invoice_id=invoice_id,
@@ -785,9 +802,7 @@ class EInvoiceService:
             )
         endpoint = self._AMEGO_ENDPOINTS.get(item.message_type)
         if endpoint is None:
-            raise EInvoiceQueueNotDroppable(
-                f"訊息類型 {item.message_type.value} 不支援 Amego 上送"
-            )
+            raise EInvoiceQueueNotDroppable(f"訊息類型 {item.message_type.value} 不支援 Amego 上送")
         # 認領來源辨識（Codex 第廿五輪）：只有 Amego 認領（xml_path 前綴 amego:）才走凍結
         # payload 重送路徑。**非 amego: 前綴**＝舊 Turnkey outbox 認領（drop_pending 寫的
         # 檔案路徑，可能已曝光給 Turnkey）——不可經 Amego 上送（不同交付通道），以 409
@@ -932,9 +947,7 @@ class EInvoiceService:
                 query_resp = await client.call(
                     "/json/allowance_query",
                     build_allowance_query_data(
-                        number=allowance_number(
-                            store_id=store_id, allowance_id=locked.allowance_id
-                        )
+                        number=allowance_number(store_id=store_id, allowance_id=locked.allowance_id)
                     ),
                 )
                 sent_net, sent_tax, sent_original_no = _payload_allowance_identity(payload)
@@ -988,9 +1001,7 @@ class EInvoiceService:
                 if target is not None:
                     await self._session.refresh(target)
             if locked.allowance_id is not None:
-                stale_allowance = await self._session.get(
-                    InvoiceAllowance, locked.allowance_id
-                )
+                stale_allowance = await self._session.get(InvoiceAllowance, locked.allowance_id)
                 if stale_allowance is not None:
                     await self._session.refresh(stale_allowance)
             resp = await client.call(endpoint, payload)  # 傳輸中斷 → 維持已認領 PENDING
@@ -1135,9 +1146,7 @@ class EInvoiceService:
         if invoice is None:
             raise InvoiceNotFound(f"銷售 {sale_id} 無發票")
         if invoice.status is not InvoiceStatus.ISSUED:
-            raise InvoiceNotIssued(
-                f"發票狀態 {invoice.status.value}，尚未開立，無證明聯可補印"
-            )
+            raise InvoiceNotIssued(f"發票狀態 {invoice.status.value}，尚未開立，無證明聯可補印")
         if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
             raise ManualPaperInvoiceOperation(
                 "本筆為手開紙本發票，證明聯是當初手寫的那張，系統無法補印"
@@ -1211,9 +1220,7 @@ class EInvoiceService:
         if invoice.status is InvoiceStatus.ISSUED:
             return invoice
         if invoice.status is not InvoiceStatus.PENDING:
-            raise EInvoiceQueueNotDroppable(
-                f"發票狀態 {invoice.status.value}，不可開立"
-            )
+            raise EInvoiceQueueNotDroppable(f"發票狀態 {invoice.status.value}，不可開立")
         # 全域鎖序 sale → queue（Codex 第四輪）：先鎖 sale 再鎖佇列列——作廢/退貨路徑
         # 先鎖 sale 再動佇列，此處先鎖佇列會與其 AB-BA 死鎖（結帳後立即作廢的窗口）。
         from app.modules.sales.service import SalesService  # 函式內 import 破循環
@@ -1241,13 +1248,9 @@ class EInvoiceService:
             raise EInvoiceQueueItemNotFound(f"發票 {invoice.id} 無可上送的開立佇列列")
         if issue_item.status is UploadStatus.FAILED:
             await self.retry(store_id, issue_item.id)
-        sent = await self.send_via_amego(
-            store_id, issue_item.id, client=await client_factory()
-        )
+        sent = await self.send_via_amego(store_id, issue_item.id, client=await client_factory())
         if sent.status is not UploadStatus.UPLOADED:
-            raise AmegoIssueFailed(
-                f"Amego 拒絕開立：{sent.last_error or '未知錯誤'}（可稍後重試）"
-            )
+            raise AmegoIssueFailed(f"Amego 拒絕開立：{sent.last_error or '未知錯誤'}（可稍後重試）")
         refreshed = await self._repo.get_invoice(store_id, invoice.id)
         assert refreshed is not None
         await self._session.refresh(refreshed)  # send 自管 commit，identity map 需刷新

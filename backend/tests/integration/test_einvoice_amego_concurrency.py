@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.core.db as app_db
 from app.core.audit import AuditLog
-from app.modules.cashdrawer.models import CashMovement, CashSession
+from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.amego import AmegoClient
 from app.modules.einvoice.models import EInvoiceResultEvent, EInvoiceUploadQueue, Invoice
@@ -39,6 +39,7 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 _F0401_OK = {
     "code": 0,
@@ -103,6 +104,7 @@ async def _seed_committed(sm: object, *, tag: str) -> tuple[int, int, int]:
 async def _cleanup(sm: object, store_id: int) -> None:
     """清掉本測試真 commit 的整條鏈（其他測試有全域計數斷言/整表清理）。"""
     async with sm() as s4:  # type: ignore[operator]
+        await delete_cash_movements_for_test(s4, store_id=store_id)
         for stmt in (
             delete(EInvoiceResultEvent).where(EInvoiceResultEvent.store_id == store_id),
             delete(EInvoiceUploadQueue).where(EInvoiceUploadQueue.store_id == store_id),
@@ -111,7 +113,6 @@ async def _cleanup(sm: object, store_id: int) -> None:
             delete(SaleTender).where(SaleTender.store_id == store_id),
             delete(SaleLine).where(SaleLine.store_id == store_id),
             delete(StockMovement).where(StockMovement.store_id == store_id),
-            delete(CashMovement).where(CashMovement.store_id == store_id),
             delete(Sale).where(Sale.store_id == store_id),
             delete(SerializedItem).where(SerializedItem.store_id == store_id),
             delete(CashSession).where(CashSession.store_id == store_id),
@@ -244,9 +245,7 @@ async def test_void_in_claim_gap_still_enqueues_f0501(
             )
             svc = EInvoiceService(s1)
             queue_id = next(
-                i.id
-                for i in await svc.list_queue(store_id)
-                if i.action is EInvoiceAction.ISSUE
+                i.id for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.ISSUE
             )
             await svc.send_via_amego(store_id, queue_id, client=client)
 
@@ -305,9 +304,7 @@ async def test_void_in_claim_gap_with_platform_not_found_cancels_issue(
             )
             svc = EInvoiceService(s1)
             queue_id = next(
-                i.id
-                for i in await svc.list_queue(store_id)
-                if i.action is EInvoiceAction.ISSUE
+                i.id for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.ISSUE
             )
             item = await svc.send_via_amego(store_id, queue_id, client=client)
             assert item.status is UploadStatus.CANCELLED
@@ -331,7 +328,6 @@ async def test_void_in_claim_gap_with_platform_not_found_cancels_issue(
             assert void_items == []  # 無需 F0501（平台無發票可作廢）
     finally:
         await _cleanup(sm, store_id)
-
 
 
 async def test_settings_patch_serialized_with_checkout(
@@ -414,9 +410,7 @@ async def test_settings_patch_serialized_with_checkout(
         assert status_value == "PENDING_ISSUE"  # 結帳以啟用態成立
         assert commit_order == ["checkout", "patch"]  # 序列化：結帳先於 PATCH
         async with sm() as s3:
-            invoices = (
-                await s3.scalars(select(Invoice).where(Invoice.store_id == store_id))
-            ).all()
+            invoices = (await s3.scalars(select(Invoice).where(Invoice.store_id == store_id))).all()
             assert len(invoices) == 1  # 啟用態建了 PENDING 發票
             settings = await StoreSettingsService(s3).get_effective_settings(store_id)
             assert settings.einvoice_enabled is False  # PATCH 最終生效（在結帳之後）
@@ -485,9 +479,7 @@ async def test_void_in_posted_at_gap_does_not_break_invoice_state(
             )
             svc = EInvoiceService(s1)
             queue_id = next(
-                i.id
-                for i in await svc.list_queue(store_id)
-                if i.action is EInvoiceAction.ISSUE
+                i.id for i in await svc.list_queue(store_id) if i.action is EInvoiceAction.ISSUE
             )
             await svc.send_via_amego(store_id, queue_id, client=client)
         monkeypatch.undo()
@@ -507,9 +499,7 @@ async def test_void_in_posted_at_gap_does_not_break_invoice_state(
             # 交付、留 VOID_PENDING 收斂不了」也照樣綠。
             rows = list(
                 await s3.scalars(
-                    select(EInvoiceUploadQueue).where(
-                        EInvoiceUploadQueue.store_id == store_id
-                    )
+                    select(EInvoiceUploadQueue).where(EInvoiceUploadQueue.store_id == store_id)
                 )
             )
             issue_rows = [r for r in rows if r.action is EInvoiceAction.ISSUE]

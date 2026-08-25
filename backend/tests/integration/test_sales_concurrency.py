@@ -21,6 +21,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import Grade, OwnershipType, SaleLineType, SerializedItemStatus, UserRole
 from app.shared.exceptions import DomainError
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 async def test_concurrent_sale_of_same_serialized_only_one_succeeds() -> None:
@@ -93,11 +94,11 @@ async def test_concurrent_sale_of_same_serialized_only_one_succeeds() -> None:
             ) == 1
     finally:
         async with sm() as s:
+            await delete_cash_movements_for_test(s, store_id=store_id)
             for model in (
                 SaleTender,
                 SaleLine,
                 StockMovement,
-                CashMovement,
                 Sale,
                 SerializedItem,
                 CashSession,

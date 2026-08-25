@@ -24,6 +24,7 @@ from app.modules.inventory.models import SerializedItem, StockMovement
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import AcquisitionType, Grade, UserRole
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 _svc_idem = itertools.count()
 
@@ -82,9 +83,9 @@ async def test_acquisition_rolls_back_entirely_when_cash_step_fails(
             assert await _count(s, CashMovement, store_id) == 0
     finally:
         async with sm() as s:
+            await delete_cash_movements_for_test(s, store_id=store_id)
             for model in (
                 StockMovement,
-                CashMovement,
                 SerializedItem,
                 Acquisition,
                 CashSession,

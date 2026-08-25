@@ -15,7 +15,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -34,6 +34,7 @@ _B2C_BUYER_IDENTIFIER = "0000000000"
 _B2C_BUYER_NAME = "消費者"
 _DESCRIPTION_MAX = 256
 _HTTP_TIMEOUT_SECONDS = 15.0
+_AMEGO_MAX_DECIMAL_PLACES = Decimal("0.0000001")
 
 
 def amego_order_id(*, store_id: int, sale_id: int) -> str:
@@ -56,6 +57,11 @@ def _decimal_str(value: Decimal) -> str:
     """Decimal → 無指數、無尾零字串（"450"、"52.5"）；金額欄位以字串傳輸。"""
     text = format(value.normalize(), "f")
     return text
+
+
+def _amego_unit_price_str(value: Decimal) -> str:
+    """Serialize UnitPrice within Amego's documented maximum of seven decimal places."""
+    return _decimal_str(value.quantize(_AMEGO_MAX_DECIMAL_PLACES, rounding=ROUND_HALF_UP))
 
 
 def build_f0401_data(
@@ -85,14 +91,14 @@ def build_f0401_data(
         if line.qty <= 0 or line.net_amount < 0:
             raise ValueError(f"品項行不合法（qty={line.qty}, net_amount={line.net_amount}）")
         line_sum += Decimal(line.net_amount)
-        # Amount（實收小計）為權威；折扣行的 UnitPrice 以小計÷數量表示（兩者一致，
-        # 避免平台以 Quantity×UnitPrice 驗算時對不上）。
+        # Amount（實收整數元小計）為權威；UnitPrice 最多 7 位小數，平台依
+        # DetailAmountRound=1 將 Quantity×UnitPrice 四捨五入至整數元後驗算。
         effective_unit = Decimal(line.net_amount) / Decimal(line.qty)
         items.append(
             {
                 "Description": line.description[:_DESCRIPTION_MAX],
                 "Quantity": line.qty,
-                "UnitPrice": _decimal_str(effective_unit),
+                "UnitPrice": _amego_unit_price_str(effective_unit),
                 "Amount": _decimal_str(Decimal(line.net_amount)),
                 "TaxType": _TAX_TYPE_TAXABLE,
             }
@@ -117,6 +123,7 @@ def build_f0401_data(
         "BuyerIdentifier": buyer_identifier,
         "BuyerName": buyer_name,
         "ProductItem": items,
+        "DetailAmountRound": 1,
         "SalesAmount": sales_amount,
         "FreeTaxSalesAmount": 0,
         "ZeroTaxSalesAmount": 0,
@@ -253,9 +260,7 @@ def build_invoice_print_data(
         "order_id": order_id,
         "printer_type": printer_type,
         "printer_lang": AMEGO_PRINTER_LANG_BIG5,
-        "print_invoice_type": (
-            AMEGO_PRINT_TYPE_REPRINT if reprint else AMEGO_PRINT_TYPE_ORIGINAL
-        ),
+        "print_invoice_type": (AMEGO_PRINT_TYPE_REPRINT if reprint else AMEGO_PRINT_TYPE_ORIGINAL),
     }
 
 
@@ -513,10 +518,7 @@ _ALLOWANCE_TYPE_VOIDED = frozenset({"D0501", "B0501"})
 _INVOICE_TYPE_CANCELLED = frozenset({"C0701", "A0701"})
 # `wait[]` 可能出現的已知待處理型別。**未知型別一律拋**：無法判斷它與本次動作是否相斥。
 _KNOWN_WAIT_TYPES = (
-    _INVOICE_TYPE_VOIDED
-    | _INVOICE_TYPE_CANCELLED
-    | _ALLOWANCE_TYPE_ISSUED
-    | _ALLOWANCE_TYPE_VOIDED
+    _INVOICE_TYPE_VOIDED | _INVOICE_TYPE_CANCELLED | _ALLOWANCE_TYPE_ISSUED | _ALLOWANCE_TYPE_VOIDED
 )
 
 
@@ -545,9 +547,7 @@ def _wait_entries(data: dict[str, object], *, ctx: str) -> list[dict[str, object
     return entries
 
 
-def _assert_no_pending_entries(
-    data: dict[str, object], kinds: frozenset[str], *, ctx: str
-) -> None:
+def _assert_no_pending_entries(data: dict[str, object], kinds: frozenset[str], *, ctx: str) -> None:
     """狀態自相矛盾（例如折讓同時掛著待作廢）→ 阻擋，要求人工對帳。"""
     found = {str(w.get("invoice_type") or "") for w in _wait_entries(data, ctx=ctx)} & kinds
     if found:
@@ -598,8 +598,7 @@ def parse_query_invoice_voided(resp: dict[str, object], *, expect_total: Decimal
         )
         if conflicting:
             raise AmegoTransportError(
-                f"{_ctx} 查到的紀錄另掛待處理的 {sorted(conflicting)}"
-                "——與本次作廢相斥，待人工對帳"
+                f"{_ctx} 查到的紀錄另掛待處理的 {sorted(conflicting)}——與本次作廢相斥，待人工對帳"
             )
         if pending & _INVOICE_TYPE_VOIDED:
             return True

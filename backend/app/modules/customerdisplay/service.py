@@ -250,6 +250,11 @@ class CustomerDisplayService:
         self._session = session
         self._repo = CustomerDisplayRepository(session)
 
+    @staticmethod
+    def configured_linepay_client() -> LinePayClient | None:
+        """取得系統設定的 LINE Pay client，作為客顯付款與對帳的單一入口。"""
+        return SalesService.configured_linepay_client()
+
     async def create_device_session(
         self,
         *,
@@ -1179,7 +1184,7 @@ class CustomerDisplayService:
         terminal_id: int,
         *,
         action: str,
-        actor_user_id: int,
+        actor_user_id: int | None,
         linepay_client: object | None,
         reason: str | None,
         evidence_type: str | None,
@@ -1382,6 +1387,15 @@ class CustomerDisplayService:
                 reconciled_linepay_result=confirmed_result,
             )
         return definitive, cart
+
+    async def list_recent_payment_uncertain_targets(
+        self,
+        cutoff: datetime,
+        *,
+        limit: int,
+    ) -> list[tuple[int, int]]:
+        """Return bounded scheduler targets; reconciliation locks each cart separately."""
+        return await self._repo.list_recent_payment_uncertain_targets(cutoff, limit=limit)
 
     async def sweep_expired_carts(self, *, now: datetime | None = None) -> int:
         """清除閒置 DRAFT，並復原因程序中斷而殘留的 PROCESSING。"""

@@ -16,7 +16,7 @@ from sqlalchemy import delete, func, select
 
 import app.core.db as app_db
 from app.core.audit import AuditLog
-from app.modules.cashdrawer.models import CashMovement, CashSession
+from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.dropper import EInvoiceDropper
 from app.modules.einvoice.models import (
@@ -43,6 +43,7 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 class _FakeSerializer:
@@ -153,7 +154,7 @@ async def test_void_vs_receipt_race_no_deadlock(tmp_path: Path) -> None:
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(Sale).where(Sale.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(StoreSettings).where(StoreSettings.store_id == store_id))
             await s.execute(delete(User).where(User.store_id == store_id))

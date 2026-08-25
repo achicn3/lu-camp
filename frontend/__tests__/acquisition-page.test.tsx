@@ -52,6 +52,7 @@ function stub(over: { drawer?: boolean; taxRate?: string; settingsFails?: boolea
         if (over.settingsFails) return json({ detail: "boom" }, 500);
         return json({
           premium_rate: "0.1000",
+          default_commission_pct: 50,
           default_margin_pct: 45,
           tax_rate: over.taxRate ?? "0.0500",
         });

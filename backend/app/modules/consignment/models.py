@@ -7,7 +7,7 @@ reclaim_needed）屬 Phase 4。金額一律 NUMERIC(scale 0) → Decimal（NT$ �
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Numeric, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TimestampMixin
@@ -22,6 +22,21 @@ class ConsignmentSettlement(Base, TimestampMixin):
     """
 
     __tablename__ = "consignment_settlements"
+    __table_args__ = (
+        CheckConstraint("gross > 0", name="ck_consignment_settlement_gross_positive"),
+        CheckConstraint(
+            "commission_pct BETWEEN 0 AND 100",
+            name="ck_consignment_settlement_commission_pct",
+        ),
+        CheckConstraint(
+            "commission_amount >= 0 AND payout_amount >= 0",
+            name="ck_consignment_settlement_amounts_nonnegative",
+        ),
+        CheckConstraint(
+            "commission_amount + payout_amount = gross",
+            name="ck_consignment_settlement_amounts_balance",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)

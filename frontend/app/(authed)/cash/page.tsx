@@ -6,6 +6,7 @@ import {
   type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
+  useRef,
   useState,
 } from "react";
 
@@ -14,7 +15,14 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatTaipeiDateTime, formatTaipeiTime } from "@/lib/datetime";
+import {
+  canDiscardIdempotencyKey,
+  clearPendingCashAdjustment,
+  loadPendingCashAdjustment,
+  savePendingCashAdjustment,
+} from "@/lib/idempotency";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { newIdempotencyKey } from "@/lib/uuid";
 
 type CashSession = components["schemas"]["CashSessionRead"];
 type CashMovement = components["schemas"]["CashMovementRead"];
@@ -117,20 +125,37 @@ function OpenSessionCard({ onOpened }: { onOpened: () => void }) {
 function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const mutation = useMutation({
     mutationFn: async (input: { amount: number; note: string }) => {
-      const { data, error: apiError } = await api.POST(
+      const pending = loadPendingCashAdjustment(sessionId);
+      if (pending != null && (pending.amount !== input.amount || pending.note !== input.note)) {
+        throw new Error("上一筆現金調整狀態未確認，請以原金額與事由重試或先查核本班調整紀錄");
+      }
+      const entry = pending ?? { key: newIdempotencyKey(), ...input };
+      if (pending == null) savePendingCashAdjustment(sessionId, entry);
+      const { data, error: apiError, response } = await api.POST(
         "/api/v1/cash-sessions/{session_id}/movements",
         {
-          params: { path: { session_id: sessionId } },
+          params: {
+            path: { session_id: sessionId },
+            header: { "Idempotency-Key": entry.key },
+          },
           body: { type: "MANUAL_ADJUST", amount: String(input.amount), note: input.note },
         },
       );
-      if (!data) throw new Error(extractDetail(apiError) ?? "調整失敗");
+      if (!data) {
+        if (canDiscardIdempotencyKey(response.status)) {
+          clearPendingCashAdjustment(sessionId);
+        }
+        throw new Error(extractDetail(apiError) ?? "調整失敗");
+      }
+      clearPendingCashAdjustment(sessionId);
       return data;
     },
     onSuccess: () => {
       setDone(true);
+      formRef.current?.reset();
       onDone();
     },
     onError: (err: Error) => setError(err.message),
@@ -152,11 +177,10 @@ function AdjustCard({ sessionId, onDone }: { sessionId: number; onDone: () => vo
       return;
     }
     mutation.mutate({ amount, note });
-    event.currentTarget.reset();
   }
 
   return (
-    <form className="card" onSubmit={onSubmit}>
+    <form ref={formRef} className="card" onSubmit={onSubmit}>
       <h2>現金手動調整</h2>
       <p className="hint">敏感操作將寫入稽核（誰/何時/金額/事由）。</p>
       <label className="field">

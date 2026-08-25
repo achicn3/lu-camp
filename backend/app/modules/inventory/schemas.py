@@ -11,6 +11,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
@@ -93,6 +94,7 @@ class PriceUpdateRequest(BaseModel):
     def _positive_integer(cls, v: Decimal) -> Decimal:
         if v <= 0 or v != v.to_integral_value():
             raise ValueError("售價須為正整數元")
+        ensure_ntd_fits_numeric_12(v, field="售價")
         return v
 
 
@@ -272,6 +274,7 @@ class CatalogProductCreateRequest(BaseModel):
             raise ValueError("售價必須為整數元")
         if value <= 0:
             raise ValueError("售價必須為正")
+        ensure_ntd_fits_numeric_12(value, field="售價")
         return value
 
 

@@ -59,6 +59,19 @@ class CashDrawerRepository:
         await self._session.flush()
         return movement
 
+    async def get_movement_by_idempotency_key(
+        self,
+        store_id: int,
+        idempotency_key: str,
+    ) -> CashMovement | None:
+        result: CashMovement | None = await self._session.scalar(
+            select(CashMovement).where(
+                CashMovement.store_id == store_id,
+                CashMovement.idempotency_key == idempotency_key,
+            )
+        )
+        return result
+
     async def list_movements(self, session_id: int) -> list[CashMovement]:
         stmt = (
             select(CashMovement)

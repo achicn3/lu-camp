@@ -8,12 +8,15 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    DDL,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
     Index,
     Numeric,
     String,
+    event,
     func,
     text,
 )
@@ -61,6 +64,36 @@ class CashMovement(Base):
     """現金異動（append-only 帳；無 updated_at）。"""
 
     __tablename__ = "cash_movements"
+    __table_args__ = (
+        Index(
+            "uq_cash_movements_store_idempotency_key",
+            "store_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+        CheckConstraint("amount <> 0", name="ck_cash_movement_amount_nonzero"),
+        CheckConstraint(
+            "type = 'MANUAL_ADJUST' OR amount > 0",
+            name="ck_cash_movement_system_amount_positive",
+        ),
+        CheckConstraint(
+            "(idempotency_key IS NULL) = (idempotency_fingerprint IS NULL)",
+            name="ck_cash_movement_idempotency_pair",
+        ),
+        CheckConstraint(
+            "type <> 'MANUAL_ADJUST' OR"
+            " (note IS NOT NULL AND btrim(note) <> ''"
+            " AND idempotency_key IS NOT NULL"
+            " AND char_length(idempotency_fingerprint) = 64)",
+            name="ck_cash_movement_manual_fields",
+        ),
+        CheckConstraint(
+            "type = 'MANUAL_ADJUST' OR"
+            " (note IS NULL AND idempotency_key IS NULL AND idempotency_fingerprint IS NULL)",
+            name="ck_cash_movement_system_fields",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -71,6 +104,34 @@ class CashMovement(Base):
     ref_id: Mapped[int | None] = mapped_column()
     # 手動調整事由（留痕，CLAUDE.md §5）；系統產生的異動為 NULL。
     note: Mapped[str | None] = mapped_column(String(200))
+    # 人工調整的 HTTP 重試身分；系統產生的 movement 不使用。指紋綁定 session/type/amount/note，
+    # 同鍵不同內容必須衝突，不能把另一筆調整誤當回放。
+    idempotency_key: Mapped[str | None] = mapped_column(String(80))
+    idempotency_fingerprint: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+CASH_MOVEMENT_IMMUTABLE_DDL: tuple[str, ...] = (
+    """
+CREATE OR REPLACE FUNCTION cash_movement_immutable() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'cash_movements is insert-only: UPDATE/DELETE forbidden';
+END;
+$$ LANGUAGE plpgsql
+""",
+    """
+CREATE TRIGGER trg_cash_movement_immutable
+BEFORE UPDATE OR DELETE ON cash_movements
+FOR EACH ROW EXECUTE FUNCTION cash_movement_immutable()
+""",
+)
+
+CASH_MOVEMENT_IMMUTABLE_DROP_DDL: tuple[str, ...] = (
+    "DROP TRIGGER IF EXISTS trg_cash_movement_immutable ON cash_movements",
+    "DROP FUNCTION IF EXISTS cash_movement_immutable()",
+)
+
+for _ddl in CASH_MOVEMENT_IMMUTABLE_DDL:
+    event.listen(CashMovement.__table__, "after_create", DDL(_ddl))  # type: ignore[no-untyped-call]

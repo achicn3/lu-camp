@@ -119,11 +119,17 @@ async def _fill_issue_fields(session: AsyncSession, invoice: Invoice) -> None:
 
 
 async def _issue_and_accept(
-    session: AsyncSession, svc: EInvoiceService, store_id: int, sale_id: int, tmp_path: Path
+    session: AsyncSession,
+    svc: EInvoiceService,
+    store_id: int,
+    sale_id: int,
+    tmp_path: Path,
+    *,
+    total: Decimal = Decimal(1050),
 ) -> Invoice:
     """走完整開立流程到 ISSUED：建 PENDING → 填必要欄位 → 拋檔 → ProcessResult 成功。"""
     invoice = await svc.create_pending_invoice(
-        store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
+        store_id, sale_id=sale_id, total=total, tax_rate=TAX_RATE
     )
     await _fill_issue_fields(session, invoice)
     queue_id = await _first_queue_id(svc, store_id)
@@ -865,6 +871,53 @@ async def test_record_allowance_on_issued_enqueues_g0401(
     assert g[0].allowance_id == allowance.id
 
 
+async def test_partial_allowances_cumulatively_reverse_original_invoice_tax(
+    db_session: AsyncSession,
+    tmp_path: Path,
+) -> None:
+    store_id, sale_id = await _seed_sale(db_session, total=Decimal(100))
+    svc = EInvoiceService(db_session)
+    invoice = await _issue_and_accept(
+        db_session,
+        svc,
+        store_id,
+        sale_id,
+        tmp_path,
+        total=Decimal(100),
+    )
+
+    first = await svc.record_allowance(
+        store_id,
+        invoice_id=invoice.id,
+        total=Decimal(50),
+        return_id=101,
+    )
+    second = await svc.record_allowance(
+        store_id,
+        invoice_id=invoice.id,
+        total=Decimal(50),
+        return_id=102,
+    )
+
+    assert (invoice.net, invoice.tax, invoice.total) == (
+        Decimal(95),
+        Decimal(5),
+        Decimal(100),
+    )
+    assert (first.net, first.tax, first.total) == (
+        Decimal(48),
+        Decimal(2),
+        Decimal(50),
+    )
+    assert (second.net, second.tax, second.total) == (
+        Decimal(47),
+        Decimal(3),
+        Decimal(50),
+    )
+    assert first.net + second.net == invoice.net
+    assert first.tax + second.tax == invoice.tax
+
+
 async def test_record_allowance_rejects_pending_invoice(db_session: AsyncSession) -> None:
     store_id, sale_id = await _seed_sale(db_session)
     svc = EInvoiceService(db_session)
@@ -872,9 +925,7 @@ async def test_record_allowance_rejects_pending_invoice(db_session: AsyncSession
         store_id, sale_id=sale_id, total=Decimal(1050), tax_rate=TAX_RATE
     )
     with pytest.raises(InvoiceNotIssued):
-        await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(100)
-        )
+        await svc.record_allowance(store_id, invoice_id=invoice.id, total=Decimal(100))
 
 
 async def test_record_allowance_rejects_duplicate_return(
@@ -883,26 +934,18 @@ async def test_record_allowance_rejects_duplicate_return(
     store_id, sale_id = await _seed_sale(db_session)
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)
-    await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(100), return_id=7
-    )
+    await svc.record_allowance(store_id, invoice_id=invoice.id, total=Decimal(100), return_id=7)
     with pytest.raises(DuplicateAllowanceForReturn):
-        await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(50), return_id=7
-        )
+        await svc.record_allowance(store_id, invoice_id=invoice.id, total=Decimal(50), return_id=7)
 
 
 async def test_record_allowance_rejects_overage(db_session: AsyncSession, tmp_path: Path) -> None:
     store_id, sale_id = await _seed_sale(db_session)
     svc = EInvoiceService(db_session)
     invoice = await _issue_and_accept(db_session, svc, store_id, sale_id, tmp_path)  # total 1050
-    await svc.record_allowance(
-        store_id, invoice_id=invoice.id, total=Decimal(1000), return_id=1
-    )
+    await svc.record_allowance(store_id, invoice_id=invoice.id, total=Decimal(1000), return_id=1)
     with pytest.raises(AllowanceExceedsInvoice):
-        await svc.record_allowance(
-            store_id, invoice_id=invoice.id, total=Decimal(100), return_id=2
-        )
+        await svc.record_allowance(store_id, invoice_id=invoice.id, total=Decimal(100), return_id=2)
 
 
 # ── 作廢中止（F3）──

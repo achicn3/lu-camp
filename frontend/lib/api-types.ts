@@ -3438,7 +3438,11 @@ export interface components {
             amount: number | string;
             /** Note */
             note: string;
-            type: components["schemas"]["CashMovementType"];
+            /**
+             * Type
+             * @constant
+             */
+            type: "MANUAL_ADJUST";
         };
         /**
          * CashMovementRead
@@ -4505,8 +4509,8 @@ export interface components {
          * InputInvoiceIn
          * @description 進項發票登錄輸入（裁示 2026-07-11：收貨時選填、漏登可補登一次）。
          *
-         *     號碼＝2 英文大寫＋8 數字；金額為含稅整數元字串（>0）。未稅/稅額由後端以
-         *     settings.tax_rate 用 split_tax_inclusive 拆分（§6），不收前端算的值。
+         *     號碼＝2 英文大寫＋8 數字；三個金額照錄供應商原始發票，後端只驗證皆為整數元且
+         *     invoice_net + invoice_tax = invoice_total，不以補登當下設定重算歷史憑證。
          */
         InputInvoiceIn: {
             /**
@@ -4514,8 +4518,12 @@ export interface components {
              * Format: date
              */
             invoice_date: string;
+            /** Invoice Net */
+            invoice_net: number | string;
             /** Invoice Number */
             invoice_number: string;
+            /** Invoice Tax */
+            invoice_tax: number | string;
             /** Invoice Total */
             invoice_total: number | string;
         };
@@ -4925,7 +4933,7 @@ export interface components {
         };
         /**
          * LinePayRefundAttemptRead
-         * @description 未定 LINE Pay 退款嘗試（退款對帳頁；docs/30 finding #3）。不含任何 PII/憑證。
+         * @description 未定或平台成功但本地待復原的 LINE Pay 退款；不含復原 payload／PII。
          */
         LinePayRefundAttemptRead: {
             /** Amount */
@@ -4939,6 +4947,12 @@ export interface components {
             id: number;
             /** Order Id */
             order_id: string;
+            /** Recovered At */
+            recovered_at: string | null;
+            /** Recovery Attempts */
+            recovery_attempts: number;
+            /** Recovery Error */
+            recovery_error: string | null;
             status: components["schemas"]["LinePayRefundStatus"];
         };
         /**
@@ -7942,7 +7956,9 @@ export interface operations {
     recordCashMovement: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 session_id: number;
             };

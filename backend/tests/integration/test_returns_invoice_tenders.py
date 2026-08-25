@@ -56,7 +56,12 @@ from tests.integration.customer_display_helpers import (
     return_consent_content,
 )
 from tests.integration.test_sales_einvoice import _FakeSerializer
-from tests.integration.test_sales_linepay import _REFUND_SUCCESS, RefundTransport, _client
+from tests.integration.test_sales_linepay import (
+    _REFUND_SUCCESS,
+    RefundTransport,
+    _client,
+    _linepay_cart_kwargs,
+)
 
 
 async def _seed(session: AsyncSession) -> tuple[int, int, int]:
@@ -82,9 +87,7 @@ async def _seed(session: AsyncSession) -> tuple[int, int, int]:
     )
     # einvoice_enabled 直接寫欄位：啟用閘門要求 AMEGO_APP_KEY 環境變數，本檔測的是退貨×發票
     # 處置，不是啟用閘門（該閘門另有測試）。
-    settings = await session.scalar(
-        select(StoreSettings).where(StoreSettings.store_id == store.id)
-    )
+    settings = await session.scalar(select(StoreSettings).where(StoreSettings.store_id == store.id))
     assert settings is not None
     settings.einvoice_enabled = True
     await session.flush()
@@ -114,9 +117,7 @@ def _lines(*codes: str) -> list[SaleLineInput]:
     return [SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=c) for c in codes]
 
 
-async def _issue(
-    session: AsyncSession, store_id: int, sale_id: int, tmp_path: Path
-) -> Invoice:
+async def _issue(session: AsyncSession, store_id: int, sale_id: int, tmp_path: Path) -> Invoice:
     """把該筆銷售的發票推到 ISSUED（本月、有紙本），以驅動「同月整筆退＝作廢」。"""
     einvoice = EInvoiceService(session)
     invoice = await einvoice.get_invoice_for_sale(store_id, sale_id)
@@ -220,9 +221,7 @@ async def test_store_credit_full_return_voids_invoice_and_restores_credit(
     assert await credit.get_balance(store_id, member_id) == Decimal("0")
     sale_lines = await SalesService(db_session).get_lines(sale.id)
     cash_before = await db_session.scalar(
-        select(CashMovement.id).where(
-            CashMovement.type == CashMovementType.SALE_REFUND_OUT
-        )
+        select(CashMovement.id).where(CashMovement.type == CashMovementType.SALE_REFUND_OUT)
     )
 
     customer_return = await ReturnsService(db_session).create_return(
@@ -252,9 +251,7 @@ async def test_store_credit_full_return_voids_invoice_and_restores_credit(
     assert refreshed is not None and refreshed.status is SaleStatus.RETURNED
     # 購物金退款不進錢櫃
     cash_after = await db_session.scalar(
-        select(CashMovement.id).where(
-            CashMovement.type == CashMovementType.SALE_REFUND_OUT
-        )
+        select(CashMovement.id).where(CashMovement.type == CashMovementType.SALE_REFUND_OUT)
     )
     assert cash_after == cash_before
 
@@ -352,19 +349,28 @@ async def test_linepay_full_return_voids_invoice_and_refunds_platform(
     store_id, clerk_id, _member_id = await _seed(db_session)
     code = await _item(db_session, store_id, f"LP-{store_id}", "1000")
     transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    lines = _lines(code)
+    tenders = [
+        TenderInput(
+            tender_type=TenderType.LINE_PAY,
+            amount=Decimal("1000"),
+            line_pay_one_time_key="OTK-void-1",
+        )
+    ]
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=_lines(code),
-        tenders=[
-            TenderInput(
-                tender_type=TenderType.LINE_PAY,
-                amount=Decimal("1000"),
-                line_pay_one_time_key="OTK-void-1",
-            )
-        ],
+        lines=lines,
+        tenders=tenders,
         idempotency_key=f"lp-sale-{store_id}",
         linepay_client=_client(transport),
+        **await _linepay_cart_kwargs(
+            db_session,
+            store_id=store_id,
+            clerk_id=clerk_id,
+            lines=lines,
+            tenders=tenders,
+        ),
     )
     invoice = await _issue(db_session, store_id, sale.id, tmp_path)
     sale_lines = await SalesService(db_session).get_lines(sale.id)
@@ -409,8 +415,10 @@ async def test_credit_plus_linepay_partial_then_full_keeps_allowance_and_caps_re
     - 兩次退款加總 = $1000 = 原付款；購物金回到 300，LINE Pay 累計退 700（不多退）
     """
     store_id, clerk_id, member_id = await _seed(db_session)
-    codes = [await _item(db_session, store_id, f"ML{i}-{store_id}", p)
-             for i, p in ((1, "400"), (2, "300"), (3, "300"))]
+    codes = [
+        await _item(db_session, store_id, f"ML{i}-{store_id}", p)
+        for i, p in ((1, "400"), (2, "300"), (3, "300"))
+    ]
     credit = StoreCreditService(db_session)
     await credit.adjust(
         store_id,
@@ -594,9 +602,7 @@ async def test_taiwan_pay_needs_manual_refund_ack_on_top_of_paper_and_consent(
     sale_lines = await SalesService(db_session).get_lines(sale.id)
     returns = ReturnsService(db_session)
 
-    async def _attempt(
-        *, recalled: bool, with_consent: bool, twpay_ack: bool, key: str
-    ) -> None:
+    async def _attempt(*, recalled: bool, with_consent: bool, twpay_ack: bool, key: str) -> None:
         await returns.create_return(
             store_id,
             sale_id=sale.id,
@@ -674,19 +680,28 @@ async def test_linepay_refund_failure_leaves_no_return_and_no_invoice_change(
     store_id, clerk_id, member_id = await _seed(db_session)
     code = await _item(db_session, store_id, f"LF-{store_id}", "900")
     ok_transport = RefundTransport(refund_resp=_REFUND_SUCCESS)
+    lines = _lines(code)
+    tenders = [
+        TenderInput(
+            tender_type=TenderType.LINE_PAY,
+            amount=Decimal("900"),
+            line_pay_one_time_key="OTK-fail-1",
+        )
+    ]
     sale = await SalesService(db_session).create_sale(
         store_id,
         clerk_id,
-        lines=_lines(code),
-        tenders=[
-            TenderInput(
-                tender_type=TenderType.LINE_PAY,
-                amount=Decimal("900"),
-                line_pay_one_time_key="OTK-fail-1",
-            )
-        ],
+        lines=lines,
+        tenders=tenders,
         idempotency_key=f"lf-sale-{store_id}",
         linepay_client=_client(ok_transport),
+        **await _linepay_cart_kwargs(
+            db_session,
+            store_id=store_id,
+            clerk_id=clerk_id,
+            lines=lines,
+            tenders=tenders,
+        ),
     )
     invoice = await _issue(db_session, store_id, sale.id, tmp_path)
     sale_lines = await SalesService(db_session).get_lines(sale.id)

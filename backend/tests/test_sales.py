@@ -8,10 +8,11 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import commission, split_tax_inclusive
+from app.core.money import MAX_NTD, commission, split_tax_inclusive
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
@@ -215,6 +216,23 @@ async def test_consignment_sale_creates_pending_settlement_store_takes_commissio
     assert settlement.payout_amount == Decimal("2000") - Decimal(expected_commission)  # 1000
     assert settlement.commission_amount + settlement.payout_amount == settlement.gross
 
+    # DB 自己也要背書結算算式，不能只相信 service 建列當下算對。
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                update(ConsignmentSettlement)
+                .where(ConsignmentSettlement.id == settlement.id)
+                .values(payout_amount=Decimal("999"))
+            )
+
+    with pytest.raises(IntegrityError):
+        async with db_session.begin_nested():
+            await db_session.execute(
+                update(ConsignmentSettlement)
+                .where(ConsignmentSettlement.id == settlement.id)
+                .values(commission_pct=101)
+            )
+
 
 async def test_no_open_session_blocks_entire_sale(db_session: AsyncSession) -> None:
     store_id, clerk_id = await _seed_base(db_session, open_drawer=False)
@@ -328,6 +346,22 @@ async def test_catalog_line_validations(db_session: AsyncSession) -> None:
             store_id,
             clerk_id,
             lines=[SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=cat.id, qty=5)],
+        )
+
+
+async def test_catalog_line_total_rejects_numeric_12_overflow(
+    db_session: AsyncSession,
+) -> None:
+    from app.shared.exceptions import SaleLineInvalid
+
+    store_id, clerk_id = await _seed_base(db_session)
+    cat = await _seed_catalog(db_session, store_id, price=MAX_NTD, qty=2)
+
+    with pytest.raises(SaleLineInvalid, match="資料庫金額上限"):
+        await SalesService(db_session).create_sale(
+            store_id,
+            clerk_id,
+            lines=[SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=cat.id, qty=2)],
         )
 
 

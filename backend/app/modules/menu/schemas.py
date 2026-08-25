@@ -7,8 +7,9 @@
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.modules.menu.models import MenuItem
 
 NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
@@ -20,6 +21,14 @@ class MenuItemCreateRequest(BaseModel):
     category: str | None = Field(default=None, max_length=50)
     sort_order: int = 0
 
+    @field_validator("unit_price")
+    @classmethod
+    def _valid_unit_price(cls, value: Decimal) -> Decimal:
+        if value != value.to_integral_value():
+            raise ValueError("售價必須為整數元")
+        ensure_ntd_fits_numeric_12(value, field="售價")
+        return value
+
 
 class MenuItemUpdateRequest(BaseModel):
     """部分更新；未提供的欄位不變。category 可明確設為 null 以清空。"""
@@ -29,6 +38,16 @@ class MenuItemUpdateRequest(BaseModel):
     category: str | None = Field(default=None, max_length=50)
     sort_order: int | None = None
     is_available: bool | None = None
+
+    @field_validator("unit_price")
+    @classmethod
+    def _valid_unit_price(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        if value != value.to_integral_value():
+            raise ValueError("售價必須為整數元")
+        ensure_ntd_fits_numeric_12(value, field="售價")
+        return value
 
 
 class MenuItemRead(BaseModel):

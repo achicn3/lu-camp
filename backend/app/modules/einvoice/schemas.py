@@ -6,6 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
+from app.core.money import ensure_ntd_fits_numeric_12
 from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
@@ -143,7 +144,16 @@ class ManualInvoiceRegisterRequest(BaseModel):
         if value.microsecond:
             raise ValueError("開立時間只到秒，請填 HH:MM:SS")
         return value
+
     random_number: str | None = Field(default=None, pattern=r"^[0-9]{4}$")  # 同上：限 ASCII
     total: NTDAmount
     # 供稽核追溯：為何改開紙本（字軌用完、平台故障…）。
     note: str | None = Field(default=None, max_length=200)
+
+    @field_validator("total")
+    @classmethod
+    def _valid_total(cls, value: Decimal) -> Decimal:
+        if value <= 0 or value != value.to_integral_value():
+            raise ValueError("發票總額必須為正整數元")
+        ensure_ntd_fits_numeric_12(value, field="發票總額")
+        return value

@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
-from app.core.money import suggested_price
+from app.core.money import split_tax_inclusive, suggested_price
 from app.core.time import store_date
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
@@ -312,10 +312,23 @@ class Sim:
         self.invoice_serial = 0
         self.watermarks: dict[str, int] = {}
         self.stats: dict[str, int] = {
-            "sales": 0, "voids": 0, "returns": 0, "buyouts": 0, "consign_intakes": 0,
-            "bulk_lots": 0, "affidavits": 0, "scu_tasks": 0, "ack_tasks": 0,
-            "pos": 0, "receipts": 0, "input_invoices": 0, "stocktakes": 0,
-            "settle_paid": 0, "credit_grants": 0, "sc_sales": 0, "cash_sessions": 0,
+            "sales": 0,
+            "voids": 0,
+            "returns": 0,
+            "buyouts": 0,
+            "consign_intakes": 0,
+            "bulk_lots": 0,
+            "affidavits": 0,
+            "scu_tasks": 0,
+            "ack_tasks": 0,
+            "pos": 0,
+            "receipts": 0,
+            "input_invoices": 0,
+            "stocktakes": 0,
+            "settle_paid": 0,
+            "credit_grants": 0,
+            "sc_sales": 0,
+            "cash_sessions": 0,
             "members": 0,
         }
 
@@ -406,8 +419,7 @@ async def _shift_day(sim: Sim, cols: dict[str, list[str]], day_start: datetime) 
         sets = ", ".join(
             f"{c} = CASE WHEN {c} IS NULL THEN NULL ELSE "
             + (
-                "CAST(:base AS timestamptz)"
-                " + make_interval(secs => LEAST((id - :wm) * 75, 39600))"
+                "CAST(:base AS timestamptz) + make_interval(secs => LEAST((id - :wm) * 75, 39600))"
                 if c != "intake_date"
                 else "CAST(:day AS date)"
             )
@@ -498,9 +510,7 @@ async def _prepare_signature_device(sim: Sim) -> None:
     await kiosk_heartbeat(sim.s, sim.kiosk.principal)
 
 
-async def _sign_on_kiosk(
-    sim: Sim, task_id: int, payout: PayoutMethod | None
-) -> None:
+async def _sign_on_kiosk(sim: Sim, task_id: int, payout: PayoutMethod | None) -> None:
     """客顯端兩步：ACK（PENDING→SIGNING，SSE 到達不算）→ 送出簽名。"""
     svc = SigningService(sim.s)
     await svc.acknowledge_task(sim.store_id, sim.kiosk.device_id, task_id)
@@ -571,11 +581,7 @@ async def _do_buyout(sim: Sim, day: int) -> None:
         )
         aff_items.append({"name": f"{bname} {gname}", "amount": str(cost)})
     total = sum(int(i.acquisition_cost or 0) for i in items)
-    payout = (
-        PayoutMethod.STORE_CREDIT
-        if _RNG.random() < 0.25
-        else PayoutMethod.CASH
-    )
+    payout = PayoutMethod.STORE_CREDIT if _RNG.random() < 0.25 else PayoutMethod.CASH
     task_id: int | None = None
     if day >= FIRST_AFFIDAVIT_DAY:
         task_id = await _sign_affidavit(sim, seller, aff_items, total, payout)
@@ -600,8 +606,10 @@ async def _do_buyout(sim: Sim, day: int) -> None:
     # 購物金沖回、稽核；當場反悔=項目未售出、購物金未花用，符合 F6.5 擋則）
     if _RNG.random() < 0.02:
         await svc.void_acquisition(
-            sim.store_id, result.acquisition_id,
-            actor_user_id=sim.manager_id, reason="模擬客人當場反悔（F6.5）",
+            sim.store_id,
+            result.acquisition_id,
+            actor_user_id=sim.manager_id,
+            reason="模擬客人當場反悔（F6.5）",
         )
         await sim.s.commit()
         sim.stats["acq_voids"] = sim.stats.get("acq_voids", 0) + 1
@@ -761,23 +769,25 @@ async def _one_sale(sim: Sim, day: int) -> None:
             )
         elif roll < 0.16 and sim.consign_codes:
             lines.append(
-                SaleLineInput(
-                    line_type=SaleLineType.SERIALIZED, item_code=sim.consign_codes.pop(0)
-                )
+                SaleLineInput(line_type=SaleLineType.SERIALIZED, item_code=sim.consign_codes.pop(0))
             )
         elif roll < 0.28 and sim.bulk_ids:
             qty = _RNG.randint(1, 4)
             # 候選由 SQL 取、選擇由 _RNG 決定：DB random() 不受 SIM_SEED 控制，
             # 會破壞可重現性（Codex 第二輪 P2）。
             lot_ids = (
-                await sim.s.execute(
-                    text(
-                        "SELECT id FROM bulk_lots WHERE store_id = :sid "
-                        "AND remaining_qty >= :q AND status = 'ON_SALE' ORDER BY id"
-                    ),
-                    {"sid": sim.store_id, "q": qty},
+                (
+                    await sim.s.execute(
+                        text(
+                            "SELECT id FROM bulk_lots WHERE store_id = :sid "
+                            "AND remaining_qty >= :q AND status = 'ON_SALE' ORDER BY id"
+                        ),
+                        {"sid": sim.store_id, "q": qty},
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not lot_ids:
                 continue  # 各批皆售罄（自然 SOLD_OUT 覆蓋），改走其他品類
             lines.append(
@@ -798,14 +808,18 @@ async def _one_sale(sim: Sim, day: int) -> None:
         else:
             qty = _RNG.randint(1, 4)
             pids = (
-                await sim.s.execute(
-                    text(
-                        "SELECT id FROM catalog_products WHERE store_id = :sid "
-                        "AND quantity_on_hand >= :q ORDER BY id"
-                    ),
-                    {"sid": sim.store_id, "q": qty},
+                (
+                    await sim.s.execute(
+                        text(
+                            "SELECT id FROM catalog_products WHERE store_id = :sid "
+                            "AND quantity_on_hand >= :q ORDER BY id"
+                        ),
+                        {"sid": sim.store_id, "q": qty},
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not pids:
                 continue  # 全面缺貨（採購補貨會回補），改走其他品類
             lines.append(
@@ -828,7 +842,10 @@ async def _one_sale(sim: Sim, day: int) -> None:
             cart, cart_total = await _open_cash_cart(sim, lines, buyer)
             tenders = [TenderInput(tender_type=TenderType.CASH, amount=cart_total)]
         sale = await sales_svc.create_sale(
-            sim.store_id, sim.clerk_id, lines=lines, buyer_contact_id=buyer,
+            sim.store_id,
+            sim.clerk_id,
+            lines=lines,
+            buyer_contact_id=buyer,
             tenders=tenders,
             idempotency_key=sim.key("sale"),
             cart_session_id=cart.id if cart is not None else None,
@@ -927,7 +944,8 @@ async def _store_credit_sale(sim: Sim) -> None:
             await _sign_on_kiosk(sim, task_id, None)
             sim.stats["scu_tasks"] += 1
             await SalesService(sim.s).create_sale(
-                sim.store_id, sim.clerk_id,
+                sim.store_id,
+                sim.clerk_id,
                 lines=lines,
                 buyer_contact_id=cid,
                 tenders=tenders,
@@ -997,15 +1015,12 @@ async def _po_step(sim: Sim, day_date: date) -> None:
         po = await purch.get_purchase_order(sim.store_id, po_id)
         if po is None:
             return
-        pending = [
-            (ln.id, ln.qty - ln.received_qty) for ln in po.lines if ln.qty > ln.received_qty
-        ]
+        pending = [(ln.id, ln.qty - ln.received_qty) for ln in po.lines if ln.qty > ln.received_qty]
         if not pending:
             return
         partial = _RNG.random() < 0.3 and len(pending) > 1
         recv_lines = [
-            ReceiveLineIn(line_id=lid, qty=(max(1, q // 2) if partial else q))
-            for lid, q in pending
+            ReceiveLineIn(line_id=lid, qty=(max(1, q // 2) if partial else q)) for lid, q in pending
         ]
         invoice: InputInvoiceIn | None = None
         total = 0
@@ -1013,14 +1028,18 @@ async def _po_step(sim: Sim, day_date: date) -> None:
             ln = next(x for x in po.lines if x.id == rl.line_id)
             total += rl.qty * int(ln.unit_cost)
         if _RNG.random() < 0.7 and total > 0:
+            invoice_net, invoice_tax = split_tax_inclusive(Decimal(total), Decimal("0.05"))
             invoice = InputInvoiceIn(
                 invoice_number=sim.next_invoice_number(),
                 invoice_date=day_date,
+                invoice_net=Decimal(invoice_net),
+                invoice_tax=Decimal(invoice_tax),
                 invoice_total=Decimal(total),
             )
         try:
             _, receipt = await purch.receive_purchase_order(
-                sim.store_id, po_id,
+                sim.store_id,
+                po_id,
                 actor_user_id=sim.clerk_id,
                 lines=recv_lines,
                 idempotency_key=sim.key("recv"),
@@ -1033,11 +1052,16 @@ async def _po_step(sim: Sim, day_date: date) -> None:
                 sim.stats["input_invoices"] += 1
             elif total > 0 and _RNG.random() < 0.5:
                 # 漏登 → 事後補登一次
+                invoice_net, invoice_tax = split_tax_inclusive(Decimal(total), Decimal("0.05"))
                 await purch.register_input_invoice(
-                    sim.store_id, po_id, receipt.id,
+                    sim.store_id,
+                    po_id,
+                    receipt.id,
                     invoice=InputInvoiceIn(
                         invoice_number=sim.next_invoice_number(),
                         invoice_date=day_date,
+                        invoice_net=Decimal(invoice_net),
+                        invoice_tax=Decimal(invoice_tax),
                         invoice_total=Decimal(total),
                     ),
                 )
@@ -1071,9 +1095,7 @@ async def _po_step(sim: Sim, day_date: date) -> None:
             await sim.s.commit()
             sim.stats["pos"] += 1
             if _RNG.random() < 0.05:
-                await purch.cancel_purchase_order(
-                    sim.store_id, po.id, actor_user_id=sim.manager_id
-                )
+                await purch.cancel_purchase_order(sim.store_id, po.id, actor_user_id=sim.manager_id)
                 await sim.s.commit()
             else:
                 sim.open_po.append(po.id)
@@ -1084,22 +1106,28 @@ async def _po_step(sim: Sim, day_date: date) -> None:
 
 async def _settlement_payouts(sim: Sim) -> None:
     ids = (
-        await sim.s.execute(
-            select(ConsignmentSettlement.id)
-            .where(
-                ConsignmentSettlement.store_id == sim.store_id,
-                ConsignmentSettlement.status == "PENDING",
+        (
+            await sim.s.execute(
+                select(ConsignmentSettlement.id)
+                .where(
+                    ConsignmentSettlement.store_id == sim.store_id,
+                    ConsignmentSettlement.status == "PENDING",
+                )
+                .order_by(ConsignmentSettlement.id)
+                .limit(25)
             )
-            .order_by(ConsignmentSettlement.id)
-            .limit(25)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     svc = ConsignmentService(sim.s)
     for sid in ids:
         if _RNG.random() < 0.8:  # 留少量 PENDING 供帳齡/待撥報表
             try:
                 await svc.pay_settlement(
-                    sim.store_id, sid, actor_user_id=sim.clerk_id,
+                    sim.store_id,
+                    sid,
+                    actor_user_id=sim.clerk_id,
                     idempotency_key=sim.key("payout"),
                 )
                 await sim.s.commit()
@@ -1120,9 +1148,7 @@ async def _stocktake(sim: Sim) -> None:
         for line in got.lines:
             delta = _RNG.choice([0, 0, 0, 0, 0, 0, 0, -1, -2, 1])
             counts[line.catalog_product_id] = max(0, line.system_qty + delta)
-        await svc.confirm_stocktake(
-            sim.store_id, st.id, counts, actor_user_id=sim.manager_id
-        )
+        await svc.confirm_stocktake(sim.store_id, st.id, counts, actor_user_id=sim.manager_id)
         await sim.s.commit()
         sim.stats["stocktakes"] += 1
     except Exception as exc:
@@ -1179,8 +1205,14 @@ async def _bootstrap(sim: Sim) -> None:
         brand_ids[bname] = b.id
     sim.brand_ids = list(brand_ids.values())
     for cname, margin in [
-        ("帳篷", 40), ("睡眠系統", 42), ("桌椅", 45), ("照明", 48),
-        ("炊事", 45), ("消耗品", 35), ("收納", 50), ("服飾", 50),
+        ("帳篷", 40),
+        ("睡眠系統", 42),
+        ("桌椅", 45),
+        ("照明", 48),
+        ("炊事", 45),
+        ("消耗品", 35),
+        ("收納", 50),
+        ("服飾", 50),
     ]:
         c = Category(store_id=sim.store_id, name=cname, target_margin_pct=margin)
         sim.s.add(c)
@@ -1188,9 +1220,7 @@ async def _bootstrap(sim: Sim) -> None:
         sim.category_ids.append(c.id)
     for bname, gears in BRAND_GEAR.items():
         for gname, _ in gears:
-            sim.s.add(
-                ProductModel(store_id=sim.store_id, brand_id=brand_ids[bname], name=gname)
-            )
+            sim.s.add(ProductModel(store_id=sim.store_id, brand_id=brand_ids[bname], name=gname))
     await sim.s.commit()
 
     # 期初庫存走可稽核路徑（Codex 第三輪 P1）：建檔一律 0 → 「開店進貨」採購單收貨補足，
@@ -1200,7 +1230,10 @@ async def _bootstrap(sim: Sim) -> None:
     inv_svc = InventoryService(sim.s)
     for sku, name, price in CATALOG_ITEMS:
         p = await inv_svc.create_catalog(
-            sim.store_id, sku=sku, name=name, unit_price=Decimal(price),
+            sim.store_id,
+            sku=sku,
+            name=name,
+            unit_price=Decimal(price),
             reorder_point=_RNG.choice([20, 30, 50]),
             idempotency_key=f"sim-bootstrap-catalog-{sku}",
         )
@@ -1210,8 +1243,12 @@ async def _bootstrap(sim: Sim) -> None:
     menu_svc = MenuService(sim.s)
     for i, (name, price, cat) in enumerate(MENU_ITEMS):
         mi = await menu_svc.create_menu_item(
-            sim.store_id, name=name, unit_price=Decimal(price), category=cat,
-            sort_order=i, actor_user_id=sim.manager_id,
+            sim.store_id,
+            name=name,
+            unit_price=Decimal(price),
+            category=cat,
+            sort_order=i,
+            actor_user_id=sim.manager_id,
         )
         sim.menu_ids.append(mi.id)
     await sim.s.commit()
@@ -1243,7 +1280,8 @@ async def _bootstrap(sim: Sim) -> None:
     po_full = await purch.get_purchase_order(sim.store_id, opening_po.id)
     assert po_full is not None
     await purch.receive_purchase_order(
-        sim.store_id, opening_po.id,
+        sim.store_id,
+        opening_po.id,
         actor_user_id=sim.manager_id,
         lines=[ReceiveLineIn(line_id=ln.id, qty=ln.qty) for ln in po_full.lines],
         idempotency_key=sim.key("recv"),
@@ -1275,14 +1313,16 @@ async def _mid_sim_adjustments(sim: Sim, day: int) -> None:
     settings_svc = StoreSettingsService(sim.s)
     if day == FIRST_AFFIDAVIT_DAY:
         await settings_svc.update_settings(
-            sim.store_id, actor_user_id=sim.manager_id,
+            sim.store_id,
+            actor_user_id=sim.manager_id,
             patch=SettingsUpdateRequest(require_acquisition_affidavit=True),
         )
         await sim.s.commit()
     # 購物金扣抵簽署無條件強制（docs/23 K5），無設定旗標可切換 → 此處不再有對應調整。
     if day == PREMIUM_BUMP_DAY:
         await settings_svc.update_settings(
-            sim.store_id, actor_user_id=sim.manager_id,
+            sim.store_id,
+            actor_user_id=sim.manager_id,
             patch=SettingsUpdateRequest(premium_rate=Decimal("0.12")),
         )
         await sim.s.commit()
@@ -1311,7 +1351,8 @@ async def _mid_sim_adjustments(sim: Sim, day: int) -> None:
         renamed = await purch.get_supplier(sim.store_id, sim.supplier_ids[0])
         if renamed is not None:
             await purch.update_supplier(
-                sim.store_id, sim.supplier_ids[0],
+                sim.store_id,
+                sim.supplier_ids[0],
                 SupplierUpdate(name=f"{renamed.name}（改組後新名）"),
                 actor_user_id=sim.manager_id,
             )
@@ -1338,10 +1379,15 @@ async def _campaigns(sim: Sim, day: int) -> None:
         # 其視窗必須涵蓋真實 now，歷史銷售才真的吃到折扣（Codex P2：過去視窗＝白開活動）。
         # 先以涵蓋 now 的視窗建立/啟用，結束日 end() 後再把視窗回填成模擬歷史區間。
         cp = await camp.create_campaign(
-            sim.store_id, name=name, discount_pct=pct,
-            starts_at=_NOW - timedelta(hours=1), ends_at=_NOW + timedelta(days=400),
-            applies_owned_serialized=True, applies_owned_bulk=True,
-            applies_catalog=True, applies_consignment=False,
+            sim.store_id,
+            name=name,
+            discount_pct=pct,
+            starts_at=_NOW - timedelta(hours=1),
+            ends_at=_NOW + timedelta(days=400),
+            applies_owned_serialized=True,
+            applies_owned_bulk=True,
+            applies_catalog=True,
+            applies_consignment=False,
             created_by=sim.manager_id,
         )
         await camp.activate(sim.store_id, cp.id, actor_user_id=sim.manager_id)
@@ -1362,9 +1408,7 @@ async def _end_due_campaigns(sim: Sim, day: int) -> None:
                 await camp.end(sim.store_id, cid, actor_user_id=sim.manager_id)
                 # 視窗回填為模擬歷史區間（僅時間欄；折扣留痕/金額不受影響）
                 await sim.s.execute(
-                    text(
-                        "UPDATE campaigns SET starts_at = :s, ends_at = :e WHERE id = :cid"
-                    ),
+                    text("UPDATE campaigns SET starts_at = :s, ends_at = :e WHERE id = :cid"),
                     {
                         "s": _NOW - timedelta(days=s_ago),
                         "e": _NOW - timedelta(days=e_ago),
@@ -1450,17 +1494,29 @@ async def _run_day(sim: Sim, plan: DayPlan, cols: dict[str, list[str]]) -> None:
 
 async def _write_manifest(sim: Sim) -> None:
     tables = [
-        "contacts", "sales", "sale_lines", "acquisitions", "serialized_items", "bulk_lots",
-        "signature_tasks", "consignment_settlements", "store_credit_ledger", "cash_sessions",
-        "cash_movements", "purchase_orders", "goods_receipts", "stocktakes", "returns",
-        "audit_log", "campaigns", "menu_items",
+        "contacts",
+        "sales",
+        "sale_lines",
+        "acquisitions",
+        "serialized_items",
+        "bulk_lots",
+        "signature_tasks",
+        "consignment_settlements",
+        "store_credit_ledger",
+        "cash_sessions",
+        "cash_movements",
+        "purchase_orders",
+        "goods_receipts",
+        "stocktakes",
+        "returns",
+        "audit_log",
+        "campaigns",
+        "menu_items",
     ]
     counts: dict[str, int] = {}
     for t in tables:
         counts[t] = int(await sim.s.scalar(text(f"SELECT COUNT(*) FROM {t}")) or 0)
-    span = (
-        await sim.s.execute(text("SELECT MIN(created_at), MAX(created_at) FROM sales"))
-    ).one()
+    span = (await sim.s.execute(text("SELECT MIN(created_at), MAX(created_at) FROM sales"))).one()
     manifest = {
         "generated_at": datetime.now(UTC).isoformat(),
         "seed": SEED,

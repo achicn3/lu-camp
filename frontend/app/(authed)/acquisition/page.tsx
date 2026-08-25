@@ -69,7 +69,7 @@ function detail(error: unknown): string | null {
   return null;
 }
 
-function emptyItem(): ItemDraft & { estimatedResale: string; rowKey: string } {
+function emptyItem(commissionPct = ""): ItemDraft & { estimatedResale: string; rowKey: string } {
   return {
     // 穩定的列識別：用 index 當 React key 時，刪除中間列會讓後面的列沿用同一個元件實例，
     // 連帶把前一列的內部狀態（如已選標籤）帶過去。不進 API payload（逐欄挑選）。
@@ -81,7 +81,7 @@ function emptyItem(): ItemDraft & { estimatedResale: string; rowKey: string } {
     productModelId: null,
     listedPrice: "",
     acquisitionCost: "",
-    commissionPct: "50",
+    commissionPct,
     estimatedResale: "",
   };
 }
@@ -342,6 +342,7 @@ function ItemRowCard({
   onChange,
   onRemove,
   refreshCategories,
+  defaultCommissionPct,
   taxRate,
   taxRateLoading,
   taxRateUnavailable,
@@ -353,6 +354,8 @@ function ItemRowCard({
   onChange: (patch: Partial<Row>) => void;
   onRemove: () => void;
   refreshCategories: () => void;
+  /** 寄售設定預設值；列尚未自訂時顯示，第一次輸入會取代而不是接在預設值後。 */
+  defaultCommissionPct: string;
   /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
   taxRate: number | null;
   /** settings 尚在載入；提示店員先不要把未稅價直接當成含稅價輸入。 */
@@ -580,8 +583,19 @@ function ItemRowCard({
           <span className="field-label">抽成 %（寄售）</span>
           <input
             inputMode="numeric"
-            value={row.commissionPct}
-            onChange={(e) => onChange({ commissionPct: e.target.value })}
+            value={row.commissionPct === "" ? defaultCommissionPct : row.commissionPct}
+            onChange={(e) => {
+              const value = e.target.value;
+              const editingDisplayedDefault =
+                row.commissionPct === "" &&
+                defaultCommissionPct !== "" &&
+                value.startsWith(defaultCommissionPct);
+              onChange({
+                commissionPct: editingDisplayedDefault
+                  ? value.slice(defaultCommissionPct.length)
+                  : value,
+              });
+            }}
           />
         </label>
       )}
@@ -815,6 +829,17 @@ export default function AcquisitionPage() {
     queryKey: ["settings"],
     queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
   });
+  const defaultCommissionPct =
+    settings.data == null ? "" : String(settings.data.default_commission_pct);
+  const rowsWithCommissionDefaults = useMemo(
+    () =>
+      rows.map((row) =>
+        row.commissionPct === "" && defaultCommissionPct !== ""
+          ? { ...row, commissionPct: defaultCommissionPct }
+          : row,
+      ),
+    [defaultCommissionPct, rows],
+  );
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
     queryFn: async () =>
@@ -865,7 +890,7 @@ export default function AcquisitionPage() {
   const isConsignment = type === "CONSIGNMENT";
   const isBulk = type === "BULK_LOT";
   const sellerIsMember = seller?.roles.includes("MEMBER") ?? false;
-  const premiumRate = settings.data ? Number(settings.data.premium_rate) : 0;
+  const premiumRate = settings.data?.premium_rate ?? "0";
   // 營業稅率取自 settings（§6 不得寫死）。未載入或值不可用時一律為 null、不做含稅換算——
   // 若讓 NaN 流下去，上架售價欄位會被填成字串 "NaN"，比不自動帶入更糟。
   const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
@@ -894,7 +919,7 @@ export default function AcquisitionPage() {
   const draft: AcquisitionDraft = {
     type,
     contactId: seller?.id ?? null,
-    items: rows,
+    items: rowsWithCommissionDefaults,
     lot,
     payoutMethod,
     payoutSplitCash: splitCash,
@@ -940,7 +965,9 @@ export default function AcquisitionPage() {
           category_id: r.categoryId,
           ...(type === "BUYOUT"
             ? { acquisition_cost: ntd(r.acquisitionCost) }
-            : { commission_pct: parseNtd(r.commissionPct) }),
+            : r.commissionPct === ""
+              ? {}
+              : { commission_pct: parseNtd(r.commissionPct) }),
         }));
       }
       if (!isConsignment) {
@@ -1221,12 +1248,17 @@ export default function AcquisitionPage() {
               refreshCategories={() =>
                 void queryClient.invalidateQueries({ queryKey: ["categories"] })
               }
+              defaultCommissionPct={defaultCommissionPct}
               taxRate={taxRate}
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
             />
           ))}
-          <button type="button" className="btn-ghost" onClick={() => setRows((p) => [...p, emptyItem()])}>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setRows((p) => [...p, emptyItem()])}
+          >
             ＋ 新增一列
           </button>
         </div>

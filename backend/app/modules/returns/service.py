@@ -127,12 +127,62 @@ class ReturnsService:
     async def get_return(self, store_id: int, return_id: int) -> CustomerReturn | None:
         return await self._repo.get_return(store_id, return_id)
 
+    async def list_succeeded_linepay_recovery_ids(self, *, limit: int) -> list[int]:
+        """列出平台已退款、但本地退貨尚未完成的紀錄。"""
+        return await SalesService(self._session).list_succeeded_linepay_return_recovery_ids(
+            limit=limit
+        )
+
+    async def recover_succeeded_linepay_refund(self, attempt_id: int) -> bool:
+        """依 provider-success 日誌補完本地退貨；不再呼叫平台退款。"""
+        sales = SalesService(self._session)
+        candidate = await sales.get_linepay_return_recovery(attempt_id)
+        if candidate is None:
+            return False
+
+        # 所有會同時碰 sale 與退款 attempt 的流程固定 sale→attempt。先用未鎖快照定位 sale，
+        # 鎖 sale 後再鎖定並重讀 attempt；避免和正常退貨的 sale→attempt 形成 AB-BA deadlock。
+        if await sales.get_sale_for_update(candidate.store_id, candidate.sale_id) is None:
+            return False
+        recovery = await sales.get_linepay_return_recovery(attempt_id, for_update=True)
+        if recovery is None:
+            return False
+        if (recovery.store_id, recovery.sale_id) != (candidate.store_id, candidate.sale_id):
+            raise ReturnConflict("LINE Pay 退款復原紀錄在鎖定前後不一致")
+
+        await self.create_return(
+            recovery.store_id,
+            sale_id=recovery.sale_id,
+            lines=[
+                ReturnLineInput(sale_line_id=line.sale_line_id, qty=line.qty)
+                for line in recovery.lines
+            ],
+            reason=recovery.reason,
+            actor_user_id=recovery.actor_user_id,
+            idempotency_key=recovery.idempotency_key,
+            # SUCCEEDED 日誌已是平台真相；None 只允許套用日誌，不再送 refund。
+            linepay_client=None,
+            taiwan_pay_refund_confirmed=recovery.taiwan_pay_refund_confirmed,
+            invoice_recalled=recovery.invoice_recalled,
+            consent_signature_task_id=recovery.consent_signature_task_id,
+            unreturned_gift_note=recovery.unreturned_gift_note,
+            manual_paper_disposed=recovery.manual_paper_disposed,
+            reconciled_linepay_refund_key=recovery.refund_key,
+            allow_expired_provider_consent=True,
+        )
+        return await sales.mark_linepay_return_recovered(attempt_id)
+
+    async def mark_linepay_recovery_failed(self, attempt_id: int, *, error_type: str) -> bool:
+        """記錄自動補帳失敗類型，不儲存可能含個資的錯誤文字。"""
+        return await SalesService(self._session).mark_linepay_return_recovery_failed(
+            attempt_id,
+            error_type=error_type,
+        )
+
     async def returned_qty_by_sale(self, store_id: int, sale_id: int) -> dict[int, int]:
         """該銷售各明細**目前為止**的累計退貨量。差額法退款要以它為基準。"""
         lines = await self._sales.list_lines(sale_id)
-        return await self._repo.returned_qty_by_sale_line_ids(
-            store_id, [line.id for line in lines]
-        )
+        return await self._repo.returned_qty_by_sale_line_ids(store_id, [line.id for line in lines])
 
     async def preview_return(
         self,
@@ -271,6 +321,7 @@ class ReturnsService:
         return_lines: dict[int, int],
         invoice_id: int,
         refund_total: Decimal,
+        allow_expired_provider_recovery: bool = False,
     ) -> None:
         """買受人同意（電子發票實施作業要點第 9 點）：折讓與作廢皆須客人簽名確認。
 
@@ -293,6 +344,7 @@ class ReturnsService:
             invoice_id=invoice_id,
             invoice_action=action.value,
             refund_total=refund_total,
+            allow_expired_provider_recovery=allow_expired_provider_recovery,
         )
 
     async def margin_adjustments(
@@ -349,6 +401,8 @@ class ReturnsService:
         consent_signature_task_id: int | None = None,
         unreturned_gift_note: str | None = None,
         manual_paper_disposed: bool = False,
+        reconciled_linepay_refund_key: str | None = None,
+        allow_expired_provider_consent: bool = False,
     ) -> CustomerReturn:
         """建立退貨單並執行副作用；成功前只 flush，不 commit。
 
@@ -383,6 +437,10 @@ class ReturnsService:
             raise ReturnConflict(f"銷售單 {sale_id} 已全數退貨，不可重複退貨")
         if sale.status is SaleStatus.VOIDED:
             raise ReturnConflict(f"銷售單 {sale_id} 已作廢，不可退貨")
+        if reconciled_linepay_refund_key is None and await SalesService(
+            self._session
+        ).has_unrecovered_linepay_return(store_id, sale.id):
+            raise ReturnConflict("此銷售已有 LINE Pay 退款成功，正在補完本地復原；請勿再送退款")
 
         sale_lines = await self._sales.list_lines(sale.id)
         lines_by_id = {line.id: line for line in sale_lines}
@@ -470,6 +528,7 @@ class ReturnsService:
                 return_lines=requested,
                 invoice_id=decided_invoice.id,
                 refund_total=refund_amount,
+                allow_expired_provider_recovery=allow_expired_provider_consent,
             )
 
         # 主商品退了、贈品沒退：系統**不自行假設**。店員必須明確說明為什麼贈品不收回，
@@ -488,8 +547,7 @@ class ReturnsService:
         if unreturned_gifts and returning_non_gift and clean_gift_note == "":
             names = "、".join(f"{line.description} × {line.qty}" for line in unreturned_gifts)
             raise ReturnConflict(
-                f"本單有贈品未一併退回（{names}）：請一併勾選退回，"
-                "或說明不收回的原因後再送出。"
+                f"本單有贈品未一併退回（{names}）：請一併勾選退回，或說明不收回的原因後再送出。"
             )
 
         sale_tenders = await self._sales.list_tenders(sale.id)
@@ -601,13 +659,31 @@ class ReturnsService:
             # 遺失/換收銀機/PENDING 被人工標 SUCCEEDED 後重做）恆得同 refund_key → durable 日誌認得
             # 已退、不重退；兩筆行別相同的合法分批退貨，退貨前累計已退量不同 → 不同 key → 各自退。
             refund_identity = _refund_identity(sale.id, requested, clean_reason, previous)
+            refund_key = reconciled_linepay_refund_key or f"s{store_id}:return:{refund_identity}"
             await SalesService(self._session).refund_line_pay_amount(
                 store_id,
                 sale.id,
                 linepay_refund,
                 linepay_client,
-                refund_key=f"s{store_id}:return:{refund_identity}",
+                refund_key=refund_key,
+                recovery_payload={
+                    "sale_id": sale.id,
+                    "lines": [
+                        {"sale_line_id": sale_line_id, "qty": qty}
+                        for sale_line_id, qty in sorted(requested.items())
+                    ],
+                    "reason": clean_reason,
+                    "actor_user_id": actor_user_id,
+                    "idempotency_key": idempotency_key,
+                    "taiwan_pay_refund_confirmed": taiwan_pay_refund_confirmed,
+                    "invoice_recalled": invoice_recalled,
+                    "consent_signature_task_id": consent_signature_task_id,
+                    "unreturned_gift_note": unreturned_gift_note,
+                    "manual_paper_disposed": manual_paper_disposed,
+                },
             )
+        else:
+            refund_key = None
 
         returned_after = dict(previous)
         for sale_line_id, qty in requested.items():
@@ -725,6 +801,11 @@ class ReturnsService:
                     sale.invoice_status = SaleInvoiceStatus.PENDING_VOID
         # 部分退貨且發票仍 PENDING：不動——F0401 核可（發票成立）時由 einvoice 回呼
         # backfill_allowances_for_issued_sale 補開 G0401。
+
+        if refund_key is not None and reconciled_linepay_refund_key is None:
+            await SalesService(self._session).mark_linepay_return_recovered_by_key(
+                store_id, refund_key
+            )
 
         await write_audit_log(
             self._session,
@@ -878,9 +959,7 @@ class ReturnsService:
     ) -> None:
         # 贈品退回要能與一般退貨分辨，否則贈品報表算不出「送出去又退回來」幾件。
         reason = (
-            StockReason.GIFT_RETURN
-            if line.line_kind is SaleLineKind.GIFT
-            else StockReason.RETURN
+            StockReason.GIFT_RETURN if line.line_kind is SaleLineKind.GIFT else StockReason.RETURN
         )
         if line.line_type == SaleLineType.CATALOG:
             assert line.catalog_product_id is not None

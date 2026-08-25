@@ -9,11 +9,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
+from app.modules.sales.inputs import LINEPAY_RETURN_RECOVERY_KIND
 from app.modules.sales.models import (
     DiscountReason,
     GiftReason,
@@ -138,16 +139,12 @@ class SalesRepository:
         stmt = (
             select(DiscountReason)
             .where(DiscountReason.store_id == store_id)
-            .order_by(
-                DiscountReason.is_active.desc(), DiscountReason.sort_order, DiscountReason.id
-            )
+            .order_by(DiscountReason.is_active.desc(), DiscountReason.sort_order, DiscountReason.id)
         )
         return list(await self._session.scalars(stmt))
 
     async def get_gift_reason(self, store_id: int, reason_id: int) -> GiftReason | None:
-        stmt = select(GiftReason).where(
-            GiftReason.id == reason_id, GiftReason.store_id == store_id
-        )
+        stmt = select(GiftReason).where(GiftReason.id == reason_id, GiftReason.store_id == store_id)
         return (await self._session.scalars(stmt)).one_or_none()
 
     async def get_discount_reason(self, store_id: int, reason_id: int) -> DiscountReason | None:
@@ -192,12 +189,19 @@ class SalesRepository:
         return result
 
     async def list_pending_refund_attempts(self, store_id: int) -> list[LinePayRefundAttempt]:
-        """列出結果未定（PENDING）的 LINE Pay 退款嘗試（退款對帳頁：人工確認/解決）。"""
+        """列出平台結果未定，或平台成功但本地交易尚未復原的退款。"""
         stmt = (
             select(LinePayRefundAttempt)
             .where(
                 LinePayRefundAttempt.store_id == store_id,
-                LinePayRefundAttempt.status == LinePayRefundStatus.PENDING,
+                or_(
+                    LinePayRefundAttempt.status == LinePayRefundStatus.PENDING,
+                    (
+                        (LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED)
+                        & LinePayRefundAttempt.recovery_kind.is_not(None)
+                        & LinePayRefundAttempt.recovered_at.is_(None)
+                    ),
+                ),
             )
             .order_by(LinePayRefundAttempt.id)
         )
@@ -215,6 +219,108 @@ class SalesRepository:
             stmt = stmt.with_for_update()
         result: LinePayRefundAttempt | None = await self._session.scalar(stmt)
         return result
+
+    async def list_succeeded_return_recovery_ids(self, *, limit: int) -> list[int]:
+        stmt = (
+            select(LinePayRefundAttempt.id)
+            .where(
+                LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED,
+                LinePayRefundAttempt.recovery_kind == LINEPAY_RETURN_RECOVERY_KIND,
+                LinePayRefundAttempt.recovered_at.is_(None),
+            )
+            .order_by(LinePayRefundAttempt.id)
+            .limit(limit)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def has_unrecovered_return_refund(self, store_id: int, sale_id: int) -> bool:
+        """此銷售是否有平台已退款、但本地退貨尚未完成的 durable 紀錄。"""
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(LinePayRefundAttempt)
+            .join(
+                LinePayTransaction,
+                (LinePayTransaction.store_id == LinePayRefundAttempt.store_id)
+                & (LinePayTransaction.order_id == LinePayRefundAttempt.order_id),
+            )
+            .where(
+                LinePayRefundAttempt.store_id == store_id,
+                LinePayTransaction.sale_id == sale_id,
+                LinePayRefundAttempt.status == LinePayRefundStatus.SUCCEEDED,
+                LinePayRefundAttempt.recovery_kind == LINEPAY_RETURN_RECOVERY_KIND,
+                LinePayRefundAttempt.recovered_at.is_(None),
+            )
+        )
+        return bool(count)
+
+    async def get_refund_attempt_by_id(
+        self, attempt_id: int, *, for_update: bool = False
+    ) -> LinePayRefundAttempt | None:
+        stmt = select(LinePayRefundAttempt).where(LinePayRefundAttempt.id == attempt_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        result: LinePayRefundAttempt | None = await self._session.scalar(stmt)
+        return result
+
+    async def mark_return_recovery_succeeded(
+        self, attempt_id: int, *, recovered_at: datetime
+    ) -> bool:
+        attempt = await self.get_refund_attempt_by_id(attempt_id, for_update=True)
+        if (
+            attempt is None
+            or attempt.status is not LinePayRefundStatus.SUCCEEDED
+            or attempt.recovery_kind != LINEPAY_RETURN_RECOVERY_KIND
+            or attempt.recovered_at is not None
+        ):
+            return False
+        attempt.recovery_attempts += 1
+        attempt.recovery_error = None
+        attempt.recovered_at = recovered_at
+        await self._session.flush()
+        return True
+
+    async def mark_return_recovery_succeeded_by_key(
+        self,
+        store_id: int,
+        refund_key: str,
+        *,
+        recovered_at: datetime,
+    ) -> bool:
+        """主退貨交易成功時，以 durable key 同交易標記本地也已完成。"""
+        attempt = await self._session.scalar(
+            select(LinePayRefundAttempt)
+            .where(
+                LinePayRefundAttempt.store_id == store_id,
+                LinePayRefundAttempt.refund_key == refund_key,
+            )
+            .with_for_update()
+        )
+        if (
+            attempt is None
+            or attempt.status is not LinePayRefundStatus.SUCCEEDED
+            or attempt.recovery_kind != LINEPAY_RETURN_RECOVERY_KIND
+            or attempt.recovered_at is not None
+        ):
+            return False
+        attempt.recovery_attempts += 1
+        attempt.recovery_error = None
+        attempt.recovered_at = recovered_at
+        await self._session.flush()
+        return True
+
+    async def mark_return_recovery_failed(self, attempt_id: int, *, error: str) -> bool:
+        attempt = await self.get_refund_attempt_by_id(attempt_id, for_update=True)
+        if (
+            attempt is None
+            or attempt.status is not LinePayRefundStatus.SUCCEEDED
+            or attempt.recovery_kind != LINEPAY_RETURN_RECOVERY_KIND
+            or attempt.recovered_at is not None
+        ):
+            return False
+        attempt.recovery_attempts += 1
+        attempt.recovery_error = error
+        await self._session.flush()
+        return True
 
     async def get_linepay_by_sale_id(
         self, store_id: int, sale_id: int, *, for_update: bool = False
@@ -515,6 +621,7 @@ class SalesRepository:
                 BulkLot.total_qty,
                 SaleLine.qty,
                 SaleLine.net_amount,
+                SaleLine.cost_snapshot,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
@@ -528,10 +635,14 @@ class SalesRepository:
                 BulkLot.consignor_id.is_(None),  # 自有散裝才認買斷毛利
             )
         )
-        for acquisition_cost, total_qty, qty, net_amount in bulk:
+        for acquisition_cost, total_qty, qty, net_amount, cost_snapshot in bulk:
             goods_revenue += net_amount
-            if total_qty and total_qty > 0:
-                cost = acquisition_cost * Decimal(qty) / Decimal(total_qty)
+            if cost_snapshot is not None:
+                cost = Decimal(cost_snapshot)
+                buyout_margin += net_amount - cost
+            elif total_qty and total_qty > 0:
+                # 舊資料若尚無成交成本快照，仍套用與結帳相同的逐行 HALF_UP 規則。
+                cost = Decimal(round_ntd(acquisition_cost * Decimal(qty) / Decimal(total_qty)))
                 buyout_margin += net_amount - cost
         return buyout_margin, goods_revenue
 
@@ -645,8 +756,7 @@ class SalesRepository:
             .having(fnb > 0)
         )
         return [
-            (created, str(mode), Decimal(rev), Decimal(total))
-            for created, mode, rev, total in rows
+            (created, str(mode), Decimal(rev), Decimal(total)) for created, mode, rev, total in rows
         ]
 
     async def gift_rows(
@@ -901,9 +1011,7 @@ class SalesRepository:
         gift_row = (
             await self._session.execute(
                 select(
-                    func.coalesce(
-                        func.sum(SaleLine.original_unit_price * SaleLine.qty), 0
-                    ),
+                    func.coalesce(func.sum(SaleLine.original_unit_price * SaleLine.qty), 0),
                     func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
                 )
                 .join(Sale, SaleLine.sale_id == Sale.id)

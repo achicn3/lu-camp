@@ -30,8 +30,16 @@ class EInvoiceRepository:
         await self._session.flush()
         return invoice
 
-    async def get_invoice(self, store_id: int, invoice_id: int) -> Invoice | None:
+    async def get_invoice(
+        self,
+        store_id: int,
+        invoice_id: int,
+        *,
+        for_update: bool = False,
+    ) -> Invoice | None:
         stmt = select(Invoice).where(Invoice.id == invoice_id, Invoice.store_id == store_id)
+        if for_update:
+            stmt = stmt.with_for_update()
         result: Invoice | None = await self._session.scalar(stmt)
         return result
 
@@ -86,6 +94,26 @@ class EInvoiceRepository:
         )
         value = await self._session.scalar(stmt)
         return Decimal(value if value is not None else 0)
+
+    async def sum_allowances_amounts(
+        self,
+        store_id: int,
+        invoice_id: int,
+    ) -> tuple[Decimal, Decimal, Decimal]:
+        """Return cumulative net, tax and total for one invoice's allowances."""
+        row = (
+            await self._session.execute(
+                select(
+                    func.coalesce(func.sum(InvoiceAllowance.net), 0),
+                    func.coalesce(func.sum(InvoiceAllowance.tax), 0),
+                    func.coalesce(func.sum(InvoiceAllowance.total), 0),
+                ).where(
+                    InvoiceAllowance.store_id == store_id,
+                    InvoiceAllowance.invoice_id == invoice_id,
+                )
+            )
+        ).one()
+        return Decimal(row[0]), Decimal(row[1]), Decimal(row[2])
 
     async def find_allowance_by_return(
         self, store_id: int, return_id: int

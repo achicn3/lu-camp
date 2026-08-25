@@ -110,7 +110,13 @@ async def test_daily_cash_expected_matches_close_formula(
     await cash.record_movement(store_id, CashMovementType.ACQUISITION_VOID_IN, Decimal(100))
     await cash.record_movement(store_id, CashMovementType.BUYOUT_OUT, Decimal(200))
     await cash.record_movement(
-        store_id, CashMovementType.MANUAL_ADJUST, Decimal(-50), actor_user_id=mgr_id
+        store_id,
+        CashMovementType.MANUAL_ADJUST,
+        Decimal(-50),
+        actor_user_id=mgr_id,
+        note="日結盤差",
+        idempotency_key="daily-cash-manual-adjust",
+        idempotency_fingerprint="4" * 64,
     )
     day = _today_iso(session)
 

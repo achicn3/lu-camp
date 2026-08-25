@@ -14,3 +14,24 @@ export function parseNtd(input: string): number | null {
 export function formatNtd(amount: number): string {
   return amount.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
+
+/**
+ * 整數元乘 API Decimal 費率後以 ROUND_HALF_UP 收整。
+ *
+ * 費率維持字串到 BigInt 比值完成，避免 `5000 * Number("0.0003")` 落成
+ * 1.4999999999999998 而比後端 Decimal 少一元。
+ */
+export function roundNtdByRate(amountNtd: number, rate: string): number | null {
+  if (!Number.isSafeInteger(amountNtd)) return null;
+  const match = /^(\d+)(?:\.(\d{1,4}))?$/.exec(rate.trim());
+  if (!match) return null;
+  const scale = BigInt(10_000);
+  const whole = BigInt(match[1]);
+  const fraction = BigInt((match[2] ?? "").padEnd(4, "0"));
+  const rateUnits = whole * scale + fraction;
+  const numerator = BigInt(amountNtd) * rateUnits;
+  const negative = numerator < BigInt(0);
+  const magnitude = negative ? -numerator : numerator;
+  const rounded = (BigInt(2) * magnitude + scale) / (BigInt(2) * scale);
+  return Number(negative ? -rounded : rounded);
+}

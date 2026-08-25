@@ -127,7 +127,9 @@ describe("payableTotal / splitValid / creditPremiumPreview", () => {
     expect(splitValid(1000, 400.5)).toBe(false);
   });
   it("creditPremiumPreview rounds", () => {
-    expect(creditPremiumPreview(1000, 0.1)).toBe(100);
-    expect(creditPremiumPreview(333, 0.1)).toBe(33); // 33.3 → 33
+    expect(creditPremiumPreview(1000, "0.1")).toBe(100);
+    expect(creditPremiumPreview(333, "0.1")).toBe(33); // 33.3 → 33
+    // 精確乘積 1.5 應 HALF_UP 為 2；Number(0.0003) 的二進位乘法曾得到 1.49999… → 1。
+    expect(creditPremiumPreview(5000, "0.0003")).toBe(2);
   });
 });

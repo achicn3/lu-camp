@@ -62,7 +62,7 @@ import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
-import { formatNtd, parseNtd } from "@/lib/money";
+import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
 import { formatSalePaymentSummary } from "@/lib/payment";
 import {
   clearPersistedIdemKey,
@@ -412,11 +412,11 @@ function TenderPanel({
   storeCreditMinSpend: number;
   cartHasItems: boolean;
   /** 台灣Pay 手續費率（小數，如 0.02=2%；docs/30）。僅供顯示店家負擔，不向客人收取。 */
-  taiwanpayFeePct: number;
+  taiwanpayFeePct: string;
   /** LINE Pay 是否啟用（docs/30）：未啟用時不顯示 LINE Pay 收款選項。 */
   linepayEnabled: boolean;
   /** LINE Pay 手續費率（小數）。僅供顯示店家負擔。 */
-  linepayFeePct: number;
+  linepayFeePct: string;
   /** LINE Pay 掃到的客人一次性付款碼（oneTimeKey）。 */
   linePayKey: string;
   setLinePayKey: (v: string) => void;
@@ -450,6 +450,8 @@ function TenderPanel({
   });
   const received = parseNtd(receivedInput);
   const change = received !== null ? changeDue(received, plan.cash) : null;
+  const taiwanPayFee = roundNtdByRate(plan.taiwanPay, taiwanpayFeePct);
+  const linePayFee = roundNtdByRate(plan.linePay, linepayFeePct);
   const maxStoreCredit = Math.max(
     0,
     Math.min(total - 1, storeCreditMax, memberBalance ?? 0),
@@ -570,11 +572,11 @@ function TenderPanel({
         <>
           <p className="hint">
             台灣Pay 收款 <Money value={plan.taiwanPay} />（請於台灣Pay App 完成收款）
-            {taiwanpayFeePct > 0 && (
+            {taiwanPayFee !== null && /[1-9]/.test(taiwanpayFeePct) && (
               <>
                 {" "}
                 · 本筆手續費{" "}
-                <Money value={Math.round(plan.taiwanPay * taiwanpayFeePct)} />
+                <Money value={taiwanPayFee} />
                 （店家負擔，不向客人收取）
               </>
             )}
@@ -609,11 +611,11 @@ function TenderPanel({
           </label>
           <p className="hint">
             LINE Pay 收款 <Money value={plan.linePay} />
-            {linepayFeePct > 0 && (
+            {linePayFee !== null && /[1-9]/.test(linepayFeePct) && (
               <>
                 {" "}
                 · 本筆手續費{" "}
-                <Money value={Math.round(plan.linePay * linepayFeePct)} />
+                <Money value={linePayFee} />
                 （店家負擔，不向客人收取）
               </>
             )}
@@ -2658,9 +2660,9 @@ export default function PosPage() {
             drawerOpen={drawerOpen}
             storeCreditMax={storeCreditMax}
             storeCreditMinSpend={storeCreditMinSpend}
-            taiwanpayFeePct={Number(settings.data?.taiwanpay_fee_pct ?? 0)}
+            taiwanpayFeePct={settings.data?.taiwanpay_fee_pct ?? "0"}
             linepayEnabled={settings.data?.linepay_enabled === true}
-            linepayFeePct={Number(settings.data?.linepay_fee_pct ?? 0)}
+            linepayFeePct={settings.data?.linepay_fee_pct ?? "0"}
             linePayKey={linePayKey}
             setLinePayKey={setLinePayKey}
             mode={mode}

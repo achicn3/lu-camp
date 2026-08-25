@@ -35,6 +35,7 @@ from app.shared.enums import (
     PayoutMethod,
     UserRole,
 )
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 from tests.integration.customer_display_helpers import (
     delete_customer_display_rows,
     prepare_signed_store_credit_cart,
@@ -114,7 +115,7 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
@@ -193,7 +194,7 @@ async def test_concurrent_sale_vs_void_no_deadlock(real_client: httpx.AsyncClien
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
@@ -338,7 +339,7 @@ async def test_concurrent_split_void_vs_credit_first_mixed_sale_no_deadlock(
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
             await s.execute(delete(CatalogProduct).where(CatalogProduct.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))
@@ -438,7 +439,7 @@ async def test_concurrent_multi_item_reverse_sale_vs_void_no_deadlock(
             await s.execute(delete(AuditLog).where(AuditLog.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
             await s.execute(delete(SerializedItem).where(SerializedItem.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))
             await s.execute(delete(Acquisition).where(Acquisition.store_id == store_id))
             await s.execute(delete(Contact).where(Contact.store_id == store_id))

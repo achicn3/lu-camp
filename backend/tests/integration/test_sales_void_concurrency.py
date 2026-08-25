@@ -17,7 +17,7 @@ import app.core.db as app_db
 from app.core.audit import AuditLog
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.cashdrawer.models import CashMovement, CashSession
+from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.inventory.models import CatalogProduct, StockMovement
 from app.modules.sales.inputs import SaleLineInput
@@ -26,6 +26,7 @@ from app.modules.sales.service import SalesService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import SaleLineType, SaleStatus, UserRole
+from tests.integration.cashdrawer_helpers import delete_cash_movements_for_test
 
 
 @pytest_asyncio.fixture
@@ -88,7 +89,7 @@ async def test_concurrent_void_only_one_succeeds(real_client: httpx.AsyncClient)
             await s.execute(delete(SaleTender).where(SaleTender.store_id == store_id))
             await s.execute(delete(SaleLine).where(SaleLine.store_id == store_id))
             await s.execute(delete(StockMovement).where(StockMovement.store_id == store_id))
-            await s.execute(delete(CashMovement).where(CashMovement.store_id == store_id))
+            await delete_cash_movements_for_test(s, store_id=store_id)
             await s.execute(delete(Sale).where(Sale.store_id == store_id))
             await s.execute(delete(CatalogProduct).where(CatalogProduct.store_id == store_id))
             await s.execute(delete(CashSession).where(CashSession.store_id == store_id))

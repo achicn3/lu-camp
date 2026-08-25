@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.core.db as app_db
 from app.core.audit import AuditLog
+from app.core.money import MAX_NTD
 from app.modules.contacts.models import Contact
 from app.modules.store.models import Store
 from app.modules.storecredit.models import StoreCreditLedger
@@ -147,6 +148,55 @@ async def test_credit_applies_premium_and_records_three_values(
     assert entry.premium_rate_applied == Decimal("0.1000")
     assert entry.balance_after == Decimal(1100)
     assert await svc.get_balance(store_id, member_id) == Decimal(1100)
+
+
+async def test_credit_rejects_premium_amount_above_numeric_limit_before_flush(
+    db_session: AsyncSession,
+) -> None:
+    """現金等值本身合法，但加上溢價後超過 Numeric(12,0) 時要回領域錯誤，不可 DB 500。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+
+    with pytest.raises(StoreCreditConflict, match="資料庫金額上限"):
+        await svc.credit(
+            store_id,
+            member_id,
+            cash_equivalent=MAX_NTD,
+            premium_rate=Decimal("0.2000"),
+            source_type=StoreCreditSourceType.ACQUISITION,
+            source_id=12,
+            created_by=user_id,
+        )
+
+    assert await svc.get_balance(store_id, member_id) == Decimal(0)
+
+
+async def test_adjust_rejects_balance_above_numeric_limit_without_partial_entry(
+    db_session: AsyncSession,
+) -> None:
+    """每筆分錄都可保存時，累計餘額仍不可超過帳戶與 balance_after 的 Numeric(12,0)。"""
+    store_id, user_id, member_id = await _seed(db_session)
+    svc = StoreCreditService(db_session)
+    await svc.adjust(
+        store_id,
+        member_id,
+        amount=MAX_NTD,
+        reason="上限邊界種子",
+        created_by=user_id,
+        idempotency_key="balance-limit-seed",
+    )
+
+    with pytest.raises(StoreCreditConflict, match="購物金餘額不可超過"):
+        await svc.adjust(
+            store_id,
+            member_id,
+            amount=Decimal(1),
+            reason="不可超過上限",
+            created_by=user_id,
+            idempotency_key="balance-limit-overflow",
+        )
+
+    assert await svc.get_balance(store_id, member_id) == MAX_NTD
 
 
 async def test_debit_and_balance_chain(db_session: AsyncSession) -> None:

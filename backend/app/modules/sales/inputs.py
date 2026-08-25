@@ -8,6 +8,8 @@ from decimal import Decimal
 
 from app.shared.enums import SaleLineKind, SaleLineType, TenderType
 
+LINEPAY_RETURN_RECOVERY_KIND = "RETURN"
+
 
 @dataclass(frozen=True)
 class SaleLineInput:
@@ -59,3 +61,28 @@ class TenderInput:
     tender_type: TenderType
     amount: Decimal
     line_pay_one_time_key: str | None = None
+
+
+@dataclass(frozen=True)
+class LinePayReturnRecoveryLine:
+    sale_line_id: int
+    qty: int
+
+
+@dataclass(frozen=True)
+class LinePayReturnRecovery:
+    """平台已退款成功、等待本地退貨補帳的型別化工作內容。"""
+
+    attempt_id: int
+    refund_key: str
+    store_id: int
+    sale_id: int
+    lines: tuple[LinePayReturnRecoveryLine, ...]
+    reason: str
+    actor_user_id: int
+    idempotency_key: str
+    taiwan_pay_refund_confirmed: bool
+    invoice_recalled: bool
+    consent_signature_task_id: int | None
+    unreturned_gift_note: str | None
+    manual_paper_disposed: bool

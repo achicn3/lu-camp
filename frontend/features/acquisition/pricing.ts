@@ -5,6 +5,8 @@
 // Number 安全整數的中間乘法改用 BigInt 整數比值收整。
 // 這些為「鑑價輔助」估計值，非持久化金額；實際成本/售價由店員輸入。
 
+import { roundNtdByRate } from "@/lib/money";
+
 const BASIS_POINTS_PER_UNIT = 10_000;
 const PERCENT_POINTS_PER_UNIT = 100;
 const ROUND_HALF_UP_FACTOR = BigInt(2);
@@ -132,7 +134,7 @@ export function splitValid(totalNtd: number, cashPartNtd: number): boolean {
   return Number.isInteger(cashPartNtd) && cashPartNtd > 0 && cashPartNtd < totalNtd;
 }
 
-/** 購物金溢價試算「可多得」= round_ntd(現金等值 × 溢價率)；premiumRate 為小數（如 0.1）。 */
-export function creditPremiumPreview(creditEquivNtd: number, premiumRate: number): number {
-  return roundNtd(creditEquivNtd * premiumRate);
+/** 購物金溢價試算「可多得」= round_ntd(現金等值 × API Decimal 溢價率字串)。 */
+export function creditPremiumPreview(creditEquivNtd: number, premiumRate: string): number {
+  return roundNtdByRate(creditEquivNtd, premiumRate) ?? 0;
 }

@@ -248,7 +248,8 @@ class SaleAdjustment(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("id", "store_id", name="uq_sale_adjustments_id_store"),
         ForeignKeyConstraint(
-            ["sale_id", "store_id"], ["sales.id", "sales.store_id"],
+            ["sale_id", "store_id"],
+            ["sales.id", "sales.store_id"],
             name="fk_sale_adjustments_sale_store",
         ),
         # 單品折扣必指向某一行；整單折扣不得指定行（分攤結果另存於 allocations）。
@@ -297,9 +298,7 @@ class SaleAdjustmentAllocation(Base, TimestampMixin):
 
     __tablename__ = "sale_adjustment_allocations"
     __table_args__ = (
-        UniqueConstraint(
-            "adjustment_id", "sale_line_id", name="uq_sale_adjustment_alloc_pair"
-        ),
+        UniqueConstraint("adjustment_id", "sale_line_id", name="uq_sale_adjustment_alloc_pair"),
         CheckConstraint("allocated_amount >= 0", name="ck_sale_adjustment_alloc_nonneg"),
     )
 
@@ -380,7 +379,7 @@ class LinePayTransaction(Base, TimestampMixin):
 
 
 class LinePayRefundAttempt(Base, TimestampMixin):
-    """LINE Pay 退款嘗試的持久化對帳日誌（docs/30 finding #1：防重退）。
+    """LINE Pay 退款嘗試與本地復原意圖的持久化 saga 日誌。
 
     **append-only、無外鍵**：以**獨立交易**提交，故能在主交易（退貨/作廢）回滾後仍存活——
     這是「呼叫平台 refund 後崩潰/回應遺失」時唯一能防重退的依據。refund_key 唯一：退貨＝
@@ -401,6 +400,13 @@ class LinePayRefundAttempt(Base, TimestampMixin):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     status: Mapped[LinePayRefundStatus] = mapped_column(_enum_col(LinePayRefundStatus))
     return_code: Mapped[str | None] = mapped_column(String(8))
+    # RETURN 退款在呼叫平台前保存足以重做本地退貨的非 PII payload；平台成功而主交易回滾時，
+    # 背景排程以原冪等鍵重做本地反轉，且不再呼叫平台。
+    recovery_kind: Mapped[str | None] = mapped_column(String(20))
+    recovery_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    recovery_attempts: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    recovery_error: Mapped[str | None] = mapped_column(String(500))
+    recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # 收款守衛（Codex SC-3 P3＋第二輪 P1）。DEFERRABLE INITIALLY DEFERRED，於 COMMIT 時驗：

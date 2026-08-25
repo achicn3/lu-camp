@@ -24,6 +24,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token, hash_password
 from app.main import create_app
 from app.modules.contacts.models import Contact
+from app.modules.customerdisplay.background_service import CustomerDisplayBackgroundService
 from app.modules.customerdisplay.models import CartSession, CartSessionEvent, KioskDevice
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.inventory.models import CatalogProduct
@@ -740,6 +741,58 @@ def _uncertain_linepay_client(transport: LinePayTransport) -> LinePayClient:
     )
 
 
+async def test_linepay_without_customer_display_cart_is_rejected_before_provider_call(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeded = await _seed(db_session, "16")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-16"))
+    assert manager is not None
+    await StoreSettingsService(db_session).update_settings(
+        manager.store_id,
+        actor_user_id=manager.id,
+        patch=SettingsUpdateRequest(linepay_enabled=True),
+    )
+    await db_session.commit()
+    transport = _SuccessfulLinePayTransport()
+    monkeypatch.setattr(
+        "app.modules.sales.router._linepay_client",
+        lambda: _uncertain_linepay_client(transport),
+    )
+
+    response = await client.post(
+        "/api/v1/sales",
+        headers={
+            **_auth(seeded.manager_token),
+            "Idempotency-Key": "linepay-without-display",
+        },
+        json={
+            "lines": [
+                {
+                    "line_type": "CATALOG",
+                    "catalog_product_id": seeded.product_id,
+                    "qty": 1,
+                }
+            ],
+            "buyer_contact_id": seeded.member_id,
+            "tenders": [
+                {
+                    "tender_type": "LINE_PAY",
+                    "amount": "120",
+                    "line_pay_one_time_key": "OTK-without-display",
+                }
+            ],
+            "expected_einvoice_enabled": False,
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "客顯" in response.json()["detail"]
+    assert transport.check_calls == 0
+    assert transport.pay_calls == 0
+
+
 async def _prepare_signed_linepay_cart(
     client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -931,6 +984,15 @@ async def test_linepay_transport_uncertainty_pauses_ttl_and_provider_success_rec
         == 0
     )
 
+    # 平台結果未定期間，門市可能因客顯故障而解除配對。平台稍後確認已扣款時，
+    # 本地補單必須只依保存的原單資料完成，不可再要求已解除的即時配對。
+    unpaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_auth(seeded.manager_token),
+        json={"reason": "付款結果不明期間更換故障客顯"},
+    )
+    assert unpaired.status_code == 200, unpaired.text
+
     transport.check_response = {
         "returnCode": "0000",
         "returnMessage": "Success.",
@@ -1045,6 +1107,55 @@ async def test_payment_uncertain_manual_resolution_requires_manager_and_evidence
     await db_session.refresh(task)
     assert task.status.value == "FAILED"
     assert task.failure_reason is not None
+
+
+async def test_payment_uncertain_is_automatically_queried_without_recharging(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seeded, _store_id, terminal_id, _task_id, sale_payload = await _prepare_signed_linepay_cart(
+        client,
+        db_session,
+        suffix="18",
+    )
+    transport = _UncertainLinePayTransport()
+    linepay_client = _uncertain_linepay_client(transport)
+    monkeypatch.setattr("app.modules.sales.router._linepay_client", lambda: linepay_client)
+    headers = {
+        **_auth(seeded.manager_token),
+        "Idempotency-Key": "automatic-linepay-reconciliation",
+    }
+    uncertain = await client.post("/api/v1/sales", headers=headers, json=sale_payload)
+    assert uncertain.status_code == 409
+    assert transport.pay_calls == 1
+
+    transport.check_response = {
+        "returnCode": "0000",
+        "returnMessage": "Success.",
+        "info": {
+            "transactionId": 2026082400000000018,
+            "status": "COMPLETE",
+            "payInfo": [{"method": "LINE_PAY", "amount": 70}],
+        },
+    }
+    outcome = await CustomerDisplayBackgroundService.reconcile_uncertain_payment_target(
+        db_session,
+        store_id=_store_id,
+        terminal_id=terminal_id,
+        linepay_client=linepay_client,
+    )
+
+    assert outcome == "SUCCESS_CONFIRMED"
+    cart_session_id = sale_payload["cart_session_id"]
+    assert isinstance(cart_session_id, int)
+    cart = await db_session.get(CartSession, cart_session_id)
+    assert cart is not None
+    await db_session.refresh(cart)
+    assert cart.status.value == "COMPLETED"
+    assert await db_session.scalar(select(func.count()).select_from(Sale)) == 1
+    assert transport.check_calls == 2
+    assert transport.pay_calls == 1
 
 
 async def test_payment_uncertain_manual_success_auto_creates_sale_without_recharging(

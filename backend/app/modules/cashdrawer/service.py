@@ -5,6 +5,7 @@
 expected 一律以 core/money 在 Decimal/整數元域計算，無 float。
 """
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -13,13 +14,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import round_ntd
+from app.core.canonical import canonical_json_bytes
+from app.core.money import MAX_NTD, round_ntd
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.modules.cashdrawer.repository import CashDrawerRepository
 from app.shared.enums import CashMovementType, CashSessionStatus
 from app.shared.exceptions import (
+    CashAmountOutOfRange,
     CashSessionAlreadyClosed,
     CashSessionAlreadyOpen,
+    IdempotencyKeyConflict,
     NoOpenCashSession,
     UnknownCashMovementType,
 )
@@ -82,6 +86,9 @@ class CashDrawerService:
         ref_type: str | None = None,
         ref_id: int | None = None,
         note: str | None = None,
+        expected_session_id: int | None = None,
+        idempotency_key: str | None = None,
+        idempotency_fingerprint: str | None = None,
     ) -> CashMovement:
         """記一筆現金異動；必須在開帳中的 session 下進行，否則拒絕。
 
@@ -93,9 +100,31 @@ class CashDrawerService:
         非先查狀態再插入）。若關帳已先一步轉 CLOSED，這裡的條件式查詢即查不到 OPEN → 拒絕，
         避免現金異動落進已關閉的 session 而被對帳漏算。T6/T7/T11 的現金寫入都經此一處。
         """
+        if idempotency_key is not None:
+            existing = await self._repo.get_movement_by_idempotency_key(
+                store_id,
+                idempotency_key,
+            )
+            if existing is not None:
+                if existing.idempotency_fingerprint != idempotency_fingerprint:
+                    raise IdempotencyKeyConflict("同一冪等鍵已用於不同的現金調整內容")
+                return existing
         session = await self._repo.get_open_session(store_id, for_update=True)
         if session is None:
             raise NoOpenCashSession("無開帳中的 cash_session，請先開帳")
+        if expected_session_id is not None and session.id != expected_session_id:
+            raise NoOpenCashSession("此 session 非開帳中或不存在")
+        # 兩個首送請求都可能在鎖前查不到；取得同一 OPEN session 的列鎖後再查一次，
+        # 輸家即可回放贏家而不撞唯一約束、不重複入帳。
+        if idempotency_key is not None:
+            existing = await self._repo.get_movement_by_idempotency_key(
+                store_id,
+                idempotency_key,
+            )
+            if existing is not None:
+                if existing.idempotency_fingerprint != idempotency_fingerprint:
+                    raise IdempotencyKeyConflict("同一冪等鍵已用於不同的現金調整內容")
+                return existing
         movement = CashMovement(
             store_id=store_id,
             session_id=session.id,
@@ -104,6 +133,8 @@ class CashDrawerService:
             ref_type=ref_type,
             ref_id=ref_id,
             note=note,
+            idempotency_key=idempotency_key,
+            idempotency_fingerprint=idempotency_fingerprint,
         )
         saved = await self._repo.add_movement(movement)
         if movement_type == CashMovementType.MANUAL_ADJUST:
@@ -122,6 +153,39 @@ class CashDrawerService:
                 },
             )
         return saved
+
+    async def record_manual_adjustment(
+        self,
+        store_id: int,
+        *,
+        session_id: int,
+        amount: Decimal,
+        actor_user_id: int,
+        note: str,
+        idempotency_key: str,
+    ) -> CashMovement:
+        """記錄店長手動調整；同鍵是否為同一內容的指紋由業務層統一定義。"""
+        fingerprint = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "session_id": session_id,
+                    "type": CashMovementType.MANUAL_ADJUST.value,
+                    "amount": amount,
+                    "note": note,
+                }
+            )
+        ).hexdigest()
+        return await self.record_movement(
+            store_id,
+            CashMovementType.MANUAL_ADJUST,
+            amount,
+            actor_user_id=actor_user_id,
+            ref_type="manual",
+            note=note,
+            expected_session_id=session_id,
+            idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint,
+        )
 
     async def expected_amount(self, session: CashSession) -> Decimal:
         """結帳應有現金 = 開帳零用金 + Σ(SALE_IN, ACQUISITION_VOID_IN)
@@ -192,9 +256,14 @@ class CashDrawerService:
             raise CashSessionAlreadyClosed(f"cash_session {session.id} 已結帳，不可重複結帳")
         session = locked
         expected = await self.expected_amount(session)
+        if abs(expected) > MAX_NTD:
+            raise CashAmountOutOfRange(f"錢櫃應有金額超過資料庫金額上限 {MAX_NTD}，無法關帳")
+        variance = counted_amount - expected
+        if abs(variance) > MAX_NTD:
+            raise CashAmountOutOfRange(f"錢櫃差額超過資料庫金額上限 {MAX_NTD}，無法關帳")
         session.expected_amount = expected
         session.counted_amount = counted_amount
-        session.variance = counted_amount - expected
+        session.variance = variance
         session.status = CashSessionStatus.CLOSED
         session.closed_by = closed_by
         session.closed_at = datetime.now(UTC)
