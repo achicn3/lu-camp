@@ -119,7 +119,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--sp-4);
-  /* 卡片各自依內容高度（勿被「估算淨利」的長說明撐高整列、造成大空白方塊跑版）。 */
+  /* 卡片各自依內容高度，避免說明文字撐高整列造成大空白方塊跑版。 */
   align-items: start;
 }
 
@@ -143,7 +143,7 @@
   margin-left: var(--sp-1);
 }
 
-/* 估算淨利長說明移至卡片下方註腳，讓儀表板卡片高度一致、不被撐高。 */
+/* 儀表板說明文字置於卡片下方，維持卡片高度一致。 */
 .rpt-dashboard-footnote {
   font-family: var(--font-sans, system-ui, sans-serif);
   font-size: var(--text-xs, 0.75rem);

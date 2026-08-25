@@ -48,7 +48,7 @@ warn_unreachable = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "app/modules"]
 addopts = "-q --cov=app --cov-report=term-missing --cov-fail-under=80"
 
 [tool.coverage.run]

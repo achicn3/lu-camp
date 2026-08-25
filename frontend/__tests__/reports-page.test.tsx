@@ -30,8 +30,6 @@ const DAILY_SUMMARY_DATA = {
   net_sales_ex_tax: "90476",
   tax: "4524",
   total_cash_out: "30000",
-  estimated_net_income: "35000",
-  estimated_net_income_note: "估計值：未含固定成本",
   avg_ticket: "2400",
   transaction_count: 50,
   store_credit_issued: "8000",
@@ -144,6 +142,60 @@ const SALES_MARGIN_DATA = {
   payment_methods: [
     { method: "CASH", received: "450000", fee: "0" },
     { method: "LINE_PAY", received: "50000", fee: "1500" },
+  ],
+  manual_discount_total: "3000",
+  gift_retail_value: "5000",
+  gift_cost: "2000",
+  gift_returned_retail_value: "1000",
+  gift_returned_cost: "400",
+  net_gift_retail_value: "4000",
+  net_gift_cost: "1600",
+  contribution_margin: "166900",
+  generated_at: "2026-06-21T18:00:00Z",
+};
+
+const GIFT_REPORT_DATA = {
+  store_id: 1,
+  date_from: "2026-05-22T00:00:00Z",
+  date_to: "2026-06-21T00:00:00Z",
+  gift_qty: 5,
+  retail_value: "5000",
+  cost: "2000",
+  returned_gift_qty: 1,
+  returned_retail_value: "1000",
+  returned_cost: "400",
+  net_gift_qty: 4,
+  net_retail_value: "4000",
+  net_cost: "1600",
+  by_reason: [
+    {
+      reason_id: 1,
+      reason_name: "活動贈品",
+      gift_count: 1,
+      gift_qty: 5,
+      retail_value: "5000",
+      cost: "2000",
+      returned_gift_qty: 1,
+      returned_retail_value: "1000",
+      returned_cost: "400",
+      net_gift_qty: 4,
+      net_retail_value: "4000",
+      net_cost: "1600",
+    },
+  ],
+  by_product: [
+    {
+      description: "露營燈",
+      gift_qty: 5,
+      retail_value: "5000",
+      cost: "2000",
+      returned_gift_qty: 1,
+      returned_retail_value: "1000",
+      returned_cost: "400",
+      net_gift_qty: 4,
+      net_retail_value: "4000",
+      net_cost: "1600",
+    },
   ],
   generated_at: "2026-06-21T18:00:00Z",
 };
@@ -305,6 +357,7 @@ function stubReportsFetch(override?: (url: string) => Response | null) {
       if (url.includes("/reports/trends")) return json(TRENDS_DATA);
       if (url.includes("/reports/daily-cash")) return json(DAILY_CASH_DATA);
       if (url.includes("/reports/sales-margin")) return json(SALES_MARGIN_DATA);
+      if (url.includes("/reports/gifts")) return json(GIFT_REPORT_DATA);
       if (url.includes("/reports/inventory-value")) return json(INVENTORY_VALUE_DATA);
       if (url.includes("/reports/consignment-payables")) return json(CONSIGNMENT_PAYABLES_DATA);
       // Store credit reports
@@ -606,19 +659,9 @@ describe("ReportsPage", () => {
     expect(screen.getByText("50")).toBeTruthy();
     // avg_ticket
     expect(screen.getByText("2,400")).toBeTruthy();
-    // estimated_net_income
-    expect(screen.getByText("35,000")).toBeTruthy();
     // 餐飲/二手分列
     expect(screen.getByText("74,000")).toBeTruthy(); // secondhand_revenue
     expect(screen.getByText("21,000")).toBeTruthy(); // food_revenue
-    // estimated_net_income_note shown in footnote (prefixed by 估算淨利說明：, alongside 估計值 badge)
-    expect(
-      screen.getByText(
-        (_, el) =>
-          el?.tagName === "P" &&
-          el.textContent?.includes(DAILY_SUMMARY_DATA.estimated_net_income_note) === true,
-      ),
-    ).toBeTruthy();
   });
 
   it("trends tab shows data table and has granularity selector", async () => {
@@ -685,14 +728,33 @@ describe("ReportsPage", () => {
     expect(screen.getByText("312,000")).toBeTruthy(); // secondhand_revenue
     // transaction_count
     expect(screen.getByText("200")).toBeTruthy();
-    // 支付手續費（docs/30 §7）：淨毛利、手續費合計、收款方式分列（含 LINE Pay 列）
+    // 支付手續費（docs/30 §7）：淨毛利、手續費合計、付款方式淨收款（含 LINE Pay 列）
     expect(screen.getByText("淨毛利（扣支付手續費）")).toBeTruthy();
     expect(screen.getByText("168,500")).toBeTruthy(); // net_margin
     expect(screen.getByText("支付手續費合計（店家成本）")).toBeTruthy();
-    expect(screen.getByText("收款方式分列")).toBeTruthy();
+    expect(screen.getByText("付款方式淨收款分列")).toBeTruthy();
     expect(screen.getByText("LINE Pay")).toBeTruthy();
     // 1,500 出現兩次（手續費合計列＋LINE Pay 手續費欄）
     expect(screen.getAllByText("1,500").length).toBe(2);
+    expect(screen.getByText("退回贈品成本")).toBeTruthy();
+    expect(screen.getByText("淨贈品成本")).toBeTruthy();
+    expect(screen.getByText("貢獻毛利（淨毛利扣淨贈品成本）")).toBeTruthy();
+  });
+
+  it("gift tab separates sent, returned, and net values", async () => {
+    loginAs("MANAGER");
+    stubReportsFetch();
+    renderPage();
+    await screen.findByText("120,000");
+
+    await userEvent.click(screen.getByRole("tab", { name: "贈品" }));
+    expect(await screen.findByRole("columnheader", { name: "期間贈品" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "送出" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "退回" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "淨額" })).toBeTruthy();
+    expect(screen.getAllByText("活動贈品").length).toBe(1);
+    expect(screen.getAllByText("露營燈").length).toBe(1);
+    expect(screen.getAllByText("1,600").length).toBeGreaterThanOrEqual(3);
   });
 
   it("inventory value tab shows owned/consignment/catalog sections", async () => {

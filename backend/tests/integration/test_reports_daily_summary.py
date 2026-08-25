@@ -1,10 +1,9 @@
 """R5 每日營運儀表板整合測試（docs/19 R5）：
 
 組合 R1 現金 + R2 毛利的同源數字（逐欄與 daily-cash / sales-margin 端點交叉一致）；
-營業額 vs 認列營收區分；稅推算；估算淨利標註；客單價；購物金非現金；空日；MANAGER；唯讀；匯出。
+營業額 vs 認列營收區分；稅推算；客單價；購物金非現金；空日；MANAGER；唯讀；匯出。
 """
 
-import calendar
 from collections.abc import AsyncGenerator
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -15,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.money import round_ntd, split_tax_inclusive
+from app.core.money import split_tax_inclusive
 from app.core.security import encode_access_token
 from app.core.time import store_date, store_day_bounds
 from app.main import create_app
@@ -210,31 +209,6 @@ async def test_daily_summary_consignment_turnover_vs_recognized(
     assert s["gross_margin"] == "500"
 
 
-async def test_daily_summary_estimated_net_income(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
-    """設了月固定支出 → 估算淨利 = 毛利 − round_ntd(月支出 ÷ 當月天數)；未設 → null。"""
-    mgr, clerk, store_id, _consignor = await _seed(db_session)
-    await _add_owned_serialized(db_session, store_id, code="OWN-N", cost="300", price="500")
-    await _sell_serialized(client, clerk, "OWN-N", key="n1")
-    day = await _day(db_session, store_id)
-
-    # 未設月固定支出 → None
-    assert (await _summary(client, mgr, day))["estimated_net_income"] is None
-
-    patched = await client.patch(
-        "/api/v1/settings",
-        json={"monthly_fixed_cash_outflow": "30000"},
-        headers=_auth(mgr),
-    )
-    assert patched.status_code == 200, patched.text
-    s = await _summary(client, mgr, day)
-    year, month = int(day[:4]), int(day[5:7])
-    days = calendar.monthrange(year, month)[1]
-    prorated = round_ntd(Decimal(30000) / Decimal(days))
-    assert s["estimated_net_income"] == str(200 - prorated)  # 毛利 200 − 攤提
-
-
 async def test_daily_summary_empty_day(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     mgr, _clerk, _store_id, _consignor = await _seed(db_session)
     s = await _summary(client, mgr, "2026-06-20")
@@ -279,4 +253,4 @@ async def test_daily_summary_manager_only_and_export(
     )
     assert csv_resp.status_code == 200
     text = csv_resp.content.decode("utf-8-sig")
-    assert "毛利" in text and "營業額" in text and "估算淨利" in text
+    assert "毛利" in text and "營業額" in text and "估算淨利" not in text

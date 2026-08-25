@@ -122,18 +122,16 @@ async def daily_summary(
     report_date: Annotated[date, Query(alias="date")],
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> DailySummaryReport | Response:
-    """每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。"""
+    """每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金一覽。"""
     report = await ReportsService(session).daily_summary(user.store_id, report_date)
     if fmt == "json":
         return report
     rate = "N/A" if report.gross_margin_rate is None else str(report.gross_margin_rate)
     avg = "N/A" if report.avg_ticket is None else str(report.avg_ticket)
-    net_income = "N/A" if report.estimated_net_income is None else str(report.estimated_net_income)
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("日期", report.date.isoformat()),
-        ("估算淨利說明", report.estimated_net_income_note),
     ]
     exp = TabularExport(
         sheet="每日營運",
@@ -165,7 +163,6 @@ async def daily_summary(
             ["購物金兌付", str(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
             ["客單價", avg],
-            ["估算淨利", net_income],
         ],
     )
     return export_response(exp, fmt)
@@ -364,9 +361,7 @@ async def inventory_value(
             [
                 "一般商品",
                 str(report.catalog_total_qty),
-                "N/A"
-                if report.catalog_cost_value is None
-                else str(report.catalog_cost_value),
+                "N/A" if report.catalog_cost_value is None else str(report.catalog_cost_value),
                 str(report.catalog_retail_value),
             ],
         ],
@@ -483,13 +478,27 @@ async def sales_margin(
             ["成本未知營收", str(report.unknown_cost_sales)],
             ["餐飲營收", str(report.food_revenue)],
             ["二手營收", str(report.secondhand_revenue)],
-            ["現金收款", str(report.cash_received)],
-            ["購物金收款", str(report.store_credit_redeemed)],
+            ["現金淨收款（扣退款）", str(report.cash_received)],
+            ["購物金淨收款（扣退款）", str(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
+            ["支付手續費合計", str(report.payment_fee_total)],
+            ["淨毛利（扣支付手續費）", str(report.net_margin)],
             ["臨時折扣", str(report.manual_discount_total)],
-            ["贈品原價價值", str(report.gift_retail_value)],
-            ["贈品成本", str(report.gift_cost)],
-            ["貢獻毛利（扣贈品成本）", str(report.contribution_margin)],
+            ["送出贈品原價價值", str(report.gift_retail_value)],
+            ["送出贈品成本", str(report.gift_cost)],
+            ["退回贈品原價價值", str(report.gift_returned_retail_value)],
+            ["退回贈品成本", str(report.gift_returned_cost)],
+            ["淨贈品原價價值", str(report.net_gift_retail_value)],
+            ["淨贈品成本", str(report.net_gift_cost)],
+            ["貢獻毛利（淨毛利扣淨贈品成本）", str(report.contribution_margin)],
+            *[
+                row
+                for method in report.payment_methods
+                for row in (
+                    [f"付款方式 {method.method} 淨收款", str(method.received)],
+                    [f"付款方式 {method.method} 手續費", str(method.fee)],
+                )
+            ],
         ],
     )
     return export_response(exp, fmt)
@@ -598,8 +607,7 @@ async def dine_in(
             ("佔比分母", "有餐飲的單（不是全店訂單）"),
             (
                 "客單價口徑",
-                "只計餐飲品項；內用與外帶不可直接比較"
-                "（外帶不累點/不折扣/不可用購物金）",
+                "只計餐飲品項；內用與外帶不可直接比較（外帶不累點/不折扣/不可用購物金）",
             ),
         ],
         headers=["服務型態", "組數", "佔比", "餐飲營收", "餐飲客單價", "整單合計"],
@@ -650,9 +658,9 @@ async def gifts(
     date_to: Annotated[AwareDateTime, Query(alias="to")],
     fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
 ) -> GiftReport | Response:
-    """贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
+    """贈品報表：依原因與品項彙總送出、退回及淨額。[from, to)；to<=from → 422。
 
-    贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
+    贈品原價不計入營業額、成本不混入商品毛利；退回歸屬退貨發生日。
     """
     if date_to <= date_from:
         raise HTTPException(
@@ -671,12 +679,30 @@ async def gifts(
         ("贈品件數", str(report.gift_qty)),
         ("原價價值", str(report.retail_value)),
         ("成本", str(report.cost)),
+        ("退回件數", str(report.returned_gift_qty)),
+        ("退回原價價值", str(report.returned_retail_value)),
+        ("退回成本", str(report.returned_cost)),
+        ("淨件數", str(report.net_gift_qty)),
+        ("淨原價價值", str(report.net_retail_value)),
+        ("淨成本", str(report.net_cost)),
     ]
     exp = TabularExport(
         sheet="贈品",
         filename_stem=f"gifts-{report.store_id}",
         meta=meta,
-        headers=["分類", "名稱", "件數", "原價價值", "成本"],
+        headers=[
+            "分類",
+            "名稱",
+            "送出件數",
+            "送出原價價值",
+            "送出成本",
+            "退回件數",
+            "退回原價價值",
+            "退回成本",
+            "淨件數",
+            "淨原價價值",
+            "淨成本",
+        ],
         rows=[
             [
                 "原因",
@@ -684,6 +710,12 @@ async def gifts(
                 str(row.gift_qty),
                 str(row.retail_value),
                 str(row.cost),
+                str(row.returned_gift_qty),
+                str(row.returned_retail_value),
+                str(row.returned_cost),
+                str(row.net_gift_qty),
+                str(row.net_retail_value),
+                str(row.net_cost),
             ]
             for row in report.by_reason
         ]
@@ -694,6 +726,12 @@ async def gifts(
                 str(row.gift_qty),
                 str(row.retail_value),
                 str(row.cost),
+                str(row.returned_gift_qty),
+                str(row.returned_retail_value),
+                str(row.returned_cost),
+                str(row.net_gift_qty),
+                str(row.net_retail_value),
+                str(row.net_cost),
             ]
             for row in report.by_product
         ],

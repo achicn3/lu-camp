@@ -817,6 +817,43 @@ class SalesRepository:
             [(str(r[0]), int(r[1]), Decimal(r[2]), Decimal(r[3])) for r in by_product],
         )
 
+    async def gift_line_snapshots(
+        self, store_id: int, sale_line_ids: list[int]
+    ) -> list[tuple[int, int | None, str, str, int, Decimal | None, Decimal | None]]:
+        """指定贈品行的成交快照；只讀 sales 資料表並維持店別／作廢隔離。"""
+        if not sale_line_ids:
+            return []
+        rows = await self._session.execute(
+            select(
+                SaleLine.id,
+                SaleLine.gift_reason_id,
+                SaleLine.gift_reason_name,
+                SaleLine.description,
+                SaleLine.qty,
+                SaleLine.original_unit_price,
+                SaleLine.cost_snapshot,
+            )
+            .join(Sale, Sale.id == SaleLine.sale_id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != SaleStatus.VOIDED,
+                SaleLine.id.in_(sale_line_ids),
+                SaleLine.line_kind == SaleLineKind.GIFT,
+            )
+        )
+        return [
+            (
+                int(line_id),
+                int(reason_id) if reason_id is not None else None,
+                str(reason_name or "未指定原因"),
+                str(description),
+                int(qty),
+                Decimal(retail) if retail is not None else None,
+                Decimal(cost) if cost is not None else None,
+            )
+            for line_id, reason_id, reason_name, description, qty, retail, cost in rows
+        ]
+
     async def margin_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> SalesMarginComponents:

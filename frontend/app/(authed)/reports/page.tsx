@@ -367,13 +367,6 @@ function DashboardPanel() {
           <dt>當日現金支出</dt>
           <dd><MoneyText value={report.total_cash_out} /></dd>
         </div>
-        <div className="rpt-stat rpt-stat-estimate">
-          <dt>
-            估算淨利
-            <span className="rpt-badge-estimate">估計值</span>
-          </dt>
-          <dd><MoneyText value={report.estimated_net_income} /></dd>
-        </div>
         <div className="rpt-stat">
           <dt>客單價</dt>
           <dd><MoneyText value={report.avg_ticket} /></dd>
@@ -395,13 +388,6 @@ function DashboardPanel() {
           <dd><MoneyText value={report.cash_variance} /></dd>
         </div>
       </dl>
-
-      {report.estimated_net_income_note && (
-        <p className="rpt-dashboard-footnote">
-          <span className="rpt-badge-estimate">估計值</span>
-          估算淨利說明：{report.estimated_net_income_note}
-        </p>
-      )}
 
       <DownloadButtons onDownload={handleDownload} />
     </div>
@@ -1123,15 +1109,31 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.manual_discount_total} /></td>
                 </tr>
                 <tr>
-                  <td>贈品原價價值（不計入營業額）</td>
+                  <td>送出贈品原價價值（不計入營業額）</td>
                   <td><MoneyText value={report.gift_retail_value} /></td>
                 </tr>
                 <tr>
-                  <td>贈品成本（不計入毛利）</td>
+                  <td>送出贈品成本（不計入毛利）</td>
                   <td><MoneyText value={report.gift_cost} /></td>
                 </tr>
                 <tr>
-                  <td>貢獻毛利（淨毛利扣贈品成本）</td>
+                  <td>退回贈品原價價值</td>
+                  <td><MoneyText value={report.gift_returned_retail_value} /></td>
+                </tr>
+                <tr>
+                  <td>退回贈品成本</td>
+                  <td><MoneyText value={report.gift_returned_cost} /></td>
+                </tr>
+                <tr>
+                  <td>淨贈品原價價值</td>
+                  <td><MoneyText value={report.net_gift_retail_value} /></td>
+                </tr>
+                <tr>
+                  <td>淨贈品成本</td>
+                  <td><MoneyText value={report.net_gift_cost} /></td>
+                </tr>
+                <tr>
+                  <td>貢獻毛利（淨毛利扣淨贈品成本）</td>
                   <td><MoneyText value={report.contribution_margin} /></td>
                 </tr>
                 <tr>
@@ -1151,11 +1153,11 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.unknown_cost_sales} /></td>
                 </tr>
                 <tr>
-                  <td>現金收入</td>
+                  <td>現金淨收款（扣退款）</td>
                   <td><MoneyText value={report.cash_received} /></td>
                 </tr>
                 <tr>
-                  <td>購物金兌付</td>
+                  <td>購物金淨收款（扣退款）</td>
                   <td><MoneyText value={report.store_credit_redeemed} /></td>
                 </tr>
                 <tr>
@@ -1172,12 +1174,12 @@ function SalesMarginPanel() {
 
           {report.payment_methods.length > 0 && (
             <div className="inv-table-wrap">
-              <h3 className="rpt-subtitle">收款方式分列</h3>
+              <h3 className="rpt-subtitle">付款方式淨收款分列</h3>
               <table className="inv-table">
                 <thead>
                   <tr>
                     <th>收款方式</th>
-                    <th>收款額</th>
+                    <th>淨收款額（扣退款）</th>
                     <th>手續費</th>
                   </tr>
                 </thead>
@@ -1560,7 +1562,7 @@ function DiscountPanel() {
   );
 }
 
-// 贈品報表：原價價值不計入營業額、成本不混入商品毛利，兩者在此獨立呈現。
+// 贈品報表：送出保留總額，退回依退貨日另列，並提供期間淨額。
 function GiftPanel() {
   const defaults = defaultDateRange();
   const [from, setFrom] = useState(defaults.from);
@@ -1602,22 +1604,40 @@ function GiftPanel() {
       {query.isError && <ErrorBlock message={query.error.message} />}
       {report && (
         <>
-          <dl className="rpt-summary">
-            <div className="rpt-stat rpt-stat-hero">
-              <dt>贈品件數</dt>
-              <dd>{report.gift_qty}</dd>
-            </div>
-            <div className="rpt-stat rpt-stat-hero">
-              <dt>原價價值</dt>
-              <dd><MoneyText value={report.retail_value} /></dd>
-            </div>
-            <div className="rpt-stat rpt-stat-hero">
-              <dt>贈品成本</dt>
-              <dd><MoneyText value={report.cost} /></dd>
-            </div>
-          </dl>
+          <div className="inv-table-wrap">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th>期間贈品</th>
+                  <th>件數</th>
+                  <th>原價價值</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">送出</th>
+                  <td>{report.gift_qty}</td>
+                  <td><MoneyText value={report.retail_value} /></td>
+                  <td><MoneyText value={report.cost} /></td>
+                </tr>
+                <tr>
+                  <th scope="row">退回</th>
+                  <td>{report.returned_gift_qty}</td>
+                  <td><MoneyText value={report.returned_retail_value} /></td>
+                  <td><MoneyText value={report.returned_cost} /></td>
+                </tr>
+                <tr>
+                  <th scope="row">淨額</th>
+                  <td>{report.net_gift_qty}</td>
+                  <td><MoneyText value={report.net_retail_value} /></td>
+                  <td><MoneyText value={report.net_cost} /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <p className="hint">
-            贈品原價不計入營業額、成本不混入商品毛利；退回的贈品不在此扣除（見庫存異動）。
+            贈品原價不計入營業額、成本不混入商品毛利；退回數字歸屬實際退貨日期。
           </p>
 
           <h3 className="rpt-subtitle">依贈送原因</h3>
@@ -1626,23 +1646,35 @@ function GiftPanel() {
               <thead>
                 <tr>
                   <th>原因</th>
-                  <th>件數</th>
-                  <th>原價價值</th>
-                  <th>成本</th>
+                  <th>送出件數</th>
+                  <th>退回件數</th>
+                  <th>淨件數</th>
+                  <th>送出原價</th>
+                  <th>退回原價</th>
+                  <th>淨原價</th>
+                  <th>送出成本</th>
+                  <th>退回成本</th>
+                  <th>淨成本</th>
                 </tr>
               </thead>
               <tbody>
                 {report.by_reason.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="hint">期間內沒有贈品。</td>
+                    <td colSpan={10} className="hint">期間內沒有贈品。</td>
                   </tr>
                 ) : (
                   report.by_reason.map((row) => (
                     <tr key={row.reason_id ?? "none"}>
                       <td>{row.reason_name}</td>
                       <td>{row.gift_qty}</td>
+                      <td>{row.returned_gift_qty}</td>
+                      <td>{row.net_gift_qty}</td>
                       <td><MoneyText value={row.retail_value} /></td>
+                      <td><MoneyText value={row.returned_retail_value} /></td>
+                      <td><MoneyText value={row.net_retail_value} /></td>
                       <td><MoneyText value={row.cost} /></td>
+                      <td><MoneyText value={row.returned_cost} /></td>
+                      <td><MoneyText value={row.net_cost} /></td>
                     </tr>
                   ))
                 )}
@@ -1656,23 +1688,35 @@ function GiftPanel() {
               <thead>
                 <tr>
                   <th>品項</th>
-                  <th>件數</th>
-                  <th>原價價值</th>
-                  <th>成本</th>
+                  <th>送出件數</th>
+                  <th>退回件數</th>
+                  <th>淨件數</th>
+                  <th>送出原價</th>
+                  <th>退回原價</th>
+                  <th>淨原價</th>
+                  <th>送出成本</th>
+                  <th>退回成本</th>
+                  <th>淨成本</th>
                 </tr>
               </thead>
               <tbody>
                 {report.by_product.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="hint">期間內沒有贈品。</td>
+                    <td colSpan={10} className="hint">期間內沒有贈品。</td>
                   </tr>
                 ) : (
                   report.by_product.map((row) => (
                     <tr key={row.description}>
                       <td>{row.description}</td>
                       <td>{row.gift_qty}</td>
+                      <td>{row.returned_gift_qty}</td>
+                      <td>{row.net_gift_qty}</td>
                       <td><MoneyText value={row.retail_value} /></td>
+                      <td><MoneyText value={row.returned_retail_value} /></td>
+                      <td><MoneyText value={row.net_retail_value} /></td>
                       <td><MoneyText value={row.cost} /></td>
+                      <td><MoneyText value={row.returned_cost} /></td>
+                      <td><MoneyText value={row.net_cost} /></td>
                     </tr>
                   ))
                 )}

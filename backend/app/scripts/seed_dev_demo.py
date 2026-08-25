@@ -78,7 +78,7 @@ async def _seed() -> None:
             await cash.open_session(store_id, clerk_id, Decimal(5000))
             await session.commit()
 
-        # 設「月固定現金支出」（房租+薪資+水電…），讓每日儀表板「估算淨利」帶得出數字（否則 N/A）。
+        # 保留固定現金支出設定供其他營運指標使用；每日摘要不再顯示估算淨利。
         # 正式環境由店主於「設定」頁的「月固定現金支出」欄維護。
         await StoreSettingsService(session).update_settings(
             store_id,

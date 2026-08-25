@@ -1864,7 +1864,7 @@ export interface paths {
         };
         /**
          * Daily Summary
-         * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金/估算淨利一覽。
+         * @description 每日營運儀表板（docs/19 R5）：今日營業額/認列營收/毛利/現金支出/購物金一覽。
          */
         get: operations["dailySummaryReport"];
         put?: never;
@@ -1932,9 +1932,9 @@ export interface paths {
         };
         /**
          * Gifts
-         * @description 贈品報表：依原因與品項彙總。半開區間 [from, to)；to<=from → 422。
+         * @description 贈品報表：依原因與品項彙總送出、退回及淨額。[from, to)；to<=from → 422。
          *
-         *     贈品原價不計入營業額、成本不混入商品毛利——兩者在此獨立呈現。
+         *     贈品原價不計入營業額、成本不混入商品毛利；退回歸屬退貨發生日。
          */
         get: operations["giftReport"];
         put?: never;
@@ -3990,7 +3990,7 @@ export interface components {
          * DailySummaryReport
          * @description 每日營運儀表板（docs/19 R5）：組合 R1 現金 + R2 毛利的同源數字，店長一眼看「今天賺多少」。
          *
-         *     營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利；估算淨利明確標註。
+         *     營業額 vs 認列營收明確區分（寄售全額 ≠ 店家營收）；成本未知不假造毛利。
          */
         DailySummaryReport: {
             /** Acquisition Void In */
@@ -4016,10 +4016,6 @@ export interface components {
              * Format: date
              */
             date: string;
-            /** Estimated Net Income */
-            estimated_net_income: string | null;
-            /** Estimated Net Income Note */
-            estimated_net_income_note: string;
             /** Expected Cash */
             expected_cash: string;
             /** Food Revenue */
@@ -4403,7 +4399,7 @@ export interface components {
         };
         /**
          * GiftProductRow
-         * @description 被當成贈品送出去最多的品項。
+         * @description 一個品項在期間內送出、退回與淨額。
          */
         GiftProductRow: {
             /** Cost */
@@ -4412,12 +4408,24 @@ export interface components {
             description: string;
             /** Gift Qty */
             gift_qty: number;
+            /** Net Cost */
+            net_cost: string;
+            /** Net Gift Qty */
+            net_gift_qty: number;
+            /** Net Retail Value */
+            net_retail_value: string;
             /** Retail Value */
             retail_value: string;
+            /** Returned Cost */
+            returned_cost: string;
+            /** Returned Gift Qty */
+            returned_gift_qty: number;
+            /** Returned Retail Value */
+            returned_retail_value: string;
         };
         /**
          * GiftReasonRow
-         * @description 一個贈送原因在期間內送出的數量、原價價值與成本。
+         * @description 一個贈送原因在期間內送出、退回與淨額。
          */
         GiftReasonRow: {
             /** Cost */
@@ -4426,20 +4434,32 @@ export interface components {
             gift_count: number;
             /** Gift Qty */
             gift_qty: number;
+            /** Net Cost */
+            net_cost: string;
+            /** Net Gift Qty */
+            net_gift_qty: number;
+            /** Net Retail Value */
+            net_retail_value: string;
             /** Reason Id */
             reason_id: number | null;
             /** Reason Name */
             reason_name: string;
             /** Retail Value */
             retail_value: string;
+            /** Returned Cost */
+            returned_cost: string;
+            /** Returned Gift Qty */
+            returned_gift_qty: number;
+            /** Returned Retail Value */
+            returned_retail_value: string;
         };
         /**
          * GiftReport
-         * @description 贈品報表：送了什麼、送了多少、成本多少。
+         * @description 贈品報表：期間送出、退回與淨額。
          *
          *     贈品原價**不計入營業額**、**不計入折扣總額**；成本獨立呈現，不混入商品毛利
-         *     （營收 0 加全額成本會讓毛利率失真）。退回的贈品不在此扣除——退回另有庫存異動
-         *     `GIFT_RETURN` 可查，混在一起會讓「送出去多少」這個問題再也答不出來。
+         *     （營收 0 加全額成本會讓毛利率失真）。既有欄位保留期間送出總額，另列退回與淨額；
+         *     退回歸屬退貨發生日。
          */
         GiftReport: {
             /** By Product */
@@ -4465,8 +4485,20 @@ export interface components {
             generated_at: string;
             /** Gift Qty */
             gift_qty: number;
+            /** Net Cost */
+            net_cost: string;
+            /** Net Gift Qty */
+            net_gift_qty: number;
+            /** Net Retail Value */
+            net_retail_value: string;
             /** Retail Value */
             retail_value: string;
+            /** Returned Cost */
+            returned_cost: string;
+            /** Returned Gift Qty */
+            returned_gift_qty: number;
+            /** Returned Retail Value */
+            returned_retail_value: string;
             /** Store Id */
             store_id: number;
         };
@@ -5276,14 +5308,17 @@ export interface components {
         PaymentMethod: "CASH" | "STORE_CREDIT" | "LINE_PAY" | "TAIWAN_PAY" | "MIXED";
         /**
          * PaymentMethodTotal
-         * @description 單一收款方式的期間彙總（docs/30 §7 決策 1）：收款額＋手續費（店家成本）。
+         * @description 單一付款方式的期間淨收款（銷售收款減退貨退款）與原支付手續費。
          */
         PaymentMethodTotal: {
             /** Fee */
             fee: string;
             /** Method */
             method: string;
-            /** Received */
+            /**
+             * Received
+             * @description 該方式淨收款（銷售收款減退貨退款）；退貨-only 期間可為負數
+             */
             received: string;
         };
         /** PaymentReconciliationRead */
@@ -6176,7 +6211,10 @@ export interface components {
         SalesMarginReport: {
             /** Bulk Cogs */
             bulk_cogs: string;
-            /** Cash Received */
+            /**
+             * Cash Received
+             * @description 現金淨收款（銷售收現減退現）
+             */
             cash_received: string;
             /**
              * Catalog Cogs
@@ -6217,6 +6255,16 @@ export interface components {
              * @default 0
              */
             gift_retail_value: string;
+            /**
+             * Gift Returned Cost
+             * @default 0
+             */
+            gift_returned_cost: string;
+            /**
+             * Gift Returned Retail Value
+             * @default 0
+             */
+            gift_returned_retail_value: string;
             /** Gross Margin */
             gross_margin: string;
             /** Gross Margin Rate */
@@ -6228,6 +6276,16 @@ export interface components {
              * @default 0
              */
             manual_discount_total: string;
+            /**
+             * Net Gift Cost
+             * @default 0
+             */
+            net_gift_cost: string;
+            /**
+             * Net Gift Retail Value
+             * @default 0
+             */
+            net_gift_retail_value: string;
             /** Net Margin */
             net_margin: string;
             /** Owned Cogs */
@@ -6240,7 +6298,10 @@ export interface components {
             recognized_revenue: string;
             /** Secondhand Revenue */
             secondhand_revenue: string;
-            /** Store Credit Redeemed */
+            /**
+             * Store Credit Redeemed
+             * @description 購物金淨收款（購物金兌付減退回購物金）
+             */
             store_credit_redeemed: string;
             /** Store Id */
             store_id: number;

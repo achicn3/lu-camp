@@ -4,7 +4,6 @@
 （docs/16 §5），本層不寫任何資料。
 """
 
-import calendar
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -65,6 +64,7 @@ from app.modules.reports.schemas import (
     TrendRow,
     TrendsReport,
 )
+from app.modules.returns.service import ReturnsService
 from app.modules.sales.service import SalesService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
@@ -80,13 +80,39 @@ def _now() -> datetime:
 
 # 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
 _SoldRow = tuple[
-    int | None, int | None, OwnershipType, Decimal | None, int | None,
-    datetime, datetime | None, Decimal,
+    int | None,
+    int | None,
+    OwnershipType,
+    Decimal | None,
+    int | None,
+    datetime,
+    datetime | None,
+    Decimal,
 ]
+
+
+@dataclass
+class _GiftAmounts:
+    sent_qty: int = 0
+    sent_retail: Decimal = Decimal(0)
+    sent_cost: Decimal = Decimal(0)
+    returned_qty: int = 0
+    returned_retail: Decimal = Decimal(0)
+    returned_cost: Decimal = Decimal(0)
+
+
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
 #            intake, sold, line_total)
 _BulkSold = tuple[
-    int | None, int | None, int | None, Decimal, int, int, datetime, datetime, Decimal,
+    int | None,
+    int | None,
+    int | None,
+    Decimal,
+    int,
+    int,
+    datetime,
+    datetime,
+    Decimal,
 ]
 
 
@@ -137,6 +163,7 @@ class ReportsService:
         self._suggestion = PremiumSuggestionService(session)
         self._cash = CashDrawerService(session)
         self._sales = SalesService(session)
+        self._returns = ReturnsService(session)
         self._inventory = InventoryService(session)
         self._consignment = ConsignmentService(session)
         self._campaigns = CampaignService(session)
@@ -302,9 +329,7 @@ class ReportsService:
         無主管核准機制（店主裁示），事後稽核就靠這份——所以「依店員」那一段是重點，
         異常的折扣量會在這裡露出來。
         """
-        by_reason, by_clerk = await self._sales.discount_report_rows(
-            store_id, date_from, date_to
-        )
+        by_reason, by_clerk = await self._sales.discount_report_rows(store_id, date_from, date_to)
         reason_rows = [
             DiscountReasonRow(
                 reason_id=reason_id,
@@ -333,12 +358,8 @@ class ReportsService:
             date_from=date_from,
             date_to=date_to,
             discount_total=sum((row.discount_total for row in reason_rows), Decimal(0)),
-            item_discount_total=sum(
-                (row.item_discount_total for row in reason_rows), Decimal(0)
-            ),
-            order_discount_total=sum(
-                (row.order_discount_total for row in reason_rows), Decimal(0)
-            ),
+            item_discount_total=sum((row.item_discount_total for row in reason_rows), Decimal(0)),
+            order_discount_total=sum((row.order_discount_total for row in reason_rows), Decimal(0)),
             adjustment_count=sum(row.adjustment_count for row in reason_rows),
             by_reason=reason_rows,
             by_clerk=clerk_rows,
@@ -347,35 +368,84 @@ class ReportsService:
     async def gift_report(
         self, store_id: int, *, date_from: datetime, date_to: datetime
     ) -> GiftReport:
-        """贈品報表：送了什麼、幾件、原價價值與成本。半開區間 [from, to)。"""
-        by_reason, by_product = await self._sales.gift_report_rows(
-            store_id, date_from, date_to
+        """贈品報表：送出保留總額，退回依退貨日另列，並提供期間淨額。"""
+        by_reason, by_product = await self._sales.gift_report_rows(store_id, date_from, date_to)
+        returned = await self._returns.gift_return_adjustments(store_id, date_from, date_to)
+
+        reason_amounts: OrderedDict[tuple[int | None, str], _GiftAmounts] = OrderedDict()
+        reason_counts: dict[tuple[int | None, str], int] = {}
+        for reason_id, reason_name, count, qty, retail, cost in by_reason:
+            key = (reason_id, reason_name)
+            reason_amounts[key] = _GiftAmounts(qty, retail, cost)
+            reason_counts[key] = count
+        product_amounts: OrderedDict[str, _GiftAmounts] = OrderedDict(
+            (description, _GiftAmounts(qty, retail, cost))
+            for description, qty, retail, cost in by_product
         )
-        reason_rows = [
-            GiftReasonRow(
-                reason_id=reason_id,
-                reason_name=reason_name,
-                gift_count=count,
-                gift_qty=qty,
-                retail_value=retail,
-                cost=cost,
+        for adjustment in returned:
+            reason_key = (adjustment.reason_id, adjustment.reason_name)
+            reason = reason_amounts.setdefault(reason_key, _GiftAmounts())
+            reason.returned_qty += adjustment.qty
+            reason.returned_retail += adjustment.retail_value
+            reason.returned_cost += adjustment.cost
+            product = product_amounts.setdefault(adjustment.description, _GiftAmounts())
+            product.returned_qty += adjustment.qty
+            product.returned_retail += adjustment.retail_value
+            product.returned_cost += adjustment.cost
+
+        reason_rows = []
+        for (reason_id, reason_name), amount in reason_amounts.items():
+            reason_rows.append(
+                GiftReasonRow(
+                    reason_id=reason_id,
+                    reason_name=reason_name,
+                    gift_count=reason_counts.get((reason_id, reason_name), 0),
+                    gift_qty=amount.sent_qty,
+                    retail_value=amount.sent_retail,
+                    cost=amount.sent_cost,
+                    returned_gift_qty=amount.returned_qty,
+                    returned_retail_value=amount.returned_retail,
+                    returned_cost=amount.returned_cost,
+                    net_gift_qty=amount.sent_qty - amount.returned_qty,
+                    net_retail_value=amount.sent_retail - amount.returned_retail,
+                    net_cost=amount.sent_cost - amount.returned_cost,
+                )
             )
-            for reason_id, reason_name, count, qty, retail, cost in by_reason
-        ]
         product_rows = [
             GiftProductRow(
-                description=description, gift_qty=qty, retail_value=retail, cost=cost
+                description=description,
+                gift_qty=amount.sent_qty,
+                retail_value=amount.sent_retail,
+                cost=amount.sent_cost,
+                returned_gift_qty=amount.returned_qty,
+                returned_retail_value=amount.returned_retail,
+                returned_cost=amount.returned_cost,
+                net_gift_qty=amount.sent_qty - amount.returned_qty,
+                net_retail_value=amount.sent_retail - amount.returned_retail,
+                net_cost=amount.sent_cost - amount.returned_cost,
             )
-            for description, qty, retail, cost in by_product
+            for description, amount in product_amounts.items()
         ]
+        sent_qty = sum(row.gift_qty for row in reason_rows)
+        sent_retail = sum((row.retail_value for row in reason_rows), Decimal(0))
+        sent_cost = sum((row.cost for row in reason_rows), Decimal(0))
+        returned_qty = sum(row.returned_gift_qty for row in reason_rows)
+        returned_retail = sum((row.returned_retail_value for row in reason_rows), Decimal(0))
+        returned_cost = sum((row.returned_cost for row in reason_rows), Decimal(0))
         return GiftReport(
             generated_at=_now(),
             store_id=store_id,
             date_from=date_from,
             date_to=date_to,
-            gift_qty=sum(row.gift_qty for row in reason_rows),
-            retail_value=sum((row.retail_value for row in reason_rows), Decimal(0)),
-            cost=sum((row.cost for row in reason_rows), Decimal(0)),
+            gift_qty=sent_qty,
+            retail_value=sent_retail,
+            cost=sent_cost,
+            returned_gift_qty=returned_qty,
+            returned_retail_value=returned_retail,
+            returned_cost=returned_cost,
+            net_gift_qty=sent_qty - returned_qty,
+            net_retail_value=sent_retail - returned_retail,
+            net_cost=sent_cost - returned_cost,
             by_reason=reason_rows,
             by_product=product_rows,
         )
@@ -413,6 +483,10 @@ class ReportsService:
             manual_discount_total=bd.manual_discount_total,
             gift_retail_value=bd.gift_retail_value,
             gift_cost=bd.gift_cost,
+            gift_returned_retail_value=bd.gift_returned_retail_value,
+            gift_returned_cost=bd.gift_returned_cost,
+            net_gift_retail_value=bd.net_gift_retail_value,
+            net_gift_cost=bd.net_gift_cost,
             contribution_margin=bd.contribution_margin,
         )
 
@@ -436,7 +510,15 @@ class ReportsService:
         """散裝售出列 → 正規化列（件數=本行件數；買斷毛利=成交−每件成本×件數，寄售散裝無抽成）。"""
         out: list[_NormRow] = []
         for (
-            brand_id, category_id, consignor_id, acq_cost, total_qty, qty, intake, sold, line_total
+            brand_id,
+            category_id,
+            consignor_id,
+            acq_cost,
+            total_qty,
+            qty,
+            intake,
+            sold,
+            line_total,
         ) in rows:
             if consignor_id is not None:
                 margin = Decimal(0)  # 寄售散裝無抽成模型（與報表他處一致）
@@ -515,7 +597,12 @@ class ReportsService:
 
         mix = await self._inventory.inventory_mix(store_id)
         aged = await self._inventory.count_aged_in_stock(store_id, 90)
-        bd = await self._sales.margin_breakdown(store_id, date_from, date_to)
+        bd = await self._sales.margin_breakdown(
+            store_id,
+            date_from,
+            date_to,
+            include_payment_and_gift_details=False,
+        )
 
         return InsightsReport(
             generated_at=_now(),
@@ -553,7 +640,12 @@ class ReportsService:
             if c.status not in (CampaignStatus.ACTIVE, CampaignStatus.ENDED):
                 continue
             # 區間 [starts_at, ends_at)；模型 CHECK 保證 ends_at > starts_at（滿足 from<to）。
-            bd = await self._sales.margin_breakdown(store_id, c.starts_at, c.ends_at)
+            bd = await self._sales.margin_breakdown(
+                store_id,
+                c.starts_at,
+                c.ends_at,
+                include_payment_and_gift_details=False,
+            )
             rows.append(
                 CampaignPerformanceRow(
                     campaign_id=c.id,
@@ -831,7 +923,12 @@ class ReportsService:
                 )
             bstart = max(cursor, date_from)
             bend = min(nxt, date_to)
-            margin = await self._sales.margin_breakdown(store_id, bstart, bend)
+            margin = await self._sales.margin_breakdown(
+                store_id,
+                bstart,
+                bend,
+                include_payment_and_gift_details=False,
+            )
             issued, redeemed = await self._sum_flows(store_id, bstart, bend)
             cash_out = await self._cash.cash_out_in_range(store_id, bstart, bend)
             rows.append(
@@ -864,13 +961,17 @@ class ReportsService:
     async def daily_summary(self, store_id: int, report_date: date) -> DailySummaryReport:
         """每日營運儀表板（docs/19 R5）：組合 daily_cash（R1）+ margin_breakdown（R2）的同源數字。
 
-        稅以認列營收在總額層級推一次（§6）。估算淨利＝毛利 − 當日攤提固定支出，明確標註為估計
-        （固定營業費用系統未逐日記錄）；月固定支出未設 → null。
+        稅以認列營收在總額層級推一次（§6）。本摘要不提供淨利；正式淨利需有完整費用來源與認列規則。
         """
         now = _now()
         start, end = store_day_bounds(report_date)
         cash = await self.daily_cash(store_id, report_date)
-        margin = await self._sales.margin_breakdown(store_id, start, end)
+        margin = await self._sales.margin_breakdown(
+            store_id,
+            start,
+            end,
+            include_payment_and_gift_details=False,
+        )
         settings = await self._settings.get_effective_settings(store_id)
 
         flows = await self._sc.flows(store_id, date_from=start, date_to=end, granularity="day")
@@ -891,18 +992,6 @@ class ReportsService:
             Decimal(round_ntd(margin.gross_turnover / Decimal(margin.transaction_count)))
             if margin.transaction_count > 0
             else None
-        )
-
-        days_in_month = calendar.monthrange(report_date.year, report_date.month)[1]
-        monthly = settings.monthly_fixed_cash_outflow
-        estimated_net_income: Decimal | None = (
-            margin.gross_margin - Decimal(round_ntd(monthly / Decimal(days_in_month)))
-            if monthly > 0
-            else None
-        )
-        note = (
-            "估算淨利＝毛利 − 當日攤提固定支出（月固定現金支出 ÷ 當月天數）；固定營業費用"
-            "（租金/薪資）未逐日記錄，僅供概估、非精確損益。未設定月固定支出 → N/A。"
         )
 
         return DailySummaryReport(
@@ -933,8 +1022,6 @@ class ReportsService:
             store_credit_redeemed=sc_redeemed,
             transaction_count=margin.transaction_count,
             avg_ticket=avg_ticket,
-            estimated_net_income=estimated_net_income,
-            estimated_net_income_note=note,
         )
 
     async def liability(self, store_id: int) -> LiabilityReport:
