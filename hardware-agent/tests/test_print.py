@@ -25,6 +25,7 @@ from agent.drivers.escpos_receipt import (
     _disp_width,
     _item_row,
     _item_sub_rows,
+    line_encoder,
 )
 from agent.escpos_printer import FakePrinter
 from agent.fakes import FakeReceiptPrinter
@@ -505,7 +506,7 @@ def test_detail_receipt_marks_gift_lines() -> None:
         line_kind="GIFT",
     )
     # 標記放**子列**：接在品名後面會被欄寬截掉（實測 EPSON 上就是這樣消失的）。
-    rendered = _item_sub_rows(line).decode("big5", errors="ignore")
+    rendered = _item_sub_rows(line, line_encoder("big5")).decode("big5", errors="ignore")
     assert "贈品" in rendered
 
 
@@ -528,7 +529,7 @@ def test_detail_receipt_explains_the_manual_discount() -> None:
         net_amount="900",
         manual_discount_amount="100",
     )
-    rendered = _item_sub_rows(line).decode("big5", errors="ignore")
+    rendered = _item_sub_rows(line, line_encoder("big5")).decode("big5", errors="ignore")
     assert "100" in rendered
 
 

@@ -30,6 +30,8 @@ from datetime import UTC, datetime
 from agent.config import (
     PrinterEndpoint,
     device_config_from_env,
+    drawer_endpoint_from_env,
+    invoice_endpoint_from_env,
     kitchen_endpoint_from_env,
 )
 from agent.interfaces import DeviceKind, DeviceStatus
@@ -79,6 +81,11 @@ class RealStatusProvider:
             此時 `poll()` 只回 EPSON 收據機 + 依附錢櫃。
         kitchen: 出餐單印表機（第二台 EPSON，通常放廚房/吧台；docs/35）連線端點；
             `None` 表示未接第二台（出餐單印到櫃檯那台），不列管。
+        invoice: 電子發票專屬機（ADR-018）連線端點；`None` 表示未接（證明聯印到收據機），
+            不列管。
+        drawer: 錢櫃所接那台印表機的連線端點（錢櫃掛在其 drawer port）。未給即沿用
+            `epson`——但**正式路徑一律由 `agent.config.drawer_endpoint_from_env` 解析**，
+            此預設只服務既有測試與單機組裝。
     """
 
     def __init__(
@@ -87,15 +94,17 @@ class RealStatusProvider:
         epson: PrinterEndpoint,
         brother: PrinterEndpoint | None = None,
         kitchen: PrinterEndpoint | None = None,
+        invoice: PrinterEndpoint | None = None,
+        drawer: PrinterEndpoint | None = None,
     ) -> None:
         self._brother = brother
         self._epson = epson
         self._kitchen = kitchen
+        self._invoice = invoice
+        self._drawer = drawer if drawer is not None else epson
 
-    def _poll_brother(self) -> DeviceStatus:
-        """TCP 探測 Brother QL-810W；B 級全標 unsupported（網路後端不讀狀態、產品不做）。"""
-        assert self._brother is not None  # 僅在 Brother 已列管時由 poll() 呼叫
-        result = _tcp_probe(self._brother)
+    def _poll_brother(self, result: _ProbeResult) -> DeviceStatus:
+        """Brother QL-810W 狀態；B 級全標 unsupported（網路後端不讀狀態、產品不做）。"""
         return DeviceStatus(
             id="brother-1",
             kind=DeviceKind.LABEL_PRINTER,
@@ -109,9 +118,8 @@ class RealStatusProvider:
             probe_error=result.probe_error,
         )
 
-    def _poll_epson(self) -> DeviceStatus:
-        """TCP 探測 EPSON TM-T82III；B 級全標 unsupported（產品裁示不做，ADR-011）。"""
-        result = _tcp_probe(self._epson)
+    def _poll_epson(self, result: _ProbeResult) -> DeviceStatus:
+        """EPSON TM-T82III（收據機）狀態；B 級全標 unsupported（產品裁示不做，ADR-011）。"""
         return DeviceStatus(
             id="epson-1",
             kind=DeviceKind.RECEIPT_PRINTER,
@@ -125,10 +133,8 @@ class RealStatusProvider:
             probe_error=result.probe_error,
         )
 
-    def _poll_kitchen(self) -> DeviceStatus:
-        """TCP 探測出餐機（第二台 EPSON）。**必須列管**：它多半在廚房，沒人會看到它離線。"""
-        assert self._kitchen is not None  # 僅在已接第二台時由 poll() 呼叫
-        result = _tcp_probe(self._kitchen)
+    def _poll_kitchen(self, result: _ProbeResult) -> DeviceStatus:
+        """出餐機（第二台 EPSON）狀態。**必須列管**：它多半在廚房，沒人會看到它離線。"""
         return DeviceStatus(
             id="kitchen-1",
             kind=DeviceKind.RECEIPT_PRINTER,
@@ -142,20 +148,39 @@ class RealStatusProvider:
             probe_error=result.probe_error,
         )
 
-    def _poll_cash_drawer(self, *, epson: DeviceStatus) -> DeviceStatus:
-        """錢櫃狀態依附 EPSON（掛在其 drawer port）；開關偵測不做（標 unsupported）。
+    def _poll_invoice(self, result: _ProbeResult) -> DeviceStatus:
+        """發票專屬機狀態（ADR-018）。**必須列管**：它離線時發票印不出來，
+        而店員未必看得到那一台（可能擺在櫃檯另一側或後方）。"""
+        return DeviceStatus(
+            id="invoice-1",
+            kind=DeviceKind.RECEIPT_PRINTER,
+            model="EPSON TM-T82III（電子發票）",
+            online=result.online,
+            last_seen=result.last_seen,
+            details={},
+            unsupported=list(_PRINTER_UNSUPPORTED),
+            driver="real",
+            validated_on_hardware=True,
+            probe_error=result.probe_error,
+        )
 
-        EPSON 探測錯誤一併如實傳達，錢櫃不可獨自顯示成正常。
+    def _poll_cash_drawer(self, result: _ProbeResult) -> DeviceStatus:
+        """錢櫃狀態依附**它實際插的那台**（drawer port）；開關偵測不做（標 unsupported）。
+
+        不可一律依附收據機：本店錢櫃的線插在發票機那台，收據機在線不代表踢得動錢櫃。
+        探測錯誤一併如實傳達，錢櫃不可獨自顯示成正常。
         """
-        last_seen = datetime.now(UTC) if epson.online else None
+        last_seen = result.last_seen
         probe_error = (
-            f"依附 EPSON，EPSON 探測錯誤：{epson.probe_error}" if epson.probe_error else None
+            f"依附 {self._drawer.host}，該台探測錯誤：{result.probe_error}"
+            if result.probe_error
+            else None
         )
         return DeviceStatus(
             id="drawer-1",
             kind=DeviceKind.CASH_DRAWER,
             model="EPSON drawer port",
-            online=epson.online,
+            online=result.online,
             last_seen=last_seen,
             details={},
             unsupported=list(_DRAWER_UNSUPPORTED),
@@ -165,13 +190,26 @@ class RealStatusProvider:
         )
 
     def poll(self) -> list[DeviceStatus]:
-        """輪詢裝置：Brother（有列管才有）→ EPSON → 出餐機（有接才有）→ 錢櫃。"""
-        epson = self._poll_epson()
-        statuses = [] if self._brother is None else [self._poll_brother()]
-        statuses.append(epson)
+        """輪詢裝置：Brother（有列管才有）→ EPSON → 發票機/出餐機（有接才有）→ 錢櫃。
+
+        **同一台只探測一次**：錢櫃多半與某台印表機共用連線（未設 `AGENT_DRAWER_HOST`
+        即收據機，本店則是發票機），為它再開一條 TCP 只是讓每次輪詢多等一個逾時。
+        """
+        probed: dict[tuple[str, int], _ProbeResult] = {}
+
+        def probe(endpoint: PrinterEndpoint) -> _ProbeResult:
+            key = (endpoint.host, endpoint.port)
+            if key not in probed:
+                probed[key] = _tcp_probe(endpoint)
+            return probed[key]
+
+        statuses = [] if self._brother is None else [self._poll_brother(probe(self._brother))]
+        statuses.append(self._poll_epson(probe(self._epson)))
+        if self._invoice is not None:
+            statuses.append(self._poll_invoice(probe(self._invoice)))
         if self._kitchen is not None:
-            statuses.append(self._poll_kitchen())
-        statuses.append(self._poll_cash_drawer(epson=epson))
+            statuses.append(self._poll_kitchen(probe(self._kitchen)))
+        statuses.append(self._poll_cash_drawer(probe(self._drawer)))
         return statuses
 
 
@@ -179,5 +217,9 @@ def real_status_provider_from_env() -> RealStatusProvider:
     """由環境變數（裝置 IP/port/逾時）建立真機狀態提供者；IP 不寫死於程式碼。"""
     config = device_config_from_env()
     return RealStatusProvider(
-        brother=config.brother, epson=config.epson, kitchen=kitchen_endpoint_from_env()
+        brother=config.brother,
+        epson=config.epson,
+        kitchen=kitchen_endpoint_from_env(),
+        invoice=invoice_endpoint_from_env(),
+        drawer=drawer_endpoint_from_env(),
     )

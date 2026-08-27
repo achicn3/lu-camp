@@ -11,6 +11,7 @@ IP 一律由環境變數提供、**程式碼內不寫死任何 IP**（CLAUDE.md�
 
 from __future__ import annotations
 
+import codecs
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -18,19 +19,32 @@ from pathlib import Path
 
 _DEFAULT_PORT = 9100  # RAW/JetDirect raw print port（兩台網路印表機通用）
 _DEFAULT_PROBE_TIMEOUT = 2.0  # 秒；A 級 TCP 探測逾時，避免輪詢卡住 /devices/status
+# 中文字型編碼預設 Big5：本店第一台 TM-T82III（S/N X7BJ020997）字型 ROM 為 TAIWAN BIG-5，
+# 舊有單機部署一律如此。第二台起若字型 ROM 不同（實機 X7B4090696 為 CHINA GB18030），
+# **必須**於該台的 env 指定，否則印出來整捲亂碼。見 ADR-018。
+DEFAULT_ENCODING = "big5"
 
 
 class MissingDeviceConfigError(Exception):
-    """必填的裝置連線設定（host）未提供——不可寫死 IP，須由環境變數提供。"""
+    """裝置設定缺漏或不可用（host 未提供、編碼名無效、字型檔不存在…）。
+
+    不可寫死 IP，須由環境變數提供；設定有問題一律明確報錯，
+    **不得默默退回預設值**（那會等到實機印出一整捲亂碼才被發現）。
+    """
 
 
 @dataclass(frozen=True)
 class PrinterEndpoint:
-    """單台網路裝置的連線端點（IP/port/探測逾時）。"""
+    """單台網路裝置的連線端點（IP/port/探測逾時/中文編碼）。
+
+    `encoding` 為送中文給**這一台**時用的字元編碼——同型號不同字型 ROM 的機器
+    （Big5 機 vs GB18030 機）不能共用一個全域常數，故隨端點一起帶。
+    """
 
     host: str
     port: int = _DEFAULT_PORT
     timeout: float = _DEFAULT_PROBE_TIMEOUT
+    encoding: str = DEFAULT_ENCODING
 
 
 @dataclass(frozen=True)
@@ -39,6 +53,25 @@ class DeviceConfig:
 
     brother: PrinterEndpoint
     epson: PrinterEndpoint
+
+
+def _encoding(env: Mapping[str, str], key: str) -> str:
+    """讀某台印表機的中文編碼（未設 → Big5）；大小寫/空白正規化，無效編碼即報錯。
+
+    打錯編碼名**不退回預設**：字型 ROM 對不上時印出的是整捲亂碼，等到那時才發現，
+    紙與客人的時間都已經花掉了。
+    """
+    name = env.get(key, "").strip().lower()
+    if not name:
+        return DEFAULT_ENCODING
+    try:
+        codecs.lookup(name)
+    except LookupError as exc:
+        raise MissingDeviceConfigError(
+            f"環境變數 {key} 指定的編碼「{name}」不是有效的字元編碼"
+            f"（本店實機用 big5 或 gbk，見 ADR-018）。"
+        ) from exc
+    return name
 
 
 def _require_host(env: Mapping[str, str], key: str) -> str:
@@ -69,7 +102,7 @@ def device_config_from_env(env: Mapping[str, str] | None = None) -> DeviceConfig
             host=_require_host(resolved, "AGENT_BROTHER_HOST"),
             port=int(resolved.get("AGENT_BROTHER_PORT", str(_DEFAULT_PORT))),
             timeout=timeout,
-        ),
+        ),  # 標籤機走光柵（自帶字型），不吃 encoding
         epson=epson_endpoint_from_env(resolved),
     )
 
@@ -99,7 +132,8 @@ def kitchen_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEn
 
     `AGENT_KITCHEN_HOST` 未設/空白 → 回 `None`，出餐單即印到收據機（既有行為，
     在買到第二台之前不得因此壞掉）。有設即回端點；選填 `AGENT_KITCHEN_PORT`
-    （預設 9100）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，與其他裝置共用）。
+    （預設 9100）、`AGENT_KITCHEN_ENCODING`（預設 big5）、
+    `AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，與其他裝置共用）。
     IP 一律由環境變數提供、程式碼不寫死。
     """
     resolved = os.environ if env is None else env
@@ -110,6 +144,50 @@ def kitchen_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEn
     return PrinterEndpoint(
         host=host,
         port=int(resolved.get("AGENT_KITCHEN_PORT", str(_DEFAULT_PORT))),
+        timeout=timeout,
+        encoding=_encoding(resolved, "AGENT_KITCHEN_ENCODING"),
+    )
+
+
+def invoice_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndpoint | None:
+    """讀發票專屬機連線端點（**選配**：第二台 EPSON，只印電子發票證明聯；ADR-018）。
+
+    `AGENT_INVOICE_HOST` 未設/空白 → 回 `None`，證明聯即印到收據機（單機店家的既有
+    行為，不得因此壞掉）。有設即回端點；選填 `AGENT_INVOICE_PORT`（預設 9100）、
+    `AGENT_INVOICE_ENCODING`（預設 big5）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒）。
+    IP 一律由環境變數提供、程式碼不寫死。
+    """
+    resolved = os.environ if env is None else env
+    host = resolved.get("AGENT_INVOICE_HOST", "").strip()
+    if not host:
+        return None
+    timeout = float(resolved.get("AGENT_DEVICE_PROBE_TIMEOUT", str(_DEFAULT_PROBE_TIMEOUT)))
+    return PrinterEndpoint(
+        host=host,
+        port=int(resolved.get("AGENT_INVOICE_PORT", str(_DEFAULT_PORT))),
+        timeout=timeout,
+        encoding=_encoding(resolved, "AGENT_INVOICE_ENCODING"),
+    )
+
+
+def drawer_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndpoint:
+    """讀錢櫃所接印表機的連線端點（錢櫃掛在某台 EPSON 的 drawer port 上）。
+
+    **回具體端點而非 `None`**：錢櫃一定接在某一台上，解析只在此處做一次——裝置組裝與
+    狀態探測兩邊各自 `or` 一次遲早會漂移。`AGENT_DRAWER_HOST` 未設 → 沿用收據機
+    （現行單機行為）；有設即用它（本店實機：錢櫃的線插在發票機那台，非收據機）。
+    選填 `AGENT_DRAWER_PORT`（預設 9100）。
+
+    錢櫃只送 kick 指令、不出紙，故把它指到「發票專屬機」不違反該機的專屬定位。
+    """
+    resolved = os.environ if env is None else env
+    host = resolved.get("AGENT_DRAWER_HOST", "").strip()
+    if not host:
+        return epson_endpoint_from_env(resolved)
+    timeout = float(resolved.get("AGENT_DEVICE_PROBE_TIMEOUT", str(_DEFAULT_PROBE_TIMEOUT)))
+    return PrinterEndpoint(
+        host=host,
+        port=int(resolved.get("AGENT_DRAWER_PORT", str(_DEFAULT_PORT))),
         timeout=timeout,
     )
 
@@ -137,8 +215,9 @@ def epson_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndp
     """只讀 EPSON 連線端點（測 A：只接 EPSON 收據機+錢櫃，**不要求** Brother host）。
 
     必填 `AGENT_EPSON_HOST`（未設即丟 `MissingDeviceConfigError`，不臆造 IP）；選填
-    `AGENT_EPSON_PORT`（預設 9100）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，連線/送出
-    共用，避免用 escpos 預設 60 秒）。IP 一律由環境變數提供、程式碼不寫死。
+    `AGENT_EPSON_PORT`（預設 9100）、`AGENT_EPSON_ENCODING`（預設 big5；本店這台字型 ROM
+    為 GB18030，設 gbk）、`AGENT_DEVICE_PROBE_TIMEOUT`（預設 2.0 秒，連線/送出共用，
+    避免用 escpos 預設 60 秒）。IP 一律由環境變數提供、程式碼不寫死。
     """
     resolved = os.environ if env is None else env
     timeout = float(resolved.get("AGENT_DEVICE_PROBE_TIMEOUT", str(_DEFAULT_PROBE_TIMEOUT)))
@@ -146,4 +225,5 @@ def epson_endpoint_from_env(env: Mapping[str, str] | None = None) -> PrinterEndp
         host=_require_host(resolved, "AGENT_EPSON_HOST"),
         port=int(resolved.get("AGENT_EPSON_PORT", str(_DEFAULT_PORT))),
         timeout=timeout,
+        encoding=_encoding(resolved, "AGENT_EPSON_ENCODING"),
     )

@@ -8,7 +8,8 @@
 > - **A 級統一以 TCP 9100 連線探測 + 心跳**判定在線/離線（連得上＝在線；不依賴 ESC/POS DLE EOT 狀態回應，避免「連得上但未回狀態」被誤判離線）。兩台共用同一 `_tcp_probe`。
 > - **EPSON B 級（缺紙/上蓋/錯誤/錢櫃開關偵測）改為不做**（產品裁示）：這類狀態機器本身會以燈號表現、店員現場肉眼可見，面板不重複偵測；對應鍵一律標 `unsupported`。錢櫃**「彈開指令」仍要做**（屬列印/drawer 功能，經 EPSON drawer port，結帳必需），但錢櫃**「開/關狀態偵測」不做**。
 > - 本次更新使**面板專注 A 級**：網路裝置掉線店員肉眼看不出，連線/離線+心跳才是面板核心價值。
-> - IP **不寫死於程式碼**，一律由環境變數提供（`AGENT_EPSON_HOST`/`AGENT_BROTHER_HOST`…，見 `hardware-agent/.env.example`、agent/config.py）。
+> - IP **不寫死於程式碼**，一律由環境變數提供（`AGENT_EPSON_HOST`/`AGENT_BROTHER_HOST`/`AGENT_INVOICE_HOST`…，見 `hardware-agent/.env.example`、agent/config.py）。
+> - 2026-08-27 起為**雙 EPSON**：發票專屬機與收據機分離，且兩台字型 ROM 不同（見 §4.1、ADR-018）。
 
 ## 0. 關鍵發現（閘門擋下的「憑記憶假設」陷阱）
 
@@ -78,6 +79,11 @@
     "details": {},                                  // A 級為主（B 級不做）
     "unsupported": ["paper_out", "cover_open", "error"],   // 產品裁示不做 → unsupported
     "driver": "real", "validated_on_hardware": false, "probe_error": null },
+  { "id": "invoice-1", "kind": "RECEIPT_PRINTER", "model": "EPSON TM-T82III（電子發票）",
+    "online": true, "last_seen": "2026-06-07T08:00:00Z",   // 有接發票專屬機才出現（ADR-018）
+    "details": {},
+    "unsupported": ["paper_out", "cover_open", "error"],
+    "driver": "real", "validated_on_hardware": true, "probe_error": null },
   { "id": "drawer-1", "kind": "CASH_DRAWER", "model": "EPSON drawer port",
     "online": true, "last_seen": "2026-06-07T08:00:00Z",
     "details": {},
@@ -89,12 +95,38 @@
 - `unsupported` 內的鍵代表「該機型不偵測/查不到」，前端顯示「此項不支援」，**不得當成故障**（ADR-010）。EPSON 改網路 + B 級裁示不做後，與 Brother 對齊成「**只回 A 級**」。
 - `probe_error`：探測時遇到的**驅動/設定錯誤**（非單純離線）的如實描述；前端應顯示錯誤、不誤導店員「只是離線」。
 - 代理本身離線（輪詢失敗）為另一態，由前端面板處理（docs/10）。
+- `drawer-1` 依附**錢櫃實際插的那台**印表機（`AGENT_DRAWER_HOST`，未設即收據機）——
+  收據機在線不代表錢櫃踢得動（ADR-018）。同一台在單次輪詢中只探測一次。
+
+### 4.1 多台印表機的角色與編碼（ADR-018）
+
+| 角色 | env | 印什麼 | 未設時 |
+|---|---|---|---|
+| 收據機 | `AGENT_EPSON_HOST`（必填） | 收據／商品明細聯／收購憑證聯／出餐單 | — |
+| 發票專屬機 | `AGENT_INVOICE_HOST` | 電子發票證明聯（含 Amego 補印的原樣版面） | 印回收據機 |
+| 出餐機 | `AGENT_KITCHEN_HOST` | 出餐單 | 印回收據機 |
+| 錢櫃 | `AGENT_DRAWER_HOST` | （只送 kick 指令，不出紙） | 沿用收據機 |
+
+**中文編碼逐機設定**（`AGENT_*_ENCODING`，預設 `big5`）：TM-T82III 有 Big5 與 GB18030
+兩種字型 ROM，**型號欄看不出來**，設錯不會報錯、只會印出整捲亂碼。查法是對該台的
+9100 送 `GS I 69`（`1D 49 45`），回 `TAIWAN BIG-5` → `big5`、`CHINA GB18030` → `gbk`：
+
+```bash
+python3 - <<'EOF'
+import socket, time
+with socket.create_connection(("192.168.0.44", 9100), timeout=4) as s:
+    s.sendall(b"\x1dIE"); time.sleep(1); print(s.recv(64))
+EOF
+```
+
+**缺紙不改印另一台**（與出餐機同一原則）：證明聯有兌獎聯性質，改印到收據機會讓店員
+以為印好了、而客人手上什麼都沒有。失敗即如實回 409/503。
 
 ## 5. T18 動工前仍須完成（閘門未解項）
 
 > 範圍更新後（EPSON 改網路、兩台 A 級、B 級不做）：原「解析 DLE EOT 位元、實測 paper/cover/drawer」等 **B 級項目全部移除**。
 
-1. **實機到貨後**確認兩台網路 IP/port（建議路由器 DHCP 綁 MAC 固定），填入 `.env`（`AGENT_EPSON_HOST`／`AGENT_BROTHER_HOST`）。
+1. **實機到貨後**確認各台網路 IP/port（建議路由器 DHCP 綁 MAC 固定），填入 `.env`（`AGENT_EPSON_HOST`／`AGENT_BROTHER_HOST`／`AGENT_INVOICE_HOST`…），並依 §4.1 確認每台的字型編碼。
 2. 在實機上驗證 `_tcp_probe` 對兩台的在線/離線判定與心跳，將 `validated_on_hardware` 改 `true`（T18）。
 3. 驗證彈錢櫃指令（`cashdraw()`／ESC `p`）經 EPSON 網路後端實際踢開錢櫃。
 4. A 級狀態目前以單元測試（mock socket）守住；實機驗證後通知使用者。

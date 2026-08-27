@@ -9,9 +9,11 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Callable
 from datetime import UTC
 from zoneinfo import ZoneInfo
 
+from agent.config import DEFAULT_ENCODING
 from agent.drivers.einvoice_format import roc_period_label
 from agent.drivers.escpos_raster import (
     PRINT_WIDTH_DOTS,
@@ -37,7 +39,9 @@ _CUT = GS + b"V" + bytes([0])  # full cut
 # 切刀位於印字頭上方約 1.2cm；切紙前先進紙，讓最後內容（總計區）通過切刀，
 # 否則結尾會被切掉並殘留到下一張頂端（實機驗證 2026-06-08）。
 _FEED_BEFORE_CUT = b"\n" * 5
-# EPSON TM-T82III 繁體中文：FS & 進中文（Big5）模式、FS . 離開（實機驗證 2026-06-08）。
+# EPSON TM-T82III 中文：FS & 進多位元組中文模式、FS . 離開（實機驗證 2026-06-08）。
+# **哪一套字型由機器的字型 ROM 決定**（Big5 機 vs GB18030 機），故編碼由 `line_encoder`
+# 依設定注入，此處只負責進出中文模式。
 # ASCII（< 0x80）在中文模式下仍以單位元組如實列印，故整份文件包在中文模式即可。
 _ENTER_CHINESE = FS + b"&"
 _EXIT_CHINESE = FS + b"."
@@ -67,9 +71,23 @@ _TRUNCATE_MARK = ".."  # ASCII 截斷標記（Big5 安全、寬度確定）
 _KITCHEN_QTY_W = 5
 
 
-def _line(text: str) -> bytes:
-    # 繁中以 Big5 編碼（TM-T82III 字庫）；非 Big5 字以 ? 取代，避免單一字中斷整張列印。
-    return text.encode("big5", errors="replace") + b"\n"
+LineEncoder = Callable[[str], bytes]
+"""把一行文字編成某台印表機看得懂的位元組（含換行）。"""
+
+
+def line_encoder(encoding: str) -> LineEncoder:
+    """做出一個綁定某台印表機字型編碼的排版函式。
+
+    **編碼隨機器走、不是全域常數**：本店兩台 TM-T82III 的字型 ROM 不同（`GS I 69`
+    分別回報 `TAIWAN BIG-5` 與 `CHINA GB18030`），同一份 Big5 位元組送到後者，印出來
+    是整捲亂碼（實機 2026-08-27）。見 ADR-018。
+    編不出的字以 ? 取代，避免單一冷僻字中斷整張列印。
+    """
+
+    def emit(text: str) -> bytes:
+        return text.encode(encoding, errors="replace") + b"\n"
+
+    return emit
 
 
 def _disp_width(text: str) -> int:
@@ -111,7 +129,7 @@ def _item_row(line: SaleLinePayload) -> str:
     )
 
 
-def _item_sub_rows(line: SaleLinePayload) -> bytes:
+def _item_sub_rows(line: SaleLinePayload, emit: LineEncoder) -> bytes:
     """品項下方的補充列：贈品標記、活動折扣、店家折扣（代理只印、不算）。
 
     **都放子列、不接在品名後面**：品名欄是固定寬度，接上去只要品名長一點就會連標記
@@ -122,13 +140,13 @@ def _item_sub_rows(line: SaleLinePayload) -> bytes:
     """
     out = bytearray()
     if line.line_kind == "GIFT":
-        out += _line("  ★ 贈品")
+        out += emit("  ★ 贈品")
     if line.discount_amount not in ("", "0") and line.original_unit_price is not None:
-        out += _line(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
+        out += emit(f"  原價{line.original_unit_price} x{line.qty} 折-{line.discount_amount}")
     # 店家臨時折扣也要印：金額已改認實付，紙上若只有活動折扣，客人會看到
     # 「單價 × 數量」對不上總價卻找不到原因。
     if line.manual_discount_amount not in ("", "0"):
-        out += _line(f"  店家折扣 -{line.manual_discount_amount}")
+        out += emit(f"  店家折扣 -{line.manual_discount_amount}")
     return bytes(out)
 
 
@@ -140,38 +158,38 @@ _ITEM_HEADER = (
 )
 
 
-def _header_block(header: StoreHeader) -> bytes:
+def _header_block(header: StoreHeader, emit: LineEncoder) -> bytes:
     out = bytearray()
     out += _ALIGN_CENTER
-    out += _line(header.name)
+    out += emit(header.name)
     out += _ALIGN_LEFT
     if header.tax_id:
-        out += _line(f"統一編號：{header.tax_id}")
+        out += emit(f"統一編號：{header.tax_id}")
     if header.address:
-        out += _line(f"地址：{header.address}")
+        out += emit(f"地址：{header.address}")
     if header.phone:
-        out += _line(f"電話：{header.phone}")
-    out += _line(_SEP)
+        out += emit(f"電話：{header.phone}")
+    out += emit(_SEP)
     return bytes(out)
 
 
-def _totals_block(sale: SalePayload) -> bytes:
+def _totals_block(sale: SalePayload, emit: LineEncoder) -> bytes:
     out = bytearray()
-    out += _line(_SEP)
+    out += emit(_SEP)
     # 活動折扣（docs/21）：有折讓時顯示折讓總額與活動名（代理只印後端算好的值）。
     if sale.total_discount not in ("", "0"):
-        out += _line(f"活動折扣 -{sale.total_discount}")
+        out += emit(f"活動折扣 -{sale.total_discount}")
         if sale.campaign_name:
-            out += _line(f"活動：{sale.campaign_name}")
-    out += _line(f"未稅　 {sale.subtotal}")
-    out += _line(f"營業稅 {sale.tax}")
-    out += _line(f"總計　 {sale.total}")
+            out += emit(f"活動：{sale.campaign_name}")
+    out += emit(f"未稅　 {sale.subtotal}")
+    out += emit(f"營業稅 {sale.tax}")
+    out += emit(f"總計　 {sale.total}")
     if sale.tenders:
-        out += _line("付款明細：")
+        out += emit("付款明細：")
         for tender in sale.tenders:
-            out += _line(f"  {_payment_label(tender.tender_type)} {tender.amount}")
+            out += emit(f"  {_payment_label(tender.tender_type)} {tender.amount}")
     else:
-        out += _line(f"付款方式：{_payment_label(sale.payment_method)}")
+        out += emit(f"付款方式：{_payment_label(sale.payment_method)}")
     return bytes(out)
 
 
@@ -189,17 +207,17 @@ def _payment_label(method: str) -> str:
 _STORE_TZ = ZoneInfo("Asia/Taipei")  # 店面時區（單店臺灣；未來多店改由 payload/設定帶入）
 
 
-def _sale_metadata_block(sale: SalePayload) -> bytes:
+def _sale_metadata_block(sale: SalePayload, emit: LineEncoder) -> bytes:
     created_at = (
         sale.created_at.replace(tzinfo=UTC) if sale.created_at.tzinfo is None else sale.created_at
     )
     local_created_at = created_at.astimezone(_STORE_TZ)
-    return _line(f"交易編號 #{sale.id}") + _line(
+    return emit(f"交易編號 #{sale.id}") + emit(
         f"交易時間 {local_created_at.strftime('%Y-%m-%d %H:%M')}"
     )
 
 
-def _store_credit_signature_block(sale: SalePayload) -> bytes:
+def _store_credit_signature_block(sale: SalePayload, emit: LineEncoder) -> bytes:
     """購物金折抵/剩餘＋客戶簽名影像（docs/23 K6，D6）：欄位缺省時輸出空、不改既有版面。
 
     簽名 PNG 已由後端 signing 驗證（8-bit RGBA、非空白）；此處再經 signature_rows 同子集
@@ -207,13 +225,13 @@ def _store_credit_signature_block(sale: SalePayload) -> bytes:
     """
     out = bytearray()
     if sale.store_credit_deducted is not None:
-        out += _line(_SEP)
-        out += _line(f"購物金折抵 -{sale.store_credit_deducted}")
+        out += emit(_SEP)
+        out += emit(f"購物金折抵 -{sale.store_credit_deducted}")
         if sale.store_credit_remaining is not None:
-            out += _line(f"購物金剩餘  {sale.store_credit_remaining}")
+            out += emit(f"購物金剩餘  {sale.store_credit_remaining}")
     if sale.signature_png_base64 is not None:
-        out += _line(_SEP)
-        out += _line("客戶簽名：")
+        out += emit(_SEP)
+        out += emit("客戶簽名：")
         out += _ALIGN_CENTER
         out += raster_command(signature_rows(sale.signature_png_base64, max_width_dots=360))
         out += _ALIGN_LEFT
@@ -225,27 +243,32 @@ class EscposReceiptPrinter:
 
     Args:
         writer: 位元組輸出端（實機為 EPSON 網路連線；測試為 byte buffer）。
+        encoding: 這台機器字型 ROM 的中文編碼（Big5 機 `big5`、GB18030 機 `gbk`）。
+            預設 `big5` ＝ 既有單機部署行為；由 `agent.config.PrinterEndpoint.encoding`
+            帶入，**不得**在此寫死。見 ADR-018。
     """
 
-    def __init__(self, writer: SupportsWrite) -> None:
+    def __init__(self, writer: SupportsWrite, *, encoding: str = DEFAULT_ENCODING) -> None:
         self._writer = writer
+        self._emit = line_encoder(encoding)
 
     def _emit_doc(self, sale: SalePayload, header: StoreHeader, *, title: str) -> None:
+        emit = self._emit
         out = bytearray()
         out += _INIT
         out += _SET_PRINT_AREA  # 印字區=408 dots：置中光柵（簽名）以紙寬為基準，右緣不被裁切
         out += _ENTER_CHINESE  # 整份文件以中文（Big5）模式列印，ASCII 仍如實
-        out += _header_block(header)
-        out += _ALIGN_CENTER + _line(title) + _ALIGN_LEFT
-        out += _sale_metadata_block(sale)
-        out += _line(_SEP)
-        out += _line(_ITEM_HEADER)  # 欄位標題列：品項 / 單價 / 總價
-        out += _line(_SEP)
+        out += _header_block(header, emit)
+        out += _ALIGN_CENTER + emit(title) + _ALIGN_LEFT
+        out += _sale_metadata_block(sale, emit)
+        out += emit(_SEP)
+        out += emit(_ITEM_HEADER)  # 欄位標題列：品項 / 單價 / 總價
+        out += emit(_SEP)
         for line in sale.lines:
-            out += _line(_item_row(line))
-            out += _item_sub_rows(line)
-        out += _totals_block(sale)
-        out += _store_credit_signature_block(sale)
+            out += emit(_item_row(line))
+            out += _item_sub_rows(line, emit)
+        out += _totals_block(sale, emit)
+        out += _store_credit_signature_block(sale, emit)
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT
         out += _CUT
@@ -259,13 +282,14 @@ class EscposReceiptPrinter:
 
     def print_acquisition(self, receipt: AcquisitionReceiptPayload, header: StoreHeader) -> None:
         """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋客戶簽名（存證聯）。"""
+        emit = self._emit
         out = bytearray()
         out += _INIT
         out += _SET_PRINT_AREA  # 同上：簽名置中光柵須以 408-dot 印字區為基準
         out += _ENTER_CHINESE
-        out += _header_block(header)
-        out += _ALIGN_CENTER + _line("收購憑證聯") + _ALIGN_LEFT
-        out += _line(f"收購單號 #{receipt.acquisition_id}")
+        out += _header_block(header, emit)
+        out += _ALIGN_CENTER + emit("收購憑證聯") + _ALIGN_LEFT
+        out += emit(f"收購單號 #{receipt.acquisition_id}")
         # 憑證時間以**店面時區**呈現（Codex K6 第四輪）：後端 signed_at 為 UTC，直接 strftime
         # 會差八小時、可能跨日，毀損證據時點。naive 值視為 UTC。
         local_dt = (
@@ -273,24 +297,24 @@ class EscposReceiptPrinter:
             if receipt.created_at.tzinfo is None
             else receipt.created_at
         ).astimezone(_STORE_TZ)
-        out += _line(f"日期 {local_dt.strftime('%Y-%m-%d %H:%M')}")
-        out += _line(f"賣方 {receipt.seller_name}")
-        out += _line(_SEP)
+        out += emit(f"日期 {local_dt.strftime('%Y-%m-%d %H:%M')}")
+        out += emit(f"賣方 {receipt.seller_name}")
+        out += emit(_SEP)
         for item in receipt.items:
-            out += _line(
+            out += emit(
                 _pad_left_field(item.name, _NAME_W + _UNIT_W)
                 + _pad_right_field(item.amount, _QTY_W + _TOTAL_W)
             )
-        out += _line(_SEP)
-        out += _line(f"收購總額 {receipt.total}")
+        out += emit(_SEP)
+        out += emit(f"收購總額 {receipt.total}")
         payout_label = "購物金" if receipt.payout_method == "STORE_CREDIT" else "現金"
-        out += _line(f"撥款方式：{payout_label}")
+        out += emit(f"撥款方式：{payout_label}")
         if receipt.store_credit_granted is not None:
-            out += _line(f"撥入購物金 +{receipt.store_credit_granted}")
+            out += emit(f"撥入購物金 +{receipt.store_credit_granted}")
         if receipt.store_credit_balance_after is not None:
-            out += _line(f"購物金總額 {receipt.store_credit_balance_after}")
-        out += _line(_SEP)
-        out += _line("賣方簽名：")
+            out += emit(f"購物金總額 {receipt.store_credit_balance_after}")
+        out += emit(_SEP)
+        out += emit("賣方簽名：")
         out += _ALIGN_CENTER
         out += raster_command(signature_rows(receipt.signature_png_base64, max_width_dots=360))
         out += _ALIGN_LEFT
@@ -305,34 +329,35 @@ class EscposReceiptPrinter:
         **無店家抬頭、無金額**——這是給吧台核對出餐的內部作業單，不是客人的憑證。
         桌號放大（雙倍字）：吧台是隔著距離掃一眼，與內文同字級等於沒印。
         """
+        emit = self._emit
         out = bytearray()
         out += _INIT
         out += _SET_PRINT_AREA
         out += _ENTER_CHINESE
         out += _ALIGN_CENTER
-        out += _DOUBLE_ON + _line("出餐單") + _DOUBLE_OFF
+        out += _DOUBLE_ON + emit("出餐單") + _DOUBLE_OFF
         out += _ALIGN_LEFT
-        out += _line(_SEP)
+        out += emit(_SEP)
         out += _ALIGN_CENTER
         if ticket.service_mode == "DINE_IN":
             # table_no 於 payload 已驗證為非空白（fail closed），此處不再防禦性補值。
-            out += _DOUBLE_ON + _line(f"內用 桌號 {(ticket.table_no or '').strip()}") + _DOUBLE_OFF
+            out += _DOUBLE_ON + emit(f"內用 桌號 {(ticket.table_no or '').strip()}") + _DOUBLE_OFF
         else:
-            out += _DOUBLE_ON + _line("外帶") + _DOUBLE_OFF
+            out += _DOUBLE_ON + emit("外帶") + _DOUBLE_OFF
         out += _ALIGN_LEFT
-        out += _line(_SEP)
+        out += emit(_SEP)
         for line in ticket.lines:
-            out += _line(
+            out += emit(
                 _pad_left_field(line.description, _WIDTH - _KITCHEN_QTY_W)
                 + _pad_right_field(f"x{line.qty}", _KITCHEN_QTY_W)
             )
-        out += _line(_SEP)
+        out += emit(_SEP)
         local_created_at = (
             ticket.created_at.replace(tzinfo=UTC)
             if ticket.created_at.tzinfo is None
             else ticket.created_at
         ).astimezone(_STORE_TZ)
-        out += _line(
+        out += emit(
             _pad_left_field(f"#{ticket.sale_id}", _WIDTH - 11)
             + _pad_right_field(local_created_at.strftime("%m-%d %H:%M"), 11)
         )
@@ -357,25 +382,26 @@ class EscposReceiptPrinter:
         left_qr, right_qr = invoice.qrcode_left_content, invoice.qrcode_right_content
         barcode = invoice.barcode_content
         number = invoice.invoice_number
+        emit = self._emit
         out = bytearray()
         out += _INIT
         out += _SET_PRINT_AREA  # 須在 ESC @ 之後（避免被重設）、版面內容之前
         out += _ENTER_CHINESE
         out += _ALIGN_CENTER
-        out += _line(invoice.seller_name)  # 1. 營業人識別標章（文字）
+        out += emit(invoice.seller_name)  # 1. 營業人識別標章（文字）
         out += _DOUBLE_ON
-        out += _line("電子發票證明聯")  # 2. 字高 ≥0.5cm
+        out += emit("電子發票證明聯")  # 2. 字高 ≥0.5cm
         out += _BOLD_ON
-        out += _line(roc_period_label(invoice.invoice_date))  # 3. 年期別（粗體）
-        out += _line(f"{number[:2]}-{number[2:]}")  # 4. 字軌號碼（粗體）
+        out += emit(roc_period_label(invoice.invoice_date))  # 3. 年期別（粗體）
+        out += emit(f"{number[:2]}-{number[2:]}")  # 4. 字軌號碼（粗體）
         out += _BOLD_OFF
         out += _DOUBLE_OFF
         out += _ALIGN_LEFT
         # 5. 交易日期時間：西元年-月-日 時:分:秒
-        out += _line(f"{invoice.invoice_date.isoformat()} {invoice.invoice_time.isoformat()}")
-        out += _line(f"隨機碼:{invoice.random_code} 總計:{invoice.total_amount}")  # 6/7
+        out += emit(f"{invoice.invoice_date.isoformat()} {invoice.invoice_time.isoformat()}")
+        out += emit(f"隨機碼:{invoice.random_code} 總計:{invoice.total_amount}")  # 6/7
         buyer_part = f" 買方{invoice.buyer_tax_id}" if invoice.buyer_tax_id else ""
-        out += _line(f"賣方{invoice.seller_tax_id}{buyer_part}")  # 8/9
+        out += emit(f"賣方{invoice.seller_tax_id}{buyer_part}")  # 8/9
         out += _ALIGN_CENTER
         out += raster_command(code39_rows(barcode))  # 11. 一維條碼 ≥0.5cm 高
         out += b"\n"

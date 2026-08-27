@@ -10,7 +10,9 @@ from dataclasses import dataclass
 
 from agent.config import (
     brother_endpoint_from_env,
+    drawer_endpoint_from_env,
     epson_endpoint_from_env,
+    invoice_endpoint_from_env,
     kitchen_endpoint_from_env,
     label_font_path_from_env,
 )
@@ -46,11 +48,23 @@ class AgentDevices:
     `None`＝沒接第二台，出餐單印到收據機（既有行為）。放廚房/吧台的那台只印出餐單，
     不印客人的收據/明細聯/證明聯。
     """
+    invoice_printer: ReceiptPrinter | None = None
+    """電子發票**專屬**印表機（ADR-018，選配）。
+
+    `None`＝沒接發票機，證明聯印到收據機（單機店家的既有行為）。有接時這台**只印
+    證明聯**（含 Amego 補印的原樣版面），收據/明細聯/收購憑證聯/出餐單一律不進來——
+    它裝的可能是不同字型 ROM 的機器，也可能被店家刻意留給發票專用紙捲。
+    """
 
     @property
     def kitchen_ticket_printer(self) -> ReceiptPrinter:
         """出餐單的實際目的地——**唯一的解析點**，呼叫端不得自行 or 一次。"""
         return self.kitchen_printer if self.kitchen_printer is not None else self.receipt_printer
+
+    @property
+    def einvoice_printer(self) -> ReceiptPrinter:
+        """電子發票證明聯的實際目的地——**唯一的解析點**，呼叫端不得自行 or 一次。"""
+        return self.invoice_printer if self.invoice_printer is not None else self.receipt_printer
 
 
 def default_fake_devices() -> AgentDevices:
@@ -66,8 +80,12 @@ def default_fake_devices() -> AgentDevices:
 def real_epson_devices_from_env() -> AgentDevices:
     """真機組合：EPSON 收據機 + 錢櫃必接；Brother 標籤機選配（T18）。
 
-    - `receipt_printer`：`EscposReceiptPrinter` 包 `NetworkEscposWriter`（lazy 連 EPSON）。
-    - `cash_drawer`：`RealCashDrawer` 經同一 EPSON 連線送 kick。
+    - `receipt_printer`：`EscposReceiptPrinter` 包 `NetworkEscposWriter`（lazy 連 EPSON），
+      中文編碼取自該端點（Big5 機/GB18030 機不同，見 ADR-018）。
+    - `invoice_printer`：`AGENT_INVOICE_HOST` 有設 → 發票專屬機；未設 → `None`（證明聯
+      印回收據機）。
+    - `cash_drawer`：`RealCashDrawer` 經**錢櫃所接那台**的連線送 kick（`AGENT_DRAWER_HOST`
+      未設即收據機；本店實機錢櫃插在發票機那台）。
     - `label_printer`：`AGENT_BROTHER_HOST` 有設 → `BrotherLabelPrinter`（brother_ql 光柵、
       網路）；未設 → `FakeLabelPrinter`（不列管）。
     - `status_provider`：探測 EPSON（+依附錢櫃）；Brother 有設一併列管。
@@ -77,7 +95,8 @@ def real_epson_devices_from_env() -> AgentDevices:
     epson = epson_endpoint_from_env()
     brother = brother_endpoint_from_env()
     kitchen = kitchen_endpoint_from_env()
-    writer = NetworkEscposWriter(epson)
+    invoice = invoice_endpoint_from_env()
+    drawer = drawer_endpoint_from_env()
     label_printer: LabelPrinter = (
         BrotherLabelPrinter(brother, font_path=label_font_path_from_env())
         if brother is not None
@@ -85,10 +104,19 @@ def real_epson_devices_from_env() -> AgentDevices:
     )
     return AgentDevices(
         label_printer=label_printer,
-        receipt_printer=EscposReceiptPrinter(writer),
-        cash_drawer=RealCashDrawer(writer),
-        status_provider=RealStatusProvider(epson=epson, brother=brother, kitchen=kitchen),
+        receipt_printer=EscposReceiptPrinter(NetworkEscposWriter(epson), encoding=epson.encoding),
+        cash_drawer=RealCashDrawer(NetworkEscposWriter(drawer)),
+        status_provider=RealStatusProvider(
+            epson=epson, brother=brother, kitchen=kitchen, invoice=invoice, drawer=drawer
+        ),
         kitchen_printer=(
-            EscposReceiptPrinter(NetworkEscposWriter(kitchen)) if kitchen is not None else None
+            EscposReceiptPrinter(NetworkEscposWriter(kitchen), encoding=kitchen.encoding)
+            if kitchen is not None
+            else None
+        ),
+        invoice_printer=(
+            EscposReceiptPrinter(NetworkEscposWriter(invoice), encoding=invoice.encoding)
+            if invoice is not None
+            else None
         ),
     )

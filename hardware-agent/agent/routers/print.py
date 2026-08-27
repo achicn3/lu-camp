@@ -97,13 +97,19 @@ async def print_raw(payload: RawPrintPayload, devices: DevicesDep) -> OkResponse
     目前唯一的用途是 Amego 的發票補印（`/json/invoice_print`）：證明聯的二維條碼含
     一段以財政部金鑰加密的驗證資訊，**本地算不出來**，只能由加值中心產生整張版面。
     我們不解讀也不改寫它的位元組——任何加工都可能讓條碼掃不出來。
+
+    去向與 `/print/einvoice` 相同（發票機接了就那台）——補印的是發票，不是收據。
     """
-    await anyio.to_thread.run_sync(devices.receipt_printer.print_raw, payload.decoded())
+    await anyio.to_thread.run_sync(devices.einvoice_printer.print_raw, payload.decoded())
     return OkResponse(status="ok")
 
 
 @router.post("/einvoice", response_model=OkResponse, operation_id="printEinvoice")
 async def print_einvoice(invoice: InvoicePayload, devices: DevicesDep) -> OkResponse:
-    """列印電子發票證明聯（附件一格式一 + 條碼規格 v1.9，欄位見 `InvoicePayload`）。"""
-    await anyio.to_thread.run_sync(devices.receipt_printer.print_einvoice, invoice)
+    """列印電子發票證明聯（附件一格式一 + 條碼規格 v1.9，欄位見 `InvoicePayload`）。
+
+    發票機接了就印那台（解析在 `AgentDevices.einvoice_printer`，ADR-018）。
+    **缺紙不得改印收據機**——證明聯有兌獎聯性質，店員會以為印好了而客人手上什麼都沒有。
+    """
+    await anyio.to_thread.run_sync(devices.einvoice_printer.print_einvoice, invoice)
     return OkResponse(status="ok")
