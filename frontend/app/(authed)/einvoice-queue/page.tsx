@@ -172,9 +172,14 @@ export default function EInvoiceQueuePage() {
         </p>
       )}
 
+      {/* 讀取失敗時**不得**顯示「共 0 筆」：那是在後端掛掉的當下告訴店長「沒事」，
+          正是這一頁存在的理由的反面（Codex 第七輪）。只有讀成功才報數。 */}
       <p className="muted">
-        {queue.isLoading ? "讀取中…" : `共 ${queue.data?.total ?? 0} 筆`}
-        {(queue.data?.total ?? 0) > items.length ? "（僅顯示最新 100 筆）" : ""}
+        {queue.isLoading
+          ? "讀取中…"
+          : queue.isSuccess
+            ? `共 ${queue.data.total} 筆${queue.data.total > items.length ? "（僅顯示最新 100 筆）" : ""}`
+            : "讀不到清單，無法確認有沒有待處理的發票。"}
       </p>
 
       <table className="table">
@@ -253,7 +258,7 @@ export default function EInvoiceQueuePage() {
               </td>
             </tr>
           ))}
-          {!queue.isLoading && items.length === 0 && (
+          {queue.isSuccess && items.length === 0 && (
             <tr>
               <td colSpan={8} className="muted">
                 {filter === "ATTENTION" ? "目前沒有需要處理的發票。" : "沒有符合的項目。"}
