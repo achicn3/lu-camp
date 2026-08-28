@@ -915,13 +915,21 @@ def test_invoice_print_payload_pins_big5_encoding() -> None:
     TM-T82III 是台灣機、以 BIG5 解碼，於是整張紙除了點陣圖那幾個字以外
     全是亂碼——而且**回應 HTTP 200、位元組長度也正常**，只有印出來才看得見。
     """
-    data = build_invoice_print_data(order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III)
+    data = build_invoice_print_data(
+        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III, reprint=False
+    )
     assert data["printer_lang"] == AMEGO_PRINTER_LANG_BIG5
 
 
-def test_invoice_print_payload_queries_by_order_id_and_marks_reprint() -> None:
-    """以 order_id 查（發票號碼正是斷線時弄丟的東西），並標記為補印。"""
-    data = build_invoice_print_data(order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III)
+def test_invoice_print_payload_queries_by_order_id() -> None:
+    """以 order_id 查（發票號碼正是斷線時弄丟的東西）。
+
+    `reprint` **沒有預設值**（店主 2026-08-29 裁示一律不加註「補印」後所加的防呆）：
+    它決定客人那張紙上會不會出現「補印」，呼叫端必須明確決定，不能靠預設值。
+    """
+    data = build_invoice_print_data(
+        order_id="S1-123", printer_type=AMEGO_PRINTER_TYPE_TM_T82III, reprint=True
+    )
     assert data["type"] == "order"
     assert data["order_id"] == "S1-123"
     assert data["printer_type"] == AMEGO_PRINTER_TYPE_TM_T82III

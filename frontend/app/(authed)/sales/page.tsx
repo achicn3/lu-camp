@@ -1104,6 +1104,7 @@ export default function SalesPage() {
       // 平台上沒有那張發票時根本無從「補印」——唯一能做的就是先把它開出來。
       // PENDING_ISSUE 只會在「結帳當下電子發票是開的、但送出沒成功」時出現，
       // 所以走到這裡代表本來就該有發票，不是無中生有。
+      let justIssued = false;
       if (sale.invoice_status === "PENDING_ISSUE") {
         const { error: issueError } = await api.POST(
           "/api/v1/einvoice/sales/{sale_id}/issue",
@@ -1112,13 +1113,26 @@ export default function SalesPage() {
         if (issueError !== undefined) {
           throw new Error(extractDetail(issueError) ?? "發票開立失敗，無法列印證明聯");
         }
+        // **開立成功當下就刷新**，不能等整個列印流程成功：後面若列印失敗，畫面會停在
+        // 「開立中」而發票其實已經開出去了——店員會以為還沒開，去按「登記手開發票」
+        // （後端會擋，但那是白做工兼誤判）（Codex 審查）。
+        justIssued = true;
+        invalidateSaleViews(queryClient);
       }
+      // 開立成功之後才失敗的話，訊息必須講明「發票已經開出去了」——否則店員會以為
+      // 整件事沒發生，跑去登記手開發票或重按，而平台上那張已經存在（Codex 審查）。
+      const issuedContext = (err: unknown): Error => {
+        const message = err instanceof Error ? err.message : String(err);
+        return new Error(justIssued ? `發票已開立，但列印失敗：${message}` : message);
+      };
       const { data, error } = await api.POST(
         "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
         { params: { path: { sale_id: sale.id } } },
       );
-      if (!data) throw new Error(extractDetail(error) ?? "取得列印內容失敗");
-      await printRaw(data.base64_data);
+      if (!data) throw issuedContext(new Error(extractDetail(error) ?? "取得列印內容失敗"));
+      await printRaw(data.base64_data).catch((err: unknown) => {
+        throw issuedContext(err);
+      });
       // **印表機回報成功之後**才記，順序不能顛倒：這支端點記的是「紙真的出來了」，
       // 先記會把失敗的那次算掉「列印一次」的額度，害真正的正本被當成補印。
       //
@@ -1132,11 +1146,13 @@ export default function SalesPage() {
         saleId: sale.id,
         isReprint: data.is_reprint,
         recordFailed: recordError !== undefined,
+        justIssued,
       };
     },
-    onSuccess: ({ saleId, isReprint, recordFailed }) =>
+    onSuccess: ({ saleId, isReprint, recordFailed, justIssued }) =>
       setPrintNote(
         [
+          justIssued ? "發票已開立。" : "",
           // 紙上一律印正本、不加註「補印」（店主裁示）。但這張之前印過的話仍要提醒
           // 店員——同一張發票交出去兩次，重複兌獎的責任在店家身上。
           isReprint

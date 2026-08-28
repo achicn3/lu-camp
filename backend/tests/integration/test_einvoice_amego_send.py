@@ -1496,11 +1496,12 @@ async def test_marking_proof_printed_again_keeps_the_first_time(
 
 
 async def test_marking_proof_printed_writes_an_audit_trail(db_session: AsyncSession) -> None:
-    """列印證明聯要留稽核：誰、何時、印的是正本還是補印。
+    """列印證明聯要留稽核：誰、何時、印出去的是什麼、是不是第二張。
 
-    營業人補印導致重複兌領獎金時責任在營業人身上（要點 §26／統一發票給獎辦法），
-    事後要舉證「這張印的是補印、不是第二張正本」就只能靠這筆紀錄。
-    同模組的作廢與手開登記都有寫，補印沒有理由例外。
+    店主 2026-08-29 裁示後**一律印正本版面**，所以 `copy` 恆為 ORIGINAL——記成 REPRINT
+    會與客人手上那張相反。但「同一張發票交出去過兩次」仍是重複兌領時的舉證關鍵，
+    改以 `previously_printed` 獨立記錄，不與版面混為一談。
+    同模組的作廢與手開登記都有寫稽核，列印沒有理由例外。
     """
     store_id, sale_id, svc = await _issued_sale(db_session)
     clerk_id = await db_session.scalar(select(User.id).where(User.store_id == store_id))
@@ -1513,5 +1514,8 @@ async def test_marking_proof_printed_writes_an_audit_trail(db_session: AsyncSess
             select(AuditLog).where(AuditLog.action == "PRINT_INVOICE_PROOF").order_by(AuditLog.id)
         )
     )
-    assert [(log.after or {})["copy"] for log in logs] == ["ORIGINAL", "REPRINT"]
+    # 版面：兩次都是正本（與實際送給平台的 print_invoice_type=1 一致）
+    assert [(log.after or {})["copy"] for log in logs] == ["ORIGINAL", "ORIGINAL"]
+    # 但「第二張」這個事實仍留著，供重複兌領時舉證
+    assert [(log.after or {})["previously_printed"] for log in logs] == [False, True]
     assert all(log.actor_user_id == clerk_id for log in logs)

@@ -1231,8 +1231,13 @@ class EInvoiceService:
             after={
                 "sale_id": sale_id,
                 "invoice_no": invoice.invoice_no,
-                # 第一次列印＝正本（「列印一次為限」的那一次）；之後一律補印。
-                "copy": "REPRINT" if printed_before is not None else "ORIGINAL",
+                # **記實際印出去的東西**：店主 2026-08-29 裁示後一律送正本版面
+                # （print_invoice_type=1），所以這裡不能再依「印過沒」推導成 REPRINT——
+                # 那會讓稽核紀錄宣稱印的是補印，與客人手上那張相反（Codex 審查）。
+                "copy": "ORIGINAL",
+                # 但「這是第幾張」仍是事後舉證的關鍵：重複兌領時要說得出「同一張發票
+                # 交出去過兩次」。改以獨立欄位如實記錄，不與版面混為一談。
+                "previously_printed": printed_before is not None,
             },
         )
 

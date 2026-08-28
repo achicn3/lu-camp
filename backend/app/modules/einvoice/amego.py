@@ -239,7 +239,7 @@ AMEGO_PRINTER_LANG_BIG5 = 1
 
 
 def build_invoice_print_data(
-    *, order_id: str, printer_type: int, reprint: bool = True
+    *, order_id: str, printer_type: int, reprint: bool
 ) -> dict[str, str | int]:
     """invoice_print（發票列印）payload：**以訂單編號查**，回傳可直送的 ESC/POS。
 
@@ -254,6 +254,10 @@ def build_invoice_print_data(
     平台限制：**只能查 180 天內的發票**；0 元發票不回傳列印內容。
 
     編碼必須明示為 BIG5，理由見 `AMEGO_PRINTER_LANG_BIG5`。
+
+    `reprint` **刻意沒有預設值**：它決定平台會不會在客人那張紙上印出「補印」二字。
+    給預設值等於讓未來新增的呼叫端「忘記想」就決定了一張稅務憑證的長相
+    （本店裁示一律不加註，見 `EInvoiceService.reprint_payload_for_sale`）。
     """
     return {
         "type": "order",
