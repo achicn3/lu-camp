@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.modules.einvoice.models import (
     EInvoiceResultEvent,
@@ -286,6 +287,25 @@ class EInvoiceRepository:
         stmt = stmt.order_by(EInvoiceUploadQueue.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
+    @staticmethod
+    def _needs_attention_clause(
+        *, auto_send_actions: Sequence[EInvoiceAction], stalled_before: datetime
+    ) -> ColumnElement[bool]:
+        """「需要人處理」的定義——**只有這一份**。
+
+        紅點與清單必須同口徑：紅點說有 1 筆、點進去卻看到「沒有符合的項目」，
+        等於畫面對店長說謊（Codex 第六輪）。
+        平台退回的，加上超過門檻仍未送出的作廢/折讓（自動送出正常時約一分鐘就清掉）。
+        """
+        return or_(
+            EInvoiceUploadQueue.status == UploadStatus.FAILED,
+            and_(
+                EInvoiceUploadQueue.status == UploadStatus.PENDING,
+                EInvoiceUploadQueue.action.in_(list(auto_send_actions)),
+                EInvoiceUploadQueue.created_at <= stalled_before,
+            ),
+        )
+
     async def count_needing_attention(
         self,
         store_id: int,
@@ -293,31 +313,40 @@ class EInvoiceRepository:
         auto_send_actions: Sequence[EInvoiceAction],
         stalled_before: datetime,
     ) -> int:
-        """平台退回的，加上超過門檻仍未送出的作廢/折讓（自動送出正常時約一分鐘就會清掉）。"""
         stmt = (
             select(func.count())
             .select_from(EInvoiceUploadQueue)
             .where(
                 EInvoiceUploadQueue.store_id == store_id,
-                or_(
-                    EInvoiceUploadQueue.status == UploadStatus.FAILED,
-                    and_(
-                        EInvoiceUploadQueue.status == UploadStatus.PENDING,
-                        EInvoiceUploadQueue.action.in_(list(auto_send_actions)),
-                        EInvoiceUploadQueue.created_at <= stalled_before,
-                    ),
+                self._needs_attention_clause(
+                    auto_send_actions=auto_send_actions, stalled_before=stalled_before
                 ),
             )
         )
         return int((await self._session.execute(stmt)).scalar_one())
 
-    async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
-        """符合篩選的佇列總筆數（供分頁與導覽列待處理數）。"""
-        stmt = select(func.count()).select_from(EInvoiceUploadQueue).where(
-            EInvoiceUploadQueue.store_id == store_id
+    async def count_queue(
+        self,
+        store_id: int,
+        *,
+        status: UploadStatus | None = None,
+        needs_attention: tuple[Sequence[EInvoiceAction], datetime] | None = None,
+    ) -> int:
+        """符合篩選的佇列總筆數（供分頁）。"""
+        stmt = (
+            select(func.count())
+            .select_from(EInvoiceUploadQueue)
+            .where(EInvoiceUploadQueue.store_id == store_id)
         )
         if status is not None:
             stmt = stmt.where(EInvoiceUploadQueue.status == status)
+        if needs_attention is not None:
+            actions, stalled_before = needs_attention
+            stmt = stmt.where(
+                self._needs_attention_clause(
+                    auto_send_actions=actions, stalled_before=stalled_before
+                )
+            )
         return int((await self._session.execute(stmt)).scalar_one())
 
     async def list_queue_with_context(
@@ -325,6 +354,7 @@ class EInvoiceRepository:
         store_id: int,
         *,
         status: UploadStatus | None = None,
+        needs_attention: tuple[Sequence[EInvoiceAction], datetime] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[tuple[EInvoiceUploadQueue, str | None, int | None]]:
@@ -353,6 +383,13 @@ class EInvoiceRepository:
         )
         if status is not None:
             stmt = stmt.where(EInvoiceUploadQueue.status == status)
+        if needs_attention is not None:
+            actions, stalled_before = needs_attention
+            stmt = stmt.where(
+                self._needs_attention_clause(
+                    auto_send_actions=actions, stalled_before=stalled_before
+                )
+            )
         stmt = stmt.order_by(EInvoiceUploadQueue.id.desc()).limit(limit).offset(offset)
         rows = (await self._session.execute(stmt)).all()
         return [(row[0], row[1], row[2]) for row in rows]

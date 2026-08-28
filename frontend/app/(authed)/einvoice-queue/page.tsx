@@ -27,8 +27,11 @@ const STATUS_LABELS: Record<UploadStatus, string> = {
   CANCELLED: "已中止",
 };
 
-/** 篩選頁籤：預設看「平台退回」——那是真的需要人處理的。 */
-const FILTERS: { key: UploadStatus | "ALL"; label: string }[] = [
+/** 篩選頁籤。預設「需要處理」——與導覽列紅點**同一個口徑**：紅點說有 N 筆、
+ *  點進來卻看不到，等於畫面對店長說謊（Codex 第六輪）。 */
+type FilterKey = UploadStatus | "ALL" | "ATTENTION";
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: "ATTENTION", label: "需要處理" },
   { key: "FAILED", label: "平台退回" },
   { key: "PENDING", label: "待送出" },
   { key: "ALL", label: "全部" },
@@ -44,14 +47,20 @@ function extractDetail(error: unknown): string | null {
 
 export default function EInvoiceQueuePage() {
   const queryClient = useQueryClient();
-  const [filter, setFilter] = useState<UploadStatus | "ALL">("FAILED");
+  const [filter, setFilter] = useState<FilterKey>("ATTENTION");
   const [note, setNote] = useState<string | null>(null);
 
   const queue = useQuery({
     queryKey: ["einvoice-queue", filter],
     queryFn: async () => {
+      const query =
+        filter === "ALL"
+          ? { limit: 100 }
+          : filter === "ATTENTION"
+            ? { needs_attention: true, limit: 100 }
+            : { status: filter, limit: 100 };
       const { data, error } = await api.GET("/api/v1/einvoice/queue", {
-        params: { query: { ...(filter === "ALL" ? {} : { status: filter }), limit: 100 } },
+        params: { query },
       });
       if (!data) throw new Error(extractDetail(error) ?? "讀取發票待處理清單失敗");
       return data;
@@ -133,7 +142,8 @@ export default function EInvoiceQueuePage() {
     <main className="page">
       <h1>發票待處理</h1>
       <p className="muted">
-        作廢與折讓由系統背景自動送交平台；這裡看得到還沒送成功的，以及平台退回、需要人處理的。
+        作廢與折讓由系統背景自動送交平台，通常一分鐘內完成。
+        「需要處理」列的是平台退回的、以及卡超過 30 分鐘還沒送出去的。
         <strong>在送出成功之前，平台上那張發票仍然有效。</strong>
       </p>
 
@@ -246,7 +256,7 @@ export default function EInvoiceQueuePage() {
           {!queue.isLoading && items.length === 0 && (
             <tr>
               <td colSpan={8} className="muted">
-                沒有符合的項目。
+                {filter === "ATTENTION" ? "目前沒有需要處理的發票。" : "沒有符合的項目。"}
               </td>
             </tr>
           )}

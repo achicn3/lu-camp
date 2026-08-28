@@ -181,6 +181,10 @@ class ProofPrintPayload(NamedTuple):
     is_reprint: bool
 
 
+_AUTO_SEND_ACTIONS = (EInvoiceAction.VOID, EInvoiceAction.ALLOWANCE)
+"""會被背景自動送出的動作——「卡住」只對這兩種成立（開立不自動送，見 background_service）。"""
+
+
 async def build_amego_client(session: AsyncSession, store_id: int) -> AmegoClient:
     """組 Amego 客戶端：賣方統編＝stores.tax_id、App Key＝環境變數（docs/24）。
 
@@ -1687,12 +1691,20 @@ class EInvoiceService:
         store_id: int,
         *,
         status: UploadStatus | None = None,
+        stalled_before: datetime | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[tuple[EInvoiceUploadQueue, str | None, int | None]]:
-        """佇列列＋發票號碼／交易編號（佇列頁用）。"""
+        """佇列列＋發票號碼／交易編號（佇列頁用）。
+
+        `stalled_before` 有值＝只列「需要人處理」的（與導覽列紅點同口徑）。
+        """
         return await self._repo.list_queue_with_context(
-            store_id, status=status, limit=limit, offset=offset
+            store_id,
+            status=status,
+            needs_attention=(_AUTO_SEND_ACTIONS, stalled_before) if stalled_before else None,
+            limit=limit,
+            offset=offset,
         )
 
     async def get_queue_item(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue | None:
@@ -1713,14 +1725,22 @@ class EInvoiceService:
         於是帳上作廢、平台有效，而畫面一片安靜（Codex 第五輪 P1）。
         """
         return await self._repo.count_needing_attention(
-            store_id,
-            auto_send_actions=(EInvoiceAction.VOID, EInvoiceAction.ALLOWANCE),
-            stalled_before=stalled_before,
+            store_id, auto_send_actions=_AUTO_SEND_ACTIONS, stalled_before=stalled_before
         )
 
-    async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
+    async def count_queue(
+        self,
+        store_id: int,
+        *,
+        status: UploadStatus | None = None,
+        stalled_before: datetime | None = None,
+    ) -> int:
         """符合篩選的佇列總筆數。"""
-        return await self._repo.count_queue(store_id, status=status)
+        return await self._repo.count_queue(
+            store_id,
+            status=status,
+            needs_attention=(_AUTO_SEND_ACTIONS, stalled_before) if stalled_before else None,
+        )
 
     async def list_due_auto_send_items(
         self,

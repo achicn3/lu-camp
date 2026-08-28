@@ -1153,6 +1153,9 @@ export interface paths {
         /**
          * List Queue
          * @description 上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。
+         *
+         *     `needs_attention=true` 只列「需要人處理」的，與導覽列紅點**同一個口徑**：
+         *     紅點說有 N 筆、點進去卻看不到，等於畫面對店長說謊（Codex 第六輪）。
          */
         get: operations["listEInvoiceQueue"];
         put?: never;
@@ -9413,6 +9416,7 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["UploadStatus"] | null;
+                needs_attention?: boolean;
                 limit?: number;
                 offset?: number;
             };

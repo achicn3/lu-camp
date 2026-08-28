@@ -147,9 +147,27 @@ try {
   await page.getByRole("heading", { name: "發票待處理" }).waitFor({ timeout: 20000 });
   ok("可從系統選單進入發票待處理", true);
 
+  // 預設頁籤「需要處理」必須與導覽列紅點同口徑：紅點說有 N 筆、點進來卻看不到，
+  // 就是畫面對店長說謊（Codex 第六輪）。先驗預設頁籤讀得到，再切「全部」找那一列。
+  await page.getByText(/共 \d+ 筆/).waitFor({ timeout: 20000 });
+  const attentionCount = Number(
+    ((await page.getByText(/共 \d+ 筆/).textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
+  );
+
   await page.getByRole("button", { name: "全部" }).click();
   await page.getByText(/共 \d+ 筆/).waitFor({ timeout: 20000 });
-  ok("清單讀取成功", true);
+  const allCount = Number(
+    ((await page.getByText(/共 \d+ 筆/).textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
+  );
+  ok("清單讀取成功", allCount >= 0, `全部 ${allCount} 筆`);
+
+  // 「需要處理」必須真的**是子集**。篩選失效時（例如舊版後端不認得這個參數而整個忽略）
+  // 兩邊會一樣多——這正是實測踩到的情況，斷言要抓得到（Codex 第六輪）。
+  ok(
+    "「需要處理」有實際篩選，不是把全部端出來",
+    attentionCount >= 0 && attentionCount < allCount,
+    `需要處理 ${attentionCount} / 全部 ${allCount}`,
+  );
   await page.screenshot({ path: join(SHOTS, "01-list.png") });
 
   // 定位**那張發票的「作廢」列**。只用發票號碼會同時命中同一張發票的「開立」列

@@ -15789,7 +15789,7 @@
     },
     "/api/v1/einvoice/queue": {
       "get": {
-        "description": "上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。",
+        "description": "上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。\n\n`needs_attention=true` 只列「需要人處理」的，與導覽列紅點**同一個口徑**：\n紅點說有 N 筆、點進去卻看不到，等於畫面對店長說謊（Codex 第六輪）。",
         "operationId": "listEInvoiceQueue",
         "parameters": [
           {
@@ -15806,6 +15806,16 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "needs_attention",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Needs Attention",
+              "type": "boolean"
             }
           },
           {
