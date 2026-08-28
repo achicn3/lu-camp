@@ -1186,6 +1186,7 @@ export default function SalesPage() {
   const [search, setSearch] = useState<
     { kind: "today" } | { kind: "id"; saleId: number } | { kind: "range"; from: string; to: string }
   >({ kind: "today" });
+  const [searchError, setSearchError] = useState<string | null>(null);
   // **必須可分頁**（docs/36）：「只看未開立」不限日期，會隨時間累積；後端 limit 上限 200，
   // 只抓第一頁的話第 201 筆之後就從**唯一的救援入口**永久消失——而那些正是拖最久、
   // 最該處理的單，畫面還不會說被截斷了（Codex 對抗審查第十一輪 medium）。
@@ -1238,10 +1239,23 @@ export default function SalesPage() {
         className="sales-search"
         onSubmit={(e) => {
           e.preventDefault();
-          const id = Number(searchInput.trim());
-          if (searchInput.trim() !== "" && Number.isInteger(id) && id > 0) {
+          // 畫面到處把單號寫成 #421054730，店員會照抄——吃掉 # 與空白，
+          // 而不是把它當成無效值默默退回今日清單（Codex 審查）。
+          const raw = searchInput.trim().replace(/^#/, "").trim();
+          if (raw !== "") {
+            const id = Number(raw);
+            if (!Number.isInteger(id) || id <= 0) {
+              setSearchError("交易編號請填數字，例如 421054730。");
+              return;
+            }
+            setSearchError(null);
+            setPendingInvoiceOnly(false); // 未開立模式會蓋過搜尋，切走才不會按了沒反應
             setSearch({ kind: "id", saleId: id });
-          } else if (fromInput || toInput) {
+            return;
+          }
+          setSearchError(null);
+          if (fromInput || toInput) {
+            setPendingInvoiceOnly(false);
             setSearch({ kind: "range", from: fromInput, to: toInput });
           } else {
             setSearch({ kind: "today" });
@@ -1276,12 +1290,19 @@ export default function SalesPage() {
             setSearchInput("");
             setFromInput("");
             setToInput("");
+            setSearchError(null);
+            setPendingInvoiceOnly(false); // 否則「回今日」按了還停在不限日期的未開立清單
             setSearch({ kind: "today" });
           }}
         >
           回今日
         </button>
       </form>
+      {searchError !== null && (
+        <p role="alert" className="form-error">
+          {searchError}
+        </p>
+      )}
       {!pendingInvoiceOnly && search.kind !== "today" && (
         <p role="status" className="form-note">
           {search.kind === "id"
@@ -1306,7 +1327,15 @@ export default function SalesPage() {
         </p>
       )}
       {sales.isSuccess && rows.length === 0 && (
-        <p className="hint">{pendingInvoiceOnly ? "沒有待開立發票的交易。" : "今日尚無交易。"}</p>
+        <p className="hint">
+          {pendingInvoiceOnly
+            ? "沒有待開立發票的交易。"
+            : search.kind === "id"
+              ? `查無交易編號 ${search.saleId} 的交易。`
+              : search.kind === "range"
+                ? "這段期間沒有交易。"
+                : "今日尚無交易。"}
+        </p>
       )}
       {rows.length > 0 && (
         <div className="card sales-list-card">

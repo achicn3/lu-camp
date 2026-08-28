@@ -106,7 +106,39 @@ try {
   });
   psql(`UPDATE sales SET created_at = now() - interval '1 day' WHERE id = ${Number(sale.id)}`);
   const movedTo = psql(`SELECT created_at::date FROM sales WHERE id = ${Number(sale.id)}`);
-  ok("前置：建立一筆交易並把時間移到昨天", Boolean(movedTo), `#${sale.id} → ${movedTo}`);
+
+  // **對照組**：另一筆留在今天。少了它，「回今日」只驗到舊列消失——今日清單整個
+  // 讀取失敗也會通過；日期範圍也只驗起日，迄日壞掉照樣全綠（Codex 審查）。
+  const todayAcq = await api("/api/v1/acquisitions", {
+    method: "POST",
+    token,
+    expect: [201],
+    headers: { "Idempotency-Key": `SMOKE_HIST_ACQ2_${runId}` },
+    body: {
+      type: "BUYOUT",
+      contact_id: seller.id,
+      payout_method: "CASH",
+      note: "sales history smoke (today)",
+      items: [
+        { name: `SMOKE_HIST_TODAY_${runId}`, grade: "A", listed_price: "300", acquisition_cost: "120" },
+      ],
+    },
+  });
+  const todaySale = await api("/api/v1/sales", {
+    method: "POST",
+    token,
+    expect: [201],
+    headers: { "Idempotency-Key": `SMOKE_HIST_SALE2_${runId}` },
+    body: {
+      lines: [{ line_type: "SERIALIZED", item_code: todayAcq.item_codes[0], qty: 1 }],
+      tenders: [{ tender_type: "CASH", amount: "300" }],
+    },
+  });
+  ok(
+    "前置：一筆移到昨天、一筆留在今天",
+    Boolean(movedTo) && Boolean(todaySale.id),
+    `舊 #${sale.id} → ${movedTo}；今日 #${todaySale.id}`,
+  );
 
   browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -122,15 +154,21 @@ try {
   // 以**整列**定位而不是某顆按鈕：作廢之後該列的按鈕會變（補印就消失了），
   // 用按鈕當「這筆在不在畫面上」的判準會在後面誤判。
   const row = page.locator("tbody tr").filter({ hasText: String(sale.id) });
-  await page.waitForTimeout(1500);
-  ok("預設（今日）看不到昨天那筆", (await row.count()) === 0);
+  const todayRow = page.locator("tbody tr").filter({ hasText: String(todaySale.id) });
+  await todayRow.first().waitFor({ timeout: 20000 });
+  ok(
+    "預設（今日）看得到今天那筆、看不到昨天那筆",
+    (await row.count()) === 0 && (await todayRow.count()) === 1,
+  );
   await page.screenshot({ path: join(SHOTS, "01-today.png") });
 
   // 用交易編號查
   await page.getByLabel("交易編號").fill(String(sale.id));
   await page.getByRole("button", { name: "查詢" }).click();
   await row.first().waitFor({ timeout: 20000 });
-  ok("用交易編號查得到昨天那筆", true, `#${sale.id}`);
+  // **只能有那一列**：若單號查詢壞成回傳全部歷史交易，只驗「目標列存在」照樣會過。
+  const idModeRows = await page.locator("tbody tr").count();
+  ok("用交易編號查得到、且結果只有那一筆", idModeRows === 1, `列數 ${idModeRows}`);
   await page.screenshot({ path: join(SHOTS, "02-by-id.png") });
 
   // 找回來之後**真的能操作**——不能只是看得到。用「作廢」而不是「補印」來驗：
@@ -145,14 +183,33 @@ try {
 
   // 日期範圍也要查得到
   await page.getByRole("button", { name: "回今日" }).click();
-  await page.waitForTimeout(1200);
-  ok("按「回今日」後又看不到了", (await row.count()) === 0);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  await todayRow.first().waitFor({ timeout: 20000 });
+  ok(
+    "按「回今日」真的回到今日清單（今天那筆在、昨天那筆不在）",
+    (await row.count()) === 0 && (await todayRow.count()) === 1,
+  );
+
+  // 起日與迄日**都設成昨天**：昨天那筆要在、今天那筆要不在。
+  // 只填起日的話，迄日壞掉（或整個沒送出）照樣會通過。
+  const yesterday = psql("SELECT (now() - interval '1 day')::date");
   await page.getByLabel("起日").fill(yesterday);
+  await page.getByLabel("迄日").fill(yesterday);
   await page.getByRole("button", { name: "查詢" }).click();
   await row.first().waitFor({ timeout: 20000 });
   const rowText = (await row.first().textContent()) ?? "";
-  ok("用日期範圍也查得到", rowText.includes("已作廢"), `起日 ${yesterday}；${rowText.trim().slice(0, 40)}`);
+  ok(
+    "日期範圍查得到昨天那筆，且不含今天那筆",
+    rowText.includes("已作廢") && (await todayRow.count()) === 0,
+    `${yesterday}~${yesterday}；${rowText.trim().slice(0, 36)}`,
+  );
+
+  // 單號打成 #421054730 是店員最可能的輸入（畫面到處這樣顯示）——必須查得到。
+  await page.getByRole("button", { name: "回今日" }).click();
+  await todayRow.first().waitFor({ timeout: 20000 });
+  await page.getByLabel("交易編號").fill(`#${sale.id}`);
+  await page.getByRole("button", { name: "查詢" }).click();
+  await row.first().waitFor({ timeout: 20000 });
+  ok("交易編號帶 # 也查得到", true, `#${sale.id}`);
   await page.screenshot({ path: join(SHOTS, "04-by-date.png") });
 } catch (err) {
   ok(`未預期錯誤：${err.message}`, false);
