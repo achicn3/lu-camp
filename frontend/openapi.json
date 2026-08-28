@@ -19176,9 +19176,26 @@
     },
     "/api/v1/sales": {
       "get": {
-        "description": "交易紀錄列表。\n\n`invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），\n且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，\n只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，\n客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。",
+        "description": "交易紀錄列表。\n\n`sale_id`：依交易編號精確查一筆，**不受日期範圍限制**（給的日期一律忽略）。\n交易紀錄畫面預設只查今日；客人隔天回來退貨時，店員若不能用單號把那筆叫出來，\n就無法退貨、作廢或補印。查無此單回**空清單**而非 404——畫面要說「查無這筆交易」，\n不是看起來壞掉。範圍一樣限本店（§4）。\n\n`invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），\n且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，\n只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，\n客端不得自行從 invoice_status 推導（電子發票關閉時根本沒有發票，按了只會 404）。",
         "operationId": "listSales",
         "parameters": [
+          {
+            "in": "query",
+            "name": "sale_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sale Id"
+            }
+          },
           {
             "in": "query",
             "name": "from",

@@ -1177,20 +1177,39 @@ export default function SalesPage() {
   // 客端從 sale.invoice_status 推導則會把「電子發票關閉、根本沒有發票」的單也列進來，
   // 按下去只會 404。切換時 queryKey 必須跟著換，否則會沿用另一模式的快取。
   const [pendingInvoiceOnly, setPendingInvoiceOnly] = useState(false);
+  // 歷史查單（QA BUG-003）：預設仍只看今日——那是最常用的。但客人隔天回來退貨時，
+  // 店員必須找得到昨天那筆，否則退貨/作廢/補印在畫面上全都做不到。
+  // 兩種找法：交易編號精確查（不受日期限制），或指定日期範圍。
+  const [searchInput, setSearchInput] = useState("");
+  const [fromInput, setFromInput] = useState("");
+  const [toInput, setToInput] = useState("");
+  const [search, setSearch] = useState<
+    { kind: "today" } | { kind: "id"; saleId: number } | { kind: "range"; from: string; to: string }
+  >({ kind: "today" });
   // **必須可分頁**（docs/36）：「只看未開立」不限日期，會隨時間累積；後端 limit 上限 200，
   // 只抓第一頁的話第 201 筆之後就從**唯一的救援入口**永久消失——而那些正是拖最久、
   // 最該處理的單，畫面還不會說被截斷了（Codex 對抗審查第十一輪 medium）。
   const sales = useInfiniteQuery({
-    queryKey: ["sales", pendingInvoiceOnly ? "registerable" : "today"],
+    queryKey: [
+      "sales",
+      pendingInvoiceOnly ? "registerable" : search.kind,
+      pendingInvoiceOnly ? "" : JSON.stringify(search),
+    ],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
-      const { data, error } = await api.GET("/api/v1/sales", {
-        params: {
-          query: pendingInvoiceOnly
-            ? { invoice_registerable: true, limit: SALES_PAGE_SIZE, offset: pageParam }
-            : { from: startOfTodayIso(), limit: SALES_PAGE_SIZE, offset: pageParam },
-        },
-      });
+      const paging = { limit: SALES_PAGE_SIZE, offset: pageParam };
+      const query = pendingInvoiceOnly
+        ? { invoice_registerable: true, ...paging }
+        : search.kind === "id"
+          ? { sale_id: search.saleId, ...paging }
+          : search.kind === "range"
+            ? {
+                ...(search.from ? { from: `${search.from}T00:00:00+08:00` } : {}),
+                ...(search.to ? { to: `${search.to}T23:59:59+08:00` } : {}),
+                ...paging,
+              }
+            : { from: startOfTodayIso(), ...paging };
+      const { data, error } = await api.GET("/api/v1/sales", { params: { query } });
       if (!data) throw new Error(extractDetail(error) ?? "讀取交易紀錄失敗");
       return data;
     },
@@ -1214,6 +1233,61 @@ export default function SalesPage() {
       )}
       {kitchenNote !== null && (
         <p className={reprintKitchen.isError ? "form-error" : "hint"}>{kitchenNote}</p>
+      )}
+      <form
+        className="sales-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const id = Number(searchInput.trim());
+          if (searchInput.trim() !== "" && Number.isInteger(id) && id > 0) {
+            setSearch({ kind: "id", saleId: id });
+          } else if (fromInput || toInput) {
+            setSearch({ kind: "range", from: fromInput, to: toInput });
+          } else {
+            setSearch({ kind: "today" });
+          }
+        }}
+      >
+        <label className="field">
+          <span className="field-label">交易編號</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={searchInput}
+            placeholder="例如 421054730"
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">起日</span>
+          <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} />
+        </label>
+        <label className="field">
+          <span className="field-label">迄日</span>
+          <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} />
+        </label>
+        <button type="submit" className="btn">
+          查詢
+        </button>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => {
+            setSearchInput("");
+            setFromInput("");
+            setToInput("");
+            setSearch({ kind: "today" });
+          }}
+        >
+          回今日
+        </button>
+      </form>
+      {!pendingInvoiceOnly && search.kind !== "today" && (
+        <p role="status" className="form-note">
+          {search.kind === "id"
+            ? `目前顯示交易編號 ${search.saleId} 的查詢結果（不限日期）。`
+            : `目前顯示 ${search.from || "最早"} 至 ${search.to || "今天"} 的交易。`}
+        </p>
       )}
       <label className="field field-toggle sales-invoice-filter">
         <input

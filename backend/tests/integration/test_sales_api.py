@@ -372,6 +372,70 @@ async def test_list_sales_with_date_range(
     assert future.json() == []
 
 
+async def test_list_sales_by_sale_id_finds_a_sale_outside_the_date_window(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """依交易編號查單**不受日期限制**。
+
+    交易紀錄畫面預設只查今日；客人隔天回來退貨時，店員若不能用單號把那筆叫出來，
+    就無法退貨、作廢或補印——後端有日期能力卻沒有單號入口（QA BUG-003）。
+    """
+    token, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    created = await client.post(
+        "/api/v1/sales", json={"lines": [_catalog_line(cat, 1)]}, headers=_auth(token, idem="id1")
+    )
+    sale_id = created.json()["id"]
+
+    # 刻意搭配一個**查不到這筆**的日期窗，證明單號優先、不被日期擋掉
+    resp = await client.get(
+        f"/api/v1/sales?sale_id={sale_id}&from=2999-01-01T00:00:00Z",
+        headers=_auth(token),
+    )
+
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert [row["id"] for row in rows] == [sale_id]
+
+
+async def test_list_sales_by_sale_id_returns_empty_for_unknown_id(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """查無此單回空清單（不是 404）——畫面要顯示「查無這筆交易」，不是壞掉。"""
+    token, _, _ = await _seed(db_session)
+    resp = await client.get("/api/v1/sales?sale_id=99999999", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_list_sales_by_sale_id_does_not_leak_across_stores(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """單號查詢一樣受本店範圍限制（§4）：別店的單號查不到。"""
+    token_a, store_a, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_a, price="100", qty=10)
+    created = await client.post(
+        "/api/v1/sales", json={"lines": [_catalog_line(cat, 1)]}, headers=_auth(token_a, idem="x")
+    )
+    sale_id = created.json()["id"]
+
+    other_store = Store(name="別間店")
+    db_session.add(other_store)
+    await db_session.flush()
+    other_clerk = User(
+        store_id=other_store.id, username="other-clerk", password_hash="h", role=UserRole.CLERK
+    )
+    db_session.add(other_clerk)
+    await db_session.flush()
+    token_b = encode_access_token(
+        user_id=other_clerk.id, role="CLERK", store_id=other_store.id
+    )
+
+    resp = await client.get(f"/api/v1/sales?sale_id={sale_id}", headers=_auth(token_b))
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 async def test_list_sales_rejects_naive_datetime_params(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

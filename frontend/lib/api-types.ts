@@ -2193,6 +2193,11 @@ export interface paths {
          * List Sales
          * @description 交易紀錄列表。
          *
+         *     `sale_id`：依交易編號精確查一筆，**不受日期範圍限制**（給的日期一律忽略）。
+         *     交易紀錄畫面預設只查今日；客人隔天回來退貨時，店員若不能用單號把那筆叫出來，
+         *     就無法退貨、作廢或補印。查無此單回**空清單**而非 404——畫面要說「查無這筆交易」，
+         *     不是看起來壞掉。範圍一樣限本店（§4）。
+         *
          *     `invoice_registerable=true`（docs/36）：只列**可登記手開發票**的銷售（發票仍待開立），
          *     且**不限日期**——這是開立失敗的單離開 POS 完成畫面後唯一找得回來的途徑，
          *     只查今日會讓昨天沒收斂的單永遠消失。資格由後端以實際發票狀態判定，
@@ -11274,6 +11279,7 @@ export interface operations {
     listSales: {
         parameters: {
             query?: {
+                sale_id?: number | null;
                 from?: components["schemas"]["AwareDateTime"] | null;
                 to?: components["schemas"]["AwareDateTime"] | null;
                 limit?: number;

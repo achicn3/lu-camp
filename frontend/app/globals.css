@@ -3519,3 +3519,15 @@ body {
   line-height: 1.25rem;
   text-align: center;
 }
+
+/* 交易紀錄的歷史查單列：單號／日期範圍與按鈕並排，窄螢幕自動換行。 */
+.sales-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.sales-search .field {
+  flex: 0 1 12rem;
+}
