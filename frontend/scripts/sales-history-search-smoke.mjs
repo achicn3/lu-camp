@@ -153,8 +153,11 @@ try {
 
   // 以**整列**定位而不是某顆按鈕：作廢之後該列的按鈕會變（補印就消失了），
   // 用按鈕當「這筆在不在畫面上」的判準會在後面誤判。
-  const row = page.locator("tbody tr").filter({ hasText: String(sale.id) });
-  const todayRow = page.locator("tbody tr").filter({ hasText: String(todaySale.id) });
+  // **限定在交易清單那張表**：店長畫面還有 LINE Pay 待對帳表，用全頁 tbody tr
+  // 會把它的列一起算進來而誤紅（Codex 第二輪）。
+  const salesRows = page.locator("table.sales-list tbody tr");
+  const row = salesRows.filter({ hasText: String(sale.id) });
+  const todayRow = salesRows.filter({ hasText: String(todaySale.id) });
   await todayRow.first().waitFor({ timeout: 20000 });
   ok(
     "預設（今日）看得到今天那筆、看不到昨天那筆",
@@ -167,7 +170,7 @@ try {
   await page.getByRole("button", { name: "查詢" }).click();
   await row.first().waitFor({ timeout: 20000 });
   // **只能有那一列**：若單號查詢壞成回傳全部歷史交易，只驗「目標列存在」照樣會過。
-  const idModeRows = await page.locator("tbody tr").count();
+  const idModeRows = await salesRows.count();
   ok("用交易編號查得到、且結果只有那一筆", idModeRows === 1, `列數 ${idModeRows}`);
   await page.screenshot({ path: join(SHOTS, "02-by-id.png") });
 
@@ -191,7 +194,11 @@ try {
 
   // 起日與迄日**都設成昨天**：昨天那筆要在、今天那筆要不在。
   // 只填起日的話，迄日壞掉（或整個沒送出）照樣會通過。
-  const yesterday = psql("SELECT (now() - interval '1 day')::date");
+  // 營業日固定台北時區。用 DB session 時區算「昨天」的話，資料庫是 UTC 時，
+  // 台北 00:00–07:59 跑這支會算成前一天而誤紅（Codex 第二輪）。
+  const yesterday = psql(
+    "SELECT ((now() AT TIME ZONE 'Asia/Taipei') - interval '1 day')::date",
+  );
   await page.getByLabel("起日").fill(yesterday);
   await page.getByLabel("迄日").fill(yesterday);
   await page.getByRole("button", { name: "查詢" }).click();
@@ -202,6 +209,7 @@ try {
     rowText.includes("已作廢") && (await todayRow.count()) === 0,
     `${yesterday}~${yesterday}；${rowText.trim().slice(0, 36)}`,
   );
+  await page.screenshot({ path: join(SHOTS, "04-by-date.png") });
 
   // 單號打成 #421054730 是店員最可能的輸入（畫面到處這樣顯示）——必須查得到。
   await page.getByRole("button", { name: "回今日" }).click();
@@ -210,7 +218,7 @@ try {
   await page.getByRole("button", { name: "查詢" }).click();
   await row.first().waitFor({ timeout: 20000 });
   ok("交易編號帶 # 也查得到", true, `#${sale.id}`);
-  await page.screenshot({ path: join(SHOTS, "04-by-date.png") });
+  await page.screenshot({ path: join(SHOTS, "05-by-hash-id.png") });
 } catch (err) {
   ok(`未預期錯誤：${err.message}`, false);
 } finally {
