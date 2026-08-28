@@ -269,14 +269,17 @@ async function main() {
       expect: [200],
     });
     const reportedCash = String(dailyCash.total_cash_sales ?? "");
-    const sessionIds = (dailyCash.sessions ?? []).map((row) => Number(row.id)).filter(Boolean);
-    const expectedCash =
-      sessionIds.length > 0
-        ? psql(
-            `SELECT COALESCE(SUM(amount),0)::bigint FROM cash_movements
-             WHERE reason='SALE_IN' AND cash_session_id IN (${sessionIds.join(",")})`,
-          )
-        : "0";
+    // 欄位名以實際 schema 為準：報表回 sessions[].session_id、cash_movements 是
+    // session_id / type（不是 id / reason）。寫錯會讓比對永遠拿 0 去對，變成偽陽性
+    // 失敗、或在報表壞成回 0 時反而全綠（Codex 第四輪）。
+    const sessionIds = (dailyCash.sessions ?? [])
+      .map((row) => Number(row.session_id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    if (sessionIds.length === 0) throw new Error("日結沒有回傳任何班別，無法獨立重算現金銷售");
+    const expectedCash = psql(
+      `SELECT COALESCE(SUM(amount),0)::bigint FROM cash_movements
+       WHERE type='SALE_IN' AND session_id IN (${sessionIds.join(",")})`,
+    );
     check(
       "LP10 daily cash report equals cash-drawer SALE_IN (LINE Pay not counted as cash)",
       reportedCash !== "" && Number(reportedCash) === Number(expectedCash),

@@ -10,9 +10,11 @@ G0401 折讓**只進佇列、沒有任何東西會送**——後端啟動只跑�
 開立的補救走人工（發票佇列頁的「重新開立」）。
 """
 
+import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select, text, update
@@ -26,7 +28,7 @@ from app.modules.einvoice.background_service import (
     AUTO_SEND_RETRY_INTERVAL,
     EInvoiceBackgroundService,
 )
-from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice
+from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
 from app.modules.sales.inputs import SaleLineInput
@@ -75,11 +77,17 @@ class _RecordingTransport:
 
     def __init__(self, *, f0501: object | None = None) -> None:
         self.calls: list[str] = []
+        self.forms: list[tuple[str, dict[str, str]]] = []
         self._f0501 = f0501 if f0501 is not None else _F0501_OK
         self._queries = 0
 
     async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
         self.calls.append(url)
+        self.forms.append((url, form))
+        if url.endswith("/json/allowance_query"):
+            return {"code": 71, "msg": "查無資料"}
+        if url.endswith("/json/g0401"):
+            return {"code": 0, "msg": ""}
         if url.endswith("/json/invoice_query"):
             self._queries += 1
             return dict(_QUERY_NOT_FOUND) if self._queries == 1 else dict(_QUERY_INVOICE_OPEN)
@@ -446,5 +454,66 @@ async def test_scope_guard_is_enforced_under_the_row_lock() -> None:
         async with factory() as session:
             still = await session.get(EInvoiceUploadQueue, queue_id)
             assert still is not None and still.status is UploadStatus.PENDING
+    finally:
+        await _truncate()
+
+
+async def test_allowance_declares_the_date_it_happened_not_the_send_date() -> None:
+    """折讓日必須是**折讓發生那天**，不是我們把它送出去那天。
+
+    自動送出上線前這條踩不到（根本沒人送）；移除年齡上限後，若因平台故障或店休積壓
+    了幾週，用送出日會把折讓申報進錯的期別——跨月即申報錯誤（Codex 第四輪 P1）。
+    """
+    factory = get_sessionmaker()
+    try:
+        transport = _RecordingTransport()
+        async with factory() as session:
+            store_id = await _seed_issued_and_voided_sale(session, transport)
+
+        happened_at = datetime.now(UTC) - timedelta(days=40)
+        async with factory() as session:
+            invoice = await session.scalar(select(Invoice).where(Invoice.store_id == store_id))
+            assert invoice is not None
+            allowance = InvoiceAllowance(
+                store_id=store_id,
+                invoice_id=invoice.id,
+                net=Decimal(100),
+                tax=Decimal(5),
+                total=Decimal(105),
+            )
+            session.add(allowance)
+            await session.flush()
+            queue_row = EInvoiceUploadQueue(
+                store_id=store_id,
+                action=EInvoiceAction.ALLOWANCE,
+                message_type=EInvoiceMessageType.G0401,
+                allowance_id=allowance.id,
+                status=UploadStatus.PENDING,
+            )
+            session.add(queue_row)
+            await session.flush()
+            await session.execute(
+                text("UPDATE invoice_allowances SET created_at = :ts WHERE id = :id"),
+                {"ts": happened_at, "id": allowance.id},
+            )
+            await session.commit()
+            queue_id = queue_row.id
+
+        transport.calls.clear()
+        transport.forms.clear()
+        async with factory() as session:
+            svc = EInvoiceService(session)
+            client = await _client_factory(transport)(session, store_id)
+            await svc.send_via_amego(
+                store_id, queue_id, client=client, allowed_message_types=AUTO_SEND_MESSAGE_TYPES
+            )
+            await session.commit()
+
+        g0401 = next(form for url, form in transport.forms if url.endswith("/json/g0401"))
+        payload = json.loads(g0401["data"])[0]
+        expected = happened_at.astimezone(ZoneInfo("Asia/Taipei")).date().strftime("%Y%m%d")
+        today = datetime.now(UTC).astimezone(ZoneInfo("Asia/Taipei")).date().strftime("%Y%m%d")
+        assert expected != today  # 前提成立，否則這條測試沒有鑑別力
+        assert payload["AllowanceDate"] == expected
     finally:
         await _truncate()

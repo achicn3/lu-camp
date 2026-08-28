@@ -1300,9 +1300,17 @@ class EInvoiceService:
             invoice = await self._repo.get_invoice(store_id, allowance.invoice_id)
             if invoice is None:
                 raise InvoiceNotFound(f"發票不存在或不屬於本店：id={allowance.invoice_id}")
+            # 折讓日＝**折讓發生的那天**，不是我們把它送出去的那天（Codex 第四輪 P1）。
+            # 自動送出上線前這條沒被踩到（根本沒人送）；現在若因平台故障或店休積壓了
+            # 幾週，用送出日會把折讓申報進錯的期別——跨月即申報錯誤。
+            allowance_created = (
+                allowance.created_at
+                if allowance.created_at.tzinfo is not None
+                else allowance.created_at.replace(tzinfo=UTC)
+            )
             return build_g0401_data(
                 number=allowance_number(store_id=store_id, allowance_id=allowance.id),
-                allowance_date=datetime.now(UTC).astimezone(_TAIPEI_TZ).date(),
+                allowance_date=allowance_created.astimezone(_TAIPEI_TZ).date(),
                 invoice=invoice,
                 net=Decimal(allowance.net),
                 tax=Decimal(allowance.tax),

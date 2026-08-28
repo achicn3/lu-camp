@@ -175,10 +175,12 @@ try {
       const msg = (await page.getByRole("status").textContent()) ?? "";
       ok("按下立即送出後真的送交平台", msg.includes("已送交平台"), msg.trim().slice(0, 80));
     } else {
-      // 背景先送掉了：那就驗「畫面如實反映已送出」，並明講這一輪沒走到按鈕路徑。
+      // 背景先送掉了 → **按鈕路徑這輪沒驗到**。單店單機下背景一分鐘一輪會正常觸發，
+      // 若把這種情況記成通過，按鈕或送出端點壞掉時仍會全綠（Codex 第四輪）。
+      // 記為失敗並明講原因，讓人重跑；不做「反正有送出去就算過」的模糊放行。
       ok(
-        `背景已自動送出（${queueStatus}），畫面如實顯示；本輪未驗按鈕路徑`,
-        rowText.includes("已送出"),
+        `本輪未驗到按鈕路徑（背景已先送出，狀態 ${queueStatus}）——請重跑`,
+        false,
         rowText.trim().slice(0, 60),
       );
     }
