@@ -54,6 +54,7 @@ let browser;
 let token;
 let restoreEInvoice = false;
 let invoiceNo = null;
+let voidQueueId = null;
 try {
   const login = await api("/api/v1/auth/login", {
     method: "POST",
@@ -122,18 +123,11 @@ try {
   invoiceNo = invoice.invoice_no;
   await api(`/api/v1/sales/${sale.id}/void`, { method: "POST", token, expect: [200] });
 
-  // **把這一列移出背景自動送出的射程**（把建立時間往回推超過年齡上限）。
-  // 不這麼做的話會跟背景排程賽跑：背景先送 → 按鈕路徑被略過（掩蓋按鈕/API 壞掉）；
-  // 或畫面讀到 PENDING 之後背景才送 → 人工按下去吃 409、變成偶發失敗（Codex 第二輪）。
-  const voidQueueId = psql(
+  voidQueueId = psql(
     `SELECT q.id FROM einvoice_upload_queue q JOIN invoices i ON i.id=q.invoice_id
      WHERE i.invoice_no='${invoiceNo}' AND q.action='VOID' ORDER BY q.id DESC LIMIT 1`,
   );
   if (!voidQueueId) throw new Error("作廢後沒有產生 F0501 待送出項目（前置資料不成立）");
-  psql(
-    `UPDATE einvoice_upload_queue SET created_at = now() - interval '30 days',
-     updated_at = now() - interval '30 days' WHERE id = ${Number(voidQueueId)}`,
-  );
   ok("前置：開立並作廢一筆，產生待送出的作廢", Boolean(invoiceNo), `${invoiceNo} / #${voidQueueId}`);
 
   browser = await chromium.launch();
@@ -166,23 +160,46 @@ try {
   await page.screenshot({ path: join(SHOTS, "02-row.png") });
 
   if (found) {
-    // 前置已把它移出背景射程，所以這裡**一定**看得到待送出與送出鈕；
-    // 看不到就是頁面或狀態顯示壞了，直接紅，不做「可能是背景先送掉」的推測。
+    // 背景排程約一分鐘一輪，可能在這幾秒內先把它送掉。**以資料庫的實際狀態決定驗哪條
+    // 路徑**，兩條都是真的斷言——不做「可能是背景送的吧」這種模糊放行（Codex 第三輪）。
+    const queueStatus = psql(
+      `SELECT status FROM einvoice_upload_queue WHERE id=${Number(voidQueueId)}`,
+    );
     const rowText = (await row.first().textContent()) ?? "";
-    ok("該列狀態為待送出（已排除背景賽跑）", rowText.includes("待送出"), rowText.trim().slice(0, 60));
-
-    const sendButton = row.first().getByRole("button", { name: /立即送出第 \d+ 筆/ });
-    ok("待送出的作廢列有「立即送出」可按", (await sendButton.count()) > 0);
-    await sendButton.click();
-    await page.getByRole("status").waitFor({ timeout: 30000 });
-    const msg = (await page.getByRole("status").textContent()) ?? "";
-    ok("按下立即送出後真的送交平台", msg.includes("已送交平台"), msg.trim().slice(0, 80));
+    if (queueStatus === "PENDING") {
+      ok("該列顯示為待送出", rowText.includes("待送出"), rowText.trim().slice(0, 60));
+      const sendButton = row.first().getByRole("button", { name: /立即送出第 \d+ 筆/ });
+      ok("待送出的作廢列有「立即送出」可按", (await sendButton.count()) > 0);
+      await sendButton.click();
+      await page.getByRole("status").waitFor({ timeout: 30000 });
+      const msg = (await page.getByRole("status").textContent()) ?? "";
+      ok("按下立即送出後真的送交平台", msg.includes("已送交平台"), msg.trim().slice(0, 80));
+    } else {
+      // 背景先送掉了：那就驗「畫面如實反映已送出」，並明講這一輪沒走到按鈕路徑。
+      ok(
+        `背景已自動送出（${queueStatus}），畫面如實顯示；本輪未驗按鈕路徑`,
+        rowText.includes("已送出"),
+        rowText.trim().slice(0, 60),
+      );
+    }
     await page.screenshot({ path: join(SHOTS, "03-sent.png") });
   }
 } catch (err) {
   ok(`未預期錯誤：${err.message}`, false);
 } finally {
   await browser?.close();
+  // 測試中途失敗時，別把一筆沒送出的作廢留在庫裡假裝是真的待辦。
+  if (voidQueueId) {
+    try {
+      const left = psql(`SELECT status FROM einvoice_upload_queue WHERE id=${Number(voidQueueId)}`);
+      if (left === "PENDING") {
+        psql(`DELETE FROM einvoice_upload_queue WHERE id=${Number(voidQueueId)}`);
+        console.log(`已清理未送出的測試佇列列 #${voidQueueId}`);
+      }
+    } catch (err) {
+      console.error("清理測試佇列列失敗：", err.message);
+    }
+  }
   if (restoreEInvoice && token) {
     try {
       await api("/api/v1/settings", { method: "PATCH", token, body: { einvoice_enabled: false } });

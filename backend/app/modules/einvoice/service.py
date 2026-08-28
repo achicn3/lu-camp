@@ -1700,7 +1700,6 @@ class EInvoiceService:
         *,
         actions: Sequence[EInvoiceAction],
         message_types: Sequence[EInvoiceMessageType],
-        created_after: datetime,
         idle_since: datetime,
         limit: int,
     ) -> list[EInvoiceUploadQueue]:
@@ -1708,7 +1707,6 @@ class EInvoiceService:
         return await self._repo.list_due_auto_send_items(
             actions=actions,
             message_types=message_types,
-            created_after=created_after,
             idle_since=idle_since,
             limit=limit,
         )

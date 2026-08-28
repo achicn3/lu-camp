@@ -240,7 +240,6 @@ class EInvoiceRepository:
         *,
         actions: Sequence[EInvoiceAction],
         message_types: Sequence[EInvoiceMessageType],
-        created_after: datetime,
         idle_since: datetime,
         limit: int,
     ) -> list[EInvoiceUploadQueue]:
@@ -261,7 +260,6 @@ class EInvoiceRepository:
                 # 約束保證配對，若只篩 action，一列 `action=VOID, message_type=F0401`
                 # 就會讓背景真的去開一張發票——安全界線必須釘在會生效的那一欄上。
                 EInvoiceUploadQueue.message_type.in_(list(message_types)),
-                EInvoiceUploadQueue.created_at >= created_after,
                 or_(
                     # 從未嘗試過（未認領）→ 立刻送，不必等退避。店長按下作廢後，
                     # 平台作廢應該是「下一輪就送出」，而不是白等一個退避間隔。

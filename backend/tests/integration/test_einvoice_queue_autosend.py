@@ -22,7 +22,6 @@ from app.core.db import get_sessionmaker
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.amego import AmegoClient, AmegoTransport
 from app.modules.einvoice.background_service import (
-    AUTO_SEND_MAX_AGE,
     AUTO_SEND_MESSAGE_TYPES,
     AUTO_SEND_RETRY_INTERVAL,
     EInvoiceBackgroundService,
@@ -282,29 +281,31 @@ async def test_pending_issue_is_never_sent_automatically() -> None:
         await _truncate()
 
 
-async def test_items_older_than_max_age_are_left_for_a_human() -> None:
-    """陳年待送出不自動補送：越舊越可能是資料殘留或另有內情，交給人判斷。"""
+async def test_very_old_pending_void_is_still_sent() -> None:
+    """陳年的待送出**照樣要送**——放越久代表平台上那張發票已經有效越久。
+
+    曾經有過 7 天的年齡上限（為了防歷史待開立列被整批補送），但那件事由訊息型別守衛
+    擋住即可；上限反而讓舊的作廢永遠沒人送、紅點也照不到（Codex 第三輪 P1）。
+    """
     factory = get_sessionmaker()
     try:
         transport = _RecordingTransport()
         async with factory() as session:
             store_id = await _seed_issued_and_voided_sale(session, transport)
             void_row = await _queue_row(session, store_id, EInvoiceAction.VOID)
-            await _age_queue_row(
-                session, void_row.id, created_ago=AUTO_SEND_MAX_AGE + timedelta(days=1)
-            )
+            await _age_queue_row(session, void_row.id, created_ago=timedelta(days=45))
         transport.calls.clear()
 
         sent, failed = await EInvoiceBackgroundService.send_due_queue_items_once(
             client_factory=_client_factory(transport)
         )
 
-        assert (sent, failed) == (0, 0)
-        assert transport.calls == []
+        assert (sent, failed) == (1, 0)
+        assert "f0501" in transport.endpoints
         async with factory() as session:
             assert (
                 await _queue_row(session, store_id, EInvoiceAction.VOID)
-            ).status is UploadStatus.PENDING
+            ).status is UploadStatus.UPLOADED
     finally:
         await _truncate()
 
@@ -408,6 +409,11 @@ async def test_scope_guard_is_enforced_under_the_row_lock() -> None:
 
     模擬「選中之後、送出之前被改成 F0401」：直接把列的 message_type 改掉再送，
     背景必須拒絕，而不是照著新的型別去打開立端點（Codex 第二輪 P1）。
+
+    **這條守不到的**：它在呼叫前就改好欄位，所以就算守衛被搬回無鎖的 preview 之後、
+    取鎖之前，測試一樣會過。要真正釘住「守衛在鎖內」得造出鎖時序，代價遠高於它防的
+    情境（要有人在那個毫秒窗口手改資料庫）——單店單機不值得（店主 2026-08-28 裁示）。
+    它確實守到的是：型別不符就拒送、而且絕不打開立端點。
     """
     factory = get_sessionmaker()
     try:

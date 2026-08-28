@@ -6,6 +6,11 @@ G0401 折讓只會被排進佇列，先前沒有任何東西會把它們送出�
 平台上那張仍然有效（向 Amego 逐張查證 `invoice_status=99`、`cancel_date=0`），
 帳上與申報對不起來，而且沒有任何畫面會提醒。
 
+**沒有年齡上限**：曾經有過（7 天），但它是為了防那批歷史待開立列被整批補送而加的——
+而那件事早已由訊息型別守衛擋住。對作廢與折讓來說**越舊的越該送**：一筆放了三週沒送出的
+作廢，代表平台上那張發票已經有效了三週。上限只會讓它永遠沒人送、也沒人看得到
+（Codex 第三輪 P1）。真的舊到平台拒收，會轉成「平台退回」讓人接手，那才是正確的流向。
+
 **刻意只送作廢與折讓**（`AUTO_SEND_ACTIONS`）：
 - 開立牽涉字軌配號與客人當下要拿到的發票，事後自動補開可能在客人早就離店後才成立。
 - 佇列裡可能留有大量歷史待開立列（本店 `lucamp_manual` 實測 17,692 筆種子殘留），
@@ -37,13 +42,6 @@ AUTO_SEND_MESSAGE_TYPES = (EInvoiceMessageType.F0501, EInvoiceMessageType.G0401)
 `_AMEGO_ENDPOINTS`）。`action` 只是我們自己的分類，兩欄之間沒有 DB 約束保證配對；
 安全界線必須釘在會生效的那一欄上，否則一列 `action=VOID, message_type=F0401`
 就能讓背景真的去開一張發票。送出前另有一道同義的再確認（見 `send_due_queue_items_once`）。
-"""
-
-AUTO_SEND_MAX_AGE = timedelta(days=7)
-"""只自動送出這段時間內建立的佇列列。
-
-越舊的待送出越可能是資料殘留或另有內情（平台早已作廢、單據已人工處理…），
-自動補送的風險大於效益，交給人在發票佇列頁判斷。
 """
 
 AUTO_SEND_RETRY_INTERVAL = timedelta(minutes=5)
@@ -82,7 +80,6 @@ class EInvoiceBackgroundService:
             due = await EInvoiceService(session).list_due_auto_send_items(
                 actions=AUTO_SEND_ACTIONS,
                 message_types=AUTO_SEND_MESSAGE_TYPES,
-                created_after=observed_at - AUTO_SEND_MAX_AGE,
                 idle_since=observed_at - AUTO_SEND_RETRY_INTERVAL,
                 limit=AUTO_SEND_BATCH_SIZE,
             )

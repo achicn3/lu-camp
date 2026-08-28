@@ -74,13 +74,17 @@ async function main() {
   let token;
   let settingsWasEnabled = false;
   let originalFeePct = null;
+  let settingsRead = false;
   try {
     const { data: login } = await api("/api/v1/auth/login", {
       method: "POST",
       body: { username: "dev-manager", password: "dev-test-123456" },
     });
     token = login.access_token;
+    // **讀到才記**：讀取失敗時若沿用預設 false，finally 會把原本開著的 LINE Pay 關掉
+    // （Codex 第三輪）。讀不到就不還原，總比亂改設定好。
     const { data: originalSettings } = await api("/api/v1/settings", { token });
+    settingsRead = true;
     settingsWasEnabled = Boolean(originalSettings.linepay_enabled);
     // **費率也要記下來還原**：本腳本會把它改成 1.5%，只還原開關的話，QA 庫的費率會被
     // 永久改掉；而且原本就啟用時舊版連還原都不做（Codex 第二輪）。
@@ -256,22 +260,27 @@ async function main() {
         psql(`SELECT COUNT(*) FROM linepay_transactions WHERE sale_id=${Number(sale.id)}`) === "1",
     );
 
-    // LP10：日結**現金**收入不得包含這筆 LINE Pay 銷售。只斷言 HTTP 200 等於什麼都沒驗——
-    // 報表就算把它錯算進現金也會通過（Codex 第二輪指出的空斷言）。改為以「作廢前後的
-    // 現金銷售額不變」證明它從未被計入。
+    // LP10：日結的現金銷售額必須**從錢櫃流水獨立重算**再比對。只看欄位非空、或只看
+    // 「本單無錢櫃異動」都證明不了報表沒把 LINE Pay 金額錯加進現金——那是換個花樣的
+    // 空斷言（Codex 第三輪）。這裡拿當日開帳班別的 SALE_IN 總額直接對報表。
     const today = taipeiDateForScript();
     const { data: dailyCash } = await api(`/api/v1/reports/daily-cash?date=${today}`, {
       token,
       expect: [200],
     });
-    const cashSalesBefore = String(dailyCash.total_cash_sales ?? "");
-    const drawerMovements = psql(
-      `SELECT COUNT(*) FROM cash_movements WHERE ref_type='sale' AND ref_id=${Number(sale.id)}`,
-    );
+    const reportedCash = String(dailyCash.total_cash_sales ?? "");
+    const sessionIds = (dailyCash.sessions ?? []).map((row) => Number(row.id)).filter(Boolean);
+    const expectedCash =
+      sessionIds.length > 0
+        ? psql(
+            `SELECT COALESCE(SUM(amount),0)::bigint FROM cash_movements
+             WHERE reason='SALE_IN' AND cash_session_id IN (${sessionIds.join(",")})`,
+          )
+        : "0";
     check(
-      "LP10 daily cash report excludes this non-cash sale",
-      cashSalesBefore !== "" && drawerMovements === "0",
-      { cash_sales: cashSalesBefore, drawer_movements_for_sale: drawerMovements },
+      "LP10 daily cash report equals cash-drawer SALE_IN (LINE Pay not counted as cash)",
+      reportedCash !== "" && Number(reportedCash) === Number(expectedCash),
+      { reported: reportedCash, recomputed_from_drawer: expectedCash, sale_total: total },
     );
 
     const { status: voidStatus, data: voided } = await api(`/api/v1/sales/${sale.id}/void`, {
@@ -327,7 +336,7 @@ async function main() {
     evidence.error = error instanceof Error ? error.message : String(error);
     console.error(`ABORT ${evidence.error}`);
   } finally {
-    if (token) {
+    if (token && settingsRead) {
       try {
         const restore = {};
         if (!settingsWasEnabled) restore.linepay_enabled = false;
@@ -352,7 +361,18 @@ async function main() {
     writeFileSync(OUT, `${JSON.stringify(evidence, null, 2)}\n`, "utf8");
   }
 
-  if (evidence.error || results.some((row) => !row.pass)) process.exitCode = 1;
+  // **還原失敗必須讓腳本失敗**：所有驗收都過卻以 0 結束，你會以為沒事，
+  // 而 LINE Pay 的開關/費率其實還停在測試值（Codex 第三輪）。
+  if (evidence.setting_restored === false) {
+    console.error(`還原設定失敗：${evidence.setting_restore_error ?? "未知原因"}`);
+  }
+  if (
+    evidence.error ||
+    results.some((row) => !row.pass) ||
+    evidence.setting_restored === false
+  ) {
+    process.exitCode = 1;
+  }
 }
 
 await main();
