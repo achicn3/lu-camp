@@ -1455,17 +1455,28 @@ async def test_never_printed_proof_prints_as_an_original(db_session: AsyncSessio
     assert _print_type(transport) == 1
 
 
-async def test_proof_printed_once_then_prints_as_a_reprint(db_session: AsyncSession) -> None:
-    """已印過 → **補印**（加註「補印」二字，須併同原聯兌獎）。"""
+async def test_proof_is_always_printed_without_the_reprint_mark(
+    db_session: AsyncSession,
+) -> None:
+    """**一律印正本、不加註「補印」二字**（店主 2026-08-29 裁示）。
+
+    要點 §26 的「補印」註記本意是讓重複的那張不能再兌獎；拿掉之後，避免重複兌領的
+    責任回到營業人自己身上。店主已明確裁示「無論哪種情況都不要在發票上出現補印字眼」
+    ——現實裡客人弄丟、缺紙漏印的情況遠比重複兌獎常見，而印出一張寫著「補印」的紙
+    給沒拿到過正本的客人，那張就永遠兌不了獎。
+
+    `is_reprint` 仍**如實**回報「這張先前印過了」，供畫面提醒店員；只是紙上不加註。
+    """
     store_id, sale_id, svc = await _issued_sale(db_session)
     await svc.mark_proof_printed(store_id, sale_id)
     transport = _ScriptedTransport(dict(_PRINT_OK))
 
-    await svc.reprint_payload_for_sale(
+    payload = await svc.reprint_payload_for_sale(
         store_id, sale_id, client_factory=_awaitable_client(transport)
     )
 
-    assert _print_type(transport) == 2
+    assert _print_type(transport) == 1  # 1＝正本；不得送 2（補印）
+    assert payload.is_reprint is True  # 事實仍留著：這張之前印過
 
 
 async def test_marking_proof_printed_again_keeps_the_first_time(

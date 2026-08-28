@@ -418,7 +418,7 @@ describe("/sales 交易紀錄頁", () => {
   });
 });
 
-describe("/sales 補印發票證明聯", () => {
+describe("/sales 列印發票證明聯", () => {
   function stubReprint(opts: { isReprint: boolean; recordOk: boolean }) {
     const calls: string[] = [];
     stubFetch((url, method) => {
@@ -448,7 +448,7 @@ describe("/sales 補印發票證明聯", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
 
-    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
 
     await waitFor(() =>
       expect(screen.getByText(/已送出 #7 的發票證明聯。/)).toBeTruthy(),
@@ -462,15 +462,50 @@ describe("/sales 補印發票證明聯", () => {
     expect(recorded).toBeGreaterThan(printed);
   });
 
-  it("已印過：標示為補印，並提醒須併同原聯兌獎", async () => {
+  it("尚未開立：先開立再取列印內容（店主 2026-08-29 裁示：未開立也要能印）", async () => {
+    const calls: string[] = [];
+    stubFetch((url, method) => {
+      calls.push(`${method} ${url}`);
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/einvoice/sales/7/issue") && method === "POST") {
+        return json({ invoice_no: "ZA10000001" });
+      }
+      if (url.includes("/reprint-payload") && method === "POST") {
+        return json({ base64_data: "G0A=", is_reprint: false });
+      }
+      if (url.includes("/print/raw") && method === "POST") return json({ status: "ok" });
+      if (url.includes("/proof-printed") && method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { invoice_status: "PENDING_ISSUE" })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/已送出 #7 的發票證明聯。/)).toBeTruthy(),
+    );
+    // **開立必須在取列印內容之前**：反過來的話平台上還沒有那張發票，根本取不到版面。
+    const issued = calls.findIndex((c) => c.includes("/issue"));
+    const payload = calls.findIndex((c) => c.includes("/reprint-payload"));
+    expect(issued).toBeGreaterThanOrEqual(0);
+    expect(payload).toBeGreaterThan(issued);
+  });
+
+  it("已印過：紙上仍印正本，但提醒店員這張先前印過（店主 2026-08-29 裁示）", async () => {
     stubReprint({ isReprint: true, recordOk: true });
     const user = userEvent.setup();
     renderPage("MANAGER");
 
-    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
 
     await waitFor(() =>
-      expect(screen.getByText(/補印聯須連同原本那張一起才能兌獎/)).toBeTruthy(),
+      expect(screen.getByText(/這張先前已印過一次，請確認客人手上沒有另一張/)).toBeTruthy(),
     );
   });
 
@@ -481,7 +516,7 @@ describe("/sales 補印發票證明聯", () => {
     const user = userEvent.setup();
     renderPage("MANAGER");
 
-    await user.click(await screen.findByLabelText("補印銷售 7 發票證明聯"));
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
 
     await waitFor(() =>
       expect(screen.getByText(/請勿重複列印/)).toBeTruthy(),

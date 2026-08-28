@@ -1100,6 +1100,19 @@ export default function SalesPage() {
   // 不依賴那個可能弄丟的發票號碼。**任何 180 天內已開立的發票都補得出來。**
   const reprintInvoice = useMutation({
     mutationFn: async (sale: SaleSummary) => {
+      // 尚未開立的先開立再印（店主 2026-08-29 裁示：未開立也要能印）。
+      // 平台上沒有那張發票時根本無從「補印」——唯一能做的就是先把它開出來。
+      // PENDING_ISSUE 只會在「結帳當下電子發票是開的、但送出沒成功」時出現，
+      // 所以走到這裡代表本來就該有發票，不是無中生有。
+      if (sale.invoice_status === "PENDING_ISSUE") {
+        const { error: issueError } = await api.POST(
+          "/api/v1/einvoice/sales/{sale_id}/issue",
+          { params: { path: { sale_id: sale.id } } },
+        );
+        if (issueError !== undefined) {
+          throw new Error(extractDetail(issueError) ?? "發票開立失敗，無法列印證明聯");
+        }
+      }
       const { data, error } = await api.POST(
         "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
         { params: { path: { sale_id: sale.id } } },
@@ -1124,8 +1137,10 @@ export default function SalesPage() {
     onSuccess: ({ saleId, isReprint, recordFailed }) =>
       setPrintNote(
         [
+          // 紙上一律印正本、不加註「補印」（店主裁示）。但這張之前印過的話仍要提醒
+          // 店員——同一張發票交出去兩次，重複兌獎的責任在店家身上。
           isReprint
-            ? `已送出 #${saleId} 的發票證明聯（補印）。補印聯須連同原本那張一起才能兌獎。`
+            ? `已送出 #${saleId} 的發票證明聯。這張先前已印過一次，請確認客人手上沒有另一張。`
             : `已送出 #${saleId} 的發票證明聯。`,
           // 紙已經出來了，所以這不是列印失敗——但沒記到，再按一次會多印一張。
           recordFailed ? "（系統沒記錄到這次列印，請勿重複列印）" : "",
@@ -1456,20 +1471,24 @@ export default function SalesPage() {
                         系統印不出來；未開立的更沒有內容可印。
                         **不再看本地有沒有條碼內容**——版面向 Amego 要，
                         連「送出成功但回應遺失」那種也補得出來。 */}
+                    {/* 已開立 → 直接印；尚未開立（結帳時電子發票是開的、但送出沒成功）
+                        → 先開立再印。電子發票關閉下建立的單是 NOT_ISSUED，不在此列，
+                        本來就沒有發票可印。 */}
                     {!voided
-                      && sale.invoice_status === "ISSUED"
+                      && (sale.invoice_status === "ISSUED"
+                        || sale.invoice_status === "PENDING_ISSUE")
                       && sale.invoice_issue_channel !== "MANUAL_PAPER" && (
                       <button
                         type="button"
                         className="btn-ghost"
                         disabled={reprintInvoice.isPending}
-                        aria-label={`補印銷售 ${sale.id} 發票證明聯`}
+                        aria-label={`列印銷售 ${sale.id} 發票證明聯`}
                         onClick={() => {
                           setPrintNote(null);
                           reprintInvoice.mutate(sale);
                         }}
                       >
-                        補印發票證明聯
+                        列印發票證明聯
                       </button>
                     )}
                     {sale.signature_task_id != null && (

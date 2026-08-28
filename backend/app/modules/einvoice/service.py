@@ -171,10 +171,11 @@ def _payload_allowance_identity(payload: object) -> tuple[Decimal, Decimal, str]
 
 
 class ProofPrintPayload(NamedTuple):
-    """證明聯列印內容＋這次是正本還是補印。
+    """證明聯列印內容＋這張先前印過沒有。
 
-    `is_reprint` 由後端依「印出來過沒有」決定並回給前端顯示，不讓 UI 自己猜——
-    猜錯會對店員講錯話（補印聯依法須併同原聯才能兌獎）。
+    `is_reprint` 由後端依「印出來過沒有」決定並回給前端顯示，不讓 UI 自己猜。
+    **紙上一律不加註「補印」**（店主 2026-08-29 裁示，見 `reprint_payload_for_sale`）；
+    這個旗標只用來提醒店員「這張之前印過了」，不改變印出來的版面。
     """
 
     base64_data: str
@@ -1193,7 +1194,12 @@ class EInvoiceService:
             build_invoice_print_data(
                 order_id=amego_order_id(store_id=store_id, sale_id=sale_id),
                 printer_type=AMEGO_PRINTER_TYPE_TM_T82III,
-                reprint=is_reprint,
+                # **一律印正本、不加註「補印」**（店主 2026-08-29 裁示）。
+                # 要點 §26 的註記本意是讓重複那張不能再兌獎，拿掉後避免重複兌領的責任
+                # 回到營業人身上。取捨理由：現實裡「客人弄丟／缺紙漏印」遠比重複兌獎
+                # 常見，而給沒拿過正本的客人一張寫著「補印」的紙，那張永遠兌不了獎。
+                # `is_reprint` 仍如實回報，供畫面提醒店員這張之前印過。
+                reprint=False,
             ),
         )
         return ProofPrintPayload(parse_invoice_print(resp), is_reprint)
