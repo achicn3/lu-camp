@@ -220,7 +220,12 @@ export default function EInvoiceQueuePage() {
                     重試
                   </button>
                 )}
-                {item.action === "ISSUE" && item.status !== "UPLOADED" && item.sale_id != null && (
+                {/* 只有「待送出／平台退回」才補得了：UPLOADED 已經開好，CANCELLED 是這張
+                    F0401 已明確終止（登記手開紙本、或交易作廢），按下去只會拿回既有發票
+                    或吃 409，畫面卻寫著「將向國稅局開票」——誤導（Codex 第三輪）。 */}
+                {item.action === "ISSUE" &&
+                  (item.status === "PENDING" || item.status === "FAILED") &&
+                  item.sale_id != null && (
                   <button
                     type="button"
                     className="btn-ghost"

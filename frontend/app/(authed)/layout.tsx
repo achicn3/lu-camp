@@ -101,10 +101,14 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     enabled: isManager,
     refetchInterval: 60_000,
     queryFn: async () => {
-      const { data } = await api.GET("/api/v1/einvoice/queue", {
+      // **讀取失敗必須丟例外**，不能回 0：openapi-fetch 對 4xx/5xx 是回 error 而非丟錯，
+      // 直接 `data?.total ?? 0` 會把「查不到」說成「沒有待處理」——紅點消失，
+      // 而實際上可能正積著一堆被平台退回的發票（Codex 第三輪）。
+      const { data, error } = await api.GET("/api/v1/einvoice/queue", {
         params: { query: { status: "FAILED", limit: 1 } },
       });
-      return data?.total ?? 0;
+      if (!data) throw new Error(typeof error === "string" ? error : "讀取待處理筆數失敗");
+      return data.total;
     },
   });
 
@@ -118,7 +122,9 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     item.ready ? (
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
-        {item.href === "/einvoice-queue" && (einvoiceFailed.data ?? 0) > 0 && (
+        {item.href === "/einvoice-queue" &&
+          einvoiceFailed.isSuccess &&
+          einvoiceFailed.data > 0 && (
           <span className="nav-badge" aria-label={`${einvoiceFailed.data} 筆發票待處理`}>
             {einvoiceFailed.data}
           </span>

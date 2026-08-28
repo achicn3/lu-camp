@@ -17,7 +17,13 @@ from app.modules.einvoice.models import (
     Invoice,
     InvoiceAllowance,
 )
-from app.shared.enums import EInvoiceAction, EInvoiceIssueChannel, InvoiceStatus, UploadStatus
+from app.shared.enums import (
+    EInvoiceAction,
+    EInvoiceIssueChannel,
+    EInvoiceMessageType,
+    InvoiceStatus,
+    UploadStatus,
+)
 
 
 class EInvoiceRepository:
@@ -233,6 +239,7 @@ class EInvoiceRepository:
         self,
         *,
         actions: Sequence[EInvoiceAction],
+        message_types: Sequence[EInvoiceMessageType],
         created_after: datetime,
         idle_since: datetime,
         limit: int,
@@ -249,6 +256,11 @@ class EInvoiceRepository:
             .where(
                 EInvoiceUploadQueue.status == UploadStatus.PENDING,
                 EInvoiceUploadQueue.action.in_(list(actions)),
+                # **真正決定打哪支平台端點的是 message_type**（見 send_via_amego 的
+                # _AMEGO_ENDPOINTS 對照），`action` 只是我們自己的分類。兩欄之間沒有 DB
+                # 約束保證配對，若只篩 action，一列 `action=VOID, message_type=F0401`
+                # 就會讓背景真的去開一張發票——安全界線必須釘在會生效的那一欄上。
+                EInvoiceUploadQueue.message_type.in_(list(message_types)),
                 EInvoiceUploadQueue.created_at >= created_after,
                 or_(
                     # 從未嘗試過（未認領）→ 立刻送，不必等退避。店長按下作廢後，

@@ -25,12 +25,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_sessionmaker
 from app.modules.einvoice.amego import AmegoClient
 from app.modules.einvoice.service import EInvoiceService, build_amego_client
-from app.shared.enums import EInvoiceAction
+from app.shared.enums import EInvoiceAction, EInvoiceMessageType, UploadStatus
 
 logger = logging.getLogger(__name__)
 
 AUTO_SEND_ACTIONS = (EInvoiceAction.VOID, EInvoiceAction.ALLOWANCE)
 """可自動送出的動作。**不含 ISSUE**，理由見模組 docstring；改動請連同測試一起看。"""
+
+AUTO_SEND_MESSAGE_TYPES = (EInvoiceMessageType.F0501, EInvoiceMessageType.G0401)
+"""可自動送出的訊息型別——**這才是決定打哪支平台端點的欄位**（`send_via_amego` 依它查
+`_AMEGO_ENDPOINTS`）。`action` 只是我們自己的分類，兩欄之間沒有 DB 約束保證配對；
+安全界線必須釘在會生效的那一欄上，否則一列 `action=VOID, message_type=F0401`
+就能讓背景真的去開一張發票。送出前另有一道同義的再確認（見 `send_due_queue_items_once`）。
+"""
 
 AUTO_SEND_MAX_AGE = timedelta(days=7)
 """只自動送出這段時間內建立的佇列列。
@@ -74,6 +81,7 @@ class EInvoiceBackgroundService:
         async with factory() as session:
             due = await EInvoiceService(session).list_due_auto_send_items(
                 actions=AUTO_SEND_ACTIONS,
+                message_types=AUTO_SEND_MESSAGE_TYPES,
                 created_after=observed_at - AUTO_SEND_MAX_AGE,
                 idle_since=observed_at - AUTO_SEND_RETRY_INTERVAL,
                 limit=AUTO_SEND_BATCH_SIZE,
@@ -86,9 +94,17 @@ class EInvoiceBackgroundService:
                 async with factory() as session:
                     svc = EInvoiceService(session)
                     client = await build_client(session, store_id)
-                    item = await svc.send_via_amego(store_id, queue_id, client=client)
+                    # `allowed_message_types` 由 send_via_amego **在列鎖內**重驗——選單那次
+                    # 篩選是無鎖讀取，列可能在中間被改成 F0401。界線必須貼著真正決定端點
+                    # 的那一行，而且在同一把鎖內（Codex 第二輪 P1）。
+                    item = await svc.send_via_amego(
+                        store_id,
+                        queue_id,
+                        client=client,
+                        allowed_message_types=AUTO_SEND_MESSAGE_TYPES,
+                    )
                     await session.commit()
-                if item.status.value == "UPLOADED":
+                if item.status is UploadStatus.UPLOADED:
                     sent += 1
                 else:
                     failed += 1

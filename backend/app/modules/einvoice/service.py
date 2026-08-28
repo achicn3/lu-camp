@@ -783,7 +783,12 @@ class EInvoiceService:
     }
 
     async def send_via_amego(
-        self, store_id: int, queue_id: int, *, client: AmegoClient
+        self,
+        store_id: int,
+        queue_id: int,
+        *,
+        client: AmegoClient,
+        allowed_message_types: Sequence[EInvoiceMessageType] | None = None,
     ) -> EInvoiceUploadQueue:
         """把 PENDING 佇列列上送 Amego（F0401 開立／F0501 作廢／G0401 折讓）。
 
@@ -817,6 +822,14 @@ class EInvoiceService:
         if item.status is not UploadStatus.PENDING:
             raise EInvoiceQueueNotDroppable(
                 "這筆不是『等待送出』的狀態，不能再送一次，請重新整理頁面看最新狀態"
+            )
+        # 呼叫端限定的訊息型別必須**在鎖下重驗**（Codex 第二輪 P1）：背景送出在選單階段
+        # 已篩過一次，但那是無鎖讀取；列可能在選單與此處之間被改成 F0401，於是「只送
+        # 作廢/折讓」的界線會在最後一刻失守、背景真的去開一張發票。端點就是由這一行的
+        # `item.message_type` 決定，界線必須貼著它、而且在同一把鎖內。
+        if allowed_message_types is not None and item.message_type not in allowed_message_types:
+            raise EInvoiceQueueNotDroppable(
+                f"訊息類型 {item.message_type.value} 不在本次允許送出的範圍內"
             )
         endpoint = self._AMEGO_ENDPOINTS.get(item.message_type)
         if endpoint is None:
@@ -1674,6 +1687,10 @@ class EInvoiceService:
             store_id, status=status, limit=limit, offset=offset
         )
 
+    async def get_queue_item(self, store_id: int, queue_id: int) -> EInvoiceUploadQueue | None:
+        """取單一佇列列（供背景送出於送出前再確認範圍）。"""
+        return await self._repo.get_queue_item(store_id, queue_id)
+
     async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
         """符合篩選的佇列總筆數。"""
         return await self._repo.count_queue(store_id, status=status)
@@ -1682,6 +1699,7 @@ class EInvoiceService:
         self,
         *,
         actions: Sequence[EInvoiceAction],
+        message_types: Sequence[EInvoiceMessageType],
         created_after: datetime,
         idle_since: datetime,
         limit: int,
@@ -1689,6 +1707,7 @@ class EInvoiceService:
         """跨店取到期可自動送出的待送出佇列列（供背景送出；範圍界定見 background_service）。"""
         return await self._repo.list_due_auto_send_items(
             actions=actions,
+            message_types=message_types,
             created_after=created_after,
             idle_since=idle_since,
             limit=limit,

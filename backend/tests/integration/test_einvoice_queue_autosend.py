@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.einvoice.amego import AmegoClient, AmegoTransport
 from app.modules.einvoice.background_service import (
     AUTO_SEND_MAX_AGE,
+    AUTO_SEND_MESSAGE_TYPES,
     AUTO_SEND_RETRY_INTERVAL,
     EInvoiceBackgroundService,
 )
@@ -35,6 +37,7 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
     EInvoiceAction,
+    EInvoiceMessageType,
     Grade,
     InvoiceStatus,
     OwnershipType,
@@ -42,6 +45,7 @@ from app.shared.enums import (
     UploadStatus,
     UserRole,
 )
+from app.shared.exceptions import EInvoiceQueueNotDroppable
 
 _F0401_OK = {
     "code": 0,
@@ -95,6 +99,21 @@ class _RecordingTransport:
         return [c.rsplit("/", 1)[-1] for c in self.calls]
 
 
+class _FlakyVoidTransport(_RecordingTransport):
+    """第一次 f0501 中斷、之後正常——用來驗「一筆失敗不影響其餘」。"""
+
+    def __init__(self, *, fail_first: bool = True) -> None:
+        super().__init__()
+        self._fail_next_void = fail_first
+
+    async def post_form(self, url: str, form: dict[str, str]) -> dict[str, object]:
+        if url.endswith("/json/f0501") and self._fail_next_void:
+            self._fail_next_void = False
+            self.calls.append(url)
+            raise RuntimeError("平台連線中斷")
+        return await super().post_form(url, form)
+
+
 def _client_factory(
     transport: AmegoTransport,
 ) -> Callable[[AsyncSession, int], Awaitable[AmegoClient]]:
@@ -110,14 +129,21 @@ def _client_factory(
 
 
 async def _seed_issued_and_voided_sale(
-    session: AsyncSession, transport: _RecordingTransport
+    session: AsyncSession,
+    transport: _RecordingTransport,
+    *,
+    name: str = "自動送出門市",
+    code: str = "SN-AUTO-1",
 ) -> int:
     """建一筆已開立、且已在系統內作廢的銷售 → 留下一筆 PENDING 的 F0501 佇列列。"""
-    store = Store(name="自動送出門市", tax_id="12345678")
+    store = Store(name=name, tax_id="12345678")
     session.add(store)
     await session.flush()
     manager = User(
-        store_id=store.id, username="autosend-mgr", password_hash="h", role=UserRole.MANAGER
+        store_id=store.id,
+        username=f"autosend-mgr-{store.id}",
+        password_hash="h",
+        role=UserRole.MANAGER,
     )
     session.add(manager)
     await session.flush()
@@ -126,7 +152,7 @@ async def _seed_issued_and_voided_sale(
     await CashDrawerService(session).open_session(store.id, manager.id, Decimal("1000"))
     item = await InventoryService(session).create_serialized_item(
         store.id,
-        item_code="SN-AUTO-1",
+        item_code=code,
         name="相機",
         grade=Grade.A,
         ownership_type=OwnershipType.OWNED,
@@ -338,25 +364,81 @@ async def test_already_attempted_item_waits_for_the_retry_interval() -> None:
 
 
 async def test_one_failing_item_does_not_stop_the_rest() -> None:
-    """一筆送不出去不得讓整輪停擺——否則一筆壞資料會卡住之後所有的作廢。"""
+    """一筆送不出去不得讓整輪停擺——否則一筆壞資料會卡住之後所有的作廢。
+
+    **必須有兩筆**（第一筆會炸、第二筆會成功）才守得住這件事：只放一筆的話，
+    就算實作在例外後直接 break，測試照樣通過（Codex 第三輪指出的空斷言）。
+    """
     factory = get_sessionmaker()
     try:
-        boom = _RecordingTransport(f0501=RuntimeError("平台連線中斷"))
-        ok = _RecordingTransport()
+        # 第一筆的 f0501 會炸；第二筆正常。以送出順序（created_at 由舊到新）決定誰先。
+        first_transport = _FlakyVoidTransport(fail_first=True)
         async with factory() as session:
-            first = await _seed_issued_and_voided_sale(session, boom)
-            row = await _queue_row(session, first, EInvoiceAction.VOID)
-            await _age_queue_row(session, row.id, created_ago=AUTO_SEND_RETRY_INTERVAL * 2)
+            store_a = await _seed_issued_and_voided_sale(
+                session, first_transport, name="失敗門市", code="SN-FAIL"
+            )
+            row_a = await _queue_row(session, store_a, EInvoiceAction.VOID)
+            await _age_queue_row(session, row_a.id, created_ago=timedelta(hours=2))
+        async with factory() as session:
+            store_b = await _seed_issued_and_voided_sale(
+                session, _RecordingTransport(), name="成功門市", code="SN-OK"
+            )
+            row_b = await _queue_row(session, store_b, EInvoiceAction.VOID)
+            await _age_queue_row(session, row_b.id, created_ago=timedelta(hours=1))
 
         sent, failed = await EInvoiceBackgroundService.send_due_queue_items_once(
-            client_factory=_client_factory(boom)
+            client_factory=_client_factory(first_transport)
         )
 
-        assert (sent, failed) == (0, 1)  # 明確計為失敗，不是靜默略過
+        # 前者失敗、後者仍然被送出去了——這正是「逐列隔離」的定義。
+        assert (sent, failed) == (1, 1)
         async with factory() as session:
             assert (
-                await _queue_row(session, first, EInvoiceAction.VOID)
+                await _queue_row(session, store_a, EInvoiceAction.VOID)
             ).status is UploadStatus.PENDING
-        assert ok.calls == []
+            assert (
+                await _queue_row(session, store_b, EInvoiceAction.VOID)
+            ).status is UploadStatus.UPLOADED
+    finally:
+        await _truncate()
+
+
+async def test_scope_guard_is_enforced_under_the_row_lock() -> None:
+    """選單是無鎖讀取，界線必須貼在**鎖下**那一行。
+
+    模擬「選中之後、送出之前被改成 F0401」：直接把列的 message_type 改掉再送，
+    背景必須拒絕，而不是照著新的型別去打開立端點（Codex 第二輪 P1）。
+    """
+    factory = get_sessionmaker()
+    try:
+        transport = _RecordingTransport()
+        async with factory() as session:
+            store_id = await _seed_issued_and_voided_sale(session, transport)
+            row = await _queue_row(session, store_id, EInvoiceAction.VOID)
+            queue_id = row.id
+        async with factory() as session:
+            await session.execute(
+                update(EInvoiceUploadQueue)
+                .where(EInvoiceUploadQueue.id == queue_id)
+                .values(message_type=EInvoiceMessageType.F0401)
+            )
+            await session.commit()
+        transport.calls.clear()
+
+        async with factory() as session:
+            svc = EInvoiceService(session)
+            client = await _client_factory(transport)(session, store_id)
+            with pytest.raises(EInvoiceQueueNotDroppable):
+                await svc.send_via_amego(
+                    store_id,
+                    queue_id,
+                    client=client,
+                    allowed_message_types=AUTO_SEND_MESSAGE_TYPES,
+                )
+
+        assert "f0401" not in transport.endpoints  # **絕不能真的去開票**
+        async with factory() as session:
+            still = await session.get(EInvoiceUploadQueue, queue_id)
+            assert still is not None and still.status is UploadStatus.PENDING
     finally:
         await _truncate()
