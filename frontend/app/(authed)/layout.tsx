@@ -1,11 +1,12 @@
 "use client";
 // 受保護區殼層：無 token 導回 /login；監聽 401 廣播；頂欄導覽＋身分/登出。
 // 前端隱藏不等於安全——後端對每個請求仍驗權（docs/10 §4）。
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
+import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { useCurrentRole } from "@/lib/useCurrentRole";
 import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
@@ -35,6 +36,7 @@ const MORE_NAV: NavItem[] = [
   { href: "/campaigns", label: "門市活動", ready: true, managerOnly: true },
   { href: "/menu", label: "餐飲菜單", ready: true, managerOnly: true },
   { href: "/reports", label: "報表", ready: true, managerOnly: true },
+  { href: "/einvoice-queue", label: "發票待處理", ready: true, managerOnly: true },
   { href: "/settings", label: "設定", ready: true, managerOnly: true },
   { href: "/backup", label: "備份", ready: true, managerOnly: true },
 ];
@@ -92,6 +94,20 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   // （D-4），降權者任何動作都 403、無法有特權操作成功；「盯管理頁時被降權」在單店單機極罕見。
   const { isManager } = useCurrentRole();
 
+  // 發票佇列待處理紅點：只數 FAILED（平台退回）。待送出的多半下一輪背景就送掉了，
+  // 拿它當紅點會天天亮著、店員很快就學會無視——紅點一亮就必須是真的要人處理。
+  const einvoiceFailed = useQuery({
+    queryKey: ["einvoice-queue-badge"],
+    enabled: isManager,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/einvoice/queue", {
+        params: { query: { status: "FAILED", limit: 1 } },
+      });
+      return data?.total ?? 0;
+    },
+  });
+
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
   if (!hydrated || token === null || session === null) return null;
@@ -102,6 +118,11 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     item.ready ? (
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
+        {item.href === "/einvoice-queue" && (einvoiceFailed.data ?? 0) > 0 && (
+          <span className="nav-badge" aria-label={`${einvoiceFailed.data} 筆發票待處理`}>
+            {einvoiceFailed.data}
+          </span>
+        )}
       </Link>
     ) : (
       <span key={item.href} className="nav-link nav-link-disabled" title="開發中">

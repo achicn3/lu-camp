@@ -1456,7 +1456,16 @@ export default function SalesPage() {
           sale={voidTarget}
           onClose={() => setVoidTarget(null)}
           onVoided={() => {
-            setVoidedNote(`銷售 #${voidTarget.id} 已作廢。`);
+            // 作廢一張**已開立**的發票時，平台作廢（F0501）是排進佇列、由背景送出的，
+            // 不是當下就完成。畫面若只說「已作廢」，店員會以為平台那邊也結束了——
+            // 實際上在送出成功之前，客人手上那張發票仍然有效。
+            setVoidedNote(
+              voidTarget.invoice_status === "ISSUED" &&
+                voidTarget.invoice_issue_channel !== "MANUAL_PAPER"
+                ? `銷售 #${voidTarget.id} 已作廢。發票作廢申請已送出，系統會在數分鐘內完成平台作廢；` +
+                    "在那之前客人手上那張發票仍為有效。"
+                : `銷售 #${voidTarget.id} 已作廢。`,
+            );
             setVoidTarget(null);
             invalidateSaleViews(queryClient);
           }}

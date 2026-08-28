@@ -74,11 +74,19 @@ async def list_queue(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> EInvoiceQueueListRead:
     """上傳佇列（限 MANAGER；可依狀態過濾、分頁）——供檢視待送/失敗項目。"""
-    items = await EInvoiceService(session).list_queue(
+    svc = EInvoiceService(session)
+    rows = await svc.list_queue_with_context(
         user.store_id, status=status_filter, limit=limit, offset=offset
     )
+    total = await svc.count_queue(user.store_id, status=status_filter)
     return EInvoiceQueueListRead(
-        items=[EInvoiceQueueItemRead.model_validate(item) for item in items],
+        items=[
+            EInvoiceQueueItemRead.model_validate(item).model_copy(
+                update={"invoice_no": invoice_no, "sale_id": sale_id}
+            )
+            for item, invoice_no, sale_id in rows
+        ],
+        total=total,
         limit=limit,
         offset=offset,
     )

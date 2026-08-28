@@ -4229,6 +4229,10 @@ export interface components {
         /**
          * EInvoiceQueueItemRead
          * @description 上傳佇列項目輸出（GET /einvoice/queue）。
+         *
+         *     `invoice_no`／`sale_id` 是給人看的識別（內部 `invoice_id` 對店長毫無意義）：
+         *     佇列頁要能讓店長一眼認出「是哪一張發票、哪一筆交易」才有辦法處置。
+         *     尚未取號的開立列 `invoice_no` 為 None。
          */
         EInvoiceQueueItemRead: {
             action: components["schemas"]["EInvoiceAction"];
@@ -4247,9 +4251,13 @@ export interface components {
             id: number;
             /** Invoice Id */
             invoice_id: number | null;
+            /** Invoice No */
+            invoice_no?: string | null;
             /** Last Error */
             last_error: string | null;
             message_type: components["schemas"]["EInvoiceMessageType"];
+            /** Sale Id */
+            sale_id?: number | null;
             status: components["schemas"]["UploadStatus"];
             /** Store Id */
             store_id: number;
@@ -4268,6 +4276,9 @@ export interface components {
         /**
          * EInvoiceQueueListRead
          * @description 佇列清單（分頁）。
+         *
+         *     `total` 是**符合篩選條件的總筆數**（不受分頁限制）：導覽列的待處理紅點要靠它，
+         *     只數本頁筆數會在超過一頁時謊報。
          */
         EInvoiceQueueListRead: {
             /** Items */
@@ -4276,6 +4287,8 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Total */
+            total: number;
         };
         /**
          * EInvoiceResultRequest

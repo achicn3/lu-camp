@@ -34,6 +34,7 @@ from app.modules.customerdisplay.router import staff_router as customer_display_
 from app.modules.customerdisplay.scheduler import scheduler_loop as customer_display_scheduler_loop
 from app.modules.einvoice.router import invoices_router as einvoice_invoices_router
 from app.modules.einvoice.router import router as einvoice_router
+from app.modules.einvoice.scheduler import scheduler_loop as einvoice_scheduler_loop
 from app.modules.inventory.router import router as inventory_router
 from app.modules.menu.router import router as menu_router
 from app.modules.purchasing.router import router as purchasing_router
@@ -84,6 +85,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         asyncio.create_task(
             customer_display_scheduler_loop(stop_event),
             name="customer-display-scheduler",
+        ),
+        # 發票佇列自動送出：作廢/折讓先前只會排進佇列、沒有任何東西送出去，
+        # 導致帳上作廢而平台上發票仍有效（實測查證）。開立不在此列，見 background_service。
+        asyncio.create_task(
+            einvoice_scheduler_loop(stop_event),
+            name="einvoice-autosend-scheduler",
         ),
     )
     try:

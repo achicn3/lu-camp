@@ -4,10 +4,11 @@
 避免同一列被並發拋檔/標記造成 attempts 或狀態競態。
 """
 
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.einvoice.models import (
@@ -16,7 +17,7 @@ from app.modules.einvoice.models import (
     Invoice,
     InvoiceAllowance,
 )
-from app.shared.enums import EInvoiceIssueChannel, InvoiceStatus, UploadStatus
+from app.shared.enums import EInvoiceAction, EInvoiceIssueChannel, InvoiceStatus, UploadStatus
 
 
 class EInvoiceRepository:
@@ -228,6 +229,39 @@ class EInvoiceRepository:
         result: EInvoiceUploadQueue | None = await self._session.scalar(stmt)
         return result
 
+    async def list_due_auto_send_items(
+        self,
+        *,
+        actions: Sequence[EInvoiceAction],
+        created_after: datetime,
+        idle_since: datetime,
+        limit: int,
+    ) -> list[EInvoiceUploadQueue]:
+        """跨店取「到期可自動送出」的待送出佇列列（最舊的先送）。
+
+        退避只套在**已經嘗試過**的列（`xml_path` 有值＝已認領）：那種再送要隔
+        `idle_since` 才不會連續重擊平台。**從未嘗試過的立刻送**——否則店長按下作廢後
+        還要白等一個退避間隔，平台上那張發票在這段時間裡仍然有效。
+        **不接受 action 全集**——呼叫端必須指名，避免有人不慎排空開立佇列。
+        """
+        stmt = (
+            select(EInvoiceUploadQueue)
+            .where(
+                EInvoiceUploadQueue.status == UploadStatus.PENDING,
+                EInvoiceUploadQueue.action.in_(list(actions)),
+                EInvoiceUploadQueue.created_at >= created_after,
+                or_(
+                    # 從未嘗試過（未認領）→ 立刻送，不必等退避。店長按下作廢後，
+                    # 平台作廢應該是「下一輪就送出」，而不是白等一個退避間隔。
+                    EInvoiceUploadQueue.xml_path.is_(None),
+                    EInvoiceUploadQueue.updated_at <= idle_since,
+                ),
+            )
+            .order_by(EInvoiceUploadQueue.created_at.asc(), EInvoiceUploadQueue.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def list_queue(
         self,
         store_id: int,
@@ -241,6 +275,52 @@ class EInvoiceRepository:
             stmt = stmt.where(EInvoiceUploadQueue.status == status)
         stmt = stmt.order_by(EInvoiceUploadQueue.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
+        """符合篩選的佇列總筆數（供分頁與導覽列待處理數）。"""
+        stmt = select(func.count()).select_from(EInvoiceUploadQueue).where(
+            EInvoiceUploadQueue.store_id == store_id
+        )
+        if status is not None:
+            stmt = stmt.where(EInvoiceUploadQueue.status == status)
+        return int((await self._session.execute(stmt)).scalar_one())
+
+    async def list_queue_with_context(
+        self,
+        store_id: int,
+        *,
+        status: UploadStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[tuple[EInvoiceUploadQueue, str | None, int | None]]:
+        """同 `list_queue`，另帶回發票號碼與交易編號（供佇列頁顯示人看得懂的識別）。
+
+        折讓列掛的是 `allowance_id`（`invoice_id` 為空），故經折讓再接回發票——
+        兩條路徑都要，否則折讓列在畫面上會是一片空白。
+        """
+        invoice_via_allowance = (
+            select(InvoiceAllowance.id.label("allowance_id"), Invoice.invoice_no, Invoice.sale_id)
+            .join(Invoice, Invoice.id == InvoiceAllowance.invoice_id)
+            .subquery()
+        )
+        stmt = (
+            select(
+                EInvoiceUploadQueue,
+                func.coalesce(Invoice.invoice_no, invoice_via_allowance.c.invoice_no),
+                func.coalesce(Invoice.sale_id, invoice_via_allowance.c.sale_id),
+            )
+            .outerjoin(Invoice, Invoice.id == EInvoiceUploadQueue.invoice_id)
+            .outerjoin(
+                invoice_via_allowance,
+                invoice_via_allowance.c.allowance_id == EInvoiceUploadQueue.allowance_id,
+            )
+            .where(EInvoiceUploadQueue.store_id == store_id)
+        )
+        if status is not None:
+            stmt = stmt.where(EInvoiceUploadQueue.status == status)
+        stmt = stmt.order_by(EInvoiceUploadQueue.id.desc()).limit(limit).offset(offset)
+        rows = (await self._session.execute(stmt)).all()
+        return [(row[0], row[1], row[2]) for row in rows]
 
     # ── 回執事件 ──
 

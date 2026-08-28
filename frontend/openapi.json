@@ -4076,7 +4076,7 @@
         "type": "string"
       },
       "EInvoiceQueueItemRead": {
-        "description": "上傳佇列項目輸出（GET /einvoice/queue）。",
+        "description": "上傳佇列項目輸出（GET /einvoice/queue）。\n\n`invoice_no`／`sale_id` 是給人看的識別（內部 `invoice_id` 對店長毫無意義）：\n佇列頁要能讓店長一眼認出「是哪一張發票、哪一筆交易」才有辦法處置。\n尚未取號的開立列 `invoice_no` 為 None。",
         "properties": {
           "action": {
             "$ref": "#/components/schemas/EInvoiceAction"
@@ -4128,6 +4128,17 @@
             ],
             "title": "Invoice Id"
           },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
           "last_error": {
             "anyOf": [
               {
@@ -4141,6 +4152,17 @@
           },
           "message_type": {
             "$ref": "#/components/schemas/EInvoiceMessageType"
+          },
+          "sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Id"
           },
           "status": {
             "$ref": "#/components/schemas/UploadStatus"
@@ -4210,7 +4232,7 @@
         "type": "object"
       },
       "EInvoiceQueueListRead": {
-        "description": "佇列清單（分頁）。",
+        "description": "佇列清單（分頁）。\n\n`total` 是**符合篩選條件的總筆數**（不受分頁限制）：導覽列的待處理紅點要靠它，\n只數本頁筆數會在超過一頁時謊報。",
         "properties": {
           "items": {
             "items": {
@@ -4226,10 +4248,15 @@
           "offset": {
             "title": "Offset",
             "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
           "items",
+          "total",
           "limit",
           "offset"
         ],

@@ -15,7 +15,7 @@
 
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import ClassVar, NamedTuple
@@ -24,11 +24,13 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.config import get_settings as get_app_settings
 from app.core.money import split_tax_inclusive
 from app.modules.einvoice.amego import (
     AMEGO_PRINTER_TYPE_TM_T82III,
     AmegoClient,
     AmegoIssueResult,
+    HttpxAmegoTransport,
     allowance_number,
     amego_order_id,
     build_allowance_query_data,
@@ -53,6 +55,7 @@ from app.modules.einvoice.models import (
 )
 from app.modules.einvoice.repository import EInvoiceRepository
 from app.modules.einvoice.serializer import InvoiceXmlSerializer
+from app.modules.store.service import StoreService
 from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
@@ -176,6 +179,21 @@ class ProofPrintPayload(NamedTuple):
 
     base64_data: str
     is_reprint: bool
+
+
+async def build_amego_client(session: AsyncSession, store_id: int) -> AmegoClient:
+    """組 Amego 客戶端：賣方統編＝stores.tax_id、App Key＝環境變數（docs/24）。
+
+    HTTP 路由與背景送出**共用同一份**——兩邊各組一次遲早會在憑證來源或 base_url 上漂移。
+    """
+    cfg = get_app_settings()
+    store = await StoreService(session).get_receipt_header(store_id)
+    return AmegoClient(
+        seller_tax_id=store.tax_id or "",
+        app_key=cfg.amego_app_key,
+        transport=HttpxAmegoTransport(),
+        base_url=cfg.amego_api_base,
+    )
 
 
 class EInvoiceService:
@@ -1642,6 +1660,39 @@ class EInvoiceService:
         offset: int = 0,
     ) -> list[EInvoiceUploadQueue]:
         return await self._repo.list_queue(store_id, status=status, limit=limit, offset=offset)
+
+    async def list_queue_with_context(
+        self,
+        store_id: int,
+        *,
+        status: UploadStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[tuple[EInvoiceUploadQueue, str | None, int | None]]:
+        """佇列列＋發票號碼／交易編號（佇列頁用）。"""
+        return await self._repo.list_queue_with_context(
+            store_id, status=status, limit=limit, offset=offset
+        )
+
+    async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
+        """符合篩選的佇列總筆數。"""
+        return await self._repo.count_queue(store_id, status=status)
+
+    async def list_due_auto_send_items(
+        self,
+        *,
+        actions: Sequence[EInvoiceAction],
+        created_after: datetime,
+        idle_since: datetime,
+        limit: int,
+    ) -> list[EInvoiceUploadQueue]:
+        """跨店取到期可自動送出的待送出佇列列（供背景送出；範圍界定見 background_service）。"""
+        return await self._repo.list_due_auto_send_items(
+            actions=actions,
+            created_after=created_after,
+            idle_since=idle_since,
+            limit=limit,
+        )
 
     async def _serialize(
         self,

@@ -3504,3 +3504,18 @@ body {
 .rpt-dine-in-summary {
   margin-top: 12px;
 }
+
+/* 發票佇列待處理紅點：平台退回的筆數。只在 >0 時渲染，紅點一亮就代表真的要人處理。 */
+.nav-badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin-left: var(--sp-1);
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--danger, #c0392b);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
+}

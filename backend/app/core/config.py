@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     backup_local_dir: str = "/home/test/lu-camp-backups"
     # 排程 tick：行程內背景任務的主開關與喚醒間隔（秒）。到期判斷另看 settings.backup_*。
     backup_scheduler_enabled: bool = True
+    # 發票佇列自動送出（作廢 F0501／折讓 G0401）。關閉後這些訊息只會留在佇列裡，
+    # 需由店長在發票佇列頁手動送出——平台上的發票不會被作廢，務必知情才關。
+    einvoice_autosend_enabled: bool = True
     backup_tick_seconds: int = 900
     # 離峰鐘點以「本地時區」判定（店家輸入 21 指當地 21:00）。伺服器用 UTC 跑,故比對前先轉此區。
     backup_timezone: str = "Asia/Taipei"
