@@ -3531,3 +3531,9 @@ body {
 .sales-search .field {
   flex: 0 1 12rem;
 }
+/* 主要與次要按鈕的預設高度不同（--tap-min vs 36px），並排時會一高一矮；
+   在這一列統一成輸入框的高度，才跟旁邊的欄位對得齊。 */
+.sales-search .btn-primary,
+.sales-search .btn-ghost {
+  min-height: var(--tap-min);
+}

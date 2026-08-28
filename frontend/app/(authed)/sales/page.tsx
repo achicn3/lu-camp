@@ -1280,7 +1280,7 @@ export default function SalesPage() {
           <span className="field-label">迄日</span>
           <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} />
         </label>
-        <button type="submit" className="btn">
+        <button type="submit" className="btn-primary">
           查詢
         </button>
         <button

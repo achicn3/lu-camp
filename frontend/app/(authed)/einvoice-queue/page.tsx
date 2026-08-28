@@ -152,7 +152,7 @@ export default function EInvoiceQueuePage() {
           <button
             key={f.key}
             type="button"
-            className={filter === f.key ? "btn" : "btn-ghost"}
+            className={filter === f.key ? "btn-primary" : "btn-ghost"}
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
           >
