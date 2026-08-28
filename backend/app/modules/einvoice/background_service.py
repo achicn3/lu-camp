@@ -111,12 +111,32 @@ class EInvoiceBackgroundService:
                         queue_id,
                         item.status.value,
                     )
-            except Exception:
+            except Exception as exc:
                 failed += 1
                 logger.exception(
                     "einvoice auto-send failed store=%s queue=%s", store_id, queue_id
                 )
+                # **把原因寫回那一列**：否則設定漏帶（如 AMEGO_APP_KEY 未載入）時，
+                # 佇列列會安靜地停在待送出、畫面上什麼都不說，而帳上已作廢、平台上
+                # 那張發票仍然有效（Codex 第五輪 P1）。狀態維持 PENDING——設定修好
+                # 就會自己重試，不需要人去按重試。
+                await cls._record_attempt_error(store_id, queue_id, exc)
         return sent, failed
+
+    @staticmethod
+    async def _record_attempt_error(store_id: int, queue_id: int, exc: Exception) -> None:
+        """把這次自動送出的失敗原因記到佇列列上（best-effort，不得反過來炸掉整輪）。"""
+        try:
+            factory = get_sessionmaker()
+            async with factory() as session:
+                await EInvoiceService(session).record_auto_send_error(
+                    store_id, queue_id, f"{type(exc).__name__}: {exc}"[:500]
+                )
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "einvoice auto-send could not record error store=%s queue=%s", store_id, queue_id
+            )
 
 
 async def _default_client_factory(session: AsyncSession, store_id: int) -> AmegoClient:

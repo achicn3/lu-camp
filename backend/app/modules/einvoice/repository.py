@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.einvoice.models import (
@@ -285,6 +285,31 @@ class EInvoiceRepository:
             stmt = stmt.where(EInvoiceUploadQueue.status == status)
         stmt = stmt.order_by(EInvoiceUploadQueue.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_needing_attention(
+        self,
+        store_id: int,
+        *,
+        auto_send_actions: Sequence[EInvoiceAction],
+        stalled_before: datetime,
+    ) -> int:
+        """平台退回的，加上超過門檻仍未送出的作廢/折讓（自動送出正常時約一分鐘就會清掉）。"""
+        stmt = (
+            select(func.count())
+            .select_from(EInvoiceUploadQueue)
+            .where(
+                EInvoiceUploadQueue.store_id == store_id,
+                or_(
+                    EInvoiceUploadQueue.status == UploadStatus.FAILED,
+                    and_(
+                        EInvoiceUploadQueue.status == UploadStatus.PENDING,
+                        EInvoiceUploadQueue.action.in_(list(auto_send_actions)),
+                        EInvoiceUploadQueue.created_at <= stalled_before,
+                    ),
+                ),
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar_one())
 
     async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
         """符合篩選的佇列總筆數（供分頁與導覽列待處理數）。"""

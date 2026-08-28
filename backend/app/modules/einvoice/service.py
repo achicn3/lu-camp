@@ -1699,6 +1699,25 @@ class EInvoiceService:
         """取單一佇列列（供背景送出於送出前再確認範圍）。"""
         return await self._repo.get_queue_item(store_id, queue_id)
 
+    async def record_auto_send_error(self, store_id: int, queue_id: int, message: str) -> None:
+        """把自動送出的失敗原因寫到佇列列（狀態不動，設定修好即自行重試）。"""
+        item = await self._repo.get_queue_item(store_id, queue_id)
+        if item is None:
+            return
+        item.last_error = message
+
+    async def count_needing_attention(self, store_id: int, *, stalled_before: datetime) -> int:
+        """需要人處理的筆數：平台退回的，加上**卡太久沒送出**的作廢/折讓。
+
+        只數 FAILED 不夠——設定漏帶時佇列列會停在 PENDING、永遠不轉 FAILED，
+        於是帳上作廢、平台有效，而畫面一片安靜（Codex 第五輪 P1）。
+        """
+        return await self._repo.count_needing_attention(
+            store_id,
+            auto_send_actions=(EInvoiceAction.VOID, EInvoiceAction.ALLOWANCE),
+            stalled_before=stalled_before,
+        )
+
     async def count_queue(self, store_id: int, *, status: UploadStatus | None = None) -> int:
         """符合篩選的佇列總筆數。"""
         return await self._repo.count_queue(store_id, status=status)

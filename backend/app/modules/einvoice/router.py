@@ -5,6 +5,7 @@
 由收尾階段（憑證/主機到位）搭配 XSD-backed 序列化器與排程接手。
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,7 @@ from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.einvoice.amego import AmegoClient, HttpxAmegoTransport
 from app.modules.einvoice.schemas import (
+    EInvoiceAttentionCountRead,
     EInvoiceQueueItemRead,
     EInvoiceQueueListRead,
     EInvoiceResultRequest,
@@ -43,6 +45,10 @@ from app.shared.exceptions import (
     ManualPaperInvoiceOperation,
 )
 
+_STALLED_MINUTES = 30
+_STALLED_AFTER = timedelta(minutes=_STALLED_MINUTES)
+"""超過這麼久還沒送出就算「卡住」。自動送出正常時約一分鐘內完成，30 分鐘留足重試餘裕。"""
+
 router = APIRouter(prefix="/einvoice", tags=["einvoice"])
 invoices_router = APIRouter(prefix="/invoices", tags=["einvoice"])
 
@@ -63,6 +69,28 @@ async def get_invoice(
     except InvoiceNotFound as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return InvoiceRead.model_validate(invoice)
+
+
+@router.get(
+    "/queue/attention-count",
+    response_model=EInvoiceAttentionCountRead,
+    operation_id="countEInvoiceQueueNeedingAttention",
+)
+async def count_queue_needing_attention(
+    session: SessionDep,
+    user: ManagerDep,
+) -> EInvoiceAttentionCountRead:
+    """需要人處理的發票筆數（供導覽列紅點）。
+
+    **不是「待送出」的總數**：待送出多半下一輪背景就送掉了，拿它當紅點會天天亮著。
+    這裡數的是「平台退回」＋「卡太久還沒送出的作廢/折讓」——後者涵蓋設定漏帶等
+    讓佇列列永遠停在待送出、畫面卻一片安靜的情況（Codex 第五輪 P1）。
+    """
+    stalled_before = datetime.now(UTC) - _STALLED_AFTER
+    count = await EInvoiceService(session).count_needing_attention(
+        user.store_id, stalled_before=stalled_before
+    )
+    return EInvoiceAttentionCountRead(count=count, stalled_after_minutes=_STALLED_MINUTES)
 
 
 @router.get("/queue", response_model=EInvoiceQueueListRead, operation_id="listEInvoiceQueue")

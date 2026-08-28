@@ -517,3 +517,43 @@ async def test_allowance_declares_the_date_it_happened_not_the_send_date() -> No
         assert payload["AllowanceDate"] == expected
     finally:
         await _truncate()
+
+
+async def test_config_failure_is_recorded_and_surfaces_as_needing_attention() -> None:
+    """設定漏帶（如 AMEGO_APP_KEY 未載入）不得讓作廢安靜地卡在待送出。
+
+    這是搬機器／開機自動啟動時最容易踩的坑：環境變數沒帶進去，佇列列停在待送出、
+    畫面一片安靜，而帳上已作廢、平台上那張發票仍然有效（Codex 第五輪 P1）。
+    """
+    from app.shared.exceptions import AmegoNotConfigured
+
+    async def broken_client_factory(_session: AsyncSession, _store_id: int) -> AmegoClient:
+        raise AmegoNotConfigured("AMEGO_APP_KEY 未設定（環境變數），不可呼叫 Amego API")
+
+    factory = get_sessionmaker()
+    try:
+        transport = _RecordingTransport()
+        async with factory() as session:
+            store_id = await _seed_issued_and_voided_sale(session, transport)
+            row = await _queue_row(session, store_id, EInvoiceAction.VOID)
+            await _age_queue_row(session, row.id, created_ago=timedelta(hours=2))
+
+        sent, failed = await EInvoiceBackgroundService.send_due_queue_items_once(
+            client_factory=broken_client_factory
+        )
+        assert (sent, failed) == (0, 1)
+
+        async with factory() as session:
+            stuck = await _queue_row(session, store_id, EInvoiceAction.VOID)
+            # 狀態維持待送出（設定修好就會自己重試），但**原因必須留下來**
+            assert stuck.status is UploadStatus.PENDING
+            assert stuck.last_error is not None
+            assert "AMEGO_APP_KEY" in stuck.last_error
+
+            # 而且要進得了「需要人處理」的計數——否則紅點不亮、店長永遠不會知道
+            attention = await EInvoiceService(session).count_needing_attention(
+                store_id, stalled_before=datetime.now(UTC) - timedelta(minutes=30)
+            )
+            assert attention >= 1
+    finally:
+        await _truncate()

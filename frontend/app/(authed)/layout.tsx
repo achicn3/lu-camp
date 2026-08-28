@@ -94,21 +94,20 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   // （D-4），降權者任何動作都 403、無法有特權操作成功；「盯管理頁時被降權」在單店單機極罕見。
   const { isManager } = useCurrentRole();
 
-  // 發票佇列待處理紅點：只數 FAILED（平台退回）。待送出的多半下一輪背景就送掉了，
-  // 拿它當紅點會天天亮著、店員很快就學會無視——紅點一亮就必須是真的要人處理。
-  const einvoiceFailed = useQuery({
+  // 發票待處理紅點：數「平台退回」＋「卡太久還沒送出的作廢/折讓」。
+  // 不數全部待送出——那些多半下一輪背景就送掉了，天天亮著店員很快就學會無視；
+  // 但也不能只數平台退回：設定漏帶時佇列列會永遠停在待送出、不轉退回，
+  // 於是帳上作廢、平台有效而畫面一片安靜（Codex 第五輪）。
+  const einvoiceAttention = useQuery({
     queryKey: ["einvoice-queue-badge"],
     enabled: isManager,
     refetchInterval: 60_000,
     queryFn: async () => {
       // **讀取失敗必須丟例外**，不能回 0：openapi-fetch 對 4xx/5xx 是回 error 而非丟錯，
-      // 直接 `data?.total ?? 0` 會把「查不到」說成「沒有待處理」——紅點消失，
-      // 而實際上可能正積著一堆被平台退回的發票（Codex 第三輪）。
-      const { data, error } = await api.GET("/api/v1/einvoice/queue", {
-        params: { query: { status: "FAILED", limit: 1 } },
-      });
+      // 直接 `?? 0` 會把「查不到」說成「沒有待處理」，紅點就消失了（Codex 第三輪）。
+      const { data, error } = await api.GET("/api/v1/einvoice/queue/attention-count", {});
       if (!data) throw new Error(typeof error === "string" ? error : "讀取待處理筆數失敗");
-      return data.total;
+      return data.count;
     },
   });
 
@@ -123,12 +122,12 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
         {item.href === "/einvoice-queue" &&
-          einvoiceFailed.isSuccess &&
-          einvoiceFailed.data > 0 && (
-          <span className="nav-badge" aria-label={`${einvoiceFailed.data} 筆發票待處理`}>
-            {einvoiceFailed.data}
-          </span>
-        )}
+          einvoiceAttention.isSuccess &&
+          einvoiceAttention.data > 0 && (
+            <span className="nav-badge" aria-label={`${einvoiceAttention.data} 筆發票待處理`}>
+              {einvoiceAttention.data}
+            </span>
+          )}
       </Link>
     ) : (
       <span key={item.href} className="nav-link nav-link-disabled" title="開發中">

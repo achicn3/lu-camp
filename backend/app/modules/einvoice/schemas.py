@@ -107,6 +107,16 @@ class EInvoiceQueueListRead(BaseModel):
     offset: int
 
 
+class EInvoiceAttentionCountRead(BaseModel):
+    """需要人處理的發票筆數（導覽列紅點用）。
+
+    `stalled_after_minutes` 讓畫面能對店員說清楚「卡多久才算卡住」。
+    """
+
+    count: int
+    stalled_after_minutes: int
+
+
 class EInvoiceResultRequest(BaseModel):
     """記錄一筆平台回執（手動或 importer）。
 

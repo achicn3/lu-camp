@@ -1163,6 +1163,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/einvoice/queue/attention-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Queue Needing Attention
+         * @description 需要人處理的發票筆數（供導覽列紅點）。
+         *
+         *     **不是「待送出」的總數**：待送出多半下一輪背景就送掉了，拿它當紅點會天天亮著。
+         *     這裡數的是「平台退回」＋「卡太久還沒送出的作廢/折讓」——後者涵蓋設定漏帶等
+         *     讓佇列列永遠停在待送出、畫面卻一片安靜的情況（Codex 第五輪 P1）。
+         */
+        get: operations["countEInvoiceQueueNeedingAttention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/einvoice/queue/{queue_id}/result": {
         parameters: {
             query?: never;
@@ -4206,6 +4230,18 @@ export interface components {
          * @enum {string}
          */
         EInvoiceAction: "ISSUE" | "VOID" | "ALLOWANCE";
+        /**
+         * EInvoiceAttentionCountRead
+         * @description 需要人處理的發票筆數（導覽列紅點用）。
+         *
+         *     `stalled_after_minutes` 讓畫面能對店員說清楚「卡多久才算卡住」。
+         */
+        EInvoiceAttentionCountRead: {
+            /** Count */
+            count: number;
+            /** Stalled After Minutes */
+            stalled_after_minutes: number;
+        };
         /**
          * EInvoiceIssueChannel
          * @description 發票是怎麼開出來的（invoices.issue_channel，docs/36）。
@@ -9402,6 +9438,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countEInvoiceQueueNeedingAttention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EInvoiceAttentionCountRead"];
                 };
             };
         };
