@@ -2694,7 +2694,11 @@ export default function PosPage() {
                       pushSign.isPending ||
                       !quoteReady ||
                       displayCart?.status !== "DRAFT" ||
-                      displayTerminal?.paired_kiosk?.online !== true
+                      displayTerminal?.paired_kiosk?.online !== true ||
+                      // 含餐飲卻沒選內用/外帶就送簽 → 客人簽完名後結帳才被擋，而那時
+                      // 內用/外帶鍵已因購物車凍結而停用，只能撤回重簽（QA BUG-004）。
+                      // 錯誤訊息本來就顯示在上方的餐飲區塊，店員看得到原因。
+                      !dineInValidation.ok
                     }
                     onClick={() => pushSign.mutate()}
                   >

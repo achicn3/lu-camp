@@ -22,6 +22,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.contacts.models import Contact
 from app.modules.customerdisplay.schemas import CartUpsertRequest, StaffCartPayloadRead
 from app.modules.inventory.models import CatalogProduct
 from app.modules.menu.models import MenuItem
@@ -328,3 +329,113 @@ async def test_cart_upsert_round_trips_service_mode(
     restored = StaffCartPayloadRead.model_validate(dumped)
     assert restored.service_mode is ServiceMode.DINE_IN
     assert restored.table_no == "A1"
+
+
+# ── 送簽前置：含餐飲必須先選內用/外帶（QA BUG-004）──
+
+
+async def test_freezing_a_menu_cart_without_service_mode_is_refused(
+    db_session: AsyncSession,
+) -> None:
+    """含餐飲卻沒選內用/外帶的購物車**不得送簽**。
+
+    購物車一凍結，畫面上的內用/外帶鍵就停用了（cartMutationLocked），所以客人簽完名
+    之後店員**選不了**——只能撤回、重選、請客人再簽一次。守衛必須在送簽這一步，
+    不能等到結帳才擋（QA BUG-004）。
+
+    擋在端點而非只擋畫面：畫面只是體貼，端點才是防線。
+    """
+    from app.modules.customerdisplay.service import CartSessionInvalid, CustomerDisplayService
+    from app.modules.storecredit.service import StoreCreditService
+    from tests.integration.customer_display_helpers import ensure_paired_customer_display
+
+    _token, store_id, clerk_id = await _seed(db_session)
+    menu_id = await _menu_item(db_session, store_id)
+    contact = Contact(store_id=store_id, name="會員", roles=["MEMBER"])
+    db_session.add(contact)
+    await db_session.flush()
+    await StoreCreditService(db_session).adjust(
+        store_id,
+        contact.id,
+        amount=Decimal("500"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key=f"dinein-guard-{store_id}-a",
+    )
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=store_id, actor_user_id=clerk_id
+    )
+    display = CustomerDisplayService(db_session)
+    cart = await display.upsert_cart(
+        store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "lines": [{"line_type": "MENU", "menu_item_id": menu_id, "qty": 1}],
+                "buyer_contact_id": contact.id,
+                "tenders": [{"tender_type": "STORE_CREDIT", "amount": "180"}],
+                # **刻意不帶 service_mode**：這正是店員忘記選的情況
+            }
+        ),
+        actor_user_id=clerk_id,
+    )
+
+    with pytest.raises(CartSessionInvalid) as err:
+        await display.freeze_store_credit_cart(
+            store_id,
+            terminal.id,
+            expected_revision=cart.revision,
+            actor_user_id=clerk_id,
+        )
+
+    assert "內用" in str(err.value)  # 訊息要講得出「先選內用或外帶」
+
+
+async def test_freezing_a_menu_cart_with_service_mode_is_allowed(
+    db_session: AsyncSession,
+) -> None:
+    """選了外帶就送得出去——守衛不能把正常流程也擋掉（對照組）。"""
+    from app.modules.customerdisplay.service import CustomerDisplayService
+    from app.modules.storecredit.service import StoreCreditService
+    from tests.integration.customer_display_helpers import ensure_paired_customer_display
+
+    _token, store_id, clerk_id = await _seed(db_session)
+    menu_id = await _menu_item(db_session, store_id)
+    contact = Contact(store_id=store_id, name="會員2", roles=["MEMBER"])
+    db_session.add(contact)
+    await db_session.flush()
+    await StoreCreditService(db_session).adjust(
+        store_id,
+        contact.id,
+        amount=Decimal("500"),
+        reason="測試入帳",
+        created_by=clerk_id,
+        idempotency_key=f"dinein-guard-{store_id}-b",
+    )
+    terminal, _device = await ensure_paired_customer_display(
+        db_session, store_id=store_id, actor_user_id=clerk_id
+    )
+    display = CustomerDisplayService(db_session)
+    cart = await display.upsert_cart(
+        store_id,
+        terminal.id,
+        CartUpsertRequest.model_validate(
+            {
+                "lines": [{"line_type": "MENU", "menu_item_id": menu_id, "qty": 1}],
+                "buyer_contact_id": contact.id,
+                "tenders": [{"tender_type": "STORE_CREDIT", "amount": "180"}],
+                "service_mode": "TAKEOUT",
+            }
+        ),
+        actor_user_id=clerk_id,
+    )
+
+    frozen, task = await display.freeze_store_credit_cart(
+        store_id,
+        terminal.id,
+        expected_revision=cart.revision,
+        actor_user_id=clerk_id,
+    )
+
+    assert frozen.status.value == "FROZEN"
+    assert task.id > 0

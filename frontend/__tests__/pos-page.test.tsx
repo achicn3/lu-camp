@@ -770,6 +770,86 @@ describe("/pos 結帳頁", () => {
     );
   });
 
+  it("二手＋餐飲未選內用/外帶：送簽按鈕停用，選了外帶才能按（QA BUG-004）", async () => {
+    // 購物車一送簽就凍結，內用/外帶鍵跟著停用；讓店員在沒選的狀態下送出去，等於客人
+    // 簽完名才在結帳被擋，然後只能撤回、重選、請客人再簽一次。
+    const MENU = [
+      {
+        id: 5,
+        store_id: 1,
+        name: "手沖-耶加",
+        unit_price: "180",
+        category: "咖啡",
+        is_available: true,
+        sort_order: 0,
+      },
+    ];
+    const MEMBER = {
+      id: 7,
+      store_id: 1,
+      name: "林測試",
+      phone: "0900000000",
+      roles: ["MEMBER"],
+      member_points: 0,
+      national_id_masked: null,
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings"))
+        return json({ ...SETTINGS, dine_in_tables: ["A1", "A2"] });
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json(MENU);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.includes("/contacts/7/store-credit"))
+        return json({ contact_id: 7, balance: "5000" });
+      if (url.includes("/api/v1/contacts") && method === "GET") return json([MEMBER]);
+      if (url.includes("/customer-display/terminals") && method === "POST") {
+        return json({ id: 1, paired_kiosk: { id: 2, online: true } });
+      }
+      if (url.includes("/customer-display/terminals/1/cart/current"))
+        return json({ id: 9, status: "DRAFT", revision: 1 });
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        // 二手 1800 ＋ 餐飲 180；餐飲不可用購物金 → 上限 1800
+        return json({
+          total: "1980",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "180",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(
+      await screen.findByLabelText("掃描或輸入商品條碼"),
+      "TENT1{Enter}",
+    );
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    const tile = await screen.findByRole("button", { name: /手沖-耶加/ });
+    await user.click(tile);
+    const dialog = await screen.findByRole("dialog", { name: /加入 手沖-耶加/ });
+    await user.click(within(dialog).getByRole("button", { name: "加入購物車" }));
+    await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
+    await user.click(screen.getByRole("button", { name: "查詢會員" }));
+    await user.click(await screen.findByRole("button", { name: /林測試/ }));
+    await user.click(screen.getByText("購物金＋其他付款"));
+    await user.type(screen.getByLabelText("本次使用購物金"), "300");
+
+    // 前提成立：畫面確實在要求先選內用/外帶
+    await waitFor(() =>
+      expect(screen.getByText(/請先選擇內用或外帶/)).toBeTruthy(),
+    );
+    const push = await screen.findByRole("button", { name: "送至手持裝置簽署" });
+    expect(push).toHaveProperty("disabled", true);
+
+    // 選了外帶就能按——守衛不能把正常流程也擋掉
+    await user.click(screen.getByRole("radio", { name: "外帶" }));
+    await waitFor(() => expect(push).toHaveProperty("disabled", false));
+  });
+
   it("生效活動橫幅顯示活動名稱與折扣", async () => {
     const ACTIVE_CAMPAIGN = {
       id: 1,
