@@ -1677,6 +1677,18 @@ export default function PosPage() {
       !signed ||
       signMismatch ||
       displayCart?.status !== "FROZEN");
+  // 伺服器上那台購物車存的內用/外帶，與畫面上的選擇是否已經一致。
+  // 不一致＝這次的變更還在防抖或在途，此時送簽會凍結到舊的選擇。
+  // DisplayCart 可能是客顯用的精簡型（沒有 staff_payload），故先收斂型別。
+  const savedDining =
+    displayCart !== null && displayCart !== undefined && "staff_payload" in displayCart
+      ? displayCart.staff_payload
+      : null;
+  const dineInSyncPending =
+    hasMenuLine &&
+    ((savedDining?.service_mode ?? null) !== dineIn.mode ||
+      (savedDining?.table_no ?? null) !== dineIn.tableNo);
+
   const cartMutationLocked =
     displayCart?.status === "FROZEN" ||
     displayCart?.status === "PROCESSING" ||
@@ -2698,7 +2710,11 @@ export default function PosPage() {
                       // 含餐飲卻沒選內用/外帶就送簽 → 客人簽完名後結帳才被擋，而那時
                       // 內用/外帶鍵已因購物車凍結而停用，只能撤回重簽（QA BUG-004）。
                       // 錯誤訊息本來就顯示在上方的餐飲區塊，店員看得到原因。
-                      !dineInValidation.ok
+                      !dineInValidation.ok ||
+                      // 而且要等**這一次的選擇真的同步上去**：購物車同步有 180ms 防抖，
+                      // 店員改完模式立刻送簽的話，凍結到的會是上一個選擇，客人簽的內容
+                      // 與實際結帳對不起來，一樣要撤回重簽（Codex 審查）。
+                      dineInSyncPending
                     }
                     onClick={() => pushSign.mutate()}
                   >

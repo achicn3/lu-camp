@@ -441,6 +441,28 @@ async def test_freezing_a_dine_in_cart_without_table_is_refused(
     assert "桌號" in str(err.value)
 
 
+async def test_freezing_a_takeout_cart_with_table_no_is_refused(
+    db_session: AsyncSession,
+) -> None:
+    """外帶不得指定桌號——結帳端會擋，凍結時就該擋（Codex 第二輪）。
+
+    這個狀態經正式 PUT API 就做得出來（不需手改資料庫），放行的話一樣是客人簽完名、
+    結帳被擋、店員卻已經改不了。
+    """
+    from app.modules.customerdisplay.service import CartSessionInvalid, CustomerDisplayService
+
+    store_id, terminal_id, clerk_id, cart = await _mixed_cart_for_signing(
+        db_session, service_mode="TAKEOUT", table_no="A1", tag="takeouttable"
+    )
+
+    with pytest.raises(CartSessionInvalid) as err:
+        await CustomerDisplayService(db_session).freeze_store_credit_cart(
+            store_id, terminal_id, expected_revision=cart.revision, actor_user_id=clerk_id
+        )
+
+    assert "外帶" in str(err.value)
+
+
 async def test_freezing_a_menu_cart_with_service_mode_is_allowed(
     db_session: AsyncSession,
 ) -> None:

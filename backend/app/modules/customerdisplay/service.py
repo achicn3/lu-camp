@@ -167,10 +167,12 @@ def _dining_identity_of(cart: CartSession) -> tuple[str | None, str | None]:
 def _service_mode_problem(cart: CartSession, raw_items: object) -> str | None:
     """這台購物車的內用/外帶設定有沒有問題？有的話回一句給店員看的話。
 
-    口徑與結帳端 `_validate_service_mode_shape` 對齊：含餐飲就必須選模式，選了內用
-    就必須有桌號。**桌號也要在這裡驗**——購物車一凍結，桌號鍵跟內用/外帶鍵一樣都
-    停用了（cartMutationLocked），所以「內用沒桌號」會踩到與「沒選模式」一模一樣的坑：
-    客人簽完名、結帳被擋、回頭卻選不了（Codex 審查指出，我原本只守了一半）。
+    口徑與結帳端 `_validate_service_mode_shape` 逐條對齊：含餐飲須選模式、內用須有桌號、
+    外帶不得帶桌號、沒有餐飲不得帶模式或桌號。**四條都要**——任何一條在凍結時放行，
+    結帳時都會被擋，而那時內用/外帶與桌號鍵已因購物車凍結而停用（cartMutationLocked），
+    店員只能撤回、重選、請客人再簽一次。
+    （桌號是否仍在設定清單內不在此驗：那要靠管理者中途改設定才會不一致，
+    依店主判準屬於不必現在處理的情境。）
 
     餐飲判斷看快照的 `line_type`；模式與桌號存在 `staff_payload`。
     """
@@ -180,13 +182,22 @@ def _service_mode_problem(cart: CartSession, raw_items: object) -> str | None:
         isinstance(item, dict) and item.get("line_type") == SaleLineType.MENU.value
         for item in raw_items
     )
-    if not has_menu:
-        return None
     mode, table_no = _dining_identity_of(cart)
+    normalized_table = (table_no or "").strip() or None
+    if not has_menu:
+        # 沒有餐飲卻標了內用/桌號：結帳端會擋（出餐單會印出不存在的餐點、也污染統計），
+        # 凍結時就擋才不會讓客人白簽一次。
+        if mode is not None or normalized_table is not None:
+            return "本單沒有餐飲，不可指定內用/外帶或桌號"
+        return None
     if mode is None:
         return "本單含餐飲，請先選擇內用或外帶再送簽"
-    if mode == ServiceMode.DINE_IN.value and not (table_no or "").strip():
-        return "內用必須先指定桌號再送簽"
+    if mode == ServiceMode.DINE_IN.value:
+        if normalized_table is None:
+            return "內用必須先指定桌號再送簽"
+        return None
+    if normalized_table is not None:
+        return "外帶不可指定桌號"
     return None
 
 

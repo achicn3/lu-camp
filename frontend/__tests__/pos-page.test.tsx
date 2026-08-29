@@ -794,7 +794,10 @@ describe("/pos 結帳頁", () => {
       national_id_masked: null,
     };
     let cartReady = false;
-    stubFetch((url, method) => {
+    let lastPutMode: string | null = null;
+    let holdTakeoutPut = true;
+    let releaseTakeoutPut: () => void = () => {};
+    stubFetch((url, method, body) => {
       if (url.includes("/settings"))
         return json({ ...SETTINGS, dine_in_tables: ["A1", "A2"] });
       if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
@@ -810,8 +813,50 @@ describe("/pos 結帳頁", () => {
       // StaffCartSessionRead 還原，接著讀 cart.snapshot.items 而炸掉（Codex 審查）。
       if (url.includes("/customer-display/terminals/1/cart/current")) return json(null);
       if (url.includes("/customer-display/terminals/1/cart") && method === "PUT") {
-        cartReady = true;
-        return json({ id: 9, status: "DRAFT", revision: 1, snapshot: { items: [] } });
+        // **只有推上去的內容真的是最終狀態才算就緒**：任何較早的 PUT（例如只有帳篷
+        // 那次）都會把旗標設成 true，於是「按鈕是灰的」可能只是報價還沒回來，
+        // 斷言就又守錯東西了（Codex 第二輪）。
+        const put = JSON.parse(body ?? "{}");
+        const putState = {
+          lines: (put.lines ?? []).length,
+          member: put.buyer_contact_id ?? null,
+          mode: put.service_mode ?? null,
+        };
+        if (putState.lines === 2 && putState.member === 7 && putState.mode === null) {
+          cartReady = true;
+        }
+        lastPutMode = putState.mode;
+        // 外帶那次**卡住不回**，用來驗「選了模式但還沒同步上去時仍不可送簽」。
+        // 不卡住的話 PUT 立刻完成，拿掉同步守衛測試照樣會過（實測確認過）。
+        if (putState.mode === "TAKEOUT" && holdTakeoutPut) {
+          return new Promise<Response>((resolve) => {
+            releaseTakeoutPut = () =>
+              resolve(
+                json({
+                  id: 9,
+                  status: "DRAFT",
+                  revision: 2,
+                  snapshot: { items: [] },
+                  staff_payload: {
+                    lines: put.lines ?? [],
+                    service_mode: "TAKEOUT",
+                    table_no: null,
+                  },
+                }),
+              );
+          });
+        }
+        return json({
+          id: 9,
+          status: "DRAFT",
+          revision: 1,
+          snapshot: { items: [] },
+          staff_payload: {
+            lines: put.lines ?? [],
+            service_mode: put.service_mode ?? null,
+            table_no: put.table_no ?? null,
+          },
+        });
       }
       if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
         // 二手 1800 ＋ 餐飲 180；餐飲不可用購物金 → 上限 1800
@@ -855,6 +900,14 @@ describe("/pos 結帳頁", () => {
 
     // 選了外帶就能按——證明剛才的停用確實只因為這一項，也確認守衛沒擋掉正常流程
     await user.click(screen.getByRole("radio", { name: "外帶" }));
+    // 餐飲條件已滿足（提示消失），但同步還卡著 → **仍不可送簽**。
+    await waitFor(() => expect(screen.queryByText(/請先選擇內用或外帶/)).toBeNull());
+    await waitFor(() => expect(lastPutMode).toBe("TAKEOUT"));
+    expect(push).toHaveProperty("disabled", true);
+
+    // 同步完成才解鎖
+    holdTakeoutPut = false;
+    releaseTakeoutPut();
     await waitFor(() => expect(push).toHaveProperty("disabled", false));
   });
 
