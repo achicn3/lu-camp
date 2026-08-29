@@ -503,6 +503,32 @@ describe("/sales 列印發票證明聯", () => {
     );
   });
 
+  it("開立成功後**斷線**：訊息一樣要講明發票已經開出去了", async () => {
+    // 上一條用的是 HTTP 502；但 openapi-fetch 對「連線中止」是把 fetch 的例外**原樣拋出**，
+    // 走的是不同分支。只測 502 釘不住這條路，而那正是本輪修的東西（Codex 第三輪）。
+    stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/einvoice/sales/7/issue") && method === "POST") {
+        return json({ invoice_no: "ZA10000001" });
+      }
+      if (url.includes("/reprint-payload") && method === "POST") {
+        throw new TypeError("Failed to fetch"); // 瀏覽器斷線時的真實樣子
+      }
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { invoice_status: "PENDING_ISSUE" })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/發票已開立，但列印失敗/)).toBeTruthy(),
+    );
+  });
+
   it("尚未開立：先開立再取列印內容（店主 2026-08-29 裁示：未開立也要能印）", async () => {
     const calls: string[] = [];
     stubFetch((url, method) => {
