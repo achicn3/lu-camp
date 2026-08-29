@@ -35,6 +35,7 @@ from app.modules.user.service import UserService
 from app.shared.enums import (
     CartSessionStatus,
     SaleLineType,
+    ServiceMode,
     SignatureTaskStatus,
     TenderType,
     UserRole,
@@ -163,23 +164,30 @@ def _dining_identity_of(cart: CartSession) -> tuple[str | None, str | None]:
     )
 
 
-def _cart_needs_service_mode(cart: CartSession, raw_items: object) -> bool:
-    """這台購物車含餐飲、卻還沒選內用/外帶嗎？
+def _service_mode_problem(cart: CartSession, raw_items: object) -> str | None:
+    """這台購物車的內用/外帶設定有沒有問題？有的話回一句給店員看的話。
 
-    餐飲判斷看快照裡的 `line_type`（與結帳端 `_validate_service_mode_shape` 同一口徑）；
-    內用/外帶存在 `staff_payload`。桌號不在此處驗——內用缺桌號由結帳端擋，
-    而那時畫面上的桌號鍵仍可用（購物車尚未凍結）。
+    口徑與結帳端 `_validate_service_mode_shape` 對齊：含餐飲就必須選模式，選了內用
+    就必須有桌號。**桌號也要在這裡驗**——購物車一凍結，桌號鍵跟內用/外帶鍵一樣都
+    停用了（cartMutationLocked），所以「內用沒桌號」會踩到與「沒選模式」一模一樣的坑：
+    客人簽完名、結帳被擋、回頭卻選不了（Codex 審查指出，我原本只守了一半）。
+
+    餐飲判斷看快照的 `line_type`；模式與桌號存在 `staff_payload`。
     """
     if not isinstance(raw_items, list):
-        return False
+        return None
     has_menu = any(
         isinstance(item, dict) and item.get("line_type") == SaleLineType.MENU.value
         for item in raw_items
     )
     if not has_menu:
-        return False
-    mode, _table_no = _dining_identity_of(cart)
-    return mode is None
+        return None
+    mode, table_no = _dining_identity_of(cart)
+    if mode is None:
+        return "本單含餐飲，請先選擇內用或外帶再送簽"
+    if mode == ServiceMode.DINE_IN.value and not (table_no or "").strip():
+        return "內用必須先指定桌號再送簽"
+    return None
 
 
 def _snapshot_fingerprint(snapshot: dict[str, object]) -> str:
@@ -893,8 +901,9 @@ class CustomerDisplayService:
         # 畫面上的內用/外帶鍵就停用了，客人簽完名之後店員選不了，只能撤回、重選、
         # 再請客人簽一次。等到結帳才擋等於讓客人白簽一次。
         # 擋在端點而非只擋畫面：畫面只是體貼，端點才是防線。
-        if _cart_needs_service_mode(cart, raw_items):
-            raise CartSessionInvalid("本單含餐飲，請先選擇內用或外帶再送簽")
+        service_mode_problem = _service_mode_problem(cart, raw_items)
+        if service_mode_problem is not None:
+            raise CartSessionInvalid(service_mode_problem)
         if cart.snapshot.get("content_version") != _CART_SNAPSHOT_VERSION:
             # 升版前就開著的購物車少了贈品／折扣欄位。與其讓它在下面缺鍵爆掉，
             # 不如給店員一句看得懂的話：重新整理購物車即可。

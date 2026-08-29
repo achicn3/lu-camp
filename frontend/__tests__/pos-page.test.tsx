@@ -793,6 +793,7 @@ describe("/pos 結帳頁", () => {
       member_points: 0,
       national_id_masked: null,
     };
+    let cartReady = false;
     stubFetch((url, method) => {
       if (url.includes("/settings"))
         return json({ ...SETTINGS, dine_in_tables: ["A1", "A2"] });
@@ -805,8 +806,13 @@ describe("/pos 結帳頁", () => {
       if (url.includes("/customer-display/terminals") && method === "POST") {
         return json({ id: 1, paired_kiosk: { id: 2, online: true } });
       }
-      if (url.includes("/customer-display/terminals/1/cart/current"))
-        return json({ id: 9, status: "DRAFT", revision: 1 });
+      // 回 null（沒有既存購物車）而不是半個物件：頁面會把任何非空 cart 當完整的
+      // StaffCartSessionRead 還原，接著讀 cart.snapshot.items 而炸掉（Codex 審查）。
+      if (url.includes("/customer-display/terminals/1/cart/current")) return json(null);
+      if (url.includes("/customer-display/terminals/1/cart") && method === "PUT") {
+        cartReady = true;
+        return json({ id: 9, status: "DRAFT", revision: 1, snapshot: { items: [] } });
+      }
       if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
         // 二手 1800 ＋ 餐飲 180；餐飲不可用購物金 → 上限 1800
         return json({
@@ -838,14 +844,16 @@ describe("/pos 結帳頁", () => {
     await user.click(screen.getByText("購物金＋其他付款"));
     await user.type(screen.getByLabelText("本次使用購物金"), "300");
 
-    // 前提成立：畫面確實在要求先選內用/外帶
-    await waitFor(() =>
-      expect(screen.getByText(/請先選擇內用或外帶/)).toBeTruthy(),
-    );
+    // **其他前置條件先就緒**，否則「按鈕是灰的」可能只是購物車還沒建立、報價還沒回來，
+    // 那樣把餐飲守衛整個拿掉測試也會過（實測踩到：修好 stub 後變異測試就不再變紅）。
+    await waitFor(() => expect(cartReady).toBe(true));
+    await waitFor(() => expect(screen.getByText(/請先選擇內用或外帶/)).toBeTruthy());
     const push = await screen.findByRole("button", { name: "送至手持裝置簽署" });
+
+    // 此刻唯一未滿足的就是內用/外帶 → 必須停用
     expect(push).toHaveProperty("disabled", true);
 
-    // 選了外帶就能按——守衛不能把正常流程也擋掉
+    // 選了外帶就能按——證明剛才的停用確實只因為這一項，也確認守衛沒擋掉正常流程
     await user.click(screen.getByRole("radio", { name: "外帶" }));
     await waitFor(() => expect(push).toHaveProperty("disabled", false));
   });
