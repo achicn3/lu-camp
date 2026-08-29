@@ -339,6 +339,14 @@ class EInvoiceResultConflict(DomainError):
     """
 
 
+class ProofNotPrintable(DomainError):
+    """這張發票依規定不印證明聯（存了手機載具或捐贈）。
+
+    客人選載具就是不要那張紙；捐贈的發票也不交付證明聯。規則本來只寫在 POS 完成頁，
+    列印端點沒守 → 交易紀錄的列印入口繞得過去（實測庫有 59 張 print_mark=false）。
+    """
+
+
 class InvoiceNotIssued(DomainError):
     """折讓的原發票尚未正式開立（PENDING/不存在）——未開立不可折讓（§7 不變量 5）。"""
 

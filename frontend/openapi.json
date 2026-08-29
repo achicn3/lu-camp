@@ -9078,6 +9078,17 @@
               }
             ]
           },
+          "invoice_print_mark": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Print Mark"
+          },
           "invoice_status": {
             "$ref": "#/components/schemas/SaleInvoiceStatus"
           },

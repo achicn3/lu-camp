@@ -500,6 +500,9 @@ class SaleSummaryRead(BaseModel):
     # 手開紙本——否則店員會先被叫去台灣Pay App 退款，送出後才被後端擋下，錢已經出去了。
     # 由 router 經 einvoice service 補上（§2 不跨模組讀表）；無發票 → None。
     invoice_issue_channel: EInvoiceIssueChannel | None = None
+    # 這張發票印不印證明聯（存載具或捐贈 → False）。交易紀錄據此不顯示列印按鈕；
+    # 沒有發票的銷售為 None。
+    invoice_print_mark: bool | None = None
 
 
 class LinePayRefundAttemptRead(BaseModel):

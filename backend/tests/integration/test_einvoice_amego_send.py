@@ -50,6 +50,7 @@ from app.shared.exceptions import (
     EInvoiceQueueNotDroppable,
     EInvoiceResultConflict,
     EInvoiceSettingsChanged,
+    ProofNotPrintable,
 )
 from tests.integration.customer_display_helpers import (
     prepare_signed_store_credit_cart,
@@ -1436,6 +1437,30 @@ def _print_type(transport: _ScriptedTransport) -> int:
     import json as _json
 
     return int(_json.loads(transport.calls[-1][1]["data"])["print_invoice_type"])
+
+
+async def test_carrier_or_donated_invoice_refuses_to_print_a_proof(
+    db_session: AsyncSession,
+) -> None:
+    """存了載具或捐贈的發票**不印證明聯**——客人選載具就是不要那張紙。
+
+    這條規則 POS 完成頁本來就有（invoiceProofPrintable），但列印端點自己沒守，
+    於是交易紀錄的列印入口可以繞過去（實測 lucamp_manual 有 59 張 print_mark=false
+    的發票）。守衛放在端點才是唯一關卡：任何入口都擋得住（Codex 審查）。
+    """
+    store_id, sale_id, svc = await _issued_sale(db_session)
+    invoice = await db_session.scalar(select(Invoice).where(Invoice.sale_id == sale_id))
+    assert invoice is not None
+    invoice.print_mark = False  # 模擬載具／捐贈
+    await db_session.flush()
+    transport = _ScriptedTransport(dict(_PRINT_OK))
+
+    with pytest.raises(ProofNotPrintable):
+        await svc.reprint_payload_for_sale(
+            store_id, sale_id, client_factory=_awaitable_client(transport)
+        )
+
+    assert transport.calls == []  # 連問平台都不該問
 
 
 async def test_never_printed_proof_prints_as_an_original(db_session: AsyncSession) -> None:

@@ -516,7 +516,10 @@ async def list_sales(
     )
     return [
         SaleSummaryRead.model_validate(sale).model_copy(
-            update={"invoice_issue_channel": channels.get(sale.id)}
+            update={
+                "invoice_issue_channel": (channels.get(sale.id) or (None, None))[0],
+                "invoice_print_mark": (channels.get(sale.id) or (None, None))[1],
+            }
         )
         for sale in sales
     ]

@@ -43,6 +43,7 @@ from app.shared.exceptions import (
     InvoiceNotIssued,
     ManualInvoiceNotRegisterable,
     ManualPaperInvoiceOperation,
+    ProofNotPrintable,
 )
 
 _STALLED_MINUTES = 30
@@ -208,8 +209,13 @@ async def get_reprint_payload(
         payload = await EInvoiceService(session).reprint_payload_for_sale(
             user.store_id, sale_id, client_factory=lambda: _amego_client(session, user.store_id)
         )
-    except (InvoiceNotFound, InvoiceNotIssued, ManualPaperInvoiceOperation) as exc:
-        # 找不到／尚未開立／手開紙本：都是「這筆本來就沒有證明聯可補印」，屬 409。
+    except (
+        InvoiceNotFound,
+        InvoiceNotIssued,
+        ManualPaperInvoiceOperation,
+        ProofNotPrintable,
+    ) as exc:
+        # 找不到／尚未開立／手開紙本／載具或捐贈：都是「這筆沒有證明聯可印」，屬 409。
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except AmegoTransportError as exc:
         # 平台連不上或未回列印內容——不可靜默印出空白，明確回報上游故障。

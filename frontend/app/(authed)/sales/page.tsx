@@ -1121,18 +1121,24 @@ export default function SalesPage() {
       }
       // 開立成功之後才失敗的話，訊息必須講明「發票已經開出去了」——否則店員會以為
       // 整件事沒發生，跑去登記手開發票或重按，而平台上那張已經存在（Codex 審查）。
-      const issuedContext = (err: unknown): Error => {
+      // **整段包起來**：openapi-fetch 對斷線／連線中止是直接把 fetch 的例外原樣拋出，
+      // 只包 HTTP 錯誤與 printRaw 會漏掉那條路，訊息就不會提到「發票已開立」了
+      //（Codex 審查）。原始錯誤以 cause 保留，不吞掉。
+      const printed = await (async () => {
+        const { data, error } = await api.POST(
+          "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
+          { params: { path: { sale_id: sale.id } } },
+        );
+        if (!data) throw new Error(extractDetail(error) ?? "取得列印內容失敗");
+        await printRaw(data.base64_data);
+        return data;
+      })().catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        return new Error(justIssued ? `發票已開立，但列印失敗：${message}` : message);
-      };
-      const { data, error } = await api.POST(
-        "/api/v1/einvoice/sales/{sale_id}/reprint-payload",
-        { params: { path: { sale_id: sale.id } } },
-      );
-      if (!data) throw issuedContext(new Error(extractDetail(error) ?? "取得列印內容失敗"));
-      await printRaw(data.base64_data).catch((err: unknown) => {
-        throw issuedContext(err);
+        throw justIssued
+          ? new Error(`發票已開立，但列印失敗：${message}`, { cause: err })
+          : err;
       });
+      const data = printed;
       // **印表機回報成功之後**才記，順序不能顛倒：這支端點記的是「紙真的出來了」，
       // 先記會把失敗的那次算掉「列印一次」的額度，害真正的正本被當成補印。
       //
@@ -1493,7 +1499,10 @@ export default function SalesPage() {
                     {!voided
                       && (sale.invoice_status === "ISSUED"
                         || sale.invoice_status === "PENDING_ISSUE")
-                      && sale.invoice_issue_channel !== "MANUAL_PAPER" && (
+                      && sale.invoice_issue_channel !== "MANUAL_PAPER"
+                      // 存了載具或捐贈的發票依規定不印證明聯——客人選載具就是不要那張紙。
+                      // 後端也有守衛，這裡不顯示只是別讓店員按了才被擋（Codex 審查）。
+                      && sale.invoice_print_mark !== false && (
                       <button
                         type="button"
                         className="btn-ghost"

@@ -53,13 +53,17 @@ class EInvoiceRepository:
 
     async def issue_channels_for_sales(
         self, store_id: int, sale_ids: list[int]
-    ) -> dict[int, EInvoiceIssueChannel]:
-        """(sale_id → issue_channel)；沒有發票的銷售不列入。"""
-        stmt = select(Invoice.sale_id, Invoice.issue_channel).where(
+    ) -> dict[int, tuple[EInvoiceIssueChannel, bool]]:
+        """(sale_id → (issue_channel, print_mark))；沒有發票的銷售不列入。
+
+        `print_mark` 一併回：存了載具或捐贈的發票依規定不印證明聯，交易紀錄要據此
+        不顯示列印按鈕——後端雖有守衛，但讓店員按了才被擋是白做工（Codex 審查）。
+        """
+        stmt = select(Invoice.sale_id, Invoice.issue_channel, Invoice.print_mark).where(
             Invoice.store_id == store_id, Invoice.sale_id.in_(sale_ids)
         )
         rows = await self._session.execute(stmt)
-        return {sale_id: channel for sale_id, channel in rows.all()}
+        return {sale_id: (channel, mark) for sale_id, channel, mark in rows.all()}
 
     async def list_pending_invoice_sale_ids(
         self, store_id: int, *, limit: int, offset: int

@@ -81,6 +81,7 @@ from app.shared.exceptions import (
     InvoiceNotIssued,
     ManualInvoiceNotRegisterable,
     ManualPaperInvoiceOperation,
+    ProofNotPrintable,
 )
 
 # 回執種類（einvoice_result_events.result_kind）。
@@ -405,7 +406,7 @@ class EInvoiceService:
 
     async def issue_channels_for_sales(
         self, store_id: int, sale_ids: list[int]
-    ) -> dict[int, EInvoiceIssueChannel]:
+    ) -> dict[int, tuple[EInvoiceIssueChannel, bool]]:
         """一批銷售各自的發票開立來源（docs/36；跨模組供 sales 列表用，§2 經 service）。
 
         沒有發票的銷售不會出現在結果裡。交易紀錄要據此**在顯示任何退款指示之前**就知道
@@ -1186,6 +1187,12 @@ class EInvoiceService:
         if invoice.issue_channel is EInvoiceIssueChannel.MANUAL_PAPER:
             raise ManualPaperInvoiceOperation(
                 "本筆為手開紙本發票，證明聯是當初手寫的那張，系統無法補印"
+            )
+        if not invoice.print_mark:
+            # 存了載具或捐贈的發票依規定不印證明聯。這條規則原本只寫在 POS 完成頁，
+            # 於是交易紀錄的列印入口繞得過去——守衛必須放在端點，任何入口才都擋得住。
+            raise ProofNotPrintable(
+                "本筆發票存入載具或已捐贈，依規定不印證明聯"
             )
         is_reprint = invoice.proof_printed_at is not None
         client = await client_factory()

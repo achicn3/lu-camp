@@ -462,6 +462,47 @@ describe("/sales 列印發票證明聯", () => {
     expect(recorded).toBeGreaterThan(printed);
   });
 
+  it("存了載具或捐贈：不顯示列印按鈕（客人選載具就是不要那張紙）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { invoice_status: "ISSUED", invoice_print_mark: false })]);
+      }
+      return null;
+    });
+    renderPage("MANAGER");
+
+    // 先等清單真的渲染出來，否則「找不到按鈕」可能只是還沒載入（空斷言）。
+    await screen.findByLabelText("補印銷售 7 商品明細聯");
+    expect(screen.queryByLabelText("列印銷售 7 發票證明聯")).toBeNull();
+  });
+
+  it("開立成功後列印失敗：訊息要講明發票已經開出去了", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/linepay-refunds/pending")) return json([]);
+      if (url.includes("/einvoice/sales/7/issue") && method === "POST") {
+        return json({ invoice_no: "ZA10000001" });
+      }
+      if (url.includes("/reprint-payload") && method === "POST") {
+        return json({ detail: "平台連線中斷" }, 502);
+      }
+      if (url.includes("/api/v1/sales") && method === "GET") {
+        return json([sale(7, { invoice_status: "PENDING_ISSUE" })]);
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+
+    await user.click(await screen.findByLabelText("列印銷售 7 發票證明聯"));
+
+    // 只說「列印失敗」的話，店員會以為整件事沒發生而跑去登記手開發票，
+    // 但平台上那張發票已經存在了。
+    await waitFor(() =>
+      expect(screen.getByText(/發票已開立，但列印失敗/)).toBeTruthy(),
+    );
+  });
+
   it("尚未開立：先開立再取列印內容（店主 2026-08-29 裁示：未開立也要能印）", async () => {
     const calls: string[] = [];
     stubFetch((url, method) => {

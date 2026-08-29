@@ -6214,6 +6214,8 @@ export interface components {
             /** Id */
             id: number;
             invoice_issue_channel?: components["schemas"]["EInvoiceIssueChannel"] | null;
+            /** Invoice Print Mark */
+            invoice_print_mark?: boolean | null;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
             payment_method: components["schemas"]["PaymentMethod"];
             service_mode?: components["schemas"]["ServiceMode"] | null;
