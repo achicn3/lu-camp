@@ -1148,6 +1148,9 @@ export default function PosPage() {
   const [receivedInput, setReceivedInput] = useState("");
   // 餐飲內用/外帶與桌號（docs/35）：不預設任一邊——預設哪邊都會被慣性按過去，
   // 而桌號錯的代價是東西送錯桌。
+  // 購物車還有變更沒同步到伺服器嗎（送簽前必須同步完成）。初始為 true：還沒收到
+  // 第一次回報之前，寧可先擋住。
+  const [cartSyncDirty, setCartSyncDirty] = useState(true);
   const [dineIn, setDineIn] = useState<DineInSelection>(clearDineIn());
   // LINE Pay 掃到的客人一次性付款碼（docs/30 P3）；結帳成功後清空、不重用。
   const [linePayKey, setLinePayKey] = useState("");
@@ -1677,18 +1680,6 @@ export default function PosPage() {
       !signed ||
       signMismatch ||
       displayCart?.status !== "FROZEN");
-  // 伺服器上那台購物車存的內用/外帶，與畫面上的選擇是否已經一致。
-  // 不一致＝這次的變更還在防抖或在途，此時送簽會凍結到舊的選擇。
-  // DisplayCart 可能是客顯用的精簡型（沒有 staff_payload），故先收斂型別。
-  const savedDining =
-    displayCart !== null && displayCart !== undefined && "staff_payload" in displayCart
-      ? displayCart.staff_payload
-      : null;
-  const dineInSyncPending =
-    hasMenuLine &&
-    ((savedDining?.service_mode ?? null) !== dineIn.mode ||
-      (savedDining?.table_no ?? null) !== dineIn.tableNo);
-
   const cartMutationLocked =
     displayCart?.status === "FROZEN" ||
     displayCart?.status === "PROCESSING" ||
@@ -2294,6 +2285,7 @@ export default function PosPage() {
         onRestore={restoreCustomerDisplayCart}
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}
+        onSyncDirtyChange={setCartSyncDirty}
       />
       {staleKitchen.map((item) => (
         <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
@@ -2711,10 +2703,12 @@ export default function PosPage() {
                       // 內用/外帶鍵已因購物車凍結而停用，只能撤回重簽（QA BUG-004）。
                       // 錯誤訊息本來就顯示在上方的餐飲區塊，店員看得到原因。
                       !dineInValidation.ok ||
-                      // 而且要等**這一次的選擇真的同步上去**：購物車同步有 180ms 防抖，
-                      // 店員改完模式立刻送簽的話，凍結到的會是上一個選擇，客人簽的內容
-                      // 與實際結帳對不起來，一樣要撤回重簽（Codex 審查）。
-                      dineInSyncPending
+                      // 而且畫面上的購物車要**已經同步到伺服器**：同步有 180ms 防抖，
+                      // 改完立刻送簽的話凍結到的是上一版，客人簽的內容與實際結帳對不
+                      // 起來，一樣得撤回重簽。用整車指紋而不是只比餐飲欄位——移除最後
+                      // 一筆餐飲時，餐飲比對會立刻「一致」，伺服器上卻還是舊車
+                      //（Codex 第三輪）。
+                      cartSyncDirty
                     }
                     onClick={() => pushSign.mutate()}
                   >

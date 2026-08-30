@@ -37,7 +37,9 @@ type FetchRoute = (
   url: string,
   method: string,
   body: string,
-) => Response | null;
+  // 允許回 Promise：有些案例要讓某支請求**卡住不回**，才造得出「已送出但尚未同步」
+  // 的中間狀態（例如驗送簽前必須等購物車同步完成）。
+) => Response | Promise<Response> | null;
 
 function stubFetch(route: FetchRoute) {
   vi.stubGlobal(
@@ -51,7 +53,7 @@ function stubFetch(route: FetchRoute) {
           ? await input.clone().text()
           : String(init?.body ?? "");
       const resp = route(url, method, body);
-      if (resp) return resp;
+      if (resp) return await resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
     }),
   );

@@ -93,9 +93,11 @@ interface PosCustomerDisplayProps {
   onRestore: (cart: StaffCart) => void | Promise<void>;
   onTerminalChange?: (terminal: Terminal | null) => void;
   onCartChange?: (cart: CartSession | StaffCart | null) => void;
+  /** 畫面上的購物車內容是否還有變更沒同步到伺服器（送簽前必須是 false）。 */
+  onSyncDirtyChange?: (dirty: boolean) => void;
 }
 
-type PendingSync =
+type PendingSync = { fingerprint: string } & (
   | {
       kind: "UPSERT";
       lines: SaleLine[];
@@ -105,7 +107,8 @@ type PendingSync =
       serviceMode: "DINE_IN" | "TAKEOUT" | null;
       tableNo: string | null;
     }
-  | { kind: "CANCEL" };
+  | { kind: "CANCEL" }
+);
 
 export function PosCustomerDisplay({
   lines,
@@ -118,12 +121,18 @@ export function PosCustomerDisplay({
   onRestore,
   onTerminalChange,
   onCartChange,
+  onSyncDirtyChange,
 }: PosCustomerDisplayProps) {
   const queryClient = useQueryClient();
   const [pairingCode, setPairingCode] = useState("");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [syncedRevision, setSyncedRevision] = useState<number | null>(null);
+  // 最後一次**成功**推上去的內容指紋。與目前畫面的指紋不同＝還有變更在防抖或在途。
+  // 只比對餐飲欄位是不夠的：移除最後一筆餐飲時，本地立刻沒有餐飲了，餐飲比對隨即
+  // 「一致」，但伺服器上還是舊的餐飲購物車（Codex 第三輪）。整車指紋才擋得住，
+  // 也順帶解決 A1→A2→A1 這種改回原值的情況。
+  const [syncedFingerprint, setSyncedFingerprint] = useState<string | null>(null);
   const payloadFingerprint = JSON.stringify({
     lines,
     buyerContactId,
@@ -268,6 +277,7 @@ export function PosCustomerDisplay({
           }
           revision.current = data.revision;
           setSyncedRevision(data.revision);
+          setSyncedFingerprint(next.fingerprint);
           onCartChange?.(data);
         } else if (revision.current !== null) {
           const { data } = await api.POST(
@@ -283,6 +293,7 @@ export function PosCustomerDisplay({
           if (!data) throw new Error("顧客螢幕沒有清空成功，請重新整理 POS。");
           revision.current = null;
           setSyncedRevision(null);
+          setSyncedFingerprint(next.fingerprint);
           onCartChange?.(null);
         }
         setSyncError(null);
@@ -296,6 +307,10 @@ export function PosCustomerDisplay({
   }, [onCartChange]);
 
   useEffect(() => {
+    onSyncDirtyChange?.(payloadFingerprint !== syncedFingerprint);
+  }, [onSyncDirtyChange, payloadFingerprint, syncedFingerprint]);
+
+  useEffect(() => {
     const terminalRow = terminal.data;
     if (
       !hydrated ||
@@ -307,10 +322,12 @@ export function PosCustomerDisplay({
     }
     const timer = window.setTimeout(() => {
       const latest = payload.current;
+      const fingerprint = payloadFingerprint;
       pending.current =
         latest.lines.length > 0
           ? {
               kind: "UPSERT",
+              fingerprint,
               lines: latest.lines,
               buyerContactId: latest.buyerContactId,
               tenders: latest.tenders,
@@ -318,7 +335,7 @@ export function PosCustomerDisplay({
               serviceMode: latest.serviceMode,
               tableNo: latest.tableNo,
             }
-          : { kind: "CANCEL" };
+          : { kind: "CANCEL", fingerprint };
       void drain(terminalRow);
     }, 180);
     return () => window.clearTimeout(timer);
