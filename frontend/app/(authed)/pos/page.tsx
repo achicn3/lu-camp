@@ -1725,6 +1725,9 @@ export default function PosPage() {
       setNotice(null);
       setDisplayCart(d.cart);
       setSignTaskId(d.signature_task_id);
+      // 客顯元件自己有一份購物車查詢快取；不讓它失效的話它仍以為是 DRAFT，
+      // 下一次輪詢就會對已凍結的購物車送 PUT、拿到 409 並留下錯誤（Codex 第五輪）。
+      void queryClient.invalidateQueries({ queryKey: ["customer-display", "cart"] });
     },
     onError: (e: Error) => setNotice(e.message),
   });

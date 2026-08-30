@@ -153,6 +153,9 @@ export function PosCustomerDisplay({
     serviceMode,
     tableNo,
   });
+  // drain 是 useCallback，內部拿不到最新的 payloadFingerprint；用 ref 帶進去。
+  // **在 effect 裡寫入**，不在 render 期間碰 ref（React 規則）。
+  const payloadFingerprintRef = useRef(payloadFingerprint);
   const revision = useRef<number | null>(null);
   const pending = useRef<PendingSync | null>(null);
   const draining = useRef(false);
@@ -251,9 +254,11 @@ export function PosCustomerDisplay({
   const drain = useCallback(async (terminalRow: Terminal) => {
     if (draining.current) return;
     draining.current = true;
+    let attempted: string | null = null;
     try {
       while (pending.current) {
         const next = pending.current;
+        attempted = next.fingerprint;
         pending.current = null;
         if (next.kind === "UPSERT") {
           const { data, response } = await api.PUT(
@@ -304,6 +309,30 @@ export function PosCustomerDisplay({
       }
     } catch (error) {
       pending.current = null;
+      // **失敗的那份已經過時就不要卡住**：掃了 A（PUT 在途）又掃 B，A 才失敗時，
+      // 若照樣設下阻擋性錯誤，B 從此送不出去也不會再有人重試——除非店員剛好又動一次
+      // 購物車（Codex 第五輪）。連續掃商品時前一個請求還在途是常態，不是罕見時序。
+      // 內容已經往前走了 → 不擋，直接以最新內容重試；只有「失敗的正是目前這份」
+      // 才是真的該讓店員看到的故障。
+      if (attempted !== null && attempted !== payloadFingerprintRef.current) {
+        // 把**最新**內容重新排進去，交給 finally 的補送機制送出；
+        // 只是 return 的話 pending 是空的，等於沒有人會再送 B。
+        const latest = payload.current;
+        pending.current =
+          latest.lines.length > 0
+            ? {
+                kind: "UPSERT",
+                fingerprint: payloadFingerprintRef.current,
+                lines: latest.lines,
+                buyerContactId: latest.buyerContactId,
+                tenders: latest.tenders,
+                adjustments: latest.adjustments,
+                serviceMode: latest.serviceMode,
+                tableNo: latest.tableNo,
+              }
+            : { kind: "CANCEL", fingerprint: payloadFingerprintRef.current };
+        return;
+      }
       setSyncError(error instanceof Error ? error.message : "顧客螢幕同步失敗");
     } finally {
       draining.current = false;
@@ -323,6 +352,10 @@ export function PosCustomerDisplay({
   useEffect(() => {
     drainRef.current = drain;
   }, [drain]);
+
+  useEffect(() => {
+    payloadFingerprintRef.current = payloadFingerprint;
+  }, [payloadFingerprint]);
 
   useEffect(() => {
     onSyncDirtyChange?.(syncBusy || payloadFingerprint !== syncedFingerprint);
