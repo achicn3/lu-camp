@@ -133,6 +133,10 @@ export function PosCustomerDisplay({
   // 「一致」，但伺服器上還是舊的餐飲購物車（Codex 第三輪）。整車指紋才擋得住，
   // 也順帶解決 A1→A2→A1 這種改回原值的情況。
   const [syncedFingerprint, setSyncedFingerprint] = useState<string | null>(null);
+  // 有請求排隊或在途嗎。**只比指紋不夠**：A1→A2（PUT 已送出、回應還沒處理）→改回 A1，
+  // 現值又等於「最後成功」的 A1，dirty 會誤判成 false，而伺服器上其實是 A2
+  //（Codex 第四輪）。在途期間一律視為未同步。
+  const [syncBusy, setSyncBusy] = useState(false);
   const payloadFingerprint = JSON.stringify({
     lines,
     buyerContactId,
@@ -303,19 +307,50 @@ export function PosCustomerDisplay({
       setSyncError(error instanceof Error ? error.message : "顧客螢幕同步失敗");
     } finally {
       draining.current = false;
+      // 迴圈判定「沒有待送」到這裡之間，排程可能剛放進新的一筆；而那次呼叫會因為
+      // draining 仍為 true 而直接返回 → 沒有人來送它。窄，但我的 syncBusy 會把它
+      // 變成送簽按鈕永久變灰，所以在這裡補送一次。
+      if (pending.current !== null) {
+        void drainRef.current?.(terminalRow);
+      } else {
+        setSyncBusy(false);
+      }
     }
   }, [onCartChange]);
 
+  // drain 需要在自己的 finally 裡再呼叫自己；用 ref 轉一手避免 useCallback 自我相依。
+  const drainRef = useRef<((terminalRow: Terminal) => Promise<void>) | null>(null);
   useEffect(() => {
-    onSyncDirtyChange?.(payloadFingerprint !== syncedFingerprint);
-  }, [onSyncDirtyChange, payloadFingerprint, syncedFingerprint]);
+    drainRef.current = drain;
+  }, [drain]);
+
+  useEffect(() => {
+    onSyncDirtyChange?.(syncBusy || payloadFingerprint !== syncedFingerprint);
+  }, [onSyncDirtyChange, payloadFingerprint, syncBusy, syncedFingerprint]);
+
+  // 同步失敗後整條同步就停住，而清除錯誤只發生在成功路徑——等於一次失敗就要整頁重載
+  // （Codex 第四輪）。改為店員一動購物車就清掉舊錯誤重試：那是他唯一能做的補救動作，
+  // 而且再失敗會馬上再顯示，不會把真的故障蓋掉。
+  const lastTriedFingerprint = useRef(payloadFingerprint);
+  useEffect(() => {
+    if (payloadFingerprint === lastTriedFingerprint.current) return;
+    lastTriedFingerprint.current = payloadFingerprint;
+    setSyncError((previous) => (previous === null ? previous : null));
+  }, [payloadFingerprint]);
 
   useEffect(() => {
     const terminalRow = terminal.data;
+    // 凍結/付款中的購物車本來就不可修改，硬推只會拿到 409 並把同步永久停住——
+    // POS 重整後遇到既有 FROZEN 購物車會穩定踩到（Codex 第四輪）。
+    const cartLocked =
+      current.data?.status === "FROZEN" ||
+      current.data?.status === "PROCESSING" ||
+      current.data?.status === "PAYMENT_UNCERTAIN";
     if (
       !hydrated ||
       !terminalRow?.paired_kiosk ||
       !ready ||
+      cartLocked ||
       syncError !== null
     ) {
       return;
@@ -336,11 +371,15 @@ export function PosCustomerDisplay({
               tableNo: latest.tableNo,
             }
           : { kind: "CANCEL", fingerprint };
+      setSyncBusy(true);
       void drain(terminalRow);
     }, 180);
     return () => window.clearTimeout(timer);
   }, [
     buyerContactId,
+    // 購物車狀態要進相依：凍結解除（撤回簽署）後必須重新跑這條 effect 恢復同步，
+    // 否則店員撤回之後畫面就再也推不上去了（eslint 的 exhaustive-deps 抓到）。
+    current.data?.status,
     drain,
     hydrated,
     payloadFingerprint,
