@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
+import { fetchAgentSimulated } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { useCurrentRole } from "@/lib/useCurrentRole";
@@ -111,6 +112,15 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     },
   });
 
+  // 假裝模式橫幅：代理沒接真機時，列印會「回成功但不出紙」。這件事必須在**印之前**
+  // 就講清楚，否則店員拿著空手才發現，單子已經結了。問不到（代理離線/舊版）回 null →
+  // 不顯示：離線在列印時本來就會報錯，天天亮著的警告等於沒有警告。
+  const agentSimulated = useQuery({
+    queryKey: ["agent-simulated"],
+    refetchInterval: 60_000,
+    queryFn: fetchAgentSimulated,
+  });
+
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
   if (!hydrated || token === null || session === null) return null;
@@ -198,6 +208,11 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
             {moreItems.map((item) => renderLink(item, () => setMoreOpen(false)))}
           </nav>
         </div>
+      )}
+      {agentSimulated.data === true && (
+        <p className="agent-sim-banner" role="status">
+          測試模式：列印不會真的出紙，錢櫃也不會開。要正式營業請洽維護人員設定列印裝置。
+        </p>
       )}
       <main className="app-main">{children}</main>
     </div>

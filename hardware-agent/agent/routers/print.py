@@ -15,7 +15,7 @@ from typing import Annotated
 import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException
 
-from agent.deps import DevicesDep, OkResponse
+from agent.deps import DevicesDep, OkResponse, ok_response
 from agent.interfaces import (
     AcquisitionReceiptPayload,
     InvoicePayload,
@@ -56,7 +56,7 @@ async def print_receipt(
     header = await _fetch_header(client, sale.store_id)
     # 真機列印是同步阻塞 I/O（網路/逾時），卸載到 worker thread，勿阻塞事件迴圈。
     await anyio.to_thread.run_sync(devices.receipt_printer.print_receipt, sale, header)
-    return OkResponse(status="ok")
+    return ok_response(devices)
 
 
 @router.post("/detail", response_model=OkResponse, operation_id="printDetail")
@@ -65,7 +65,7 @@ async def print_detail(
 ) -> OkResponse:
     header = await _fetch_header(client, sale.store_id)
     await anyio.to_thread.run_sync(devices.receipt_printer.print_detail, sale, header)
-    return OkResponse(status="ok")
+    return ok_response(devices)
 
 
 @router.post("/acquisition", response_model=OkResponse, operation_id="printAcquisitionReceipt")
@@ -75,7 +75,7 @@ async def print_acquisition(
     """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名影像（存證）。"""
     header = await _fetch_header(client, receipt.store_id)
     await anyio.to_thread.run_sync(devices.receipt_printer.print_acquisition, receipt, header)
-    return OkResponse(status="ok")
+    return ok_response(devices)
 
 
 @router.post("/kitchen", response_model=OkResponse, operation_id="printKitchenTicket")
@@ -87,7 +87,7 @@ async def print_kitchen(ticket: KitchenTicketPayload, devices: DevicesDep) -> Ok
     # 出餐機接了就印那台、沒接退回收據機（解析在 AgentDevices.kitchen_ticket_printer）。
     # **缺紙不得改印櫃檯那台**——店員會以為廚房收到了，餐永遠不會被做。
     await anyio.to_thread.run_sync(devices.kitchen_ticket_printer.print_kitchen_ticket, ticket)
-    return OkResponse(status="ok")
+    return ok_response(devices)
 
 
 @router.post("/raw", response_model=OkResponse, operation_id="printRaw")
@@ -101,7 +101,7 @@ async def print_raw(payload: RawPrintPayload, devices: DevicesDep) -> OkResponse
     去向與 `/print/einvoice` 相同（發票機接了就那台）——補印的是發票，不是收據。
     """
     await anyio.to_thread.run_sync(devices.einvoice_printer.print_raw, payload.decoded())
-    return OkResponse(status="ok")
+    return ok_response(devices)
 
 
 @router.post("/einvoice", response_model=OkResponse, operation_id="printEinvoice")
@@ -112,4 +112,4 @@ async def print_einvoice(invoice: InvoicePayload, devices: DevicesDep) -> OkResp
     **缺紙不得改印收據機**——證明聯有兌獎聯性質，店員會以為印好了而客人手上什麼都沒有。
     """
     await anyio.to_thread.run_sync(devices.einvoice_printer.print_einvoice, invoice)
-    return OkResponse(status="ok")
+    return ok_response(devices)

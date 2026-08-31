@@ -18,9 +18,23 @@ from agent.devices import AgentDevices
 
 
 class OkResponse(BaseModel):
-    """通用成功回應。"""
+    """通用成功回應。
+
+    `simulated=True` 代表這台代理跑在假裝模式：**回了成功但沒有真的列印**。
+    呼叫端必須把這件事講給店員聽，否則他會以為紙已經出來了。
+    """
 
     status: str
+    simulated: bool = False
+
+
+def ok_response(devices: AgentDevices) -> OkResponse:
+    """成功回應，並如實帶上「這台是不是假裝模式」。
+
+    每個端點各自寫 `OkResponse(status="ok")` 的話，日後新增端點很容易漏掉註記——
+    漏掉的後果是店員在假裝模式下看到「已送出」卻拿不到紙。統一從這裡出。
+    """
+    return OkResponse(status="ok", simulated=devices.simulated)
 
 
 async def get_devices(request: Request) -> AgentDevices:

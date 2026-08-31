@@ -3537,3 +3537,14 @@ body {
 .sales-search .btn-ghost {
   min-height: var(--tap-min);
 }
+
+/* 假裝模式橫幅：代理未接真機時常駐提示（列印回成功卻不出紙）。 */
+.agent-sim-banner {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border-bottom: 1px solid var(--warn);
+  color: var(--warn);
+  font-weight: 600;
+  text-align: center;
+}

@@ -28,7 +28,7 @@ async def test_label_endpoint_ok() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/print/label", json={"code": "X1", "name": "n", "price": 10})
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    assert resp.json() == {"status": "ok", "simulated": True}
 
 
 async def test_drawer_and_health_endpoints() -> None:
@@ -37,5 +37,5 @@ async def test_drawer_and_health_endpoints() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         drawer = await client.post("/drawer/open")
-    assert health.json() == {"status": "ok"}
+    assert health.json() == {"status": "ok", "simulated": True}
     assert drawer.status_code == 200

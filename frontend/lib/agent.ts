@@ -2,7 +2,7 @@
 // 後端只記稽核；實體列印（ESC/POS → EPSON）由代理負責。位址由 NEXT_PUBLIC_AGENT_URL 設定。
 import type { components } from "./api-types";
 
-const AGENT_BASE = (
+export const AGENT_BASE = (
   process.env.NEXT_PUBLIC_AGENT_URL ?? "http://localhost:8001"
 ).replace(/\/+$/, "");
 
@@ -176,4 +176,21 @@ export async function printLabel(
  */
 export async function openCashDrawer(): Promise<void> {
   await postAgent("/drawer/open", {});
+}
+
+/**
+ * 代理是不是跑在「假裝模式」（收到列印回成功、紙卻不會出來）。
+ *
+ * 回 null＝問不到（代理離線或版本較舊）。**問不到不等於假裝模式**：代理離線在列印時
+ * 會明確報錯，硬要在此顯示警告等於天天亮著，店員很快就學會無視，真的出事時沒人看。
+ */
+export async function fetchAgentSimulated(): Promise<boolean | null> {
+  try {
+    const res = await globalThis.fetch(`${AGENT_BASE}/health`);
+    if (!res.ok) return null;
+    const j = (await res.json()) as { simulated?: unknown };
+    return typeof j.simulated === "boolean" ? j.simulated : null;
+  } catch {
+    return null;
+  }
 }

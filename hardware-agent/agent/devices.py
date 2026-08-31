@@ -48,6 +48,12 @@ class AgentDevices:
     `None`＝沒接第二台，出餐單印到收據機（既有行為）。放廚房/吧台的那台只印出餐單，
     不印客人的收據/明細聯/證明聯。
     """
+    simulated: bool = False
+    """這組是不是「假裝列印」的裝置。
+
+    假裝模式收到列印一樣回成功、紙卻不會出來。**列印回應要帶著這個事實**，前端才能
+    對店員直說「這次沒有真的列印」——否則店員會拿著空手以為印好了。
+    """
     invoice_printer: ReceiptPrinter | None = None
     """電子發票**專屬**印表機（ADR-018，選配）。
 
@@ -74,6 +80,7 @@ def default_fake_devices() -> AgentDevices:
         receipt_printer=FakeReceiptPrinter(),
         cash_drawer=FakeCashDrawer(),
         status_provider=FakeStatusProvider(),
+        simulated=True,
     )
 
 

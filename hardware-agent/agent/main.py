@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
+from pathlib import Path
 
 import anyio.to_thread
 from fastapi import FastAPI, Request
@@ -21,7 +23,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent.config import MissingDeviceConfigError
-from agent.deps import DevicesDep, OkResponse, get_devices  # noqa: F401  (get_devices re-export)
+from agent.deps import (  # noqa: F401  (get_devices re-export)
+    DevicesDep,
+    OkResponse,
+    get_devices,
+    ok_response,
+)
 from agent.devices import AgentDevices, default_fake_devices, real_epson_devices_from_env
 from agent.drivers.brother_label import LabelContentTooWide
 from agent.drivers.signature_png import SignatureImageError
@@ -111,8 +118,8 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         )
 
     @app.get("/health", response_model=OkResponse, operation_id="agentHealth")
-    async def health() -> OkResponse:
-        return OkResponse(status="ok")
+    async def health(devices: DevicesDep) -> OkResponse:
+        return ok_response(devices)
 
     @app.post("/print/label", response_model=OkResponse, operation_id="printLabel")
     async def label(req: LabelRequest, devices: DevicesDep) -> OkResponse:
@@ -120,13 +127,13 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         await anyio.to_thread.run_sync(
             devices.label_printer.print_label, req.code, req.name, req.price
         )
-        return OkResponse(status="ok")
+        return ok_response(devices)
 
     @app.post("/drawer/open", response_model=OkResponse, operation_id="openDrawer")
     async def drawer(devices: DevicesDep) -> OkResponse:
         # 真機踢櫃為同步阻塞 I/O（網路），卸載到 worker thread，勿阻塞事件迴圈。
         await anyio.to_thread.run_sync(devices.cash_drawer.open)
-        return OkResponse(status="ok")
+        return ok_response(devices)
 
     # --- T15/T16 在此 include 各自的 router（避免彼此改同一 endpoint）---
     # 兩個 router 都從無循環的 agent.deps 取 DI（DevicesDep/OkResponse），
@@ -140,14 +147,47 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
     return app
 
 
-def _devices_from_env() -> AgentDevices | None:
-    """依 `AGENT_DEVICES` 選注入：`real` → 真機 EPSON 組合；其餘（含未設/測試）→ None。
+_MODE_REAL = "real"
+_MODE_FAKE = "fake"
 
-    回傳 None 時 `create_app` 用全 Fake 預設，確保自動化測試與無實機開發不需設定 IP。
+
+def devices_from_env(env: Mapping[str, str] | None = None) -> AgentDevices | None:
+    """依 `AGENT_DEVICES` 選注入：`real` → 真機組合；`fake` → None（由 create_app 用 Fake）。
+
+    **未設或無法辨識的值一律拒絕啟動**，不再默默退回假裝模式。
+
+    為什麼要這麼嚴：假裝模式收到列印就回「成功」，紙卻不會出來。開機腳本／launchd
+    忘了帶這個環境變數時，舊行為是安靜地變成假裝模式——畫面顯示「已送出」、客人拿不到
+    收據，而店員完全看不出哪裡錯。拒絕啟動則會讓前端直接顯示「無法連線硬體代理」，
+    當場就看得見。打錯字（real→rael）同樣要擋，那是最容易發生的情況。
     """
-    if os.environ.get("AGENT_DEVICES", "").strip().lower() == "real":
+    resolved = os.environ if env is None else env
+    mode = resolved.get("AGENT_DEVICES", "").strip().lower()
+    if mode == _MODE_REAL:
         return real_epson_devices_from_env()
-    return None
+    if mode == _MODE_FAKE:
+        return None
+    raise MissingDeviceConfigError(
+        "環境變數 AGENT_DEVICES 未設定或無法辨識"
+        f"（收到 {resolved.get('AGENT_DEVICES', '')!r}）。"
+        f"請明確設為 {_MODE_REAL}（接真機列印）或 {_MODE_FAKE}（不列印，開發與測試用）。"
+        "不給預設值是刻意的：假裝模式會回報列印成功但不出紙。"
+    )
 
 
-app = create_app(_devices_from_env())
+def _load_dotenv_if_present() -> None:
+    """啟動時載入同目錄的 `.env`（若存在）。
+
+    launchd／開機腳本很容易漏帶環境變數，而漏帶的後果是整台機器安靜地不列印。
+    自己讀一份就少一個必須有人記得的步驟。**已存在的環境變數優先**——
+    正式部署若在 plist 明確指定，不會被檔案蓋掉。
+    """
+    from dotenv import load_dotenv  # uvicorn[standard] 已帶入 python-dotenv
+
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+
+
+_load_dotenv_if_present()
+app = create_app(devices_from_env())
