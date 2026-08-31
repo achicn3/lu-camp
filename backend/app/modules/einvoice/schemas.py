@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.shared.enums import (
     EInvoiceAction,
     EInvoiceIssueChannel,
@@ -16,7 +16,7 @@ from app.shared.enums import (
     UploadStatus,
 )
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 class InvoiceRead(BaseModel):

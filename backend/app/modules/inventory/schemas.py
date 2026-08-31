@@ -11,7 +11,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.shared.enums import (
     BulkAcquisitionBasis,
     BulkLotStatus,
@@ -20,9 +20,11 @@ from app.shared.enums import (
     SerializedItemStatus,
 )
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[
-    Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
+    Decimal | None, PlainSerializer(
+        lambda d: None if d is None else format_ntd(d), return_type=str | None
+    )
 ]
 
 
@@ -58,7 +60,7 @@ class ProductModelCreate(BaseModel):
     name: str = Field(min_length=1, max_length=150)
 
 
-RateMultiple = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+RateMultiple = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 class CategoryRead(BaseModel):

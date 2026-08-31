@@ -5,7 +5,6 @@ import {
   marginPct,
   maxAcquisitionCost,
   netOfTaxInclusive,
-  payableTotal,
   splitValid,
   suggestedListedPrice,
   taxInclusivePrice,
@@ -115,11 +114,7 @@ describe("suggestedListedPrice", () => {
   });
 });
 
-describe("payableTotal / splitValid / creditPremiumPreview", () => {
-  it("payableTotal sums costs", () => {
-    expect(payableTotal([100, 200, 300])).toBe(600);
-    expect(payableTotal([])).toBe(0);
-  });
+describe("splitValid / creditPremiumPreview", () => {
   it("splitValid requires integer 0<cash<total", () => {
     expect(splitValid(1000, 400)).toBe(true);
     expect(splitValid(1000, 0)).toBe(false);

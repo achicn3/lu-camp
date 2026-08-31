@@ -17,12 +17,12 @@ from pydantic import (
     model_validator,
 )
 
-from app.core.money import MAX_NTD, ensure_ntd_fits_numeric_12
+from app.core.money import MAX_NTD, ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.acquisition.models import Acquisition
 from app.shared.enums import AcquisitionType, BulkAcquisitionBasis, Grade, PayoutMethod
 
 # 金額：輸出序列化為字串；輸入可吃字串或數字（Pydantic 轉 Decimal）。
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 COMMISSION_PCT_MIN = 0
 COMMISSION_PCT_MAX = 100

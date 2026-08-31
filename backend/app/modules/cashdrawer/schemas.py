@@ -10,11 +10,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.cashdrawer.models import CashMovement, CashSession
 from app.shared.enums import CashMovementType, CashSessionStatus
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: format(d, "f"), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 def _whole(value: Decimal, *, allow_negative: bool) -> Decimal:

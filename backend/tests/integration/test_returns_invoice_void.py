@@ -8,6 +8,7 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select, text
@@ -49,6 +50,9 @@ from app.shared.exceptions import (
 )
 from tests.integration.customer_display_helpers import return_consent_content
 from tests.integration.test_sales_einvoice import _FakeSerializer
+
+# 發票開立日是台北曆日（見 _issue_invoice）——用 UTC 日會在每月 1 號翻紅。
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 async def _seed(session: AsyncSession, *, price: str = "1050") -> tuple[int, int, str]:
@@ -98,7 +102,11 @@ async def _issue_invoice(
 ) -> None:
     """把發票推到 ISSUED，並可指定開立日/紙本/載具/捐贈以驅動政策分支。"""
     invoice.invoice_no = "AB12345678"
-    invoice.invoice_date = invoice_date or datetime.now(UTC).date()
+    # **必須用台北日**：發票開立日是台北曆日（平台回填的也是），而「同月退貨才作廢」
+    # 的判斷走 `same_taipei_month`。這裡若用 UTC 日，每月 1 號台北 00:00–08:00 之間
+    # UTC 還在上個月，同月退貨會被判成「跨月」→ 政策回 ALLOWANCE，整組測試翻紅。
+    # 產品端沒有這個問題（開立日來自平台回填的台北日），是測試自己造錯了資料。
+    invoice.invoice_date = invoice_date or datetime.now(_TAIPEI_TZ).date()
     invoice.invoice_time = "12:34:56"
     invoice.random_number = "1234"
     invoice.print_mark = print_mark

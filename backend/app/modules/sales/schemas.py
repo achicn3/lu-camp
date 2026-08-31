@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.pricing import DiscountRequest
@@ -27,7 +27,7 @@ from app.shared.enums import (
     TenderType,
 )
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 class SaleLineCreateRequest(BaseModel):
@@ -308,7 +308,9 @@ class SaleCreateRequest(BaseModel):
 
 
 NTDAmountOpt = Annotated[
-    Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
+    Decimal | None, PlainSerializer(
+        lambda d: None if d is None else format_ntd(d), return_type=str | None
+    )
 ]
 
 

@@ -6,10 +6,11 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 
+from app.core.money import format_ntd
 from app.modules.returns.models import CustomerReturn
 from app.shared.enums import TenderType
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 class ReturnLineRequest(BaseModel):

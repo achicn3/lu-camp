@@ -6,13 +6,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, PlainSerializer
 
+from app.core.money import format_ntd
 from app.shared.enums import CampaignStatus
-
-
-def format_ntd(value: Decimal) -> str:
-    """輸出一般十進位金額，避免 Decimal 的科學記號流入畫面或匯出檔。"""
-    return format(value, "f")
-
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[

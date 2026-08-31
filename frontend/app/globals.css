@@ -2076,6 +2076,14 @@ body {
   display: block;
   margin-top: 4px;
 }
+/* 件數填的是 1–99 的個位數，給它整行寬度會讓店員以為要填別的東西。
+   （收購價本來就在格線外、本來就佔整行，與這裡的寬度無關。） */
+.acq-qty {
+  max-width: 200px;
+}
+.acq-qty .hint {
+  font-size: var(--text-sm);
+}
 .acq-link {
   background: none;
   border: none;

@@ -7,11 +7,11 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 from sqlalchemy import inspect
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, PurchaseOrderLine
 from app.shared.enums import PurchaseOrderStatus
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 
 
 class SupplierCreate(BaseModel):

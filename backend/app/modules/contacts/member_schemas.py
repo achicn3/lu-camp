@@ -10,12 +10,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, PlainSerializer
 
+from app.core.money import format_ntd
 from app.modules.contacts.schemas import ContactRead
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 NTDAmountOpt = Annotated[
     Decimal | None,
-    PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None),
+    PlainSerializer(
+        lambda d: None if d is None else format_ntd(d), return_type=str | None
+    ),
 ]
 
 

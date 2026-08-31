@@ -36,6 +36,20 @@ def ensure_ntd_fits_numeric_12(
     return value
 
 
+def format_ntd(value: Decimal) -> str:
+    """金額對外輸出的唯一格式：純十進位，永不帶科學記號。
+
+    **為什麼不能用 `str(value)`**：PostgreSQL 的 numeric 經 asyncpg 讀回來時，帶尾隨零
+    的值會是 `Decimal('3E+4')` 而不是 `Decimal('30000')`，`str()` 就原樣輸出 `'3E+4'`。
+    前端一律以 `^-?\d+$` 解析金額字串，帶 E 即判為無效 → 畫面顯示 `3E+4`、
+    **條碼標籤印成 NT$0**（實測：三萬元的商品貼出 0 元標籤）。
+
+    所有模組的 `NTDAmount` 序列化器都必須用這支，不要各自寫 `str(d)`——
+    報表模組先前已單獨修過同一個問題，但沒有推廣，於是其餘 12 個模組繼續踩。
+    """
+    return format(value, "f")
+
+
 def round_ntd(value: Decimal) -> int:
     """四捨五入（ROUND_HALF_UP）到整數元。"""
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))

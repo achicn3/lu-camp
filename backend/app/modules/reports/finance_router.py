@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
+from app.core.money import format_ntd
 from app.core.time import AwareDateTime, store_datetime_iso
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
@@ -27,7 +28,6 @@ from app.modules.reports.schemas import (
     InventoryValueReport,
     SalesMarginReport,
     TrendsReport,
-    format_ntd,
 )
 from app.modules.reports.service import ReportsService
 from app.shared.exceptions import DomainError

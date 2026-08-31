@@ -124,11 +124,6 @@ export function suggestedListedPrice(
   return roundRatio(numerator, denominator);
 }
 
-/** 應付總額 = Σ 成本（買斷各列成本；散裝傳 [整堆成本]）。 */
-export function payableTotal(costsNtd: number[]): number {
-  return costsNtd.reduce((sum, cost) => sum + cost, 0);
-}
-
 /** SPLIT 現金部分合法：整數且 0 < cash < total。 */
 export function splitValid(totalNtd: number, cashPartNtd: number): boolean {
   return Number.isInteger(cashPartNtd) && cashPartNtd > 0 && cashPartNtd < totalNtd;

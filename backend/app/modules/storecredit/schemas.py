@@ -6,12 +6,14 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
-from app.core.money import ensure_ntd_fits_numeric_12
+from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
 from app.shared.enums import StoreCreditEntryType, StoreCreditSourceType
 
-NTDAmount = Annotated[Decimal, PlainSerializer(lambda d: str(d), return_type=str)]
+NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 PremiumRate = Annotated[
-    Decimal | None, PlainSerializer(lambda d: None if d is None else str(d), return_type=str | None)
+    Decimal | None, PlainSerializer(
+        lambda d: None if d is None else format_ntd(d), return_type=str | None
+    )
 ]
 
 

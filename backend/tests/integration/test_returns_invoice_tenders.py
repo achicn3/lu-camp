@@ -12,6 +12,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -62,6 +63,11 @@ from tests.integration.test_sales_linepay import (
     _client,
     _linepay_cart_kwargs,
 )
+
+# 發票開立日是**台北曆日**（平台回填的也是），而「同月退貨才作廢」走 same_taipei_month。
+# 用 UTC 日的話，每月 1 號台北 00:00–08:00 之間 UTC 還在上個月，同月退貨會被判成跨月，
+# 政策回 ALLOWANCE 而非 VOID，整組測試翻紅——產品端沒有這個問題，是測試造錯了資料。
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 async def _seed(session: AsyncSession) -> tuple[int, int, int]:
@@ -123,7 +129,7 @@ async def _issue(session: AsyncSession, store_id: int, sale_id: int, tmp_path: P
     invoice = await einvoice.get_invoice_for_sale(store_id, sale_id)
     assert invoice is not None
     invoice.invoice_no = f"AB{sale_id:08d}"
-    invoice.invoice_date = datetime.now(UTC).date()
+    invoice.invoice_date = datetime.now(_TAIPEI_TZ).date()
     invoice.invoice_time = "12:34:56"
     invoice.random_number = "1234"
     invoice.print_mark = True

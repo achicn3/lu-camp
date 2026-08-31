@@ -7,8 +7,9 @@
    與事實不符的「同意書」（沿 TRANSACTION_ACK 的既有原則）。
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import text
@@ -42,6 +43,11 @@ from tests.integration.customer_display_helpers import (
     ensure_paired_customer_display,
     signature_png_base64,
 )
+
+# 發票開立日是**台北曆日**（平台回填的也是），而「同月退貨才作廢」走 same_taipei_month。
+# 用 UTC 日的話，每月 1 號台北 00:00–08:00 之間 UTC 還在上個月，同月退貨會被判成跨月，
+# 政策回 ALLOWANCE 而非 VOID，整組測試翻紅——產品端沒有這個問題，是測試造錯了資料。
+_TAIPEI_TZ = ZoneInfo("Asia/Taipei")
 
 
 async def _seed(session: AsyncSession) -> tuple[int, int, str]:
@@ -89,7 +95,7 @@ async def _anonymous_sale_with_issued_invoice(
     assert row is not None
     row.status = InvoiceStatus.ISSUED
     row.invoice_no = "AB10000001"
-    row.invoice_date = datetime.now(UTC).date()
+    row.invoice_date = datetime.now(_TAIPEI_TZ).date()
     row.print_mark = True
     await session.flush()
     return int(sale.id)
@@ -198,7 +204,7 @@ async def test_partial_return_consent_says_allowance(db_session: AsyncSession) -
     assert row is not None
     row.status = InvoiceStatus.ISSUED
     row.invoice_no = "AB10000002"
-    row.invoice_date = datetime.now(UTC).date()
+    row.invoice_date = datetime.now(_TAIPEI_TZ).date()
     await db_session.flush()
     lines = await SalesService(db_session).get_lines(sale.id)
 

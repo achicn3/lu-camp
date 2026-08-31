@@ -19,10 +19,10 @@ import {
   creditPremiumPreview,
   marginPct,
   maxAcquisitionCost,
-  payableTotal,
   suggestedListedPrice,
   taxInclusivePrice,
 } from "@/features/acquisition/pricing";
+import { expandByQty, qtyErrors, rowsPayableTotal } from "@/features/acquisition/quantity";
 import {
   type AcqType,
   type AcquisitionDraft,
@@ -69,7 +69,11 @@ function detail(error: unknown): string | null {
   return null;
 }
 
-function emptyItem(commissionPct = ""): ItemDraft & { estimatedResale: string; rowKey: string } {
+function emptyItem(commissionPct = ""): ItemDraft & {
+  estimatedResale: string;
+  rowKey: string;
+  qty: string;
+} {
   return {
     // 穩定的列識別：用 index 當 React key 時，刪除中間列會讓後面的列沿用同一個元件實例，
     // 連帶把前一列的內部狀態（如已選標籤）帶過去。不進 API payload（逐欄挑選）。
@@ -83,6 +87,8 @@ function emptyItem(commissionPct = ""): ItemDraft & { estimatedResale: string; r
     acquisitionCost: "",
     commissionPct,
     estimatedResale: "",
+    // 同款多件（客人一次帶三頂一樣的帳篷）：畫面上一列，送出時展開成三筆獨立商品。
+    qty: "1",
   };
 }
 
@@ -99,7 +105,7 @@ function emptyLot(): LotDraft {
   };
 }
 
-type Row = ItemDraft & { estimatedResale: string; rowKey: string };
+type Row = ItemDraft & { estimatedResale: string; rowKey: string; qty: string };
 
 // ── 賣方/寄售人 ──
 function SellerSection({
@@ -392,6 +398,11 @@ function ItemRowCard({
       : null;
   const cost = parseNtd(row.acquisitionCost);
   const overCost = type === "BUYOUT" && maxCost !== null && cost !== null && cost > maxCost;
+  // 件數：只在買斷用（寄售一件件談抽成）。合計＝每件收購價 × 件數，即時顯示，
+  // 讓店員在按送出前就看到這一列要付多少。
+  const qtyIssues = type === "BUYOUT" ? qtyErrors(index, row.qty) : [];
+  const multiUnitTotal =
+    qtyIssues.length === 0 && cost !== null ? rowsPayableTotal([row]) : null;
   const listed = parseNtd(row.listedPrice);
   const margin =
     listed !== null && cost !== null && taxRate !== null
@@ -568,8 +579,9 @@ function ItemRowCard({
       )}
 
       {type === "BUYOUT" ? (
+        <>
         <label className="field">
-          <span className="field-label">收購價</span>
+          <span className="field-label">收購價（每件）</span>
           <input
             aria-label="收購價"
             inputMode="numeric"
@@ -578,6 +590,27 @@ function ItemRowCard({
           />
           {overCost && <span className="form-error acq-warn">超過建議最高收購成本，毛利偏低</span>}
         </label>
+        <label className="field acq-qty">
+          <span className="field-label">件數</span>
+          {/* 同款多件：客人一次帶三頂一樣的帳篷時不必按三次「新增一列」。
+              送出時會展開成三筆各自獨立的商品（各有自己的條碼、可分別賣出）。 */}
+          <input
+            aria-label="件數"
+            inputMode="numeric"
+            value={row.qty}
+            onChange={(e) => onChange({ qty: e.target.value })}
+          />
+          {qtyIssues.length > 0 ? (
+            <span className="form-error">{qtyIssues[0]}</span>
+          ) : (
+            multiUnitTotal !== null && (
+              <span className="hint">
+                {`此列共 ${row.qty} 件，合計 ${formatNtd(multiUnitTotal)}`}
+              </span>
+            )
+          )}
+        </label>
+        </>
       ) : (
         <label className="field">
           <span className="field-label">抽成 %（寄售）</span>
@@ -904,7 +937,7 @@ export default function AcquisitionPage() {
 
   const payable = isBulk
     ? parseNtd(lot.acquisitionCost) ?? 0
-    : payableTotal(rows.map((r) => parseNtd(r.acquisitionCost) ?? 0));
+    : rowsPayableTotal(rows);  // 每列＝每件收購價 × 件數
   // 已簽切結 → 撥款以客人所選為準（D7），否則用店員選的（非手持流程）。
   const effectivePayout: PayoutMethod =
     signed && signedPayout ? signedPayout : payoutMethod;
@@ -956,7 +989,9 @@ export default function AcquisitionPage() {
           label: lot.label || null,
         };
       } else {
-        body.items = rows.map((r) => ({
+        // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
+        // 後端收的是純品項陣列（與店員按三次「新增一列」完全等價），不需要知道件數。
+        body.items = expandByQty(rows).map((r) => ({
           name: r.name,
           grade: r.grade,
           listed_price: ntd(r.listedPrice),
@@ -1099,7 +1134,13 @@ export default function AcquisitionPage() {
       if (!seller) throw new Error("請先選擇賣方");
       const items = isBulk
         ? [{ name: lot.name || "散裝批", amount: String(payable) }]
-        : rows.map((r) => ({ name: r.name || "品項", amount: String(parseNtd(r.acquisitionCost) ?? 0) }));
+        : // **與送出的 payload 用同一份展開結果**：後端綁定會逐項比對品名與金額，
+          // 客人簽 1 件、店員改成 3 件會直接被擋下——件數因此自動被簽名綁住，
+          // 不必另外傳一個件數欄位給後端比對（與散裝批的 lot 快照是不同做法）。
+          expandByQty(rows).map((r) => ({
+            name: r.name || "品項",
+            amount: String(parseNtd(r.acquisitionCost) ?? 0),
+          }));
       const content: Record<string, unknown> = {
         items,
         total: String(payable),
