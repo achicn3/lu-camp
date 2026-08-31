@@ -8,10 +8,14 @@
 「無法連線硬體代理」，店員當場看得到。
 """
 
+import importlib
+import os
+from pathlib import Path
+
 import pytest
 
 from agent.config import MissingDeviceConfigError
-from agent.main import devices_from_env
+from agent.main import build_app, devices_from_env
 
 
 def test_missing_mode_refuses_to_start() -> None:
@@ -43,3 +47,49 @@ def test_explicit_fake_is_allowed() -> None:
 def test_case_and_whitespace_tolerated() -> None:
     """`Fake ` 這種大小寫/空白差異不該讓服務起不來。"""
     assert devices_from_env({"AGENT_DEVICES": " Fake "}) is None
+
+
+def test_importing_the_module_does_not_require_configuration() -> None:
+    """光是 import 不得驗設定，否則乾淨 checkout 連測試都跑不起來。
+
+    測試會 import `agent.main`，而 `.env` 不入庫。若在 import 時就建立 app 並驗模式，
+    新機器上執行文件指定的 `uv run pytest` 會在**收集階段**就拋錯——品質關卡必須在
+    新機器上直接跑得起來（Codex 審查 Standards 項）。
+    """
+    module = importlib.reload(importlib.import_module("agent.main"))
+
+    assert not hasattr(module, "app")  # 有 app 就代表 import 時建了，設定驗證也就跟著跑了
+
+
+def test_build_app_validates_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真正要啟動服務時才驗——這時沒設模式仍必須拒絕。"""
+    monkeypatch.setenv("AGENT_DEVICES", "rael")
+
+    with pytest.raises(MissingDeviceConfigError):
+        build_app()
+
+
+def test_build_app_reads_the_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """啟動時自動載入同目錄 `.env`：launchd／開機腳本漏帶環境變數是搬機最常見的事。"""
+    monkeypatch.delenv("AGENT_DEVICES", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("AGENT_DEVICES=fake\n", encoding="utf-8")
+    monkeypatch.setattr("agent.main.ENV_FILE", env_file)
+
+    build_app()  # 沒有這行載入就會 MissingDeviceConfigError
+
+    assert os.environ["AGENT_DEVICES"] == "fake"
+
+
+def test_env_file_does_not_override_explicit_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """明確給的環境變數優先於檔案——正式部署在 plist 指定時不該被檔案蓋掉。"""
+    monkeypatch.setenv("AGENT_DEVICES", "fake")
+    env_file = tmp_path / ".env"
+    env_file.write_text("AGENT_DEVICES=real\n", encoding="utf-8")
+    monkeypatch.setattr("agent.main.ENV_FILE", env_file)
+
+    build_app()
+
+    assert os.environ["AGENT_DEVICES"] == "fake"

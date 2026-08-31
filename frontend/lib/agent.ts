@@ -8,6 +8,12 @@ export const AGENT_BASE = (
 
 type SaleRead = components["schemas"]["SaleRead"];
 
+/**
+ * 代理回報「這次操作其實沒有真的送到機器」時發出的事件。
+ * 畫面收到就立刻重查，不必等下一輪輪詢——中間那幾單店員照樣會以為印出來了。
+ */
+export const AGENT_SIMULATED_EVENT = "lu-camp:agent-simulated";
+
 async function postAgent(path: string, body: unknown): Promise<void> {
   let res: Response;
   try {
@@ -28,6 +34,14 @@ async function postAgent(path: string, body: unknown): Promise<void> {
       /* 非 JSON 回應沿用預設訊息 */
     }
     throw new Error(detail);
+  }
+  // 成功回應裡帶著「這次是不是假的」。舊版代理沒有這個欄位 → 一律當成真的，
+  // 不猜：誤報會讓橫幅天天亮著，店員很快就學會無視。
+  try {
+    const j = (await res.json()) as { simulated?: unknown };
+    if (j.simulated === true) globalThis.dispatchEvent(new Event(AGENT_SIMULATED_EVENT));
+  } catch {
+    /* 非 JSON 或空回應：不影響列印結果，維持既有行為 */
   }
 }
 
@@ -179,17 +193,22 @@ export async function openCashDrawer(): Promise<void> {
 }
 
 /**
- * 代理是不是跑在「假裝模式」（收到列印回成功、紙卻不會出來）。
+ * 沒有接到真機、按了也不會有東西出來的裝置名稱（例如「標籤機」）。
  *
- * 回 null＝問不到（代理離線或版本較舊）。**問不到不等於假裝模式**：代理離線在列印時
- * 會明確報錯，硬要在此顯示警告等於天天亮著，店員很快就學會無視，真的出事時沒人看。
+ * 回 null＝問不到（代理離線，或版本舊到還沒有這個欄位）。**問不到不等於假裝模式**：
+ * 代理離線在列印時會明確報錯，硬要在此顯示警告等於天天亮著，店員很快就學會無視，
+ * 真的出事時沒人看。
+ *
+ * 逐台而非整組：real 模式下沒設 host 的裝置會悄悄退回假的（標籤機是選配），
+ * 那時只有標籤印不出來，收據照常——說成「全部都是測試模式」是另一種謊報。
  */
-export async function fetchAgentSimulated(): Promise<boolean | null> {
+export async function fetchSimulatedDevices(): Promise<string[] | null> {
   try {
     const res = await globalThis.fetch(`${AGENT_BASE}/health`);
     if (!res.ok) return null;
-    const j = (await res.json()) as { simulated?: unknown };
-    return typeof j.simulated === "boolean" ? j.simulated : null;
+    const j = (await res.json()) as { simulated_devices?: unknown };
+    if (!Array.isArray(j.simulated_devices)) return null;
+    return j.simulated_devices.filter((d): d is string => typeof d === "string");
   } catch {
     return null;
   }

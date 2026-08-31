@@ -94,12 +94,14 @@ cd /home/test/lu-camp/frontend
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 NEXT_PUBLIC_AGENT_URL=http://localhost:8787 \
   nohup pnpm exec next dev -p 3000 > /tmp/fe.log 2>&1 &
 
-# 硬體代理 :8787（**必須載入 .env 才會用真實驅動**，否則 driver=fake、不會真的印）
+# 硬體代理 :8787（啟動時自己讀 hardware-agent/.env，不必先 source；
+# AGENT_DEVICES 沒設或打錯字會直接拒絕啟動，不會安靜退回假裝模式）
 cd /home/test/lu-camp/hardware-agent
-set -a && . ./.env && set +a
-nohup uv run uvicorn agent.main:app --host 127.0.0.1 --port 8787 > /tmp/agent.log 2>&1 &
+nohup uv run uvicorn agent.main:build_app --factory --host 127.0.0.1 --port 8787 > /tmp/agent.log 2>&1 &
 
-# 確認：driver 必須是 real
+# 確認：simulated_devices 必須是空的。有名字就代表那幾台按了不會有東西出來
+# （real 模式下沒設 host 的裝置會退回 Fake，例如標籤機是選配）。
+curl -s http://127.0.0.1:8787/health
 curl -s http://127.0.0.1:8787/devices/status | python3 -m json.tool | grep -E '"id"|"driver"'
 ```
 

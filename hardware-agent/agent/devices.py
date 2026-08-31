@@ -33,6 +33,13 @@ from agent.interfaces import (
     ReceiptPrinter,
 )
 
+# 「按了不會有東西出來」的實作。判定假裝模式時比對這份清單，而不是相信某個旗標。
+_FAKE_IMPLEMENTATIONS = (
+    FakeLabelPrinter,
+    FakeReceiptPrinter,
+    FakeCashDrawer,
+)
+
 
 @dataclass(frozen=True)
 class AgentDevices:
@@ -48,12 +55,6 @@ class AgentDevices:
     `None`＝沒接第二台，出餐單印到收據機（既有行為）。放廚房/吧台的那台只印出餐單，
     不印客人的收據/明細聯/證明聯。
     """
-    simulated: bool = False
-    """這組是不是「假裝列印」的裝置。
-
-    假裝模式收到列印一樣回成功、紙卻不會出來。**列印回應要帶著這個事實**，前端才能
-    對店員直說「這次沒有真的列印」——否則店員會拿著空手以為印好了。
-    """
     invoice_printer: ReceiptPrinter | None = None
     """電子發票**專屬**印表機（ADR-018，選配）。
 
@@ -61,6 +62,43 @@ class AgentDevices:
     證明聯**（含 Amego 補印的原樣版面），收據/明細聯/收購憑證聯/出餐單一律不進來——
     它裝的可能是不同字型 ROM 的機器，也可能被店家刻意留給發票專用紙捲。
     """
+
+    @property
+    def simulated_devices(self) -> tuple[str, ...]:
+        """實際上沒有接到真機、按了也不會有東西出來的裝置（給人看的名稱）。
+
+        **由注入的物件推得，不由工廠宣告**：`real` 模式下沒設 host 的裝置會悄悄退回
+        Fake（例如標籤機選配），若靠一個整組旗標來記，那種混合配置就會謊報「都是真的」，
+        於是「按了列印標籤卻什麼都沒出來」完全無跡可循。改成看物件，日後多接一台也
+        不必記得同步任何旗標。
+        """
+        return tuple(
+            name
+            for name, device in (
+                ("標籤機", self.label_printer),
+                ("收據機", self.receipt_printer),
+                ("出餐機", self.kitchen_printer),
+                ("發票機", self.invoice_printer),
+                ("錢櫃", self.cash_drawer),
+            )
+            # None＝沒接第二台、印到收據機（既有設計），不是「假裝」，故不點名。
+            if device is not None and isinstance(device, _FAKE_IMPLEMENTATIONS)
+        )
+
+    def simulated_for(self, binding: str) -> bool:
+        """某個端點用的那台是不是假的。
+
+        逐端點認定而非整組認定：標籤機沒接，不代表收據也印不出來——把兩者混為一談，
+        警告就會過度氾濫而被無視。
+        """
+        device = {
+            "label": self.label_printer,
+            "receipt": self.receipt_printer,
+            "kitchen": self.kitchen_ticket_printer,
+            "einvoice": self.einvoice_printer,
+            "drawer": self.cash_drawer,
+        }[binding]
+        return isinstance(device, _FAKE_IMPLEMENTATIONS)
 
     @property
     def kitchen_ticket_printer(self) -> ReceiptPrinter:
@@ -80,7 +118,6 @@ def default_fake_devices() -> AgentDevices:
         receipt_printer=FakeReceiptPrinter(),
         cash_drawer=FakeCashDrawer(),
         status_provider=FakeStatusProvider(),
-        simulated=True,
     )
 
 

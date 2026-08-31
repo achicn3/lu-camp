@@ -20,21 +20,33 @@ from agent.devices import AgentDevices
 class OkResponse(BaseModel):
     """通用成功回應。
 
-    `simulated=True` 代表這台代理跑在假裝模式：**回了成功但沒有真的列印**。
-    呼叫端必須把這件事講給店員聽，否則他會以為紙已經出來了。
+    `simulated=True` 代表**這次操作**送去的那台是假的：回了成功，但紙不會出來、錢櫃
+    不會開。呼叫端必須把這件事講給店員聽，否則他會以為東西已經出來了。
     """
 
     status: str
     simulated: bool = False
 
 
-def ok_response(devices: AgentDevices) -> OkResponse:
-    """成功回應，並如實帶上「這台是不是假裝模式」。
+class HealthResponse(OkResponse):
+    """健康檢查：另外點名**哪幾台**沒接上真機。
 
-    每個端點各自寫 `OkResponse(status="ok")` 的話，日後新增端點很容易漏掉註記——
-    漏掉的後果是店員在假裝模式下看到「已送出」卻拿不到紙。統一從這裡出。
+    畫面只說「測試模式」，店員不知道還能不能結帳；說「標籤機沒接上」他就知道
+    只有標籤印不出來。
     """
-    return OkResponse(status="ok", simulated=devices.simulated)
+
+    simulated_devices: list[str] = []
+
+
+def ok_response(devices: AgentDevices, binding: str) -> OkResponse:
+    """成功回應，並如實帶上「這次送去的那台是不是假的」。
+
+    `binding` 是端點用的裝置（見 `AgentDevices.simulated_for`）。每個端點各自寫
+    `OkResponse(status="ok")` 的話，日後新增端點很容易漏掉註記——漏掉的後果是店員
+    看到「已送出」卻拿不到紙。統一從這裡出，且未知的 binding 會直接 KeyError，
+    不會安靜地當成「真的」。
+    """
+    return OkResponse(status="ok", simulated=devices.simulated_for(binding))
 
 
 async def get_devices(request: Request) -> AgentDevices:

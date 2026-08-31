@@ -37,5 +37,9 @@ async def test_drawer_and_health_endpoints() -> None:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         health = await client.get("/health")
         drawer = await client.post("/drawer/open")
-    assert health.json() == {"status": "ok", "simulated": True}
+    assert health.json() == {
+        "status": "ok",
+        "simulated": True,
+        "simulated_devices": ["標籤機", "收據機", "錢櫃"],
+    }
     assert drawer.status_code == 200

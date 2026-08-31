@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import anyio.to_thread
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,6 +26,7 @@ from pydantic import BaseModel
 from agent.config import MissingDeviceConfigError
 from agent.deps import (  # noqa: F401  (get_devices re-export)
     DevicesDep,
+    HealthResponse,
     OkResponse,
     get_devices,
     ok_response,
@@ -117,9 +119,11 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
             content={"detail": str(exc), "error": type(exc).__name__},
         )
 
-    @app.get("/health", response_model=OkResponse, operation_id="agentHealth")
-    async def health(devices: DevicesDep) -> OkResponse:
-        return ok_response(devices)
+    @app.get("/health", response_model=HealthResponse, operation_id="agentHealth")
+    async def health(devices: DevicesDep) -> HealthResponse:
+        # 健康檢查沒有「這次送去哪台」可言，回整體狀況並點名沒接上的那幾台。
+        names = devices.simulated_devices
+        return HealthResponse(status="ok", simulated=bool(names), simulated_devices=list(names))
 
     @app.post("/print/label", response_model=OkResponse, operation_id="printLabel")
     async def label(req: LabelRequest, devices: DevicesDep) -> OkResponse:
@@ -127,13 +131,13 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
         await anyio.to_thread.run_sync(
             devices.label_printer.print_label, req.code, req.name, req.price
         )
-        return ok_response(devices)
+        return ok_response(devices, "label")
 
     @app.post("/drawer/open", response_model=OkResponse, operation_id="openDrawer")
     async def drawer(devices: DevicesDep) -> OkResponse:
         # 真機踢櫃為同步阻塞 I/O（網路），卸載到 worker thread，勿阻塞事件迴圈。
         await anyio.to_thread.run_sync(devices.cash_drawer.open)
-        return ok_response(devices)
+        return ok_response(devices, "drawer")
 
     # --- T15/T16 在此 include 各自的 router（避免彼此改同一 endpoint）---
     # 兩個 router 都從無循環的 agent.deps 取 DI（DevicesDep/OkResponse），
@@ -175,19 +179,20 @@ def devices_from_env(env: Mapping[str, str] | None = None) -> AgentDevices | Non
     )
 
 
-def _load_dotenv_if_present() -> None:
-    """啟動時載入同目錄的 `.env`（若存在）。
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
-    launchd／開機腳本很容易漏帶環境變數，而漏帶的後果是整台機器安靜地不列印。
-    自己讀一份就少一個必須有人記得的步驟。**已存在的環境變數優先**——
-    正式部署若在 plist 明確指定，不會被檔案蓋掉。
+
+def build_app() -> FastAPI:
+    """正式啟動的入口：`uvicorn agent.main:build_app --factory`。
+
+    **刻意不在 import 時建立 app**：測試會 import 本模組，而 `.env` 不入庫；若在
+    import 時就驗設定，乾淨 checkout 執行 `uv run pytest` 會在收集階段整個拋錯——
+    品質關卡必須在新機器上直接跑得起來（Codex 審查 Standards 項）。
+
+    先載入同目錄的 `.env`（若存在）：launchd／開機腳本很容易漏帶環境變數，而漏帶的
+    後果是整台機器安靜地不列印，自己讀一份就少一個必須有人記得的步驟。**已存在的
+    環境變數優先**——正式部署若在 plist 明確指定，不會被檔案蓋掉。
     """
-    from dotenv import load_dotenv  # uvicorn[standard] 已帶入 python-dotenv
-
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if env_path.is_file():
-        load_dotenv(env_path, override=False)
-
-
-_load_dotenv_if_present()
-app = create_app(devices_from_env())
+    if ENV_FILE.is_file():
+        load_dotenv(ENV_FILE, override=False)
+    return create_app(devices_from_env())

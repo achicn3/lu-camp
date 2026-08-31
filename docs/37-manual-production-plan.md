@@ -250,7 +250,7 @@ ALLOW_DEV_SEED=true SEED_USER_USERNAME=dev-kiosk SEED_USER_ROLE=KIOSK \
 ```bash
 cd hardware-agent
 set -a && . ./.env && set +a
-uv run uvicorn agent.main:app --host 127.0.0.1 --port 8001
+uv run uvicorn agent.main:build_app --factory --host 127.0.0.1 --port 8001
 curl -s http://localhost:8001/devices/status | grep -o '"driver":"[a-z]*"'   # 必須全是 real
 ```
 

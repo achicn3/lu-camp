@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
-import { fetchAgentSimulated } from "@/lib/agent";
+import { AGENT_SIMULATED_EVENT, fetchSimulatedDevices } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
 import { useCurrentRole } from "@/lib/useCurrentRole";
@@ -115,11 +115,19 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
   // 假裝模式橫幅：代理沒接真機時，列印會「回成功但不出紙」。這件事必須在**印之前**
   // 就講清楚，否則店員拿著空手才發現，單子已經結了。問不到（代理離線/舊版）回 null →
   // 不顯示：離線在列印時本來就會報錯，天天亮著的警告等於沒有警告。
-  const agentSimulated = useQuery({
+  const simulatedDevices = useQuery({
     queryKey: ["agent-simulated"],
     refetchInterval: 60_000,
-    queryFn: fetchAgentSimulated,
+    queryFn: fetchSimulatedDevices,
   });
+
+  useEffect(() => {
+    // 列印回應說「這次是假的」→ 立刻重查，不等下一輪輪詢（最長 60 秒的空窗期內，
+    // 店員會一直看到「已送出」而畫面上毫無異狀）。
+    const onSimulated = () => void simulatedDevices.refetch();
+    window.addEventListener(AGENT_SIMULATED_EVENT, onSimulated);
+    return () => window.removeEventListener(AGENT_SIMULATED_EVENT, onSimulated);
+  }, [simulatedDevices]);
 
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
@@ -209,11 +217,13 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
           </nav>
         </div>
       )}
-      {agentSimulated.data === true && (
-        <p className="agent-sim-banner" role="status">
-          測試模式：列印不會真的出紙，錢櫃也不會開。要正式營業請洽維護人員設定列印裝置。
-        </p>
-      )}
+      {simulatedDevices.data !== undefined &&
+        simulatedDevices.data !== null &&
+        simulatedDevices.data.length > 0 && (
+          <p className="agent-sim-banner" role="status">
+            {`測試模式：${simulatedDevices.data.join("、")}沒有接上真的機器，按了不會有東西出來。要正式營業請洽維護人員設定。`}
+          </p>
+        )}
       <main className="app-main">{children}</main>
     </div>
   );
