@@ -1,5 +1,11 @@
 import type { NextConfig } from "next";
 
+import { assertBuildAddresses } from "./scripts/check-build-env.mjs";
+
+// Next 在讀這份設定之前已載入 .env / .env.local，所以位址檢查放這裡才看得到值
+// （獨立的 prebuild 腳本用 node 直接跑會看不到 .env.local，實測會誤報建置中止）。
+assertBuildAddresses();
+
 const nextConfig: NextConfig = {
   devIndicators: false,
   // **只影響 `next dev`**：Next 預設封鎖非 localhost 來源對開發資源（HMR 等）的請求。
