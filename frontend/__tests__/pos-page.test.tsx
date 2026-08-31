@@ -610,7 +610,6 @@ describe("/pos 結帳頁", () => {
       "TENT1{Enter}",
     );
     await user.type(screen.getByPlaceholderText("姓名或電話"), member.phone);
-    await user.click(screen.getByRole("button", { name: "查詢會員" }));
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await user.click(screen.getByText("購物金＋其他付款"));
     await user.type(screen.getByLabelText("本次使用購物金"), "300");
@@ -758,7 +757,6 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     // 歸戶會員
     await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
-    await user.click(screen.getByRole("button", { name: "查詢會員" }));
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await waitFor(() => expect(screen.getByText(/購物金餘額/)).toBeTruthy());
     // 選購物金 → 出現上限訊息、結帳停用
@@ -886,7 +884,6 @@ describe("/pos 結帳頁", () => {
     const dialog = await screen.findByRole("dialog", { name: /加入 手沖-耶加/ });
     await user.click(within(dialog).getByRole("button", { name: "加入購物車" }));
     await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
-    await user.click(screen.getByRole("button", { name: "查詢會員" }));
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await user.click(screen.getByText("購物金＋其他付款"));
     await user.type(screen.getByLabelText("本次使用購物金"), "300");

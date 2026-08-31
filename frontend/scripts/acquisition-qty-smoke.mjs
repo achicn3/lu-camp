@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 const BASE = (process.env.SMOKE_BASE ?? "http://localhost:3000").replace(/\/+$/, "");
-const API = (process.env.SMOKE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots", "acq-qty");
 const USERNAME = process.env.SMOKE_USERNAME ?? "dev-manager";
 const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";

@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { discountDisplay } from "@/features/campaigns/campaigns";
+import { MemberPanel } from "@/features/pos/MemberPanel";
 import {
   PosCustomerDisplay,
   restoreLines,
@@ -255,126 +256,6 @@ function ScanBar({
         </p>
       )}
     </form>
-  );
-}
-
-// ── 會員歸戶 ──
-function MemberPanel({
-  member,
-  onSelect,
-  onClear,
-  disabled = false,
-}: {
-  member: ContactRead | null;
-  onSelect: (c: ContactRead) => void;
-  onClear: () => void;
-  disabled?: boolean;
-}) {
-  const [q, setQ] = useState("");
-  const search = useMutation({
-    mutationFn: async (query: string): Promise<ContactRead[]> => {
-      const { data, error } = await api.GET("/api/v1/contacts", {
-        params: { query: { q: query, role: "MEMBER", limit: 8 } },
-      });
-      if (!data) throw new Error(extractDetail(error) ?? "查詢失敗");
-      return data;
-    },
-  });
-  const balance = useQuery({
-    queryKey: ["store-credit", member?.id],
-    enabled: member !== null,
-    queryFn: async () => {
-      const { data, error } = await api.GET(
-        "/api/v1/contacts/{contact_id}/store-credit",
-        {
-          params: { path: { contact_id: member!.id } },
-        },
-      );
-      if (!data) throw new Error(extractDetail(error) ?? "讀取餘額失敗");
-      return data;
-    },
-  });
-
-  if (member !== null) {
-    const bal = balance.data ? (parseNtd(balance.data.balance) ?? 0) : null;
-    return (
-      <div className="pos-member pos-member-selected">
-        <div>
-          <strong>{member.name}</strong>
-          {member.phone && <span className="hint"> · {member.phone}</span>}
-          <div className="hint">
-            點數 {member.member_points} · 購物金餘額{" "}
-            {balance.isError ? (
-              <span className="balance-error">讀取失敗</span>
-            ) : bal === null ? (
-              "讀取中…"
-            ) : (
-              <Money value={bal} />
-            )}
-          </div>
-        </div>
-        <button type="button" className="btn-ghost" onClick={onClear} disabled={disabled}>
-          取消歸戶
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="pos-member">
-      <form
-        className="pos-member-search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (q.trim()) search.mutate(q.trim());
-        }}
-      >
-        <label className="field">
-          <span className="field-label">
-            會員歸戶（選填；以購物金付款必填）
-          </span>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="姓名或電話"
-            inputMode="text"
-            disabled={disabled}
-          />
-        </label>
-        <button
-          type="submit"
-          className="btn-ghost"
-          disabled={search.isPending || disabled}
-        >
-          查詢會員
-        </button>
-      </form>
-      {search.isError && (
-        <p role="alert" className="form-error">
-          {(search.error as Error).message}
-        </p>
-      )}
-      {search.data && search.data.length === 0 && (
-        <p className="hint">查無符合的會員。</p>
-      )}
-      {search.data && search.data.length > 0 && (
-        <ul className="pos-member-results">
-          {search.data.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => onSelect(c)}
-                disabled={disabled}
-              >
-                {c.name}
-                {c.phone ? ` · ${c.phone}` : ""}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
