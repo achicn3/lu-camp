@@ -9,14 +9,15 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const replaceMock = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace: replaceMock, push: vi.fn() }),
-}));
-
 import AuthedLayout from "@/app/(authed)/layout";
 import { readTokenRole } from "@/lib/auth";
 import { clearToken, setToken } from "@/lib/token";
+
+// vi.mock 由 vitest 自動提升到 import 之上，故 import 可依 CLAUDE.md §9 一律置頂。
+// 本檔不驗導向行為（那是 authed-layout.test.tsx 的事），只需讓 useRouter 有東西可呼叫。
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+}));
 
 function makeToken(role: string, storeId = 1, sub = "1"): string {
   const b64url = (obj: unknown) =>

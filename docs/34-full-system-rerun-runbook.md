@@ -99,8 +99,9 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 NEXT_PUBLIC_AGENT_URL=http://loca
 cd /home/test/lu-camp/hardware-agent
 nohup uv run uvicorn agent.main:build_app --factory --host 127.0.0.1 --port 8787 > /tmp/agent.log 2>&1 &
 
-# 確認：simulated_devices 必須是空的。有名字就代表那幾台按了不會有東西出來
-# （real 模式下沒設 host 的裝置會退回 Fake，例如標籤機是選配）。
+# 確認：simulated_devices 只該列出你確實沒接的那幾台——本機沒有獨立 Brother，
+# 所以會看到 ["標籤機"]，那是正常的（見上方前置條件）。出現「收據機」「錢櫃」
+# 才是有問題：那幾台按了不會有東西出來，畫面卻會顯示已送出。
 curl -s http://127.0.0.1:8787/health
 curl -s http://127.0.0.1:8787/devices/status | python3 -m json.tool | grep -E '"id"|"driver"'
 ```
