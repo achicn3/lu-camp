@@ -214,8 +214,8 @@ async def reconciliation(
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("帳本推導總負債", str(report.ledger_total_outstanding)),
-        ("快取總負債", str(report.cached_total_outstanding)),
+        ("帳本推導總負債", format_ntd(report.ledger_total_outstanding)),
+        ("快取總負債", format_ntd(report.cached_total_outstanding)),
         ("快取可信", "是" if report.cached_total_trustworthy else "否"),
     ]
     exp = TabularExport(

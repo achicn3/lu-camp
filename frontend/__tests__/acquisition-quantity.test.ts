@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 
 import { expandByQty, qtyErrors, rowsPayableTotal } from "@/features/acquisition/quantity";
-import type { ItemDraft } from "@/features/acquisition/validation";
+import type { AcqType, ItemDraft } from "@/features/acquisition/validation";
+import { validateDraft } from "@/features/acquisition/validation";
 
 const row = (over: Partial<ItemDraft & { qty: string }> = {}) => ({
   name: "帳篷",
@@ -94,5 +95,79 @@ describe("數量驗證", () => {
 
   it("錯誤訊息指出是第幾列，店員才知道要改哪裡", () => {
     expect(qtyErrors(2, "0")[0]).toContain("第 3 列");
+  });
+});
+
+// ── 送出閘門（Codex 對抗式審查兩個 High）──
+//
+// 展開層的 fail closed（不合法就展開成 0 筆）本身沒錯，但它不是閘門：送出前的
+// validateDraft 完全沒看件數，於是「畫面顯示紅字、按下去照樣送出、那一列靜默消失」。
+// 店員以為收了兩列，實際只建了一列，付給客人的錢也少了。
+describe("件數必須擋住送出", () => {
+  const draft = (items: (ItemDraft & { qty: string })[], type: AcqType = "BUYOUT") => ({
+    type,
+    contactId: 1,
+    items,
+    lot: {
+      name: "", categoryId: null, brandId: null, acquisitionCost: "",
+      acquisitionBasis: "" as const, totalQty: "", unitPrice: "", label: "",
+    },
+    payoutMethod: "CASH" as const,
+    payoutSplitCash: "",
+    sellerIsMember: false,
+  });
+
+  it("任何一列件數不合法 → validateDraft 回錯誤（送出被擋）", () => {
+    const errors = validateDraft(draft([row(), row({ qty: "0" })]));
+
+    expect(errors.some((e) => e.includes("件數"))).toBe(true);
+  });
+
+  it("超過上限也擋（99 件上限必須是真的送出守衛，不只是提示）", () => {
+    expect(validateDraft(draft([row({ qty: "100" })])).some((e) => e.includes("件數"))).toBe(true);
+  });
+
+  it("全部合法就不擋", () => {
+    expect(validateDraft(draft([row({ qty: "3" }), row({ qty: "1" })]))).toEqual([]);
+  });
+
+  it("撥款檢查要用「單價 × 件數」的總額，否則合法的拆帳被誤擋", () => {
+    // 500 × 3 = 1500，現金 700 是合法的 SPLIT；若總額被誤算成 500，700 會被當成溢付。
+    const d = {
+      ...draft([row({ acquisitionCost: "500", qty: "3" })]),
+      payoutMethod: "SPLIT" as const,
+      payoutSplitCash: "700",
+      sellerIsMember: true,
+    };
+
+    expect(validateDraft(d)).toEqual([]);
+  });
+
+  it("寄售不看件數——件數欄只在買斷出現，寄售帶著舊值不該擋人", () => {
+    const errors = validateDraft(draft([row({ qty: "3", commissionPct: "50" })], "CONSIGNMENT"));
+
+    expect(errors.filter((e) => e.includes("件數"))).toEqual([]);
+  });
+});
+
+describe("寄售不得夾帶買斷的件數（Codex 對抗式審查 High）", () => {
+  it("非買斷一律當 1 件展開", () => {
+    // 買斷填 3 件後切到寄售，件數欄會被隱藏但值還在。若展開照跑，
+    // 店員看到一列寄售品、系統實際建了三件——而且畫面上完全沒有線索。
+    const rows = [row({ qty: "3" })];
+
+    expect(expandByQty(rows, "CONSIGNMENT")).toHaveLength(1);
+    expect(expandByQty(rows, "BUYOUT")).toHaveLength(3);
+  });
+
+  it("預設（不指定型別）維持買斷語意，既有呼叫端行為不變", () => {
+    expect(expandByQty([row({ qty: "3" })])).toHaveLength(3);
+  });
+
+  it("非買斷的合計也只算一件", () => {
+    const rows = [row({ acquisitionCost: "500", qty: "3" })];
+
+    expect(rowsPayableTotal(rows, "CONSIGNMENT")).toBe(500);
+    expect(rowsPayableTotal(rows, "BUYOUT")).toBe(1500);
   });
 });

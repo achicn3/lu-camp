@@ -937,7 +937,7 @@ export default function AcquisitionPage() {
 
   const payable = isBulk
     ? parseNtd(lot.acquisitionCost) ?? 0
-    : rowsPayableTotal(rows);  // 每列＝每件收購價 × 件數
+    : rowsPayableTotal(rows, type);  // 每列＝每件收購價 × 件數（非買斷一律 1 件）
   // 已簽切結 → 撥款以客人所選為準（D7），否則用店員選的（非手持流程）。
   const effectivePayout: PayoutMethod =
     signed && signedPayout ? signedPayout : payoutMethod;
@@ -991,7 +991,7 @@ export default function AcquisitionPage() {
       } else {
         // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
         // 後端收的是純品項陣列（與店員按三次「新增一列」完全等價），不需要知道件數。
-        body.items = expandByQty(rows).map((r) => ({
+        body.items = expandByQty(rows, type).map((r) => ({
           name: r.name,
           grade: r.grade,
           listed_price: ntd(r.listedPrice),
@@ -1137,7 +1137,7 @@ export default function AcquisitionPage() {
         : // **與送出的 payload 用同一份展開結果**：後端綁定會逐項比對品名與金額，
           // 客人簽 1 件、店員改成 3 件會直接被擋下——件數因此自動被簽名綁住，
           // 不必另外傳一個件數欄位給後端比對（與散裝批的 lot 快照是不同做法）。
-          expandByQty(rows).map((r) => ({
+          expandByQty(rows, type).map((r) => ({
             name: r.name || "品項",
             amount: String(parseNtd(r.acquisitionCost) ?? 0),
           }));

@@ -126,8 +126,8 @@ async def daily_summary(
     report = await ReportsService(session).daily_summary(user.store_id, report_date)
     if fmt == "json":
         return report
-    rate = "N/A" if report.gross_margin_rate is None else str(report.gross_margin_rate)
-    avg = "N/A" if report.avg_ticket is None else str(report.avg_ticket)
+    rate = "N/A" if report.gross_margin_rate is None else format_ntd(report.gross_margin_rate)
+    avg = "N/A" if report.avg_ticket is None else format_ntd(report.avg_ticket)
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
@@ -139,28 +139,28 @@ async def daily_summary(
         meta=meta,
         headers=["指標", "值"],
         rows=[
-            ["營業額", str(report.gross_turnover)],
-            ["認列營收", str(report.recognized_revenue)],
-            ["除稅淨額", str(report.net_sales_ex_tax)],
-            ["稅額", str(report.tax)],
-            ["寄售抽成收入", str(report.consignment_commission_income)],
-            ["銷貨成本", str(report.cogs)],
-            ["毛利", str(report.gross_margin)],
+            ["營業額", format_ntd(report.gross_turnover)],
+            ["認列營收", format_ntd(report.recognized_revenue)],
+            ["除稅淨額", format_ntd(report.net_sales_ex_tax)],
+            ["稅額", format_ntd(report.tax)],
+            ["寄售抽成收入", format_ntd(report.consignment_commission_income)],
+            ["銷貨成本", format_ntd(report.cogs)],
+            ["毛利", format_ntd(report.gross_margin)],
             ["毛利率", rate],
-            ["成本未知營收", str(report.unknown_cost_sales)],
-            ["餐飲營收", str(report.food_revenue)],
-            ["二手營收", str(report.secondhand_revenue)],
-            ["現金銷售", str(report.cash_sales_in)],
-            ["作廢收購退現", str(report.acquisition_void_in)],
-            ["收購付現", str(report.buyout_out)],
-            ["寄售付款", str(report.consignment_payout_out)],
-            ["人工調整", str(report.manual_adjust)],
-            ["當日現金支出", str(report.total_cash_out)],
-            ["應有現金", str(report.expected_cash)],
-            ["實點現金", str(report.counted_cash)],
-            ["現金差異", str(report.cash_variance)],
-            ["購物金發出", str(report.store_credit_issued)],
-            ["購物金兌付", str(report.store_credit_redeemed)],
+            ["成本未知營收", format_ntd(report.unknown_cost_sales)],
+            ["餐飲營收", format_ntd(report.food_revenue)],
+            ["二手營收", format_ntd(report.secondhand_revenue)],
+            ["現金銷售", format_ntd(report.cash_sales_in)],
+            ["作廢收購退現", format_ntd(report.acquisition_void_in)],
+            ["收購付現", format_ntd(report.buyout_out)],
+            ["寄售付款", format_ntd(report.consignment_payout_out)],
+            ["人工調整", format_ntd(report.manual_adjust)],
+            ["當日現金支出", format_ntd(report.total_cash_out)],
+            ["應有現金", format_ntd(report.expected_cash)],
+            ["實點現金", format_ntd(report.counted_cash)],
+            ["現金差異", format_ntd(report.cash_variance)],
+            ["購物金發出", format_ntd(report.store_credit_issued)],
+            ["購物金兌付", format_ntd(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
             ["客單價", avg],
         ],
@@ -313,13 +313,13 @@ async def inventory_value(
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("自有在庫成本", str(report.total_owned_cost_value)),
-        ("自有在庫售價", str(report.total_owned_retail_value)),
-        ("寄售在庫售價(非自有資產)", str(report.consignment_inventory_gross)),
+        ("自有在庫成本", format_ntd(report.total_owned_cost_value)),
+        ("自有在庫售價", format_ntd(report.total_owned_retail_value)),
+        ("寄售在庫售價(非自有資產)", format_ntd(report.consignment_inventory_gross)),
         # 收貨會帶入進價（docs/32），所以這裡不再固定 N/A：真的沒有已知成本才顯示 N/A。
         (
             "一般商品成本",
-            "N/A" if report.catalog_cost_value is None else str(report.catalog_cost_value),
+            "N/A" if report.catalog_cost_value is None else format_ntd(report.catalog_cost_value),
         ),
         ("一般商品成本未知件數", str(report.catalog_unknown_cost_qty)),
         ("庫齡<30天", str(report.owned_cost_aging.lt_30d)),
@@ -337,20 +337,20 @@ async def inventory_value(
             [
                 "自有序號",
                 str(report.owned_serialized_count),
-                str(report.owned_serialized_cost),
-                str(report.owned_serialized_retail),
+                format_ntd(report.owned_serialized_cost),
+                format_ntd(report.owned_serialized_retail),
             ],
             [
                 "自有散裝(剩餘件)",
                 str(report.owned_bulk_remaining_qty),
-                str(report.owned_bulk_cost),
-                str(report.owned_bulk_retail),
+                format_ntd(report.owned_bulk_cost),
+                format_ntd(report.owned_bulk_retail),
             ],
             [
                 "寄售序號",
                 str(report.consignment_serialized_count),
                 "N/A",
-                str(report.consignment_inventory_gross),
+                format_ntd(report.consignment_inventory_gross),
             ],
             [
                 "寄售散裝(剩餘件)",
@@ -361,8 +361,10 @@ async def inventory_value(
             [
                 "一般商品",
                 str(report.catalog_total_qty),
-                "N/A" if report.catalog_cost_value is None else str(report.catalog_cost_value),
-                str(report.catalog_retail_value),
+                "N/A"
+                if report.catalog_cost_value is None
+                else format_ntd(report.catalog_cost_value),
+                format_ntd(report.catalog_retail_value),
             ],
         ],
     )
@@ -392,10 +394,10 @@ async def consignment_payables(
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
         ("狀態篩選", report.status_filter),
-        ("待付合計(PENDING)", str(report.total_pending_payout)),
-        ("已付合計(PAID)", str(report.total_paid_payout)),
-        ("取消合計(CANCELLED)", str(report.total_cancelled_payout)),
-        ("需追回合計(reclaim)", str(report.total_reclaim_needed_payout)),
+        ("待付合計(PENDING)", format_ntd(report.total_pending_payout)),
+        ("已付合計(PAID)", format_ntd(report.total_paid_payout)),
+        ("取消合計(CANCELLED)", format_ntd(report.total_cancelled_payout)),
+        ("需追回合計(reclaim)", format_ntd(report.total_reclaim_needed_payout)),
     ]
     exp = TabularExport(
         sheet="寄售應付",
@@ -454,7 +456,7 @@ async def sales_margin(
     )
     if fmt == "json":
         return report
-    rate = "N/A" if report.gross_margin_rate is None else str(report.gross_margin_rate)
+    rate = "N/A" if report.gross_margin_rate is None else format_ntd(report.gross_margin_rate)
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
@@ -467,30 +469,30 @@ async def sales_margin(
         meta=meta,
         headers=["指標", "值"],
         rows=[
-            ["營業額", str(report.gross_turnover)],
-            ["認列營收", str(report.recognized_revenue)],
-            ["自有序號成本", str(report.owned_cogs)],
-            ["自有散裝成本", str(report.bulk_cogs)],
-            ["一般商品成本", str(report.catalog_cogs)],
-            ["寄售抽成收入", str(report.consignment_commission_income)],
-            ["毛利", str(report.gross_margin)],
+            ["營業額", format_ntd(report.gross_turnover)],
+            ["認列營收", format_ntd(report.recognized_revenue)],
+            ["自有序號成本", format_ntd(report.owned_cogs)],
+            ["自有散裝成本", format_ntd(report.bulk_cogs)],
+            ["一般商品成本", format_ntd(report.catalog_cogs)],
+            ["寄售抽成收入", format_ntd(report.consignment_commission_income)],
+            ["毛利", format_ntd(report.gross_margin)],
             ["毛利率", rate],
-            ["成本未知營收", str(report.unknown_cost_sales)],
-            ["餐飲營收", str(report.food_revenue)],
-            ["二手營收", str(report.secondhand_revenue)],
-            ["現金淨收款（扣退款）", str(report.cash_received)],
-            ["購物金淨收款（扣退款）", str(report.store_credit_redeemed)],
+            ["成本未知營收", format_ntd(report.unknown_cost_sales)],
+            ["餐飲營收", format_ntd(report.food_revenue)],
+            ["二手營收", format_ntd(report.secondhand_revenue)],
+            ["現金淨收款（扣退款）", format_ntd(report.cash_received)],
+            ["購物金淨收款（扣退款）", format_ntd(report.store_credit_redeemed)],
             ["交易筆數", str(report.transaction_count)],
-            ["支付手續費合計", str(report.payment_fee_total)],
-            ["淨毛利（扣支付手續費）", str(report.net_margin)],
-            ["臨時折扣", str(report.manual_discount_total)],
-            ["送出贈品原價價值", str(report.gift_retail_value)],
-            ["送出贈品成本", str(report.gift_cost)],
-            ["退回贈品原價價值", str(report.gift_returned_retail_value)],
-            ["退回贈品成本", str(report.gift_returned_cost)],
-            ["淨贈品原價價值", str(report.net_gift_retail_value)],
-            ["淨贈品成本", str(report.net_gift_cost)],
-            ["貢獻毛利（淨毛利扣淨贈品成本）", str(report.contribution_margin)],
+            ["支付手續費合計", format_ntd(report.payment_fee_total)],
+            ["淨毛利（扣支付手續費）", format_ntd(report.net_margin)],
+            ["臨時折扣", format_ntd(report.manual_discount_total)],
+            ["送出贈品原價價值", format_ntd(report.gift_retail_value)],
+            ["送出贈品成本", format_ntd(report.gift_cost)],
+            ["退回贈品原價價值", format_ntd(report.gift_returned_retail_value)],
+            ["退回贈品成本", format_ntd(report.gift_returned_cost)],
+            ["淨贈品原價價值", format_ntd(report.net_gift_retail_value)],
+            ["淨贈品成本", format_ntd(report.net_gift_cost)],
+            ["貢獻毛利（淨毛利扣淨贈品成本）", format_ntd(report.contribution_margin)],
             *[
                 row
                 for method in report.payment_methods
@@ -530,7 +532,7 @@ async def discounts(
         ("店別", str(report.store_id)),
         ("起", store_datetime_iso(report.date_from)),
         ("迄", store_datetime_iso(report.date_to)),
-        ("折扣總額", str(report.discount_total)),
+        ("折扣總額", format_ntd(report.discount_total)),
     ]
     exp = TabularExport(
         sheet="臨時折扣",
@@ -677,14 +679,14 @@ async def gifts(
         ("起", store_datetime_iso(report.date_from)),
         ("迄", store_datetime_iso(report.date_to)),
         ("贈品件數", str(report.gift_qty)),
-        ("原價價值", str(report.retail_value)),
-        ("成本", str(report.cost)),
+        ("原價價值", format_ntd(report.retail_value)),
+        ("成本", format_ntd(report.cost)),
         ("退回件數", str(report.returned_gift_qty)),
-        ("退回原價價值", str(report.returned_retail_value)),
-        ("退回成本", str(report.returned_cost)),
+        ("退回原價價值", format_ntd(report.returned_retail_value)),
+        ("退回成本", format_ntd(report.returned_cost)),
         ("淨件數", str(report.net_gift_qty)),
-        ("淨原價價值", str(report.net_retail_value)),
-        ("淨成本", str(report.net_cost)),
+        ("淨原價價值", format_ntd(report.net_retail_value)),
+        ("淨成本", format_ntd(report.net_cost)),
     ]
     exp = TabularExport(
         sheet="贈品",

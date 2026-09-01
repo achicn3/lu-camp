@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.core.money import format_ntd
 from app.modules.contacts.models import Contact
 from app.shared.enums import ContactRole
 
@@ -109,7 +110,7 @@ class MemberWithCreditRead(BaseModel):
             roles=list(contact.roles),
             member_points=contact.member_points,
             has_national_id=contact.national_id_enc is not None,
-            store_credit_balance=str(balance),
+            store_credit_balance=format_ntd(balance),
         )
 
 

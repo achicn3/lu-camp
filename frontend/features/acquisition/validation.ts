@@ -1,6 +1,8 @@
 // F6 收購表單驗證純邏輯：對齊後端 AcquisitionCreate 的必填/互斥，提交前先擋（回 zh-TW 錯誤）。
 // 草稿欄位多為字串（表單狀態）；此處只驗形狀，不送網路。
 import { parseNtd } from "@/lib/money";
+
+import { qtyErrors, rowsPayableTotal } from "./quantity";
 import type { components } from "@/lib/api-types";
 
 type Grade = components["schemas"]["Grade"];
@@ -39,6 +41,12 @@ export interface AcquisitionDraft {
   payoutMethod: PayoutMethod;
   payoutSplitCash: string;
   sellerIsMember: boolean;
+}
+
+/** 取一列的件數；沒有這個欄位（舊呼叫端/寄售）視為 1 件。 */
+function quantityOf(row: ItemDraft): string {
+  const qty = (row as ItemDraft & { qty?: unknown }).qty;
+  return typeof qty === "string" ? qty : "1";
 }
 
 /** 字串為正整數元（> 0）。 */
@@ -109,13 +117,22 @@ export function validateDraft(draft: AcquisitionDraft): string[] {
   } else {
     if (draft.items.length === 0) errors.push("至少需要一列鑑價品項");
     draft.items.forEach((row, i) => errors.push(...serializedRowErrors(draft.type, i, row)));
+    // 件數只在買斷有意義（寄售一件件談抽成，畫面上不顯示件數欄）。
+    // **必須擋在這裡而不只是列內提示**：送出用的是 validateDraft 的結果，
+    // 漏掉的話「畫面紅字、按下去照樣送出、那一列被展開成 0 筆而靜默消失」——
+    // 店員以為收了兩列，實際只建了一列，付給客人的錢也少了（Codex 對抗式審查 High）。
+    if (draft.type === "BUYOUT") {
+      draft.items.forEach((row, i) => errors.push(...qtyErrors(i, quantityOf(row))));
+    }
   }
 
   if (draft.type !== "CONSIGNMENT") {
     const payable =
       draft.type === "BULK_LOT"
         ? parseNtd(draft.lot.acquisitionCost) ?? 0
-        : draft.items.reduce((sum, row) => sum + (parseNtd(row.acquisitionCost) ?? 0), 0);
+        // 撥款檢查的總額必須是「單價 × 件數」，與畫面顯示的應付額同一套算法；
+        // 只加一次成本會讓合法的 SPLIT 被誤判成溢付（Codex 對抗式審查 Medium）。
+        : rowsPayableTotal(draft.items.map((row) => ({ ...row, qty: quantityOf(row) })));
     errors.push(
       ...payoutErrors(draft.payoutMethod, draft.sellerIsMember, payable, draft.payoutSplitCash),
     );

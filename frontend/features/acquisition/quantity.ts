@@ -10,7 +10,7 @@
 // 不需要另外傳一個數量欄位給後端比對。
 import { parseNtd } from "@/lib/money";
 
-import type { ItemDraft } from "./validation";
+import type { AcqType, ItemDraft } from "./validation";
 
 /** 一列的最大件數。打錯一個鍵（3 → 30）就建出一堆假存貨，事後要一件件作廢。 */
 export const MAX_QTY_PER_ROW = 99;
@@ -30,21 +30,27 @@ export function qtyErrors(index: number, qty: string): string[] {
   return [`第 ${index + 1} 列：件數需為 1–${MAX_QTY_PER_ROW} 的整數`];
 }
 
-/** 依件數展開成 N 筆一模一樣的品項；數量本身不進 payload（那只是輸入介面的事）。 */
-export function expandByQty(rows: QuantityRow[]): ItemDraft[] {
+/** 依件數展開成 N 筆一模一樣的品項；數量本身不進 payload（那只是輸入介面的事）。
+ *
+ * `type` 非買斷時一律當 1 件：件數欄只在買斷顯示，但**切換型別不會清掉值**——
+ * 買斷填 3 件後切到寄售，店員看到一列寄售品、系統卻建了三件，畫面上完全沒有線索
+ * （Codex 對抗式審查 High）。件數的語意屬於買斷，就在這裡一次收斂。
+ */
+export function expandByQty(rows: QuantityRow[], type: AcqType = "BUYOUT"): ItemDraft[] {
   return rows.flatMap(({ qty, ...item }) => {
-    const count = parseQty(qty);
+    const count = type === "BUYOUT" ? parseQty(qty) : 1;
     // 不合法的件數在送出前已被 qtyErrors 擋下；這裡 fail closed 回 0 筆，
     // 絕不「當作 1 件」——那會讓一張擋不住的壞資料悄悄變成一件真的存貨。
     return count === null ? [] : Array.from({ length: count }, () => ({ ...item }));
   });
 }
 
-/** 應付總額 = Σ(每件收購價 × 件數)。收購價填的是**每件**的價格。 */
-export function rowsPayableTotal(rows: QuantityRow[]): number {
+/** 應付總額 = Σ(每件收購價 × 件數)。收購價填的是**每件**的價格。
+ *  非買斷同上：件數不適用，一律當 1 件。 */
+export function rowsPayableTotal(rows: QuantityRow[], type: AcqType = "BUYOUT"): number {
   return rows.reduce((sum, row) => {
     const cost = parseNtd(row.acquisitionCost) ?? 0;
-    const count = parseQty(row.qty);
+    const count = type === "BUYOUT" ? parseQty(row.qty) : 1;
     return sum + (count === null ? 0 : cost * count);
   }, 0);
 }
