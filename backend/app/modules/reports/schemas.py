@@ -6,10 +6,16 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, PlainSerializer
 
-from app.core.money import format_ntd
+from app.core.money import format_ntd, format_rate
 from app.shared.enums import CampaignStatus
 
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
+# 比率（毛利率等）不是金額：小數、非整數元。與金額分開宣告，才不會被金額守衛誤收，
+# 也不會被日後任何依金額語意調整 format_ntd 的人順手改壞。
+RateOpt = Annotated[
+    Decimal | None,
+    PlainSerializer(lambda d: None if d is None else format_rate(d), return_type=str | None),
+]
 NTDAmountOpt = Annotated[
     Decimal | None,
     PlainSerializer(lambda d: None if d is None else format_ntd(d), return_type=str | None),
@@ -137,7 +143,7 @@ class SalesMarginReport(BaseModel):
     catalog_cogs: NTDAmount = Decimal(0)  # 一般商品成本（有成交成本快照者）
     consignment_commission_income: NTDAmount
     gross_margin: NTDAmount
-    gross_margin_rate: NTDAmountOpt  # 毛利 ÷ 已知成本營收；分母 0 → null
+    gross_margin_rate: RateOpt  # 毛利 ÷ 已知成本營收；分母 0 → null
     unknown_cost_sales: NTDAmount  # 成本未知營收（catalog + 餐飲 + 缺成本自有），不假造毛利
     # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
     food_revenue: NTDAmount
@@ -180,7 +186,7 @@ class DailySummaryReport(BaseModel):
     # 成本/毛利面
     cogs: NTDAmount  # 自有序號 + 散裝成本
     gross_margin: NTDAmount
-    gross_margin_rate: NTDAmountOpt  # 分母 0 → null
+    gross_margin_rate: RateOpt  # 分母 0 → null
     unknown_cost_sales: NTDAmount
     # 餐飲/二手分列（裁示）：food=餐飲認列營收；secondhand=非餐飲認列營收（=recognized−food）
     food_revenue: NTDAmount
@@ -211,7 +217,7 @@ class TrendRow(BaseModel):
     food_revenue: NTDAmount
     secondhand_revenue: NTDAmount
     gross_margin: NTDAmount
-    gross_margin_rate: NTDAmountOpt
+    gross_margin_rate: RateOpt
     cogs: NTDAmount
     total_cash_out: NTDAmount
     store_credit_issued: NTDAmount
@@ -364,7 +370,7 @@ class CampaignPerformanceRow(BaseModel):
     gross_turnover: NTDAmount
     recognized_revenue: NTDAmount
     gross_margin: NTDAmount
-    gross_margin_rate: NTDAmountOpt
+    gross_margin_rate: RateOpt
     transaction_count: int
 
 

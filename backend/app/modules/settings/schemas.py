@@ -16,9 +16,8 @@ from app.modules.settings.models import PremiumRateHistory, StoreSettings
 
 RateOut = Annotated[Decimal, PlainSerializer(format_rate, return_type=str)]
 RateOutOpt = Annotated[
-    Decimal | None, PlainSerializer(
-        lambda d: None if d is None else format_ntd(d), return_type=str | None
-    )
+    Decimal | None,
+    PlainSerializer(lambda d: None if d is None else format_rate(d), return_type=str | None),
 ]
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
 # 溢價率政策硬界線：與 SC-1 帳本 DB 經濟守衛（premium_rate_applied ∈ [0, 0.20]）一致。

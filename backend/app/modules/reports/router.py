@@ -64,11 +64,11 @@ async def liability(
         ("店別", str(report.store_id)),
         ("總未兌付負債", format_ntd(report.total_outstanding)),
         ("負債健康比", report.liability_health_ratio or "N/A"),
-        ("帳齡<30天", str(report.aging_buckets.lt_30d)),
-        ("帳齡30-90天", str(report.aging_buckets.d30_90)),
-        ("帳齡90-180天", str(report.aging_buckets.d90_180)),
-        ("帳齡180-365天", str(report.aging_buckets.d180_365)),
-        ("帳齡>365天", str(report.aging_buckets.gt_365d)),
+        ("帳齡<30天", format_ntd(report.aging_buckets.lt_30d)),
+        ("帳齡30-90天", format_ntd(report.aging_buckets.d30_90)),
+        ("帳齡90-180天", format_ntd(report.aging_buckets.d90_180)),
+        ("帳齡180-365天", format_ntd(report.aging_buckets.d180_365)),
+        ("帳齡>365天", format_ntd(report.aging_buckets.gt_365d)),
     ]
     exp = TabularExport(
         sheet="購物金負債",

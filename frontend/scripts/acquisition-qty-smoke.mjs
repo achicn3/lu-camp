@@ -85,10 +85,24 @@ try {
   // 測試會為了錯的理由變綠（Codex 第二輪指出）。混合列才驗得出前端有沒有真的擋。
   await page.click('button:has-text("＋ 新增一列")');
   const rows = page.locator(".acq-row");
+  // 第二列必須**除了件數以外全部合法**，否則它會因為缺分類之類的理由被擋，
+  // 測試又一次為了錯的理由變綠（Codex 第三輪：同一個陷阱的第三次）。
   await rows.nth(1).getByLabel("品名").fill(`${ITEM_NAME}-B`);
   await rows.nth(1).locator("select").first().selectOption("A");
+  const cat2 = rows.nth(1).getByLabel("分類");
+  await cat2.click();
+  await cat2.fill(`多件分類-${RUN}`);
+  await page.click(`button:has-text("多件分類-${RUN}")`);
   await rows.nth(1).getByLabel("上架售價（含稅）").fill("1500");
   await rows.nth(1).getByLabel("收購價").fill(String(COST));
+  await page.waitForTimeout(300);
+
+  // 先證明「第二列在件數合法時可以送出」——否則下面的「被擋」證明不了是件數擋的
+  const errorsBefore = await page.locator(".form-error").allInnerTexts();
+  ok("第二列除件數外皆合法（沒有其他錯誤擋著）",
+    errorsBefore.filter((t) => !t.includes("件數")).length === 0,
+    errorsBefore.join(" | "));
+
   await rows.nth(1).getByLabel("件數").fill("0");
   await page.waitForTimeout(400);
 
@@ -101,6 +115,18 @@ try {
   await page.waitForTimeout(2000);
   page.off("request", watch);
   ok("一列合法＋一列件數 0：整單被擋，連 POST 都沒發出", !posted && (await page.locator("text=收購完成").count()) === 0);
+
+  // 推簽也必須先驗證：否則客人會先簽到一份缺了那列的快照，最後送出才被擋，
+  // 只能撤回請客人重簽（Codex 第二輪 Medium；第三輪指出缺回歸測試）。
+  let signPosted = false;
+  const watchSign = (req) => {
+    if (req.method() === "POST" && req.url().includes("/api/v1/signing/tasks")) signPosted = true;
+  };
+  page.on("request", watchSign);
+  await page.click('button:has-text("送至手持裝置簽署")');
+  await page.waitForTimeout(2000);
+  page.off("request", watchSign);
+  ok("件數非法時推簽也被擋，沒有建立簽署任務（客人不會白簽一次）", !signPosted);
 
   await rows.nth(1).locator('button:has-text("移除")').click();
   await page.waitForTimeout(300);

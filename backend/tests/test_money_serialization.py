@@ -92,7 +92,11 @@ def test_report_exports_have_no_scientific_notation_columns() -> None:
     欄位時自動納入——這正是先前只修報表模組一處、沒推廣到其他模組的教訓。
     """
     schema_src = Path("app/modules/reports/schemas.py").read_text(encoding="utf-8")
-    money_fields = set(re.findall(r"^\s{4}([a-z_]+):\s*NTDAmount", schema_src, re.M))
+    money_fields = set(
+        # 欄位名可能含數字（lt_30d、d30_90…）。少了 `0-9` 就看不見帳齡分桶那 10 欄——
+        # 守衛自己有洞比沒有守衛更危險，因為它給了「已經掃過了」的錯覺。
+        re.findall(r"^\s{4}([a-z_0-9]+):\s*NTDAmount", schema_src, re.M)
+    )
     assert money_fields, "抓不到任何 NTDAmount 欄位，掃描規則可能已失效"
 
     offenders: list[str] = []
@@ -100,7 +104,11 @@ def test_report_exports_have_no_scientific_notation_columns() -> None:
         source = path.read_text(encoding="utf-8")
         for field in money_fields:
             # `str(r.gross_turnover)` 這種寫法會讓 Decimal('3E+4') 原樣進 CSV。
-            for match in re.finditer(rf"\bstr\(\w+\.{field}\)", source):
+            # `[\w.]+` 而非 `\w+`：金額也可能在巢狀模型裡
+            # （report.aging_buckets.lt_30d）。只比對單層屬性會漏掉 10 個帳齡分桶欄位，
+            # 這正是第三輪審查抓到的——守衛自己有洞，比沒有守衛更危險，因為它給了
+            # 「已經掃過了」的錯覺。
+            for match in re.finditer(rf"\bstr\([\w.]+\.{field}\)", source):
                 offenders.append(f"{path}: {match.group(0)}")
 
     assert offenders == [], f"金額欄未用 format_ntd：{offenders}"

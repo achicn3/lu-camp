@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
-from app.core.money import format_ntd
+from app.core.money import format_ntd, format_rate
 from app.core.time import AwareDateTime, store_datetime_iso
 from app.modules.reports.export import ExportFormat, TabularExport, export_response
 from app.modules.reports.schemas import (
@@ -126,7 +126,7 @@ async def daily_summary(
     report = await ReportsService(session).daily_summary(user.store_id, report_date)
     if fmt == "json":
         return report
-    rate = "N/A" if report.gross_margin_rate is None else format_ntd(report.gross_margin_rate)
+    rate = "N/A" if report.gross_margin_rate is None else format_rate(report.gross_margin_rate)
     avg = "N/A" if report.avg_ticket is None else format_ntd(report.avg_ticket)
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
@@ -225,7 +225,7 @@ async def trends(
                 format_ntd(r.food_revenue),
                 format_ntd(r.secondhand_revenue),
                 format_ntd(r.gross_margin),
-                "N/A" if r.gross_margin_rate is None else format_ntd(r.gross_margin_rate),
+                "N/A" if r.gross_margin_rate is None else format_rate(r.gross_margin_rate),
                 format_ntd(r.cogs),
                 format_ntd(r.total_cash_out),
                 format_ntd(r.store_credit_issued),
@@ -322,11 +322,11 @@ async def inventory_value(
             "N/A" if report.catalog_cost_value is None else format_ntd(report.catalog_cost_value),
         ),
         ("一般商品成本未知件數", str(report.catalog_unknown_cost_qty)),
-        ("庫齡<30天", str(report.owned_cost_aging.lt_30d)),
-        ("庫齡30-90天", str(report.owned_cost_aging.d30_90)),
-        ("庫齡90-180天", str(report.owned_cost_aging.d90_180)),
-        ("庫齡180-365天", str(report.owned_cost_aging.d180_365)),
-        ("庫齡>365天", str(report.owned_cost_aging.gt_365d)),
+        ("庫齡<30天", format_ntd(report.owned_cost_aging.lt_30d)),
+        ("庫齡30-90天", format_ntd(report.owned_cost_aging.d30_90)),
+        ("庫齡90-180天", format_ntd(report.owned_cost_aging.d90_180)),
+        ("庫齡180-365天", format_ntd(report.owned_cost_aging.d180_365)),
+        ("庫齡>365天", format_ntd(report.owned_cost_aging.gt_365d)),
     ]
     exp = TabularExport(
         sheet="庫存價值",
@@ -456,7 +456,7 @@ async def sales_margin(
     )
     if fmt == "json":
         return report
-    rate = "N/A" if report.gross_margin_rate is None else format_ntd(report.gross_margin_rate)
+    rate = "N/A" if report.gross_margin_rate is None else format_rate(report.gross_margin_rate)
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
@@ -787,7 +787,7 @@ async def campaign_performance(
                 format_ntd(r.gross_turnover),
                 format_ntd(r.recognized_revenue),
                 format_ntd(r.gross_margin),
-                "N/A" if r.gross_margin_rate is None else format_ntd(r.gross_margin_rate),
+                "N/A" if r.gross_margin_rate is None else format_rate(r.gross_margin_rate),
                 str(r.transaction_count),
             ]
             for r in report.rows
