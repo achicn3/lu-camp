@@ -16,11 +16,18 @@ class UserRole(StrEnum):
 
 
 class ContactRole(StrEnum):
-    """聯絡人角色（統一主檔可同時具備多重角色）。"""
+    """聯絡人身分。**每個人都是 MEMBER**；賣過東西給店裡的人另外帶 SELLER。
+
+    店主裁示（2026-09-01）：不再分「賣方」與「寄售人」——兩者在程式裡的待遇完全
+    一樣（都必須有身分證字號），分開只是多一個要店員判斷的欄位。商品是買斷來的還是
+    寄售的，是**商品的屬性**（見 inventory 的 source_kind），不是人的屬性。
+
+    SELLER 由收購流程自動標記，店員不必手動勾；它存在的唯一理由是守住
+    「收購對象必須留身分證字號」這條防贓物要求。
+    """
 
     MEMBER = "MEMBER"
     SELLER = "SELLER"
-    CONSIGNOR = "CONSIGNOR"
 
 
 class Grade(StrEnum):

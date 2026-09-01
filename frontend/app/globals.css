@@ -3556,3 +3556,9 @@ body {
   font-weight: 600;
   text-align: center;
 }
+
+/* 會員詳情的身分（唯讀）：與欄位標籤之間不該有大字級落差。 */
+.member-identity {
+  margin: 2px 0 8px;
+  font-weight: 600;
+}

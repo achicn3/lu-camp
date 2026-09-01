@@ -91,7 +91,7 @@ describe("contacts 建檔防呆", () => {
     renderPage();
     await user.type(screen.getByLabelText("姓名 *"), "王小明");
     await user.type(screen.getByLabelText("電話 *"), "0912345678");
-    await user.type(screen.getByLabelText("身分證字號（收購/寄售必填）"), "A123456788");
+    await user.type(screen.getByLabelText("身分證字號（收購時必填）"), "A123456788");
     await user.click(screen.getByRole("button", { name: "建檔" }));
     await waitFor(() =>
       expect(screen.getByText(/身分證字號格式或檢核碼不正確/)).toBeTruthy(),
@@ -113,7 +113,7 @@ describe("contacts 建檔防呆", () => {
     renderPage();
     await user.type(screen.getByLabelText("姓名 *"), "王小明");
     await user.type(screen.getByLabelText("電話 *"), "0912345678");
-    await user.type(screen.getByLabelText("身分證字號（收購/寄售必填）"), "A123456789");
+    await user.type(screen.getByLabelText("身分證字號（收購時必填）"), "A123456789");
     await user.click(screen.getByRole("button", { name: "建檔" }));
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toMatchObject({

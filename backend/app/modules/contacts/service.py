@@ -13,6 +13,7 @@ from app.modules.contacts.schemas import ContactCreate, ContactUpdate
 from app.shared.enums import ContactRole
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
+    ContactNotFound,
     DuplicateContact,
     InvalidNationalId,
     MemberPointsAdjustFailed,
@@ -112,12 +113,9 @@ class ContactService:
         if "national_id" in provided:
             await self._apply_national_id_change(store_id, contact, data.national_id)
 
-        # 收購/寄售角色必須有 national_id（沿 ContactCreate 不變量，CLAUDE.md §5）。
-        needs_id = {ContactRole.SELLER.value, ContactRole.CONSIGNOR.value} & set(contact.roles)
-        if needs_id and contact.national_id_enc is None:
-            raise AcquisitionRequiresNationalId(
-                "收購/寄售對象（SELLER/CONSIGNOR）必須有 national_id"
-            )
+        # 賣方必須有 national_id（沿 ContactCreate 不變量，CLAUDE.md §5）。
+        if ContactRole.SELLER.value in contact.roles and contact.national_id_enc is None:
+            raise AcquisitionRequiresNationalId("收購對象（賣方）必須有身分證字號")
 
         await self._repo.save(contact)
 
@@ -216,6 +214,42 @@ class ContactService:
             raise MemberPointsAdjustFailed(
                 f"contact {contact_id} 點數調整 {delta:+d} 失敗（不存在/跨店/將為負）"
             )
+
+    async def ensure_seller_role(
+        self, store_id: int, contact_id: int, *, actor_user_id: int
+    ) -> Contact:
+        """把這個人標記為賣方（賣東西給店裡時由收購流程呼叫）。
+
+        店員不必手動勾角色——判斷「這個人算不算賣方」對他毫無意義，而判斷錯了會讓
+        收購被擋或讓身分證字號的登記要求被繞過。系統知道誰賣了東西，就由系統標。
+
+        **鎖定該列再改**：與 national_id 的編輯（同以行鎖）序列化，杜絕「標成賣方後、
+        commit 前身分證字號被並發清空」而留下沒有證號的賣方（沿用 D-1 模式）。
+        冪等：已經是賣方就原樣返回，不重複寫稽核。
+        """
+        contact = await self._repo.get_for_update(store_id, contact_id)
+        if contact is None:
+            raise ContactNotFound(f"找不到 contact {contact_id}")
+        if ContactRole.SELLER.value in contact.roles:
+            return contact
+        if contact.national_id_enc is None:
+            raise AcquisitionRequiresNationalId("收購對象（賣方）必須有身分證字號，請先補登")
+
+        roles_before = list(contact.roles)
+        # 重新賦值而非就地 append：ARRAY 欄位就地變動 SQLAlchemy 偵測不到，不會寫回 DB。
+        contact.roles = [*roles_before, ContactRole.SELLER.value]
+        await self._repo.save(contact)
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="CONTACT_ROLE_AUTO_TAG",
+            entity_type="contact",
+            entity_id=str(contact.id),
+            before={"roles": roles_before},
+            after={"roles": list(contact.roles)},
+        )
+        return contact
 
     async def get_contact(self, store_id: int, contact_id: int) -> Contact | None:
         return await self._repo.get(store_id, contact_id)

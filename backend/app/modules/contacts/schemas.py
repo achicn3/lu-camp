@@ -12,24 +12,30 @@ _MASK = "***"
 
 
 class ContactCreate(BaseModel):
-    """建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）；
-    收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。"""
+    """建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）。
+
+    **不問角色**：每個人建檔就是會員，賣東西時由收購流程自動補上 SELLER。
+    身分證字號只有 SELLER 需要——純消費的客人佔多數（一年模擬 3081 人中 2204 人
+    從沒賣過東西），為了集點就要他們留身分證字號，個資責任與辦卡阻力都不划算。
+    """
 
     name: str = Field(min_length=1)
     phone: str = Field(min_length=1)
     national_id: str | None = None
     address: str | None = Field(default=None, max_length=200)  # K1：住址（明文，D5）
-    roles: list[ContactRole] = Field(default_factory=list)
+    roles: list[ContactRole] = Field(default_factory=lambda: [ContactRole.MEMBER])
     member_points: int = Field(default=0, ge=0)  # 點數不可為負（docs/16 §0 僅累積）
     default_carrier_type: str | None = None
     default_carrier_id: str | None = None
     source_note: str | None = None
 
     @model_validator(mode="after")
-    def _require_national_id_for_acquisition(self) -> "ContactCreate":
-        needs_id = {ContactRole.SELLER, ContactRole.CONSIGNOR} & set(self.roles)
-        if needs_id and not self.national_id:
-            raise ValueError("收購/寄售對象（SELLER/CONSIGNOR）必須提供 national_id")
+    def _member_always_and_seller_needs_national_id(self) -> "ContactCreate":
+        """每個人都是會員；賣方必須有身分證字號（防贓物登記，CLAUDE.md §5）。"""
+        if ContactRole.MEMBER not in self.roles:
+            self.roles = [ContactRole.MEMBER, *self.roles]
+        if ContactRole.SELLER in self.roles and not self.national_id:
+            raise ValueError("收購對象（賣方）必須提供身分證字號")
         return self
 
 

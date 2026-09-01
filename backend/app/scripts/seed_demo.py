@@ -564,13 +564,8 @@ async def seed_contacts(
     member_sellers: list[int] = []
     for _ in range(_SELLER_COUNT):
         serial += 1
-        # **約四成的賣方同時是會員**：想用購物金收款（撥款方式 STORE_CREDIT/SPLIT）
-        # 的賣方**必須**是會員，否則 service 會擋下（docs/16 I-8）。
-        # 全部設為純 SELLER 的話，購物金入帳一筆都產不出來。
-        also_member = rng.random() < 0.40
-        roles = [ContactRole.SELLER, ContactRole.CONSIGNOR]
-        if also_member:
-            roles.append(ContactRole.MEMBER)
+        # 每個人都是會員（2026-09-01 裁示），賣過東西的另帶 SELLER。
+        roles = [ContactRole.MEMBER, ContactRole.SELLER]
         # 賣方/寄售主**必須**有 national_id，否則收購階段會被擋下
         contact_id = await _ensure(
             ContactCreate(
@@ -582,8 +577,8 @@ async def seed_contacts(
             )
         )
         sellers.append(contact_id)
-        if also_member:
-            member_sellers.append(contact_id)
+        # 每個人都是會員，所以每位賣方都能用購物金收款（docs/16 I-8）。
+        member_sellers.append(contact_id)
 
     await session.commit()
     if not sellers:  # pragma: no cover - 上面已保證，這是最後防線

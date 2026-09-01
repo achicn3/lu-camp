@@ -354,6 +354,7 @@ async def test_expired_token_rejected(client: httpx.AsyncClient, db_session: Asy
 async def test_contact_can_hold_multiple_roles(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """身分只剩兩種：每個人都是會員，賣過東西的另帶賣方（2026-09-01 裁示）。"""
     _, m_token, _ = await _setup_store_and_tokens(db_session)
     resp = await client.post(
         "/api/v1/contacts",
@@ -361,15 +362,34 @@ async def test_contact_can_hold_multiple_roles(
             "phone": _uphone(),
             "name": "多角色",
             "national_id": NATIONAL_ID,
-            "roles": ["MEMBER", "SELLER", "CONSIGNOR"],
+            "roles": ["MEMBER", "SELLER"],
         },
         headers=_auth(m_token),
     )
     assert resp.status_code == 201
-    assert set(resp.json()["roles"]) == {"MEMBER", "SELLER", "CONSIGNOR"}
+    assert set(resp.json()["roles"]) == {"MEMBER", "SELLER"}
 
 
-@pytest.mark.parametrize("role", ["SELLER", "CONSIGNOR"])
+async def test_member_is_added_even_when_only_seller_is_requested(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """只送 SELLER 也會補上 MEMBER——「每個人都是會員」不靠呼叫端記得。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    resp = await client.post(
+        "/api/v1/contacts",
+        json={
+            "phone": _uphone(),
+            "name": "只送賣方",
+            "national_id": NATIONAL_ID,
+            "roles": ["SELLER"],
+        },
+        headers=_auth(m_token),
+    )
+    assert resp.status_code == 201
+    assert set(resp.json()["roles"]) == {"MEMBER", "SELLER"}
+
+
+@pytest.mark.parametrize("role", ["SELLER"])
 async def test_acquisition_role_requires_national_id(
     client: httpx.AsyncClient, db_session: AsyncSession, role: str
 ) -> None:
@@ -612,7 +632,7 @@ async def test_update_contact_add_acquisition_role_without_national_id_rejected(
     resp = await client.patch(
         f"/api/v1/contacts/{cid}", json={"roles": ["MEMBER", "SELLER"]}, headers=_auth(m_token)
     )
-    assert resp.status_code == 422  # SELLER/CONSIGNOR 必須有 national_id
+    assert resp.status_code == 422  # 賣方必須有 national_id
 
 
 async def test_update_contact_manager_sets_national_id_encrypts_and_audits(
@@ -665,7 +685,7 @@ async def test_update_contact_duplicate_national_id_rejected(
 async def test_update_contact_blank_national_id_with_acquisition_role_rejected(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
-    # 空字串不可偽裝為有效 national_id 來滿足 SELLER/CONSIGNOR（Codex 對抗式審查 high）。
+    # 空字串不可偽裝為有效 national_id 來滿足賣方（Codex 對抗式審查 high）。
     _, m_token, _ = await _setup_store_and_tokens(db_session)
     cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
     resp = await client.patch(

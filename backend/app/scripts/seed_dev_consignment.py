@@ -59,7 +59,9 @@ async def _seed(store_id: int, user_id: int) -> int:
         for name, phone, code, item_name, price, pct in _SPECS:
             if await repo.get_serialized_by_code(store_id, code) is not None:
                 continue
-            consignor = Contact(store_id=store_id, name=name, phone=phone, roles=["CONSIGNOR"])
+            consignor = Contact(
+                store_id=store_id, name=name, phone=phone, roles=["MEMBER", "SELLER"]
+            )
             session.add(consignor)
             await session.flush()
             await InventoryService(session).create_serialized_item(

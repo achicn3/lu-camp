@@ -690,6 +690,13 @@ class AcquisitionService:
                 actor_user_id=clerk_user_id,
             )
 
+        # 賣過東西的人自動標記為賣方（2026-09-01 裁示：店員不必手動勾角色）。
+        # 放在最後、與收購同一個交易：收購沒成立就不該留下賣方標記。
+        # 冪等，且此處的 national_id 前置檢查已在本方法開頭做過。
+        await self._contacts.ensure_seller_role(
+            store_id, contact.id, actor_user_id=clerk_user_id
+        )
+
         return AcquisitionResult(
             acquisition_id=acquisition.id,
             type=data.type,

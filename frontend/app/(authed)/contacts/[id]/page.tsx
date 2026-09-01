@@ -12,7 +12,6 @@ import {
   KIND_LABELS,
   MEMBER_TABS,
   PAYMENT_METHOD_LABELS,
-  ROLE_LABELS,
   SETTLEMENT_STATUS_LABELS,
   SOURCE_TYPE_LABELS,
   labelFor,
@@ -26,9 +25,7 @@ import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
 
 type Overview = components["schemas"]["MemberOverviewRead"];
-type ContactRole = components["schemas"]["ContactRole"];
 
-const ALL_ROLES: ContactRole[] = ["MEMBER", "SELLER", "CONSIGNOR"];
 const PAGE_SIZE = 20;
 
 function extractDetail(error: unknown): string | null {
@@ -512,7 +509,6 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
   const isManager = decodeSession()?.role === "MANAGER";
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [roles, setRoles] = useState<ContactRole[]>(contact.roles as ContactRole[]);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [nid, setNid] = useState("");
 
@@ -546,10 +542,6 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
       address: String(form.get("address")).trim() || null,
       source_note: String(form.get("source_note")).trim() || null,
     });
-  }
-
-  function toggleRole(role: ContactRole) {
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
   }
 
   async function reveal() {
@@ -599,36 +591,23 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
       </form>
 
       <div className="card">
-        <h2>角色與身分證</h2>
+        <h2>身分與身分證字號</h2>
         {!isManager ? (
           <p className="hint">變更角色或身分證字號需管理者權限。</p>
         ) : (
           <>
-            <fieldset className="member-roles">
-              <legend className="field-label">角色</legend>
-              {ALL_ROLES.map((role) => (
-                <label key={role} className="member-role-check">
-                  <input
-                    type="checkbox"
-                    checked={roles.includes(role)}
-                    onChange={() => toggleRole(role)}
-                  />
-                  <span>{labelFor(ROLE_LABELS, role)}</span>
-                </label>
-              ))}
-            </fieldset>
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => patch.mutate({ roles })}
-              disabled={patch.isPending}
-            >
-              更新角色
-            </button>
+            {/* 身分由系統管理，不再手動勾選（2026-09-01 裁示）：每個人都是會員，
+                賣過東西的由收購流程自動補上賣方。留著手動編輯只會製造矛盾狀態——
+                手動加賣方等於沒有收購卻標成賣方，手動移除等於抹掉他賣過東西的事實。 */}
+            <p className="field-label">身分</p>
+            <p className="member-identity">{rolesLabel(contact.roles)}</p>
+            <p className="hint">
+              每位建檔的客人都是會員；賣東西給店裡之後，系統會自動加上「賣方」。
+            </p>
             <hr className="divider" />
             <p className="hint">
               身分證字號：{contact.has_national_id ? "已建檔（加密）" : "未建檔"}
-              （收購/寄售角色必填；設定後可加 SELLER/CONSIGNOR）
+              （只有收購需要；客人要賣東西時在此補登即可）
             </p>
             <div className="member-id-actions">
               <input

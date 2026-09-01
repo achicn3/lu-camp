@@ -1,9 +1,12 @@
 // 會員中心顯示用標籤（純函式；zh-TW）。後端值 → 顯示文字，集中一處便於測試與一致性。
 
+// 身分只有兩種（2026-09-01 裁示）：每個人都是會員，賣過東西的另帶賣方。
+// CONSIGNOR 已由 migration c4e8a2b6d9f1 併入 SELLER，這裡不再保留——留著是死碼，
+// 而萬一真有殘值，`labelFor` 會原樣顯示英文，那正好是「這裡有沒清乾淨」的訊號。
+// （商品狀態的 RETURNED_TO_CONSIGNOR 是另一回事：那是商品的生命週期，不是人的身分。）
 export const ROLE_LABELS: Record<string, string> = {
   MEMBER: "會員",
   SELLER: "賣方",
-  CONSIGNOR: "寄售人",
 };
 
 export const SOURCE_TYPE_LABELS: Record<string, string> = {

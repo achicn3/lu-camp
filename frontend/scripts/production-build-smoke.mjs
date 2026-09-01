@@ -25,10 +25,10 @@ const PASSWORD = process.env.SMOKE_PASSWORD ?? "dev-test-123456";
 const PAGES = [
   ["/", "門市作業"],
   ["/pos", "POS 結帳"],
-  ["/sales", "交易紀錄"],
+  ["/sales", "交易紀錄（今日）"],
   ["/cash", "現金對帳"],
-  ["/contacts", "會員/賣方"],
-  ["/acquisition", "收購"],
+  ["/contacts", "會員 / 賣方"],
+  ["/acquisition", "收購鑑價入庫"],
   ["/call-tickets", "叫號"],
   ["/signing", "簽署紀錄"],
   ["/inventory", "庫存"],
@@ -73,7 +73,13 @@ try {
     const res = await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
     let rendered = true;
     try {
-      await page.getByRole("heading", { name: heading }).first().waitFor({ timeout: 15000 });
+      // **限定 level 1 且 exact**：Playwright 的 name 預設是部分比對，
+      // 「會員/賣方」曾經比對到建檔表單的 <h2>新增會員/賣方</h2> 而非頁面標題——
+      // 那個 h2 改名之後才暴露出來「頁面有渲染」這件事一直驗在錯的元素上。
+      await page
+        .getByRole("heading", { level: 1, name: heading, exact: true })
+        .first()
+        .waitFor({ timeout: 15000 });
     } catch {
       rendered = false;
     }

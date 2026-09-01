@@ -23,7 +23,6 @@ export const PAYOUT_LABEL: Record<PayoutMethod, string> = {
 export const ROLE_LABEL: Record<ContactRole, string> = {
   MEMBER: "會員",
   SELLER: "賣方",
-  CONSIGNOR: "寄售人",
 };
 
 export const BASIS_LABEL: Record<Basis, string> = {

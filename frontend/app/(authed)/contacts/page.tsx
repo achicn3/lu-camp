@@ -19,7 +19,6 @@ type Contact = components["schemas"]["ContactRead"];
 type ContactRole = components["schemas"]["ContactRole"];
 type Member = components["schemas"]["MemberWithCreditRead"];
 
-const ALL_ROLES: ContactRole[] = ["MEMBER", "SELLER", "CONSIGNOR"];
 const PAGE_SIZE = 50;
 
 function extractDetail(error: unknown): string | null {
@@ -267,7 +266,6 @@ function AllMembersTab() {
 // ── 建檔 ─────────────────────────────────────────────────────────────────
 function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const [roles, setRoles] = useState<ContactRole[]>(["MEMBER"]);
   const mutation = useMutation({
     mutationFn: async (input: {
       name: string;
@@ -288,10 +286,6 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
     },
     onError: (err: Error) => setError(err.message),
   });
-
-  function toggleRole(role: ContactRole) {
-    setRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]));
-  }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -316,14 +310,15 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
     }
     const address = String(form.get("address")).trim() || null;
     mutation.mutate(
-      { name, phone, national_id: nationalId, address, roles },
+      // 不再問角色：每個人建檔就是會員，賣東西時由收購流程自動補上賣方標記。
+      { name, phone, national_id: nationalId, address, roles: ["MEMBER"] as ContactRole[] },
       { onSuccess: () => formEl.reset() },
     );
   }
 
   return (
     <form className="card" onSubmit={onSubmit}>
-      <h2>新增會員/賣方</h2>
+      <h2>新增會員</h2>
       <div className="member-form-grid">
         <label className="field">
           <span className="field-label">姓名 *</span>
@@ -338,7 +333,7 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
           <input name="address" maxLength={200} placeholder="選填" />
         </label>
         <label className="field">
-          <span className="field-label">身分證字號（收購/寄售必填）</span>
+          <span className="field-label">身分證字號（收購時必填）</span>
           <input
             name="national_id"
             autoComplete="off"
@@ -348,20 +343,10 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
           />
         </label>
       </div>
-      <fieldset className="member-roles">
-        <legend className="field-label">角色</legend>
-        {ALL_ROLES.map((role) => (
-          <label key={role} className="member-role-check">
-            <input
-              type="checkbox"
-              checked={roles.includes(role)}
-              onChange={() => toggleRole(role)}
-            />
-            <span>{rolesLabel([role])}</span>
-          </label>
-        ))}
-      </fieldset>
-      <p className="hint">身分證字號靜態加密儲存、不明文顯示；收購/寄售對象必填。</p>
+      <p className="hint">
+        身分證字號靜態加密儲存、不明文顯示。**只有收購才需要**——客人來賣東西時再補登即可，
+        單純消費集點不必留。
+      </p>
       {error !== null && (
         <p role="alert" className="form-error">
           {error}

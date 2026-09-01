@@ -3816,8 +3816,11 @@ export interface components {
         ConsignmentSettlementStatus: "PENDING" | "PAID" | "CANCELLED";
         /**
          * ContactCreate
-         * @description 建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）；
-         *     收購/寄售對象（SELLER/CONSIGNOR）另必填 national_id。
+         * @description 建立聯絡人輸入。手機必填、同店唯一（供以手機查找既有會員、避免重複建檔）。
+         *
+         *     **不問角色**：每個人建檔就是會員，賣東西時由收購流程自動補上 SELLER。
+         *     身分證字號只有 SELLER 需要——純消費的客人佔多數（一年模擬 3081 人中 2204 人
+         *     從沒賣過東西），為了集點就要他們留身分證字號，個資責任與辦卡阻力都不划算。
          */
         ContactCreate: {
             /** Address */
@@ -3890,10 +3893,17 @@ export interface components {
         };
         /**
          * ContactRole
-         * @description 聯絡人角色（統一主檔可同時具備多重角色）。
+         * @description 聯絡人身分。**每個人都是 MEMBER**；賣過東西給店裡的人另外帶 SELLER。
+         *
+         *     店主裁示（2026-09-01）：不再分「賣方」與「寄售人」——兩者在程式裡的待遇完全
+         *     一樣（都必須有身分證字號），分開只是多一個要店員判斷的欄位。商品是買斷來的還是
+         *     寄售的，是**商品的屬性**（見 inventory 的 source_kind），不是人的屬性。
+         *
+         *     SELLER 由收購流程自動標記，店員不必手動勾；它存在的唯一理由是守住
+         *     「收購對象必須留身分證字號」這條防贓物要求。
          * @enum {string}
          */
-        ContactRole: "MEMBER" | "SELLER" | "CONSIGNOR";
+        ContactRole: "MEMBER" | "SELLER";
         /**
          * ContactUpdate
          * @description 編輯聯絡人（PATCH 語意；docs/17 §5.2、裁示 #3）。

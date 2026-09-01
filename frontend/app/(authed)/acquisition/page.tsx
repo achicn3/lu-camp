@@ -109,19 +109,19 @@ type Row = ItemDraft & { estimatedResale: string; rowKey: string; qty: string };
 
 // ── 賣方/寄售人 ──
 function SellerSection({
-  isConsignment,
   seller,
   onSelect,
 }: {
-  isConsignment: boolean;
   seller: Contact | null;
   onSelect: (c: Contact | null) => void;
 }) {
   const [q, setQ] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const role: ContactRole = isConsignment ? "CONSIGNOR" : "SELLER";
-  const roleLabel = isConsignment ? "寄售人" : "賣方";
+  // 寄售人已併入賣方（2026-09-01 裁示）：商品是買斷來的還是寄售的，是**商品的屬性**
+  // （庫存頁的來源標示），不是人的屬性。兩者在程式裡的待遇本來就完全一樣。
+  const role: ContactRole = "SELLER";
+  const roleLabel = "賣方";
 
   const results = useQuery({
     queryKey: ["contacts-search", q],
@@ -1272,7 +1272,7 @@ export default function AcquisitionPage() {
         ))}
       </div>
 
-      <SellerSection isConsignment={isConsignment} seller={seller} onSelect={setSeller} />
+      <SellerSection seller={seller} onSelect={setSeller} />
 
       {isBulk ? (
         <BulkLotForm
