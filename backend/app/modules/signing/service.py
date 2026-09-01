@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.canonical import canonical_json_bytes
+from app.core.money import format_ntd
 from app.modules.customerdisplay.models import CartSessionEvent
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 
@@ -376,8 +377,8 @@ class SigningService:
                 with_premium = round_ntd(total * (Decimal(1) + rate))
                 enriched["store_credit_premium"] = {
                     "rate": str(rate),
-                    "amount": str(with_premium),
-                    "extra": str(with_premium - total),
+                    "amount": format_ntd(with_premium),
+                    "extra": format_ntd(with_premium - total),
                 }
         return enriched
 
@@ -409,10 +410,10 @@ class SigningService:
         return {
             "seller_name": getattr(contact, "name", None),
             "phone": getattr(contact, "phone", None),
-            "debit": str(debit),
-            "sale_total": str(sale_total),
-            "balance_before": str(balance),
-            "balance_after": str(balance - debit),
+            "debit": format_ntd(debit),
+            "sale_total": format_ntd(sale_total),
+            "balance_before": format_ntd(balance),
+            "balance_after": format_ntd(balance - debit),
         }
 
     async def _ensure_sale_ackable(
@@ -459,7 +460,7 @@ class SigningService:
         )
         return {
             "sale_ref": f"#{sale.id}",
-            "total": str(sale.total),
+            "total": format_ntd(sale.total),
             "purchased_at": sale.created_at.isoformat(timespec="minutes"),
         }
 
@@ -571,7 +572,7 @@ class SigningService:
                 {"sale_line_id": line_id, "qty": qty} for line_id, qty in sorted(requested.items())
             ],
             "items": items,
-            "refund_total": str(refund_total),
+            "refund_total": format_ntd(refund_total),
             "invoice_action_label": label,
             "consent_note": (f"本人同意就上列退貨品項，由店家{label}，並確認退款金額無誤。"),
         }
@@ -594,11 +595,11 @@ class SigningService:
             amount = self._whole_ntd(it.get("amount"))
             if not name or amount is None:
                 raise SignatureContentMismatch("收購切結品項必須帶名稱與有效金額（非負整數元）")
-            items.append({"name": name, "amount": str(amount)})
+            items.append({"name": name, "amount": format_ntd(amount)})
         total = self._whole_ntd(content.get("total"))
         if total is None:
             raise SignatureContentMismatch("收購切結必須帶有效總額（total，非負整數元）")
-        canonical: dict[str, object] = {"items": items, "total": str(total)}
+        canonical: dict[str, object] = {"items": items, "total": format_ntd(total)}
         lot_raw = content.get("lot")
         if lot_raw is not None:
             if not isinstance(lot_raw, dict):
@@ -1104,7 +1105,7 @@ class SigningService:
             raise SignatureContentMismatch(
                 "發票處置方式在簽署後已改變（例如已跨月或期間出現其他折讓），請重新請客人確認簽名"
             )
-        if task.content.get("refund_total") != str(refund_total):
+        if task.content.get("refund_total") != format_ntd(refund_total):
             raise SignatureContentMismatch("退款金額與客人簽署同意的金額不符，請重新請客人確認簽名")
         return await self.consume_task(
             task,

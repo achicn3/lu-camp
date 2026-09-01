@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog, write_audit_log
-from app.core.money import commission
+from app.core.money import commission, format_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.repository import ConsignmentRepository
@@ -88,7 +88,7 @@ class ConsignmentService:
             before={"status": ConsignmentSettlementStatus.PENDING.value},
             after={
                 "status": ConsignmentSettlementStatus.PAID.value,
-                "payout_amount": str(settlement.payout_amount),
+                "payout_amount": format_ntd(settlement.payout_amount),
                 "idempotency_key": key,
             },
         )

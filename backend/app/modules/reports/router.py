@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, require_role
+from app.core.money import format_ntd
 from app.core.time import AwareDateTime, store_datetime_iso
 from app.modules.reports.export import (
     CSV_MEDIA_TYPE,
@@ -61,7 +62,7 @@ async def liability(
     meta = [
         ("產生時間", store_datetime_iso(report.generated_at)),
         ("店別", str(report.store_id)),
-        ("總未兌付負債", str(report.total_outstanding)),
+        ("總未兌付負債", format_ntd(report.total_outstanding)),
         ("負債健康比", report.liability_health_ratio or "N/A"),
         ("帳齡<30天", str(report.aging_buckets.lt_30d)),
         ("帳齡30-90天", str(report.aging_buckets.d30_90)),

@@ -62,3 +62,23 @@ def test_no_module_defines_its_own_money_formatter() -> None:
             offenders.append(str(path))
 
     assert offenders == [], f"這些模組沒有使用 core.money.format_ntd：{offenders}"
+
+
+def test_signing_canonical_form_is_representation_independent() -> None:
+    """簽署內容的正規化形式不得受金額寫法影響。
+
+    `"3E+4"` 與 `"30000"` 是同一筆錢。正規化若原樣沿用寫法，兩邊來源不同就比對不符——
+    客人明明簽了對的金額卻被系統判成「與簽署內容不符，請重新簽」。這不是理論：
+    交易總額直接從資料庫讀出來時就是 Decimal('3E+4')（實測 sales.total = 30000）。
+    """
+    from app.modules.signing.service import SigningService
+
+    scientific = SigningService._canonical_affidavit_client_fields(
+        SigningService, {"items": [{"name": "帳篷", "amount": "3E+4"}], "total": "3E+4"}
+    )
+    plain = SigningService._canonical_affidavit_client_fields(
+        SigningService, {"items": [{"name": "帳篷", "amount": "30000"}], "total": "30000"}
+    )
+
+    assert scientific == plain
+    assert scientific["total"] == "30000"
