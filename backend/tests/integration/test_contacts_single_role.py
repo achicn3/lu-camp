@@ -93,3 +93,25 @@ async def test_tagging_requires_a_national_id(db_session: AsyncSession) -> None:
 
     with pytest.raises(Exception, match=r"national_id|身分證"):
         await svc.ensure_seller_role(store_id, contact.id, actor_user_id=clerk_id)
+
+
+async def test_seller_tag_only_appears_after_an_acquisition_exists(
+    db_session: AsyncSession,
+) -> None:
+    """在收購頁上「選好賣方」不等於「賣過東西」。
+
+    標記賣方的唯一時機是收購**成立**（ensure_seller_role 與收購同一交易）。若在建檔或
+    補登身分證字號時就先標，店員按取消、或收購中途失敗，這個人就永遠掛著賣方標記——
+    帳面上他賣過東西，實際上一次都沒有（Codex 對抗式審查 高）。
+    """
+    store_id, _ = await _store_and_clerk(db_session)
+    svc = ContactService(db_session)
+
+    # 收購頁的「建立新賣方」：帶身分證字號建檔，但**還沒有任何收購**。
+    contact = await svc.create_contact(
+        store_id,
+        ContactCreate(name="還沒賣", phone="0900222111", national_id="A123456789"),
+    )
+
+    assert ContactRole.SELLER.value not in contact.roles
+    assert contact.roles == [ContactRole.MEMBER.value]

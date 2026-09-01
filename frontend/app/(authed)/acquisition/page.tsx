@@ -54,7 +54,6 @@ import {
 import { newIdempotencyKey } from "@/lib/uuid";
 
 type Contact = components["schemas"]["ContactRead"];
-type ContactRole = components["schemas"]["ContactRole"];
 type Category = components["schemas"]["CategoryRead"];
 type PricingRule = components["schemas"]["PricingRuleRead"];
 type Grade = components["schemas"]["Grade"];
@@ -120,7 +119,7 @@ function SellerSection({
   const [error, setError] = useState<string | null>(null);
   // 寄售人已併入賣方（2026-09-01 裁示）：商品是買斷來的還是寄售的，是**商品的屬性**
   // （庫存頁的來源標示），不是人的屬性。兩者在程式裡的待遇本來就完全一樣。
-  const role: ContactRole = "SELLER";
+  // 這裡不再送出角色——賣方標記由後端在收購成立時補上。
   const roleLabel = "賣方";
 
   const results = useQuery({
@@ -139,7 +138,10 @@ function SellerSection({
           name: input.name,
           phone: input.phone,
           national_id: input.national_id,
-          roles: [role],
+          // **不在這裡標賣方**：這一刻只是「選好了要跟誰收購」，收購還沒成立。
+          // 店員按取消、或收購中途失敗，這個人就會永遠掛著賣方標記——帳面上他賣過
+          // 東西、實際上一次都沒有（Codex 對抗式審查 高）。標記由後端在收購成立時
+          // 於**同一個交易內**補上（ensure_seller_role），失敗即隨交易回滾。
           member_points: 0,
         },
       });
@@ -153,16 +155,14 @@ function SellerSection({
     onError: (e: Error) => setError(e.message),
   });
 
-  // 補登：為已選取、但尚無身分證字號的既有會員設定 national_id 並加上賣方/寄售人角色
+  // 補登：為已選取、但尚無身分證字號的既有會員設定 national_id
   // （收購櫃檯一條龍；後端放寬 CLERK 可補登，仍寫稽核）。
+  // **只補證號、不標賣方**，理由同上：補登的當下收購還沒成立。
   const backfillMut = useMutation({
     mutationFn: async (input: { id: number; national_id: string }) => {
-      const roles = Array.from(
-        new Set<ContactRole>([...((seller?.roles ?? []) as ContactRole[]), role]),
-      );
       const { data, error: apiErr } = await api.PATCH("/api/v1/contacts/{contact_id}", {
         params: { path: { contact_id: input.id } },
-        body: { national_id: input.national_id, roles },
+        body: { national_id: input.national_id },
       });
       if (!data) throw new Error(detail(apiErr) ?? "補登失敗");
       return data;
@@ -210,7 +210,7 @@ function SellerSection({
                 maxLength={10}
               />
               <button type="submit" className="btn-primary" disabled={backfillMut.isPending}>
-                補登並設為{roleLabel}
+                補登身分證字號
               </button>
             </div>
             {error !== null && (

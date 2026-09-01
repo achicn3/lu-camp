@@ -136,7 +136,7 @@ describe("AcquisitionPage", () => {
     expect(posts).toHaveLength(0);
   });
 
-  it("選到無證號的既有會員 → 補登身分證字號（PATCH 加證號+角色）", async () => {
+  it("選到無證號的既有會員 → 只補證號，**不**在此標記賣方", async () => {
     const MEMBER = {
       id: 9,
       store_id: 1,
@@ -171,10 +171,12 @@ describe("AcquisitionPage", () => {
     // 已選取但無證號 → 出現補登欄
     const nidInput = await screen.findByLabelText("補登身分證字號");
     await userEvent.type(nidInput, "A123456789");
-    await userEvent.click(screen.getByRole("button", { name: /補登並設為賣方/ }));
+    await userEvent.click(screen.getByRole("button", { name: /補登身分證字號/ }));
     await waitFor(() => expect(patches).toHaveLength(1));
     expect(patches[0]).toMatchObject({ national_id: "A123456789" });
-    expect(patches[0].roles).toEqual(expect.arrayContaining(["MEMBER", "SELLER"]));
+    // 補登的當下收購還沒成立：此時標賣方，店員一按取消這個人就永遠掛著標記，
+    // 帳面上他賣過東西、實際上一次都沒有。標記由後端在收購成立時同交易補上。
+    expect(patches[0].roles).toBeUndefined();
   });
 
   it("打完估計轉售價（未稅）→ 上架售價自動帶入含稅價", async () => {

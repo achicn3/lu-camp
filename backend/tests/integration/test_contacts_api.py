@@ -777,6 +777,11 @@ async def test_update_contact_cannot_remove_member_with_store_credit(
 async def test_update_contact_can_remove_member_without_store_credit(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """沒有購物金時仍可移除 MEMBER：這條路徑是 `_guard_member_removal` 的存在理由。
+
+    2026-09-01 的身分簡化只保證「建檔一定是會員」，不把它變成永不可改——那會讓上面
+    那道守衛與並發防線變成不可觸發的死碼。前端已無此入口。
+    """
     _, m_token, _ = await _setup_store_and_tokens(db_session)
     cid = await _create_contact(client, m_token, name="會員", roles=["MEMBER"])
     resp = await client.patch(f"/api/v1/contacts/{cid}", json={"roles": []}, headers=_auth(m_token))

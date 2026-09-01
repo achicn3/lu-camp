@@ -94,14 +94,34 @@ try {
   const nidBox = page.getByLabel("身分證字號").first();
   ok("既有會員缺身分證字號時出現補登欄", (await nidBox.count()) > 0);
   await nidBox.fill(validNationalId(RUN));
-  await page.getByRole("button", { name: /補登並設為賣方/ }).click();
+  await page.getByRole("button", { name: /補登身分證字號/ }).click();
   await page.waitForTimeout(1500);
   await page.screenshot({ path: join(SHOTS, "02-backfill.png") });
 
+  // **補登不等於賣過東西**：這一刻收購還沒成立，店員按取消就該什麼都沒發生。
+  // 若在此就標成賣方，帳面上他賣過東西、實際上一次都沒有（Codex 對抗式審查 高）。
   const afterBackfill = await apiJson(`/api/v1/contacts/${created.id}`, { token });
-  ok("補登後成為「會員 + 賣方」",
-    ["MEMBER", "SELLER"].every((r) => afterBackfill.roles.includes(r)),
+  ok("補登身分證字號後**仍只是會員**（收購尚未成立）",
+    JSON.stringify(afterBackfill.roles) === JSON.stringify(["MEMBER"]),
     JSON.stringify(afterBackfill.roles));
+
+  // 真的完成一次收購 → 這時才該變成賣方
+  await page.getByLabel("品名").first().fill(`身分測試品-${RUN}`);
+  await page.locator(".acq-row select").first().selectOption("A");
+  const cat = page.getByLabel("分類");
+  await cat.click();
+  await cat.fill(`身分分類-${RUN}`);
+  await page.click(`button:has-text("建立「身分分類-${RUN}」")`);
+  await page.getByLabel("上架售價（含稅）").fill("1000");
+  await page.getByLabel("收購價").fill("300");
+  await page.click('button:has-text("送出收購")');
+  await page.waitForSelector("text=收購完成", { timeout: 20000 });
+  await page.screenshot({ path: join(SHOTS, "025-after-acquisition.png") });
+
+  const afterAcq = await apiJson(`/api/v1/contacts/${created.id}`, { token });
+  ok("收購成立後才變成「會員 + 賣方」",
+    ["MEMBER", "SELLER"].every((r) => afterAcq.roles.includes(r)),
+    JSON.stringify(afterAcq.roles));
 
   // 3) 詳情頁：身分是唯讀的
   await page.goto(`${BASE}/contacts/${created.id}`, { waitUntil: "domcontentloaded" });

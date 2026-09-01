@@ -35,19 +35,19 @@ async function ensureConsignmentItem() {
   if (existing) return existing.item_code;
 
   // 收購/寄售對象**必須有 national_id**（後端 422），所以用 has_national_id 篩，
-  // 不能隨手取第一個 CONSIGNOR。
+  // 不能隨手取第一個賣方。（寄售人已併入賣方，2026-09-01 裁示）
   //
   // **要用搜尋，不能讀前 50 筆**：demo 資料有三千多筆聯絡人，03-contacts 建的那位
   // 排在最後（id 3000+），`?limit=50` 撈到的全是前面的純會員 → 永遠找不到而中止。
   // 原本的寫法在只有十幾筆測資時可行，被 12 個月的真實資料打壞。
   const found = (await apiJson(token, "GET", "/api/v1/contacts?q=手冊測試客&limit=50")).json ?? [];
-  let consignor = found.find((c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id);
+  let consignor = found.find((c) => (c.roles ?? []).includes("SELLER") && c.has_national_id);
   if (!consignor) {
     // 退而求其次：翻頁找任何一位具身分證的寄售人（seed 的賣方也有身分證）
     for (let offset = 0; offset < 4000 && !consignor; offset += 200) {
       const page = (await apiJson(token, "GET", `/api/v1/contacts?limit=200&offset=${offset}`)).json ?? [];
       if (page.length === 0) break;
-      consignor = page.find((c) => (c.roles ?? []).includes("CONSIGNOR") && c.has_national_id);
+      consignor = page.find((c) => (c.roles ?? []).includes("SELLER") && c.has_national_id);
     }
   }
   if (!consignor) {

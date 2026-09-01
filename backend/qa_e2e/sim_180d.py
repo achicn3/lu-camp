@@ -1300,7 +1300,7 @@ async def _bootstrap(sim: Sim) -> None:
                 name=f"寄售人{i + 1:02d}",
                 phone=make_phone(_RNG, 20_000_000 + i),
                 national_id=make_national_id(_RNG),
-                roles=["CONSIGNOR", "MEMBER"],
+                roles=["MEMBER", "SELLER"],
             ),
         )
         sim.consignor_ids.append(consignor.id)

@@ -51,10 +51,16 @@ class ContactUpdate(BaseModel):
     phone: str | None = None
     national_id: str | None = None
     address: str | None = Field(default=None, max_length=200)  # 可改可清（PATCH 語意）
+    # 這裡**刻意不強制補回 MEMBER**（建檔時才強制）。曾試著在 PATCH 也補，結果是
+    # `_guard_member_removal` 與 `StoreCreditMemberRequired` 永遠觸發不到——那兩道是
+    # 先前對抗式審查特別要求的競態防線（移除會員 ⇄ 並發首筆購物金入帳）。為了概念整齊
+    # 拆掉有測試守著的安全機制並不划算；「每個人都是會員」由建檔與 migration 保證，
+    # 而危險的情況（持有購物金者）本來就擋得住。前端也已無改身分的入口。
     roles: list[ContactRole] | None = None
     default_carrier_type: str | None = None
     default_carrier_id: str | None = None
     source_note: str | None = None
+
 
 
 class ContactRead(BaseModel):

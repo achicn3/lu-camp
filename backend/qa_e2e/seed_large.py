@@ -385,7 +385,7 @@ async def _seed() -> None:
                 store_id=store_id,
                 name=name,
                 phone=phone,
-                roles=["CONSIGNOR", "SELLER"],
+                roles=["MEMBER", "SELLER"],
                 national_id_enc=f"enc-con-{i}",
             )
             session.add(consignor)

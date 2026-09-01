@@ -39,6 +39,19 @@ def upgrade() -> None:
         )
         """
     )
+    # 回填歷史賣方：舊流程只要求「有身分證字號」就能完成收購，不強制帶 SELLER 角色，
+    # 所以有人賣過東西卻沒被標記（實測 877 位賣方中有 1 位）。不補的話「SELLER」這個
+    # 標記名不副實——它宣稱的意思是「賣過東西給店裡」。
+    op.execute(
+        """
+        UPDATE contacts c
+        SET roles = ARRAY(
+            SELECT DISTINCT r FROM unnest(array_append(c.roles, 'SELLER')) AS r ORDER BY r
+        )
+        WHERE NOT ('SELLER' = ANY(c.roles))
+          AND EXISTS (SELECT 1 FROM acquisitions a WHERE a.contact_id = c.id)
+        """
+    )
 
 
 def downgrade() -> None:
