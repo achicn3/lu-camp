@@ -220,16 +220,16 @@ async def trends(
         rows=[
             [
                 r.period.isoformat(),
-                str(r.gross_turnover),
-                str(r.recognized_revenue),
-                str(r.food_revenue),
-                str(r.secondhand_revenue),
-                str(r.gross_margin),
-                "N/A" if r.gross_margin_rate is None else str(r.gross_margin_rate),
-                str(r.cogs),
-                str(r.total_cash_out),
-                str(r.store_credit_issued),
-                str(r.store_credit_redeemed),
+                format_ntd(r.gross_turnover),
+                format_ntd(r.recognized_revenue),
+                format_ntd(r.food_revenue),
+                format_ntd(r.secondhand_revenue),
+                format_ntd(r.gross_margin),
+                "N/A" if r.gross_margin_rate is None else format_ntd(r.gross_margin_rate),
+                format_ntd(r.cogs),
+                format_ntd(r.total_cash_out),
+                format_ntd(r.store_credit_issued),
+                format_ntd(r.store_credit_redeemed),
                 str(r.transaction_count),
             ]
             for r in report.rows
@@ -271,18 +271,18 @@ async def insights(
         ("迄", store_datetime_iso(report.date_to)),
         ("在庫>90天件數", str(t.in_stock_over_90d)),
         ("平均周轉天數", _days(t.avg_turnover_days)),
-        ("二手營收", str(mix.secondhand)),
-        ("寄售抽成", str(mix.consignment_commission)),
-        ("餐飲營收", str(mix.food)),
+        ("二手營收", format_ntd(mix.secondhand)),
+        ("寄售抽成", format_ntd(mix.consignment_commission)),
+        ("餐飲營收", format_ntd(mix.food)),
     ]
     rows = [
         [
             dim,
             r.label,
             str(r.units_sold),
-            str(r.revenue),
-            str(r.margin),
-            str(r.avg_unit_price),
+            format_ntd(r.revenue),
+            format_ntd(r.margin),
+            format_ntd(r.avg_unit_price),
             _days(r.avg_days_in_stock),
         ]
         for dim, group in (("品牌", report.brand_breakdown), ("類型", report.category_breakdown))
@@ -425,9 +425,9 @@ async def consignment_payables(
                 str(r.sale_id),
                 r.item_code,
                 r.item_name,
-                str(r.gross),
-                str(r.commission_amount),
-                str(r.payout_amount),
+                format_ntd(r.gross),
+                format_ntd(r.commission_amount),
+                format_ntd(r.payout_amount),
                 r.status,
                 "是" if r.reclaim_needed else "否",
                 store_datetime_iso(r.sale_created_at),
@@ -497,8 +497,8 @@ async def sales_margin(
                 row
                 for method in report.payment_methods
                 for row in (
-                    [f"付款方式 {method.method} 淨收款", str(method.received)],
-                    [f"付款方式 {method.method} 手續費", str(method.fee)],
+                    [f"付款方式 {method.method} 淨收款", format_ntd(method.received)],
+                    [f"付款方式 {method.method} 手續費", format_ntd(method.fee)],
                 )
             ],
         ],
@@ -544,9 +544,9 @@ async def discounts(
                 "原因",
                 row.reason_name,
                 str(row.adjustment_count),
-                str(row.item_discount_total),
-                str(row.order_discount_total),
-                str(row.discount_total),
+                format_ntd(row.item_discount_total),
+                format_ntd(row.order_discount_total),
+                format_ntd(row.discount_total),
             ]
             for row in report.by_reason
         ]
@@ -557,7 +557,7 @@ async def discounts(
                 str(row.adjustment_count),
                 "",
                 "",
-                str(row.discount_total),
+                format_ntd(row.discount_total),
             ]
             for row in report.by_clerk
         ],
@@ -618,9 +618,9 @@ async def dine_in(
                 label,
                 str(stats.groups),
                 f"{stats.share:.4f}",
-                str(stats.fnb_revenue),
-                str(stats.avg_ticket),
-                str(stats.gross_total),
+                format_ntd(stats.fnb_revenue),
+                format_ntd(stats.avg_ticket),
+                format_ntd(stats.gross_total),
             ]
             for label, stats in (
                 ("內用", report.summary.dine_in),
@@ -634,8 +634,8 @@ async def dine_in(
                 b.period.isoformat(),
                 str(b.dine_in_groups),
                 str(b.takeout_groups),
-                str(b.dine_in_revenue),
-                str(b.takeout_revenue),
+                format_ntd(b.dine_in_revenue),
+                format_ntd(b.takeout_revenue),
                 "",
             ]
             for b in report.trend
@@ -710,14 +710,14 @@ async def gifts(
                 "原因",
                 row.reason_name,
                 str(row.gift_qty),
-                str(row.retail_value),
-                str(row.cost),
+                format_ntd(row.retail_value),
+                format_ntd(row.cost),
                 str(row.returned_gift_qty),
-                str(row.returned_retail_value),
-                str(row.returned_cost),
+                format_ntd(row.returned_retail_value),
+                format_ntd(row.returned_cost),
                 str(row.net_gift_qty),
-                str(row.net_retail_value),
-                str(row.net_cost),
+                format_ntd(row.net_retail_value),
+                format_ntd(row.net_cost),
             ]
             for row in report.by_reason
         ]
@@ -726,14 +726,14 @@ async def gifts(
                 "品項",
                 row.description,
                 str(row.gift_qty),
-                str(row.retail_value),
-                str(row.cost),
+                format_ntd(row.retail_value),
+                format_ntd(row.cost),
                 str(row.returned_gift_qty),
-                str(row.returned_retail_value),
-                str(row.returned_cost),
+                format_ntd(row.returned_retail_value),
+                format_ntd(row.returned_cost),
                 str(row.net_gift_qty),
-                str(row.net_retail_value),
-                str(row.net_cost),
+                format_ntd(row.net_retail_value),
+                format_ntd(row.net_cost),
             ]
             for row in report.by_product
         ],
@@ -783,11 +783,11 @@ async def campaign_performance(
                 str(r.discount_pct),
                 store_datetime_iso(r.starts_at),
                 store_datetime_iso(r.ends_at),
-                str(r.campaign_discount_total),
-                str(r.gross_turnover),
-                str(r.recognized_revenue),
-                str(r.gross_margin),
-                "N/A" if r.gross_margin_rate is None else str(r.gross_margin_rate),
+                format_ntd(r.campaign_discount_total),
+                format_ntd(r.gross_turnover),
+                format_ntd(r.recognized_revenue),
+                format_ntd(r.gross_margin),
+                "N/A" if r.gross_margin_rate is None else format_ntd(r.gross_margin_rate),
                 str(r.transaction_count),
             ]
             for r in report.rows

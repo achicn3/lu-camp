@@ -37,7 +37,7 @@ def ensure_ntd_fits_numeric_12(
 
 
 def format_ntd(value: Decimal | int) -> str:
-    """金額對外輸出的唯一格式：純十進位，永不帶科學記號。
+    r"""金額對外輸出的唯一格式：純十進位，永不帶科學記號。
 
     **為什麼不能用 `str(value)`**：PostgreSQL 的 numeric 經 asyncpg 讀回來時，帶尾隨零
     的值會是 `Decimal('3E+4')` 而不是 `Decimal('30000')`，`str()` 就原樣輸出 `'3E+4'`。
@@ -50,6 +50,16 @@ def format_ntd(value: Decimal | int) -> str:
     # 也收 int：`round_ntd()` 回的是 int，呼叫端不該為了型別再包一次 Decimal
     # （包漏一處就又是一個 str() 的科學記號缺口）。int 本來就不會有指數形式。
     return format(Decimal(value), "f")
+
+
+def format_rate(value: Decimal) -> str:
+    """比率/倍數對外輸出：定點、不帶科學記號。
+
+    與 `format_ntd` 分開是刻意的——兩者目前輸出相同，但語意不同：金額是整數元，
+    比率有小數。混用會讓「金額格式化器」的守衛測試誤收費率欄位，也讓日後任何依
+    金額語意調整 `format_ntd`（例如收整到元）的人，順手把稅率變成 0。
+    """
+    return format(value, "f")
 
 
 def round_ntd(value: Decimal) -> int:

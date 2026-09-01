@@ -100,9 +100,10 @@ export function MemberPanel({
     );
   }
 
-  // term 落後於輸入框：剛清空輸入時 term 還是舊值、查詢結果也還在，此時不該顯示
-  // 上一次的清單（店員會以為那是新輸入的結果）。
-  const showResults = q.trim().length > 0 && term.length > 0;
+  // term 落後於輸入框 250ms。**顯示條件必須是「結果屬於現在框裡的字」**，不能只擋清空：
+  // 打「0912」查到林小姐後改打「0988」，那 250ms 內畫面仍掛著林小姐，店員手快點下去，
+  // 這筆交易就記到別人頭上、購物金也扣錯人（Codex 第二輪對抗式審查）。
+  const showResults = term.length > 0 && term === q.trim();
 
   return (
     <div className="pos-member">

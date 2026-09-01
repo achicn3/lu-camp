@@ -75,7 +75,7 @@ async def liability(
         filename_stem=f"store-credit-liability-{report.store_id}",
         meta=meta,
         headers=["會員ID", "姓名", "餘額"],
-        rows=[[str(m.contact_id), m.name, str(m.balance)] for m in report.per_member],
+        rows=[[str(m.contact_id), m.name, format_ntd(m.balance)] for m in report.per_member],
     )
     return _export_response(exp, fmt)
 
@@ -128,14 +128,14 @@ async def flows(
         rows=[
             [
                 r.period.isoformat(),
-                str(r.issued),
-                str(r.redeemed),
-                str(r.net_change),
-                str(r.issued_gross),
-                str(r.issued_reversed),
-                str(r.redeemed_gross),
-                str(r.redeemed_reversed),
-                str(r.adjustment_net),
+                format_ntd(r.issued),
+                format_ntd(r.redeemed),
+                format_ntd(r.net_change),
+                format_ntd(r.issued_gross),
+                format_ntd(r.issued_reversed),
+                format_ntd(r.redeemed_gross),
+                format_ntd(r.redeemed_reversed),
+                format_ntd(r.adjustment_net),
             ]
             for r in report.rows
         ],

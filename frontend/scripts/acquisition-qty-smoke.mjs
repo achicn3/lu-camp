@@ -78,14 +78,32 @@ try {
   const qtyBox = page.getByLabel("件數").first();
   ok("件數欄預設為 1", (await qtyBox.inputValue()) === "1", await qtyBox.inputValue());
 
-  // 件數不合法必須擋住送出，而不只是顯示紅字（Codex High #1）
-  await qtyBox.fill("0");
+  // 件數不合法必須擋住送出，而不只是顯示紅字（Codex High #1）。
+  //
+  // **必須用「一列合法＋一列非法」**：只有一列且件數 0 時，展開結果是空陣列，後端
+  // 本來就會拒收空品項——那樣即使前端完全沒有守衛，畫面也不會出現「收購完成」，
+  // 測試會為了錯的理由變綠（Codex 第二輪指出）。混合列才驗得出前端有沒有真的擋。
+  await page.click('button:has-text("＋ 新增一列")');
+  const rows = page.locator(".acq-row");
+  await rows.nth(1).getByLabel("品名").fill(`${ITEM_NAME}-B`);
+  await rows.nth(1).locator("select").first().selectOption("A");
+  await rows.nth(1).getByLabel("上架售價（含稅）").fill("1500");
+  await rows.nth(1).getByLabel("收購價").fill(String(COST));
+  await rows.nth(1).getByLabel("件數").fill("0");
   await page.waitForTimeout(400);
-  await page.click('button:has-text("送出收購")');
-  await page.waitForTimeout(1500);
-  const blocked = (await page.locator("text=收購完成").count()) === 0;
-  ok("件數 0 時送出被擋下（不是紅字之後照樣送）", blocked);
 
+  let posted = false;
+  const watch = (req) => {
+    if (req.method() === "POST" && req.url().includes("/api/v1/acquisitions")) posted = true;
+  };
+  page.on("request", watch);
+  await page.click('button:has-text("送出收購")');
+  await page.waitForTimeout(2000);
+  page.off("request", watch);
+  ok("一列合法＋一列件數 0：整單被擋，連 POST 都沒發出", !posted && (await page.locator("text=收購完成").count()) === 0);
+
+  await rows.nth(1).locator('button:has-text("移除")').click();
+  await page.waitForTimeout(300);
   await qtyBox.fill(String(QTY));
   await page.waitForTimeout(400);
   const bodyText = await page.locator("body").innerText();

@@ -9,12 +9,14 @@
 本檔把「所有對外的金額欄位都必須是純十進位」釘成全域不變量。
 """
 
+import re
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from app.core.money import format_ntd
+from app.modules.signing.service import SigningService
 
 # asyncpg 從 numeric 讀回來時真的會產生的形狀（實測 lucamp_manual 的 listed_price）。
 SCIENTIFIC = [
@@ -71,8 +73,6 @@ def test_signing_canonical_form_is_representation_independent() -> None:
     客人明明簽了對的金額卻被系統判成「與簽署內容不符，請重新簽」。這不是理論：
     交易總額直接從資料庫讀出來時就是 Decimal('3E+4')（實測 sales.total = 30000）。
     """
-    from app.modules.signing.service import SigningService
-
     scientific = SigningService._canonical_affidavit_client_fields(
         SigningService, {"items": [{"name": "帳篷", "amount": "3E+4"}], "total": "3E+4"}
     )
@@ -82,3 +82,25 @@ def test_signing_canonical_form_is_representation_independent() -> None:
 
     assert scientific == plain
     assert scientific["total"] == "30000"
+
+
+def test_report_exports_have_no_scientific_notation_columns() -> None:
+    """報表匯出（CSV/Excel）的金額欄一律走 format_ntd。
+
+    這裡用**靜態掃描**而非跑一次匯出：匯出端點有數十個，逐一構造報表資料的成本遠高於
+    收益，而漏掉一欄的後果只是店長的 Excel 出現 `3E+4`。掃描能涵蓋全部欄位，且新增
+    欄位時自動納入——這正是先前只修報表模組一處、沒推廣到其他模組的教訓。
+    """
+    schema_src = Path("app/modules/reports/schemas.py").read_text(encoding="utf-8")
+    money_fields = set(re.findall(r"^\s{4}([a-z_]+):\s*NTDAmount", schema_src, re.M))
+    assert money_fields, "抓不到任何 NTDAmount 欄位，掃描規則可能已失效"
+
+    offenders: list[str] = []
+    for path in sorted(Path("app/modules/reports").glob("*router*.py")):
+        source = path.read_text(encoding="utf-8")
+        for field in money_fields:
+            # `str(r.gross_turnover)` 這種寫法會讓 Decimal('3E+4') 原樣進 CSV。
+            for match in re.finditer(rf"\bstr\(\w+\.{field}\)", source):
+                offenders.append(f"{path}: {match.group(0)}")
+
+    assert offenders == [], f"金額欄未用 format_ntd：{offenders}"

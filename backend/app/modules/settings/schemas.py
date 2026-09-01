@@ -10,11 +10,11 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
-from app.core.money import format_ntd
+from app.core.money import format_ntd, format_rate
 from app.modules.settings.defaults import MAX_DINE_IN_TABLE_LENGTH, MAX_DINE_IN_TABLES
 from app.modules.settings.models import PremiumRateHistory, StoreSettings
 
-RateOut = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
+RateOut = Annotated[Decimal, PlainSerializer(format_rate, return_type=str)]
 RateOutOpt = Annotated[
     Decimal | None, PlainSerializer(
         lambda d: None if d is None else format_ntd(d), return_type=str | None

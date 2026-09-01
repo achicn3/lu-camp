@@ -1132,6 +1132,14 @@ export default function AcquisitionPage() {
   const pushSign = useMutation({
     mutationFn: async () => {
       if (!seller) throw new Error("請先選擇賣方");
+      // 推簽前先跑與送出同一套驗證：否則有效列混著一列件數 0 時，客人會先簽到一份
+      // 缺了那列的快照，等到最後按送出才被擋下——只能撤回簽署、請客人重簽一次
+      // （Codex 第二輪對抗式審查）。擋在推簽前，客人只會簽一次。
+      const problems = validateDraft(draft);
+      if (problems.length > 0) {
+        setErrors(problems);
+        throw new Error(problems[0]);
+      }
       const items = isBulk
         ? [{ name: lot.name || "散裝批", amount: String(payable) }]
         : // **與送出的 payload 用同一份展開結果**：後端綁定會逐項比對品名與金額，

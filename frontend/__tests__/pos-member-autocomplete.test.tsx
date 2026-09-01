@@ -121,6 +121,22 @@ describe("POS 會員即時查找", () => {
     expect(contactCalls).toBeLessThanOrEqual(2);
   });
 
+  it("改查別人的期間不得顯示上一位的結果——點下去就是歸錯戶", async () => {
+    // 送查的字串落後輸入框 250ms。若只擋「清空」不擋「改成別的字」，那 250ms 內
+    // 畫面掛著上一位會員，店員手快點下去，這筆交易就記到別人頭上、購物金也扣錯人。
+    // （Codex 第二輪：本分支新造的問題）
+    renderPanel(<MemberPanel member={null} onSelect={vi.fn()} onClear={vi.fn()} />);
+    const box = screen.getByPlaceholderText("姓名或電話");
+
+    await userEvent.type(box, "0912");
+    await screen.findByRole("button", { name: /林測試/ });
+    await userEvent.clear(box);
+    await userEvent.type(box, "0988");
+
+    // 同樣不用 waitFor：等下去 debounce 就過了，那樣無論實作怎麼寫都會過。
+    expect(screen.queryByRole("button", { name: /林測試/ })).toBeNull();
+  });
+
   it("停用時不可查詢（結帳中/購物車凍結）", async () => {
     renderPanel(<MemberPanel member={null} onSelect={vi.fn()} onClear={vi.fn()} disabled />);
 

@@ -60,12 +60,20 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000   # 背景執行
 
 ## 3. 前端（:3000）
 
-前端 client 端 API base 預設 `http://localhost:8000`（`NEXT_PUBLIC_API_BASE_URL` 可覆寫）。
+前端在瀏覽器端呼叫的後端與硬體代理位址，**兩個都必須明確指定**——沒設會被寫死成
+`localhost`，那在收銀台這台看起來正常，但顧客螢幕與簽署裝置是另一台機器，它們的
+`localhost` 指向自己。`next.config.ts` 因此在啟動時就擋下未設定的情形（連 `pnpm dev`
+也一樣），乾淨的新機器少設一個就起不來。
 
 ```bash
 cd frontend
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 pnpm dev   # 背景執行；若 3000 已被佔用先停掉舊的
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 \
+NEXT_PUBLIC_AGENT_URL=http://localhost:8001 \
+  pnpm dev   # 背景執行；若 3000 已被佔用先停掉舊的
 ```
+
+> 從 WSL 外部（Windows 主機／區網平板）連進來時，兩個位址都要改成 WSL 的 IP
+> （`hostname -I`），不能用 `localhost`——那個 localhost 指的是瀏覽器所在的機器。
 
 ## 4. 跑煙霧腳本 + 截圖
 
