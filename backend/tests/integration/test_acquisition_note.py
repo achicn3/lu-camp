@@ -3,7 +3,9 @@
 驗機時直接記「附原廠盒、缺充電線」，不必事後回頭找那件商品。三種庫存型態一致。
 """
 
+import hashlib
 import itertools
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -14,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
+from app.modules.acquisition.schemas import AcquisitionCreate
+from app.modules.acquisition.service import AcquisitionService
 from app.modules.inventory.models import BulkLot, CatalogProduct, SerializedItem
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -191,19 +195,13 @@ def test_fingerprint_ignores_absent_note_for_legacy_replays() -> None:
     重複付現、重複入庫**。這是金流風險，不是相容性潔癖。
     （Codex 對抗式審查第一輪 high；catalog 建檔那支是同一類問題。）
     """
-    import hashlib
-    import json
-
-    from app.modules.acquisition.schemas import AcquisitionCreate
-    from app.modules.acquisition.service import AcquisitionService
-
-    payload = {
-        "type": "BUYOUT",
-        "contact_id": 1,
-        "items": [
-            {"name": "外套", "grade": "A", "listed_price": "3000", "acquisition_cost": "1200"}
-        ],
+    item: dict[str, object] = {
+        "name": "外套",
+        "grade": "A",
+        "listed_price": "3000",
+        "acquisition_cost": "1200",
     }
+    payload: dict[str, object] = {"type": "BUYOUT", "contact_id": 1, "items": [item]}
     data = AcquisitionCreate.model_validate(payload)
 
     # 舊式：model_dump 之後把「本次新增的」note 鍵拿掉（頂層 note 是舊有欄位，保留）。
@@ -218,22 +216,13 @@ def test_fingerprint_ignores_absent_note_for_legacy_replays() -> None:
 
     # 有填備註即是不同內容：同鍵改備註仍要被擋。
     with_note = AcquisitionCreate.model_validate(
-        {
-            **payload,
-            "items": [{**payload["items"][0], "note": "右袖口磨損"}],
-        }
+        {**payload, "items": [{**item, "note": "右袖口磨損"}]}
     )
     assert AcquisitionService._fingerprint(with_note) != legacy
 
 
 def test_fingerprint_ignores_absent_note_for_bulk_lot() -> None:
     """散裝批的待重送同樣要能跨部署重播（BULK_LOT 走 lot 而非 items）。"""
-    import hashlib
-    import json
-
-    from app.modules.acquisition.schemas import AcquisitionCreate
-    from app.modules.acquisition.service import AcquisitionService
-
     data = AcquisitionCreate.model_validate(
         {
             "type": "BULK_LOT",
