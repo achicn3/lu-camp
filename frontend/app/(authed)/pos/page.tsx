@@ -2897,7 +2897,9 @@ export default function PosPage() {
         >
           <div className="card pos-dialog pos-note-dialog">
             <h2>交貨前請先確認</h2>
-            <p className="hint">以下商品有備註，請先跟客人說明或處理完再收款。</p>
+            <p className="hint">
+              這筆有 {notedLines.length} 件商品帶備註，請先跟客人說明或處理完再收款。
+            </p>
             <ul className="pos-note-list">
               {notedLines.map((line) => (
                 <li key={line.key}>

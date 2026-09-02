@@ -3604,6 +3604,16 @@ body {
 .pos-note-dialog {
   max-width: 480px;
   width: 100%;
+  /* 多件商品都有備註時，清單自己捲動、對話框不長過畫面——否則「已確認，繼續結帳」
+     會被擠到視窗外，店員按不到就結不了帳。 */
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.pos-note-dialog > h2,
+.pos-note-dialog > .hint,
+.pos-note-dialog > .pos-dialog-actions {
+  flex: 0 0 auto;
 }
 .pos-note-list {
   list-style: none;
@@ -3612,6 +3622,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
+  overflow-y: auto;
+  min-height: 0;
 }
 .pos-note-list li {
   padding: var(--sp-2) var(--sp-3);
