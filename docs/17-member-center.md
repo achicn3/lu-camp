@@ -24,7 +24,7 @@ T21 的領域核心**幾乎都已存在**：購物金帳本（SC-1～4）、收�
 
 | 項目 | 現況 | 缺口 / T21 動作 |
 |---|---|---|
-| 資料模型 `Contact` | `name`、`phone(index)`、`national_id_enc`、`national_id_blind_index(index)`、`roles[]`（MEMBER/SELLER/CONSIGNOR）、`member_points`、`default_carrier_*`、`source_note`；複合唯一 `(store_id, blind_index)` 去重、`(id, store_id)` 供他表複合 FK | 會員所需欄位齊全。**選配**：是否加 `member_no`（會員卡號）見 §3.1，預設**不加** |
+| 資料模型 `Contact` | `name`、`phone(index)`、`national_id_enc`、`national_id_blind_index(index)`、`roles[]`（MEMBER/SELLER；每列必含 MEMBER）、`member_points`、`default_carrier_*`、`source_note`；複合唯一 `(store_id, blind_index)` 去重、`(id, store_id)` 供他表複合 FK | 會員所需欄位齊全。**選配**：是否加 `member_no`（會員卡號）見 §3.1，預設**不加** |
 | PII 加密 | AES-256-GCM 欄位層加密（`core/crypto.get_pii_cipher`）；`national_id_blind_index = HMAC`（`core/crypto.national_id_blind_index`）僅供精確去重；`reveal_national_id` 解密並寫 `audit_log`（明文不入稽核/log） | 沿用，不動。編輯 national_id 時須重算 blind index + 去重（見 §4） |
 | Service | `create_contact`（blind-index 去重命中回既有）、`get_contact`、`lookup_by_national_id`、`search(role,q)`、`reveal_national_id`、`add_member_points`（原子 UPDATE，跨店/負值即拒） | **缺 `update_contact`**（編輯姓名/電話/載具/備註/national_id/roles）。新增之 |
 | Router | `POST /contacts`、`POST /contacts/lookup`、`GET /contacts`、`GET /contacts/{id}`、`GET /contacts/{id}/national-id`（MANAGER） | **缺 `PATCH /contacts/{id}`**。新增之 |
@@ -164,7 +164,7 @@ contacts (MemberService facade, read-only aggregation)
 - **MEMBER 移除守衛（裁示 #3＋Codex 對抗式審查 high）**：移除 `MEMBER` 角色前，facade 以
   `StoreCreditService.has_store_credit`（**唯讀**）確認該 contact 未持有購物金帳戶/帳本；仍持有則
   `409` 拒絕——否則會留下「非會員仍掛購物金負債」、破壞 storecredit 的會員邊界（I-8）並使報表
-  錯分類。`SELLER`/`CONSIGNOR` 移除**不受此限**（其關聯為 `contact_id` 直接 FK、非角色閘）。
+  錯分類。`SELLER` 移除**不受此限**（其關聯為 `contact_id` 直接 FK、非角色閘）。
   跨模組只經對方 service（contacts→storecredit 唯讀；以函式內 import 打破循環相依）。
   **併發強一致（Codex 對抗式審查 high，已收緊）**：storecredit 入帳/校正的 `_require_member`
   改以 `SELECT … FOR UPDATE` 鎖定該 contact 列再驗會員資格，與本守衛在**同一列**互斥——
@@ -205,7 +205,7 @@ contacts (MemberService facade, read-only aggregation)
 >
 > **【Codex 對抗式審查補強】列鎖序列化（D-1 模式）**：`update_contact` 以
 > `SELECT … FOR UPDATE`（`populate_existing=True`）鎖定該 contact 列後才讀-改-驗，使
-> 「SELLER/CONSIGNOR ↔ national_id 必填」這個**跨欄位**不變量於持鎖期間以最新 committed
+> 「SELLER ↔ national_id 必填」這個**跨欄位**不變量於持鎖期間以最新 committed
 > 狀態重驗。否則「A 交易清 national_id、B 交易加 SELLER」會各以舊快照通過檢查、最終寫出
 > 「SELLER 卻無 national_id」的壞列。空白/全空白 national_id 一律正規化為「無」（同 create
 > 的 falsy 處理），不可用空字串偽裝 `has_national_id` 繞過此不變量。

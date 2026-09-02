@@ -54,7 +54,7 @@ erDiagram
 `id, store_id, username, password_hash, role(MANAGER|CLERK), is_active, created_at`
 
 ### contact（統一聯絡人）
-- `id, store_id, name, phone, national_id_enc(加密), national_id_blind_index(HMAC(national_id,金鑰),供精確去重比對), roles(set: MEMBER|SELLER|CONSIGNOR), member_points, default_carrier_type?, default_carrier_id?(預留欄位；目前 POS 不自動帶入), source_note, created_at`
+- `id, store_id, name, phone, national_id_enc(加密), national_id_blind_index(HMAC(national_id,金鑰),供精確去重比對), roles(set: MEMBER|SELLER；每列必含 MEMBER，SELLER 由收購自動標記), member_points, default_carrier_type?, default_carrier_id?(預留欄位；目前 POS 不自動帶入), source_note, created_at`
 - `national_id_enc` 僅 `MANAGER` 可解密；查看寫稽核。**不可明文/部分搜尋**；以 `national_id_blind_index` 做精確去重（HMAC 金鑰由環境/KMS 管理、不入 repo），日常查詢用姓名/電話。載具非 PII，明文即可。
 
 ### brand（品牌輕主檔）
