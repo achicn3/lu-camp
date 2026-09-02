@@ -4,6 +4,8 @@ POS/庫存頁前置：掃碼查件（by-code）、序號品/一般商品/散裝�
 全部需認證、以 token 的 store_id 範圍過濾（§4）；金額一律字串整數元（§6/§11）。
 """
 
+import hashlib
+import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -1268,3 +1270,68 @@ async def test_update_catalog_and_bulk_note_cross_store_is_404(
         f"/api/v1/bulk-lots/{lot_b.id}/note", json={"note": "越店"}, headers=headers
     )
     assert rb.status_code == 404
+
+
+async def test_create_catalog_legacy_fingerprint_still_replays(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """加了 note 之後，**部署前存下的舊指紋**仍須能重播，不可變成 409。
+
+    舊列的 create_fingerprint 是在沒有 note 的年代算的。若指紋無條件納入 note，
+    部署當下瀏覽器裡待重送的那一筆會算出不同指紋 → 被當成「同鍵不同內容」拒絕，
+    店員以為沒建好而重打一次。故 note 為 None 時必須退化成與舊式相同的指紋。
+    """
+    from app.modules.inventory.service import _catalog_create_fingerprint
+
+    legacy = hashlib.sha256(
+        json.dumps(
+            {
+                "brand_id": None,
+                "name": "舊式指紋營繩",
+                "reorder_point": 3,
+                "sku": None,
+                "unit_price": "250",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    current = _catalog_create_fingerprint(
+        sku=None,
+        name="舊式指紋營繩",
+        unit_price=Decimal(250),
+        reorder_point=3,
+        brand_id=None,
+        note=None,
+    )
+    assert current == legacy, "沒填備註時的指紋必須與舊式相同"
+
+    # 有填備註則是不同內容：同鍵改備註要被擋（否則重送會靜默沿用舊備註）。
+    with_note = _catalog_create_fingerprint(
+        sku=None,
+        name="舊式指紋營繩",
+        unit_price=Decimal(250),
+        reorder_point=3,
+        brand_id=None,
+        note="效期短",
+    )
+    assert with_note != legacy
+
+    headers = {
+        **(await _auth_manager(db_session, store_id := await _seed_store(db_session))),
+        "Idempotency-Key": "catalog-create-note-conflict",
+    }
+    assert store_id
+    first = await client.post(
+        "/api/v1/catalog-products",
+        json={"name": "營繩", "unit_price": "250"},
+        headers=headers,
+    )
+    conflict = await client.post(
+        "/api/v1/catalog-products",
+        json={"name": "營繩", "unit_price": "250", "note": "後來才補的備註"},
+        headers=headers,
+    )
+    assert first.status_code == 201, first.text
+    assert conflict.status_code == 409, conflict.text

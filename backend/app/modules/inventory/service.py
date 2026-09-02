@@ -86,16 +86,24 @@ def _catalog_create_fingerprint(
     brand_id: int | None,
     note: str | None,
 ) -> str:
-    """一般商品建檔內容的穩定指紋；同冪等鍵僅允許精確重播原始請求。"""
+    """一般商品建檔內容的穩定指紋；同冪等鍵僅允許精確重播原始請求。
+
+    note 為**後加欄位**：沒填時整個鍵省略，指紋退化成加 note 之前的舊式，
+    使部署前就存在的待重送（瀏覽器 localStorage）仍能正常重播，而不是被當成
+    「同鍵不同內容」拒絕、害店員以為沒建好又重打一次。有填則納入比對，
+    同鍵改備註照樣被擋（否則重送會靜默沿用舊備註）。
+    """
+    payload: dict[str, object] = {
+        "brand_id": brand_id,
+        "name": name,
+        "reorder_point": reorder_point,
+        "sku": sku,
+        "unit_price": str(unit_price.quantize(Decimal(1))),
+    }
+    if note is not None:
+        payload["note"] = note
     canonical = json.dumps(
-        {
-            "brand_id": brand_id,
-            "name": name,
-            "note": note,
-            "reorder_point": reorder_point,
-            "sku": sku,
-            "unit_price": str(unit_price.quantize(Decimal(1))),
-        },
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
