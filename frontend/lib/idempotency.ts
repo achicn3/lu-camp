@@ -93,6 +93,8 @@ export interface CatalogCreateRequestBody {
   unit_price: number;
   reorder_point: number;
   brand_id?: number | null;
+  /** 商品備註（選填）。舊的待重送內容沒有這個鍵，故 validator 只在存在時檢查型別。 */
+  note?: string | null;
 }
 
 export interface PendingCatalogCreate {
@@ -117,7 +119,8 @@ function isCatalogCreateBody(value: unknown): value is CatalogCreateRequestBody 
     typeof body.unit_price === "number" &&
     Number.isFinite(body.unit_price) &&
     typeof body.reorder_point === "number" &&
-    Number.isInteger(body.reorder_point)
+    Number.isInteger(body.reorder_point) &&
+    (body.note === undefined || body.note === null || typeof body.note === "string")
   );
 }
 

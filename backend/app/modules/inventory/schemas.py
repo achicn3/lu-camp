@@ -100,6 +100,24 @@ class PriceUpdateRequest(BaseModel):
         return v
 
 
+class NoteUpdateRequest(BaseModel):
+    """改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。
+
+    單一自由欄位，兼「商品狀況說明」與「內部作業備忘」（2026-09-02 裁示）。
+    空字串/全空白一律存 NULL——否則 POS 結帳會為了空白備註跳一個沒有內容的提醒。
+    """
+
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _blank_to_none(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        return cleaned or None
+
+
 class PricingRuleRead(BaseModel):
     """分類×成色帶 定價規則輸出（收購定價輔助讀取）。"""
 
@@ -144,6 +162,7 @@ class SerializedItemRead(BaseModel):
     status: SerializedItemStatus
     intake_date: datetime
     sold_date: datetime | None
+    note: str | None = None
 
 
 class ItemSourceRead(BaseModel):
@@ -186,6 +205,7 @@ class SerializedItemDetailRead(BaseModel):
     acquisition_id: int | None
     acquisition_type: str | None
     sale_id: int | None
+    note: str | None = None
     history: list[ItemHistoryEvent]
 
 
@@ -216,6 +236,7 @@ class CatalogProductDetailRead(BaseModel):
     unit_cost: NTDAmountOpt = None
     quantity_on_hand: int
     reorder_point: int
+    note: str | None = None
     purchases: list[CatalogPurchaseRead]
     history: list[ItemHistoryEvent]
 
@@ -237,6 +258,7 @@ class BulkLotDetailRead(BaseModel):
     source: ItemSourceRead | None
     acquisition_id: int | None
     acquisition_type: str | None
+    note: str | None = None
     history: list[ItemHistoryEvent]
 
 
@@ -252,6 +274,13 @@ class CatalogProductCreateRequest(BaseModel):
     unit_price: NTDAmount
     reorder_point: int = Field(default=0, ge=0)
     brand_id: int | None = None
+    # 商品備註（選填）：採購品沒有收購單，建檔是唯一能在源頭寫下備註的地方。
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _blank_note_to_none(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
     @field_validator("sku", mode="before")
     @classmethod
@@ -297,6 +326,7 @@ class CatalogProductRead(BaseModel):
     unit_price: NTDAmount
     quantity_on_hand: int
     reorder_point: int
+    note: str | None = None
     incoming_qty: int = 0
 
 
@@ -319,3 +349,4 @@ class BulkLotRead(BaseModel):
     total_qty: int
     remaining_qty: int
     status: BulkLotStatus
+    note: str | None = None

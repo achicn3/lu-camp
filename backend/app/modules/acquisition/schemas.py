@@ -50,6 +50,13 @@ class AcquisitionItemIn(BaseModel):
     category_id: int | None = None  # F6 additive 持久化（前端 serialized 必填，後端選填）
     acquisition_cost: NTDAmount | None = None
     commission_pct: int | None = Field(default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX)
+    # 商品備註（選填）：驗機當下就記下狀況/作業提醒，POS 結帳會據此跳提醒。
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _blank_note_to_none(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
     @field_validator("grade")
     @classmethod
@@ -75,6 +82,12 @@ class AcquisitionLotIn(BaseModel):
     brand_id: int | None = None
     category_id: int | None = None  # F6 additive 持久化（散裝選填）
     label: str | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def _blank_note_to_none(cls, v: str | None) -> str | None:
+        return (v.strip() or None) if v is not None else None
 
     @field_validator("acquisition_cost", "unit_price")
     @classmethod

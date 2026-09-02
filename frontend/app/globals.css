@@ -1924,6 +1924,35 @@ body {
   max-width: 360px;
   width: 100%;
 }
+/* 商品備註（明細內可編輯區塊 + 列表摘要）。備註可能是「缺充電線」這種交貨前必須看到的事，
+   故用暖色底標出來，不與一般欄位混在一起。 */
+.inv-note {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+}
+.inv-note-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.inv-note-head .inv-detail-subtitle {
+  margin: 0;
+}
+.inv-note-text {
+  margin: var(--sp-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inv-note-summary {
+  font-family: var(--font-body);
+  color: var(--warn);
+}
+
 .inv-history {
   list-style: none;
   padding: 0;
@@ -3561,4 +3590,43 @@ body {
 .member-identity {
   margin: 2px 0 8px;
   font-weight: 600;
+}
+
+/* POS 商品備註：購物車行內提示 + 結帳前的確認對話框。
+   「缺充電線」這種事必須在交貨前被看到，故用暖色標記、對話框需明確按過才放行。 */
+.pos-line-note {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+.pos-note-dialog {
+  max-width: 480px;
+  width: 100%;
+}
+.pos-note-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-3) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pos-note-list li {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 6%, var(--surface));
+}
+.pos-note-item {
+  display: block;
+  font-weight: 600;
+}
+.pos-note-body {
+  display: block;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

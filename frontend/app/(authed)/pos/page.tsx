@@ -25,7 +25,9 @@ import {
   cartTotal,
   isGift,
   lineTotal,
+  linesWithNotes,
   markAsGift,
+  noteAckFingerprint,
   removeLine,
   setQty,
   toSaleLines,
@@ -138,6 +140,7 @@ function ScanBar({
           qty: 1,
           itemCode: item.item_code,
           maxQty: 1,
+          note: item.note,
         };
       }
       // 僅 404 才視為「非序號品」改試散裝；其他狀態（401/403/500）如實回報，
@@ -162,6 +165,7 @@ function ScanBar({
           qty: 1,
           bulkLotId: lot.id,
           maxQty: lot.remaining_qty,
+          note: lot.note,
         };
       }
       if (bulk.response.status !== 404) {
@@ -186,6 +190,7 @@ function ScanBar({
           qty: 1,
           catalogProductId: product.id,
           maxQty: product.quantity_on_hand,
+          note: product.note,
         };
       }
       if (catalog.response.status !== 404) {
@@ -1067,6 +1072,11 @@ export default function PosPage() {
   // 結帳當下生效活動名（供明細聯顯示活動）；結帳成功時自試算結果擷取、清單一變即失效不影響。
   const [completedCampaign, setCompletedCampaign] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
+  // 商品備註結帳提醒（2026-09-02 裁示）：按下結帳先跳出，列出車內所有帶備註的商品，
+  // 店員確認後才進收款。noteAck 存的是「已確認的那組備註」的指紋——再掃進一件有備註的
+  // 商品時指紋會變，會再問一次，避免後加入的提醒被前一次確認吃掉。
+  const [noteAck, setNoteAck] = useState("");
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
@@ -1500,6 +1510,11 @@ export default function PosPage() {
   const hasMenuLine = lines.some((line) => line.lineType === "MENU");
   const dineInTables = settings.data?.dine_in_tables ?? [];
   const dineInValidation = validateDineIn(hasMenuLine, dineIn, dineInTables);
+
+  // 商品備註提醒：車內帶備註的行，與「這組備註是否已被確認過」。
+  const notedLines = linesWithNotes(lines);
+  const noteFingerprint = noteAckFingerprint(lines);
+  const noteAckPending = notedLines.length > 0 && noteAck !== noteFingerprint;
 
   // 購物金扣抵手持簽署（docs/23 K5）：輪詢任務狀態；簽署快照的折抵額須與當前收款計畫相符，
   // 改了購物車/收款即失配 → 顯示警告並要求作廢重推（後端結帳時亦精確比對，雙重防線）。
@@ -1990,6 +2005,8 @@ export default function PosPage() {
   }
 
   function resetSale() {
+    setNoteAck("");
+    setNoteDialogOpen(false);
     setLines([]);
     setDiscountDrafts([]);
     setGiftTargetKey(null);
@@ -2242,6 +2259,9 @@ export default function PosPage() {
                           {line.description}
                           {isGift(line) && (
                             <span className="pos-gift-badge">贈品</span>
+                          )}
+                          {line.note != null && line.note.trim() !== "" && (
+                            <span className="pos-line-note">備註：{line.note.trim()}</span>
                           )}
                         </td>
                         <td>
@@ -2847,7 +2867,14 @@ export default function PosPage() {
               // 含餐飲卻沒選內用/外帶或桌號 → 先擋（後端亦有同一組守衛）。
               !dineInValidation.ok
             }
-            onClick={() => checkout.mutate()}
+            onClick={() => {
+              // 有未確認的商品備註 → 先跳提醒，確認後才進收款（不直接送出）。
+              if (noteAckPending) {
+                setNoteDialogOpen(true);
+                return;
+              }
+              checkout.mutate();
+            }}
           >
             {checkout.isPending
               ? "結帳中…"
@@ -2861,6 +2888,47 @@ export default function PosPage() {
           </button>
         </aside>
       </div>
+      {noteDialogOpen && (
+        <div
+          className="pos-dialog-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="商品備註提醒"
+        >
+          <div className="card pos-dialog pos-note-dialog">
+            <h2>交貨前請先確認</h2>
+            <p className="hint">以下商品有備註，請先跟客人說明或處理完再收款。</p>
+            <ul className="pos-note-list">
+              {notedLines.map((line) => (
+                <li key={line.key}>
+                  <span className="pos-note-item">{line.description}</span>
+                  <span className="pos-note-body">{line.note}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="pos-dialog-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  setNoteAck(noteFingerprint);
+                  setNoteDialogOpen(false);
+                  checkout.mutate();
+                }}
+              >
+                已確認，繼續結帳
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setNoteDialogOpen(false)}
+              >
+                回購物車
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

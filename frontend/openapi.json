@@ -157,6 +157,18 @@
             "title": "Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "product_model_id": {
             "anyOf": [
               {
@@ -232,6 +244,18 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "total_qty": {
             "exclusiveMinimum": 0.0,
@@ -1002,6 +1026,17 @@
             "title": "Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "remaining_qty": {
             "title": "Remaining Qty",
             "type": "integer"
@@ -1102,6 +1137,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "remaining_qty": {
             "title": "Remaining Qty",
@@ -2410,6 +2456,18 @@
             "title": "Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "reorder_point": {
             "default": 0,
             "minimum": 0.0,
@@ -2476,6 +2534,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "purchases": {
             "items": {
@@ -2552,6 +2621,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "quantity_on_hand": {
             "title": "Quantity On Hand",
@@ -6922,6 +7002,25 @@
         "title": "MenuItemUpdateRequest",
         "type": "object"
       },
+      "NoteUpdateRequest": {
+        "description": "改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。\n\n單一自由欄位，兼「商品狀況說明」與「內部作業備忘」（2026-09-02 裁示）。\n空字串/全空白一律存 NULL——否則 POS 結帳會為了空白備註跳一個沒有內容的提醒。",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "NoteUpdateRequest",
+        "type": "object"
+      },
       "OwnershipType": {
         "description": "序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。",
         "enum": [
@@ -9509,6 +9608,17 @@
             "title": "Name",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "ownership_type": {
             "$ref": "#/components/schemas/OwnershipType"
           },
@@ -9655,6 +9765,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "ownership_type": {
             "$ref": "#/components/schemas/OwnershipType"
@@ -12588,6 +12709,64 @@
         ]
       }
     },
+    "/api/v1/bulk-lots/{lot_id}/note": {
+      "patch": {
+        "description": "改散裝批備註（一般店員即可；售罄仍可補記；寫稽核）。找不到→404。",
+        "operationId": "updateBulkNote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Bulk Note",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/bulk-lots/{lot_id}/price": {
       "patch": {
         "description": "改散裝批每件均一價（限管理者；僅販售中；寫稽核）。找不到→404、非販售中→409。",
@@ -13632,6 +13811,64 @@
           }
         ],
         "summary": "Get Catalog Detail",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/{product_id}/note": {
+      "patch": {
+        "description": "改一般商品備註（一般店員即可；寫稽核）。找不到→404。",
+        "operationId": "updateCatalogNote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Catalog Note",
         "tags": [
           "inventory"
         ]
@@ -19928,6 +20165,64 @@
           }
         ],
         "summary": "Get Serialized Detail",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/{item_id}/note": {
+      "patch": {
+        "description": "改序號品備註（一般店員即可；已售出仍可補記；寫稽核）。找不到→404。",
+        "operationId": "updateSerializedNote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Serialized Note",
         "tags": [
           "inventory"
         ]

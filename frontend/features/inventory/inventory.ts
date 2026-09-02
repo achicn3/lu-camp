@@ -57,3 +57,21 @@ export { gradeLabel };
 export function orUndefined<T extends string>(value: T | ""): T | undefined {
   return value === "" ? undefined : value;
 }
+
+/**
+ * 商品備註長度上限，與後端 `String(500)` 及 `NoteUpdateRequest.max_length` 一致。
+ * 前端先擋，避免使用者打完一長串才被 422 退回。
+ */
+export const NOTE_MAX_LENGTH = 500;
+
+/** 是否有實質備註（空字串/純空白不算——否則結帳會跳一個沒有內容的提醒）。 */
+export function hasNote(note: string | null | undefined): boolean {
+  return typeof note === "string" && note.trim() !== "";
+}
+
+/** 列表用單行摘要：折掉換行、超過 maxChars 截斷加省略號。沒有備註回空字串。 */
+export function noteSummary(note: string | null | undefined, maxChars: number): string {
+  if (!hasNote(note)) return "";
+  const flat = (note as string).trim().replace(/\s+/g, " ");
+  return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
+}

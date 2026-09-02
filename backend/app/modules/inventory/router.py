@@ -23,6 +23,7 @@ from app.modules.inventory.schemas import (
     CategoryCreate,
     CategoryRead,
     CategoryTargetUpdate,
+    NoteUpdateRequest,
     PriceUpdateRequest,
     PricingRuleRead,
     PricingRulesUpdate,
@@ -109,6 +110,24 @@ async def update_serialized_price(
     return SerializedItemRead.model_validate(item)
 
 
+@router.patch(
+    "/serialized-items/{item_id}/note",
+    response_model=SerializedItemRead,
+    operation_id="updateSerializedNote",
+)
+async def update_serialized_note(
+    item_id: int, payload: NoteUpdateRequest, session: SessionDep, user: CurrentUserDep
+) -> SerializedItemRead:
+    """改序號品備註（一般店員即可；已售出仍可補記；寫稽核）。找不到→404。"""
+    item = await InventoryService(session).update_serialized_note(
+        user.store_id, item_id, note=payload.note, actor_user_id=user.id
+    )
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此序號品")
+    await session.commit()
+    return SerializedItemRead.model_validate(item)
+
+
 @router.get(
     "/catalog-products/by-sku/{sku}",
     response_model=CatalogProductRead,
@@ -146,6 +165,24 @@ async def update_catalog_price(
 
 
 @router.patch(
+    "/catalog-products/{product_id}/note",
+    response_model=CatalogProductRead,
+    operation_id="updateCatalogNote",
+)
+async def update_catalog_note(
+    product_id: int, payload: NoteUpdateRequest, session: SessionDep, user: CurrentUserDep
+) -> CatalogProductRead:
+    """改一般商品備註（一般店員即可；寫稽核）。找不到→404。"""
+    product = await InventoryService(session).update_catalog_note(
+        user.store_id, product_id, note=payload.note, actor_user_id=user.id
+    )
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此一般商品")
+    await session.commit()
+    return CatalogProductRead.model_validate(product)
+
+
+@router.patch(
     "/bulk-lots/{lot_id}/price",
     response_model=BulkLotRead,
     operation_id="updateBulkPrice",
@@ -161,6 +198,24 @@ async def update_bulk_price(
     except InvalidStateTransition as exc:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if lot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
+    await session.commit()
+    return BulkLotRead.model_validate(lot)
+
+
+@router.patch(
+    "/bulk-lots/{lot_id}/note",
+    response_model=BulkLotRead,
+    operation_id="updateBulkNote",
+)
+async def update_bulk_note(
+    lot_id: int, payload: NoteUpdateRequest, session: SessionDep, user: CurrentUserDep
+) -> BulkLotRead:
+    """改散裝批備註（一般店員即可；售罄仍可補記；寫稽核）。找不到→404。"""
+    lot = await InventoryService(session).update_bulk_note(
+        user.store_id, lot_id, note=payload.note, actor_user_id=user.id
+    )
     if lot is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
     await session.commit()
@@ -284,6 +339,7 @@ async def create_catalog_product(
             unit_price=payload.unit_price,
             reorder_point=payload.reorder_point,
             brand_id=payload.brand_id,
+            note=payload.note,
             idempotency_key=idempotency_key,
         )
     except CrossStoreReference as exc:

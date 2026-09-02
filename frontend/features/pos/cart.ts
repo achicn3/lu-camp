@@ -23,6 +23,35 @@ export interface CartLine {
   lineKind?: "NORMAL" | "GIFT";
   giftReasonId?: number;
   giftNote?: string;
+  /**
+   * 商品備註（掃碼時由庫存帶入，唯讀）。行內顯示，並在按下結帳時彙整成提醒對話框，
+   * 避免「缺充電線」這種事到交貨才發現。與 giftNote（贈品原因備註）是不同東西。
+   */
+  note?: string | null;
+}
+
+/**
+ * 結帳提醒的「確認範圍」指紋：只由帶備註的行與其內容決定。
+ * 店員確認過一次就不再打擾，但**再掃進/移除有備註的商品時指紋會變**，必須重新確認——
+ * 否則後加入的「缺充電線」會被前一次的確認默默吃掉。改數量不算變動。
+ */
+export function noteAckFingerprint(lines: CartLine[]): string {
+  return linesWithNotes(lines)
+    .map((line) => `${line.key}\u0000${line.note}`)
+    .join("\u0001");
+}
+
+/** 結帳提醒用：挑出車內帶備註的行（保持購物車順序；空白備註不算）。 */
+export function linesWithNotes(
+  lines: CartLine[],
+): { key: string; description: string; note: string }[] {
+  return lines
+    .filter((line) => typeof line.note === "string" && line.note.trim() !== "")
+    .map((line) => ({
+      key: line.key,
+      description: line.description,
+      note: (line.note as string).trim(),
+    }));
 }
 
 export function lineTotal(line: CartLine): number {

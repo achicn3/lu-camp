@@ -78,13 +78,20 @@ def _build_history(movements: list[StockMovement]) -> list[dict[str, Any]]:
 
 
 def _catalog_create_fingerprint(
-    *, sku: str | None, name: str, unit_price: Decimal, reorder_point: int, brand_id: int | None
+    *,
+    sku: str | None,
+    name: str,
+    unit_price: Decimal,
+    reorder_point: int,
+    brand_id: int | None,
+    note: str | None,
 ) -> str:
     """一般商品建檔內容的穩定指紋；同冪等鍵僅允許精確重播原始請求。"""
     canonical = json.dumps(
         {
             "brand_id": brand_id,
             "name": name,
+            "note": note,
             "reorder_point": reorder_point,
             "sku": sku,
             "unit_price": str(unit_price.quantize(Decimal(1))),
@@ -220,6 +227,7 @@ class InventoryService:
         commission_pct: int | None = None,
         acquisition_id: int | None = None,
         category_id: int | None = None,
+        note: str | None = None,
     ) -> SerializedItem:
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
@@ -250,6 +258,7 @@ class InventoryService:
             commission_pct=commission_pct,
             acquisition_id=acquisition_id,
             category_id=category_id,
+            note=note,
         )
         return await self._repo.add_serialized(item)
 
@@ -436,6 +445,7 @@ class InventoryService:
             "acquisition_id": item.acquisition_id,
             "acquisition_type": acquisition.type.value if acquisition is not None else None,
             "sale_id": sale_id,
+            "note": item.note,
             "history": history,
         }
 
@@ -498,6 +508,62 @@ class InventoryService:
         await self._audit_price(store_id, actor_user_id, "bulk_lot", lot_id, old, new)
         return lot
 
+    async def update_serialized_note(
+        self, store_id: int, item_id: int, *, note: str | None, actor_user_id: int
+    ) -> SerializedItem | None:
+        """改序號品備註（任何在職店員；寫稽核）。找不到→None。
+
+        與改價不同，**不限「僅在庫」**：已售出的商品仍要能補記客訴/瑕疵，日後回查才有依據。
+        """
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
+        if item is None:
+            return None
+        old, item.note = item.note, note
+        await self._session.flush()
+        await self._audit_note(store_id, actor_user_id, "serialized_item", item_id, old, note)
+        return item
+
+    async def update_catalog_note(
+        self, store_id: int, product_id: int, *, note: str | None, actor_user_id: int
+    ) -> CatalogProduct | None:
+        """改一般商品備註（任何在職店員；寫稽核）。找不到→None。"""
+        product = await self._repo.get_catalog_for_update(store_id, product_id)
+        if product is None:
+            return None
+        old, product.note = product.note, note
+        await self._session.flush()
+        await self._audit_note(store_id, actor_user_id, "catalog_product", product_id, old, note)
+        return product
+
+    async def update_bulk_note(
+        self, store_id: int, lot_id: int, *, note: str | None, actor_user_id: int
+    ) -> BulkLot | None:
+        """改散裝批備註（任何在職店員；寫稽核）。找不到→None。售罄的堆仍可補記。"""
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
+        if lot is None:
+            return None
+        old, lot.note = lot.note, note
+        await self._session.flush()
+        await self._audit_note(store_id, actor_user_id, "bulk_lot", lot_id, old, note)
+        return lot
+
+    async def _audit_note(
+        self, store_id: int, actor_user_id: int, entity_type: str, entity_id: int,
+        old: str | None, new: str | None,
+    ) -> None:
+        """備註異動留痕（前後值）。備註是自由文字，可能被寫入個資——故只進 audit_log
+        （授權角色才查得到），絕不進結構化 log（CLAUDE.md §5）。"""
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_NOTE",
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            before={"note": old},
+            after={"note": new},
+        )
+
     async def _audit_price(
         self, store_id: int, actor_user_id: int, entity_type: str, entity_id: int,
         old: Decimal, new: Decimal,
@@ -556,6 +622,7 @@ class InventoryService:
             "unit_price": product.unit_price,
             "quantity_on_hand": product.quantity_on_hand,
             "reorder_point": product.reorder_point,
+            "note": product.note,
             "purchases": purchases,
             "history": history,
         }
@@ -605,6 +672,7 @@ class InventoryService:
             "source": source,
             "acquisition_id": lot.acquisition_id,
             "acquisition_type": acquisition.type.value if acquisition is not None else None,
+            "note": lot.note,
             "history": history,
         }
 
@@ -655,6 +723,7 @@ class InventoryService:
         unit_price: Decimal,
         reorder_point: int = 0,
         brand_id: int | None = None,
+        note: str | None = None,
         idempotency_key: str | None = None,
     ) -> CatalogProduct:
         """新增一般商品（上架）：廠商採購商品先建檔（初始庫存 0），之後採購收貨補庫存。
@@ -670,6 +739,7 @@ class InventoryService:
                 unit_price=unit_price,
                 reorder_point=reorder_point,
                 brand_id=brand_id,
+                note=note,
             )
             if idempotency_key is not None
             else None
@@ -699,6 +769,7 @@ class InventoryService:
             quantity_on_hand=0,
             reorder_point=reorder_point,
             brand_id=brand_id,
+            note=note,
             create_idempotency_key=idempotency_key,
             create_fingerprint=fingerprint,
         )
@@ -946,6 +1017,7 @@ class InventoryService:
         label: str | None = None,
         acquisition_id: int | None = None,
         category_id: int | None = None,
+        note: str | None = None,
     ) -> BulkLot:
         if grade != Grade.E:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
@@ -969,6 +1041,7 @@ class InventoryService:
             label=label,
             acquisition_id=acquisition_id,
             category_id=category_id,
+            note=note,
         )
         return await self._repo.add_bulk_lot(lot)
 

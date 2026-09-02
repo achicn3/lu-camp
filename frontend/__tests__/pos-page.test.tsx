@@ -240,6 +240,107 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(drawerCalls).toBe(1));
   });
 
+  it("商品有備註：結帳先跳提醒，確認後才送出；未確認不得成交", async () => {
+    let saleCalls = 0;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1"))
+        return json({ ...TENT, note: "缺營釘，交貨前跟客人說" });
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleCalls += 1;
+        return json(
+          { id: 9, store_id: 1, total: "1800", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/print/detail")) return json({ status: "ok" });
+      if (url.includes("/print-detail")) return json({ id: 9 });
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+    // 掃進來就在購物車行內看得到（不打斷連掃）
+    expect(screen.getByText(/備註：缺營釘/)).toBeTruthy();
+
+    // 按結帳 → 先跳提醒，且**尚未**送出銷售
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    const dialog = await screen.findByRole("dialog", { name: "商品備註提醒" });
+    expect(within(dialog).getByText(/缺營釘，交貨前跟客人說/)).toBeTruthy();
+    expect(saleCalls).toBe(0);
+
+    // 回購物車 → 對話框關閉、仍未送出
+    await user.click(within(dialog).getByRole("button", { name: "回購物車" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "商品備註提醒" })).toBeNull(),
+    );
+    expect(saleCalls).toBe(0);
+
+    // 再按結帳 → 又跳一次（沒確認過就不放行）→ 這次確認 → 才真的成交
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    const again = await screen.findByRole("dialog", { name: "商品備註提醒" });
+    await user.click(within(again).getByRole("button", { name: "已確認，繼續結帳" }));
+    await waitFor(() => expect(saleCalls).toBe(1));
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+  });
+
+  it("商品沒有備註：結帳不跳提醒，直接成交", async () => {
+    let saleCalls = 0;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/TENT1"))
+        return json({ ...TENT, note: null });
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleCalls += 1;
+        return json(
+          { id: 10, store_id: 1, total: "1800", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/print/detail")) return json({ status: "ok" });
+      if (url.includes("/print-detail")) return json({ id: 10 });
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
+
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    await waitFor(() => expect(saleCalls).toBe(1));
+    expect(screen.queryByRole("dialog", { name: "商品備註提醒" })).toBeNull();
+  });
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";

@@ -280,6 +280,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/{lot_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Bulk Note
+         * @description 改散裝批備註（一般店員即可；售罄仍可補記；寫稽核）。找不到→404。
+         */
+        patch: operations["updateBulkNote"];
+        trace?: never;
+    };
     "/api/v1/bulk-lots/{lot_id}/price": {
         parameters: {
             query?: never;
@@ -572,6 +592,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Catalog Note
+         * @description 改一般商品備註（一般店員即可；寫稽核）。找不到→404。
+         */
+        patch: operations["updateCatalogNote"];
         trace?: never;
     };
     "/api/v1/catalog-products/{product_id}/price": {
@@ -2383,6 +2423,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/{item_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Serialized Note
+         * @description 改序號品備註（一般店員即可；已售出仍可補記；寫稽核）。找不到→404。
+         */
+        patch: operations["updateSerializedNote"];
+        trace?: never;
+    };
     "/api/v1/serialized-items/{item_id}/price": {
         parameters: {
             query?: never;
@@ -2751,6 +2811,8 @@ export interface components {
             listed_price: number | string;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Product Model Id */
             product_model_id?: number | null;
         };
@@ -2770,6 +2832,8 @@ export interface components {
             label?: string | null;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Total Qty */
             total_qty: number;
             /** Unit Price */
@@ -3055,6 +3119,8 @@ export interface components {
             lot_code: string;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Remaining Qty */
             remaining_qty: number;
             source: components["schemas"]["ItemSourceRead"] | null;
@@ -3084,6 +3150,8 @@ export interface components {
             lot_code: string;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Remaining Qty */
             remaining_qty: number;
             status: components["schemas"]["BulkLotStatus"];
@@ -3576,6 +3644,8 @@ export interface components {
             brand_id?: number | null;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /**
              * Reorder Point
              * @default 0
@@ -3599,6 +3669,8 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Purchases */
             purchases: components["schemas"]["CatalogPurchaseRead"][];
             /** Quantity On Hand */
@@ -3631,6 +3703,8 @@ export interface components {
             incoming_qty: number;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             /** Quantity On Hand */
             quantity_on_hand: number;
             /** Reorder Point */
@@ -5360,6 +5434,17 @@ export interface components {
             unit_price?: number | string | null;
         };
         /**
+         * NoteUpdateRequest
+         * @description 改商品備註（一般店員即可；不涉金額，故不比照改價限管理者、也不限在庫）。
+         *
+         *     單一自由欄位，兼「商品狀況說明」與「內部作業備忘」（2026-09-02 裁示）。
+         *     空字串/全空白一律存 NULL——否則 POS 結帳會為了空白備註跳一個沒有內容的提醒。
+         */
+        NoteUpdateRequest: {
+            /** Note */
+            note?: string | null;
+        };
+        /**
          * OwnershipType
          * @description 序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。
          * @enum {string}
@@ -6414,6 +6499,8 @@ export interface components {
             margin: string | null;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             ownership_type: components["schemas"]["OwnershipType"];
             /** Sale Id */
             sale_id: number | null;
@@ -6451,6 +6538,8 @@ export interface components {
             listed_price: string;
             /** Name */
             name: string;
+            /** Note */
+            note?: string | null;
             ownership_type: components["schemas"]["OwnershipType"];
             /** Product Model Id */
             product_model_id: number | null;
@@ -7642,6 +7731,41 @@ export interface operations {
             };
         };
     };
+    updateBulkNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     updateBulkPrice: {
         parameters: {
             query?: never;
@@ -8238,6 +8362,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProductDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCatalogNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
                 };
             };
             /** @description Validation Error */
@@ -11631,6 +11790,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateSerializedNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */

@@ -845,6 +845,7 @@ class AcquisitionService:
                 commission_pct=commission,
                 acquisition_id=acquisition_id,
                 category_id=item.category_id,
+                note=item.note,
             )
             await self._inventory.record_stock_in(
                 store_id,
@@ -877,6 +878,7 @@ class AcquisitionService:
             label=lot.label,
             acquisition_id=acquisition_id,
             category_id=lot.category_id,
+            note=lot.note,
         )
         await self._inventory.record_stock_in(
             store_id,

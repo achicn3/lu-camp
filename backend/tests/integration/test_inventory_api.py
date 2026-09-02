@@ -1083,3 +1083,188 @@ async def test_item_name_suggestions_treat_wildcards_as_literals(
         "/api/v1/item-name-suggestions", params={"q": "%"}, headers=_auth(store_id)
     )
     assert only_wildcard.json() == ["純棉 100% 天幕"]  # 只回真的含「%」者，不是全部
+
+
+# ── 商品備註（單一欄位兼「商品狀況說明」與「內部作業備忘」；POS 結帳提醒用）────────
+async def test_update_serialized_note_allows_clerk_and_audits(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """寫序號品備註：一般店員即可（不涉金額），更新後回應帶 note 並寫稽核 UPDATE_NOTE。"""
+    from app.core.audit import AuditLog
+
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="NOTE-1")
+    await db_session.commit()  # 釋出 savepoint，端點 commit/rollback 不影響種子
+
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/note",
+        json={"note": "螢幕左下有刮痕，附原廠盒、缺充電線"},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["note"] == "螢幕左下有刮痕，附原廠盒、缺充電線"
+    audits = (
+        await db_session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "UPDATE_NOTE", AuditLog.store_id == store_id
+            )
+        )
+    ).all()
+    assert len(audits) == 1
+
+
+async def test_update_serialized_note_allowed_when_sold(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已售出仍可補備註（客訴回查要寫得進去）——與改價的「僅在庫」限制不同。"""
+    store_id = await _seed_store(db_session)
+    sold = await _seed_item(
+        db_session, store_id, item_code="NOTE-2", status=SerializedItemStatus.SOLD
+    )
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{sold.id}/note",
+        json={"note": "客人反映防水塗層脫落"},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["note"] == "客人反映防水塗層脫落"
+
+
+async def test_update_note_clears_with_empty_string(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """清空備註：空字串/全空白一律存成 NULL，不留下空白備註害 POS 跳空提醒。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="NOTE-3")
+    item.note = "先別賣，等老闆確認"
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/note",
+        json={"note": "   "},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["note"] is None
+
+
+async def test_update_note_rejects_overlong(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """超過 500 字 → 422（schema 擋在端點前，不讓 DB 截斷）。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="NOTE-4")
+    await db_session.commit()
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/note",
+        json={"note": "字" * 501},
+        headers=_auth(store_id),
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_note_cross_store_is_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """他店商品一律 404（不洩漏跨店存在性；沿用既有慣例）。"""
+    store_a = await _seed_store(db_session, name="A 店")
+    store_b = await _seed_store(db_session, name="B 店")
+    item_b = await _seed_item(db_session, store_b, item_code="NOTE-5")
+    await db_session.commit()
+    resp = await client.patch(
+        f"/api/v1/serialized-items/{item_b.id}/note",
+        json={"note": "越店寫入"},
+        headers=_auth(store_a),
+    )
+    assert resp.status_code == 404
+
+
+async def test_update_catalog_and_bulk_note(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """一般商品與散裝批同樣可寫備註（三種庫存型態一致，不出現查得到 A 查不到 B）。"""
+    store_id = await _seed_store(db_session)
+    product = CatalogProduct(
+        store_id=store_id, sku="CP-N", name="瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5,
+    )
+    lot = BulkLot(
+        store_id=store_id, lot_code="LOT-N", name="營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([product, lot])
+    await db_session.commit()
+
+    rc = await client.patch(
+        f"/api/v1/catalog-products/{product.id}/note",
+        json={"note": "同批有瑕疵，出貨前先搖一下確認不漏氣"},
+        headers=_auth(store_id),
+    )
+    assert rc.status_code == 200, rc.text
+    assert rc.json()["note"] == "同批有瑕疵，出貨前先搖一下確認不漏氣"
+    rb = await client.patch(
+        f"/api/v1/bulk-lots/{lot.id}/note", json={"note": "放 B 架第三層"}, headers=_auth(store_id)
+    )
+    assert rb.status_code == 200, rb.text
+    assert rb.json()["note"] == "放 B 架第三層"
+
+
+async def test_note_reaches_pos_scan_reads(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """POS 掃碼查件的三個端點都要帶回 note，結帳提醒才有資料可跳。"""
+    store_id = await _seed_store(db_session)
+    item = await _seed_item(db_session, store_id, item_code="S1-AAAAAAAAAA")
+    item.note = "缺充電線"
+    product = CatalogProduct(
+        store_id=store_id, sku="CP-POS", name="瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5, note="效期將至",
+    )
+    lot = BulkLot(
+        store_id=store_id, lot_code="L1-BBBBBBBBBB", name="營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+        note="數量請客人自己點",
+    )
+    db_session.add_all([product, lot])
+    await db_session.flush()
+
+    headers = _auth(store_id)
+    rs = await client.get(f"/api/v1/serialized-items/by-code/{item.item_code}", headers=headers)
+    assert rs.status_code == 200 and rs.json()["note"] == "缺充電線"
+    rc = await client.get(f"/api/v1/catalog-products/by-sku/{product.sku}", headers=headers)
+    assert rc.status_code == 200 and rc.json()["note"] == "效期將至"
+    rb = await client.get(f"/api/v1/bulk-lots/by-code/{lot.lot_code}", headers=headers)
+    assert rb.status_code == 200 and rb.json()["note"] == "數量請客人自己點"
+
+
+async def test_update_catalog_and_bulk_note_cross_store_is_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """一般商品/散裝批的備註同樣不可跨店寫入（他店一律 404，不洩漏存在性）。"""
+    store_a = await _seed_store(db_session, name="A 店 note")
+    store_b = await _seed_store(db_session, name="B 店 note")
+    product_b = CatalogProduct(
+        store_id=store_b, sku="CP-XS", name="他店瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5,
+    )
+    lot_b = BulkLot(
+        store_id=store_b, lot_code="LOT-XS", name="他店營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([product_b, lot_b])
+    await db_session.commit()
+
+    headers = _auth(store_a)
+    rc = await client.patch(
+        f"/api/v1/catalog-products/{product_b.id}/note", json={"note": "越店"}, headers=headers
+    )
+    assert rc.status_code == 404
+    rb = await client.patch(
+        f"/api/v1/bulk-lots/{lot_b.id}/note", json={"note": "越店"}, headers=headers
+    )
+    assert rb.status_code == 404

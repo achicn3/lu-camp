@@ -124,6 +124,10 @@ class CatalogProduct(Base, TimestampMixin):
     # 建檔冪等：回應遺失後以同 key 重送，依原始請求指紋回放同一商品，不重複產生自動 SKU。
     create_idempotency_key: Mapped[str | None] = mapped_column(String(80))
     create_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    # 商品備註（單一自由欄位，兼「商品狀況說明」與「內部作業備忘」；2026-09-02 裁示）。
+    # POS 掃入購物車後行內顯示、按下結帳時彈出確認，避免交貨才發現缺件。
+    # 自由文字：UI 提示勿填個資，且不得寫進結構化 log（CLAUDE.md §5）。
+    note: Mapped[str | None] = mapped_column(String(500))
 
 
 class SerializedItem(Base, TimestampMixin):
@@ -157,6 +161,10 @@ class SerializedItem(Base, TimestampMixin):
         DateTime(timezone=True), server_default=func.now()
     )
     sold_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 商品備註（單一自由欄位，兼「商品狀況說明」與「內部作業備忘」；2026-09-02 裁示）。
+    # POS 掃入購物車後行內顯示、按下結帳時彈出確認，避免交貨才發現缺件。
+    # 自由文字：UI 提示勿填個資，且不得寫進結構化 log（CLAUDE.md §5）。
+    note: Mapped[str | None] = mapped_column(String(500))
 
 
 class BulkLot(Base, TimestampMixin):
@@ -190,6 +198,10 @@ class BulkLot(Base, TimestampMixin):
     intake_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # 商品備註（單一自由欄位，兼「商品狀況說明」與「內部作業備忘」；2026-09-02 裁示）。
+    # POS 掃入購物車後行內顯示、按下結帳時彈出確認，避免交貨才發現缺件。
+    # 自由文字：UI 提示勿填個資，且不得寫進結構化 log（CLAUDE.md §5）。
+    note: Mapped[str | None] = mapped_column(String(500))
 
 
 class StockMovement(Base):

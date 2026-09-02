@@ -9,10 +9,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
+  NOTE_MAX_LENGTH,
   type Badge,
   bulkStatusBadge,
   gradeLabel,
+  hasNote,
   isLowStock,
+  noteSummary,
   orUndefined,
   ownershipBadge,
   sellThroughPct,
@@ -331,6 +334,148 @@ function ChangePriceButton({
   );
 }
 
+// 列表內的備註摘要：內部作業備忘（「先別賣」「放 B 架」）要在列表就看得到，
+// 不必逐件點開明細。過長截斷，完整內容在明細與結帳提醒。
+function NoteLine({ note }: { note: string | null | undefined }) {
+  if (!hasNote(note)) return null;
+  return (
+    <span className="row-sub inv-note-summary" title={note ?? undefined}>
+      備註：{noteSummary(note, 28)}
+    </span>
+  );
+}
+
+// 商品備註：單一自由欄位，兼「商品狀況說明」與「內部作業備忘」（2026-09-02 裁示）。
+// 一般店員即可編輯（不涉金額，故不比照改價限管理者）；已售出/售罄仍可補記。
+function NoteEditor({
+  kind,
+  id,
+  note,
+  detailQueryKey,
+}: {
+  kind: "serialized" | "catalog" | "bulk";
+  id: number;
+  note: string | null | undefined;
+  detailQueryKey: readonly unknown[];
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(note ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: async (next: string) => {
+      const body = { note: next.trim() === "" ? null : next };
+      if (kind === "serialized") {
+        const { data, error: e } = await api.PATCH("/api/v1/serialized-items/{item_id}/note", {
+          params: { path: { item_id: id } },
+          body,
+        });
+        if (!data) throw new Error(extractDetail(e) ?? "備註儲存失敗");
+        return data;
+      }
+      if (kind === "catalog") {
+        const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}/note", {
+          params: { path: { product_id: id } },
+          body,
+        });
+        if (!data) throw new Error(extractDetail(e) ?? "備註儲存失敗");
+        return data;
+      }
+      const { data, error: e } = await api.PATCH("/api/v1/bulk-lots/{lot_id}/note", {
+        params: { path: { lot_id: id } },
+        body,
+      });
+      if (!data) throw new Error(extractDetail(e) ?? "備註儲存失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setEditing(false);
+      void qc.invalidateQueries({ queryKey: detailQueryKey });
+      void qc.invalidateQueries({ queryKey: ["inventory"] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    if (value.length > NOTE_MAX_LENGTH) {
+      setError(`備註最多 ${NOTE_MAX_LENGTH} 個字`);
+      return;
+    }
+    mut.mutate(value);
+  }
+
+  if (!editing) {
+    return (
+      <div className="inv-note">
+        <div className="inv-note-head">
+          <h4 className="inv-detail-subtitle">備註</h4>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setValue(note ?? "");
+              setError(null);
+              setEditing(true);
+            }}
+          >
+            {note ? "編輯備註" : "新增備註"}
+          </button>
+        </div>
+        {note ? (
+          <p className="inv-note-text">{note}</p>
+        ) : (
+          <p className="hint">尚未填寫備註。</p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <form className="inv-note" onSubmit={submit}>
+      <div className="inv-note-head">
+        <h4 className="inv-detail-subtitle">備註</h4>
+      </div>
+      <label className="field">
+        <span className="field-label">
+          商品狀況或作業提醒（結帳時會提醒店員）
+        </span>
+        <textarea
+          autoFocus
+          rows={3}
+          maxLength={NOTE_MAX_LENGTH}
+          aria-label="商品備註"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+      </label>
+      <p className="hint">
+        例：「缺充電線」「螢幕左下有刮痕」「先別賣，等老闆確認」。請勿填寫客人身分證或電話。
+        剩餘 {NOTE_MAX_LENGTH - value.length} 字。
+      </p>
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <div className="pos-dialog-actions">
+        <button type="submit" className="btn-primary" disabled={mut.isPending}>
+          {mut.isPending ? "儲存中…" : "儲存備註"}
+        </button>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => setEditing(false)}
+          disabled={mut.isPending}
+        >
+          取消
+        </button>
+      </div>
+    </form>
+  );
+}
+
 // 逐件「詳細」：來源（賣方/寄售人）、收購成本/時間、標價/成交價、入庫時間、完整異動歷史。
 function ItemDetailModal({
   itemId,
@@ -440,6 +585,12 @@ function ItemDetailModal({
                 <dd>{dt(d.sold_date)}</dd>
               </div>
             </dl>
+            <NoteEditor
+              kind="serialized"
+              id={d.id}
+              note={d.note}
+              detailQueryKey={["serialized-detail", itemId]}
+            />
             <h4 className="inv-detail-subtitle">歷史紀錄</h4>
             {d.history.length === 0 ? (
               <p className="hint">尚無異動紀錄。</p>
@@ -534,6 +685,12 @@ function CatalogDetailModal({ productId, onClose }: { productId: number; onClose
                 </dd>
               </div>
             </dl>
+            <NoteEditor
+              kind="catalog"
+              id={d.id}
+              note={d.note}
+              detailQueryKey={["catalog-detail", productId]}
+            />
             <h4 className="inv-detail-subtitle">經銷商進貨歷史</h4>
             {d.purchases.length === 0 ? (
               <p className="hint">尚無進貨紀錄。</p>
@@ -655,6 +812,12 @@ function BulkDetailModal({
                 <dd>{dt(d.intake_date)}</dd>
               </div>
             </dl>
+            <NoteEditor
+              kind="bulk"
+              id={d.id}
+              note={d.note}
+              detailQueryKey={["bulk-detail", lotId]}
+            />
             <h4 className="inv-detail-subtitle">庫存異動歷史</h4>
             <HistoryList history={d.history} />
           </>
@@ -762,7 +925,10 @@ function SerializedPanel() {
         {rows.map((item) => (
           <tr key={item.id}>
             <td className="inv-code">{item.item_code}</td>
-            <td>{item.name}</td>
+            <td>
+              {item.name}
+              <NoteLine note={item.note} />
+            </td>
             <td>{gradeLabel(item.grade)}</td>
             <td>
               <BadgeChip badge={ownershipBadge(item.ownership_type)} />
@@ -820,6 +986,7 @@ function CreateCatalogProduct() {
   const [name, setName] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [reorderPoint, setReorderPoint] = useState("0");
+  const [catalogNote, setCatalogNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
@@ -839,6 +1006,7 @@ function CreateCatalogProduct() {
             name: name.trim(),
             unit_price: price,
             reorder_point: reorder,
+            note: catalogNote.trim() || null,
           },
         };
         savePendingCatalogCreate(catalogCreateStoreId, pending);
@@ -865,6 +1033,7 @@ function CreateCatalogProduct() {
       setName("");
       setUnitPrice("");
       setReorderPoint("0");
+      setCatalogNote("");
       setFormError(null);
       void queryClient.invalidateQueries({ queryKey: ["inventory"] });
       void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
@@ -927,6 +1096,17 @@ function CreateCatalogProduct() {
               value={pendingCatalogCreate?.body.reorder_point ?? reorderPoint}
               disabled={pendingCatalogCreate !== null || create.isPending}
               onChange={(e) => setReorderPoint(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>備註（選填，結帳時會提醒店員）</span>
+            <input
+              aria-label="商品備註"
+              maxLength={NOTE_MAX_LENGTH}
+              placeholder="例：效期短，先進先出"
+              value={pendingCatalogCreate?.body.note ?? catalogNote}
+              disabled={pendingCatalogCreate !== null || create.isPending}
+              onChange={(e) => setCatalogNote(e.target.value)}
             />
           </label>
         </div>
@@ -998,7 +1178,10 @@ function CatalogPanel() {
           return (
             <tr key={product.id}>
               <td className="inv-code">{product.sku}</td>
-              <td>{product.name}</td>
+              <td>
+                {product.name}
+                <NoteLine note={product.note} />
+              </td>
               <td>
                 <MoneyText value={product.unit_price} />
               </td>
@@ -1081,7 +1264,10 @@ function BulkPanel() {
         {rows.map((lot) => (
           <tr key={lot.id}>
             <td className="inv-code">{lot.lot_code}</td>
-            <td>{lot.name}</td>
+            <td>
+              {lot.name}
+              <NoteLine note={lot.note} />
+            </td>
             <td>{gradeLabel(lot.grade)}</td>
             <td>
               <MoneyText value={lot.unit_price} />
@@ -1236,7 +1422,10 @@ function AgingPanel() {
         {rows.map((item) => (
           <tr key={item.id}>
             <td className="inv-code">{item.item_code}</td>
-            <td>{item.name}</td>
+            <td>
+              {item.name}
+              <NoteLine note={item.note} />
+            </td>
             <td>{gradeLabel(item.grade)}</td>
             <td>
               <BadgeChip badge={ownershipBadge(item.ownership_type)} />
