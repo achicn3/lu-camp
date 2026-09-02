@@ -33,6 +33,7 @@ import {
   toSaleLines,
   unmarkGift,
 } from "@/features/pos/cart";
+import { withFreshNotes } from "@/features/pos/restoreNotes";
 import {
   type DiscountDraft,
   canonicalAdjustments,
@@ -1094,9 +1095,11 @@ export default function PosPage() {
       // 優先用店員端保存的原始請求還原：客顯快照沒有贈品原因、備註與折扣意圖，
       // 只靠它重建會把贈品與折扣整個弄丟，接著同步 effect 又會把殘缺狀態寫回伺服器。
       const payload = cart.staff_payload ?? null;
+      // 還原＝換了一份購物車，先前對備註的「已確認」一律失效，必須重新確認。
+      setNoteAck("");
+      setNoteDialogOpen(false);
       if (payload) {
-        setLines(
-          payload.lines.map((line, index) => {
+        const restoredLines: CartLine[] = payload.lines.map((line, index) => {
             const gift = line.line_kind === "GIFT";
             const snapshot = cart.snapshot.items[index];
             const base =
@@ -1121,8 +1124,8 @@ export default function PosPage() {
               giftReasonId: line.gift_reason_id ?? undefined,
               giftNote: line.gift_note ?? undefined,
             };
-          }),
-        );
+        });
+        setLines(await withFreshNotes(restoredLines));
         setDiscountDrafts(
           (payload.adjustments ?? []).map((adjustment, index) => ({
             id: `restored-${index}`,
@@ -1151,7 +1154,7 @@ export default function PosPage() {
         );
       } else {
         // 升級前建立的舊購物車沒有這份資料：只能以快照重建（贈品原因與折扣無從得知）。
-        setLines(restoreLines(cart.snapshot.items));
+        setLines(await withFreshNotes(restoreLines(cart.snapshot.items)));
         setDiscountDrafts([]);
       }
       // 內用/外帶與桌號（docs/35）：一併還原。少了它，被凍結的餐飲購物車重掛後會卡死——

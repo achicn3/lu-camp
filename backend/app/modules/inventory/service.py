@@ -516,6 +516,14 @@ class InventoryService:
         await self._audit_price(store_id, actor_user_id, "bulk_lot", lot_id, old, new)
         return lot
 
+    async def get_catalog_by_id(self, store_id: int, product_id: int) -> CatalogProduct | None:
+        """以 id 取一般商品（限本店）。POS 還原購物車重新取回備註用。"""
+        return await self._repo.get_catalog(store_id, product_id)
+
+    async def get_bulk_lot_by_id(self, store_id: int, lot_id: int) -> BulkLot | None:
+        """以 id 取散裝批（限本店）。POS 還原購物車重新取回備註用。"""
+        return await self._repo.get_bulk_lot(store_id, lot_id)
+
     async def update_serialized_note(
         self, store_id: int, item_id: int, *, note: str | None, actor_user_id: int
     ) -> SerializedItem | None:

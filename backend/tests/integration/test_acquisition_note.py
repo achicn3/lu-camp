@@ -181,3 +181,75 @@ async def test_catalog_product_create_persists_note(
     )
     assert product is not None and product.note == "效期短，先進先出"
     assert resp.json()["note"] == "效期短，先進先出"
+
+
+def test_fingerprint_ignores_absent_note_for_legacy_replays() -> None:
+    """收購冪等指紋：沒填備註時必須與**加 note 之前**完全相同。
+
+    `_fingerprint` 直接雜湊整個 model_dump，新增 note 欄位會讓每一筆舊的待重送
+    都算出不同指紋 → 回 409「同鍵不同內容」→ 店員另起新鍵重送 → **重複收購、
+    重複付現、重複入庫**。這是金流風險，不是相容性潔癖。
+    （Codex 對抗式審查第一輪 high；catalog 建檔那支是同一類問題。）
+    """
+    import hashlib
+    import json
+
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+
+    payload = {
+        "type": "BUYOUT",
+        "contact_id": 1,
+        "items": [
+            {"name": "外套", "grade": "A", "listed_price": "3000", "acquisition_cost": "1200"}
+        ],
+    }
+    data = AcquisitionCreate.model_validate(payload)
+
+    # 舊式：model_dump 之後把「本次新增的」note 鍵拿掉（頂層 note 是舊有欄位，保留）。
+    legacy_dump = data.model_dump(mode="json")
+    for item in legacy_dump["items"]:
+        item.pop("note", None)
+    legacy = hashlib.sha256(
+        json.dumps(legacy_dump, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+    assert AcquisitionService._fingerprint(data) == legacy, "沒填備註時指紋必須與舊式相同"
+
+    # 有填備註即是不同內容：同鍵改備註仍要被擋。
+    with_note = AcquisitionCreate.model_validate(
+        {
+            **payload,
+            "items": [{**payload["items"][0], "note": "右袖口磨損"}],
+        }
+    )
+    assert AcquisitionService._fingerprint(with_note) != legacy
+
+
+def test_fingerprint_ignores_absent_note_for_bulk_lot() -> None:
+    """散裝批的待重送同樣要能跨部署重播（BULK_LOT 走 lot 而非 items）。"""
+    import hashlib
+    import json
+
+    from app.modules.acquisition.schemas import AcquisitionCreate
+    from app.modules.acquisition.service import AcquisitionService
+
+    data = AcquisitionCreate.model_validate(
+        {
+            "type": "BULK_LOT",
+            "contact_id": 1,
+            "lot": {
+                "name": "營釘一批",
+                "acquisition_cost": "500",
+                "acquisition_basis": "BAG",
+                "total_qty": 20,
+                "unit_price": "50",
+            },
+        }
+    )
+    legacy_dump = data.model_dump(mode="json")
+    legacy_dump["lot"].pop("note", None)
+    legacy = hashlib.sha256(
+        json.dumps(legacy_dump, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    assert AcquisitionService._fingerprint(data) == legacy

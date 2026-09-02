@@ -12661,6 +12661,54 @@
         ]
       }
     },
+    "/api/v1/bulk-lots/{lot_id}": {
+      "get": {
+        "description": "以 id 取散裝批（POS 還原購物車用；他店/不存在一律 404）。\n\n與 `getCatalogProduct` 同理：還原時只有 id，`/detail` 限管理者。\n須宣告於 `/bulk-lots/by-code/{lot_code}` 之後。",
+        "operationId": "getBulkLot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bulk Lot By Id",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
     "/api/v1/bulk-lots/{lot_id}/detail": {
       "get": {
         "description": "散裝批逐件明細：來源（賣方/寄售人）、收購成本、均一價、剩餘、入庫時間、異動歷史。",
@@ -13763,6 +13811,54 @@
           }
         ],
         "summary": "Get Catalog By Sku",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/{product_id}": {
+      "get": {
+        "description": "以 id 取一般商品（POS 還原購物車用；他店/不存在一律 404）。\n\n客顯購物車還原時明細只留 id（沒有 sku），而 `/detail` 限管理者、店員讀不到；\n缺這支，重整或換店員接手後商品備註會消失、結帳不再提醒。\n須宣告於 `/catalog-products/by-sku/{sku}` 之後。",
+        "operationId": "getCatalogProduct",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProductRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Catalog By Id",
         "tags": [
           "inventory"
         ]

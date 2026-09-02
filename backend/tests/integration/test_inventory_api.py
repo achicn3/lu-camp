@@ -1335,3 +1335,80 @@ async def test_create_catalog_legacy_fingerprint_still_replays(
     )
     assert first.status_code == 201, first.text
     assert conflict.status_code == 409, conflict.text
+
+
+# ── POS 復原用的輕量取件（by id）──────────────────────────────────────────────
+# 客顯購物車還原時，明細只留下商品 id（沒有 sku / lot_code），而 /detail 限管理者，
+# 店員在 POS 讀不到。缺這兩支，重整或換店員接手後備註就消失、結帳不再提醒。
+async def test_get_catalog_and_bulk_by_id_returns_note_for_clerk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id = await _seed_store(db_session)
+    product = CatalogProduct(
+        store_id=store_id, sku="CP-BYID", name="瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5, note="效期短，先進先出",
+    )
+    lot = BulkLot(
+        store_id=store_id, lot_code="LOT-BYID", name="營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+        note="數量請客人自己點",
+    )
+    db_session.add_all([product, lot])
+    await db_session.flush()
+
+    headers = _auth(store_id)  # 一般店員即可（POS 就是店員在用）
+    rc = await client.get(f"/api/v1/catalog-products/{product.id}", headers=headers)
+    assert rc.status_code == 200, rc.text
+    assert rc.json()["note"] == "效期短，先進先出"
+    assert rc.json()["sku"] == "CP-BYID"
+    rb = await client.get(f"/api/v1/bulk-lots/{lot.id}", headers=headers)
+    assert rb.status_code == 200, rb.text
+    assert rb.json()["note"] == "數量請客人自己點"
+    assert rb.json()["lot_code"] == "LOT-BYID"
+
+
+async def test_get_catalog_and_bulk_by_id_cross_store_is_404(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_a = await _seed_store(db_session, name="A 店 byid")
+    store_b = await _seed_store(db_session, name="B 店 byid")
+    product_b = CatalogProduct(
+        store_id=store_b, sku="CP-BYID-X", name="他店瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5,
+    )
+    lot_b = BulkLot(
+        store_id=store_b, lot_code="LOT-BYID-X", name="他店營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([product_b, lot_b])
+    await db_session.flush()
+
+    headers = _auth(store_a)
+    assert (await client.get(f"/api/v1/catalog-products/{product_b.id}", headers=headers)
+            ).status_code == 404
+    assert (await client.get(f"/api/v1/bulk-lots/{lot_b.id}", headers=headers)).status_code == 404
+
+
+async def test_get_by_id_does_not_shadow_by_code_routes(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """新增的 {id} 路由不可搶掉既有的 by-sku / by-code（POS 掃碼靠它們）。"""
+    store_id = await _seed_store(db_session)
+    product = CatalogProduct(
+        store_id=store_id, sku="CP-SHADOW", name="瓦斯罐", unit_price=Decimal(120),
+        quantity_on_hand=5,
+    )
+    lot = BulkLot(
+        store_id=store_id, lot_code="LOT-SHADOW", name="營釘", grade=Grade.E,
+        acquisition_cost=Decimal(300), acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=Decimal(50), total_qty=10, remaining_qty=10, status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([product, lot])
+    await db_session.flush()
+    headers = _auth(store_id)
+    assert (await client.get("/api/v1/catalog-products/by-sku/CP-SHADOW", headers=headers)
+            ).status_code == 200
+    assert (await client.get("/api/v1/bulk-lots/by-code/LOT-SHADOW", headers=headers)
+            ).status_code == 200

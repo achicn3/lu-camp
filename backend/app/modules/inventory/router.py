@@ -182,6 +182,26 @@ async def update_catalog_note(
     return CatalogProductRead.model_validate(product)
 
 
+@router.get(
+    "/catalog-products/{product_id}",
+    response_model=CatalogProductRead,
+    operation_id="getCatalogProduct",
+)
+async def get_catalog_by_id(
+    product_id: int, session: SessionDep, user: CurrentUserDep
+) -> CatalogProductRead:
+    """以 id 取一般商品（POS 還原購物車用；他店/不存在一律 404）。
+
+    客顯購物車還原時明細只留 id（沒有 sku），而 `/detail` 限管理者、店員讀不到；
+    缺這支，重整或換店員接手後商品備註會消失、結帳不再提醒。
+    須宣告於 `/catalog-products/by-sku/{sku}` 之後。
+    """
+    product = await InventoryService(session).get_catalog_by_id(user.store_id, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此一般商品")
+    return CatalogProductRead.model_validate(product)
+
+
 @router.patch(
     "/bulk-lots/{lot_id}/price",
     response_model=BulkLotRead,
@@ -521,6 +541,25 @@ async def update_pricing_rules(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到本店的此分類")
     await session.commit()
     return [PricingRuleRead.model_validate(rule) for rule in rules]
+
+
+@router.get(
+    "/bulk-lots/{lot_id}",
+    response_model=BulkLotRead,
+    operation_id="getBulkLot",
+)
+async def get_bulk_lot_by_id(
+    lot_id: int, session: SessionDep, user: CurrentUserDep
+) -> BulkLotRead:
+    """以 id 取散裝批（POS 還原購物車用；他店/不存在一律 404）。
+
+    與 `getCatalogProduct` 同理：還原時只有 id，`/detail` 限管理者。
+    須宣告於 `/bulk-lots/by-code/{lot_code}` 之後。
+    """
+    lot = await InventoryService(session).get_bulk_lot_by_id(user.store_id, lot_id)
+    if lot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
+    return BulkLotRead.model_validate(lot)
 
 
 @router.get("/bulk-lots", response_model=list[BulkLotRead], operation_id="listBulkLots")

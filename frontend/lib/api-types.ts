@@ -260,6 +260,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/{lot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Lot By Id
+         * @description 以 id 取散裝批（POS 還原購物車用；他店/不存在一律 404）。
+         *
+         *     與 `getCatalogProduct` 同理：還原時只有 id，`/detail` 限管理者。
+         *     須宣告於 `/bulk-lots/by-code/{lot_code}` 之後。
+         */
+        get: operations["getBulkLot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-lots/{lot_id}/detail": {
         parameters: {
             query?: never;
@@ -566,6 +589,30 @@ export interface paths {
          *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
          */
         get: operations["getCatalogProductBySku"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/{product_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Catalog By Id
+         * @description 以 id 取一般商品（POS 還原購物車用；他店/不存在一律 404）。
+         *
+         *     客顯購物車還原時明細只留 id（沒有 sku），而 `/detail` 限管理者、店員讀不到；
+         *     缺這支，重整或換店員接手後商品備註會消失、結帳不再提醒。
+         *     須宣告於 `/catalog-products/by-sku/{sku}` 之後。
+         */
+        get: operations["getCatalogProduct"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7700,6 +7747,37 @@ export interface operations {
             };
         };
     };
+    getBulkLot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getBulkLotDetail: {
         parameters: {
             query?: never;
@@ -8319,6 +8397,37 @@ export interface operations {
             header?: never;
             path: {
                 sku: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
             };
             cookie?: never;
         };

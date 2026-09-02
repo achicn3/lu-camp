@@ -84,8 +84,14 @@ try {
     await detail.locator('button:has-text("關閉")').click();
     await detail.waitFor({ state: "hidden", timeout: 4000 });
 
-    // 列表摘要：內部備忘要在列表就看得到，不必逐件點開
-    const summary = await page.locator(".inv-note-summary").first().isVisible().catch(() => false);
+    // 列表摘要：內部備忘要在列表就看得到，不必逐件點開。
+    // 存檔會使列表查詢失效並重抓，故用「等到出現」而非瞬間判定（否則會偶發假紅）。
+    const summary = await page
+      .locator(".inv-note-summary")
+      .first()
+      .waitFor({ state: "visible", timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
     ok(`${tab}：寫入備註並在列表顯示摘要`, summary);
     if (i === 0) await page.screenshot({ path: `${SHOTS}/03-list-summary.png` });
   }

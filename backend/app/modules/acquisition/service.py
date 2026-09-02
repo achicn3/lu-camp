@@ -161,8 +161,24 @@ class AcquisitionService:
 
     @staticmethod
     def _fingerprint(data: AcquisitionCreate) -> str:
-        """請求內容穩定 sha256（D-2 模式）：同 key 重送比對是否同一請求。"""
-        canonical = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+        """請求內容穩定 sha256（D-2 模式）：同 key 重送比對是否同一請求。
+
+        逐件／散裝批的 `note` 是**後加欄位**：沒填時把該鍵拿掉，指紋退化成加 note
+        之前的形狀。否則部署前送出、回應遺失的每一筆重送都會算出新指紋 → 回 409
+        「同鍵不同內容」→ 店員另起新鍵重送 → **重複收購、重複付現、重複入庫**。
+        有填則照常納入，故「同鍵改備註」仍被擋。
+        （頂層 `AcquisitionCreate.note` 是舊有欄位，不在此列。）
+        """
+        payload = data.model_dump(mode="json")
+        items = payload.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict) and item.get("note") is None:
+                    item.pop("note", None)
+        lot = payload.get("lot")
+        if isinstance(lot, dict) and lot.get("note") is None:
+            lot.pop("note", None)
+        canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     async def find_idempotent_replay(
