@@ -35,9 +35,14 @@ def abort_if_notes_exist(bind: sa.engine.Connection) -> None:
     「缺充電線」「先別賣」這些交貨前必須看到的事會靜默消失。回滾程式碼不必然要
     回滾 schema——這個欄位是 additive，舊版程式碼在有它的資料庫上照樣跑。
     """
+    # 先鎖後數（同一交易內）：只 SELECT 的話，計數完成到 DROP COLUMN 之間仍可能有
+    # PATCH 寫入新備註並提交，ALTER 等它結束後照樣刪掉——fail-closed 就形同虛設。
+    # ACCESS EXCLUSIVE 與 DROP COLUMN 需要的鎖相同，等於把檢查與刪除變成一個原子動作。
+    for table in _TABLES:
+        # 表名來自本檔常數 _TABLES，非外部輸入。
+        bind.execute(sa.text(f"LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"))
     counts = {
         table: bind.execute(
-            # 表名來自本檔常數 _TABLES，非外部輸入；欄名固定。
             sa.text(f"SELECT count(*) FROM {table} WHERE note IS NOT NULL")
         ).scalar_one()
         for table in _TABLES

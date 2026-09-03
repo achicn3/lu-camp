@@ -34,6 +34,7 @@ import {
   unmarkGift,
 } from "@/features/pos/cart";
 import { withFreshNotes } from "@/features/pos/restoreNotes";
+import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 import {
   type DiscountDraft,
   canonicalAdjustments,
@@ -1200,21 +1201,31 @@ export default function PosPage() {
       );
       setLinePayKey("");
       setTaiwanPayConfirmed(false);
-      setMember(null);
+      // 會員查詢留在鎖內，但**加上期限**。
+      // 移到鎖外雖然能防卡死，卻開出一個窗口：解鎖後店員可能已改選別人或開始結帳，
+      // 晚到的結果會覆寫他的選擇，甚至送出 buyer_contact_id=null 與伺服器購物車不符。
+      // 有了期限，鎖內等待是有界的（後端在同一台機器上，正常是毫秒級），
+      // 既沒有窗口也不會卡死；逾時就放棄帶入，店員可自行重查。
+      if (cart.buyer_contact_id !== null) {
+        const controller = new AbortController();
+        const result = await withDeadline(
+          api.GET("/api/v1/contacts/{contact_id}", {
+            params: { path: { contact_id: cart.buyer_contact_id } },
+            signal: controller.signal,
+          }),
+          RESTORE_LOOKUP_TIMEOUT_MS,
+          null,
+          () => controller.abort(),
+        );
+        if (isStale()) return;
+        setMember(result?.data ?? null);
+      } else {
+        setMember(null);
+      }
       } finally {
         // 中途拋例外也一定要解鎖，否則收銀台會永遠結不了帳——那比漏提醒更糟。
         // 被更新的還原接手時，由新的那次負責解鎖。
         if (!isStale()) setRestoring(false);
-      }
-      // 會員在**解鎖之後**才查：鎖的用途是保護購物車行不被晚到的結果覆蓋、以及不讓
-      // 店員在備註補齊前結帳；會員兩者都不影響。把它留在鎖內，只要這支請求卡住
-      // （伺服器收了連線卻不回應）就會讓結帳鍵永久停用——收銀台結不了帳比少帶會員嚴重。
-      if (cart.buyer_contact_id !== null) {
-        const { data } = await api.GET("/api/v1/contacts/{contact_id}", {
-          params: { path: { contact_id: cart.buyer_contact_id } },
-        });
-        if (isStale()) return;
-        setMember(data ?? null);
       }
     },
     [],

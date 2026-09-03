@@ -11,6 +11,7 @@
 // 只有 404（商品不存在／他店）才算「確定沒有備註」。
 import type { CartLine } from "@/features/pos/cart";
 import { api } from "@/lib/api";
+import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 
 /** 單行的備註查詢結果：拿到內容、確定沒有、或**沒問到**。 */
 type NoteLookup =
@@ -18,28 +19,31 @@ type NoteLookup =
   | { kind: "absent" }
   | { kind: "unknown" };
 
-async function fetchNote(line: CartLine): Promise<NoteLookup> {
+async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLookup> {
   try {
     if (line.lineType === "SERIALIZED" && line.itemCode) {
       const { data, response } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
         params: { path: { item_code: line.itemCode } },
+        signal,
       });
       return classify(data?.note, response.status);
     }
     if (line.lineType === "CATALOG" && line.catalogProductId != null) {
       const { data, response } = await api.GET("/api/v1/catalog-products/{product_id}", {
         params: { path: { product_id: line.catalogProductId } },
+        signal,
       });
       return classify(data?.note, response.status);
     }
     if (line.lineType === "BULK_LOT" && line.bulkLotId != null) {
       const { data, response } = await api.GET("/api/v1/bulk-lots/{lot_id}", {
         params: { path: { lot_id: line.bulkLotId } },
+        signal,
       });
       return classify(data?.note, response.status);
     }
   } catch {
-    // 網路層失敗（斷線、CORS、逾時）：問不到，不能當成沒有備註。
+    // 網路層失敗（斷線、CORS、被 abort）：問不到，不能當成沒有備註。
     return { kind: "unknown" };
   }
   // 餐飲行等沒有庫存備註可查的型態。
@@ -54,35 +58,6 @@ function classify(note: string | null | undefined, status: number): NoteLookup {
 }
 
 /**
- * 補抓備註的逐行逾時。**收銀台永遠不能因為補備註而結不了帳**：伺服器收了連線卻不
- * 回應時（沒有錯誤、也不 settle），沒有逾時就會讓還原一直卡著、結帳鍵永久停用——
- * 那比漏提醒嚴重得多。逾時的行當成「沒問到」，照樣在提醒裡列出請店員自行查證。
- * 後端就在同一台機器上，正常回應是毫秒級；3 秒已經非常寬鬆。
- */
-export const NOTE_FETCH_TIMEOUT_MS = 3000;
-
-/** 逐行競速：先到者為準；逾時就回 fallback，不等原本那個 promise。 */
-function withTimeout(
-  pending: Promise<NoteLookup>,
-  timeoutMs: number,
-  fallback: NoteLookup,
-): Promise<NoteLookup> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(fallback), timeoutMs);
-    void pending.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      () => {
-        clearTimeout(timer);
-        resolve(fallback);
-      },
-    );
-  });
-}
-
-/**
  * 把還原出來的購物車行補上最新備註。
  * 查得到 → 帶入 note；問不到／逾時 → `noteUnknown: true`；確定沒有 → 原樣。
  * 逾時逐行獨立：一件卡住不拖累其他件。
@@ -91,10 +66,18 @@ export async function withFreshNotes(
   restored: CartLine[],
   options: { timeoutMs?: number } = {},
 ): Promise<CartLine[]> {
-  const timeoutMs = options.timeoutMs ?? NOTE_FETCH_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? RESTORE_LOOKUP_TIMEOUT_MS;
   return await Promise.all(
     restored.map(async (line): Promise<CartLine> => {
-      const lookup = await withTimeout(fetchNote(line), timeoutMs, { kind: "unknown" });
+      // 逾時要**真的中止**底層請求：只 resolve fallback 的話，那些請求仍占著瀏覽器
+      // 連線額度，晚到的 401 還會觸發全域處理、清掉比它新的登入狀態。
+      const controller = new AbortController();
+      const lookup = await withDeadline(
+        fetchNote(line, controller.signal),
+        timeoutMs,
+        { kind: "unknown" } as NoteLookup,
+        () => controller.abort(),
+      );
       if (lookup.kind === "resolved") return { ...line, note: lookup.note };
       if (lookup.kind === "unknown") return { ...line, noteUnknown: true };
       return line;

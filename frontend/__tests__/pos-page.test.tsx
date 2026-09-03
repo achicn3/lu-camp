@@ -467,8 +467,9 @@ describe("/pos 結帳頁", () => {
   });
 
   it("還原時查會員卡住，也必須解鎖結帳（不得因任何一支請求而卡死收銀台）", async () => {
-    // restoring 的 finally 只在所有 await 都 settle 時才執行。補備註已有逐行逾時，
-    // 但還原裡還有第二支請求（查會員）——它卡住一樣會讓結帳鍵永久停用。
+    // restoring 的 finally 只在所有 await 都 settle 時才執行。凡是擋在鎖內的請求
+    // 都必須有期限，否則伺服器收了連線卻不回應就會讓結帳鍵永久停用。
+    // 查會員留在鎖內（避免解鎖後晚到結果覆寫店員的選擇），靠期限保證一定解鎖。
     const snapshot = {
       content_version: "cart-v1",
       items: [
@@ -576,11 +577,14 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(screen.getByText(/備註：缺營釘/)).toBeTruthy(), {
       timeout: 8000,
     });
-    // 查會員永不回應，但購物車已定案 → 結帳與掃碼**必須**已解除停用。
-    await waitFor(() =>
-      expect(
-        (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
-      ).toBe(false),
+    // 查會員永不回應 → 期限（RESTORE_LOOKUP_TIMEOUT_MS，3 秒）到了就放棄帶入會員，
+    // 結帳與掃碼**必須**解除停用。等待上限給到 8 秒，確保驗的是「有解鎖」而非時序運氣。
+    await waitFor(
+      () =>
+        expect(
+          (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
+        ).toBe(false),
+      { timeout: 8000 },
     );
     expect(document.querySelector("button.pos-checkout")?.textContent).not.toContain(
       "還原購物車中",

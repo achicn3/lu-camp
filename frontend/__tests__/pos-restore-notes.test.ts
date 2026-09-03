@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CartLine } from "@/features/pos/cart";
 import { withFreshNotes } from "@/features/pos/restoreNotes";
+import { withDeadline } from "@/lib/deadline";
 import { setToken } from "@/lib/token";
 
 function fakeJwt(payload: Record<string, unknown>): string {
@@ -158,3 +159,33 @@ describe("withFreshNotes", () => {
   });
 });
 
+
+describe("withDeadline（擋著結帳流程的請求一律要有期限）", () => {
+  it("逾時回 fallback 並呼叫 onTimeout 中止底層請求", async () => {
+    let aborted = false;
+    const out = await withDeadline(
+      new Promise<string>(() => {}),
+      10,
+      "fallback",
+      () => {
+        aborted = true;
+      },
+    );
+    expect(out).toBe("fallback");
+    expect(aborted).toBe(true);
+  });
+
+  it("正常回來時不觸發 onTimeout", async () => {
+    let aborted = false;
+    const out = await withDeadline(Promise.resolve("ok"), 1000, "fallback", () => {
+      aborted = true;
+    });
+    expect(out).toBe("ok");
+    expect(aborted).toBe(false);
+  });
+
+  it("底層 reject 也回 fallback（不讓例外冒出來中斷還原）", async () => {
+    const out = await withDeadline(Promise.reject(new Error("boom")), 1000, "fallback");
+    expect(out).toBe("fallback");
+  });
+});
