@@ -1200,19 +1200,21 @@ export default function PosPage() {
       );
       setLinePayKey("");
       setTaiwanPayConfirmed(false);
+      setMember(null);
+      } finally {
+        // 中途拋例外也一定要解鎖，否則收銀台會永遠結不了帳——那比漏提醒更糟。
+        // 被更新的還原接手時，由新的那次負責解鎖。
+        if (!isStale()) setRestoring(false);
+      }
+      // 會員在**解鎖之後**才查：鎖的用途是保護購物車行不被晚到的結果覆蓋、以及不讓
+      // 店員在備註補齊前結帳；會員兩者都不影響。把它留在鎖內，只要這支請求卡住
+      // （伺服器收了連線卻不回應）就會讓結帳鍵永久停用——收銀台結不了帳比少帶會員嚴重。
       if (cart.buyer_contact_id !== null) {
         const { data } = await api.GET("/api/v1/contacts/{contact_id}", {
           params: { path: { contact_id: cart.buyer_contact_id } },
         });
         if (isStale()) return;
         setMember(data ?? null);
-      } else {
-        setMember(null);
-      }
-      } finally {
-        // 中途拋例外（例如查會員時斷線）也一定要解鎖，否則收銀台會永遠結不了帳——
-        // 那比漏提醒更糟。被更新的還原接手時，由新的那次負責解鎖。
-        if (!isStale()) setRestoring(false);
       }
     },
     [],

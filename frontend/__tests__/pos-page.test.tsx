@@ -466,6 +466,127 @@ describe("/pos 結帳頁", () => {
     expect(screen.getByText(/備註：缺營釘/)).toBeTruthy();
   });
 
+  it("還原時查會員卡住，也必須解鎖結帳（不得因任何一支請求而卡死收銀台）", async () => {
+    // restoring 的 finally 只在所有 await 都 settle 時才執行。補備註已有逐行逾時，
+    // 但還原裡還有第二支請求（查會員）——它卡住一樣會讓結帳鍵永久停用。
+    const snapshot = {
+      content_version: "cart-v1",
+      items: [
+        {
+          item_key: "SERIALIZED:TENT1",
+          line_type: "SERIALIZED",
+          name: "雙人帳篷(測試)",
+          qty: 1,
+          unit_price: "1800",
+          original_unit_price: null,
+          discount_amount: "0",
+          line_total: "1800",
+        },
+      ],
+      total: "1800",
+      discount_total: "0",
+      campaign_name: null,
+      member: null,
+      tenders: [{ tender_type: "CASH", amount: "1800" }],
+    };
+    const existingCart = {
+      id: 42,
+      status: "DRAFT",
+      revision: 1,
+      pos_terminal_id: 9,
+      kiosk_device_id: 8,
+      snapshot,
+      changes: [],
+      created_at: "2026-09-03T10:00:00Z",
+      updated_at: "2026-09-03T10:00:01Z",
+      buyer_contact_id: 7, // ← 有會員，會觸發那支查詢
+      active_signature_task_id: null,
+      payment_order_id: null,
+      payment_uncertain_at: null,
+      payment_uncertain_reason: null,
+      sale_id: null,
+      staff_payload: {
+        lines: [
+          {
+            line_type: "SERIALIZED",
+            item_code: "TENT1",
+            catalog_product_id: null,
+            bulk_lot_id: null,
+            menu_item_id: null,
+            qty: 1,
+            line_kind: "NORMAL",
+            gift_reason_id: null,
+            gift_note: null,
+          },
+        ],
+        adjustments: [],
+        service_mode: null,
+        table_no: null,
+      },
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1"))
+        return json({ ...TENT, note: "缺營釘" });
+      // 購物金餘額要先比對，否則會被下面的 /contacts/7 前綴吃掉而一起卡住。
+      if (url.includes("/contacts/7/store-credit"))
+        return json({ contact_id: 7, balance: "0" });
+      // 查會員**永不回應**
+      if (url.includes("/api/v1/contacts/7")) {
+        return new Promise<Response>(() => {});
+      }
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST") {
+        return json(
+          {
+            id: 9,
+            installation_id: "10000000-0000-4000-8000-000000000009",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-09-03T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          },
+          201,
+        );
+      }
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") return json(existingCart);
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(existingCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    renderPage();
+
+    // 先確認**還原真的發生了**（備註已帶進購物車）——否則「輸入框是啟用的」
+    // 可能只是還沒開始還原，斷言就守錯東西了。
+    await waitFor(() => expect(screen.getByText(/備註：缺營釘/)).toBeTruthy(), {
+      timeout: 8000,
+    });
+    // 查會員永不回應，但購物車已定案 → 結帳與掃碼**必須**已解除停用。
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
+      ).toBe(false),
+    );
+    expect(document.querySelector("button.pos-checkout")?.textContent).not.toContain(
+      "還原購物車中",
+    );
+  }, 15000);
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";
