@@ -121,4 +121,40 @@ describe("withFreshNotes", () => {
     expect(await withFreshNotes(restored)).toEqual(restored);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("後端不回應：逾時後標記未知並讓還原結束，不得無限等待", async () => {
+    // 收銀台**永遠不能因為補備註而結不了帳**。伺服器收了連線卻不回應時，
+    // 沒有逾時就會讓 restoring 一直是 true → 結帳鍵永久停用。
+    setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})), // 永不 settle
+    );
+    const out = await withFreshNotes([{ ...BASE, key: "S:S1-A", itemCode: "S1-A" }], {
+      timeoutMs: 10,
+    });
+    expect(out[0].noteUnknown).toBe(true);
+  });
+
+  it("逾時是逐行獨立的：一件卡住不拖累其他件", async () => {
+    setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("HANG")) return await new Promise<Response>(() => {});
+        return json({ item_code: "OK", note: "缺充電線" });
+      }),
+    );
+    const out = await withFreshNotes(
+      [
+        { ...BASE, key: "S:HANG", itemCode: "HANG" },
+        { ...BASE, key: "S:OK", itemCode: "OK" },
+      ],
+      { timeoutMs: 10 },
+    );
+    expect(out[0].noteUnknown).toBe(true);
+    expect(out[1].note).toBe("缺充電線");
+  });
 });
+

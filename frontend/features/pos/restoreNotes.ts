@@ -54,13 +54,47 @@ function classify(note: string | null | undefined, status: number): NoteLookup {
 }
 
 /**
- * 把還原出來的購物車行補上最新備註。
- * 查得到 → 帶入 note；問不到 → `noteUnknown: true`；確定沒有 → 原樣。
+ * 補抓備註的逐行逾時。**收銀台永遠不能因為補備註而結不了帳**：伺服器收了連線卻不
+ * 回應時（沒有錯誤、也不 settle），沒有逾時就會讓還原一直卡著、結帳鍵永久停用——
+ * 那比漏提醒嚴重得多。逾時的行當成「沒問到」，照樣在提醒裡列出請店員自行查證。
+ * 後端就在同一台機器上，正常回應是毫秒級；3 秒已經非常寬鬆。
  */
-export async function withFreshNotes(restored: CartLine[]): Promise<CartLine[]> {
+export const NOTE_FETCH_TIMEOUT_MS = 3000;
+
+/** 逐行競速：先到者為準；逾時就回 fallback，不等原本那個 promise。 */
+function withTimeout(
+  pending: Promise<NoteLookup>,
+  timeoutMs: number,
+  fallback: NoteLookup,
+): Promise<NoteLookup> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), timeoutMs);
+    void pending.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
+/**
+ * 把還原出來的購物車行補上最新備註。
+ * 查得到 → 帶入 note；問不到／逾時 → `noteUnknown: true`；確定沒有 → 原樣。
+ * 逾時逐行獨立：一件卡住不拖累其他件。
+ */
+export async function withFreshNotes(
+  restored: CartLine[],
+  options: { timeoutMs?: number } = {},
+): Promise<CartLine[]> {
+  const timeoutMs = options.timeoutMs ?? NOTE_FETCH_TIMEOUT_MS;
   return await Promise.all(
     restored.map(async (line): Promise<CartLine> => {
-      const lookup = await fetchNote(line);
+      const lookup = await withTimeout(fetchNote(line), timeoutMs, { kind: "unknown" });
       if (lookup.kind === "resolved") return { ...line, note: lookup.note };
       if (lookup.kind === "unknown") return { ...line, noteUnknown: true };
       return line;

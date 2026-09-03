@@ -451,10 +451,10 @@ describe("/pos 結帳頁", () => {
         (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
       ).toBe(true),
     );
-    expect(screen.getByRole("button", { name: /結帳|試算中/ })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    // 以 class 選取而非文字：還原中按鈕文字會變成「還原購物車中…」。
+    const checkoutBtn = document.querySelector("button.pos-checkout");
+    expect(checkoutBtn).toHaveProperty("disabled", true);
+    expect(checkoutBtn?.textContent).toContain("還原購物車中");
 
     // 備註回來 → 解鎖，且備註確實帶進購物車
     releaseNote();

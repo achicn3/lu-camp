@@ -2902,7 +2902,9 @@ export default function PosPage() {
               checkout.mutate();
             }}
           >
-            {checkout.isPending
+            {restoring
+              ? "還原購物車中…"
+              : checkout.isPending
               ? "結帳中…"
               : displayCart?.status === "PAYMENT_UNCERTAIN"
                 ? "等待付款對帳…"
