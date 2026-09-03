@@ -341,6 +341,131 @@ describe("/pos 結帳頁", () => {
     expect(screen.queryByRole("dialog", { name: "商品備註提醒" })).toBeNull();
   });
 
+  it("還原購物車期間鎖住掃碼與結帳，備註補抓完成才解鎖", async () => {
+    // 還原是非同步的（要重新取回每件商品的備註）。等待期間若還能掃碼，晚回來的
+    // 還原結果會把新掃的商品整批覆蓋掉；此時若能結帳，備註也還沒補上 → 漏提醒。
+    // （Codex 對抗式審查第二輪 high）
+    let releaseNote: () => void = () => {};
+    const snapshot = {
+      content_version: "cart-v1",
+      items: [
+        {
+          item_key: "SERIALIZED:TENT1",
+          line_type: "SERIALIZED",
+          name: "雙人帳篷(測試)",
+          qty: 1,
+          unit_price: "1800",
+          original_unit_price: null,
+          discount_amount: "0",
+          line_total: "1800",
+        },
+      ],
+      total: "1800",
+      discount_total: "0",
+      campaign_name: null,
+      member: null,
+      tenders: [{ tender_type: "CASH", amount: "1800" }],
+    };
+    const existingCart = {
+      id: 41,
+      status: "DRAFT",
+      revision: 1,
+      pos_terminal_id: 9,
+      kiosk_device_id: 8,
+      snapshot,
+      changes: [],
+      created_at: "2026-09-03T10:00:00Z",
+      updated_at: "2026-09-03T10:00:01Z",
+      buyer_contact_id: null,
+      active_signature_task_id: null,
+      payment_order_id: null,
+      payment_uncertain_at: null,
+      payment_uncertain_reason: null,
+      sale_id: null,
+      staff_payload: {
+        lines: [
+          {
+            line_type: "SERIALIZED",
+            item_code: "TENT1",
+            catalog_product_id: null,
+            bulk_lot_id: null,
+            menu_item_id: null,
+            qty: 1,
+            line_kind: "NORMAL",
+            gift_reason_id: null,
+            gift_note: null,
+          },
+        ],
+        adjustments: [],
+        service_mode: null,
+        table_no: null,
+      },
+    };
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      // 還原時的備註補抓：**卡住不回**，用來造出「還原進行中」的窗口。
+      if (url.includes("/serialized-items/by-code/TENT1")) {
+        return new Promise<Response>((resolve) => {
+          releaseNote = () => resolve(json({ ...TENT, note: "缺營釘" }));
+        });
+      }
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST") {
+        return json(
+          {
+            id: 9,
+            installation_id: "10000000-0000-4000-8000-000000000009",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-09-03T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          },
+          201,
+        );
+      }
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") return json(existingCart);
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(existingCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    renderPage();
+
+    // 還原卡在備註補抓 → 掃碼輸入與結帳鍵都必須是停用的
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
+      ).toBe(true),
+    );
+    expect(screen.getByRole("button", { name: /結帳|試算中/ })).toHaveProperty(
+      "disabled",
+      true,
+    );
+
+    // 備註回來 → 解鎖，且備註確實帶進購物車
+    releaseNote();
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
+      ).toBe(false),
+    );
+    expect(screen.getByText(/備註：缺營釘/)).toBeTruthy();
+  });
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";

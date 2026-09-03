@@ -1,6 +1,8 @@
-// 還原購物車時要重新取回商品備註（Codex 對抗式審查 high）。
-// 沒有這一步，重整／崩潰復原／換店員接手之後所有商品都被當成沒有備註 →
-// 結帳不再提醒，功能在最需要它的場合失效。
+// 還原購物車時要重新取回商品備註，且**取不到時不得當成「沒有備註」**
+// （Codex 對抗式審查第一輪＋第二輪 high）。
+//
+// 沒有重新取回：重整／崩潰復原／換店員接手之後所有商品都被當成沒有備註 → 結帳不再提醒。
+// 取不到卻當成沒有：短暫 401／500／斷線就會讓「先別賣」無聲消失——正是要避免的事。
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CartLine } from "@/features/pos/cart";
@@ -57,11 +59,9 @@ describe("withFreshNotes", () => {
       { ...BASE, key: "C:12", lineType: "CATALOG", catalogProductId: 12 },
       { ...BASE, key: "B:34", lineType: "BULK_LOT", bulkLotId: 34 },
     ];
-    expect((await withFreshNotes(restored)).map((l) => l.note)).toEqual([
-      "缺充電線",
-      "效期短",
-      "請客人自己點",
-    ]);
+    const out = await withFreshNotes(restored);
+    expect(out.map((l) => l.note)).toEqual(["缺充電線", "效期短", "請客人自己點"]);
+    expect(out.every((l) => l.noteUnknown !== true)).toBe(true);
   });
 
   it("備註被清空時還原成沒有備註（不留下過期提醒）", async () => {
@@ -74,21 +74,44 @@ describe("withFreshNotes", () => {
     const restored: CartLine[] = [
       { ...BASE, key: "S:S1-A", itemCode: "S1-A", note: "掃碼時的舊備註" },
     ];
-    expect((await withFreshNotes(restored))[0].note).toBeNull();
+    const out = await withFreshNotes(restored);
+    expect(out[0].note).toBeNull();
+    expect(out[0].noteUnknown).toBeUndefined();
   });
 
-  it("取不到（404／網路）就維持原樣，還原本身不中斷", async () => {
+  it.each([
+    ["401（權杖剛過期）", 401],
+    ["403", 403],
+    ["500（後端暫時炸了）", 500],
+  ])("%s：標記為未知，不得當成沒有備註", async (_label, status) => {
+    setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
+    stubFetch((url) =>
+      url.includes("/serialized-items/by-code/S1-A") ? json({ detail: "x" }, status) : null,
+    );
+    const out = await withFreshNotes([{ ...BASE, key: "S:S1-A", itemCode: "S1-A" }]);
+    expect(out[0].noteUnknown).toBe(true);
+  });
+
+  it("網路例外：同樣標記為未知（不是靜默略過）", async () => {
+    setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }));
+    const out = await withFreshNotes([{ ...BASE, key: "S:S1-A", itemCode: "S1-A" }]);
+    expect(out[0].noteUnknown).toBe(true);
+  });
+
+  it("404（商品被刪/他店）視為確定沒有備註，不是讀取失敗", async () => {
     setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
     stubFetch((url) =>
       url.includes("/serialized-items/by-code/GONE") ? json({ detail: "找不到" }, 404) : null,
     );
-    const restored: CartLine[] = [{ ...BASE, key: "S:GONE", itemCode: "GONE" }];
-    const out = await withFreshNotes(restored);
-    expect(out).toHaveLength(1);
+    const out = await withFreshNotes([{ ...BASE, key: "S:GONE", itemCode: "GONE" }]);
+    expect(out[0].noteUnknown).toBeUndefined();
     expect(out[0].note).toBeUndefined();
   });
 
-  it("餐飲行沒有庫存備註，不發請求也不改動", async () => {
+  it("餐飲行沒有庫存備註，不發請求也不標記未知", async () => {
     setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
     const fetchSpy = vi.fn(async () => json({}));
     vi.stubGlobal("fetch", fetchSpy);

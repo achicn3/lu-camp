@@ -28,7 +28,32 @@ def upgrade() -> None:
         op.add_column(table, sa.Column("note", sa.String(length=500), nullable=True))
 
 
+def abort_if_notes_exist(bind: sa.engine.Connection) -> None:
+    """有任何非空備註就拒絕降版（fail closed）。
+
+    備註是店員手打的、無處可還原：DROP 掉之後就算再 upgrade 回來也只剩空欄位，
+    「缺充電線」「先別賣」這些交貨前必須看到的事會靜默消失。回滾程式碼不必然要
+    回滾 schema——這個欄位是 additive，舊版程式碼在有它的資料庫上照樣跑。
+    """
+    counts = {
+        table: bind.execute(
+            # 表名來自本檔常數 _TABLES，非外部輸入；欄名固定。
+            sa.text(f"SELECT count(*) FROM {table} WHERE note IS NOT NULL")
+        ).scalar_one()
+        for table in _TABLES
+    }
+    populated = {table: n for table, n in counts.items() if n}
+    if populated:
+        detail = "、".join(f"{table} {n} 筆" for table, n in populated.items())
+        raise RuntimeError(
+            f"拒絕降版：已有商品備註（{detail}），DROP 之後無從還原。"
+            "本欄位為 additive，舊版程式碼可直接在含此欄位的資料庫上執行——"
+            "請只回滾程式碼、不要降 schema；確定要丟棄請自備備份後手動處理。"
+        )
+
+
 def downgrade() -> None:
     """Downgrade schema."""
+    abort_if_notes_exist(op.get_bind())
     for table in reversed(_TABLES):
         op.drop_column(table, "note")

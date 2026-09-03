@@ -1078,6 +1078,11 @@ export default function PosPage() {
   // 商品時指紋會變，會再問一次，避免後加入的提醒被前一次確認吃掉。
   const [noteAck, setNoteAck] = useState("");
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  // 還原是非同步的（要重新取回每件商品的備註）。等待期間店員仍可掃碼，晚回來的結果
+  // 會把那些操作整批覆蓋掉；兩次還原重疊時也可能是**較舊**的那次最後寫入。
+  // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
+  const restoreGenerationRef = useRef(0);
+  const [restoring, setRestoring] = useState(false);
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
@@ -1095,9 +1100,14 @@ export default function PosPage() {
       // 優先用店員端保存的原始請求還原：客顯快照沒有贈品原因、備註與折扣意圖，
       // 只靠它重建會把贈品與折扣整個弄丟，接著同步 effect 又會把殘缺狀態寫回伺服器。
       const payload = cart.staff_payload ?? null;
+      const generation = restoreGenerationRef.current + 1;
+      restoreGenerationRef.current = generation;
+      const isStale = () => restoreGenerationRef.current !== generation;
+      setRestoring(true);
       // 還原＝換了一份購物車，先前對備註的「已確認」一律失效，必須重新確認。
       setNoteAck("");
       setNoteDialogOpen(false);
+      try {
       if (payload) {
         const restoredLines: CartLine[] = payload.lines.map((line, index) => {
             const gift = line.line_kind === "GIFT";
@@ -1125,7 +1135,9 @@ export default function PosPage() {
               giftNote: line.gift_note ?? undefined,
             };
         });
-        setLines(await withFreshNotes(restoredLines));
+        const withNotes = await withFreshNotes(restoredLines);
+        if (isStale()) return;
+        setLines(withNotes);
         setDiscountDrafts(
           (payload.adjustments ?? []).map((adjustment, index) => ({
             id: `restored-${index}`,
@@ -1154,7 +1166,9 @@ export default function PosPage() {
         );
       } else {
         // 升級前建立的舊購物車沒有這份資料：只能以快照重建（贈品原因與折扣無從得知）。
-        setLines(await withFreshNotes(restoreLines(cart.snapshot.items)));
+        const withNotes = await withFreshNotes(restoreLines(cart.snapshot.items));
+        if (isStale()) return;
+        setLines(withNotes);
         setDiscountDrafts([]);
       }
       // 內用/外帶與桌號（docs/35）：一併還原。少了它，被凍結的餐飲購物車重掛後會卡死——
@@ -1190,9 +1204,15 @@ export default function PosPage() {
         const { data } = await api.GET("/api/v1/contacts/{contact_id}", {
           params: { path: { contact_id: cart.buyer_contact_id } },
         });
+        if (isStale()) return;
         setMember(data ?? null);
       } else {
         setMember(null);
+      }
+      } finally {
+        // 中途拋例外（例如查會員時斷線）也一定要解鎖，否則收銀台會永遠結不了帳——
+        // 那比漏提醒更糟。被更新的還原接手時，由新的那次負責解鎖。
+        if (!isStale()) setRestoring(false);
       }
     },
     [],
@@ -1580,6 +1600,7 @@ export default function PosPage() {
       signMismatch ||
       displayCart?.status !== "FROZEN");
   const cartMutationLocked =
+    restoring ||
     displayCart?.status === "FROZEN" ||
     displayCart?.status === "PROCESSING" ||
     displayCart?.status === "PAYMENT_UNCERTAIN";
@@ -2855,6 +2876,8 @@ export default function PosPage() {
             disabled={
               !validation.ok ||
               checkout.isPending ||
+              // 還原中：購物車還沒定案（備註仍在補抓），此時結帳會漏提醒。
+              restoring ||
               !quoteReady ||
               scSignBlock ||
               displayCart?.status === "PAYMENT_UNCERTAIN" ||

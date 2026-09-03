@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import { NOTE_MAX_LENGTH, hasNote, noteSummary } from "@/features/inventory/inventory";
 import type { CartLine } from "@/features/pos/cart";
-import { linesWithNotes, noteAckFingerprint } from "@/features/pos/cart";
+import {
+  NOTE_UNKNOWN_TEXT,
+  linesWithNotes,
+  noteAckFingerprint,
+} from "@/features/pos/cart";
 
 describe("備註上限", () => {
   it("與後端 String(500) 一致，避免前端放行卻被 422 退回", () => {
@@ -117,5 +121,38 @@ describe("noteAckFingerprint（提醒確認的有效範圍）", () => {
     const before: CartLine[] = [{ ...base, key: "a", note: "缺充電線", qty: 1 }];
     const after: CartLine[] = [{ ...base, key: "a", note: "缺充電線", qty: 3 }];
     expect(noteAckFingerprint(after)).toBe(noteAckFingerprint(before));
+  });
+});
+
+
+describe("讀不到備註的行（fail closed）", () => {
+  const base: CartLine = {
+    key: "a",
+    lineType: "SERIALIZED",
+    description: "外套",
+    unitPrice: 1000,
+    qty: 1,
+  };
+
+  it("noteUnknown 的行要出現在提醒清單，內容標示為讀取失敗", () => {
+    const lines: CartLine[] = [{ ...base, key: "a", noteUnknown: true }];
+    expect(linesWithNotes(lines)).toEqual([
+      { key: "a", description: "外套", note: NOTE_UNKNOWN_TEXT, unknown: true },
+    ]);
+  });
+
+  it("讀取失敗也要納入確認指紋：修好之後重新讀到真備註必須再問一次", () => {
+    const unknown: CartLine[] = [{ ...base, key: "a", noteUnknown: true }];
+    const resolved: CartLine[] = [{ ...base, key: "a", note: "缺充電線" }];
+    expect(noteAckFingerprint(unknown)).not.toBe(noteAckFingerprint(resolved));
+    expect(noteAckFingerprint(unknown)).not.toBe("");
+  });
+
+  it("有備註又讀取失敗（不同商品）兩者都列出", () => {
+    const lines: CartLine[] = [
+      { ...base, key: "a", note: "缺充電線" },
+      { ...base, key: "b", description: "爐頭", noteUnknown: true },
+    ];
+    expect(linesWithNotes(lines).map((l) => l.key)).toEqual(["a", "b"]);
   });
 });
