@@ -20,6 +20,12 @@ export interface ItemDraft {
   listedPrice: string;
   acquisitionCost: string; // 買斷
   commissionPct: string; // 寄售
+  /**
+   * 商品備註（選填）：驗機當下記下「缺營釘」「右袖口磨損」最順手。
+   * **一列一則，套用該列全部件數**（2026-09-04 裁示）——展開後是 N 件各自獨立的
+   * 商品，備註跟著複製；要分別註記就拆成多列填。
+   */
+  note: string;
 }
 
 export interface LotDraft {
@@ -31,6 +37,7 @@ export interface LotDraft {
   totalQty: string;
   unitPrice: string;
   label: string;
+  note: string;
 }
 
 export interface AcquisitionDraft {

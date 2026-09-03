@@ -31,6 +31,7 @@ import {
   validateDraft,
 } from "@/features/acquisition/validation";
 import { canVoid } from "@/features/acquisition/void";
+import { NOTE_MAX_LENGTH } from "@/features/inventory/inventory";
 import { isValidNationalId } from "@/features/member/national-id";
 import { InfoTip } from "@/features/shared/InfoTip";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
@@ -86,6 +87,8 @@ function emptyItem(commissionPct = ""): ItemDraft & {
     acquisitionCost: "",
     commissionPct,
     estimatedResale: "",
+    // 商品備註（選填）：一列一則，套用該列全部件數。
+    note: "",
     // 同款多件（客人一次帶三頂一樣的帳篷）：畫面上一列，送出時展開成三筆獨立商品。
     qty: "1",
   };
@@ -101,6 +104,7 @@ function emptyLot(): LotDraft {
     totalQty: "",
     unitPrice: "",
     label: "",
+    note: "",
   };
 }
 
@@ -403,6 +407,9 @@ function ItemRowCard({
   const qtyIssues = type === "BUYOUT" ? qtyErrors(index, row.qty) : [];
   const multiUnitTotal =
     qtyIssues.length === 0 && cost !== null ? rowsPayableTotal([row]) : null;
+  // 本列件數（僅買斷適用）：用來提示「這則備註會套用到全部 N 件」。
+  const multiUnitCount =
+    type === "BUYOUT" && qtyIssues.length === 0 ? (parseNtd(row.qty) ?? null) : null;
   const listed = parseNtd(row.listedPrice);
   const margin =
     listed !== null && cost !== null && taxRate !== null
@@ -691,6 +698,25 @@ function ItemRowCard({
               {category !== null && margin < category.target_margin_pct ? "（低於目標）" : ""}
             </span>
           )
+        )}
+      </label>
+
+      {/* 商品備註：驗機當下就記下狀況或作業提醒，結帳時系統會提醒店員。
+          一列一則，套用該列全部件數（2026-09-04 裁示）——要分別註記就拆成多列填。 */}
+      <label className="field acq-note">
+        <span className="field-label">
+          備註（選填）
+          <InfoTip text="商品狀況或作業提醒，結帳時會跳出來提醒店員。例：缺充電線、右袖口磨損、先別賣等老闆確認。請勿填寫客人身分證或電話。" />
+        </span>
+        <input
+          aria-label="商品備註"
+          maxLength={NOTE_MAX_LENGTH}
+          placeholder="例：缺營釘一支、附原廠盒"
+          value={row.note}
+          onChange={(e) => onChange({ note: e.target.value })}
+        />
+        {multiUnitCount !== null && multiUnitCount > 1 && row.note.trim() !== "" && (
+          <span className="hint">這則備註會套用到本列全部 {multiUnitCount} 件。</span>
         )}
       </label>
     </div>
@@ -987,6 +1013,7 @@ export default function AcquisitionPage() {
           brand_id: lot.brandId,
           category_id: lot.categoryId,
           label: lot.label || null,
+          note: lot.note.trim() || null,
         };
       } else {
         // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
@@ -998,6 +1025,9 @@ export default function AcquisitionPage() {
           brand_id: r.brandId,
           product_model_id: r.productModelId,
           category_id: r.categoryId,
+          // 一列一則，展開後每件都帶同一則（2026-09-04 裁示）。空白送 null，
+          // 避免建出「有備註但內容是空白」的商品害 POS 跳空提醒。
+          note: r.note.trim() || null,
           ...(type === "BUYOUT"
             ? { acquisition_cost: ntd(r.acquisitionCost) }
             : r.commissionPct === ""
@@ -1602,6 +1632,20 @@ function BulkLotForm({
         <label className="field">
           <span className="field-label">命名（選填）</span>
           <input value={lot.label} onChange={(e) => patch({ label: e.target.value })} />
+        </label>
+        {/* 散裝批同樣可在收購當下寫備註（三種庫存型態一致）。 */}
+        <label className="field acq-note">
+          <span className="field-label">
+            備註（選填）
+            <InfoTip text="商品狀況或作業提醒，結帳時會跳出來提醒店員。例：數量請客人自己點過、放 B 架第三層。請勿填寫客人身分證或電話。" />
+          </span>
+          <input
+            aria-label="散裝批備註"
+            maxLength={NOTE_MAX_LENGTH}
+            placeholder="例：數量請客人自己點過"
+            value={lot.note}
+            onChange={(e) => patch({ note: e.target.value })}
+          />
         </label>
       </div>
     </div>

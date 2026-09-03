@@ -18,6 +18,7 @@ function item(over: Partial<ItemDraft> = {}): ItemDraft {
     categoryId: 1,
     brandId: null,
     productModelId: null,
+    note: "",
     listedPrice: "3000",
     acquisitionCost: "1200",
     commissionPct: "50",
@@ -35,6 +36,7 @@ function lot(over: Partial<LotDraft> = {}): LotDraft {
     totalQty: "10",
     unitPrice: "50",
     label: "",
+    note: "",
     ...over,
   };
 }

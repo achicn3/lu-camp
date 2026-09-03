@@ -3642,3 +3642,9 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 收購列的備註：跨整列寬度放在最後一行——備註是自由文字，擠在窄格子裡打不了字，
+   而且它的語意是「這一列的補充」，不是與價格並排的另一個欄位。 */
+.acq-row-grid .acq-note {
+  grid-column: 1 / -1;
+}

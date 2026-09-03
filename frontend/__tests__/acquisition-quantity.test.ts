@@ -18,6 +18,7 @@ const row = (over: Partial<ItemDraft & { qty: string }> = {}) => ({
   listedPrice: "1000",
   acquisitionCost: "500",
   commissionPct: "",
+  note: "",
   qty: "1",
   ...over,
 });
@@ -110,7 +111,7 @@ describe("件數必須擋住送出", () => {
     items,
     lot: {
       name: "", categoryId: null, brandId: null, acquisitionCost: "",
-      acquisitionBasis: "" as const, totalQty: "", unitPrice: "", label: "",
+      acquisitionBasis: "" as const, totalQty: "", unitPrice: "", label: "", note: "",
     },
     payoutMethod: "CASH" as const,
     payoutSplitCash: "",
