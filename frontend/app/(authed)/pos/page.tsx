@@ -1087,6 +1087,9 @@ export default function PosPage() {
   // 會把那些操作整批覆蓋掉；兩次還原重疊時也可能是**較舊**的那次最後寫入。
   // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
   const restoreGenerationRef = useRef(0);
+  // 還原時要知道「現在車上有沒有東西」。restoreCustomerDisplayCart 的相依是 []，
+  // 讀不到最新的 lines，用 ref 帶進去。
+  const linesRef = useRef<CartLine[]>([]);
   const [restoring, setRestoring] = useState(false);
   // 掛載到「確定沒有東西要還原／還原完成」之間也要鎖：那段期間掃進去的商品會被
   // onRestore 的 setLines 整批覆蓋而無聲消失（同步 effect 也被 hydrated 擋著推不上去）。
@@ -1117,6 +1120,10 @@ export default function PosPage() {
       // 還原＝換了一份購物車，先前對備註的「已確認」一律失效，必須重新確認。
       setNoteAck("");
       setNoteDialogOpen(false);
+      // 還原會整批取代購物車。車上原本有東西就是被蓋掉了——**不能無聲**，那正是這條
+      // 修正要防的事。（會走到這裡而非作廢，代表伺服器購物車是不可覆寫的狀態：
+      // 簽署中／付款處理中／付款待確認，此時本地當不成權威，只能以伺服器為準。）
+      const overwrote = linesRef.current.length > 0;
       try {
       if (payload) {
         const restoredLines: CartLine[] = payload.lines.map((line, index) => {
@@ -1235,6 +1242,11 @@ export default function PosPage() {
         // 中途拋例外也一定要解鎖，否則收銀台會永遠結不了帳——那比漏提醒更糟。
         // 被更新的還原接手時，由新的那次負責解鎖。
         if (!isStale()) setRestoring(false);
+      }
+      if (overwrote && !isStale()) {
+        setNotice(
+          "已改用顧客螢幕上那筆未完成的購物車；剛才掃入的商品沒有被保留，請確認後重新掃描。",
+        );
       }
     },
     [],
@@ -1621,6 +1633,10 @@ export default function PosPage() {
       !signed ||
       signMismatch ||
       displayCart?.status !== "FROZEN");
+  useEffect(() => {
+    linesRef.current = lines;
+  }, [lines]);
+
   const cartMutationLocked =
     restoring ||
     restorePending ||

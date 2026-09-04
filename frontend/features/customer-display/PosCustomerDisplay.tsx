@@ -258,7 +258,11 @@ export function PosCustomerDisplay({
     return () => window.clearTimeout(timer);
   }, [restoreAttempt, restoreSettled]);
 
-  const restorePending = !restoreSettled && expiredAttempt !== restoreAttempt;
+  // restoreAttempt === 0 代表序號還沒建立（第一個 render，effect 尚未執行）。
+  // 這時 expiredAttempt 也是 0，若不特別處理就會算成「已過期」→ 回報 false，
+  // 把父層 fail-closed 的初值蓋掉，留下一個 commit 的破口。未定案就是待決。
+  const restorePending =
+    !restoreSettled && (restoreAttempt === 0 || expiredAttempt !== restoreAttempt);
   // 這一次嘗試是否已經超過期限（鎖已放開，店員可能已經動過購物車）。
   const restoreExpired = restoreAttempt !== 0 && expiredAttempt === restoreAttempt;
   useEffect(() => {
