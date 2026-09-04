@@ -114,9 +114,13 @@ const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
 function ScanBar({
   onResolved,
   disabled = false,
+  disabledReason,
 }: {
   onResolved: (line: CartLine) => void;
   disabled?: boolean;
+  /** 停用的原因。**掃碼槍打進停用的輸入框會整個消失**（沒有錯誤、什麼都沒有），
+   *  店員只會覺得「掃了沒反應」，所以一定要說出為什麼、要等什麼。 */
+  disabledReason?: string;
 }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -252,7 +256,7 @@ function ScanBar({
       </label>
       <span className="hint pos-scan-hint">
         {disabled
-          ? "簽署或付款處理期間，購物車已鎖定。"
+          ? (disabledReason ?? "簽署或付款處理期間，購物車已鎖定。")
           : mutation.isPending
             ? "查詢中…"
             : "掃描後自動加入購物車（免按 Enter）。"}
@@ -1084,6 +1088,11 @@ export default function PosPage() {
   // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
   const restoreGenerationRef = useRef(0);
   const [restoring, setRestoring] = useState(false);
+  // 掛載到「確定沒有東西要還原／還原完成」之間也要鎖：那段期間掃進去的商品會被
+  // onRestore 的 setLines 整批覆蓋而無聲消失（同步 effect 也被 hydrated 擋著推不上去）。
+  // 初值 true 是為了第一個 frame 就 fail closed；放行由 PosCustomerDisplay 負責，
+  // 它帶有硬性期限，不會把收銀台鎖死。
+  const [restorePending, setRestorePending] = useState(true);
   // 購物金扣抵手持簽署（docs/23 K5，D3）：推送至手持裝置後的任務 id；輪詢其狀態，
   // SIGNED 後結帳帶 signature_task_id 綁定（後端驗折抵額精確相符＋單次使用）。
   const [signTaskId, setSignTaskId] = useState<number | null>(null);
@@ -1614,6 +1623,7 @@ export default function PosPage() {
       displayCart?.status !== "FROZEN");
   const cartMutationLocked =
     restoring ||
+    restorePending ||
     displayCart?.status === "FROZEN" ||
     displayCart?.status === "PROCESSING" ||
     displayCart?.status === "PAYMENT_UNCERTAIN";
@@ -2224,6 +2234,7 @@ export default function PosPage() {
         onTerminalChange={setDisplayTerminal}
         onCartChange={setDisplayCart}
         onSyncDirtyChange={setCartSyncDirty}
+        onRestorePendingChange={setRestorePending}
       />
       {staleKitchen.map((item) => (
         <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
@@ -2242,7 +2253,17 @@ export default function PosPage() {
       <ActiveCampaignBanner />
       <div className="pos-grid">
         <div className="pos-left">
-          <ScanBar onResolved={addToCart} disabled={cartMutationLocked} />
+          <ScanBar
+            onResolved={addToCart}
+            disabled={cartMutationLocked}
+            disabledReason={
+              restoring
+                ? "正在恢復上一筆購物車，稍候再掃。"
+                : restorePending
+                  ? "正在確認有沒有未結完的購物車，稍候再掃。"
+                  : undefined
+            }
+          />
           {notice !== null && (
             <p role="alert" className="form-error">
               {notice}
@@ -2915,9 +2936,13 @@ export default function PosPage() {
               checkout.mutate();
             }}
           >
+            {/* 兩者可能同時為真（還原尚未完成 → restorePending 也還是 true）。
+                已經在還原就說「還原中」，那是比較具體的狀態。 */}
             {restoring
               ? "還原購物車中…"
-              : checkout.isPending
+              : restorePending
+                ? "確認購物車中…"
+                : checkout.isPending
               ? "結帳中…"
               : displayCart?.status === "PAYMENT_UNCERTAIN"
                 ? "等待付款對帳…"

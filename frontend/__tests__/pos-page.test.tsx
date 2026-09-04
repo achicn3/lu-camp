@@ -207,8 +207,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
-    const scan = screen.getByLabelText("掃描或輸入商品條碼");
-    await user.type(scan, "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() =>
       expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(),
     );
@@ -274,7 +273,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     // 掃進來就在購物車行內看得到（不打斷連掃）
     expect(screen.getByText(/備註：缺營釘/)).toBeTruthy();
@@ -333,7 +332,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
 
     await user.click(screen.getByRole("button", { name: "結帳" }));
@@ -346,6 +345,7 @@ describe("/pos 結帳頁", () => {
     // 還原結果會把新掃的商品整批覆蓋掉；此時若能結帳，備註也還沒補上 → 漏提醒。
     // （Codex 對抗式審查第二輪 high）
     let releaseNote: () => void = () => {};
+    let noteRequested = false;
     const snapshot = {
       content_version: "cart-v1",
       items: [
@@ -407,6 +407,7 @@ describe("/pos 結帳頁", () => {
       if (url.includes("/menu-items")) return json([]);
       // 還原時的備註補抓：**卡住不回**，用來造出「還原進行中」的窗口。
       if (url.includes("/serialized-items/by-code/TENT1")) {
+        noteRequested = true;
         return new Promise<Response>((resolve) => {
           releaseNote = () => resolve(json({ ...TENT, note: "缺營釘" }));
         });
@@ -445,16 +446,19 @@ describe("/pos 結帳頁", () => {
     });
     renderPage();
 
+    // 等真的進到「補抓備註」這一步，否則斷言可能在更早的「確認購物車」階段就通過，
+    // 驗不到這支測試要驗的東西。
+    await waitFor(() => expect(noteRequested).toBe(true));
     // 還原卡在備註補抓 → 掃碼輸入與結帳鍵都必須是停用的
-    await waitFor(() =>
-      expect(
-        (screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement).disabled,
-      ).toBe(true),
-    );
+    expect(scanBox().disabled).toBe(true);
     // 以 class 選取而非文字：還原中按鈕文字會變成「還原購物車中…」。
     const checkoutBtn = document.querySelector("button.pos-checkout");
     expect(checkoutBtn).toHaveProperty("disabled", true);
-    expect(checkoutBtn?.textContent).toContain("還原購物車中");
+    await waitFor(() =>
+      expect(document.querySelector("button.pos-checkout")?.textContent).toContain(
+        "還原購物車中",
+      ),
+    );
 
     // 備註回來 → 解鎖，且備註確實帶進購物車
     releaseNote();
@@ -591,6 +595,168 @@ describe("/pos 結帳頁", () => {
     );
   }, 15000);
 
+  // ── 還原前的空窗（掛載 → onRestore 之間）────────────────────────────────
+  // 這段期間掃進去的商品會**雙重失效**：同步 effect 被 hydrated 擋著推不上伺服器，
+  // 接著 onRestore 的 setLines 又整批覆蓋掉。開店第一次載入（backend 剛起、頁面剛編譯）
+  // 窗口可能到一兩秒，而昨天剩一張沒結完的單正是最容易碰上的情況。
+  //
+  // 鎖住掃碼是對的，但**鎖死比原本的 bug 嚴重**（收銀台完全結不了帳），所以下面三支
+  // 測試全都在證明「最後一定會放行」。
+  const restoreSnapshot = {
+    content_version: "cart-v1",
+    items: [
+      {
+        item_key: "SERIALIZED:TENT1",
+        line_type: "SERIALIZED",
+        name: "雙人帳篷(測試)",
+        qty: 1,
+        unit_price: "1800",
+        original_unit_price: null,
+        discount_amount: "0",
+        line_total: "1800",
+      },
+    ],
+    total: "1800",
+    discount_total: "0",
+    campaign_name: null,
+    member: null,
+    tenders: [{ tender_type: "CASH", amount: "1800" }],
+  };
+  const restoreCart = {
+    id: 51,
+    status: "DRAFT",
+    revision: 1,
+    pos_terminal_id: 9,
+    kiosk_device_id: 8,
+    snapshot: restoreSnapshot,
+    changes: [],
+    created_at: "2026-09-04T10:00:00Z",
+    updated_at: "2026-09-04T10:00:01Z",
+    buyer_contact_id: null,
+    active_signature_task_id: null,
+    payment_order_id: null,
+    payment_uncertain_at: null,
+    payment_uncertain_reason: null,
+    sale_id: null,
+    staff_payload: {
+      lines: [
+        {
+          line_type: "SERIALIZED",
+          item_code: "TENT1",
+          catalog_product_id: null,
+          bulk_lot_id: null,
+          menu_item_id: null,
+          qty: 1,
+          line_kind: "NORMAL",
+          gift_reason_id: null,
+          gift_note: null,
+        },
+      ],
+      adjustments: [],
+      service_mode: null,
+      table_no: null,
+    },
+  };
+  const terminalRow = (pairedKiosk: unknown) => ({
+    id: 9,
+    installation_id: "10000000-0000-4000-8000-000000000009",
+    name: "主要櫃檯",
+    paired_kiosk: pairedKiosk,
+  });
+  const PAIRED = {
+    id: 8,
+    label: "顧客平板",
+    online: true,
+    last_seen_at: "2026-09-04T10:00:00Z",
+    current_session_id: null,
+    displayed_revision: 0,
+  };
+  const scanBox = () =>
+    screen.getByLabelText("掃描或輸入商品條碼") as HTMLInputElement;
+
+  /** 等掃碼框可用再掃。載入時 POS 會先確認有沒有未結完的購物車，那段期間掃碼是停用的
+   *  （否則掃進去的會被還原整批覆蓋）。真實店員也是看畫面就緒才掃。 */
+  async function scan(user: ReturnType<typeof userEvent.setup>, code: string) {
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    await user.type(scanBox(), `${code}{Enter}`);
+  }
+
+  it("沒配對顧客螢幕：不會有還原，掃碼框必須可用（不得鎖死收銀台）", async () => {
+    // 沒配對時 cart/current 的 enabled 是 false，hydrated 永遠不會變 true。
+    // 若用「還沒 hydrated 就鎖」實作，這種店開機後掃碼框就是死的——而小店多半沒接顧客螢幕。
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(null), 201);
+      return null;
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+  });
+
+  it("有舊購物車：還原完成前鎖住掃碼，完成後放行且舊車已帶回", async () => {
+    let releaseCart: () => void = () => {};
+    let cartRequested = false;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") {
+        // 卡住 cart/current，造出「正在問有沒有舊購物車」的空窗
+        cartRequested = true;
+        return new Promise<Response>((resolve) => {
+          releaseCart = () => resolve(json(restoreCart));
+        });
+      }
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(restoreCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    renderPage();
+    // 等 cart/current 真的發出去，否則下面的斷言可能在「還沒開始問」時就通過，
+    // 那樣即使完全沒有鎖也會綠（假綠）。
+    await waitFor(() => expect(cartRequested).toBe(true));
+    // 還在問「有沒有舊購物車」→ 掃碼必須停用，否則掃進去的會被 setLines 整批吃掉
+    expect(scanBox().disabled).toBe(true);
+
+    releaseCart();
+    // 還原完成 → 放行，且舊購物車確實帶回來了
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(), {
+      timeout: 8000,
+    });
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 8000 });
+  }, 20000);
+
+  it("查詢卡住不回：期限到期後仍必須放行（寧可退回原本的風險，也不能鎖死）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      // 註冊終端**永不回應**：沒有期限的話 restorePending 會一直是 true
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return new Promise<Response>(() => {});
+      return null;
+    });
+    renderPage();
+    await waitFor(() => expect(scanBox().disabled).toBe(true));
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 15000 });
+  }, 25000);
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";
@@ -698,10 +864,7 @@ describe("/pos 結帳頁", () => {
     });
     const user = userEvent.setup();
     renderPage();
-    await user.type(
-      await screen.findByLabelText("掃描或輸入商品條碼"),
-      "TENT1{Enter}",
-    );
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("購物車版本 1")).toBeTruthy());
 
     await user.click(screen.getByRole("button", { name: "結帳" }));
@@ -756,7 +919,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     await user.click(screen.getByText("LINE Pay"));
     await user.type(
@@ -956,10 +1119,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.type(
-      await screen.findByLabelText("掃描或輸入商品條碼"),
-      "TENT1{Enter}",
-    );
+    await scan(user, "TENT1");
     await user.type(screen.getByPlaceholderText("姓名或電話"), member.phone);
     await user.click(await screen.findByRole("button", { name: /林測試/ }));
     await user.click(screen.getByText("購物金＋其他付款"));
@@ -1040,7 +1200,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
 
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     // 應付總額顯示折後 1,620（非折前 1,800）
     await waitFor(() =>
@@ -1104,7 +1264,7 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     // 二手序號品入車
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     // 歸戶會員
     await user.type(screen.getByPlaceholderText("姓名或電話"), "林測試");
@@ -1225,10 +1385,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.type(
-      await screen.findByLabelText("掃描或輸入商品條碼"),
-      "TENT1{Enter}",
-    );
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     const tile = await screen.findByRole("button", { name: /手沖-耶加/ });
     await user.click(tile);
@@ -1306,7 +1463,8 @@ describe("/pos 結帳頁", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
     // 不打 {Enter}：輸入到符合碼制即自動送出加入購物車
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "S1-ABCDEF0123");
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    await user.type(scanBox(), "S1-ABCDEF0123");
     await waitFor(() =>
       expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(),
     );
@@ -1328,7 +1486,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "NOPE{Enter}");
+    await scan(user, "NOPE");
     await waitFor(() =>
       expect(screen.getByText(/找不到此條碼：NOPE/)).toBeTruthy(),
     );
@@ -1359,7 +1517,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "GAS-230{Enter}");
+    await scan(user, "GAS-230");
     await waitFor(() =>
       expect(screen.getByText("高山瓦斯罐 230g")).toBeTruthy(),
     );
@@ -1392,7 +1550,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "EMPTY-1{Enter}");
+    await scan(user, "EMPTY-1");
     await waitFor(() =>
       expect(screen.getByText(/EMPTY-1 已無庫存/)).toBeTruthy(),
     );
@@ -1420,7 +1578,7 @@ describe("/pos 結帳頁", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
-    await user.type(screen.getByLabelText("掃描或輸入商品條碼"), "TENT1{Enter}");
+    await scan(user, "TENT1");
     await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy());
     await user.click(screen.getByRole("button", { name: "結帳" }));
 

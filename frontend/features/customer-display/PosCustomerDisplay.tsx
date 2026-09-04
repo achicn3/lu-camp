@@ -9,6 +9,13 @@ import type { components } from "@/lib/api-types";
 import { parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
+/**
+ * 還原待決的硬性期限。這段期間掃碼是停用的，所以不能太長；但開店第一次載入
+ * （backend 剛起、頁面剛編譯、機器剛開機）本來就會慢，太短又等於沒鎖。
+ * 5 秒是折衷：正常狀況零點幾秒就放行，只有伺服器不回應時才真的等滿。
+ */
+export const RESTORE_GUARD_TIMEOUT_MS = 5000;
+
 type SaleLine = components["schemas"]["SaleLineCreateRequest"];
 type Tender = components["schemas"]["CartTenderRequest"];
 type Adjustment = components["schemas"]["SaleAdjustmentRequest"];
@@ -95,6 +102,12 @@ interface PosCustomerDisplayProps {
   onCartChange?: (cart: CartSession | StaffCart | null) => void;
   /** 畫面上的購物車內容是否還有變更沒同步到伺服器（送簽前必須是 false）。 */
   onSyncDirtyChange?: (dirty: boolean) => void;
+  /**
+   * 「還原是否還沒定案」：從掛載到「確定沒有東西要還原」或「還原完成」為止為 true。
+   * POS 頁據此鎖住購物車操作——這段期間掃進去的商品會**雙重失效**：同步 effect 被
+   * hydrated 擋著推不上伺服器，接著 onRestore 的 setLines 又整批覆蓋掉，商品無聲消失。
+   */
+  onRestorePendingChange?: (pending: boolean) => void;
 }
 
 type PendingSync = { fingerprint: string } & (
@@ -122,6 +135,7 @@ export function PosCustomerDisplay({
   onTerminalChange,
   onCartChange,
   onSyncDirtyChange,
+  onRestorePendingChange,
 }: PosCustomerDisplayProps) {
   const queryClient = useQueryClient();
   const [pairingCode, setPairingCode] = useState("");
@@ -196,6 +210,35 @@ export function PosCustomerDisplay({
       return data ?? null;
     },
   });
+
+  // 還原待決：從掛載算起，直到**確定不會有還原**或**還原已完成**為止。
+  //
+  // 刻意由「已知的資料」推導，不看 React Query 的 isPending/isLoading：
+  //   - v5 的 disabled 查詢 isPending 也是 true（沒配對顧客螢幕的店會被永久鎖死）
+  //   - 用 isLoading 則在「terminal 剛好、current 還沒開始抓」之間有一個 render 的破口
+  // 每一條分支都是「已經知道答案」才放行，順序即優先序。
+  const restoreSettled =
+    terminal.isError ||
+    (terminal.data != null &&
+      (terminal.data.paired_kiosk == null || // 沒配對 → 不會有還原
+        current.isError || // 問不到 → 放行，別擋著做生意
+        (current.isSuccess && (current.data == null || hydrated))));
+
+  // 硬性期限：伺服器收了連線卻不回應時，上面每個條件都會永遠停在「還不知道」。
+  // **鎖死收銀台比原本的漏單嚴重得多**，時間到就退回原本的風險，讓店員做得了生意。
+  const [restoreDeadlineReached, setRestoreDeadlineReached] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setRestoreDeadlineReached(true),
+      RESTORE_GUARD_TIMEOUT_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const restorePending = !restoreSettled && !restoreDeadlineReached;
+  useEffect(() => {
+    onRestorePendingChange?.(restorePending);
+  }, [onRestorePendingChange, restorePending]);
 
   useEffect(() => {
     onTerminalChange?.(terminal.data ?? null);
