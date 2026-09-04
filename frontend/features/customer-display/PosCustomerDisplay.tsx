@@ -174,14 +174,6 @@ export function PosCustomerDisplay({
   const pending = useRef<PendingSync | null>(null);
   const draining = useRef(false);
   const hydratedTerminal = useRef<number | null>(null);
-  // 本次掛載的時點：用來分辨「這次抓回來的」與「上一筆留在快取裡的」購物車。
-  // 在 effect 裡設定（render 期間呼叫 Date.now() 是不純的）；設定前一律視為
-  // 「還沒有新鮮資料」，故初值取無限大而不是 0——0 會讓任何舊快取都被當成新的。
-  const mountedAtRef = useRef(Number.POSITIVE_INFINITY);
-  useEffect(() => {
-    mountedAtRef.current = Date.now();
-  }, []);
-
   const terminal = useQuery({
     queryKey: ["customer-display", "terminal"],
     retry: false,
@@ -306,8 +298,11 @@ export function PosCustomerDisplay({
     if (!current.isSuccess || hydrated || terminal.data == null) return;
     // 重掛時 React Query 會**先同步吐出舊快取**再背景重抓（預設 staleTime 0）。
     // 完成一筆後 resetSale 會讓本元件重新掛載，若吃到上一筆的快取，剛賣掉的商品、
-    // 簽署與付款狀態會整組回到下一筆交易。只認本次掛載之後才更新的資料。
-    if (current.dataUpdatedAt <= mountedAtRef.current) return;
+    // 簽署與付款狀態會整組回到下一筆交易。只認本次掛載之後才真的抓回來的資料。
+    //
+    // 用 isFetchedAfterMount 而非比對時間戳：時鐘比對在「掛載與取得資料落在同一毫秒」
+    // 時會誤判成舊快取而該還原卻不還原，也怕時鐘回撥。這個旗標就是這個語意本身。
+    if (!current.isFetchedAfterMount) return;
     revision.current = current.data?.revision ?? null;
     setSyncedRevision(revision.current);
     let active = true;
@@ -337,7 +332,7 @@ export function PosCustomerDisplay({
     };
   }, [
     current.data,
-    current.dataUpdatedAt,
+    current.isFetchedAfterMount,
     current.isSuccess,
     hydrated,
     onRestore,
