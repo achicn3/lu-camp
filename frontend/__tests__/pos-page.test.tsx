@@ -833,6 +833,71 @@ describe("/pos 結帳頁", () => {
     expect(btn?.textContent).toContain("確認購物車中");
   });
 
+  it("完成一筆後開始下一筆：不得吃到上一筆的購物車快取", async () => {
+    // 重掛時 React Query 會先同步吐出舊快取再背景重抓（預設 staleTime 0）。
+    // 完成畫面是 early return，PosCustomerDisplay 會卸載；resetSale 重新掛載時若吃到
+    // 上一筆的快取，剛賣掉的商品會整組回到下一筆交易。（Codex 第二輪 high）
+    let currentCart: Record<string, unknown> | null = { ...restoreCart };
+    let saleCalls = 0;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET")
+        return json(currentCart);
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") {
+        currentCart = { ...restoreCart, status: "DRAFT", revision: 1 };
+        return json(currentCart);
+      }
+      if (url.endsWith("/terminals/9/cart/begin-checkout") && method === "POST") {
+        currentCart = { ...restoreCart, status: "PROCESSING", revision: 2 };
+        return json(currentCart);
+      }
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      if (url.endsWith("/api/v1/sales") && method === "POST") {
+        saleCalls += 1;
+        currentCart = null; // 成交後伺服器上已經沒有購物車了
+        return json(
+          { id: 88, store_id: 1, total: "1800", payment_method: "CASH", lines: [], tenders: [] },
+          201,
+        );
+      }
+      if (url.includes("/print/detail")) return json({ status: "ok" });
+      if (url.includes("/print-detail")) return json({ id: 88 });
+      if (url.includes("/drawer/open")) return json({ status: "ok" });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    // 第一筆：舊購物車還原進來 → 結帳
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(), {
+      timeout: 10000,
+    });
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 10000 });
+    await user.click(screen.getByRole("button", { name: "結帳" }));
+    await waitFor(() => expect(saleCalls).toBe(1), { timeout: 10000 });
+    await waitFor(() => expect(screen.getByText(/已完成/)).toBeTruthy());
+
+    // 開始下一筆 → 元件重掛。快取裡還留著那張含帳篷的購物車。
+    await user.click(screen.getByRole("button", { name: "開始下一筆" }));
+    // 給還原充分機會去把上一筆灌回來
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(screen.queryByText("雙人帳篷(測試)")).toBeNull();
+  }, 30000);
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";

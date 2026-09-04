@@ -174,6 +174,13 @@ export function PosCustomerDisplay({
   const pending = useRef<PendingSync | null>(null);
   const draining = useRef(false);
   const hydratedTerminal = useRef<number | null>(null);
+  // 本次掛載的時點：用來分辨「這次抓回來的」與「上一筆留在快取裡的」購物車。
+  // 在 effect 裡設定（render 期間呼叫 Date.now() 是不純的）；設定前一律視為
+  // 「還沒有新鮮資料」，故初值取無限大而不是 0——0 會讓任何舊快取都被當成新的。
+  const mountedAtRef = useRef(Number.POSITIVE_INFINITY);
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+  }, []);
 
   const terminal = useQuery({
     queryKey: ["customer-display", "terminal"],
@@ -230,27 +237,38 @@ export function PosCustomerDisplay({
   // 期限跟著「每一次待決」重新起算，不是只在掛載時算一次：顧客螢幕**事後才配對**時
   // restoreSettled 會從已定案退回待決（開始問 cart/current），若沿用掛載時那個早就
   // 用掉的期限，那次還原就完全沒有保護，等於窗口又開回來。
-  // 以「待決事件」的鍵識別是哪一次在等（終端 × 配對的顧客螢幕）；已定案為 null。
-  // 換一組就是新的一次還原，期限跟著重新起算；同一組只給一次期限，避免配對狀態
-  // 反覆跳動時每次都把收銀台再鎖 5 秒。
-  const restoreKey = restoreSettled
-    ? null
-    : `${terminal.data?.id ?? "none"}:${terminal.data?.paired_kiosk?.id ?? "none"}`;
-  const [expiredRestoreKey, setExpiredRestoreKey] = useState<string | null>(null);
+  // 每一次「從已定案轉為待決」就是一次新的還原嘗試，用遞增序號識別。
+  //
+  // 先前用「終端 × 顧客螢幕」當鍵是錯的：那代表配對組合，不代表一次嘗試。同一組第一次
+  // 逾時之後，斷線重連或重抓再度進入待決時會被當成「已經過期」，鎖立刻放開、遲到的
+  // 舊車也照樣作廢——兩邊的保護都失效。序號則是每次待決都全新起算。
+  const restoreAttemptRef = useRef(0);
+  const settledRef = useRef(true);
+  const [restoreAttempt, setRestoreAttempt] = useState(0);
   useEffect(() => {
-    if (restoreKey === null) return;
+    if (restoreSettled) {
+      settledRef.current = true;
+      return;
+    }
+    if (!settledRef.current) return; // 同一次待決中，不重複起算
+    settledRef.current = false;
+    restoreAttemptRef.current += 1;
+    setRestoreAttempt(restoreAttemptRef.current);
+  }, [restoreSettled]);
+
+  const [expiredAttempt, setExpiredAttempt] = useState(0);
+  useEffect(() => {
+    if (restoreSettled || restoreAttempt === 0) return;
     const timer = window.setTimeout(
-      () => setExpiredRestoreKey(restoreKey),
+      () => setExpiredAttempt(restoreAttempt),
       RESTORE_GUARD_TIMEOUT_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [restoreKey]);
+  }, [restoreAttempt, restoreSettled]);
 
-  const restorePending = restoreKey !== null && expiredRestoreKey !== restoreKey;
-  // 這一次還原是否已經超過期限（鎖已放開，店員可能已經動過購物車）。
-  const restoreExpired =
-    expiredRestoreKey ===
-    `${terminal.data?.id ?? "none"}:${terminal.data?.paired_kiosk?.id ?? "none"}`;
+  const restorePending = !restoreSettled && expiredAttempt !== restoreAttempt;
+  // 這一次嘗試是否已經超過期限（鎖已放開，店員可能已經動過購物車）。
+  const restoreExpired = restoreAttempt !== 0 && expiredAttempt === restoreAttempt;
   useEffect(() => {
     onRestorePendingChange?.(restorePending);
   }, [onRestorePendingChange, restorePending]);
@@ -286,6 +304,10 @@ export function PosCustomerDisplay({
 
   useEffect(() => {
     if (!current.isSuccess || hydrated || terminal.data == null) return;
+    // 重掛時 React Query 會**先同步吐出舊快取**再背景重抓（預設 staleTime 0）。
+    // 完成一筆後 resetSale 會讓本元件重新掛載，若吃到上一筆的快取，剛賣掉的商品、
+    // 簽署與付款狀態會整組回到下一筆交易。只認本次掛載之後才更新的資料。
+    if (current.dataUpdatedAt <= mountedAtRef.current) return;
     revision.current = current.data?.revision ?? null;
     setSyncedRevision(revision.current);
     let active = true;
@@ -295,7 +317,14 @@ export function PosCustomerDisplay({
     // 購物車還空著就照常還原——沒有東西會被蓋掉，也不必白白丟掉未結完的單。
     // 用 payload ref 而非 lines prop：ref 由專責 effect 維護、恆為最新的已提交內容，
     // 不必把 lines 塞進相依（每掃一件就重跑這條 effect），也不必抑制 lint 規則。
-    const discardStaleRestore = restoreExpired && payload.current.lines.length > 0;
+    // 逾時後才回來的還原：店員可能已經掃了東西，不能覆蓋他的操作。
+    // **但只有 DRAFT 可以被本地取代**——FROZEN／PROCESSING／PAYMENT_UNCERTAIN 的購物車
+    // 同步 effect 明文拒絕推送，作廢了本地也當不成權威：簽署任務、會員與付款方式都沒
+    // 還原，畫面卻被 displayCart 鎖住，變成既推不上去也結不了帳。那三種狀態一律照常
+    // 還原，讓店員拿回撤回／對帳的入口。
+    const serverCartOverwritable = current.data?.status === "DRAFT";
+    const discardStaleRestore =
+      restoreExpired && serverCartOverwritable && payload.current.lines.length > 0;
     void Promise.resolve(
       current.data && !discardStaleRestore ? onRestore(current.data) : undefined,
     ).then(() => {
@@ -308,6 +337,7 @@ export function PosCustomerDisplay({
     };
   }, [
     current.data,
+    current.dataUpdatedAt,
     current.isSuccess,
     hydrated,
     onRestore,

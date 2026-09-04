@@ -2051,6 +2051,19 @@ export default function PosPage() {
     );
   }
 
+  /**
+   * 所有結帳入口的唯一出口。
+   *
+   * 主結帳鍵之外還有備註提醒對話框的「已確認，繼續結帳」——那顆先前直接呼叫
+   * checkout.mutate，繞過了還原鎖：對話框開著期間若終端重抓或事後配對讓還原重新
+   * 待決，仍會用即將被取代的購物車開始結帳。集中在這裡，只有一處要維護。
+   */
+  function startCheckout() {
+    // 購物車尚未定案（還在確認有沒有未結完的單／正在還原）→ 一律不送出。
+    if (restoring || restorePending) return;
+    checkout.mutate();
+  }
+
   function resetSale() {
     setNoteAck("");
     setNoteDialogOpen(false);
@@ -2934,14 +2947,12 @@ export default function PosPage() {
               !dineInValidation.ok
             }
             onClick={() => {
-              // UI 之外再擋一次：鍵盤送出或狀態剛翻轉時，onClick 可能拿到過期的判斷。
-              if (restoring || restorePending) return;
               // 有未確認的商品備註 → 先跳提醒，確認後才進收款（不直接送出）。
               if (noteAckPending) {
                 setNoteDialogOpen(true);
                 return;
               }
-              checkout.mutate();
+              startCheckout();
             }}
           >
             {/* 兩者可能同時為真（還原尚未完成 → restorePending 也還是 true）。
@@ -2989,7 +3000,7 @@ export default function PosPage() {
                 onClick={() => {
                   setNoteAck(noteFingerprint);
                   setNoteDialogOpen(false);
-                  checkout.mutate();
+                  startCheckout();
                 }}
               >
                 已確認，繼續結帳
