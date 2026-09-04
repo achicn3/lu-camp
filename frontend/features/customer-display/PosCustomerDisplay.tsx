@@ -226,16 +226,27 @@ export function PosCustomerDisplay({
 
   // 硬性期限：伺服器收了連線卻不回應時，上面每個條件都會永遠停在「還不知道」。
   // **鎖死收銀台比原本的漏單嚴重得多**，時間到就退回原本的風險，讓店員做得了生意。
-  const [restoreDeadlineReached, setRestoreDeadlineReached] = useState(false);
+  //
+  // 期限跟著「每一次待決」重新起算，不是只在掛載時算一次：顧客螢幕**事後才配對**時
+  // restoreSettled 會從已定案退回待決（開始問 cart/current），若沿用掛載時那個早就
+  // 用掉的期限，那次還原就完全沒有保護，等於窗口又開回來。
+  // 以「待決事件」的鍵識別是哪一次在等（終端 × 配對的顧客螢幕）；已定案為 null。
+  // 換一組就是新的一次還原，期限跟著重新起算；同一組只給一次期限，避免配對狀態
+  // 反覆跳動時每次都把收銀台再鎖 5 秒。
+  const restoreKey = restoreSettled
+    ? null
+    : `${terminal.data?.id ?? "none"}:${terminal.data?.paired_kiosk?.id ?? "none"}`;
+  const [expiredRestoreKey, setExpiredRestoreKey] = useState<string | null>(null);
   useEffect(() => {
+    if (restoreKey === null) return;
     const timer = window.setTimeout(
-      () => setRestoreDeadlineReached(true),
+      () => setExpiredRestoreKey(restoreKey),
       RESTORE_GUARD_TIMEOUT_MS,
     );
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [restoreKey]);
 
-  const restorePending = !restoreSettled && !restoreDeadlineReached;
+  const restorePending = restoreKey !== null && expiredRestoreKey !== restoreKey;
   useEffect(() => {
     onRestorePendingChange?.(restorePending);
   }, [onRestorePendingChange, restorePending]);
