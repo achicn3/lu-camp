@@ -247,6 +247,10 @@ export function PosCustomerDisplay({
   }, [restoreKey]);
 
   const restorePending = restoreKey !== null && expiredRestoreKey !== restoreKey;
+  // 這一次還原是否已經超過期限（鎖已放開，店員可能已經動過購物車）。
+  const restoreExpired =
+    expiredRestoreKey ===
+    `${terminal.data?.id ?? "none"}:${terminal.data?.paired_kiosk?.id ?? "none"}`;
   useEffect(() => {
     onRestorePendingChange?.(restorePending);
   }, [onRestorePendingChange, restorePending]);
@@ -285,12 +289,24 @@ export function PosCustomerDisplay({
     revision.current = current.data?.revision ?? null;
     setSyncedRevision(revision.current);
     let active = true;
-    void Promise.resolve(current.data ? onRestore(current.data) : undefined).then(() => {
+    // 逾時解鎖只是讓店員能做生意，**不代表遲到的還原可以覆蓋他做過的事**。
+    // 期限過後店員可能已經掃了東西；此時才回來的舊購物車一律作廢，否則等於把窗口
+    // 從「掛載到還原之間」挪到「第 5 秒之後」，根本沒關上。
+    // 購物車還空著就照常還原——沒有東西會被蓋掉，也不必白白丟掉未結完的單。
+    const discardStaleRestore = restoreExpired && lines.length > 0;
+    void Promise.resolve(
+      current.data && !discardStaleRestore ? onRestore(current.data) : undefined,
+    ).then(() => {
+      // 作廢的情況也要 hydrate：讓同步恢復，由本地購物車成為權威推上去，
+      // 不然畫面與顧客螢幕會一直對不起來。
       if (active) setHydrated(true);
     });
     return () => {
       active = false;
     };
+    // lines 刻意不進相依：它只用來判斷「現在覆蓋會不會蓋掉東西」，把它放進來會讓
+    // 每次掃碼都重跑這條 effect。restoreExpired 同理，只在逾時那一刻翻一次。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.data, current.isSuccess, hydrated, onRestore, terminal.data]);
 
   useEffect(() => {

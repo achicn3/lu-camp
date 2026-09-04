@@ -757,6 +757,82 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 15000 });
   }, 25000);
 
+  it("逾時後掃了東西，遲到的舊購物車回來也不得覆蓋（窗口要真的關上，不是挪後）", async () => {
+    // 逾時解鎖只是讓店員做得了生意，不代表遲到的還原可以蓋掉他做過的事。
+    // 少了這一條，修正只是把覆蓋窗口從「掛載到還原之間」挪到「第 5 秒之後」。
+    // （Codex 對抗式審查 high）
+    let releaseCart: () => void = () => {};
+    let cartRequested = false;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/GAS-230"))
+        return json({ id: 6, sku: "GAS-230", name: "高山瓦斯罐", unit_price: "150", quantity_on_hand: 9, reorder_point: 2, brand_id: null, note: null }, 404);
+      if (url.includes("/catalog-products/by-sku/GAS-230"))
+        return json({ id: 6, store_id: 1, sku: "GAS-230", name: "高山瓦斯罐", brand_id: null, unit_price: "150", quantity_on_hand: 9, reorder_point: 2, note: null });
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.includes("/bulk-lots/by-code/GAS-230")) return json({ detail: "x" }, 404);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") {
+        cartRequested = true;
+        return new Promise<Response>((resolve) => {
+          releaseCart = () => resolve(json(restoreCart));
+        });
+      }
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(restoreCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "150",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "150",
+        });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(cartRequested).toBe(true));
+    expect(scanBox().disabled).toBe(true);
+
+    // 等 5 秒期限到期 → 放行（店員做得了生意）
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 15000 });
+
+    // 逾時後掃一件商品進來
+    await user.type(scanBox(), "GAS-230{Enter}");
+    await waitFor(() => expect(screen.getByText("高山瓦斯罐")).toBeTruthy());
+
+    // 這時舊購物車才姍姍來遲 → **不得覆蓋**
+    releaseCart();
+    await waitFor(() => expect(cartRequested).toBe(true));
+    // 給遲到的還原充分機會去搞破壞
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(screen.getByText("高山瓦斯罐")).toBeTruthy();
+    expect(screen.queryByText("雙人帳篷(測試)")).toBeNull();
+  }, 30000);
+
+  it("還在確認購物車時，結帳鍵也必須停用（不只掃碼）", async () => {
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET")
+        return new Promise<Response>(() => {});
+      return null;
+    });
+    renderPage();
+    await waitFor(() => expect(scanBox().disabled).toBe(true));
+    const btn = document.querySelector("button.pos-checkout");
+    expect(btn).toHaveProperty("disabled", true);
+    expect(btn?.textContent).toContain("確認購物車中");
+  });
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";

@@ -2054,6 +2054,10 @@ export default function PosPage() {
   function resetSale() {
     setNoteAck("");
     setNoteDialogOpen(false);
+    // 完成畫面是 early return，PosCustomerDisplay 在那時已卸載；回到購物車視圖會重新
+    // 掛載並重新問一次「有沒有未結完的購物車」。子元件的 effect 要下一個 commit 才會
+    // 回報，這中間父層若還留著 false 就有一個 render 的破口——先 fail closed。
+    setRestorePending(true);
     setLines([]);
     setDiscountDrafts([]);
     setGiftTargetKey(null);
@@ -2910,8 +2914,10 @@ export default function PosPage() {
             disabled={
               !validation.ok ||
               checkout.isPending ||
-              // 還原中：購物車還沒定案（備註仍在補抓），此時結帳會漏提醒。
+              // 還原中／還在確認有沒有未結完的購物車：購物車都還沒定案，此時結帳
+              // 會用到即將被取代的內容（也可能漏掉備註提醒）。
               restoring ||
+              restorePending ||
               !quoteReady ||
               scSignBlock ||
               displayCart?.status === "PAYMENT_UNCERTAIN" ||
@@ -2928,6 +2934,8 @@ export default function PosPage() {
               !dineInValidation.ok
             }
             onClick={() => {
+              // UI 之外再擋一次：鍵盤送出或狀態剛翻轉時，onClick 可能拿到過期的判斷。
+              if (restoring || restorePending) return;
               // 有未確認的商品備註 → 先跳提醒，確認後才進收款（不直接送出）。
               if (noteAckPending) {
                 setNoteDialogOpen(true);
