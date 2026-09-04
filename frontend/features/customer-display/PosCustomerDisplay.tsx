@@ -293,7 +293,9 @@ export function PosCustomerDisplay({
     // 期限過後店員可能已經掃了東西；此時才回來的舊購物車一律作廢，否則等於把窗口
     // 從「掛載到還原之間」挪到「第 5 秒之後」，根本沒關上。
     // 購物車還空著就照常還原——沒有東西會被蓋掉，也不必白白丟掉未結完的單。
-    const discardStaleRestore = restoreExpired && lines.length > 0;
+    // 用 payload ref 而非 lines prop：ref 由專責 effect 維護、恆為最新的已提交內容，
+    // 不必把 lines 塞進相依（每掃一件就重跑這條 effect），也不必抑制 lint 規則。
+    const discardStaleRestore = restoreExpired && payload.current.lines.length > 0;
     void Promise.resolve(
       current.data && !discardStaleRestore ? onRestore(current.data) : undefined,
     ).then(() => {
@@ -304,10 +306,14 @@ export function PosCustomerDisplay({
     return () => {
       active = false;
     };
-    // lines 刻意不進相依：它只用來判斷「現在覆蓋會不會蓋掉東西」，把它放進來會讓
-    // 每次掃碼都重跑這條 effect。restoreExpired 同理，只在逾時那一刻翻一次。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current.data, current.isSuccess, hydrated, onRestore, terminal.data]);
+  }, [
+    current.data,
+    current.isSuccess,
+    hydrated,
+    onRestore,
+    restoreExpired,
+    terminal.data,
+  ]);
 
   useEffect(() => {
     if (!hydrated || !current.isSuccess || current.data == null) return;
