@@ -108,6 +108,12 @@ interface PosCustomerDisplayProps {
    * hydrated 擋著推不上伺服器，接著 onRestore 的 setLines 又整批覆蓋掉，商品無聲消失。
    */
   onRestorePendingChange?: (pending: boolean) => void;
+  /**
+   * 逾時後作廢了伺服器上那台未結完的購物車（改以目前畫面為準）時通知 POS 頁。
+   * 這條路徑會**反向覆蓋**：本地車接著被 PUT 上去，伺服器那筆 DRAFT 就沒了。
+   * 原 bug 丟掉的是一件剛掃的商品，這裡丟掉的是一整台舊車——更不能無聲。
+   */
+  onStaleRestoreDiscarded?: (itemCount: number) => void;
 }
 
 type PendingSync = { fingerprint: string } & (
@@ -136,6 +142,7 @@ export function PosCustomerDisplay({
   onCartChange,
   onSyncDirtyChange,
   onRestorePendingChange,
+  onStaleRestoreDiscarded,
 }: PosCustomerDisplayProps) {
   const queryClient = useQueryClient();
   const [pairingCode, setPairingCode] = useState("");
@@ -221,7 +228,15 @@ export function PosCustomerDisplay({
     (terminal.data != null &&
       (terminal.data.paired_kiosk == null || // 沒配對 → 不會有還原
         current.isError || // 問不到 → 放行，別擋著做生意
-        (current.isSuccess && (current.data == null || hydrated))));
+        // isFetchedAfterMount 與下方 hydration effect 用同一個標準，否則會不對稱：
+        // 快取是 null 時會立刻算成「已定案」而放行鎖，但 effect 仍在等本次抓取——
+        // 抓回來若是一台有車的伺服器，onRestore 照樣整批覆蓋。
+        // 「快取 null、伺服器有車」在正常操作下就會出現：掛載時真的沒車 → 店員掃碼 →
+        // drain 的 PUT 建了伺服器購物車但不寫 query cache → 切走再切回 /pos（gcTime 內）
+        // → 快取仍是 null。伺服器不回應時仍由硬性期限放行，不會鎖死。
+        (current.isSuccess &&
+          current.isFetchedAfterMount &&
+          (current.data == null || hydrated))));
 
   // 硬性期限：伺服器收了連線卻不回應時，上面每個條件都會永遠停在「還不知道」。
   // **鎖死收銀台比原本的漏單嚴重得多**，時間到就退回原本的風險，讓店員做得了生意。
@@ -324,6 +339,9 @@ export function PosCustomerDisplay({
     const serverCartOverwritable = current.data?.status === "DRAFT";
     const discardStaleRestore =
       restoreExpired && serverCartOverwritable && payload.current.lines.length > 0;
+    if (discardStaleRestore && current.data) {
+      onStaleRestoreDiscarded?.(current.data.snapshot.items.length);
+    }
     void Promise.resolve(
       current.data && !discardStaleRestore ? onRestore(current.data) : undefined,
     ).then(() => {
@@ -340,6 +358,7 @@ export function PosCustomerDisplay({
     current.isSuccess,
     hydrated,
     onRestore,
+    onStaleRestoreDiscarded,
     restoreExpired,
     terminal.data,
   ]);

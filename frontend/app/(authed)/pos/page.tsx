@@ -1087,9 +1087,13 @@ export default function PosPage() {
   // 會把那些操作整批覆蓋掉；兩次還原重疊時也可能是**較舊**的那次最後寫入。
   // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
   const restoreGenerationRef = useRef(0);
-  // 還原時要知道「現在車上有沒有東西」。restoreCustomerDisplayCart 的相依是 []，
-  // 讀不到最新的 lines，用 ref 帶進去。
-  const linesRef = useRef<CartLine[]>([]);
+  // 還原時要知道「有沒有把**店員自己加的東西**蓋掉」。
+  //
+  // 不比對行數：(a) 子元件的 effect 早於父元件的 effect，同一個 commit 內若既有掃碼
+  // 又有查詢完成，比對到的會是上一版（空的）而漏報；(b) 連續兩次還原時，車上的行是
+  // 前一次還原塞的、不是店員掃的，比對行數會誤報「請重新掃描」——店員照做就多算一件。
+  // 用「店員是否真的加過商品」這個事實，兩個問題一起消失。
+  const clerkAddedRef = useRef(false);
   const [restoring, setRestoring] = useState(false);
   // 掛載到「確定沒有東西要還原／還原完成」之間也要鎖：那段期間掃進去的商品會被
   // onRestore 的 setLines 整批覆蓋而無聲消失（同步 effect 也被 hydrated 擋著推不上去）。
@@ -1123,7 +1127,7 @@ export default function PosPage() {
       // 還原會整批取代購物車。車上原本有東西就是被蓋掉了——**不能無聲**，那正是這條
       // 修正要防的事。（會走到這裡而非作廢，代表伺服器購物車是不可覆寫的狀態：
       // 簽署中／付款處理中／付款待確認，此時本地當不成權威，只能以伺服器為準。）
-      const overwrote = linesRef.current.length > 0;
+      const overwrote = clerkAddedRef.current;
       try {
       if (payload) {
         const restoredLines: CartLine[] = payload.lines.map((line, index) => {
@@ -1243,6 +1247,7 @@ export default function PosPage() {
         // 被更新的還原接手時，由新的那次負責解鎖。
         if (!isStale()) setRestoring(false);
       }
+      if (!isStale()) clerkAddedRef.current = false;
       if (overwrote && !isStale()) {
         setNotice(
           "已改用顧客螢幕上那筆未完成的購物車；剛才掃入的商品沒有被保留，請確認後重新掃描。",
@@ -1633,10 +1638,6 @@ export default function PosPage() {
       !signed ||
       signMismatch ||
       displayCart?.status !== "FROZEN");
-  useEffect(() => {
-    linesRef.current = lines;
-  }, [lines]);
-
   const cartMutationLocked =
     restoring ||
     restorePending ||
@@ -2059,6 +2060,8 @@ export default function PosPage() {
       return;
     }
     const result = addLine(lines, line);
+    // 店員親手加了商品：日後若有還原把車換掉，才知道該不該提示「你掃的沒被保留」。
+    clerkAddedRef.current = true;
     setLines(result.lines);
     setNotice(
       result.duplicateSerialized
@@ -2074,13 +2077,23 @@ export default function PosPage() {
    * checkout.mutate，繞過了還原鎖：對話框開著期間若終端重抓或事後配對讓還原重新
    * 待決，仍會用即將被取代的購物車開始結帳。集中在這裡，只有一處要維護。
    */
-  function startCheckout() {
+  /** @returns 是否真的送出。被擋下時回 false，呼叫端要讓店員看見原因。 */
+  function startCheckout(): boolean {
     // 購物車尚未定案（還在確認有沒有未結完的單／正在還原）→ 一律不送出。
-    if (restoring || restorePending) return;
+    if (restoring || restorePending) {
+      setNotice(
+        restoring
+          ? "正在恢復上一筆購物車，稍候再按結帳。"
+          : "正在確認有沒有未結完的購物車，稍候再按結帳。",
+      );
+      return false;
+    }
     checkout.mutate();
+    return true;
   }
 
   function resetSale() {
+    clerkAddedRef.current = false;
     setNoteAck("");
     setNoteDialogOpen(false);
     // 完成畫面是 early return，PosCustomerDisplay 在那時已卸載；回到購物車視圖會重新
@@ -2268,6 +2281,12 @@ export default function PosPage() {
         onCartChange={setDisplayCart}
         onSyncDirtyChange={setCartSyncDirty}
         onRestorePendingChange={setRestorePending}
+        onStaleRestoreDiscarded={(itemCount) =>
+          setNotice(
+            `顧客螢幕上另有一筆未完成的購物車（${itemCount} 件），已被目前畫面取代。` +
+              "若那筆才是要結的，請作廢本畫面內容並重新掃描。",
+          )
+        }
       />
       {staleKitchen.map((item) => (
         <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
@@ -3014,9 +3033,10 @@ export default function PosPage() {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
+                  // 擋下時保留對話框開著：關掉又什麼都沒發生，收銀台上看起來像當機。
+                  if (!startCheckout()) return;
                   setNoteAck(noteFingerprint);
                   setNoteDialogOpen(false);
-                  startCheckout();
                 }}
               >
                 已確認，繼續結帳

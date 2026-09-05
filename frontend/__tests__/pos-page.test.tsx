@@ -59,11 +59,13 @@ function stubFetch(route: FetchRoute) {
   );
 }
 
-function renderPage() {
+function renderPage(seedCache?: (client: QueryClient) => void) {
   setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // 預先塞快取：重現「切走再切回 /pos 時 React Query 先同步吐出舊快取」的情境。
+  seedCache?.(client);
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
@@ -813,6 +815,11 @@ describe("/pos 結帳頁", () => {
     await new Promise((r) => setTimeout(r, 1500));
     expect(screen.getByText("高山瓦斯罐")).toBeTruthy();
     expect(screen.queryByText("雙人帳篷(測試)")).toBeNull();
+    // 作廢舊車**不得無聲**：那筆未結完的購物車就這樣沒了（本地車接著會被 PUT 上去
+    // 覆蓋它），店員必須看得到。原 bug 丟一件商品，這條路徑丟一整台車。
+    await waitFor(() =>
+      expect(screen.getByText(/顧客螢幕上另有一筆未完成的購物車/)).toBeTruthy(),
+    );
   }, 30000);
 
   it("還在確認購物車時，結帳鍵也必須停用（不只掃碼）", async () => {
@@ -897,6 +904,58 @@ describe("/pos 結帳頁", () => {
     await new Promise((r) => setTimeout(r, 1500));
     expect(screen.queryByText("雙人帳篷(測試)")).toBeNull();
   }, 30000);
+
+  it("快取是 null 但伺服器其實有車：鎖仍須生效，掃入的商品不得被遲來的還原吃掉", async () => {
+    // restoreSettled 若不套用 isFetchedAfterMount 就會不對稱：快取非 null 會鎖，
+    // 快取是 null 卻立刻算「已定案」而放行——但 hydration effect 還在等本次抓取，
+    // 抓回來若是一台有車的伺服器，onRestore 照樣整批覆蓋。
+    //
+    // 「快取 null、伺服器有車」在正常操作下就會出現：掛載時真的沒車 → 店員掃碼 →
+    // 同步的 PUT 建了伺服器購物車但不寫 query cache → 切走再切回 /pos（gcTime 內）
+    // → 快取仍是 null。（code-reviewer 子代理實測發現）
+    let releaseCart: () => void = () => {};
+    let cartRequested = false;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) return json(TENT);
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET") {
+        cartRequested = true;
+        return new Promise<Response>((resolve) => {
+          releaseCart = () => resolve(json(restoreCart));
+        });
+      }
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(restoreCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    // 快取裡是「沒有購物車」，但伺服器待會兒會回一台有車的
+    renderPage((client) => {
+      client.setQueryData(["customer-display", "cart", 9], null);
+    });
+
+    await waitFor(() => expect(cartRequested).toBe(true));
+    // 快取雖是 null，本次抓取還沒回來 → **必須**還鎖著
+    expect(scanBox().disabled).toBe(true);
+
+    releaseCart();
+    await waitFor(() => expect(screen.getByText("雙人帳篷(測試)")).toBeTruthy(), {
+      timeout: 8000,
+    });
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 8000 });
+  }, 20000);
 
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
