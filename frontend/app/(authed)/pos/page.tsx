@@ -1085,6 +1085,13 @@ export default function PosPage() {
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   // 對話框內的訊息：全域 notice 印在左欄，會被對話框的半透明遮罩蓋住，店員看不到。
   const [noteDialogBlocked, setNoteDialogBlocked] = useState<string | null>(null);
+
+  /** 關閉備註提醒對話框。**一定要一起清掉擋下原因**，否則下次開啟會一進去就顯示
+   *  一行早已過期的紅字，店員會去等一個已經結束的狀態。 */
+  function closeNoteDialog() {
+    setNoteDialogOpen(false);
+    setNoteDialogBlocked(null);
+  }
   // 還原是非同步的（要重新取回每件商品的備註）。等待期間店員仍可掃碼，晚回來的結果
   // 會把那些操作整批覆蓋掉；兩次還原重疊時也可能是**較舊**的那次最後寫入。
   // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
@@ -1136,7 +1143,7 @@ export default function PosPage() {
       setRestoring(true);
       // 還原＝換了一份購物車，先前對備註的「已確認」一律失效，必須重新確認。
       setNoteAck("");
-      setNoteDialogOpen(false);
+      closeNoteDialog();
       // 還原會整批取代購物車。車上原本有東西就是被蓋掉了——**不能無聲**，那正是這條
       // 修正要防的事。（會走到這裡而非作廢，代表伺服器購物車是不可覆寫的狀態：
       // 簽署中／付款處理中／付款待確認，此時本地當不成權威，只能以伺服器為準。）
@@ -1263,7 +1270,7 @@ export default function PosPage() {
       if (!isStale()) clerkAddedRef.current = false;
       if (overwrote && !isStale()) {
         setNotice(
-          "已改用顧客螢幕上那筆未完成的購物車；剛才掃入的商品沒有被保留，請確認後重新掃描。",
+          "已改用顧客螢幕上那筆未完成的購物車；你剛才對這筆的修改沒有被保留，請重新確認。",
         );
       }
     },
@@ -2096,23 +2103,24 @@ export default function PosPage() {
   /**
    * 所有結帳入口的唯一出口。
    *
-   * 主結帳鍵之外還有備註提醒對話框的「已確認，繼續結帳」——那顆先前直接呼叫
+   * 主結帳鍵之外還有備註提醒對話框的「已確認，繼續結帳」——那顆曾經直接呼叫
    * checkout.mutate，繞過了還原鎖：對話框開著期間若終端重抓或事後配對讓還原重新
    * 待決，仍會用即將被取代的購物車開始結帳。集中在這裡，只有一處要維護。
+   *
+   * 日後要在結帳前加守衛（例如「現金抽屜未開帳」），加在這裡就兩個入口都算數。
+   *
+   * @param report 把被擋下的原因說給店員聽。預設寫左欄 notice；對話框開著時要改寫
+   *   對話框自己的訊息區——左欄會被半透明遮罩蓋住，店員看不到。
+   * @returns 是否真的送出。
    */
-  /** 被擋下的原因；未被擋回 null。 */
-  function checkoutBlockedReason(): string | null {
-    if (restoring) return "正在恢復上一筆購物車，稍候再按結帳。";
-    if (restorePending) return "正在確認有沒有未結完的購物車，稍候再按結帳。";
-    return null;
-  }
-
-  /** @returns 是否真的送出。被擋下時回 false，呼叫端要讓店員看見原因。 */
-  function startCheckout(): boolean {
+  function startCheckout(report: (message: string) => void = setNotice): boolean {
     // 購物車尚未定案（還在確認有沒有未結完的單／正在還原）→ 一律不送出。
-    const blocked = checkoutBlockedReason();
-    if (blocked !== null) {
-      setNotice(blocked);
+    if (restoring) {
+      report("正在恢復上一筆購物車，稍候再按結帳。");
+      return false;
+    }
+    if (restorePending) {
+      report("正在確認有沒有未結完的購物車，稍候再按結帳。");
       return false;
     }
     checkout.mutate();
@@ -2122,7 +2130,7 @@ export default function PosPage() {
   function resetSale() {
     clerkAddedRef.current = false;
     setNoteAck("");
-    setNoteDialogOpen(false);
+    closeNoteDialog();
     // 完成畫面是 early return，PosCustomerDisplay 在那時已卸載；回到購物車視圖會重新
     // 掛載並重新問一次「有沒有未結完的購物車」。子元件的 effect 要下一個 commit 才會
     // 回報，這中間父層若還留著 false 就有一個 render 的破口——先 fail closed。
@@ -2620,11 +2628,12 @@ export default function PosPage() {
                       className="btn-ghost"
                       aria-label={`移除折扣 ${describeDiscount(draft, lines)}`}
                       disabled={cartMutationLocked}
-                      onClick={() =>
+                      onClick={() => {
+                        markCartEdited();
                         setDiscountDrafts((prev) =>
                           prev.filter((d) => d.id !== draft.id),
-                        )
-                      }
+                        );
+                      }}
                     >
                       移除
                     </button>
@@ -2654,7 +2663,10 @@ export default function PosPage() {
                   aria-checked={dineIn.mode === "DINE_IN"}
                   className={`pos-dinein-mode ${dineIn.mode === "DINE_IN" ? "is-active" : ""}`}
                   disabled={cartMutationLocked || dineInValidation.tablesUnavailable}
-                  onClick={() => setDineIn({ mode: "DINE_IN", tableNo: null })}
+                  onClick={() => {
+                    markCartEdited();
+                    setDineIn({ mode: "DINE_IN", tableNo: null });
+                  }}
                 >
                   內用
                 </button>
@@ -2664,7 +2676,10 @@ export default function PosPage() {
                   aria-checked={dineIn.mode === "TAKEOUT"}
                   className={`pos-dinein-mode ${dineIn.mode === "TAKEOUT" ? "is-active" : ""}`}
                   disabled={cartMutationLocked}
-                  onClick={() => setDineIn({ mode: "TAKEOUT", tableNo: null })}
+                  onClick={() => {
+                    markCartEdited();
+                    setDineIn({ mode: "TAKEOUT", tableNo: null });
+                  }}
                 >
                   外帶
                 </button>
@@ -2679,7 +2694,10 @@ export default function PosPage() {
                       aria-checked={dineIn.tableNo === table}
                       className={`pos-dinein-table ${dineIn.tableNo === table ? "is-active" : ""}`}
                       disabled={cartMutationLocked}
-                      onClick={() => setDineIn({ mode: "DINE_IN", tableNo: table })}
+                      onClick={() => {
+                        markCartEdited();
+                        setDineIn({ mode: "DINE_IN", tableNo: table });
+                      }}
                     >
                       {table}
                     </button>
@@ -2694,8 +2712,14 @@ export default function PosPage() {
 
           <MemberPanel
             member={member}
-            onSelect={setMember}
-            onClear={() => setMember(null)}
+            onSelect={(next) => {
+              markCartEdited();
+              setMember(next);
+            }}
+            onClear={() => {
+              markCartEdited();
+              setMember(null);
+            }}
             disabled={cartMutationLocked}
           />
 
@@ -3067,17 +3091,11 @@ export default function PosPage() {
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  // 擋下時保留對話框開著：關掉又什麼都沒發生，收銀台上看起來像當機。
-                  // 原因要印在對話框**裡面**——左欄的 notice 被遮罩蓋住看不到。
-                  const blocked = checkoutBlockedReason();
-                  if (blocked !== null) {
-                    setNoteDialogBlocked(blocked);
-                    return;
-                  }
-                  setNoteDialogBlocked(null);
+                  // 擋下時保留對話框開著、原因印在對話框**裡面**：關掉又什麼都沒發生
+                  // 看起來像當機，而左欄的 notice 被半透明遮罩蓋住看不到。
+                  if (!startCheckout(setNoteDialogBlocked)) return;
                   setNoteAck(noteFingerprint);
-                  setNoteDialogOpen(false);
-                  checkout.mutate();
+                  closeNoteDialog();
                 }}
               >
                 已確認，繼續結帳
@@ -3085,10 +3103,7 @@ export default function PosPage() {
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => {
-                  setNoteDialogBlocked(null);
-                  setNoteDialogOpen(false);
-                }}
+                onClick={closeNoteDialog}
               >
                 回購物車
               </button>

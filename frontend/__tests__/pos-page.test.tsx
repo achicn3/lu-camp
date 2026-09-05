@@ -957,6 +957,52 @@ describe("/pos 結帳頁", () => {
     await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 8000 });
   }, 20000);
 
+  it("一次還原只跑一輪備註補抓（回呼身分穩定，不得重入）", async () => {
+    // 傳進 PosCustomerDisplay 的回呼**必須是穩定身分**：它們進了 hydration effect 的
+    // 相依陣列。用行內箭頭的話每次父層 render 都換身分 → effect cleanup 後重跑 →
+    // 還原期間每 re-render 一次就多叫一次 onRestore。而觸發是必然的：還原第一件事
+    // 就是 setRestoring(true)。
+    //
+    // 這個 bug 整套測試、Codex 三輪、我自己都沒抓到，修好了更要有守門員：
+    // 數備註補抓被呼叫幾次即可——一輪還原是 1 次，退回行內箭頭會變 3 次。
+    let noteFetches = 0;
+    stubFetch((url, method) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+      if (url.includes("/menu-items")) return json([]);
+      if (url.includes("/serialized-items/by-code/TENT1")) {
+        noteFetches += 1;
+        return json({ ...TENT, note: "缺營釘" });
+      }
+      if (url.endsWith("/api/v1/customer-display/terminals") && method === "POST")
+        return json(terminalRow(PAIRED), 201);
+      if (url.endsWith("/terminals/9/cart/current") && method === "GET")
+        return json(restoreCart);
+      if (url.endsWith("/terminals/9/cart") && method === "PUT") return json(restoreCart);
+      if (url.endsWith("/api/v1/sales/quote") && method === "POST") {
+        return json({
+          total: "1800",
+          campaign_id: null,
+          campaign_name: null,
+          lines: [],
+          food_subtotal: "0",
+          store_credit_max: "1800",
+        });
+      }
+      return null;
+    });
+    renderPage();
+
+    // 還原完成（備註已帶進購物車）
+    await waitFor(() => expect(screen.getByText(/備註：缺營釘/)).toBeTruthy(), {
+      timeout: 10000,
+    });
+    await waitFor(() => expect(scanBox().disabled).toBe(false), { timeout: 10000 });
+    // 再等一會兒，讓任何重入有機會發生
+    await new Promise((r) => setTimeout(r, 800));
+    expect(noteFetches).toBe(1);
+  }, 20000);
+
   it("已配對客顯時先提交 PROCESSING，再以新 revision 成交", async () => {
     let currentCart: Record<string, unknown> | null = null;
     let beginBody = "";
