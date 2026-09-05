@@ -1083,6 +1083,8 @@ export default function PosPage() {
   // 商品時指紋會變，會再問一次，避免後加入的提醒被前一次確認吃掉。
   const [noteAck, setNoteAck] = useState("");
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  // 對話框內的訊息：全域 notice 印在左欄，會被對話框的半透明遮罩蓋住，店員看不到。
+  const [noteDialogBlocked, setNoteDialogBlocked] = useState<string | null>(null);
   // 還原是非同步的（要重新取回每件商品的備註）。等待期間店員仍可掃碼，晚回來的結果
   // 會把那些操作整批覆蓋掉；兩次還原重疊時也可能是**較舊**的那次最後寫入。
   // 用遞增世代識別「這次還原還算不算數」，並在還原期間鎖住購物車操作與結帳。
@@ -1111,6 +1113,17 @@ export default function PosPage() {
   // 完成結帳時綁定的簽署快照（K6 明細聯加印折抵/剩餘＋簽名用；未綁定為 null）。
   const [completedSignature, setCompletedSignature] = useState<CompletedSignature | null>(null);
   const isManager = decodeSession()?.role === "MANAGER";
+
+  // **必須是穩定身分**：這個回呼進了子元件 hydration effect 的相依陣列。用行內箭頭的話
+  // 每次父層 render 都換身分 → effect cleanup 後重跑 → 還原期間每 re-render 一次就多叫
+  // 一次 onRestore（實測 3 次）。而觸發是必然的：restoreCustomerDisplayCart 第一件事就是
+  // setRestoring(true)。重入本身雖不會鎖死，但會把 hydrated 的設定押在排程順序上。
+  const handleStaleRestoreDiscarded = useCallback((itemCount: number) => {
+    setNotice(
+      `顧客螢幕上另有一筆未完成的購物車（${itemCount} 件），已被目前畫面取代。` +
+        "若那筆才是要結的，請作廢本畫面內容並重新掃描。",
+    );
+  }, []);
 
   const restoreCustomerDisplayCart = useCallback(
     async (cart: components["schemas"]["StaffCartSessionRead"]) => {
@@ -2054,14 +2067,24 @@ export default function PosPage() {
     },
   });
 
+  /**
+   * 標記「店員親手動過這台購物車」。
+   *
+   * 只記掃碼是不夠的：改數量、移除、改成贈品、加折扣同樣是他的手工輸入，若之後
+   * 有還原把車換掉，那些編輯一樣會被還原成舊值——**數量那條會少收錢**，而且無聲。
+   * 所有會改動購物車的 handler 都走這裡，旗標只有一處要維護。
+   */
+  function markCartEdited() {
+    clerkAddedRef.current = true;
+  }
+
   function addToCart(line: CartLine) {
     if (cartMutationLocked) {
       setNotice("簽署或付款處理期間，購物車已由伺服器鎖定。");
       return;
     }
     const result = addLine(lines, line);
-    // 店員親手加了商品：日後若有還原把車換掉，才知道該不該提示「你掃的沒被保留」。
-    clerkAddedRef.current = true;
+    markCartEdited();
     setLines(result.lines);
     setNotice(
       result.duplicateSerialized
@@ -2077,15 +2100,19 @@ export default function PosPage() {
    * checkout.mutate，繞過了還原鎖：對話框開著期間若終端重抓或事後配對讓還原重新
    * 待決，仍會用即將被取代的購物車開始結帳。集中在這裡，只有一處要維護。
    */
+  /** 被擋下的原因；未被擋回 null。 */
+  function checkoutBlockedReason(): string | null {
+    if (restoring) return "正在恢復上一筆購物車，稍候再按結帳。";
+    if (restorePending) return "正在確認有沒有未結完的購物車，稍候再按結帳。";
+    return null;
+  }
+
   /** @returns 是否真的送出。被擋下時回 false，呼叫端要讓店員看見原因。 */
   function startCheckout(): boolean {
     // 購物車尚未定案（還在確認有沒有未結完的單／正在還原）→ 一律不送出。
-    if (restoring || restorePending) {
-      setNotice(
-        restoring
-          ? "正在恢復上一筆購物車，稍候再按結帳。"
-          : "正在確認有沒有未結完的購物車，稍候再按結帳。",
-      );
+    const blocked = checkoutBlockedReason();
+    if (blocked !== null) {
+      setNotice(blocked);
       return false;
     }
     checkout.mutate();
@@ -2281,12 +2308,7 @@ export default function PosPage() {
         onCartChange={setDisplayCart}
         onSyncDirtyChange={setCartSyncDirty}
         onRestorePendingChange={setRestorePending}
-        onStaleRestoreDiscarded={(itemCount) =>
-          setNotice(
-            `顧客螢幕上另有一筆未完成的購物車（${itemCount} 件），已被目前畫面取代。` +
-              "若那筆才是要結的，請作廢本畫面內容並重新掃描。",
-          )
-        }
+        onStaleRestoreDiscarded={handleStaleRestoreDiscarded}
       />
       {staleKitchen.map((item) => (
         <p key={item.saleId} role="alert" className="form-error pos-kitchen-stale">
@@ -2396,15 +2418,16 @@ export default function PosPage() {
                               value={line.qty}
                               aria-label={`${line.description} 數量`}
                               disabled={cartMutationLocked}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                markCartEdited();
                                 setLines(
                                   setQty(
                                     lines,
                                     line.key,
                                     parseNtd(e.target.value) ?? 1,
                                   ),
-                                )
-                              }
+                                );
+                              }}
                             />
                           )}
                         </td>
@@ -2419,7 +2442,10 @@ export default function PosPage() {
                               aria-label={`取消贈品 ${line.description}`}
                               disabled={cartMutationLocked}
                               onClick={() =>
-                                setLines(unmarkGift(lines, line.key))
+                                {
+                                  markCartEdited();
+                                  setLines(unmarkGift(lines, line.key));
+                                }
                               }
                             >
                               取消贈品
@@ -2456,6 +2482,7 @@ export default function PosPage() {
                             disabled={cartMutationLocked}
                             onClick={() => {
                               const next = removeLine(lines, line.key);
+                              markCartEdited();
                               setLines(next);
                               // 移除最後一筆餐飲 → 清空內用/外帶，否則純二手的單會
                               // 帶著桌號送出（後端 422）。在這裡清而不是用 effect：
@@ -2484,6 +2511,7 @@ export default function PosPage() {
             }
             onCancel={() => setGiftTargetKey(null)}
             onConfirm={(reasonId, note) => {
+              markCartEdited();
               setLines(
                 markAsGift(lines, giftTargetKey, {
                   reasonId,
@@ -2510,6 +2538,7 @@ export default function PosPage() {
               setDiscountScopeIsOrder(false);
             }}
             onConfirm={(draft) => {
+              markCartEdited();
               setDiscountDrafts((prev) => [
                 ...prev,
                 {
@@ -3028,15 +3057,27 @@ export default function PosPage() {
                 </li>
               ))}
             </ul>
+            {noteDialogBlocked !== null && (
+              <p role="alert" className="form-error">
+                {noteDialogBlocked}
+              </p>
+            )}
             <div className="pos-dialog-actions">
               <button
                 type="button"
                 className="btn-primary"
                 onClick={() => {
                   // 擋下時保留對話框開著：關掉又什麼都沒發生，收銀台上看起來像當機。
-                  if (!startCheckout()) return;
+                  // 原因要印在對話框**裡面**——左欄的 notice 被遮罩蓋住看不到。
+                  const blocked = checkoutBlockedReason();
+                  if (blocked !== null) {
+                    setNoteDialogBlocked(blocked);
+                    return;
+                  }
+                  setNoteDialogBlocked(null);
                   setNoteAck(noteFingerprint);
                   setNoteDialogOpen(false);
+                  checkout.mutate();
                 }}
               >
                 已確認，繼續結帳
@@ -3044,7 +3085,10 @@ export default function PosPage() {
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => setNoteDialogOpen(false)}
+                onClick={() => {
+                  setNoteDialogBlocked(null);
+                  setNoteDialogOpen(false);
+                }}
               >
                 回購物車
               </button>
