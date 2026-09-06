@@ -350,6 +350,24 @@ class TestStatusIncludesInvoicePrinter:
         assert mock_conn.call_count == 2
 
 
+def test_call_ticket_ascii_label_is_byte_identical_on_both_printers() -> None:
+    """ASCII label 在兩台不同字型 ROM 的機器上必須產出**完全相同的位元組**。
+
+    這是 ASCII 限制成立的根據：Big5 與 GB18030 都是 ASCII 的超集，0x20–0x7E 兩邊一致，
+    所以號碼不受「編碼隨機器走」影響。若哪天這個前提不成立（換了字型 ROM／改用其他
+    編碼），這支測試會先紅，而不是等客人拿到亂碼的號碼牌。
+    """
+    big5_buf, gbk_buf = FakePrinter(), FakePrinter()
+    EscposReceiptPrinter(big5_buf).print_call_ticket(_CALL_TICKET)
+    EscposReceiptPrinter(gbk_buf, encoding="gbk").print_call_ticket(_CALL_TICKET)
+    big5_bytes, gbk_bytes = bytes(big5_buf.buffer), bytes(gbk_buf.buffer)
+    # 整份不同（中文的「候位號碼」「王小明」隨機器編碼）
+    assert big5_bytes != gbk_bytes
+    # 但**號碼那段**（三倍字、單位元組模式）兩邊必須一模一樣
+    assert _CALL_TICKET.label.encode("ascii") in big5_bytes
+    assert _CALL_TICKET.label.encode("ascii") in gbk_bytes
+
+
 def test_call_ticket_label_must_be_ascii() -> None:
     """label 走三倍字（單位元組模式），中文會印成亂碼——在邊界擋下而不是印出垃圾。"""
     with pytest.raises(ValidationError):
