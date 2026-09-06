@@ -10,7 +10,12 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator, model_validator
 
 from app.core.money import ensure_ntd_fits_numeric_12, format_ntd
-from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
+from app.modules.sales.inputs import (
+    CARRIER_TYPE_MOBILE,
+    InvoiceInfoInput,
+    SaleLineInput,
+    TenderInput,
+)
 from app.modules.sales.models import Sale, SaleLine, SaleTender
 from app.modules.sales.pricing import DiscountRequest
 from app.shared.enums import (
@@ -162,7 +167,7 @@ class SaleInvoiceInfoRequest(BaseModel):
         return InvoiceInfoInput(
             buyer_tax_id=self.buyer_tax_id,
             buyer_name=self.buyer_name,
-            carrier_type="3J0002" if self.mobile_carrier is not None else None,
+            carrier_type=CARRIER_TYPE_MOBILE if self.mobile_carrier is not None else None,
             carrier_id=self.mobile_carrier,
             npoban=self.npoban,
         )

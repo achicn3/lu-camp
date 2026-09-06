@@ -6,13 +6,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { components } from "@/lib/api-types";
+// **與畫面共用同一份述詞**：測試自己抄一份的話，把 page.tsx 的提示整塊刪掉測試照樣綠。
+import { showsLinePayCarrierNote as showsCarrierNote } from "@/lib/invoice-carrier-note";
 
 type InvoiceRead = components["schemas"]["InvoiceRead"];
-
-/** 完成畫面顯示載具提示的條件：發票有載具，而店員的載具欄是空的（＝自動帶入的）。 */
-function showsCarrierNote(invoice: InvoiceRead | null, clerkCarrierInput: string): boolean {
-  return invoice != null && invoice.carrier_id != null && clerkCarrierInput === "";
-}
 
 const withCarrier = { carrier_id: "/ABC1234" } as InvoiceRead;
 const withoutCarrier = { carrier_id: null } as InvoiceRead;

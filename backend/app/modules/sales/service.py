@@ -37,6 +37,7 @@ from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.sales import linepay as sales_linepay
 from app.modules.sales.inputs import (
+    CARRIER_TYPE_MOBILE,
     LINEPAY_RETURN_RECOVERY_KIND,
     InvoiceInfoInput,
     LinePayReturnRecovery,
@@ -1216,7 +1217,9 @@ class SalesService:
                 and info.carrier_id is None
                 and info.npoban is None
             ):
-                info = replace(info, carrier_type="3J0002", carrier_id=linepay_carrier)
+                info = replace(
+                    info, carrier_type=CARRIER_TYPE_MOBILE, carrier_id=linepay_carrier
+                )
             is_b2b = info.buyer_tax_id is not None
             donate = info.npoban is not None
             has_carrier = info.carrier_type is not None and info.carrier_id is not None
@@ -1295,7 +1298,6 @@ class SalesService:
         reconciled_linepay_result: LinePayResult | None = None,
         linepay_attempt: LinePayAttemptState | None = None,
     ) -> str | None:
-        """@return LINE Pay 帶回的電子發票載具（沒有就是 None），供發票資訊補上。"""
         """落地收款：現金入錢櫃 SALE_IN、購物金扣帳本 DEBIT、行動支付僅記 tender（非現金、不進
         抽屜，docs/30），並記 sale_tenders（含手續費快照）。
 
@@ -1306,6 +1308,8 @@ class SalesService:
         手續費（docs/30 裁示：獨立支出行）：LINE_PAY/TAIWAN_PAY 依 settings 費率於當下快照
         `fee = round_ntd(amount × fee_pct)`，記於 sale_tenders.fee_amount（店家成本，不減 amount）。
         LINE Pay 的 API 授權（fail-closed）由 P2 於此加入；本階段 TAIWAN_PAY 免 API。
+
+        @return LINE Pay 帶回的電子發票載具（沒有就是 None），供發票資訊補上。
         """
         linepay_carrier: str | None = None
         for tender in sorted(plan, key=lambda t: 0 if t.tender_type == TenderType.CASH else 1):
@@ -1449,7 +1453,11 @@ class SalesService:
                 raw_response=result.raw,
             )
         )
-        # 客人綁在 LINE Pay 上的載具（沒綁、或商店未申請開通 merchantReference 就是 None）。
+        # 客人綁在 LINE Pay 上的載具。以下三種情況都是 None，都不是異常：
+        #   1. 客人沒綁；
+        #   2. 商店未向 LINE Pay 申請開通 merchantReference（TW only，需申請）；
+        #   3. **走 check 重用或對帳補單**——那條路的 result 來自 parse_check_result，
+        #      而 check 回應是否含 merchantReference 官方沒寫，故刻意不解析、不臆測欄位。
         return result.mobile_carrier
 
     async def _refund_line_pay_for_sale(

@@ -65,6 +65,7 @@ import {
 } from "@/lib/agent";
 import { fetchSignaturePngBase64 } from "@/lib/signature";
 import { api } from "@/lib/api";
+import { showsLinePayCarrierNote } from "@/lib/invoice-carrier-note";
 import { decodeSession } from "@/lib/auth";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd, roundNtdByRate } from "@/lib/money";
@@ -2258,9 +2259,7 @@ export default function PosPage() {
                   重試開立
                 </button>
               )}
-              {completedInvoice != null &&
-                completedInvoice.carrier_id != null &&
-                invCarrier === "" && (
+              {showsLinePayCarrierNote(completedInvoice, invCarrier) && (
                   // 店員沒打載具、發票卻有 → 是從客人的 LINE Pay 自動帶入的。
                   // （統編/捐贈與載具至多擇一，選了那兩者發票就不會有 carrier_id。）
                   // **一定要講**：有載具就不印紙本，客人沒看到紙會以為沒開發票；

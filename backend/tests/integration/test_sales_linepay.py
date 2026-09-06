@@ -1191,6 +1191,25 @@ async def test_linepay_carrier_does_not_override_buyer_tax_id(
 
 
 @pytest.mark.asyncio
+async def test_linepay_carrier_does_not_override_the_carrier_clerk_scanned(
+    db_session: AsyncSession,
+) -> None:
+    """店員已經掃了載具 → **不得**被 LINE Pay 帶回的另一個載具蓋掉。
+
+    三個守衛條件裡這條的後果最嚴重：發票會開到**別人的載具**去，事後必須作廢重開。
+    （客人拿自己的條碼給店員掃，代表他要的就是那一個；LINE Pay 綁的可能是舊的。）
+    """
+    invoice = await _linepay_sale_with_invoice(
+        db_session,
+        invoice_info=InvoiceInfoInput(carrier_type="3J0002", carrier_id="/XYZ7890"),
+        pay_resp=_PAY_SUCCESS_WITH_CARRIER,  # 回的是 /ABC1234
+        key="k-carrier-5",
+    )
+    assert invoice is not None
+    assert invoice.carrier_id == "/XYZ7890"
+
+
+@pytest.mark.asyncio
 async def test_linepay_carrier_does_not_override_donation(db_session: AsyncSession) -> None:
     """店員選了捐贈 → 不得被載具蓋掉（客人明確表示要捐）。"""
     invoice = await _linepay_sale_with_invoice(

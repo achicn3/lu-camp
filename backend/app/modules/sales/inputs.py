@@ -11,6 +11,11 @@ from app.shared.enums import SaleLineKind, SaleLineType, TenderType
 LINEPAY_RETURN_RECOVERY_KIND = "RETURN"
 
 
+# 手機條碼載具的 CarrierType（財政部代碼）。本系統**只開放手機條碼**（docs/24 §載具）——
+# 不支援自然人憑證或光貿會員載具，故此值為唯一。
+CARRIER_TYPE_MOBILE = "3J0002"
+
+
 @dataclass(frozen=True)
 class SaleLineInput:
     """一筆銷售明細輸入。依 line_type 擇一帶入參照：
