@@ -18,11 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.models import Contact
+from app.modules.einvoice.models import Invoice
 from app.modules.inventory.service import InventoryService
-from app.modules.sales.inputs import SaleLineInput, TenderInput
+from app.modules.sales.inputs import InvoiceInfoInput, SaleLineInput, TenderInput
 from app.modules.sales.linepay import LinePayClient, LinePayTransport
 from app.modules.sales.models import LinePayTransaction, Sale, SaleTender
 from app.modules.sales.service import SalesService
+from app.modules.settings.models import StoreSettings
 from app.modules.settings.schemas import SettingsUpdateRequest
 from app.modules.settings.service import StoreSettingsService
 from app.modules.store.models import Store
@@ -1099,3 +1101,116 @@ async def test_linepay_requires_one_time_key(db_session: AsyncSession) -> None:
             linepay_client=_client(transport),
             **cart_kwargs,
         )
+
+
+# ── 載具自動帶入（2026-09-06 裁示）────────────────────────────────────────────
+# LINE Pay 回應在 info.merchantReference.affiliateCards[] 帶回客人綁定的載具
+# （cardType == MOBILE_CARRIER）。三欄都沒填時自動採用，店員不用請客人再掃一次。
+_PAY_SUCCESS_WITH_CARRIER: dict[str, object] = {
+    "returnCode": "0000",
+    "returnMessage": "Success.",
+    "info": {
+        "transactionId": 2026071802368895010,
+        "orderId": "x",
+        "merchantReference": {
+            "affiliateCards": [
+                {"cardType": "MEMBERSHIP", "cardId": "M-1"},
+                {"cardType": "MOBILE_CARRIER", "cardId": "/ABC1234"},
+            ]
+        },
+    },
+}
+
+
+async def _linepay_sale_with_invoice(
+    db_session: AsyncSession,
+    *,
+    invoice_info: InvoiceInfoInput | None,
+    pay_resp: dict[str, object],
+    key: str,
+) -> Invoice | None:
+    """跑一筆啟用發票的 LINE Pay 交易，回傳建立的發票（沒開就是 None）。"""
+    store_id, clerk_id = await _seed(db_session)
+    # 直接改設定列而非走 update_settings：後者對啟用電子發票有前置檢查（AMEGO 金鑰、
+    # 店家統編），那些與本測試要驗的載具帶入無關。其他發票測試亦採同一做法。
+    settings_row = await db_session.scalar(
+        select(StoreSettings).where(StoreSettings.store_id == store_id)
+    )
+    assert settings_row is not None
+    settings_row.einvoice_enabled = True
+    await db_session.flush()
+    await _seed_item(db_session, store_id, code=f"S-{key}", price="1000")
+    lines = _line(f"S-{key}")
+    tenders = _tender("1000")
+    cart_kwargs = await _linepay_cart_kwargs(
+        db_session, store_id=store_id, clerk_id=clerk_id, lines=lines, tenders=tenders
+    )
+    sale = await SalesService(db_session).create_sale(
+        store_id,
+        clerk_id,
+        lines=lines,
+        tenders=tenders,
+        idempotency_key=key,
+        linepay_client=_client(ScriptedTransport(check_resp=_CHECK_NOT_FOUND, pay_resp=pay_resp)),
+        invoice_info=invoice_info,
+        **cart_kwargs,
+    )
+    invoice: Invoice | None = await db_session.scalar(
+        select(Invoice).where(Invoice.sale_id == sale.id)
+    )
+    return invoice
+
+
+@pytest.mark.asyncio
+async def test_linepay_carrier_is_used_when_clerk_chose_nothing(
+    db_session: AsyncSession,
+) -> None:
+    """三欄都空白 → 用 LINE Pay 帶回的載具開發票（店員不必請客人再掃一次）。"""
+    invoice = await _linepay_sale_with_invoice(
+        db_session, invoice_info=None, pay_resp=_PAY_SUCCESS_WITH_CARRIER, key="k-carrier-1"
+    )
+    assert invoice is not None
+    assert invoice.carrier_id == "/ABC1234"
+    assert invoice.carrier_type == "3J0002"
+
+
+@pytest.mark.asyncio
+async def test_linepay_carrier_does_not_override_buyer_tax_id(
+    db_session: AsyncSession,
+) -> None:
+    """店員打了統編（B2B）→ **不得**被載具蓋掉。三者至多擇一，客人要的是統一編號。"""
+    invoice = await _linepay_sale_with_invoice(
+        db_session,
+        invoice_info=InvoiceInfoInput(buyer_tax_id="12345678", buyer_name="某某公司"),
+        pay_resp=_PAY_SUCCESS_WITH_CARRIER,
+        key="k-carrier-2",
+    )
+    assert invoice is not None
+    assert invoice.buyer_tax_id == "12345678"
+    assert invoice.carrier_id is None
+
+
+@pytest.mark.asyncio
+async def test_linepay_carrier_does_not_override_donation(db_session: AsyncSession) -> None:
+    """店員選了捐贈 → 不得被載具蓋掉（客人明確表示要捐）。"""
+    invoice = await _linepay_sale_with_invoice(
+        db_session,
+        invoice_info=InvoiceInfoInput(npoban="123"),
+        pay_resp=_PAY_SUCCESS_WITH_CARRIER,
+        key="k-carrier-3",
+    )
+    assert invoice is not None
+    assert invoice.npoban == "123"
+    assert invoice.carrier_id is None
+
+
+@pytest.mark.asyncio
+async def test_linepay_without_carrier_leaves_invoice_untouched(
+    db_session: AsyncSession,
+) -> None:
+    """沒綁載具（或商店未申請開通 merchantReference）→ 照舊開 B2C，不得亂帶。"""
+    invoice = await _linepay_sale_with_invoice(
+        db_session, invoice_info=None, pay_resp=_PAY_SUCCESS, key="k-carrier-4"
+    )
+    assert invoice is not None
+    assert invoice.carrier_id is None

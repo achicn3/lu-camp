@@ -23,6 +23,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -115,6 +116,8 @@ class LinePayResult:
     status: str | None  # check 的 info.status（COMPLETE/FAIL/CANCEL/AUTH_READY）；pay 無
     raw: dict[str, object]  # 原始回應（對帳存證，落 linepay_transactions.raw_response）
     amount: Decimal | None = None  # check 的 Σ info.payInfo[].amount（供 check-first 金額比對）
+    # 客人綁在 LINE Pay 上的手機條碼載具（見 _mobile_carrier）。沒有就是 None。
+    mobile_carrier: str | None = None
 
     @property
     def is_success(self) -> bool:
@@ -136,6 +139,55 @@ def _transaction_id_str(info: object) -> str | None:
     return str(tx)
 
 
+# 手機條碼載具的**碼身**：7 碼（數字/大寫英文/+-.）。標準寫法帶前導 `/`
+# （與 SaleInvoiceInfoRequest 同一套），但 LINE Pay 回哪一種無從得知——見 _mobile_carrier。
+_CARRIER_BODY_RE = re.compile(r"^[0-9A-Z+\-.]{7}$")
+_CARD_TYPE_MOBILE_CARRIER = "MOBILE_CARRIER"
+
+
+def _mobile_carrier(info: object) -> str | None:
+    """從 `info.merchantReference.affiliateCards[]` 取出客人綁定的載具。
+
+    客人的 LINE Pay 綁了載具時，那張卡會以 `cardType == "MOBILE_CARRIER"` 出現，
+    `cardId` 就是載具號碼——有它就不必請客人再掃一次載具條碼（2026-09-06 裁示）。
+
+    依官方文件（Offline API v4「付款請求」回應，2026-09-06 查閱）：
+    - `merchantReference` 標示 **TW only**，且「欲使用此欄位，請聯絡 LINE Pay 負責人」
+      ——**未申請開通就不會回傳**，且僅在「該交易用戶符合該合作商店載具或會員卡類型」
+      時才包含。所以取不到是常態，不是異常。
+    - `cardType == "MOBILE_CARRIER"` 時，載具資訊在 `cardId`；**其他類型由各合作商店
+      自行定義**，故只能精確比對這個字串，不可做模糊匹配。
+
+    **格式一律正規化**：文件只說 `cardId` 是 String，**沒有規定格式**。台灣手機條碼載具的
+    標準寫法是 `/`＋7 碼，但 LINE Pay 回的是哪一種無從得知——若硬性要求帶斜線，回不帶
+    斜線時**每一個正確的載具都會被擋掉**，功能安靜地永遠不生效。故兩種都收、統一補上斜線。
+
+    真的不成形的（小寫、長度不對、非法字元）仍一律回 None：寧可讓店員自己掃，也不能把
+    不合格的字送去開發票——那會開出一張載具錯誤的發票，事後得作廢重開。
+    付款本身已經成功了，解析失敗絕不能讓交易看起來失敗。
+    """
+    if not isinstance(info, dict):
+        return None
+    reference = info.get("merchantReference")
+    if not isinstance(reference, dict):
+        return None
+    cards = reference.get("affiliateCards")
+    if not isinstance(cards, list):
+        return None
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        if card.get("cardType") != _CARD_TYPE_MOBILE_CARRIER:
+            continue
+        card_id = card.get("cardId")
+        if not isinstance(card_id, str):
+            continue
+        body = card_id.strip().removeprefix("/")
+        if _CARRIER_BODY_RE.match(body):
+            return f"/{body}"
+    return None
+
+
 def parse_pay_result(resp: dict[str, object]) -> LinePayResult:
     """oneTimeKeys/pay 回應解析。成功（0000）必含 info.transactionId，缺則視為傳輸不可信。"""
     code = str(resp.get("returnCode") or "")
@@ -145,7 +197,12 @@ def parse_pay_result(resp: dict[str, object]) -> LinePayResult:
     if code == RETURN_CODE_SUCCESS and tx is None:
         raise LinePayTransportError("LINE Pay pay 回 0000 但缺 transactionId（結果不可信）")
     return LinePayResult(
-        return_code=code, return_message=message, transaction_id=tx, status=None, raw=resp
+        return_code=code,
+        return_message=message,
+        transaction_id=tx,
+        status=None,
+        raw=resp,
+        mobile_carrier=_mobile_carrier(info),
     )
 
 

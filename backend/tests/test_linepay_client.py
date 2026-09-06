@@ -235,3 +235,103 @@ async def test_client_refund_posts_amount_to_order_path() -> None:
     assert transport.url.endswith("/v4/payments/orders/LP-1-abc/refund")
     assert transport.body is not None
     assert json.loads(transport.body)["refundAmount"] == 250
+
+
+# ── 載具自動帶入（2026-09-06 裁示）────────────────────────────────────────────
+# 客人的 LINE Pay 綁了載具時，回應會在 info.merchantReference.affiliateCards[] 帶回來，
+# cardType == MOBILE_CARRIER 那筆的 cardId 就是載具。有它就不必請客人再掃一次載具條碼。
+def _pay_resp(cards: object) -> dict[str, object]:
+    return {
+        "returnCode": "0000",
+        "returnMessage": "Success.",
+        "info": {
+            "transactionId": 2026071802368895010,
+            "orderId": "LP-1-x",
+            "merchantReference": {"affiliateCards": cards},
+        },
+    }
+
+
+def test_parse_pay_result_extracts_mobile_carrier() -> None:
+    r = parse_pay_result(
+        _pay_resp([{"cardType": "MOBILE_CARRIER", "cardId": "/ABC1234"}])
+    )
+    assert r.mobile_carrier == "/ABC1234"
+
+
+def test_parse_pay_result_picks_the_carrier_among_other_cards() -> None:
+    """卡片可能有好幾張（會員卡、集點卡…），只認 MOBILE_CARRIER 那張。"""
+    r = parse_pay_result(
+        _pay_resp(
+            [
+                {"cardType": "MEMBERSHIP", "cardId": "M-999"},
+                {"cardType": "MOBILE_CARRIER", "cardId": "/ABC1234"},
+                {"cardType": "POINT", "cardId": "P-1"},
+            ]
+        )
+    )
+    assert r.mobile_carrier == "/ABC1234"
+
+
+def test_parse_pay_result_without_carrier_is_none() -> None:
+    """沒綁載具、或整個欄位不存在（文件未載明，不可假設一定回傳）→ None。"""
+    assert parse_pay_result(_pay_resp([])).mobile_carrier is None
+    only_member = _pay_resp([{"cardType": "MEMBERSHIP", "cardId": "M-1"}])
+    assert parse_pay_result(only_member).mobile_carrier is None
+    assert (
+        parse_pay_result(
+            {
+                "returnCode": "0000",
+                "returnMessage": "Success.",
+                "info": {"transactionId": 1, "orderId": "x"},
+            }
+        ).mobile_carrier
+        is None
+    )
+
+
+def test_parse_pay_result_accepts_carrier_with_or_without_leading_slash() -> None:
+    """**兩種寫法都要收**，並一律正規化成帶斜線的標準格式。
+
+    官方文件只說 `cardId` 是 String、說明「電子發票載具或會員卡ID」，**沒有規定格式**
+    （2026-09-06 實際文件確認）。台灣手機條碼載具的標準寫法是 `/`＋7 碼，但 LINE Pay
+    回的是哪一種無從得知。若硬性要求帶斜線，回不帶斜線時**每一個正確的載具都會被擋掉**，
+    功能安靜地永遠不生效——這比擋錯一次嚴重得多。
+    """
+    def carrier(card_id: str) -> str | None:
+        return parse_pay_result(
+            _pay_resp([{"cardType": "MOBILE_CARRIER", "cardId": card_id}])
+        ).mobile_carrier
+
+    assert carrier("/ABC1234") == "/ABC1234"
+    assert carrier("ABC1234") == "/ABC1234"
+    assert carrier(" /ABC1234 ") == "/ABC1234"  # 前後空白也修掉（外部系統常見）
+
+
+def test_parse_pay_result_rejects_malformed_carrier() -> None:
+    """真的不成形的一律當成沒有——寧可讓店員自己掃，也不能把不合格的字送去開發票，
+    那會開出一張載具錯誤的發票，事後得作廢重開。
+
+    載具＝7 碼（數字／大寫英文／`+-.`）。小寫、長度不對、含非法字元都不收。
+    """
+    bad_ids: list[object] = [
+        "/abc1234", "/ABC12345", "/ABC123", "ABC123", "ABC12345", "", "/", None, 12345,
+    ]
+    for bad in bad_ids:
+        resp = _pay_resp([{"cardType": "MOBILE_CARRIER", "cardId": bad}])
+        assert parse_pay_result(resp).mobile_carrier is None
+
+
+def test_parse_pay_result_survives_junk_shapes() -> None:
+    """欄位形狀不如預期時不得炸——付款已經成功了，解析載具失敗不該讓交易看起來失敗。"""
+    junk_shapes: list[object] = [
+        "not-a-list", {"a": 1}, [None], ["x"], [{"cardType": "MOBILE_CARRIER"}],
+    ]
+    for junk in junk_shapes:
+        assert parse_pay_result(_pay_resp(junk)).mobile_carrier is None
+    weird: dict[str, object] = {
+        "returnCode": "0000",
+        "returnMessage": "Success.",
+        "info": {"transactionId": 1, "merchantReference": "not-a-dict"},
+    }
+    assert parse_pay_result(weird).mobile_carrier is None

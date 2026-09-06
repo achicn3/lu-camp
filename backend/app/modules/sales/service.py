@@ -1146,7 +1146,7 @@ class SalesService:
 
         # 收款副作用（§3.2）：現金 tender → 錢櫃 SALE_IN（現金部分，非全額）；
         # 購物金 tender → 帳本 DEBIT（買方）。發票/稅/點數不受 tender 組成影響。
-        await self._apply_tenders(
+        linepay_carrier = await self._apply_tenders(
             store_id,
             sale,
             plan,
@@ -1205,6 +1205,18 @@ class SalesService:
         # 就沒有可開立的憑證。銷售本身仍完整記錄，invoice_status 維持 NOT_ISSUED。
         if settings.einvoice_enabled and total > 0:
             info = invoice_info if invoice_info is not None else InvoiceInfoInput()
+            # LINE Pay 帶回客人綁定的載具時自動採用——**但只在店員三欄都沒填時**
+            # （2026-09-06 裁示）。統編/載具/捐贈碼至多擇一，店員已經選過的是客人明確
+            # 要求的，不得被蓋掉。載具格式已在 linepay 解析層驗過（見 _mobile_carrier）；
+            # 沒帶回或格式不合就維持原樣，走既有的兩條路：店員請客人出示條碼補掃，
+            # 或直接開 B2C 並印出證明聯。
+            if (
+                linepay_carrier is not None
+                and info.buyer_tax_id is None
+                and info.carrier_id is None
+                and info.npoban is None
+            ):
+                info = replace(info, carrier_type="3J0002", carrier_id=linepay_carrier)
             is_b2b = info.buyer_tax_id is not None
             donate = info.npoban is not None
             has_carrier = info.carrier_type is not None and info.carrier_id is not None
@@ -1282,7 +1294,8 @@ class SalesService:
         reconciled_linepay_order_id: str | None = None,
         reconciled_linepay_result: LinePayResult | None = None,
         linepay_attempt: LinePayAttemptState | None = None,
-    ) -> None:
+    ) -> str | None:
+        """@return LINE Pay 帶回的電子發票載具（沒有就是 None），供發票資訊補上。"""
         """落地收款：現金入錢櫃 SALE_IN、購物金扣帳本 DEBIT、行動支付僅記 tender（非現金、不進
         抽屜，docs/30），並記 sale_tenders（含手續費快照）。
 
@@ -1294,6 +1307,7 @@ class SalesService:
         `fee = round_ntd(amount × fee_pct)`，記於 sale_tenders.fee_amount（店家成本，不減 amount）。
         LINE Pay 的 API 授權（fail-closed）由 P2 於此加入；本階段 TAIWAN_PAY 免 API。
         """
+        linepay_carrier: str | None = None
         for tender in sorted(plan, key=lambda t: 0 if t.tender_type == TenderType.CASH else 1):
             fee = Decimal(0)
             if tender.tender_type == TenderType.CASH:
@@ -1322,7 +1336,7 @@ class SalesService:
                 # 非現金、不進抽屜；手續費快照為店家成本。API 授權（fail-closed）見下。
                 fee = Decimal(round_ntd(tender.amount * settings.linepay_fee_pct))
                 assert idempotency_key is not None  # create_sale 已於前置守衛強制
-                await self._charge_line_pay(
+                carrier = await self._charge_line_pay(
                     store_id,
                     sale,
                     tender,
@@ -1332,6 +1346,8 @@ class SalesService:
                     reconciled_result=reconciled_linepay_result,
                     attempt_state=linepay_attempt,
                 )
+                if carrier is not None:
+                    linepay_carrier = carrier
             await self._repo.add_tender(
                 SaleTender(
                     store_id=store_id,
@@ -1341,6 +1357,7 @@ class SalesService:
                     fee_amount=fee,
                 )
             )
+        return linepay_carrier
 
     async def _charge_line_pay(
         self,
@@ -1353,8 +1370,10 @@ class SalesService:
         order_id_override: str | None = None,
         reconciled_result: LinePayResult | None = None,
         attempt_state: LinePayAttemptState | None = None,
-    ) -> None:
+    ) -> str | None:
         """LINE Pay Offline v4 收款（fail-closed、冪等；docs/30 §4）。
+
+        @return 客人綁在 LINE Pay 上的電子發票載具（沒有就是 None）。見 linepay._mobile_carrier。
 
         orderId 由 (store, 冪等鍵) 確定性導出——rollback/retry 恆同號。**check-first**：先向平台
         查此 orderId：
@@ -1430,6 +1449,8 @@ class SalesService:
                 raw_response=result.raw,
             )
         )
+        # 客人綁在 LINE Pay 上的載具（沒綁、或商店未申請開通 merchantReference 就是 None）。
+        return result.mobile_carrier
 
     async def _refund_line_pay_for_sale(
         self, store_id: int, sale_id: int, client: LinePayClient | None

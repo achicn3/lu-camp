@@ -3648,3 +3648,12 @@ body {
 .acq-row-grid .acq-note {
   grid-column: 1 / -1;
 }
+
+/* 自動帶入 LINE Pay 載具的提示：有載具就不印紙本，客人沒看到紙會以為沒開發票，
+   所以這句一定要看得到。 */
+.pos-invoice-carrier-note {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--info);
+  overflow-wrap: anywhere;
+}
