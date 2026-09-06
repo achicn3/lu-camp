@@ -25,6 +25,7 @@ from agent.drivers.signature_png import signature_rows
 from agent.escpos_printer import ESC, FS, GS, SupportsWrite
 from agent.interfaces import (
     AcquisitionReceiptPayload,
+    CallTicketPayload,
     InvoicePayload,
     KitchenTicketPayload,
     SaleLinePayload,
@@ -49,6 +50,10 @@ _EXIT_CHINESE = FS + b"."
 # 後兩者粗體；雙倍字（24×2 dots = 6mm）達標。GS ! 控 ASCII、FS W 控中文（Big5）字級。
 _DOUBLE_ON = GS + b"!" + bytes([0x11]) + FS + b"W" + bytes([1])
 _DOUBLE_OFF = GS + b"!" + bytes([0x00]) + FS + b"W" + bytes([0])
+# 號碼牌的號碼專用：三倍寬高（GS ! 高低位＝倍率-1）。客人是拿在手上、隔著距離看，
+# 與內文同字級等於沒印；中文另有 FS W 只有單/雙兩級，故僅用於 ASCII 的號碼本身。
+_TRIPLE_ON = GS + b"!" + bytes([0x22])
+_TRIPLE_OFF = GS + b"!" + bytes([0x00])
 _BOLD_ON = ESC + b"E" + bytes([1])
 _BOLD_OFF = ESC + b"E" + bytes([0])
 
@@ -317,6 +322,42 @@ class EscposReceiptPrinter:
         out += emit("賣方簽名：")
         out += _ALIGN_CENTER
         out += raster_command(signature_rows(receipt.signature_png_base64, max_width_dots=360))
+        out += _ALIGN_LEFT
+        out += _EXIT_CHINESE
+        out += _FEED_BEFORE_CUT
+        out += _CUT
+        self._writer.write(bytes(out))
+
+    def print_call_ticket(self, ticket: CallTicketPayload) -> None:
+        """列印號碼牌（docs/38）：放到最大的號碼＋稱呼＋登記時間。
+
+        **無店家抬頭、無金額**——客人就站在店裡，這只是候位憑據。號碼用三倍字：
+        客人拿在手上、店員在櫃檯喊號，兩邊都要一眼看得到。
+        """
+        emit = self._emit
+        out = bytearray()
+        out += _INIT
+        out += _SET_PRINT_AREA
+        out += _ENTER_CHINESE
+        out += _ALIGN_CENTER
+        out += _DOUBLE_ON + emit("候位號碼") + _DOUBLE_OFF
+        out += emit("")
+        # 號碼是 ASCII（#7 / 8-18 #7），走 GS ! 三倍字；中文的 FS W 只有單雙兩級。
+        out += _EXIT_CHINESE
+        out += _TRIPLE_ON + emit(ticket.label) + _TRIPLE_OFF
+        out += _ENTER_CHINESE
+        out += emit("")
+        out += _DOUBLE_ON + emit(ticket.name) + _DOUBLE_OFF
+        out += _ALIGN_LEFT
+        out += emit(_SEP)
+        local_created_at = (
+            ticket.created_at.replace(tzinfo=UTC)
+            if ticket.created_at.tzinfo is None
+            else ticket.created_at
+        ).astimezone(_STORE_TZ)
+        out += _ALIGN_CENTER
+        out += emit(f"登記時間 {local_created_at.strftime('%m-%d %H:%M')}")
+        out += emit("請留意櫃檯叫號")
         out += _ALIGN_LEFT
         out += _EXIT_CHINESE
         out += _FEED_BEFORE_CUT

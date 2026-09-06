@@ -5,10 +5,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Pagination } from "@/features/common/Pagination";
+import { printCallTicket } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
 import {
+  CALL_TICKET_HISTORY_PAGE_SIZE,
   CALL_TICKET_PAGE_SIZE,
   isSafeExternalLink,
   ticketLabel,
@@ -33,16 +36,55 @@ export default function CallTicketsPage() {
   // **裁示「資料留著」的落點**：沒有這個開關，完成的單就只剩 API 撈得到——
   // 等於資料留了也找不回來（後端做好、UI 走不到，是本專案已經犯過的錯）。
   const [showDone, setShowDone] = useState(false);
+  /** 歷史檢視的頁碼（候位中不分頁——一天不會有幾十組人同時在等）。 */
+  const [page, setPage] = useState(0);
+  /** 只看某一天（台北營業日）。空字串＝不限日期。 */
+  const [dateFilter, setDateFilter] = useState("");
   // 剛取到的號碼——這個數字是要喊出口的，取號後大大地顯示出來。
   const [justIssued, setJustIssued] = useState<CallTicket | null>(null);
+  /**
+   * 列印號碼牌給客人拿。走收據機（不是發票機）。
+   *
+   * 失敗**不擋任何事**：號碼早就配出去了、清單上也看得到，紙只是給客人拿在手上的輔助。
+   * 印表機沒紙或代理離線時提示店員即可，不該讓叫號作業停下來。
+   */
+  const printTicket = useMutation({
+    mutationFn: async (ticket: CallTicket) => {
+      await printCallTicket({
+        storeId: ticket.store_id,
+        ticketNo: ticket.ticket_no,
+        label: ticketLabel(ticket),
+        name: ticket.name,
+        createdAt: ticket.created_at,
+      });
+    },
+    onSuccess: () => setError(null),
+    onError: (e: Error) =>
+      setError(`號碼牌列印失敗：${e.message}（號碼已登記，可稍後補印）`),
+  });
 
+  // 候位中一頁看完（不分頁）；歷史每頁小一點，翻頁才有意義。
+  const pageSize = showDone ? CALL_TICKET_HISTORY_PAGE_SIZE : CALL_TICKET_PAGE_SIZE;
   const tickets = useQuery({
-    queryKey: ["call-tickets", showDone ? "all" : "waiting"],
+    queryKey: [
+      "call-tickets",
+      showDone ? "all" : "waiting",
+      showDone ? page : 0,
+      dateFilter,
+    ],
     queryFn: async () => {
       // **明確帶上限**：預設 100 而清單是舊的排前面，若累積超過 100 筆未完成，
       // 剛取號的客人反而不會出現在清單上。取後端上限 200，並在達上限時提示。
       const { data, error: err } = await api.GET("/api/v1/call-tickets", {
-        params: { query: { limit: CALL_TICKET_PAGE_SIZE, include_done: showDone } },
+        params: {
+          query: {
+            limit: pageSize,
+            include_done: showDone,
+            offset: showDone ? page * pageSize : 0,
+            // 空字串要送 undefined：送空字串會被後端當成格式錯誤的日期而 422。
+            ...(dateFilter === "" ? {} : { ticket_date: dateFilter }),
+          },
+        },
       });
       if (!data) throw new Error(extractDetail(err) ?? "讀取候位清單失敗");
       return data;
@@ -163,10 +205,28 @@ export default function CallTicketsPage() {
         <input
           type="checkbox"
           checked={showDone}
-          onChange={(e) => setShowDone(e.target.checked)}
+          onChange={(e) => {
+            // 切換檢視就回到第一頁——留在第 3 頁切過去會看到空白，像是資料不見了。
+            setPage(0);
+            setShowDone(e.target.checked);
+          }}
         />
         <span className="field-label">顯示已完成（可回頭找先前的表單連結）</span>
       </label>
+      {showDone && (
+        <label className="field call-ticket-date-filter">
+          <span className="field-label">只看某一天（不填＝全部，最近的先）</span>
+          <input
+            type="date"
+            aria-label="只看某一天"
+            value={dateFilter}
+            onChange={(e) => {
+              setPage(0);
+              setDateFilter(e.target.value);
+            }}
+          />
+        </label>
+      )}
       {tickets.isError && (
         <p role="alert" className="form-error">
           {(tickets.error as Error).message}
@@ -175,7 +235,7 @@ export default function CallTicketsPage() {
       {tickets.isSuccess && rows.length === 0 && (
         <p className="hint">{showDone ? "尚無任何叫號紀錄。" : "目前沒有人在候位。"}</p>
       )}
-      {rows.length >= CALL_TICKET_PAGE_SIZE && (
+      {!showDone && rows.length >= CALL_TICKET_PAGE_SIZE && (
         <p role="alert" className="form-error">
           候位中已達顯示上限 {CALL_TICKET_PAGE_SIZE} 筆，可能還有更多沒列出。
           請先把已處理完的按「完成」。
@@ -221,15 +281,27 @@ export default function CallTicketsPage() {
                     {/* 已完成的不再顯示「完成」——按了雖是冪等的，但畫面不該給出
                         一個什麼都不會改變的按鈕。 */}
                     {ticket.status === "WAITING" && (
-                      <button
-                        type="button"
-                        className="btn-ghost"
-                        aria-label={`完成叫號 ${ticket.ticket_no}`}
-                        disabled={complete.isPending}
-                        onClick={() => complete.mutate(ticket.id)}
-                      >
-                        完成
-                      </button>
+                      <>
+                        {/* 補印給客人拿：客人沒拿到、弄丟、或登記時印表機剛好沒紙。 */}
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          aria-label={`列印號碼牌 ${ticket.ticket_no}`}
+                          disabled={printTicket.isPending}
+                          onClick={() => printTicket.mutate(ticket)}
+                        >
+                          列印
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          aria-label={`完成叫號 ${ticket.ticket_no}`}
+                          disabled={complete.isPending}
+                          onClick={() => complete.mutate(ticket.id)}
+                        >
+                          完成
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>
@@ -237,6 +309,15 @@ export default function CallTicketsPage() {
             </tbody>
           </table>
           </div>
+          {/* 歷史才分頁：候位中一頁看完，翻頁反而讓店員找不到人。 */}
+          {showDone && (
+            <Pagination
+              page={page}
+              count={rows.length}
+              pageSize={CALL_TICKET_HISTORY_PAGE_SIZE}
+              onPage={setPage}
+            />
+          )}
         </div>
       )}
     </section>

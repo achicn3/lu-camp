@@ -12875,7 +12875,7 @@
     },
     "/api/v1/call-tickets": {
       "get": {
-        "description": "候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。",
+        "description": "候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。\n\n`ticket_date`（台北營業日）指定時改查那一天的全部，依取號順序——量大的日子\n才撈得完。搭配 `offset` 翻頁；不指定日期時 `offset` 也已能翻到歷史。",
         "operationId": "listCallTickets",
         "parameters": [
           {
@@ -12909,6 +12909,23 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ticket_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticket Date"
             }
           }
         ],

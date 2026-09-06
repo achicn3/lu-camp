@@ -159,6 +159,22 @@ class KitchenTicketLine(BaseModel):
     qty: int = Field(ge=1)
 
 
+class CallTicketPayload(BaseModel):
+    """號碼牌列印輸入（docs/38）：候位客人拿在手上的憑據。
+
+    比照出餐單**不帶店家抬頭**——客人就站在店裡，不需要店名/統編，也少一層對後端的
+    相依（`stores` 取不到就印不出號碼牌是說不過去的）。
+    `label` 是畫面上顯示的那串（今日為 `#7`、跨日未完成為 `8/18 #7`），由呼叫端決定，
+    印出來才會跟店員畫面上看到的一致。
+    """
+
+    store_id: int
+    ticket_no: int = Field(gt=0)
+    label: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=60)
+    created_at: datetime
+
+
 class KitchenTicketPayload(BaseModel):
     """出餐單列印輸入（docs/35）：結帳後給吧台/廚房核對出餐用的內部作業單。
 
@@ -332,6 +348,10 @@ class ReceiptPrinter(Protocol):
 
     def print_acquisition(self, receipt: AcquisitionReceiptPayload, header: StoreHeader) -> None:
         """列印收購憑證聯（docs/23 K6：切結品項/總額/撥款＋客戶簽名影像）。"""
+        ...
+
+    def print_call_ticket(self, ticket: CallTicketPayload) -> None:
+        """列印號碼牌（docs/38）。"""
         ...
 
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:

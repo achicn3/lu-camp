@@ -188,3 +188,75 @@ async def test_explicit_nulls_are_accepted(
     )
     assert resp.status_code == 201, resp.text
     assert (resp.json()["link"], resp.json()["note"]) == (None, None)
+
+
+async def test_history_paging_over_http_reaches_older_records(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """翻頁必須翻得到舊紀錄——原本歷史那半沒有 offset，第二頁會又回到最新那幾筆。
+
+    這是「超過一頁就撈不到」的實際樣子，用 HTTP 走一次確認端點層也對。
+    """
+    clerk, _, _ = await _seed(db_session)
+    done_ids: list[int] = []
+    for i in range(5):
+        body = (
+            await client.post(
+                "/api/v1/call-tickets", json={"name": f"完成{i}"}, headers=_auth(clerk)
+            )
+        ).json()
+        await client.post(
+            f"/api/v1/call-tickets/{body['id']}/complete", headers=_auth(clerk)
+        )
+        done_ids.append(body["id"])
+
+    seen: list[int] = []
+    for offset in (0, 2, 4):
+        page = (
+            await client.get(
+                f"/api/v1/call-tickets?include_done=true&limit=2&offset={offset}",
+                headers=_auth(clerk),
+            )
+        ).json()
+        seen += [t["id"] for t in page]
+    # 不重不漏，且順序是最近的先
+    assert seen == list(reversed(done_ids))
+
+
+async def test_filter_by_ticket_date_over_http(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """指定日期查那一天的全部；**當天也查得到**，別的日子查不到今天的。"""
+    clerk, _, _ = await _seed(db_session)
+    today_ticket = (
+        await client.post("/api/v1/call-tickets", json={"name": "今天"}, headers=_auth(clerk))
+    ).json()
+    today = today_ticket["ticket_date"]
+
+    same_day = (
+        await client.get(
+            f"/api/v1/call-tickets?include_done=true&ticket_date={today}",
+            headers=_auth(clerk),
+        )
+    ).json()
+    assert [t["id"] for t in same_day] == [today_ticket["id"]]
+
+    other_day = (
+        await client.get(
+            "/api/v1/call-tickets?include_done=true&ticket_date=2020-01-01",
+            headers=_auth(clerk),
+        )
+    ).json()
+    assert other_day == []
+
+
+async def test_bad_ticket_date_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """日期格式錯誤要在邊界擋下（422），不可默默忽略而回全部——那會讓店員以為
+    篩選生效、卻看到不相干的資料。"""
+    clerk, _, _ = await _seed(db_session)
+    resp = await client.get(
+        "/api/v1/call-tickets?ticket_date=not-a-date", headers=_auth(clerk)
+    )
+    assert resp.status_code == 422

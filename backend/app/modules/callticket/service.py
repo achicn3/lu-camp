@@ -1,6 +1,6 @@
 """叫號單 service（docs/38）：配號、完成、查詢。所有業務規則集中於此。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,9 +97,14 @@ class CallTicketService:
         include_done: bool = False,
         limit: int = 100,
         offset: int = 0,
+        ticket_date: date | None = None,
         now: datetime | None = None,
     ) -> list[CallTicket]:
-        """預設只回**今天**的待處理；`include_done=True` 供事後回頭找那個表單連結。"""
+        """預設只回**今天**的待處理；`include_done=True` 供事後回頭找那個表單連結。
+
+        `ticket_date` 指定時改查那一天的全部（依取號順序），供歷史查詢用——
+        沒有它的話，量一大就只能看到最近那一頁。
+        """
         moment = now if now is not None else utc_now()
         return await self._repo.list_tickets(
             store_id,
@@ -107,4 +112,5 @@ class CallTicketService:
             today=store_date(moment),
             limit=limit,
             offset=offset,
+            ticket_date=ticket_date,
         )

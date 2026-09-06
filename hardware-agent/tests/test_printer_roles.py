@@ -27,6 +27,7 @@ from agent.fakes import FakeReceiptPrinter
 from agent.interfaces import (
     AcquisitionReceiptItem,
     AcquisitionReceiptPayload,
+    CallTicketPayload,
     InvoicePayload,
     KitchenTicketLine,
     KitchenTicketPayload,
@@ -79,6 +80,13 @@ _TICKET = KitchenTicketPayload(
     created_at=datetime(2026, 8, 27, 3, 0, tzinfo=UTC),
     lines=[KitchenTicketLine(description="手沖耶加雪菲", qty=1)],
 )
+_CALL_TICKET = CallTicketPayload(
+    store_id=1,
+    ticket_no=7,
+    label="#7",
+    name="王小明",
+    created_at=datetime(2026, 8, 27, 3, 0, tzinfo=UTC),
+)
 _ACQUISITION = AcquisitionReceiptPayload(
     store_id=1,
     acquisition_id=7,
@@ -125,6 +133,16 @@ class TestPerPrinterEncoding:
         buffer = FakePrinter()
         EscposReceiptPrinter(buffer, encoding="gbk").print_kitchen_ticket(_TICKET)
         assert "出餐單".encode("gbk") in bytes(buffer.buffer)
+
+    def test_call_ticket_follows_the_printer_encoding(self) -> None:
+        """號碼牌也走收據機那台（GB18030），不可仍用 Big5——客人拿到的是整捲亂碼。"""
+        buffer = FakePrinter()
+        EscposReceiptPrinter(buffer, encoding="gbk").print_call_ticket(_CALL_TICKET)
+        written = bytes(buffer.buffer)
+        assert "候位號碼".encode("gbk") in written
+        assert "王小明".encode("gbk") in written
+        # 號碼本身是 ASCII，兩種編碼都一樣；重點是它有被印出來
+        assert b"#7" in written
 
     def test_unencodable_char_becomes_question_mark(self) -> None:
         """編不出的字退成 ?（看得出來），不得讓整張列印中斷。"""
@@ -329,3 +347,20 @@ class TestStatusIncludesInvoicePrinter:
         with _mock_tcp({"203.0.113.44": "ok", "203.0.113.42": "ok"}) as mock_conn:
             provider.poll()
         assert mock_conn.call_count == 2
+
+
+async def test_call_ticket_never_reaches_the_invoice_printer(
+    printers: tuple[FakeReceiptPrinter, FakeReceiptPrinter],
+) -> None:
+    """號碼牌是給客人的候位憑據，**不是發票**——發票專屬機只收證明聯（ADR-018）。
+
+    印錯機器不只是跑錯紙：`.42` 是 Big5 ROM、`.44` 是 GB18030，中文編碼隨機器走，
+    送錯台就是整捲亂碼。
+    """
+    receipt, invoice = printers
+    resp = await _post(
+        _app(receipt, invoice), "/print/call-ticket", _CALL_TICKET.model_dump(mode="json")
+    )
+    assert resp.status_code == 200
+    assert receipt.call_tickets == [_CALL_TICKET]
+    assert invoice.call_tickets == []

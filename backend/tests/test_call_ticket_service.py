@@ -6,7 +6,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.time import STORE_TIME_ZONE
+from app.core.time import STORE_TIME_ZONE, store_date
 from app.modules.callticket.service import CallTicketService
 from app.modules.store.models import Store
 from app.modules.user.models import User
@@ -340,3 +340,89 @@ async def test_persistent_clash_eventually_raises(
     monkeypatch.setattr(CallTicketRepository, "next_ticket_no", _always_clash)
     with pytest.raises(IntegrityError):
         await svc.create(seed.store_a, name="永遠撞", actor_user_id=seed.user_a)
+
+
+async def test_offset_reaches_history_beyond_the_waiting_block(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """**翻頁必須翻得到歷史**。
+
+    歷史查詢原本只有 limit 沒有 offset，於是不論翻到第幾頁，歷史那半永遠回最新的
+    那幾筆——超過一頁的舊紀錄根本撈不到。offset 要扣掉候位的總數，才算得出
+    「歷史要從第幾筆開始」。
+    """
+    svc = _svc(db_session)
+    # 今天 2 筆候位
+    for i in range(2):
+        await svc.create(seed.store_a, name=f"候位{i}", actor_user_id=seed.user_a, now=TODAY)
+    # 昨天 5 筆已完成（歷史，最近的先 → 號碼大的先）
+    done_ids = []
+    for i in range(5):
+        t = await svc.create(
+            seed.store_a, name=f"完成{i}", actor_user_id=seed.user_a, now=YESTERDAY
+        )
+        await svc.complete(seed.store_a, t.id, actor_user_id=seed.user_a)
+        done_ids.append(t.id)
+
+    # 每頁 3 筆：第 1 頁＝2 候位＋最新 1 筆歷史
+    page1 = await svc.list_tickets(seed.store_a, include_done=True, limit=3, offset=0, now=TODAY)
+    assert len(page1) == 3
+    assert page1[2].id == done_ids[-1]  # 歷史最新的那筆
+
+    # 第 2 頁＝接續的 3 筆歷史（不是又回到最新的）
+    page2 = await svc.list_tickets(seed.store_a, include_done=True, limit=3, offset=3, now=TODAY)
+    assert [r.id for r in page2] == list(reversed(done_ids))[1:4]
+
+    # 第 3 頁＝最後 1 筆，且**不重複、不遺漏**
+    page3 = await svc.list_tickets(seed.store_a, include_done=True, limit=3, offset=6, now=TODAY)
+    assert [r.id for r in page3] == [done_ids[0]]
+    seen = [r.id for r in page1 + page2 + page3]
+    assert len(seen) == len(set(seen)) == 7
+
+
+async def test_filter_by_date_returns_that_day_including_today(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """指定日期＝查那一天的全部（候位與已完成都算），**當天也要查得到**。"""
+    svc = _svc(db_session)
+    yd = await svc.create(seed.store_a, name="昨天的", actor_user_id=seed.user_a, now=YESTERDAY)
+    await svc.complete(seed.store_a, yd.id, actor_user_id=seed.user_a)
+    td_done = await svc.create(seed.store_a, name="今天完成", actor_user_id=seed.user_a, now=TODAY)
+    await svc.complete(seed.store_a, td_done.id, actor_user_id=seed.user_a)
+    td_wait = await svc.create(seed.store_a, name="今天候位", actor_user_id=seed.user_a, now=TODAY)
+
+    today_rows = await svc.list_tickets(
+        seed.store_a, include_done=True, ticket_date=store_date(TODAY), now=TODAY
+    )
+    assert {r.id for r in today_rows} == {td_done.id, td_wait.id}
+    # 那一天的順序＝取號順序（查某天的紀錄用排隊順序讀最自然）
+    assert [r.ticket_no for r in today_rows] == sorted(r.ticket_no for r in today_rows)
+
+    yd_rows = await svc.list_tickets(
+        seed.store_a, include_done=True, ticket_date=store_date(YESTERDAY), now=TODAY
+    )
+    assert [r.id for r in yd_rows] == [yd.id]
+
+
+async def test_filter_by_date_paginates_without_gaps(
+    db_session: AsyncSession, seed: Seed
+) -> None:
+    """指定日期時分頁也要不重不漏——某天量大時才撈得完。"""
+    svc = _svc(db_session)
+    ids = []
+    for i in range(5):
+        t = await svc.create(seed.store_a, name=f"今天{i}", actor_user_id=seed.user_a, now=TODAY)
+        ids.append(t.id)
+
+    seen: list[int] = []
+    for offset in (0, 2, 4):
+        rows = await svc.list_tickets(
+            seed.store_a,
+            include_done=True,
+            ticket_date=store_date(TODAY),
+            limit=2,
+            offset=offset,
+            now=TODAY,
+        )
+        seen += [r.id for r in rows]
+    assert seen == ids

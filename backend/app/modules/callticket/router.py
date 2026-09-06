@@ -4,6 +4,7 @@
 中央守衛擋掉，碰不到這裡。只做 I/O 與驗證，業務規則在 service。
 """
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,10 +49,19 @@ async def list_call_tickets(
     include_done: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    ticket_date: Annotated[date | None, Query()] = None,
 ) -> list[CallTicketRead]:
-    """候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。"""
+    """候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。
+
+    `ticket_date`（台北營業日）指定時改查那一天的全部，依取號順序——量大的日子
+    才撈得完。搭配 `offset` 翻頁；不指定日期時 `offset` 也已能翻到歷史。
+    """
     rows = await CallTicketService(session).list_tickets(
-        user.store_id, include_done=include_done, limit=limit, offset=offset
+        user.store_id,
+        include_done=include_done,
+        limit=limit,
+        offset=offset,
+        ticket_date=ticket_date,
     )
     return [CallTicketRead.model_validate(row) for row in rows]
 

@@ -210,6 +210,39 @@ try {
   await page.screenshot({ path: `${SHOTS}/06-cross-day-history.png` });
   await page.getByLabel(/顯示已完成/).uncheck();
 
+  // ── 號碼牌列印（2026-09-05 裁示）──
+  // 客人要拿號碼牌，且**不能從發票機出**——那台是發票專屬機（ADR-018），而且兩台
+  // 字型 ROM 不同（Big5 vs GB18030），送錯台是整捲亂碼。
+  await page.getByLabel(/顯示已完成/).uncheck().catch(() => {});
+  await page.waitForTimeout(400);
+  const printRow = page.locator("table.call-ticket-list tbody tr").first();
+  const printBtn = printRow.locator('button[aria-label^="列印號碼牌"]');
+  ok("候位中的每一列都有列印鍵", (await printBtn.count()) === 1);
+
+  const printRequests = [];
+  const watchPrint = (req) => {
+    if (req.method() === "POST" && req.url().includes("/print/")) printRequests.push(req.url());
+  };
+  page.on("request", watchPrint);
+  await printBtn.click();
+  await page.waitForTimeout(1500);
+  page.off("request", watchPrint);
+  ok(
+    "列印送到 /print/call-ticket（走收據機，不是發票機）",
+    printRequests.length === 1 && printRequests[0].endsWith("/print/call-ticket"),
+    printRequests.join(" | ") || "（沒有送出任何列印請求）",
+  );
+  ok(
+    "沒有任何請求打到發票機端點",
+    !printRequests.some((u) => u.includes("/print/einvoice")),
+  );
+  // 印完（或印失敗）都不得擋住叫號作業——號碼早就配出去了
+  ok(
+    "列印後「完成」仍可按（作業沒被列印卡住）",
+    await printRow.locator('button[aria-label^="完成叫號"]').isEnabled(),
+  );
+  await page.screenshot({ path: `${SHOTS}/07-print-ticket.png` });
+
   // ── 危險連結在邊界被擋（不是只有前端不渲染）──
   const bad = await api(token, "POST", "/api/v1/call-tickets", {
     name: `壞連結-${RUN}`,

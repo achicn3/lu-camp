@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from agent.deps import DevicesDep, OkResponse, ok_response
 from agent.interfaces import (
     AcquisitionReceiptPayload,
+    CallTicketPayload,
     InvoicePayload,
     KitchenTicketPayload,
     RawPrintPayload,
@@ -75,6 +76,18 @@ async def print_acquisition(
     """列印收購憑證聯（docs/23 K6）：切結品項/總額/撥款＋賣方簽名影像（存證）。"""
     header = await _fetch_header(client, receipt.store_id)
     await anyio.to_thread.run_sync(devices.receipt_printer.print_acquisition, receipt, header)
+    return ok_response(devices, "receipt")
+
+
+@router.post("/call-ticket", response_model=OkResponse, operation_id="printCallTicket")
+async def print_call_ticket(ticket: CallTicketPayload, devices: DevicesDep) -> OkResponse:
+    """列印號碼牌（docs/38）：候位客人拿在手上的憑據。
+
+    **一律走收據機**——號碼牌不是發票，發票專屬機只收證明聯（ADR-018）。印錯機器不只是
+    跑錯紙：兩台字型 ROM 不同（Big5 vs GB18030），中文送錯台就是整捲亂碼。
+    比照出餐單**不取店家抬頭**：客人就站在店裡，不該因後端 stores 取不到就印不出號碼。
+    """
+    await anyio.to_thread.run_sync(devices.receipt_printer.print_call_ticket, ticket)
     return ok_response(devices, "receipt")
 
 

@@ -5,6 +5,11 @@ export type CallTicket = components["schemas"]["CallTicketRead"];
 
 /** 後端 `/api/v1/call-tickets` 的 `limit` 上限。 */
 export const CALL_TICKET_PAGE_SIZE = 200;
+/**
+ * 歷史檢視每頁筆數。刻意小於候位清單：歷史是「回頭找某一筆」，一頁太多反而難掃視，
+ * 而且分頁要真的能翻才看得完——後端上限 200，歷史累積後光靠一頁永遠看不到舊的。
+ */
+export const CALL_TICKET_HISTORY_PAGE_SIZE = 50;
 
 const SAFE_SCHEMES = ["http:", "https:"];
 

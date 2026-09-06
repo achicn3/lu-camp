@@ -353,6 +353,9 @@ export interface paths {
         /**
          * List Call Tickets
          * @description 候位清單。預設只回未完成；`include_done=true` 供事後回頭找那個表單連結。
+         *
+         *     `ticket_date`（台北營業日）指定時改查那一天的全部，依取號順序——量大的日子
+         *     才撈得完。搭配 `offset` 翻頁；不指定日期時 `offset` 也已能翻到歷史。
          */
         get: operations["listCallTickets"];
         put?: never;
@@ -7885,6 +7888,7 @@ export interface operations {
                 include_done?: boolean;
                 limit?: number;
                 offset?: number;
+                ticket_date?: string | null;
             };
             header?: never;
             path?: never;

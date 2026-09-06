@@ -121,6 +121,29 @@ export async function printRaw(base64Data: string): Promise<void> {
   await postAgent("/print/raw", { base64_data: base64Data });
 }
 
+/**
+ * 列印號碼牌（docs/38）：候位客人拿在手上的憑據。
+ *
+ * **走收據機，不走發票機**——號碼牌不是發票，而且兩台字型 ROM 不同（Big5 vs GB18030），
+ * 送錯台是整捲亂碼。去向由代理端的 `/print/call-ticket` 決定，此處不指定機器。
+ * `label` 送畫面上顯示的那串（今日 `#7`、跨日 `8/18 #7`），印出來才與店員看到的一致。
+ */
+export async function printCallTicket(t: {
+  storeId: number;
+  ticketNo: number;
+  label: string;
+  name: string;
+  createdAt: string;
+}): Promise<void> {
+  await postAgent("/print/call-ticket", {
+    store_id: t.storeId,
+    ticket_no: t.ticketNo,
+    label: t.label,
+    name: t.name,
+    created_at: t.createdAt,
+  });
+}
+
 export async function printKitchenTicket(
   sale: SaleRead,
   serviceMode: "DINE_IN" | "TAKEOUT",

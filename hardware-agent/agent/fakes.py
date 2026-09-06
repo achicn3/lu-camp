@@ -19,6 +19,7 @@ from agent.errors import (
 )
 from agent.interfaces import (
     AcquisitionReceiptPayload,
+    CallTicketPayload,
     DeviceKind,
     DeviceStatus,
     InvoicePayload,
@@ -65,6 +66,7 @@ class FakeReceiptPrinter:
         self.raw_prints: list[bytes] = []
         self.acquisitions: list[tuple[AcquisitionReceiptPayload, StoreHeader]] = []
         self.kitchen_tickets: list[KitchenTicketPayload] = []
+        self.call_tickets: list[CallTicketPayload] = []
 
     def _guard(self) -> None:
         if self.timeout:
@@ -97,6 +99,9 @@ class FakeReceiptPrinter:
     ) -> None:
         self._guard()
         self.acquisitions.append((receipt, header))
+
+    def print_call_ticket(self, ticket: CallTicketPayload) -> None:
+        self.call_tickets.append(ticket)
 
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:
         self._guard()

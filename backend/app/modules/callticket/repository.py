@@ -41,6 +41,7 @@ class CallTicketRepository:
         today: date,
         limit: int,
         offset: int,
+        ticket_date: date | None = None,
     ) -> list[CallTicket]:
         """待處理在前（舊的先，＝排隊順序），已完成接在後面（**最近完成的先**）。
 
@@ -56,6 +57,25 @@ class CallTicketRepository:
         跨日未完成的不再出現在候位清單，但**資料不刪**——仍可由 `include_done=True`
         的歷史檢視找回它與它的表單連結。
         """
+        # 指定日期＝查那一天的全部，單一排序、單一查詢，分頁語意單純。
+        # 用取號順序（遞增）讀：查某天的紀錄時看的是「那天的隊伍」，不是「最近發生什麼」。
+        if ticket_date is not None:
+            conditions = [
+                CallTicket.store_id == store_id,
+                CallTicket.ticket_date == ticket_date,
+            ]
+            if not include_done:
+                conditions.append(CallTicket.status == CallTicketStatus.WAITING)
+            return list(
+                await self._session.scalars(
+                    select(CallTicket)
+                    .where(*conditions)
+                    .order_by(CallTicket.ticket_no.asc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+            )
+
         waiting = list(
             await self._session.scalars(
                 select(CallTicket)
@@ -74,6 +94,19 @@ class CallTicketRepository:
         remaining = limit - len(waiting)
         if remaining <= 0:
             return waiting
+        # 歷史那半的 offset 要**扣掉候位的總數**：這份清單是兩段串接，前段用掉多少，
+        # 後段就得從第幾筆開始。原本只給 limit 不給 offset，於是不論翻到第幾頁，
+        # 歷史永遠回最新那幾筆——超過一頁的舊紀錄根本撈不到。
+        waiting_total = await self._session.scalar(
+            select(func.count())
+            .select_from(CallTicket)
+            .where(
+                CallTicket.store_id == store_id,
+                CallTicket.status == CallTicketStatus.WAITING,
+                CallTicket.ticket_date == today,
+            )
+        )
+        done_offset = max(0, offset - (waiting_total or 0))
         # 歷史檢視：已完成 ＋ **跨日未完成**（後者已離開候位清單，這裡是唯一找得回的地方）
         done = await self._session.scalars(
             select(CallTicket)
@@ -86,5 +119,6 @@ class CallTicketRepository:
             )
             .order_by(CallTicket.ticket_date.desc(), CallTicket.ticket_no.desc())
             .limit(remaining)
+            .offset(done_offset)
         )
         return waiting + list(done)
