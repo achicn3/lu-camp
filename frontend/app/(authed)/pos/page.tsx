@@ -2260,15 +2260,15 @@ export default function PosPage() {
                 </button>
               )}
               {showsLinePayCarrierNote(completedInvoice, invCarrier) && (
-                  // 店員沒打載具、發票卻有 → 是從客人的 LINE Pay 自動帶入的。
-                  // （統編/捐贈與載具至多擇一，選了那兩者發票就不會有 carrier_id。）
-                  // **一定要講**：有載具就不印紙本，客人沒看到紙會以為沒開發票；
-                  // 而且客人若說「我沒有載具」，店員要能當場發現對不上。
-                  <span className="pos-invoice-carrier-note">
-                    已使用客人 LINE Pay 綁定的載具 {completedInvoice.carrier_id}
-                    ，發票存入載具、未列印。
-                  </span>
-                )}
+                // 店員沒打載具、發票卻有 → 是從客人的 LINE Pay 自動帶入的。
+                // （統編/捐贈與載具至多擇一，選了那兩者發票就不會有 carrier_id。）
+                // **一定要講**：有載具就不印紙本，客人沒看到紙會以為沒開發票；
+                // 而且客人若說「我沒有載具」，店員要能當場發現對不上。
+                <span className="pos-invoice-carrier-note">
+                  已使用客人 LINE Pay 綁定的載具 {completedInvoice.carrier_id}
+                  ，發票存入載具、未列印。
+                </span>
+              )}
               {completedInvoice != null && invoiceProofPrintable(completedInvoice) && (
                 // 常駐重印（Codex 第十六輪）：抬頭慢載入/代理離線/缺紙時列印可能失敗，
                 // 發票已開立不會進 error 態——店員需有在地重試入口。

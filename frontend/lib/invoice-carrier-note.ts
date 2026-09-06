@@ -12,6 +12,11 @@ type InvoiceRead = components["schemas"]["InvoiceRead"];
  * **一定要講**：有載具就不印紙本，客人沒看到紙會以為沒開發票；客人若說「我沒有載具」，
  * 店員也要能當場發現對不上。
  * 統編／捐贈與載具至多擇一，選了那兩者發票就不會有 carrier_id，故不必另外判斷。
+ *
+ * **這個型別守衛是單向的**：回 `false` 不代表發票沒有載具——也可能只是店員自己打了。
+ * 目前傳進來的是 `InvoiceRead | null`，否定分支不會被收窄成 `never`；但若日後有人把
+ * **已經收窄過**的值傳進來，`false` 分支就會變成無法到達。要在否定分支裡判斷「有沒有
+ * 載具」，請直接看 `carrier_id`，不要拿這個述詞的反面當答案。
  */
 export function showsLinePayCarrierNote<T extends Pick<InvoiceRead, "carrier_id">>(
   invoice: T | null,

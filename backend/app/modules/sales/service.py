@@ -1217,9 +1217,7 @@ class SalesService:
                 and info.carrier_id is None
                 and info.npoban is None
             ):
-                info = replace(
-                    info, carrier_type=CARRIER_TYPE_MOBILE, carrier_id=linepay_carrier
-                )
+                info = replace(info, carrier_type=CARRIER_TYPE_MOBILE, carrier_id=linepay_carrier)
             is_b2b = info.buyer_tax_id is not None
             donate = info.npoban is not None
             has_carrier = info.carrier_type is not None and info.carrier_id is not None

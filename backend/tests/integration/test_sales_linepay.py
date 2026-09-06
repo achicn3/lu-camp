@@ -1172,6 +1172,9 @@ async def test_linepay_carrier_is_used_when_clerk_chose_nothing(
     assert invoice is not None
     assert invoice.carrier_id == "/ABC1234"
     assert invoice.carrier_type == "3J0002"
+    # **這條才是客人看得到的後果**：有載具 → 不印證明聯。完成畫面那句提示存在的理由，
+    # 也牽動退貨政策（has_paper_copy 對載具發票為 False）。
+    assert invoice.print_mark is False
 
 
 @pytest.mark.asyncio
