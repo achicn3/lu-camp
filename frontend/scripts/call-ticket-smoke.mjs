@@ -213,8 +213,6 @@ try {
   // ── 號碼牌列印（2026-09-05 裁示）──
   // 客人要拿號碼牌，且**不能從發票機出**——那台是發票專屬機（ADR-018），而且兩台
   // 字型 ROM 不同（Big5 vs GB18030），送錯台是整捲亂碼。
-  await page.getByLabel(/顯示已完成/).uncheck().catch(() => {});
-  await page.waitForTimeout(400);
   const printRow = page.locator("table.call-ticket-list tbody tr").first();
   const printBtn = printRow.locator('button[aria-label^="列印號碼牌"]');
   ok("候位中的每一列都有列印鍵", (await printBtn.count()) === 1);
@@ -242,6 +240,38 @@ try {
     await printRow.locator('button[aria-label^="完成叫號"]').isEnabled(),
   );
   await page.screenshot({ path: `${SHOTS}/07-print-ticket.png` });
+
+  // ── 歷史檢視：日期篩選與分頁（2026-09-06 裁示）──
+  // 特別驗「取消勾選後日期不得殘留」：那個看不見的條件會讓**候位主畫面**顯示錯的一天，
+  // 空清單還寫著「目前沒有人在候位」——實際上有人在等，而畫面上沒有控制可以清掉它。
+  await page.getByLabel(/顯示已完成/).check();
+  await page.waitForTimeout(600);
+  const dateInput = page.getByLabel("只看某一天");
+  ok("歷史檢視才有日期篩選", await dateInput.isVisible());
+
+  // 挑一個一定沒有紀錄的日子 → 應該是空的
+  await dateInput.fill("2020-01-01");
+  await page.waitForTimeout(900);
+  ok(
+    "指定沒有紀錄的日期 → 清單為空",
+    (await page.locator("table.call-ticket-list tbody tr").count()) === 0,
+  );
+  await page.screenshot({ path: `${SHOTS}/08-date-filter.png` });
+
+  // 取消勾選 → 回候位檢視，剛才那個日期**不得**繼續生效
+  await page.getByLabel(/顯示已完成/).uncheck();
+  await page.waitForTimeout(900);
+  const backToWaiting = await page.locator("table.call-ticket-list tbody tr").count();
+  ok(
+    "取消勾選後日期篩選不殘留（候位清單回到今天）",
+    backToWaiting > 0,
+    `候位 ${backToWaiting} 筆`,
+  );
+  ok(
+    "回到候位檢視後日期輸入框消失",
+    !(await page.getByLabel("只看某一天").isVisible().catch(() => false)),
+  );
+  await page.screenshot({ path: `${SHOTS}/09-filter-cleared.png` });
 
   // ── 危險連結在邊界被擋（不是只有前端不渲染）──
   const bad = await api(token, "POST", "/api/v1/call-tickets", {

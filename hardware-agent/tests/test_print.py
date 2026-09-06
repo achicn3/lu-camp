@@ -191,6 +191,28 @@ async def test_receipt_printer_paper_out_returns_409() -> None:
     assert resp.json()["error"] == "PaperOut"
 
 
+async def test_call_ticket_paper_out_returns_409() -> None:
+    """缺紙時號碼牌也要如實回錯，不可假裝印出去了。
+
+    店員按了「列印」卻沒有紙出來，畫面若顯示成功，他會以為客人拿到號碼牌了。
+    （前端把列印失敗當非阻擋處理，但**前提是失敗真的會回報**。）
+    """
+    printer = FakeReceiptPrinter(paper_out=True)
+    resp = await _post(
+        _app_with(printer, _FakeClient()),
+        "/print/call-ticket",
+        {
+            "store_id": 1,
+            "ticket_no": 7,
+            "label": "#7",
+            "name": "王小明",
+            "created_at": "2026-09-06T01:30:00Z",
+        },
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "PaperOut"
+
+
 async def test_store_client_fetches_each_call_and_raises_without_cache() -> None:
     """抓取優先：每次都打後端取最新抬頭；無快取時後端失敗即丟 StoreHeaderUnavailable。"""
     requests: list[httpx.Request] = []

@@ -185,6 +185,26 @@ describe("歷史檢視：分頁與日期篩選", () => {
     expect(urls.every((u) => !u.includes("ticket_date="))).toBe(true);
   });
 
+  it("**取消勾選後不得殘留日期篩選**——候位清單會顯示錯的一天卻沒有控制可以清", async () => {
+    // 日期輸入框只在「顯示已完成」時渲染。若查詢條件沒綁 showDone、取消勾選也不清值，
+    // 那個看不見的日期會繼續套在候位清單上：畫面說「目前沒有人在候位」，實際上有人在等。
+    const urls: string[] = [];
+    stubList(urls);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("王小明")).toBeTruthy());
+
+    await user.click(screen.getByRole("checkbox"));
+    const dateInput = await screen.findByLabelText("只看某一天");
+    await user.type(dateInput, "2026-09-01");
+    await waitFor(() => expect(urls.some((u) => u.includes("ticket_date=2026-09-01"))).toBe(true));
+
+    urls.length = 0;
+    await user.click(screen.getByRole("checkbox")); // 取消勾選 → 回候位檢視
+    await waitFor(() => expect(urls.some((u) => u.includes("include_done=false"))).toBe(true));
+    expect(urls.every((u) => !u.includes("ticket_date="))).toBe(true);
+  });
+
   it("選了日期 → 帶 ticket_date 並回到第一頁", async () => {
     const urls: string[] = [];
     stubList(urls);

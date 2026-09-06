@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from agent.config import PrinterEndpoint
 from agent.devices import AgentDevices, default_fake_devices
@@ -347,6 +348,18 @@ class TestStatusIncludesInvoicePrinter:
         with _mock_tcp({"203.0.113.44": "ok", "203.0.113.42": "ok"}) as mock_conn:
             provider.poll()
         assert mock_conn.call_count == 2
+
+
+def test_call_ticket_label_must_be_ascii() -> None:
+    """label 走三倍字（單位元組模式），中文會印成亂碼——在邊界擋下而不是印出垃圾。"""
+    with pytest.raises(ValidationError):
+        CallTicketPayload(
+            store_id=1,
+            ticket_no=7,
+            label="七號",
+            name="王小明",
+            created_at=datetime(2026, 8, 27, 3, 0, tzinfo=UTC),
+        )
 
 
 async def test_call_ticket_never_reaches_the_invoice_printer(

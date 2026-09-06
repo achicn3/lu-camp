@@ -81,8 +81,11 @@ export default function CallTicketsPage() {
             limit: pageSize,
             include_done: showDone,
             offset: showDone ? page * pageSize : 0,
-            // 空字串要送 undefined：送空字串會被後端當成格式錯誤的日期而 422。
-            ...(dateFilter === "" ? {} : { ticket_date: dateFilter }),
+            // 日期篩選**只屬於歷史檢視**：日期輸入框只在 showDone 時渲染，若不綁條件，
+            // 取消勾選後那個看不見的日期會繼續套在候位清單上——畫面顯示「目前沒有人在
+            // 候位」，實際上有人在等，而店員找不到任何可以清掉它的控制。
+            // 空字串也不能送：後端會當成格式錯誤的日期而 422。
+            ...(showDone && dateFilter !== "" ? { ticket_date: dateFilter } : {}),
           },
         },
       });
@@ -208,6 +211,8 @@ export default function CallTicketsPage() {
           onChange={(e) => {
             // 切換檢視就回到第一頁——留在第 3 頁切過去會看到空白，像是資料不見了。
             setPage(0);
+            // 回到候位檢視就清掉日期：讓狀態與畫面上看得到的控制一致，不留隱形條件。
+            if (!e.target.checked) setDateFilter("");
             setShowDone(e.target.checked);
           }}
         />

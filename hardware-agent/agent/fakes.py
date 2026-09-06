@@ -101,6 +101,9 @@ class FakeReceiptPrinter:
         self.acquisitions.append((receipt, header))
 
     def print_call_ticket(self, ticket: CallTicketPayload) -> None:
+        # _guard() 不可漏：缺紙／離線／上蓋開／逾時全靠它模擬。少了它，「印表機故障」
+        # 這條路徑在號碼牌上永遠測不到——而「缺紙靜默漏單」正是已知的既有弱點。
+        self._guard()
         self.call_tickets.append(ticket)
 
     def print_kitchen_ticket(self, ticket: KitchenTicketPayload) -> None:

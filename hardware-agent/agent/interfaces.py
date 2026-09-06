@@ -170,7 +170,10 @@ class CallTicketPayload(BaseModel):
 
     store_id: int
     ticket_no: int = Field(gt=0)
-    label: str = Field(min_length=1, max_length=20)
+    # **限 ASCII**：號碼在版面上是三倍字，而三倍字（GS !）只作用於單位元組模式——
+    # 中文 label 會在 `FS .` 之後被送出而印成亂碼，寬度也會超欄折行。
+    # 目前呼叫端只產 `#7` / `8/18 #7`，這裡把那個假設變成被強制的約束。
+    label: str = Field(min_length=1, max_length=20, pattern=r"^[\x20-\x7E]+$")
     name: str = Field(min_length=1, max_length=60)
     created_at: datetime
 
