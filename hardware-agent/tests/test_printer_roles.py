@@ -21,7 +21,12 @@ from pydantic import ValidationError
 
 from agent.config import PrinterEndpoint
 from agent.devices import AgentDevices, default_fake_devices
-from agent.drivers.escpos_receipt import EscposReceiptPrinter, line_encoder
+from agent.drivers.escpos_receipt import (
+    _TRIPLE_OFF,
+    _TRIPLE_ON,
+    EscposReceiptPrinter,
+    line_encoder,
+)
 from agent.drivers.status_real import RealStatusProvider
 from agent.escpos_printer import FakePrinter
 from agent.fakes import FakeReceiptPrinter
@@ -357,15 +362,24 @@ def test_call_ticket_ascii_label_is_byte_identical_on_both_printers() -> None:
     所以號碼不受「編碼隨機器走」影響。若哪天這個前提不成立（換了字型 ROM／改用其他
     編碼），這支測試會先紅，而不是等客人拿到亂碼的號碼牌。
     """
+    # 用含空白與 `/` 的跨日 label，比只有 `#7` 更有代表性
+    ticket = _CALL_TICKET.model_copy(update={"label": "8/18 #7"})
     big5_buf, gbk_buf = FakePrinter(), FakePrinter()
-    EscposReceiptPrinter(big5_buf).print_call_ticket(_CALL_TICKET)
-    EscposReceiptPrinter(gbk_buf, encoding="gbk").print_call_ticket(_CALL_TICKET)
+    EscposReceiptPrinter(big5_buf).print_call_ticket(ticket)
+    EscposReceiptPrinter(gbk_buf, encoding="gbk").print_call_ticket(ticket)
     big5_bytes, gbk_bytes = bytes(big5_buf.buffer), bytes(gbk_buf.buffer)
     # 整份不同（中文的「候位號碼」「王小明」隨機器編碼）
     assert big5_bytes != gbk_bytes
-    # 但**號碼那段**（三倍字、單位元組模式）兩邊必須一模一樣
-    assert _CALL_TICKET.label.encode("ascii") in big5_bytes
-    assert _CALL_TICKET.label.encode("ascii") in gbk_bytes
+
+    def triple_slice(data: bytes) -> bytes:
+        """取三倍字那一段（號碼本身）。斷言整段相等，而不是只確認 label 有出現——
+        後者證明不了「兩份輸出裡是同一段位元組」，測試名就會比它證明的還強。"""
+        start = data.index(_TRIPLE_ON)
+        end = data.index(_TRIPLE_OFF, start)
+        return data[start : end + len(_TRIPLE_OFF)]
+
+    assert triple_slice(big5_bytes) == triple_slice(gbk_bytes)
+    assert ticket.label.encode("ascii") in triple_slice(big5_bytes)
 
 
 def test_call_ticket_label_must_be_ascii() -> None:

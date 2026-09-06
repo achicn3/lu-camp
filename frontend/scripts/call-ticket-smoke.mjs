@@ -267,9 +267,12 @@ try {
     backToWaiting > 0,
     `候位 ${backToWaiting} 筆`,
   );
+  // 不加 .catch：locator.isVisible() 對不存在的元素本來就回 false、不丟例外。
+  // 加了反而 fail-open——真的丟例外（例如 strict mode 命中多個元素）會被吞成 false，
+  // 取反後斷言「消失了」反而通過。這正是本輪剛從別處移除的那個模式。
   ok(
     "回到候位檢視後日期輸入框消失",
-    !(await page.getByLabel("只看某一天").isVisible().catch(() => false)),
+    !(await page.getByLabel("只看某一天").isVisible()),
   );
   await page.screenshot({ path: `${SHOTS}/09-filter-cleared.png` });
 
