@@ -1439,18 +1439,22 @@ function BulkPanel() {
             </option>
           ))}
         </select>
-        <select
-          aria-label="成色"
-          value={grade}
-          onChange={(e) => { setGrade(e.target.value as Grade | ""); setPage(0); }}
-        >
-          <option value="">全部成色</option>
-          {grades.map((g) => (
-            <option key={g} value={g}>
-              {gradeLabel(g)}
-            </option>
-          ))}
-        </select>
+        {/* 散裝批的成色在建檔時寫死 E（見 acquisition/service.py），實際上只會有一個選項；
+            只有一個選項的篩選等於沒篩，徒增畫面雜訊，故只在真的有多種成色時才顯示。 */}
+        {grades.length > 1 && (
+          <select
+            aria-label="成色"
+            value={grade}
+            onChange={(e) => { setGrade(e.target.value as Grade | ""); setPage(0); }}
+          >
+            <option value="">全部成色</option>
+            {grades.map((g) => (
+              <option key={g} value={g}>
+                {gradeLabel(g)}
+              </option>
+            ))}
+          </select>
+        )}
       </SearchBar>
       <TableShell
         loading={query.isFetching}
