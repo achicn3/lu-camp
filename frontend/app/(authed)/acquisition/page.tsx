@@ -22,6 +22,7 @@ import {
   suggestedListedPrice,
   taxInclusivePrice,
 } from "@/features/acquisition/pricing";
+import { PriceHint } from "@/features/acquisition/PriceHint";
 import { expandByQty, qtyErrors, rowsPayableTotal } from "@/features/acquisition/quantity";
 import {
   type AcqType,
@@ -558,6 +559,12 @@ function ItemRowCard({
             ))}
           </select>
         </label>
+        {/* 定價前先看同款以前的行情：品牌＋型號都選了才查得到（見 PriceHint）。 */}
+        <PriceHint
+          brandId={row.brandId}
+          productModelId={row.productModelId}
+          grade={row.grade}
+        />
         <label className="field">
           <span className="field-label">
             {autoTaxApplies ? "估計轉售價（未稅）" : "估計轉售價"}

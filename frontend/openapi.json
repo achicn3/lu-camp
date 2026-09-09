@@ -4943,6 +4943,56 @@
         "title": "Grade",
         "type": "string"
       },
+      "GradePriceStat": {
+        "description": "同款商品在某個成色下的歷史行情：收購價與上架售價各自的區間。\n\n**只計買斷**。寄售整批排除：店家對寄售品沒有收購成本，把它算進件數會讓\n「收過 N 件」與收購價區間的母體對不起來（裁示 2026-09-09）。",
+        "properties": {
+          "cost_max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Max"
+          },
+          "cost_min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Min"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "listed_max": {
+            "title": "Listed Max",
+            "type": "string"
+          },
+          "listed_min": {
+            "title": "Listed Min",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grade",
+          "count",
+          "listed_min",
+          "listed_max"
+        ],
+        "title": "GradePriceStat",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6106,6 +6156,41 @@
         "title": "KioskTaskRead",
         "type": "object"
       },
+      "LatestAcquisitionRead": {
+        "description": "最近一次收到這款東西時的實際數字；只看區間看不出行情有沒有在動。",
+        "properties": {
+          "acquired_at": {
+            "format": "date-time",
+            "title": "Acquired At",
+            "type": "string"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "acquired_at",
+          "grade",
+          "listed_price"
+        ],
+        "title": "LatestAcquisitionRead",
+        "type": "object"
+      },
       "LiabilityReport": {
         "description": "§5A 購物金負債報表。",
         "properties": {
@@ -7257,6 +7342,48 @@
           "constraint_values"
         ],
         "title": "PremiumSuggestionResponse",
+        "type": "object"
+      },
+      "PriceHintRead": {
+        "description": "收購定價提示：同品牌＋型號的歷史行情，依成色分列。\n\n比對鍵只用品牌＋型號（兩者都是選單、存 id，比對可靠）；成色不過濾而是分組，\n店員才能一眼比較各成色的價差。分類不納入比對——型號已經決定東西是什麼，\n再用分類過濾只會讓建檔不一致的歷史整批消失。僅計買斷，寄售不列入。",
+        "properties": {
+          "grades": {
+            "items": {
+              "$ref": "#/components/schemas/GradePriceStat"
+            },
+            "title": "Grades",
+            "type": "array"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LatestAcquisitionRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "used_all_time": {
+            "title": "Used All Time",
+            "type": "boolean"
+          },
+          "window_months": {
+            "title": "Window Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_months",
+          "used_all_time",
+          "total_count",
+          "grades"
+        ],
+        "title": "PriceHintRead",
         "type": "object"
       },
       "PriceUpdateRequest": {
@@ -20230,6 +20357,67 @@
           }
         ],
         "summary": "Get Serialized By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/price-hint": {
+      "get": {
+        "description": "收購定價提示：同品牌＋型號以前收多少、賣多少，依成色分列。\n\n店員在收購頁定價時用，故開放一般店員（收購價本來就是他自己輸入的）。\n查無歷史回空提示而非 404——前端安靜地不顯示即可，不必把「沒收過」當錯誤。",
+        "operationId": "acquisitionPriceHint",
+        "parameters": [
+          {
+            "description": "品牌 id（必填）",
+            "in": "query",
+            "name": "brand_id",
+            "required": true,
+            "schema": {
+              "description": "品牌 id（必填）",
+              "title": "Brand Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "型號 id（必填）",
+            "in": "query",
+            "name": "product_model_id",
+            "required": true,
+            "schema": {
+              "description": "型號 id（必填）",
+              "title": "Product Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceHintRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquisition Price Hint",
         "tags": [
           "inventory"
         ]

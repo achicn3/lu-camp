@@ -24,6 +24,7 @@ from app.modules.inventory.schemas import (
     CategoryRead,
     CategoryTargetUpdate,
     NoteUpdateRequest,
+    PriceHintRead,
     PriceUpdateRequest,
     PricingRuleRead,
     PricingRulesUpdate,
@@ -56,6 +57,28 @@ async def _ensure_category_create_allowed(session: AsyncSession, user: CurrentUs
     settings = await StoreSettingsService(session).get_effective_settings(user.store_id)
     if not settings.allow_clerk_manage_categories:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="權限不足")
+
+
+@router.get(
+    "/serialized-items/price-hint",
+    response_model=PriceHintRead,
+    operation_id="acquisitionPriceHint",
+)
+async def acquisition_price_hint(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int, Query(description="品牌 id（必填）")],
+    product_model_id: Annotated[int, Query(description="型號 id（必填）")],
+) -> PriceHintRead:
+    """收購定價提示：同品牌＋型號以前收多少、賣多少，依成色分列。
+
+    店員在收購頁定價時用，故開放一般店員（收購價本來就是他自己輸入的）。
+    查無歷史回空提示而非 404——前端安靜地不顯示即可，不必把「沒收過」當錯誤。
+    """
+    hint = await InventoryService(session).acquisition_price_hint(
+        user.store_id, brand_id=brand_id, product_model_id=product_model_id
+    )
+    return PriceHintRead.model_validate(hint)
 
 
 @router.get(

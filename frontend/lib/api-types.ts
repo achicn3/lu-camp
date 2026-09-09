@@ -2453,6 +2453,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/price-hint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Acquisition Price Hint
+         * @description 收購定價提示：同品牌＋型號以前收多少、賣多少，依成色分列。
+         *
+         *     店員在收購頁定價時用，故開放一般店員（收購價本來就是他自己輸入的）。
+         *     查無歷史回空提示而非 404——前端安靜地不顯示即可，不必把「沒收過」當錯誤。
+         */
+        get: operations["acquisitionPriceHint"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/serialized-items/{item_id}/detail": {
         parameters: {
             query?: never;
@@ -4715,6 +4738,26 @@ export interface components {
          * @enum {string}
          */
         Grade: "S" | "A" | "B" | "C" | "D" | "E";
+        /**
+         * GradePriceStat
+         * @description 同款商品在某個成色下的歷史行情：收購價與上架售價各自的區間。
+         *
+         *     **只計買斷**。寄售整批排除：店家對寄售品沒有收購成本，把它算進件數會讓
+         *     「收過 N 件」與收購價區間的母體對不起來（裁示 2026-09-09）。
+         */
+        GradePriceStat: {
+            /** Cost Max */
+            cost_max?: string | null;
+            /** Cost Min */
+            cost_min?: string | null;
+            /** Count */
+            count: number;
+            grade: components["schemas"]["Grade"];
+            /** Listed Max */
+            listed_max: string;
+            /** Listed Min */
+            listed_min: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -5133,6 +5176,22 @@ export interface components {
             id: number;
             kind: components["schemas"]["SignatureTaskKind"];
             status: components["schemas"]["SignatureTaskStatus"];
+        };
+        /**
+         * LatestAcquisitionRead
+         * @description 最近一次收到這款東西時的實際數字；只看區間看不出行情有沒有在動。
+         */
+        LatestAcquisitionRead: {
+            /**
+             * Acquired At
+             * Format: date-time
+             */
+            acquired_at: string;
+            /** Cost */
+            cost?: string | null;
+            grade: components["schemas"]["Grade"];
+            /** Listed Price */
+            listed_price: string;
         };
         /**
          * LiabilityReport
@@ -5604,6 +5663,25 @@ export interface components {
             window_metrics: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * PriceHintRead
+         * @description 收購定價提示：同品牌＋型號的歷史行情，依成色分列。
+         *
+         *     比對鍵只用品牌＋型號（兩者都是選單、存 id，比對可靠）；成色不過濾而是分組，
+         *     店員才能一眼比較各成色的價差。分類不納入比對——型號已經決定東西是什麼，
+         *     再用分類過濾只會讓建檔不一致的歷史整批消失。僅計買斷，寄售不列入。
+         */
+        PriceHintRead: {
+            /** Grades */
+            grades: components["schemas"]["GradePriceStat"][];
+            latest?: components["schemas"]["LatestAcquisitionRead"] | null;
+            /** Total Count */
+            total_count: number;
+            /** Used All Time */
+            used_all_time: boolean;
+            /** Window Months */
+            window_months: number;
         };
         /**
          * PriceUpdateRequest
@@ -11872,6 +11950,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acquisitionPriceHint: {
+        parameters: {
+            query: {
+                /** @description 品牌 id（必填） */
+                brand_id: number;
+                /** @description 型號 id（必填） */
+                product_model_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceHintRead"];
                 };
             };
             /** @description Validation Error */

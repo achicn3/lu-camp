@@ -350,3 +350,42 @@ class BulkLotRead(BaseModel):
     remaining_qty: int
     status: BulkLotStatus
     note: str | None = None
+
+
+class GradePriceStat(BaseModel):
+    """同款商品在某個成色下的歷史行情：收購價與上架售價各自的區間。
+
+    **只計買斷**。寄售整批排除：店家對寄售品沒有收購成本，把它算進件數會讓
+    「收過 N 件」與收購價區間的母體對不起來（裁示 2026-09-09）。
+    """
+
+    grade: Grade
+    count: int
+    cost_min: NTDAmountOpt = None
+    cost_max: NTDAmountOpt = None
+    listed_min: NTDAmount
+    listed_max: NTDAmount
+
+
+class LatestAcquisitionRead(BaseModel):
+    """最近一次收到這款東西時的實際數字；只看區間看不出行情有沒有在動。"""
+
+    acquired_at: datetime
+    grade: Grade
+    cost: NTDAmountOpt = None
+    listed_price: NTDAmount
+
+
+class PriceHintRead(BaseModel):
+    """收購定價提示：同品牌＋型號的歷史行情，依成色分列。
+
+    比對鍵只用品牌＋型號（兩者都是選單、存 id，比對可靠）；成色不過濾而是分組，
+    店員才能一眼比較各成色的價差。分類不納入比對——型號已經決定東西是什麼，
+    再用分類過濾只會讓建檔不一致的歷史整批消失。僅計買斷，寄售不列入。
+    """
+
+    window_months: int
+    used_all_time: bool
+    total_count: int
+    grades: list[GradePriceStat]
+    latest: LatestAcquisitionRead | None = None

@@ -364,6 +364,62 @@ class InventoryService:
         """以 item_code 取序號品（供 POS 掃碼查件、讀取售價/ownership）。"""
         return await self._repo.get_serialized_by_code(store_id, item_code)
 
+    # ── 收購定價提示（同款歷史行情）─────────────────────────────────────
+    #
+    # 店員收購時最缺的是「這款以前收多少、賣多少」。比對鍵只用品牌＋型號：兩者都是
+    # 選單、存的是 id，不像品名是手打的自由文字（「蠻牛牌營釘」與「蠻牛營釘」比不到）。
+    # 成色不拿來過濾而是分組——成色正是價差主因，店員要的就是一眼看完各成色的差別。
+    # 只認買斷：寄售的架上價是跟寄售人談的、店家沒有收購成本，混進來會誤導定價（裁示 2026-09-09）。
+    PRICE_HINT_WINDOW_MONTHS = 12
+    _PRICE_HINT_WINDOW = timedelta(days=365)
+    # 由好到差；店員視線由上往下就是價格由高到低。E 是散裝、不會出現在序號品，殿後即可。
+    _GRADE_ORDER = (Grade.S, Grade.A, Grade.B, Grade.C, Grade.D, Grade.E)
+
+    async def acquisition_price_hint(
+        self, store_id: int, *, brand_id: int, product_model_id: int
+    ) -> dict[str, Any]:
+        """同品牌＋型號的歷史行情，依成色分列；近一年沒資料才退回全部歷史。
+
+        唯讀，不寫任何資料。查無歷史回空提示（不是 404），前端才好安靜地不顯示。
+        """
+        since: datetime | None = datetime.now(UTC) - self._PRICE_HINT_WINDOW
+        rows = await self._repo.price_hint_by_grade(store_id, brand_id, product_model_id, since)
+        used_all_time = False
+        if not rows:
+            # 近一年沒收過就退回全部歷史並明說是舊資料——總比什麼都不顯示好。
+            since = None
+            rows = await self._repo.price_hint_by_grade(store_id, brand_id, product_model_id, None)
+            used_all_time = bool(rows)
+
+        order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
+        grades = sorted(rows, key=lambda r: order.get(r.grade, len(order)))
+        latest = await self._repo.latest_priced_item(store_id, brand_id, product_model_id, since)
+
+        return {
+            "window_months": self.PRICE_HINT_WINDOW_MONTHS,
+            "used_all_time": used_all_time,
+            "total_count": sum(r.count for r in grades),
+            "grades": [
+                {
+                    "grade": r.grade,
+                    "count": r.count,
+                    "cost_min": r.cost_min,
+                    "cost_max": r.cost_max,
+                    "listed_min": r.listed_min,
+                    "listed_max": r.listed_max,
+                }
+                for r in grades
+            ],
+            "latest": None
+            if latest is None
+            else {
+                "acquired_at": latest.created_at,
+                "grade": latest.grade,
+                "cost": latest.acquisition_cost,
+                "listed_price": latest.listed_price,
+            },
+        }
+
     async def get_serialized_detail(
         self, store_id: int, item_id: int
     ) -> dict[str, Any] | None:

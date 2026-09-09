@@ -709,3 +709,69 @@ class InventoryRepository:
         )
         result = cast("CursorResult[Any]", await self._session.execute(stmt))
         return result.rowcount == 1
+
+    # ── 收購定價提示：同品牌＋型號的歷史行情 ──────────────────────────────
+    #
+    # 只認買斷（OWNED）：寄售的架上價是跟寄售人談出來的、店家沒有收購成本，
+    # 混進來會讓「N 件」與收購價區間的母體對不起來（店員會以為那 N 件都是這個價收的）。
+    # 作廢收購的件（WRITTEN_OFF）不是成交行情，一律排除；其餘狀態（在庫／已售）都算。
+
+    def _price_hint_scope(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> Any:
+        conds = [
+            SerializedItem.store_id == store_id,
+            SerializedItem.brand_id == brand_id,
+            SerializedItem.product_model_id == product_model_id,
+            SerializedItem.ownership_type == OwnershipType.OWNED,
+            SerializedItem.status != SerializedItemStatus.WRITTEN_OFF,
+        ]
+        if since is not None:
+            conds.append(SerializedItem.created_at >= since)
+        return conds
+
+    async def price_hint_by_grade(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> list[Any]:
+        """依成色彙總：件數、收購價區間、上架售價區間（僅買斷）。
+
+        收購價的 min/max 交給 SQL 聚合忽略 NULL：買斷一定有成本（唯一的建立路徑
+        AcquisitionService 對 BUYOUT 斷言過），但欄位本身可為 NULL，不靠猜補 0。
+        """
+        stmt = (
+            select(
+                SerializedItem.grade,
+                func.count().label("count"),
+                func.min(SerializedItem.acquisition_cost).label("cost_min"),
+                func.max(SerializedItem.acquisition_cost).label("cost_max"),
+                func.min(SerializedItem.listed_price).label("listed_min"),
+                func.max(SerializedItem.listed_price).label("listed_max"),
+            )
+            .where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+            .group_by(SerializedItem.grade)
+        )
+        return list((await self._session.execute(stmt)).all())
+
+    async def latest_priced_item(
+        self,
+        store_id: int,
+        brand_id: int,
+        product_model_id: int,
+        since: datetime | None,
+    ) -> SerializedItem | None:
+        """同款最近買斷入庫的一件；併列 id 排序，同一秒入庫也有穩定結果。"""
+        stmt = (
+            select(SerializedItem)
+            .where(*self._price_hint_scope(store_id, brand_id, product_model_id, since))
+            .order_by(SerializedItem.created_at.desc(), SerializedItem.id.desc())
+            .limit(1)
+        )
+        return (await self._session.scalars(stmt)).first()
