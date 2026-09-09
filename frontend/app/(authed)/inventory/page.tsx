@@ -64,20 +64,6 @@ function dt(value: string | null | undefined): string {
   return formatTaipeiDateTime(value);
 }
 
-// 篩選用品牌/類型選項（單店量小，一次載入；供下拉與明細名稱對照共用）。
-function useFilterOptions() {
-  const brands = useQuery({
-    queryKey: ["brands", "all"],
-    queryFn: async () => (await api.GET("/api/v1/brands", { params: { query: { limit: 200 } } })).data ?? [],
-  });
-  const categories = useQuery({
-    queryKey: ["categories", "all"],
-    queryFn: async () =>
-      (await api.GET("/api/v1/categories", { params: { query: { limit: 200 } } })).data ?? [],
-  });
-  return { brands: brands.data ?? [], categories: categories.data ?? [] };
-}
-
 // 序號品篩選下拉：只列**實際有庫存用到的**值；選了品牌就把型號/分類/成色收斂到
 // 該品牌實際有的，避免店員選出空清單。品牌本身一律列全部，否則選定後換不掉。
 //
@@ -172,14 +158,18 @@ function ReprintLabelButton({
 function Pagination({
   page,
   count,
+  total,
   onPage,
 }: {
   page: number;
   count: number;
+  /** 符合條件的總筆數；有給才顯示得出「共 M 頁」。未提供的分頁沿用舊的推測法。 */
+  total?: number;
   onPage: (next: number) => void;
 }) {
-  // 無總筆數端點：滿頁（count===PAGE_SIZE）視為「可能有下一頁」。
-  const hasNext = count === PAGE_SIZE;
+  // 有總筆數就照它算；沒有的話退回舊推測：滿頁（count===PAGE_SIZE）視為「可能有下一頁」。
+  const pages = total === undefined ? null : Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasNext = pages === null ? count === PAGE_SIZE : page + 1 < pages;
   return (
     <div className="inv-pager">
       <button
@@ -190,7 +180,9 @@ function Pagination({
       >
         上一頁
       </button>
-      <span className="hint">第 {page + 1} 頁</span>
+      <span className="hint">
+        {pages === null ? `第 ${page + 1} 頁` : `第 ${page + 1} / ${pages} 頁・共 ${total} 件`}
+      </span>
       <button
         type="button"
         className="btn-ghost"
@@ -905,6 +897,27 @@ function SerializedPanel() {
   });
   const rows: SerializedItem[] = query.data ?? [];
 
+  // 總筆數：與清單同一組條件、不帶分頁，用來顯示「第 N / 共 M 頁」。
+  const totalQuery = useQuery({
+    queryKey: ["inventory", "serialized-count", { status, ownership, brandId, categoryId, productModelId, grade, q }],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/serialized-items/count", {
+        params: {
+          query: {
+            status: orUndefined(status),
+            ownership: orUndefined(ownership),
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
+            product_model_id: productModelId === "" ? undefined : productModelId,
+            grade: orUndefined(grade),
+            q: orUndefined(q),
+          },
+        },
+      });
+      return data?.count ?? null;
+    },
+  });
+
   return (
     <div className="inv-panel">
       <SearchBar placeholder="品名 / 序號碼" onSearch={(value) => { setQ(value); setPage(0); }}>
@@ -985,16 +998,16 @@ function SerializedPanel() {
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["序號碼", "品名", "品牌", "型號", "成色", "持有", "狀態", "標價", "操作"]}
+        headers={["序號碼", "品牌", "品名", "型號", "成色", "持有", "狀態", "標價", "操作"]}
       >
         {rows.map((item) => (
           <tr key={item.id}>
             <td className="inv-code">{item.item_code}</td>
+            <td>{brandName(item.brand_id)}</td>
             <td>
               {item.name}
               <NoteLine note={item.note} />
             </td>
-            <td>{brandName(item.brand_id)}</td>
             <td>{modelName(item.product_model_id)}</td>
             <td>{gradeLabel(item.grade)}</td>
             <td>
@@ -1026,7 +1039,7 @@ function SerializedPanel() {
           </tr>
         ))}
       </TableShell>
-      <Pagination page={page} count={rows.length} onPage={setPage} />
+      <Pagination page={page} count={rows.length} total={totalQuery.data ?? undefined} onPage={setPage} />
       {detailId !== null && (
         <ItemDetailModal
           itemId={detailId}
@@ -1197,17 +1210,27 @@ function CreateCatalogProduct() {
 
 function CatalogPanel() {
   const [lowStock, setLowStock] = useState(false);
+  const [brandId, setBrandId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
   const isManager = useIsManager();
+  // 一般商品只有品牌一個維度（沒有型號/成色/分類欄位），所以沒有東西可以收斂。
+  const optionsQuery = useQuery({
+    queryKey: ["inventory", "catalog-filter-options"],
+    queryFn: async () => (await api.GET("/api/v1/catalog-products/filter-options", {})).data ?? null,
+  });
+  const brands = optionsQuery.data?.brands ?? [];
+  const brandName = (id: number | null) =>
+    id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
 
   const query = useQuery({
-    queryKey: ["inventory", "catalog", { lowStock, q, page }],
+    queryKey: ["inventory", "catalog", { lowStock, brandId, q, page }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/catalog-products", {
         params: {
           query: {
+            brand_id: brandId === "" ? undefined : brandId,
             q: orUndefined(q),
             low_stock: lowStock ? true : undefined,
             limit: PAGE_SIZE,
@@ -1217,6 +1240,21 @@ function CatalogPanel() {
       });
       if (response.ok && data) return data;
       throw new Error(extractDetail(error) ?? "讀取一般商品失敗");
+    },
+  });
+  const totalQuery = useQuery({
+    queryKey: ["inventory", "catalog-count", { lowStock, brandId, q }],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/catalog-products/count", {
+        params: {
+          query: {
+            brand_id: brandId === "" ? undefined : brandId,
+            q: orUndefined(q),
+            low_stock: lowStock ? true : undefined,
+          },
+        },
+      });
+      return data?.count ?? null;
     },
   });
   const rows: CatalogProduct[] = query.data ?? [];
@@ -1233,18 +1271,31 @@ function CatalogPanel() {
           />
           僅顯示低庫存
         </label>
+        <select
+          aria-label="品牌"
+          value={brandId}
+          onChange={(e) => { setBrandId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部品牌</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
       </SearchBar>
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["商品編號", "品名", "單價", "現有量", "再訂購點", "操作"]}
+        headers={["商品編號", "品牌", "品名", "單價", "現有量", "再訂購點", "操作"]}
       >
         {rows.map((product) => {
           const low = isLowStock(product.quantity_on_hand, product.reorder_point);
           return (
             <tr key={product.id}>
               <td className="inv-code">{product.sku}</td>
+              <td>{brandName(product.brand_id)}</td>
               <td>
                 {product.name}
                 <NoteLine note={product.note} />
@@ -1269,7 +1320,7 @@ function CatalogPanel() {
           );
         })}
       </TableShell>
-      <Pagination page={page} count={rows.length} onPage={setPage} />
+      <Pagination page={page} count={rows.length} total={totalQuery.data ?? undefined} onPage={setPage} />
       {detailId !== null && (
         <CatalogDetailModal productId={detailId} onClose={() => setDetailId(null)} />
       )}
@@ -1279,21 +1330,64 @@ function CatalogPanel() {
 
 function BulkPanel() {
   const [status, setStatus] = useState<BulkStatus | "">("");
+  const [brandId, setBrandId] = useState<number | "">("");
+  const [categoryId, setCategoryId] = useState<number | "">("");
+  const [grade, setGrade] = useState<Grade | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
   const isManager = useIsManager();
-  const { brands } = useFilterOptions();
+  // 同序號品：只列實際有貨的值，選了品牌就把分類與成色收斂到該品牌實際有的。
+  const optionsQuery = useQuery({
+    queryKey: ["inventory", "bulk-filter-options", brandId],
+    queryFn: async () =>
+      (
+        await api.GET("/api/v1/bulk-lots/filter-options", {
+          params: { query: { brand_id: brandId === "" ? undefined : brandId } },
+        })
+      ).data ?? null,
+  });
+  const brands = optionsQuery.data?.brands ?? [];
+  const categories = optionsQuery.data?.categories ?? [];
+  const grades = optionsQuery.data?.grades ?? [];
+  // 換品牌時清掉下層選擇：舊的分類/成色在新品牌下可能根本不存在，會查出空清單。
+  const changeBrand = (next: number | "") => {
+    setBrandId(next);
+    setCategoryId("");
+    setGrade("");
+    setPage(0);
+  };
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
 
+  const totalQuery = useQuery({
+    queryKey: ["inventory", "bulk-count", { status, brandId, categoryId, grade, q }],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/bulk-lots/count", {
+        params: {
+          query: {
+            status: orUndefined(status),
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
+            grade: orUndefined(grade),
+            q: orUndefined(q),
+          },
+        },
+      });
+      return data?.count ?? null;
+    },
+  });
+
   const query = useQuery({
-    queryKey: ["inventory", "bulk", { status, q, page }],
+    queryKey: ["inventory", "bulk", { status, brandId, categoryId, grade, q, page }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/bulk-lots", {
         params: {
           query: {
             status: orUndefined(status),
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
+            grade: orUndefined(grade),
             q: orUndefined(q),
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
@@ -1321,16 +1415,53 @@ function BulkPanel() {
             </option>
           ))}
         </select>
+        <select
+          aria-label="品牌"
+          value={brandId}
+          onChange={(e) => changeBrand(e.target.value === "" ? "" : Number(e.target.value))}
+        >
+          <option value="">全部品牌</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="類型"
+          value={categoryId}
+          onChange={(e) => { setCategoryId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部類型</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="成色"
+          value={grade}
+          onChange={(e) => { setGrade(e.target.value as Grade | ""); setPage(0); }}
+        >
+          <option value="">全部成色</option>
+          {grades.map((g) => (
+            <option key={g} value={g}>
+              {gradeLabel(g)}
+            </option>
+          ))}
+        </select>
       </SearchBar>
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["批號", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態", "操作"]}
+        headers={["批號", "品牌", "名稱", "成色", "均一價", "剩餘/總", "收購成本", "售出進度", "狀態", "操作"]}
       >
         {rows.map((lot) => (
           <tr key={lot.id}>
             <td className="inv-code">{lot.lot_code}</td>
+            <td>{brandName(lot.brand_id)}</td>
             <td>
               {lot.name}
               <NoteLine note={lot.note} />
@@ -1369,7 +1500,7 @@ function BulkPanel() {
           </tr>
         ))}
       </TableShell>
-      <Pagination page={page} count={rows.length} onPage={setPage} />
+      <Pagination page={page} count={rows.length} total={totalQuery.data ?? undefined} onPage={setPage} />
       {detailId !== null && (
         <BulkDetailModal lotId={detailId} brandName={brandName} onClose={() => setDetailId(null)} />
       )}
@@ -1383,17 +1514,48 @@ function AgingPanel() {
   const [customDays, setCustomDays] = useState("");
   const [brandId, setBrandId] = useState<number | "">("");
   const [categoryId, setCategoryId] = useState<number | "">("");
+  const [productModelId, setProductModelId] = useState<number | "">("");
+  const [grade, setGrade] = useState<Grade | "">("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
   const isManager = useIsManager();
-  const { brands, categories } = useFilterOptions();
+  // 久滯庫存就是加了「在庫≥N 天」條件的序號品，選項來源與收斂邏輯完全共用。
+  const { brands, models, categories, grades } = useSerializedFilterOptions(brandId);
+  const changeBrand = (next: number | "") => {
+    setBrandId(next);
+    setProductModelId("");
+    setCategoryId("");
+    setGrade("");
+    setPage(0);
+  };
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
+  const modelName = (id: number | null) =>
+    id === null ? "—" : (models.find((m) => m.id === id)?.name ?? "—");
   const categoryName = (id: number | null) =>
     id === null ? "—" : (categories.find((c) => c.id === id)?.name ?? "—");
 
+  const totalQuery = useQuery({
+    queryKey: ["inventory", "aging-count", { minDays, brandId, categoryId, productModelId, grade }],
+    queryFn: async () => {
+      const { data } = await api.GET("/api/v1/serialized-items/count", {
+        params: {
+          query: {
+            status: "IN_STOCK",
+            min_age_days: minDays,
+            brand_id: brandId === "" ? undefined : brandId,
+            category_id: categoryId === "" ? undefined : categoryId,
+            product_model_id: productModelId === "" ? undefined : productModelId,
+            grade: orUndefined(grade),
+          },
+        },
+      });
+      return data?.count ?? null;
+    },
+  });
+
   const query = useQuery({
-    queryKey: ["inventory", "aging", { minDays, brandId, categoryId, page }],
+    queryKey: ["inventory", "aging", { minDays, brandId, categoryId, productModelId, grade, page }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/serialized-items", {
         params: {
@@ -1403,6 +1565,8 @@ function AgingPanel() {
             oldest_first: true,
             brand_id: brandId === "" ? undefined : brandId,
             category_id: categoryId === "" ? undefined : categoryId,
+            product_model_id: productModelId === "" ? undefined : productModelId,
+            grade: orUndefined(grade),
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
           },
@@ -1458,7 +1622,7 @@ function AgingPanel() {
         <select
           aria-label="品牌"
           value={brandId}
-          onChange={(e) => { setBrandId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+          onChange={(e) => changeBrand(e.target.value === "" ? "" : Number(e.target.value))}
         >
           <option value="">全部品牌</option>
           {brands.map((b) => (
@@ -1479,20 +1643,46 @@ function AgingPanel() {
             </option>
           ))}
         </select>
+        <select
+          aria-label="型號"
+          value={productModelId}
+          onChange={(e) => { setProductModelId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部型號</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="成色"
+          value={grade}
+          onChange={(e) => { setGrade(e.target.value as Grade | ""); setPage(0); }}
+        >
+          <option value="">全部成色</option>
+          {grades.map((g) => (
+            <option key={g} value={g}>
+              {gradeLabel(g)}
+            </option>
+          ))}
+        </select>
       </div>
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["序號碼", "品名", "成色", "持有", "標價", "入庫時間", "已在庫天數", "操作"]}
+        headers={["序號碼", "品牌", "品名", "型號", "成色", "持有", "標價", "入庫時間", "已在庫天數", "操作"]}
       >
         {rows.map((item) => (
           <tr key={item.id}>
             <td className="inv-code">{item.item_code}</td>
+            <td>{brandName(item.brand_id)}</td>
             <td>
               {item.name}
               <NoteLine note={item.note} />
             </td>
+            <td>{modelName(item.product_model_id)}</td>
             <td>{gradeLabel(item.grade)}</td>
             <td>
               <BadgeChip badge={ownershipBadge(item.ownership_type)} />
@@ -1517,7 +1707,7 @@ function AgingPanel() {
           </tr>
         ))}
       </TableShell>
-      <Pagination page={page} count={rows.length} onPage={setPage} />
+      <Pagination page={page} count={rows.length} total={totalQuery.data ?? undefined} onPage={setPage} />
       {detailId !== null && (
         <ItemDetailModal
           itemId={detailId}

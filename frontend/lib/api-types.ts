@@ -260,6 +260,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Bulk Lots
+         * @description 散裝批在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。
+         */
+        get: operations["countBulkLots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-lots/filter-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bulk Filter Options
+         * @description 散裝批篩選下拉的選項來源：只列實際有貨的品牌／分類／成色。
+         *
+         *     選了品牌就把分類與成色收斂到該品牌實際有的，避免選出空清單。
+         */
+        get: operations["bulkFilterOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-lots/{lot_id}": {
         parameters: {
             query?: never;
@@ -592,6 +634,46 @@ export interface paths {
          *     須宣告於 `/catalog-products/{product_id}/...` 之前，避免 `by-sku` 被路徑參數搶匹配。
          */
         get: operations["getCatalogProductBySku"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Catalog Products
+         * @description 一般商品在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。
+         */
+        get: operations["countCatalogProducts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog-products/filter-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog Filter Options
+         * @description 一般商品篩選下拉的選項來源：只列實際有一般商品掛著的品牌。
+         */
+        get: operations["catalogFilterOptions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2453,6 +2535,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Serialized Items
+         * @description 符合同一組篩選條件的序號品總筆數；庫存頁用它顯示「第 N / 共 M 頁」。
+         */
+        get: operations["countSerializedItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/serialized-items/filter-options": {
         parameters: {
             query?: never;
@@ -3186,6 +3288,18 @@ export interface components {
          */
         BulkAcquisitionBasis: "WEIGHT" | "BAG" | "UNSPECIFIED";
         /**
+         * BulkFilterOptions
+         * @description 散裝批的篩選選項；分類與成色依品牌收斂，品牌一律列全部實際有的。
+         */
+        BulkFilterOptions: {
+            /** Brands */
+            brands: components["schemas"]["BrandRead"][];
+            /** Categories */
+            categories: components["schemas"]["CategoryRead"][];
+            /** Grades */
+            grades: components["schemas"]["Grade"][];
+        };
+        /**
          * BulkLotDetailRead
          * @description 散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。
          */
@@ -3727,6 +3841,17 @@ export interface components {
          * @enum {string}
          */
         CashSessionStatus: "OPEN" | "CLOSED";
+        /**
+         * CatalogFilterOptions
+         * @description 一般商品的篩選選項。
+         *
+         *     只有品牌一個維度：catalog_products 沒有型號／成色／分類欄位（2026-09-09 裁示不加），
+         *     所以沒有東西可以依品牌收斂。
+         */
+        CatalogFilterOptions: {
+            /** Brands */
+            brands: components["schemas"]["BrandRead"][];
+        };
         /**
          * CatalogProductCreateRequest
          * @description 新增一般商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。
@@ -4909,6 +5034,14 @@ export interface components {
             in_stock_over_90d: number;
             /** Owned Serialized */
             owned_serialized: number;
+        };
+        /**
+         * InventoryCountRead
+         * @description 符合目前篩選條件的總筆數（庫存頁算總頁數用）。
+         */
+        InventoryCountRead: {
+            /** Count */
+            count: number;
         };
         /**
          * InventoryValueReport
@@ -6615,6 +6748,14 @@ export interface components {
             unknown_cost_sales: string;
         };
         /**
+         * SerializedCountRead
+         * @description 符合目前篩選條件的序號品總筆數（庫存頁算總頁數用）。
+         */
+        SerializedCountRead: {
+            /** Count */
+            count: number;
+        };
+        /**
          * SerializedFilterOptions
          * @description 庫存頁序號品的篩選選項；只含實際有庫存用到的值（見 service 說明）。
          */
@@ -7803,6 +7944,9 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["BulkLotStatus"] | null;
+                brand_id?: number | null;
+                category_id?: number | null;
+                grade?: components["schemas"]["Grade"] | null;
                 q?: string | null;
                 limit?: number;
                 offset?: number;
@@ -7851,6 +7995,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countBulkLots: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["BulkLotStatus"] | null;
+                brand_id?: number | null;
+                category_id?: number | null;
+                grade?: components["schemas"]["Grade"] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulkFilterOptions: {
+        parameters: {
+            query?: {
+                /** @description 選定品牌後收斂其餘選項 */
+                brand_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkFilterOptions"];
                 };
             };
             /** @description Validation Error */
@@ -8443,6 +8654,7 @@ export interface operations {
     listCatalogProducts: {
         parameters: {
             query?: {
+                brand_id?: number | null;
                 q?: string | null;
                 low_stock?: boolean;
                 limit?: number;
@@ -8536,6 +8748,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countCatalogProducts: {
+        parameters: {
+            query?: {
+                brand_id?: number | null;
+                q?: string | null;
+                low_stock?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalogFilterOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogFilterOptions"];
                 };
             };
         };
@@ -11988,6 +12253,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countSerializedItems: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SerializedItemStatus"] | null;
+                ownership?: components["schemas"]["OwnershipType"] | null;
+                category_id?: number | null;
+                brand_id?: number | null;
+                product_model_id?: number | null;
+                grade?: components["schemas"]["Grade"] | null;
+                min_age_days?: number | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedCountRead"];
                 };
             };
             /** @description Validation Error */

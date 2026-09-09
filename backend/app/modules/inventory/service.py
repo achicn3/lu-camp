@@ -871,20 +871,22 @@ class InventoryService:
         self,
         store_id: int,
         *,
+        brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CatalogProduct]:
-        """列一般商品（POS 選件/庫存頁；q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
+        """列一般商品（POS 選件/庫存頁；篩品牌、q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
         return await self._repo.list_catalog(
-            store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+            store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
         )
 
     async def list_catalog_with_incoming(
         self,
         store_id: int,
         *,
+        brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
         limit: int = 50,
@@ -894,7 +896,7 @@ class InventoryService:
         from app.modules.purchasing.service import PurchasingService
 
         products = await self._repo.list_catalog(
-            store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+            store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
         )
         incoming = await PurchasingService(self._session).incoming_qty_by_catalog(
             store_id, [p.id for p in products]
@@ -907,14 +909,79 @@ class InventoryService:
         *,
         status: BulkLotStatus | None = None,
         consignor_id: int | None = None,
+        brand_id: int | None = None,
+        category_id: int | None = None,
+        grade: Grade | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BulkLot]:
-        """列散裝堆（POS 明確選堆/庫存頁；篩狀態/consignor、q 搜名稱/堆名/識別碼）。"""
+        """列散裝堆（POS 明確選堆／庫存頁）。
+
+        篩狀態／consignor／品牌／分類／成色；q 搜名稱、堆名與識別碼。
+        """
         return await self._repo.list_bulk_lots(
-            store_id, status=status, consignor_id=consignor_id, q=q, limit=limit, offset=offset
+            store_id,
+            status=status,
+            consignor_id=consignor_id,
+            brand_id=brand_id,
+            category_id=category_id,
+            grade=grade,
+            q=q,
+            limit=limit,
+            offset=offset,
         )
+
+    async def count_catalog_products(
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None = None,
+        q: str | None = None,
+        low_stock: bool = False,
+    ) -> int:
+        """一般商品總筆數：與 list_catalog 同一組條件、不分頁（庫存頁算總頁數）。"""
+        return await self._repo.count_catalog(
+            store_id, brand_id=brand_id, q=q, low_stock=low_stock
+        )
+
+    async def catalog_filter_options(self, store_id: int) -> dict[str, Any]:
+        """一般商品的篩選選項：只有品牌一個維度。
+
+        catalog_products 沒有型號／成色／分類欄位（2026-09-09 裁示不加），所以這裡
+        沒有東西可以收斂，只列實際有一般商品掛著的品牌。
+        """
+        return {"brands": await self._repo.brands_in_use_catalog(store_id)}
+
+    async def count_bulk_lots_total(
+        self,
+        store_id: int,
+        *,
+        status: BulkLotStatus | None = None,
+        brand_id: int | None = None,
+        category_id: int | None = None,
+        grade: Grade | None = None,
+        q: str | None = None,
+    ) -> int:
+        """散裝批總筆數：與 list_bulk_lots 同一組條件、不分頁（庫存頁算總頁數）。"""
+        return await self._repo.count_bulk_lots(
+            store_id, status=status, brand_id=brand_id, category_id=category_id, grade=grade, q=q
+        )
+
+    async def bulk_filter_options(
+        self, store_id: int, *, brand_id: int | None = None
+    ) -> dict[str, Any]:
+        """散裝批的篩選選項：品牌一律列全部實際有的，分類與成色依品牌收斂。
+
+        取捨與序號品相同：只依品牌收斂，不看畫面上其他已選條件（狀態／搜尋字）。
+        """
+        order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
+        grades = await self._repo.grades_in_use_bulk(store_id, brand_id)
+        return {
+            "brands": await self._repo.brands_in_use_bulk(store_id),
+            "categories": await self._repo.categories_in_use_bulk(store_id, brand_id),
+            "grades": sorted(grades, key=lambda g: order.get(g, len(order))),
+        }
 
     async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:
         """在庫序號品（IN_STOCK，全部；庫存價值/庫齡報表唯讀用）。"""
@@ -937,6 +1004,38 @@ class InventoryService:
         if not term:
             return []
         return await self._repo.suggest_item_names(store_id, term, limit)
+
+    async def count_serialized_items(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None = None,
+        ownership_type: OwnershipType | None = None,
+        category_id: int | None = None,
+        brand_id: int | None = None,
+        product_model_id: int | None = None,
+        grade: Grade | None = None,
+        min_age_days: int | None = None,
+        q: str | None = None,
+    ) -> int:
+        """庫存頁的總筆數：與 list_serialized 套用同一組條件，只是不分頁。
+
+        沒有它就只能用「滿頁＝可能還有下一頁」猜，店員看不到自己在第幾／共幾頁。
+        """
+        stocked_before = (
+            datetime.now(UTC) - timedelta(days=min_age_days) if min_age_days is not None else None
+        )
+        return await self._repo.count_serialized(
+            store_id,
+            status=status,
+            ownership_type=ownership_type,
+            category_id=category_id,
+            brand_id=brand_id,
+            product_model_id=product_model_id,
+            grade=grade,
+            stocked_before=stocked_before,
+            q=q,
+        )
 
     async def serialized_filter_options(
         self, store_id: int, *, brand_id: int | None = None

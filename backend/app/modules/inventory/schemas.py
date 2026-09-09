@@ -398,3 +398,33 @@ class SerializedFilterOptions(BaseModel):
     models: list[ProductModelRead]
     categories: list[CategoryRead]
     grades: list[Grade]
+
+
+class SerializedCountRead(BaseModel):
+    """符合目前篩選條件的序號品總筆數（庫存頁算總頁數用）。"""
+
+    count: int
+
+
+class CatalogFilterOptions(BaseModel):
+    """一般商品的篩選選項。
+
+    只有品牌一個維度：catalog_products 沒有型號／成色／分類欄位（2026-09-09 裁示不加），
+    所以沒有東西可以依品牌收斂。
+    """
+
+    brands: list[BrandRead]
+
+
+class BulkFilterOptions(BaseModel):
+    """散裝批的篩選選項；分類與成色依品牌收斂，品牌一律列全部實際有的。"""
+
+    brands: list[BrandRead]
+    categories: list[CategoryRead]
+    grades: list[Grade]
+
+
+class InventoryCountRead(BaseModel):
+    """符合目前篩選條件的總筆數（庫存頁算總頁數用）。"""
+
+    count: int

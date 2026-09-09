@@ -167,6 +167,85 @@ class InventoryRepository:
         result: SerializedItem | None = await self._session.scalar(stmt)
         return result
 
+    def _serialized_filters(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None,
+        ownership_type: OwnershipType | None,
+        consignor_id: int | None,
+        category_id: int | None,
+        brand_id: int | None,
+        product_model_id: int | None,
+        grade: Grade | None,
+        stocked_before: datetime | None,
+        q: str | None,
+    ) -> list[Any]:
+        """清單與計數共用的條件；分開寫遲早分岔，頁數就會跟翻得到的頁對不起來。"""
+        conds: list[Any] = [SerializedItem.store_id == store_id]
+        if status is not None:
+            conds.append(SerializedItem.status == status)
+        if ownership_type is not None:
+            conds.append(SerializedItem.ownership_type == ownership_type)
+        if consignor_id is not None:
+            conds.append(SerializedItem.consignor_id == consignor_id)
+        if category_id is not None:
+            conds.append(SerializedItem.category_id == category_id)
+        if brand_id is not None:
+            conds.append(SerializedItem.brand_id == brand_id)
+        if product_model_id is not None:
+            conds.append(SerializedItem.product_model_id == product_model_id)
+        if grade is not None:
+            conds.append(SerializedItem.grade == grade)
+        if stocked_before is not None:
+            # 久滯庫存：入庫早於 cutoff（已在庫天數 ≥ 指定天數）。
+            conds.append(SerializedItem.intake_date <= stocked_before)
+        if q:
+            pattern = f"%{q}%"
+            conds.append(
+                SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
+            )
+        return conds
+
+    async def count_serialized(
+        self,
+        store_id: int,
+        *,
+        status: SerializedItemStatus | None = None,
+        ownership_type: OwnershipType | None = None,
+        consignor_id: int | None = None,
+        category_id: int | None = None,
+        brand_id: int | None = None,
+        product_model_id: int | None = None,
+        grade: Grade | None = None,
+        stocked_before: datetime | None = None,
+        q: str | None = None,
+    ) -> int:
+        """符合同一組條件的總筆數（不含分頁）。
+
+        兩處用途共用同一支：庫存頁的總頁數，以及洞察摘要的在庫結構／久滯件數。
+        與 list_serialized 共用 `_serialized_filters`，頁數才不會跟翻得到的頁對不起來。
+        """
+        stmt = (
+            select(func.count())
+            .select_from(SerializedItem)
+            .where(
+                *self._serialized_filters(
+                    store_id,
+                    status=status,
+                    ownership_type=ownership_type,
+                    consignor_id=consignor_id,
+                    category_id=category_id,
+                    brand_id=brand_id,
+                    product_model_id=product_model_id,
+                    grade=grade,
+                    stocked_before=stocked_before,
+                    q=q,
+                )
+            )
+        )
+        return int((await self._session.scalar(stmt)) or 0)
+
     async def list_serialized(
         self,
         store_id: int,
@@ -184,53 +263,24 @@ class InventoryRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[SerializedItem]:
-        stmt = select(SerializedItem).where(SerializedItem.store_id == store_id)
-        if status is not None:
-            stmt = stmt.where(SerializedItem.status == status)
-        if ownership_type is not None:
-            stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
-        if consignor_id is not None:
-            stmt = stmt.where(SerializedItem.consignor_id == consignor_id)
-        if category_id is not None:
-            stmt = stmt.where(SerializedItem.category_id == category_id)
-        if brand_id is not None:
-            stmt = stmt.where(SerializedItem.brand_id == brand_id)
-        if product_model_id is not None:
-            stmt = stmt.where(SerializedItem.product_model_id == product_model_id)
-        if grade is not None:
-            stmt = stmt.where(SerializedItem.grade == grade)
-        if stocked_before is not None:
-            # 久滯庫存：入庫早於 cutoff（已在庫天數 ≥ 指定天數）。
-            stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
-        if q:
-            pattern = f"%{q}%"
-            stmt = stmt.where(
-                SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
+        stmt = select(SerializedItem).where(
+            *self._serialized_filters(
+                store_id,
+                status=status,
+                ownership_type=ownership_type,
+                consignor_id=consignor_id,
+                category_id=category_id,
+                brand_id=brand_id,
+                product_model_id=product_model_id,
+                grade=grade,
+                stocked_before=stocked_before,
+                q=q,
             )
+        )
         # 久滯庫存頁以「入庫最久」排序（intake_date 升冪）；一般列表維持新到舊。
         order = SerializedItem.intake_date.asc() if oldest_first else SerializedItem.id.desc()
         stmt = stmt.order_by(order).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
-
-    async def count_serialized(
-        self,
-        store_id: int,
-        *,
-        status: SerializedItemStatus | None = None,
-        ownership_type: OwnershipType | None = None,
-        stocked_before: datetime | None = None,
-    ) -> int:
-        """序號品計數（洞察摘要：在庫結構、久滯件數）。"""
-        stmt = select(func.count()).select_from(SerializedItem).where(
-            SerializedItem.store_id == store_id
-        )
-        if status is not None:
-            stmt = stmt.where(SerializedItem.status == status)
-        if ownership_type is not None:
-            stmt = stmt.where(SerializedItem.ownership_type == ownership_type)
-        if stocked_before is not None:
-            stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
-        return int(await self._session.scalar(stmt) or 0)
 
     async def brand_names(self, store_id: int, ids: list[int]) -> dict[int, str]:
         """指定品牌 id 的名稱對照（經營洞察依售出列實際出現的 id 取名，不受清單上限限制）。"""
@@ -262,25 +312,97 @@ class InventoryRepository:
         )
         return int(await self._session.scalar(stmt) or 0)
 
+    def _catalog_filters(
+        self, store_id: int, *, brand_id: int | None, q: str | None, low_stock: bool
+    ) -> list[Any]:
+        """清單與計數共用；分開寫遲早分岔，頁數就會跟翻得到的頁對不起來。"""
+        conds: list[Any] = [CatalogProduct.store_id == store_id]
+        if brand_id is not None:
+            conds.append(CatalogProduct.brand_id == brand_id)
+        if q:
+            pattern = f"%{q}%"
+            conds.append(CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern))
+        if low_stock:
+            conds.append(CatalogProduct.quantity_on_hand <= CatalogProduct.reorder_point)
+        return conds
+
     async def list_catalog(
         self,
         store_id: int,
         *,
+        brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CatalogProduct]:
-        stmt = select(CatalogProduct).where(CatalogProduct.store_id == store_id)
+        stmt = (
+            select(CatalogProduct)
+            .where(*self._catalog_filters(store_id, brand_id=brand_id, q=q, low_stock=low_stock))
+            .order_by(CatalogProduct.name)
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def count_catalog(
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None = None,
+        q: str | None = None,
+        low_stock: bool = False,
+    ) -> int:
+        """符合同一組條件的一般商品總筆數（不含分頁）；庫存頁算總頁數用。"""
+        stmt = (
+            select(func.count())
+            .select_from(CatalogProduct)
+            .where(*self._catalog_filters(store_id, brand_id=brand_id, q=q, low_stock=low_stock))
+        )
+        return int((await self._session.scalar(stmt)) or 0)
+
+    async def brands_in_use_catalog(self, store_id: int) -> list[Brand]:
+        """有一般商品掛著的品牌（品牌本身也擋一次 store_id，理由同序號品）。"""
+        stmt = (
+            select(Brand)
+            .join(CatalogProduct, CatalogProduct.brand_id == Brand.id)
+            .where(CatalogProduct.store_id == store_id, Brand.store_id == store_id)
+            .distinct()
+            .order_by(Brand.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    def _bulk_filters(
+        self,
+        store_id: int,
+        *,
+        status: BulkLotStatus | None,
+        consignor_id: int | None,
+        brand_id: int | None,
+        category_id: int | None,
+        grade: Grade | None,
+        q: str | None,
+    ) -> list[Any]:
+        """清單與計數共用；分開寫遲早分岔，頁數就會跟翻得到的頁對不起來。"""
+        conds: list[Any] = [BulkLot.store_id == store_id]
+        if status is not None:
+            conds.append(BulkLot.status == status)
+        if consignor_id is not None:
+            conds.append(BulkLot.consignor_id == consignor_id)
+        if brand_id is not None:
+            conds.append(BulkLot.brand_id == brand_id)
+        if category_id is not None:
+            conds.append(BulkLot.category_id == category_id)
+        if grade is not None:
+            conds.append(BulkLot.grade == grade)
         if q:
             pattern = f"%{q}%"
-            stmt = stmt.where(
-                CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern)
+            conds.append(
+                BulkLot.name.ilike(pattern)
+                | BulkLot.lot_code.ilike(pattern)
+                | BulkLot.label.ilike(pattern)
             )
-        if low_stock:
-            stmt = stmt.where(CatalogProduct.quantity_on_hand <= CatalogProduct.reorder_point)
-        stmt = stmt.order_by(CatalogProduct.name).limit(limit).offset(offset)
-        return list((await self._session.scalars(stmt)).all())
+        return conds
 
     async def list_bulk_lots(
         self,
@@ -288,23 +410,91 @@ class InventoryRepository:
         *,
         status: BulkLotStatus | None = None,
         consignor_id: int | None = None,
+        brand_id: int | None = None,
+        category_id: int | None = None,
+        grade: Grade | None = None,
         q: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[BulkLot]:
-        stmt = select(BulkLot).where(BulkLot.store_id == store_id)
-        if status is not None:
-            stmt = stmt.where(BulkLot.status == status)
-        if consignor_id is not None:
-            stmt = stmt.where(BulkLot.consignor_id == consignor_id)
-        if q:
-            pattern = f"%{q}%"
-            stmt = stmt.where(
-                BulkLot.name.ilike(pattern)
-                | BulkLot.lot_code.ilike(pattern)
-                | BulkLot.label.ilike(pattern)
+        stmt = (
+            select(BulkLot)
+            .where(
+                *self._bulk_filters(
+                    store_id,
+                    status=status,
+                    consignor_id=consignor_id,
+                    brand_id=brand_id,
+                    category_id=category_id,
+                    grade=grade,
+                    q=q,
+                )
             )
-        stmt = stmt.order_by(BulkLot.id.desc()).limit(limit).offset(offset)
+            .order_by(BulkLot.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def count_bulk_lots(
+        self,
+        store_id: int,
+        *,
+        status: BulkLotStatus | None = None,
+        consignor_id: int | None = None,
+        brand_id: int | None = None,
+        category_id: int | None = None,
+        grade: Grade | None = None,
+        q: str | None = None,
+    ) -> int:
+        """符合同一組條件的散裝批總筆數（不含分頁）；庫存頁算總頁數用。"""
+        stmt = (
+            select(func.count())
+            .select_from(BulkLot)
+            .where(
+                *self._bulk_filters(
+                    store_id,
+                    status=status,
+                    consignor_id=consignor_id,
+                    brand_id=brand_id,
+                    category_id=category_id,
+                    grade=grade,
+                    q=q,
+                )
+            )
+        )
+        return int((await self._session.scalar(stmt)) or 0)
+
+    # 散裝批的篩選選項：品牌一律列全部實際有的，分類與成色依品牌收斂（同序號品）。
+    def _bulk_used_scope(self, store_id: int, brand_id: int | None) -> list[Any]:
+        conds: list[Any] = [BulkLot.store_id == store_id]
+        if brand_id is not None:
+            conds.append(BulkLot.brand_id == brand_id)
+        return conds
+
+    async def brands_in_use_bulk(self, store_id: int) -> list[Brand]:
+        stmt = (
+            select(Brand)
+            .join(BulkLot, BulkLot.brand_id == Brand.id)
+            .where(BulkLot.store_id == store_id, Brand.store_id == store_id)
+            .distinct()
+            .order_by(Brand.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def categories_in_use_bulk(self, store_id: int, brand_id: int | None) -> list[Category]:
+        stmt = (
+            select(Category)
+            .join(BulkLot, BulkLot.category_id == Category.id)
+            .where(*self._bulk_used_scope(store_id, brand_id), Category.store_id == store_id)
+            .distinct()
+            .order_by(Category.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def grades_in_use_bulk(self, store_id: int, brand_id: int | None) -> list[Grade]:
+        """回傳順序不保證，排序由 service 依成色好壞決定。"""
+        stmt = select(BulkLot.grade).where(*self._bulk_used_scope(store_id, brand_id)).distinct()
         return list((await self._session.scalars(stmt)).all())
 
     async def serialized_for_valuation(self, store_id: int) -> list[SerializedItem]:

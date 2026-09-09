@@ -948,6 +948,39 @@
         "title": "BulkAcquisitionBasis",
         "type": "string"
       },
+      "BulkFilterOptions": {
+        "description": "散裝批的篩選選項；分類與成色依品牌收斂，品牌一律列全部實際有的。",
+        "properties": {
+          "brands": {
+            "items": {
+              "$ref": "#/components/schemas/BrandRead"
+            },
+            "title": "Brands",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryRead"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "grades": {
+            "items": {
+              "$ref": "#/components/schemas/Grade"
+            },
+            "title": "Grades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "brands",
+          "categories",
+          "grades"
+        ],
+        "title": "BulkFilterOptions",
+        "type": "object"
+      },
       "BulkLotDetailRead": {
         "description": "散裝批明細（庫存逐件「詳細」）：來源/收購成本/均一價/剩餘＋入庫時間＋異動歷史。",
         "properties": {
@@ -2435,6 +2468,23 @@
         ],
         "title": "CashSessionStatus",
         "type": "string"
+      },
+      "CatalogFilterOptions": {
+        "description": "一般商品的篩選選項。\n\n只有品牌一個維度：catalog_products 沒有型號／成色／分類欄位（2026-09-09 裁示不加），\n所以沒有東西可以依品牌收斂。",
+        "properties": {
+          "brands": {
+            "items": {
+              "$ref": "#/components/schemas/BrandRead"
+            },
+            "title": "Brands",
+            "type": "array"
+          }
+        },
+        "required": [
+          "brands"
+        ],
+        "title": "CatalogFilterOptions",
+        "type": "object"
       },
       "CatalogProductCreateRequest": {
         "description": "新增一般商品（上架）：廠商採購商品先建檔，之後才能建採購單→收貨補庫存。\n\nSKU 可留白由系統產生；初始庫存固定 0（補庫存一律走採購收貨，留痕）；\nreorder_point 為低庫存提醒點。",
@@ -5296,6 +5346,20 @@
           "catalog_in_stock"
         ],
         "title": "InsightsTurnover",
+        "type": "object"
+      },
+      "InventoryCountRead": {
+        "description": "符合目前篩選條件的總筆數（庫存頁算總頁數用）。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "InventoryCountRead",
         "type": "object"
       },
       "InventoryValueReport": {
@@ -9624,6 +9688,20 @@
         "title": "SalesMarginReport",
         "type": "object"
       },
+      "SerializedCountRead": {
+        "description": "符合目前篩選條件的序號品總筆數（庫存頁算總頁數用）。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "SerializedCountRead",
+        "type": "object"
+      },
       "SerializedFilterOptions": {
         "description": "庫存頁序號品的篩選選項；只含實際有庫存用到的值（見 service 說明）。",
         "properties": {
@@ -12705,6 +12783,54 @@
           },
           {
             "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "grade",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grade"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Grade"
+            }
+          },
+          {
+            "in": "query",
             "name": "q",
             "required": false,
             "schema": {
@@ -12824,6 +12950,183 @@
           }
         ],
         "summary": "Get Bulk Lot By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-lots/count": {
+      "get": {
+        "description": "散裝批在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。",
+        "operationId": "countBulkLots",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BulkLotStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "grade",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grade"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Grade"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Bulk Lots",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-lots/filter-options": {
+      "get": {
+        "description": "散裝批篩選下拉的選項來源：只列實際有貨的品牌／分類／成色。\n\n選了品牌就把分類與成色收斂到該品牌實際有的，避免選出空清單。",
+        "operationId": "bulkFilterOptions",
+        "parameters": [
+          {
+            "description": "選定品牌後收斂其餘選項",
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "選定品牌後收斂其餘選項",
+              "title": "Brand Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkFilterOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Bulk Filter Options",
         "tags": [
           "inventory"
         ]
@@ -13802,6 +14105,22 @@
         "parameters": [
           {
             "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
             "name": "q",
             "required": false,
             "schema": {
@@ -13996,6 +14315,115 @@
           }
         ],
         "summary": "Get Catalog By Sku",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/count": {
+      "get": {
+        "description": "一般商品在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。",
+        "operationId": "countCatalogProducts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "low_stock",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Low Stock",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Catalog Products",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/catalog-products/filter-options": {
+      "get": {
+        "description": "一般商品篩選下拉的選項來源：只列實際有一般商品掛著的品牌。",
+        "operationId": "catalogFilterOptions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFilterOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Catalog Filter Options",
         "tags": [
           "inventory"
         ]
@@ -20430,6 +20858,176 @@
           }
         ],
         "summary": "Get Serialized By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/count": {
+      "get": {
+        "description": "符合同一組篩選條件的序號品總筆數；庫存頁用它顯示「第 N / 共 M 頁」。",
+        "operationId": "countSerializedItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SerializedItemStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ownership",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OwnershipType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ownership"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "product_model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Product Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "grade",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grade"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Grade"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_age_days",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 3650,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Age Days"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Serialized Items",
         "tags": [
           "inventory"
         ]

@@ -157,6 +157,13 @@ function route(url: string): Response | null {
     optionRequests.push(url);
     return json(FILTER_OPTIONS);
   }
+  if (url.includes("/serialized-items/count")) return json({ count: SERIALIZED.length });
+  if (url.includes("/catalog-products/count")) return json({ count: CATALOG.length });
+  if (url.includes("/catalog-products/filter-options")) return json({ brands: FILTER_OPTIONS.brands });
+  if (url.includes("/bulk-lots/count")) return json({ count: BULK.length });
+  if (url.includes("/bulk-lots/filter-options")) {
+    return json({ brands: FILTER_OPTIONS.brands, categories: FILTER_OPTIONS.categories, grades: ["E"] });
+  }
   if (url.includes("/catalog-products/") && url.includes("/detail")) return json(CATALOG_DETAIL);
   if (url.includes("/bulk-lots/") && url.includes("/detail")) return json(BULK_DETAIL);
   if (url.includes("/serialized-items/") && url.includes("/detail")) return json(DETAIL);
@@ -455,5 +462,64 @@ describe("InventoryPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("品牌"), "12");
     await waitFor(() => expect(models.value).toBe(""));
     expect(grades.value).toBe("");
+  });
+
+  it("欄位順序是序號碼、品牌、品名、型號", async () => {
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent)
+      .slice(0, 4);
+    expect(headers).toEqual(["序號碼", "品牌", "品名", "型號"]);
+  });
+
+  it("分頁顯示總頁數與總件數，不再只說「第 N 頁」", async () => {
+    // 這支要多頁，所以總數自己給（共用 stub 的總數要跟只有一列的清單一致）。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/serialized-items/count")) return json({ count: 137 });
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("SER-001");
+    // 137 件、每頁 PAGE_SIZE(20) → 共 7 頁
+    expect(await screen.findByText(/第 1 \/ 7 頁・共 137 件/)).toBeTruthy();
+  });
+
+  it("一般商品與散裝批也看得到品牌欄與總頁數", async () => {
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("SKU-9");
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent).slice(0, 3))
+      .toEqual(["商品編號", "品牌", "品名"]);
+    expect(screen.getByText(/共 \d+ 件/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
+    await screen.findByText(/第 \d+ \/ \d+ 頁/);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent).slice(0, 3))
+      .toEqual(["批號", "品牌", "名稱"]);
+  });
+
+  it("久滯庫存比照序號品：品牌型號欄、型號成色篩選、總頁數", async () => {
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+
+    await userEvent.click(screen.getByRole("tab", { name: "久滯庫存" }));
+    await screen.findByText(/第 \d+ \/ \d+ 頁/);
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent).slice(0, 4))
+      .toEqual(["序號碼", "品牌", "品名", "型號"]);
+    expect(screen.getByLabelText("型號")).toBeTruthy();
+    expect(screen.getByLabelText("成色")).toBeTruthy();
   });
 });

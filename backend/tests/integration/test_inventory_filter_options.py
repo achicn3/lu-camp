@@ -24,6 +24,7 @@ from app.shared.enums import Grade, OwnershipType, SerializedItemStatus, UserRol
 
 OPTIONS = "/api/v1/serialized-items/filter-options"
 LIST = "/api/v1/serialized-items"
+COUNT = "/api/v1/serialized-items/count"
 
 
 @pytest_asyncio.fixture
@@ -260,6 +261,63 @@ async def test_list_can_filter_by_grade(
 
     rows = (await client.get(LIST, params={"grade": "B"}, headers=_auth(store_id))).json()
     assert [r["item_code"] for r in rows] == [wanted.item_code]
+
+
+async def test_count_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """總筆數要跟清單套用同一組條件——否則頁數會跟實際翻得到的頁對不起來。"""
+    store_id = await _seed_store(db_session)
+    bull = await _brand(db_session, store_id, "蠻牛")
+    other = await _brand(db_session, store_id, "別牌")
+    for _ in range(3):
+        await _item(db_session, store_id, brand=bull, grade=Grade.A)
+    await _item(db_session, store_id, brand=bull, grade=Grade.D)
+    await _item(db_session, store_id, brand=other, grade=Grade.A)
+
+    assert (await client.get(COUNT, headers=_auth(store_id))).json()["count"] == 5
+    assert (
+        await client.get(COUNT, params={"brand_id": bull.id}, headers=_auth(store_id))
+    ).json()["count"] == 4
+    assert (
+        await client.get(
+            COUNT, params={"brand_id": bull.id, "grade": "A"}, headers=_auth(store_id)
+        )
+    ).json()["count"] == 3
+
+
+async def test_count_ignores_paging_but_honours_search(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """分頁參數不該影響總數；搜尋字則必須算進去。"""
+    store_id = await _seed_store(db_session)
+    bull = await _brand(db_session, store_id, "蠻牛")
+    for _ in range(3):
+        await _item(db_session, store_id, brand=bull)
+    special = SerializedItem(
+        store_id=store_id,
+        item_code=f"ITM-{next(_SEQ):06d}",
+        name="限量帳篷",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal("100"),
+        status=SerializedItemStatus.IN_STOCK,
+        brand_id=bull.id,
+    )
+    db_session.add(special)
+    await db_session.flush()
+
+    assert (await client.get(COUNT, headers=_auth(store_id))).json()["count"] == 4
+    assert (
+        await client.get(COUNT, params={"q": "限量"}, headers=_auth(store_id))
+    ).json()["count"] == 1
+
+
+async def test_count_is_store_scoped(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    store_a = await _seed_store(db_session, "A 店")
+    store_b = await _seed_store(db_session, "B 店")
+    await _item(db_session, store_a)
+    assert (await client.get(COUNT, headers=_auth(store_b))).json()["count"] == 0
 
 
 async def test_options_require_authentication(client: httpx.AsyncClient) -> None:

@@ -127,10 +127,18 @@ try {
   await page.getByRole("tab", { name: "序號品" }).click();
   await page.getByRole("columnheader", { name: "型號" }).waitFor();
 
+  const headers = (await page.getByRole("columnheader").allTextContents()).slice(0, 4);
   ok(
-    "清單看得到品牌與型號欄",
-    (await page.getByRole("columnheader", { name: "品牌" }).count()) === 1 &&
-      (await page.getByRole("columnheader", { name: "型號" }).count()) === 1,
+    "欄位順序：序號碼、品牌、品名、型號",
+    JSON.stringify(headers) === JSON.stringify(["序號碼", "品牌", "品名", "型號"]),
+    headers.join("、"),
+  );
+
+  const pagerText = await page.locator(".inv-pager .hint").first().innerText();
+  ok(
+    "分頁顯示總頁數與總件數",
+    /第 \d+ \/ \d+ 頁・共 \d+ 件/.test(pagerText),
+    pagerText,
   );
   const row = page.getByRole("row").filter({ hasText: setups[0].model });
   await row.first().waitFor();
@@ -205,6 +213,30 @@ try {
     secondModels.join("、"),
   );
   await page.screenshot({ path: join(SHOTS, "03-switched-brand.png"), fullPage: true });
+
+  // 另外三個分頁：欄位與分頁一致，散裝批同樣依品牌收斂。
+  for (const [tab, expected] of [
+    ["久滯庫存", ["序號碼", "品牌", "品名", "型號"]],
+    ["一般商品", ["商品編號", "品牌", "品名"]],
+    ["散裝批", ["批號", "品牌", "名稱"]],
+  ]) {
+    await page.getByRole("tab", { name: tab }).click();
+    // 等總筆數真的回來——分頁一開始就渲染成「第 1 頁」，早讀會讀到還沒載入的狀態
+    // （同前面型號下拉那個坑：等待條件要寫想看到的結果，不是等元素出現）。
+    await page
+      .locator(".inv-pager .hint")
+      .filter({ hasText: /第 \d+ \/ \d+ 頁・共 \d+ 件/ })
+      .first()
+      .waitFor({ timeout: 10_000 });
+    const cols = (await page.getByRole("columnheader").allTextContents()).slice(0, expected.length);
+    const pager = await page.locator(".inv-pager .hint").first().innerText();
+    ok(
+      `${tab}：欄位含品牌、分頁有總頁數`,
+      JSON.stringify(cols) === JSON.stringify(expected) && /第 \d+ \/ \d+ 頁・共 \d+ 件/.test(pager),
+      `${cols.join("、")} ｜ ${pager}`,
+    );
+    await page.screenshot({ path: join(SHOTS, `0${tab === "久滯庫存" ? 5 : tab === "一般商品" ? 6 : 7}-${encodeURIComponent(tab)}.png`), fullPage: true });
+  }
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: join(SHOTS, "04-mobile.png"), fullPage: true });

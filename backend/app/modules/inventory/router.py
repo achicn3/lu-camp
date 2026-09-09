@@ -15,14 +15,17 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.inventory.schemas import (
     BrandCreate,
     BrandRead,
+    BulkFilterOptions,
     BulkLotDetailRead,
     BulkLotRead,
+    CatalogFilterOptions,
     CatalogProductCreateRequest,
     CatalogProductDetailRead,
     CatalogProductRead,
     CategoryCreate,
     CategoryRead,
     CategoryTargetUpdate,
+    InventoryCountRead,
     NoteUpdateRequest,
     PriceHintRead,
     PriceUpdateRequest,
@@ -30,6 +33,7 @@ from app.modules.inventory.schemas import (
     PricingRulesUpdate,
     ProductModelCreate,
     ProductModelRead,
+    SerializedCountRead,
     SerializedFilterOptions,
     SerializedItemDetailRead,
     SerializedItemRead,
@@ -64,6 +68,38 @@ async def _ensure_category_create_allowed(session: AsyncSession, user: CurrentUs
     settings = await StoreSettingsService(session).get_effective_settings(user.store_id)
     if not settings.allow_clerk_manage_categories:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="權限不足")
+
+
+@router.get(
+    "/serialized-items/count",
+    response_model=SerializedCountRead,
+    operation_id="countSerializedItems",
+)
+async def count_serialized_items(
+    session: SessionDep,
+    user: CurrentUserDep,
+    status_filter: Annotated[SerializedItemStatus | None, Query(alias="status")] = None,
+    ownership_type: Annotated[OwnershipType | None, Query(alias="ownership")] = None,
+    category_id: Annotated[int | None, Query(alias="category_id")] = None,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    product_model_id: Annotated[int | None, Query(alias="product_model_id")] = None,
+    grade: Annotated[Grade | None, Query(alias="grade")] = None,
+    min_age_days: Annotated[int | None, Query(alias="min_age_days", ge=1, le=3650)] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+) -> SerializedCountRead:
+    """符合同一組篩選條件的序號品總筆數；庫存頁用它顯示「第 N / 共 M 頁」。"""
+    total = await InventoryService(session).count_serialized_items(
+        user.store_id,
+        status=status_filter,
+        ownership_type=ownership_type,
+        category_id=category_id,
+        brand_id=brand_id,
+        product_model_id=product_model_id,
+        grade=grade,
+        min_age_days=min_age_days,
+        q=q,
+    )
+    return SerializedCountRead(count=total)
 
 
 @router.get(
@@ -233,6 +269,38 @@ async def update_catalog_note(
 
 
 @router.get(
+    "/catalog-products/count",
+    response_model=InventoryCountRead,
+    operation_id="countCatalogProducts",
+)
+async def count_catalog_products(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    low_stock: Annotated[bool, Query()] = False,
+) -> InventoryCountRead:
+    """一般商品在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。"""
+    total = await InventoryService(session).count_catalog_products(
+        user.store_id, brand_id=brand_id, q=q, low_stock=low_stock
+    )
+    return InventoryCountRead(count=total)
+
+
+@router.get(
+    "/catalog-products/filter-options",
+    response_model=CatalogFilterOptions,
+    operation_id="catalogFilterOptions",
+)
+async def catalog_filter_options(
+    session: SessionDep, user: CurrentUserDep
+) -> CatalogFilterOptions:
+    """一般商品篩選下拉的選項來源：只列實際有一般商品掛著的品牌。"""
+    options = await InventoryService(session).catalog_filter_options(user.store_id)
+    return CatalogFilterOptions.model_validate(options)
+
+
+@router.get(
     "/catalog-products/{product_id}",
     response_model=CatalogProductRead,
     operation_id="getCatalogProduct",
@@ -352,13 +420,14 @@ async def list_serialized(
 async def list_catalog(
     session: SessionDep,
     user: CurrentUserDep,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     low_stock: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CatalogProductRead]:
     products, incoming = await InventoryService(session).list_catalog_with_incoming(
-        user.store_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+        user.store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
     return [
         CatalogProductRead.model_validate(product).model_copy(
@@ -598,6 +667,48 @@ async def update_pricing_rules(
 
 
 @router.get(
+    "/bulk-lots/count", response_model=InventoryCountRead, operation_id="countBulkLots"
+)
+async def count_bulk_lots(
+    session: SessionDep,
+    user: CurrentUserDep,
+    status_filter: Annotated[BulkLotStatus | None, Query(alias="status")] = None,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    category_id: Annotated[int | None, Query(alias="category_id")] = None,
+    grade: Annotated[Grade | None, Query(alias="grade")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+) -> InventoryCountRead:
+    """散裝批在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。"""
+    total = await InventoryService(session).count_bulk_lots_total(
+        user.store_id,
+        status=status_filter,
+        brand_id=brand_id,
+        category_id=category_id,
+        grade=grade,
+        q=q,
+    )
+    return InventoryCountRead(count=total)
+
+
+@router.get(
+    "/bulk-lots/filter-options",
+    response_model=BulkFilterOptions,
+    operation_id="bulkFilterOptions",
+)
+async def bulk_filter_options(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int | None, Query(description="選定品牌後收斂其餘選項")] = None,
+) -> BulkFilterOptions:
+    """散裝批篩選下拉的選項來源：只列實際有貨的品牌／分類／成色。
+
+    選了品牌就把分類與成色收斂到該品牌實際有的，避免選出空清單。
+    """
+    options = await InventoryService(session).bulk_filter_options(user.store_id, brand_id=brand_id)
+    return BulkFilterOptions.model_validate(options)
+
+
+@router.get(
     "/bulk-lots/{lot_id}",
     response_model=BulkLotRead,
     operation_id="getBulkLot",
@@ -621,12 +732,22 @@ async def list_bulk_lots(
     session: SessionDep,
     user: CurrentUserDep,
     status_filter: Annotated[BulkLotStatus | None, Query(alias="status")] = None,
+    brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    category_id: Annotated[int | None, Query(alias="category_id")] = None,
+    grade: Annotated[Grade | None, Query(alias="grade")] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[BulkLotRead]:
     lots = await InventoryService(session).list_bulk_lots(
-        user.store_id, status=status_filter, q=q, limit=limit, offset=offset
+        user.store_id,
+        status=status_filter,
+        brand_id=brand_id,
+        category_id=category_id,
+        grade=grade,
+        q=q,
+        limit=limit,
+        offset=offset,
     )
     return [BulkLotRead.model_validate(lot) for lot in lots]
 
