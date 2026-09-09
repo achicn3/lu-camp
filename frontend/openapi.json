@@ -9624,6 +9624,47 @@
         "title": "SalesMarginReport",
         "type": "object"
       },
+      "SerializedFilterOptions": {
+        "description": "庫存頁序號品的篩選選項；只含實際有庫存用到的值（見 service 說明）。",
+        "properties": {
+          "brands": {
+            "items": {
+              "$ref": "#/components/schemas/BrandRead"
+            },
+            "title": "Brands",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategoryRead"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "grades": {
+            "items": {
+              "$ref": "#/components/schemas/Grade"
+            },
+            "title": "Grades",
+            "type": "array"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ProductModelRead"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "brands",
+          "models",
+          "categories",
+          "grades"
+        ],
+        "title": "SerializedFilterOptions",
+        "type": "object"
+      },
       "SerializedItemDetailRead": {
         "description": "序號品明細（庫存逐件「詳細」）：含成本/售價/來源/收購/售出/完整異動歷史。",
         "properties": {
@@ -20210,6 +20251,38 @@
           },
           {
             "in": "query",
+            "name": "product_model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Product Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "grade",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Grade"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Grade"
+            }
+          },
+          {
+            "in": "query",
             "name": "min_age_days",
             "required": false,
             "schema": {
@@ -20357,6 +20430,63 @@
           }
         ],
         "summary": "Get Serialized By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/filter-options": {
+      "get": {
+        "description": "庫存頁篩選下拉的選項來源：只列本店序號品實際用到的品牌／型號／分類／成色。\n\n選了品牌就把型號／分類／成色收斂到該品牌實際有的，避免選出空清單。",
+        "operationId": "serializedFilterOptions",
+        "parameters": [
+          {
+            "description": "選定品牌後收斂其餘選項",
+            "in": "query",
+            "name": "brand_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "選定品牌後收斂其餘選項",
+              "title": "Brand Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedFilterOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Serialized Filter Options",
         "tags": [
           "inventory"
         ]

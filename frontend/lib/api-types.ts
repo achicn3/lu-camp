@@ -2453,6 +2453,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/filter-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Serialized Filter Options
+         * @description 庫存頁篩選下拉的選項來源：只列本店序號品實際用到的品牌／型號／分類／成色。
+         *
+         *     選了品牌就把型號／分類／成色收斂到該品牌實際有的，避免選出空清單。
+         */
+        get: operations["serializedFilterOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/serialized-items/price-hint": {
         parameters: {
             query?: never;
@@ -6591,6 +6613,20 @@ export interface components {
             transaction_count: number;
             /** Unknown Cost Sales */
             unknown_cost_sales: string;
+        };
+        /**
+         * SerializedFilterOptions
+         * @description 庫存頁序號品的篩選選項；只含實際有庫存用到的值（見 service 說明）。
+         */
+        SerializedFilterOptions: {
+            /** Brands */
+            brands: components["schemas"]["BrandRead"][];
+            /** Categories */
+            categories: components["schemas"]["CategoryRead"][];
+            /** Grades */
+            grades: components["schemas"]["Grade"][];
+            /** Models */
+            models: components["schemas"]["ProductModelRead"][];
         };
         /**
          * SerializedItemDetailRead
@@ -11900,6 +11936,8 @@ export interface operations {
                 ownership?: components["schemas"]["OwnershipType"] | null;
                 category_id?: number | null;
                 brand_id?: number | null;
+                product_model_id?: number | null;
+                grade?: components["schemas"]["Grade"] | null;
                 min_age_days?: number | null;
                 oldest_first?: boolean;
                 q?: string | null;
@@ -11950,6 +11988,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    serializedFilterOptions: {
+        parameters: {
+            query?: {
+                /** @description 選定品牌後收斂其餘選項 */
+                brand_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedFilterOptions"];
                 };
             };
             /** @description Validation Error */

@@ -176,6 +176,8 @@ class InventoryRepository:
         consignor_id: int | None = None,
         category_id: int | None = None,
         brand_id: int | None = None,
+        product_model_id: int | None = None,
+        grade: Grade | None = None,
         stocked_before: datetime | None = None,
         oldest_first: bool = False,
         q: str | None = None,
@@ -193,6 +195,10 @@ class InventoryRepository:
             stmt = stmt.where(SerializedItem.category_id == category_id)
         if brand_id is not None:
             stmt = stmt.where(SerializedItem.brand_id == brand_id)
+        if product_model_id is not None:
+            stmt = stmt.where(SerializedItem.product_model_id == product_model_id)
+        if grade is not None:
+            stmt = stmt.where(SerializedItem.grade == grade)
         if stocked_before is not None:
             # 久滯庫存：入庫早於 cutoff（已在庫天數 ≥ 指定天數）。
             stmt = stmt.where(SerializedItem.intake_date <= stocked_before)
@@ -775,3 +781,54 @@ class InventoryRepository:
             .limit(1)
         )
         return (await self._session.scalars(stmt)).first()
+
+    # ── 庫存頁篩選選項：只列「本店序號品實際用到的」值 ────────────────────
+    #
+    # 建了卻沒有任何庫存用到的品牌／型號／分類不列出來——選了也是空清單，
+    # 徒增店員的挫折。選了品牌時，型號／分類／成色收斂到該品牌實際有的。
+
+    def _used_scope(self, store_id: int, brand_id: int | None) -> list[Any]:
+        conds: list[Any] = [SerializedItem.store_id == store_id]
+        if brand_id is not None:
+            conds.append(SerializedItem.brand_id == brand_id)
+        return conds
+
+    async def brands_in_use(self, store_id: int) -> list[Brand]:
+        """有序號品掛著的品牌。品牌一律不收斂——收斂了就換不掉已選的那個。"""
+        stmt = (
+            select(Brand)
+            .join(SerializedItem, SerializedItem.brand_id == Brand.id)
+            .where(SerializedItem.store_id == store_id)
+            .distinct()
+            .order_by(Brand.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def models_in_use(self, store_id: int, brand_id: int | None) -> list[ProductModel]:
+        stmt = (
+            select(ProductModel)
+            .join(SerializedItem, SerializedItem.product_model_id == ProductModel.id)
+            .where(*self._used_scope(store_id, brand_id))
+            .distinct()
+            .order_by(ProductModel.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def categories_in_use(self, store_id: int, brand_id: int | None) -> list[Category]:
+        stmt = (
+            select(Category)
+            .join(SerializedItem, SerializedItem.category_id == Category.id)
+            .where(*self._used_scope(store_id, brand_id))
+            .distinct()
+            .order_by(Category.name)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def grades_in_use(self, store_id: int, brand_id: int | None) -> list[Grade]:
+        """回傳順序不保證，排序由 service 依成色好壞決定。"""
+        stmt = (
+            select(SerializedItem.grade)
+            .where(*self._used_scope(store_id, brand_id))
+            .distinct()
+        )
+        return list((await self._session.scalars(stmt)).all())

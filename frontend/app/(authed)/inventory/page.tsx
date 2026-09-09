@@ -49,6 +49,7 @@ type CatalogProduct = components["schemas"]["CatalogProductRead"];
 type SerializedStatus = components["schemas"]["SerializedItemStatus"];
 type BulkStatus = components["schemas"]["BulkLotStatus"];
 type Ownership = components["schemas"]["OwnershipType"];
+type Grade = components["schemas"]["Grade"];
 
 type Tab = "serialized" | "aging" | "catalog" | "bulk";
 const PAGE_SIZE = 20;
@@ -75,6 +76,26 @@ function useFilterOptions() {
       (await api.GET("/api/v1/categories", { params: { query: { limit: 200 } } })).data ?? [],
   });
   return { brands: brands.data ?? [], categories: categories.data ?? [] };
+}
+
+// 序號品篩選下拉：只列**實際有庫存用到的**值；選了品牌就把型號/分類/成色收斂到
+// 該品牌實際有的，避免店員選出空清單。品牌本身一律列全部，否則選定後換不掉。
+function useSerializedFilterOptions(brandId: number | "") {
+  const query = useQuery({
+    queryKey: ["inventory", "serialized-filter-options", brandId],
+    queryFn: async () =>
+      (
+        await api.GET("/api/v1/serialized-items/filter-options", {
+          params: { query: { brand_id: brandId === "" ? undefined : brandId } },
+        })
+      ).data ?? null,
+  });
+  return {
+    brands: query.data?.brands ?? [],
+    models: query.data?.models ?? [],
+    categories: query.data?.categories ?? [],
+    grades: query.data?.grades ?? [],
+  };
 }
 
 // 下拉選項（openapi-typescript 只生成型別、不生成 runtime 陣列；以生成型別標註保元素合法）。
@@ -832,18 +853,31 @@ function SerializedPanel() {
   const [ownership, setOwnership] = useState<Ownership | "">("");
   const [brandId, setBrandId] = useState<number | "">("");
   const [categoryId, setCategoryId] = useState<number | "">("");
+  const [productModelId, setProductModelId] = useState<number | "">("");
+  const [grade, setGrade] = useState<Grade | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
   const isManager = useIsManager();
-  const { brands, categories } = useFilterOptions();
+  const { brands, models, categories, grades } = useSerializedFilterOptions(brandId);
+  // 換品牌時把下層選擇清掉：舊的型號/分類/成色在新品牌下可能根本不存在，
+  // 留著會查出空清單而且看起來像壞掉。
+  const changeBrand = (next: number | "") => {
+    setBrandId(next);
+    setProductModelId("");
+    setCategoryId("");
+    setGrade("");
+    setPage(0);
+  };
   const brandName = (id: number | null) =>
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
+  const modelName = (id: number | null) =>
+    id === null ? "—" : (models.find((m) => m.id === id)?.name ?? "—");
   const categoryName = (id: number | null) =>
     id === null ? "—" : (categories.find((c) => c.id === id)?.name ?? "—");
 
   const query = useQuery({
-    queryKey: ["inventory", "serialized", { status, ownership, brandId, categoryId, q, page }],
+    queryKey: ["inventory", "serialized", { status, ownership, brandId, categoryId, productModelId, grade, q, page }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/serialized-items", {
         params: {
@@ -852,6 +886,8 @@ function SerializedPanel() {
             ownership: orUndefined(ownership),
             brand_id: brandId === "" ? undefined : brandId,
             category_id: categoryId === "" ? undefined : categoryId,
+            product_model_id: productModelId === "" ? undefined : productModelId,
+            grade: orUndefined(grade),
             q: orUndefined(q),
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
@@ -894,7 +930,7 @@ function SerializedPanel() {
         <select
           aria-label="品牌"
           value={brandId}
-          onChange={(e) => { setBrandId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+          onChange={(e) => changeBrand(e.target.value === "" ? "" : Number(e.target.value))}
         >
           <option value="">全部品牌</option>
           {brands.map((b) => (
@@ -915,12 +951,36 @@ function SerializedPanel() {
             </option>
           ))}
         </select>
+        <select
+          aria-label="型號"
+          value={productModelId}
+          onChange={(e) => { setProductModelId(e.target.value === "" ? "" : Number(e.target.value)); setPage(0); }}
+        >
+          <option value="">全部型號</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="成色"
+          value={grade}
+          onChange={(e) => { setGrade(e.target.value as Grade | ""); setPage(0); }}
+        >
+          <option value="">全部成色</option>
+          {grades.map((g) => (
+            <option key={g} value={g}>
+              {gradeLabel(g)}
+            </option>
+          ))}
+        </select>
       </SearchBar>
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["序號碼", "品名", "成色", "持有", "狀態", "標價", "操作"]}
+        headers={["序號碼", "品名", "品牌", "型號", "成色", "持有", "狀態", "標價", "操作"]}
       >
         {rows.map((item) => (
           <tr key={item.id}>
@@ -929,6 +989,8 @@ function SerializedPanel() {
               {item.name}
               <NoteLine note={item.note} />
             </td>
+            <td>{brandName(item.brand_id)}</td>
+            <td>{modelName(item.product_model_id)}</td>
             <td>{gradeLabel(item.grade)}</td>
             <td>
               <BadgeChip badge={ownershipBadge(item.ownership_type)} />

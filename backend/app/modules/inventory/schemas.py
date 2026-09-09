@@ -389,3 +389,12 @@ class PriceHintRead(BaseModel):
     total_count: int
     grades: list[GradePriceStat]
     latest: LatestAcquisitionRead | None = None
+
+
+class SerializedFilterOptions(BaseModel):
+    """庫存頁序號品的篩選選項；只含實際有庫存用到的值（見 service 說明）。"""
+
+    brands: list[BrandRead]
+    models: list[ProductModelRead]
+    categories: list[CategoryRead]
+    grades: list[Grade]

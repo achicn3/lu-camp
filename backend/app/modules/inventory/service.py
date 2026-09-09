@@ -757,6 +757,8 @@ class InventoryService:
         consignor_id: int | None = None,
         category_id: int | None = None,
         brand_id: int | None = None,
+        product_model_id: int | None = None,
+        grade: Grade | None = None,
         min_age_days: int | None = None,
         oldest_first: bool = False,
         q: str | None = None,
@@ -779,6 +781,8 @@ class InventoryService:
             consignor_id=consignor_id,
             category_id=category_id,
             brand_id=brand_id,
+            product_model_id=product_model_id,
+            grade=grade,
             stocked_before=stocked_before,
             oldest_first=oldest_first,
             q=q,
@@ -933,6 +937,24 @@ class InventoryService:
         if not term:
             return []
         return await self._repo.suggest_item_names(store_id, term, limit)
+
+    async def serialized_filter_options(
+        self, store_id: int, *, brand_id: int | None = None
+    ) -> dict[str, Any]:
+        """庫存頁的篩選選項：只列本店序號品**實際用到**的值。
+
+        給了 brand_id 就把型號／分類／成色收斂到該品牌實際有的——店員選了品牌之後
+        再從一長串型號裡找不存在的組合，選出來只會是空清單。品牌本身一律列全部，
+        否則選定後就換不掉了。
+        """
+        order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
+        grades = await self._repo.grades_in_use(store_id, brand_id)
+        return {
+            "brands": await self._repo.brands_in_use(store_id),
+            "models": await self._repo.models_in_use(store_id, brand_id),
+            "categories": await self._repo.categories_in_use(store_id, brand_id),
+            "grades": sorted(grades, key=lambda g: order.get(g, len(order))),
+        }
 
     async def list_serialized_by_acquisitions(
         self,

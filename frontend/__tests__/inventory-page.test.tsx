@@ -30,8 +30,8 @@ const SERIALIZED = [
     ownership_type: "CONSIGNMENT",
     status: "IN_STOCK",
     listed_price: "3500",
-    brand_id: null,
-    product_model_id: null,
+    brand_id: 11,
+    product_model_id: 21,
     commission_pct: 50,
     consignor_id: 7,
     intake_date: "2026-06-01T00:00:00Z",
@@ -139,7 +139,24 @@ const BULK_DETAIL = {
   history: [{ at: "2026-06-01T00:00:00Z", event: "入庫（收購）", qty: 10, note: null }],
 };
 
+const FILTER_OPTIONS = {
+  brands: [
+    { id: 11, name: "蠻牛" },
+    { id: 12, name: "別牌" },
+  ],
+  models: [{ id: 21, brand_id: 11, name: "營釘 20cm" }],
+  categories: [{ id: 31, name: "配件", target_margin_pct: 45 }],
+  grades: ["A", "C"],
+};
+
+// 記下每次要選項時帶的 brand_id，用來驗「選了品牌就收斂」。
+const optionRequests: string[] = [];
+
 function route(url: string): Response | null {
+  if (url.includes("/serialized-items/filter-options")) {
+    optionRequests.push(url);
+    return json(FILTER_OPTIONS);
+  }
   if (url.includes("/catalog-products/") && url.includes("/detail")) return json(CATALOG_DETAIL);
   if (url.includes("/bulk-lots/") && url.includes("/detail")) return json(BULK_DETAIL);
   if (url.includes("/serialized-items/") && url.includes("/detail")) return json(DETAIL);
@@ -399,5 +416,44 @@ describe("InventoryPage", () => {
       ),
     );
     expect(await screen.findByText("SER-001")).toBeTruthy();
+  });
+
+  it("序號品清單看得到品牌與型號", async () => {
+    stubInventory();
+    renderPage();
+    // 品牌名同時出現在下拉選項裡，所以鎖定那一列而不是整頁找字。
+    const row = (await screen.findByText("SER-001")).closest("tr");
+    expect(row?.textContent).toContain("蠻牛");
+    expect(row?.textContent).toContain("營釘 20cm");
+  });
+
+  it("選了品牌之後，選項要跟著那個品牌重新取得", async () => {
+    optionRequests.length = 0;
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+    // 一開始沒選品牌 → 不帶 brand_id，列出全部實際有的
+    await waitFor(() => expect(optionRequests.length).toBeGreaterThan(0));
+    expect(optionRequests.some((u) => !u.includes("brand_id"))).toBe(true);
+
+    await userEvent.selectOptions(screen.getByLabelText("品牌"), "11");
+    await waitFor(() => expect(optionRequests.some((u) => u.includes("brand_id=11"))).toBe(true));
+  });
+
+  it("換品牌會清掉型號與成色——舊的選擇在新品牌下可能根本不存在", async () => {
+    stubInventory();
+    renderPage();
+    await screen.findByText("SER-001");
+
+    const models = screen.getByLabelText("型號") as HTMLSelectElement;
+    const grades = screen.getByLabelText("成色") as HTMLSelectElement;
+    await userEvent.selectOptions(models, "21");
+    await userEvent.selectOptions(grades, "A");
+    expect(models.value).toBe("21");
+    expect(grades.value).toBe("A");
+
+    await userEvent.selectOptions(screen.getByLabelText("品牌"), "12");
+    await waitFor(() => expect(models.value).toBe(""));
+    expect(grades.value).toBe("");
   });
 });

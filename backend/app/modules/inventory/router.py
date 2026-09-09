@@ -30,12 +30,19 @@ from app.modules.inventory.schemas import (
     PricingRulesUpdate,
     ProductModelCreate,
     ProductModelRead,
+    SerializedFilterOptions,
     SerializedItemDetailRead,
     SerializedItemRead,
 )
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
-from app.shared.enums import BulkLotStatus, OwnershipType, SerializedItemStatus, UserRole
+from app.shared.enums import (
+    BulkLotStatus,
+    Grade,
+    OwnershipType,
+    SerializedItemStatus,
+    UserRole,
+)
 from app.shared.exceptions import (
     CrossStoreReference,
     DuplicateCatalogProduct,
@@ -57,6 +64,26 @@ async def _ensure_category_create_allowed(session: AsyncSession, user: CurrentUs
     settings = await StoreSettingsService(session).get_effective_settings(user.store_id)
     if not settings.allow_clerk_manage_categories:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="權限不足")
+
+
+@router.get(
+    "/serialized-items/filter-options",
+    response_model=SerializedFilterOptions,
+    operation_id="serializedFilterOptions",
+)
+async def serialized_filter_options(
+    session: SessionDep,
+    user: CurrentUserDep,
+    brand_id: Annotated[int | None, Query(description="選定品牌後收斂其餘選項")] = None,
+) -> SerializedFilterOptions:
+    """庫存頁篩選下拉的選項來源：只列本店序號品實際用到的品牌／型號／分類／成色。
+
+    選了品牌就把型號／分類／成色收斂到該品牌實際有的，避免選出空清單。
+    """
+    options = await InventoryService(session).serialized_filter_options(
+        user.store_id, brand_id=brand_id
+    )
+    return SerializedFilterOptions.model_validate(options)
 
 
 @router.get(
@@ -292,6 +319,8 @@ async def list_serialized(
     ownership_type: Annotated[OwnershipType | None, Query(alias="ownership")] = None,
     category_id: Annotated[int | None, Query(alias="category_id")] = None,
     brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
+    product_model_id: Annotated[int | None, Query(alias="product_model_id")] = None,
+    grade: Annotated[Grade | None, Query(alias="grade")] = None,
     min_age_days: Annotated[int | None, Query(alias="min_age_days", ge=1, le=3650)] = None,
     oldest_first: Annotated[bool, Query(alias="oldest_first")] = False,
     q: Annotated[str | None, Query(max_length=100)] = None,
@@ -304,6 +333,8 @@ async def list_serialized(
         ownership_type=ownership_type,
         category_id=category_id,
         brand_id=brand_id,
+        product_model_id=product_model_id,
+        grade=grade,
         min_age_days=min_age_days,
         oldest_first=oldest_first,
         q=q,
