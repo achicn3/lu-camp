@@ -946,6 +946,12 @@ class InventoryService:
         給了 brand_id 就把型號／分類／成色收斂到該品牌實際有的——店員選了品牌之後
         再從一長串型號裡找不存在的組合，選出來只會是空清單。品牌本身一律列全部，
         否則選定後就換不掉了。
+
+        **已知取捨**：只依品牌收斂，不看畫面上其他已選條件（狀態／持有／搜尋字）。
+        所以先選「狀態＝已售出」時，成色仍會列出全部成色，可能選到一個在已售出裡
+        沒有的成色而查出空清單。要做到完全一致得是完整的 faceted search（每個下拉
+        各自排除自己那一維），複雜度與快取成本都跳一級；單店實際使用以品牌為主，
+        故刻意停在這裡。
         """
         order = {grade: i for i, grade in enumerate(self._GRADE_ORDER)}
         grades = await self._repo.grades_in_use(store_id, brand_id)

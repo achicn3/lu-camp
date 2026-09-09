@@ -793,12 +793,16 @@ class InventoryRepository:
             conds.append(SerializedItem.brand_id == brand_id)
         return conds
 
+    # 被 join 的品牌／型號／分類**各自也擋一次 store_id**：只擋商品的話，店別是靠
+    # 「商品必然指向本店的品牌」這個假設間接達成的。一筆指錯店的資料就會讓他店名稱
+    # 出現在下拉裡。§4 要求每個查詢都以 store_id 過濾，這裡明示比推導安全。
+
     async def brands_in_use(self, store_id: int) -> list[Brand]:
         """有序號品掛著的品牌。品牌一律不收斂——收斂了就換不掉已選的那個。"""
         stmt = (
             select(Brand)
             .join(SerializedItem, SerializedItem.brand_id == Brand.id)
-            .where(SerializedItem.store_id == store_id)
+            .where(SerializedItem.store_id == store_id, Brand.store_id == store_id)
             .distinct()
             .order_by(Brand.name)
         )
@@ -808,7 +812,7 @@ class InventoryRepository:
         stmt = (
             select(ProductModel)
             .join(SerializedItem, SerializedItem.product_model_id == ProductModel.id)
-            .where(*self._used_scope(store_id, brand_id))
+            .where(*self._used_scope(store_id, brand_id), ProductModel.store_id == store_id)
             .distinct()
             .order_by(ProductModel.name)
         )
@@ -818,7 +822,7 @@ class InventoryRepository:
         stmt = (
             select(Category)
             .join(SerializedItem, SerializedItem.category_id == Category.id)
-            .where(*self._used_scope(store_id, brand_id))
+            .where(*self._used_scope(store_id, brand_id), Category.store_id == store_id)
             .distinct()
             .order_by(Category.name)
         )

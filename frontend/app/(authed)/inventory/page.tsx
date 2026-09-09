@@ -80,6 +80,11 @@ function useFilterOptions() {
 
 // 序號品篩選下拉：只列**實際有庫存用到的**值；選了品牌就把型號/分類/成色收斂到
 // 該品牌實際有的，避免店員選出空清單。品牌本身一律列全部，否則選定後換不掉。
+//
+// 換品牌時下拉會短暫只剩「全部…」：重新查詢期間 data 是 undefined，四個清單同時
+// 變空。本地查詢很快，實務上幾乎看不到；刻意不用 placeholderData 撐住舊值——那會
+// 讓畫面短暫顯示**上一個品牌**的型號，比空著更容易誤選。
+// （寫瀏覽器煙霧時要注意：等待條件不能只寫「別的選項消失」，那在全空的瞬間就成立了。）
 function useSerializedFilterOptions(brandId: number | "") {
   const query = useQuery({
     queryKey: ["inventory", "serialized-filter-options", brandId],

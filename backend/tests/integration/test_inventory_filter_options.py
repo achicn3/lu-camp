@@ -206,6 +206,30 @@ async def test_options_are_store_scoped(
     assert body["grades"] == []
 
 
+async def test_options_do_not_leak_other_stores_names_via_bad_references(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """就算有一筆商品指到他店的品牌／型號／分類，也不得把他店名稱列進下拉。
+
+    正常資料不會這樣，但店別若只靠「商品必然指向本店」間接達成，一筆錯誤資料就會
+    洩漏他店名稱。這道測試守著 repository 對品牌／型號／分類各自明示的 store 條件。
+    """
+    store_a = await _seed_store(db_session, "A 店")
+    store_b = await _seed_store(db_session, "B 店")
+    a_brand = await _brand(db_session, store_a, "他店品牌")
+    a_model = await _model(db_session, store_a, a_brand, "他店型號")
+    a_category = await _category(db_session, store_a, "他店分類")
+    # B 店的商品，卻指到 A 店的品牌／型號／分類（刻意造出的錯誤資料）
+    await _item(db_session, store_b, brand=a_brand, model=a_model, category=a_category)
+
+    body = (await client.get(OPTIONS, headers=_auth(store_b))).json()
+    assert body["brands"] == []
+    assert body["models"] == []
+    assert body["categories"] == []
+    # 成色來自商品本身（本來就是 B 店的），所以仍會列出
+    assert body["grades"] == ["A"]
+
+
 async def test_list_can_filter_by_product_model(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
