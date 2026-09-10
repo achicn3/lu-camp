@@ -142,7 +142,7 @@ describe("/acquisition 寄售抽成", () => {
     await user.click(screen.getByLabelText("分類"));
     await user.click(await screen.findByRole("option", { name: "相機" }));
     await user.type(
-      screen.getByLabelText("上架售價（含稅）", { selector: "input" }),
+      screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }),
       "2000",
     );
     expect((screen.getByLabelText("抽成 %（寄售）") as HTMLInputElement).value).toBe("37");

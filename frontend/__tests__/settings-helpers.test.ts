@@ -1,7 +1,13 @@
 // 純函式單元測試：溢價率夾擠、百分比格式化。
 import { describe, expect, it } from "vitest";
 
-import { clampRate, formatPct, parsePctInput, parseRateInput } from "@/features/settings/helpers";
+import {
+  clampRate,
+  formatPct,
+  parsePctInput,
+  parseRateInput,
+  ratePercentValue,
+} from "@/features/settings/helpers";
 
 describe("clampRate", () => {
   it("在範圍內的值不變", () => {
@@ -93,5 +99,31 @@ describe("parsePctInput", () => {
   });
   it("max=100：仍拒小數（100.0）", () => {
     expect(parsePctInput("100.0", 100)).toBeNull();
+  });
+});
+
+describe("ratePercentValue（輸入框預設值）", () => {
+  it("2.2% 存成 0.0220，讀回來要是 2.2 而不是 2.1999999999999997", () => {
+    // parseFloat("0.0220") * 100 在 JS 裡就是 2.1999999999999997——輸入框顯示這個
+    // 數字會讓店主以為系統把設定值改壞了（實際上 DB 存的是對的）。
+    expect(ratePercentValue("0.0220")).toBe("2.2");
+  });
+
+  it("2.9%（另一個會踩到浮點的值）", () => {
+    expect(ratePercentValue("0.0290")).toBe("2.9");
+  });
+
+  it("整數百分比不留小數點", () => {
+    expect(ratePercentValue("0.0500")).toBe("5");
+    expect(ratePercentValue("0.0000")).toBe("0");
+  });
+
+  it("四位小數（DB 精度上限）完整保留", () => {
+    expect(ratePercentValue("0.0285")).toBe("2.85");
+    expect(ratePercentValue("0.1234")).toBe("12.34");
+  });
+
+  it("讀不到值時回 0，不要顯示 NaN", () => {
+    expect(ratePercentValue("")).toBe("0");
   });
 });

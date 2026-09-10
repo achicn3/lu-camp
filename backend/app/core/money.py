@@ -80,25 +80,49 @@ def discounted_price(unit_price: Decimal, discount_pct: int) -> int:
     return round_ntd(unit_price * Decimal(100 - discount_pct) / Decimal(100))
 
 
-def suggested_price(acquisition_cost: Decimal, margin_pct: int, tax_rate: Decimal) -> int:
-    """建議**含稅**上架售價 = round_ntd(收購價 ÷ (1 − margin_pct/100) × (1 + tax_rate))（§7.9）。
+def suggested_price(
+    acquisition_cost: Decimal,
+    margin_pct: int,
+    tax_rate: Decimal,
+    fee_rate: Decimal = Decimal(0),
+) -> int:
+    """建議**含稅**上架售價（§7.9；手續費部分為 2026-09-09 裁示）。
+
+        未稅目標 = 收購價 ÷ (1 − margin_pct/100)
+        含稅售價 = round_ntd(未稅目標 × (1 + tax_rate) ÷ (1 − fee_rate × (1 + tax_rate)))
 
     目標毛利對**未稅**售價談：標價含稅（§6），但那 5% 是代政府收的、不是店家毛利。
-    先算未稅售價、最後才加稅，**只四捨五入一次**——先把未稅取整再加稅會多一次捨入誤差。
+
+    `fee_rate` 是行動支付手續費（兩種支付取較高者），店家被金流商抽走、不向客人加收。
+    不補進標價的話目標毛利就達不到：收 1000、毛利 45%、稅 5% 的舊式建議價是 1909，
+    客人刷行動支付被抽 42 元後未稅實得只剩 1776，實際毛利 43.7%。
+
+    採**精確補償**而非把費率直接乘上去：要的是「扣掉手續費之後的未稅實得」正好等於
+    未稅目標，所以除以 (1 − fee×(1+tax)) 而不是乘以 (1+fee)（後者會補償不足）。
+    費率 0 時整條式子退化為舊式，向後相容。
+
+    **手續費一律計入標價**（裁示 2026-09-09）：付現金的客人也適用同一個標價，
+    一件商品一個價，標籤／POS／客顯才會一致。
 
     margin_pct 為整數百分數，限 0-99；>=100 或 <0 會除以零/負值，視為錯誤。
-    tax_rate 為小數稅率（如 0.05），限 0 ≤ rate < 1，取自 settings、不得寫死。
-    tax_rate=0 時退化為舊式（2026-08-23 前的定義），供向後相容比對。
+    tax_rate、fee_rate 為小數（如 0.05／0.022），取自 settings、不得寫死。
+    fee_rate × (1 + tax_rate) ≥ 1 會讓分母 ≤ 0（手續費把整個售價吃光），視為錯誤。
     """
     if not MARGIN_MIN <= margin_pct <= MARGIN_MAX:
         raise InvalidMargin(f"margin_pct 須介於 {MARGIN_MIN}-{MARGIN_MAX}，收到 {margin_pct}")
     if not Decimal(0) <= tax_rate < Decimal(1):
         raise InvalidTaxRate(f"稅率須介於 0（含）至 1（不含），收到 {tax_rate}")
+    if fee_rate < Decimal(0):
+        raise InvalidTaxRate(f"手續費率不得為負，收到 {fee_rate}")
+    taxed = Decimal(1) + tax_rate
+    fee_divisor = Decimal(1) - fee_rate * taxed
+    if fee_divisor <= Decimal(0):
+        raise InvalidTaxRate(f"手續費率過高（費率×(1+稅率) ≥ 1），收到 {fee_rate}")
     # **先乘後除**：先除會讓 Decimal 在 28 位有效位數處截斷，之後再乘就補不回來。
     # 例 cost 282／margin 1／稅率 7.25%：先除後乘得 305，精確值是 305.5 → 應為 306。
     # 5% 下看不出來（實測零誤差），非 5% 的稅率才會現形——而稅率是可設定的。
     return round_ntd(
-        acquisition_cost * Decimal(100) * (Decimal(1) + tax_rate) / Decimal(100 - margin_pct)
+        acquisition_cost * Decimal(100) * taxed / (Decimal(100 - margin_pct) * fee_divisor)
     )
 
 

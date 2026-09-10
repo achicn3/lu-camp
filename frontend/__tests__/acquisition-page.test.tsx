@@ -32,7 +32,14 @@ const SELLER = {
 /** 讓測試可以延後或弄壞 /settings 的回應（稅率晚到／讀不到的路徑）。 */
 let releaseSettings: (() => void) | null = null;
 
-function stub(over: { drawer?: boolean; taxRate?: string; settingsFails?: boolean; holdSettings?: boolean } = {}) {
+function stub(over: {
+    drawer?: boolean;
+    taxRate?: string;
+    linepayFee?: string;
+    taiwanpayFee?: string;
+    settingsFails?: boolean;
+    holdSettings?: boolean;
+  } = {}) {
   releaseSettings = null;
   const gate = over.holdSettings
     ? new Promise<void>((resolve) => {
@@ -55,6 +62,8 @@ function stub(over: { drawer?: boolean; taxRate?: string; settingsFails?: boolea
           default_commission_pct: 50,
           default_margin_pct: 45,
           tax_rate: over.taxRate ?? "0.0500",
+          linepay_fee_pct: over.linepayFee ?? "0.0000",
+          taiwanpay_fee_pct: over.taiwanpayFee ?? "0.0000",
         });
       }
       if (url.includes("/cash-sessions/current")) {
@@ -185,7 +194,36 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     await waitFor(() =>
-      expect((screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value).toBe("2111"),
+      expect((screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value).toBe("2111"),
+    );
+  });
+
+  it("有行動支付手續費時，價格要把手續費也補進去（取兩種支付的較高者）", async () => {
+    // 未稅 2010、稅 5%、手續費取 max(1.5%, 2.2%) = 2.2%
+    //   純加稅：2111；補手續費後：round(2010 × 1.05 ÷ (1 − 0.022×1.05)) = 2160
+    // 不補的話客人刷卡被抽 47 元，店家實得掉到未稅 2062，毛利就不是談好的那個數字。
+    stub({ linepayFee: "0.0150", taiwanpayFee: "0.0220" });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement)
+          .value,
+      ).toBe("2160"),
+    );
+  });
+
+  it("手續費為 0 時與純加稅相同——沒設定行動支付的店不受影響", async () => {
+    stub({ linepayFee: "0.0000", taiwanpayFee: "0.0000" });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement)
+          .value,
+      ).toBe("2111"),
     );
   });
 
@@ -194,7 +232,7 @@ describe("AcquisitionPage", () => {
     renderPage();
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
-    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    const listed = screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     await waitFor(() => expect(listed.value).toBe("2111"));
     // 店員手動改成別的價
     await userEvent.clear(listed);
@@ -213,7 +251,7 @@ describe("AcquisitionPage", () => {
     await userEvent.type(resale, "2010");
     await waitFor(() =>
       expect(
-        (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+        (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value,
       ).toBe("2211"),
     );
   });
@@ -223,7 +261,7 @@ describe("AcquisitionPage", () => {
     renderPage();
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
-    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    const listed = screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     expect(listed.value).toBe(""); // 還沒有稅率，不能亂猜
     await userEvent.type(listed, "2500");
     expect(listed.value).toBe("2500");
@@ -241,7 +279,7 @@ describe("AcquisitionPage", () => {
     renderPage();
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
-    const listed = screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+    const listed = screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     expect(listed.value).toBe("");
     releaseSettings?.();
     await waitFor(() => expect(listed.value).toBe("2111"));
@@ -253,7 +291,7 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     expect(
-      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+      (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value,
     ).toBe("");
     expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
   });
@@ -264,7 +302,7 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     expect(
-      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+      (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value,
     ).toBe("");
     expect(await screen.findByText(/讀不到稅率設定/)).toBeTruthy();
   });
@@ -277,7 +315,7 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "1000");
     const listed = () =>
-      screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+      screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     await waitFor(() => expect(listed().value).toBe("1050"));
     await userEvent.clear(listed());
     await userEvent.type(listed(), "1800");
@@ -299,7 +337,7 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2000");
     const listed = () =>
-      screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement;
+      screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     expect(listed().value).toBe(""); // 寄售不自動加稅
     await userEvent.type(listed(), "2000"); // 與寄售人談定的架上價
 
@@ -318,21 +356,21 @@ describe("AcquisitionPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
     await waitFor(() =>
       expect(
-        (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement)
+        (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement)
           .value,
       ).toBe("2100"),
     );
   });
 
-  it("寄售分頁不自動加稅，也不出現「帶入含稅價格」快捷", async () => {
+  it("寄售分頁不自動加稅，也不出現「帶入客人實付價」快捷", async () => {
     stub();
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "寄售" }));
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2000");
-    await waitFor(() => expect(screen.queryByText(/帶入含稅價格/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/帶入客人實付價/)).toBeNull());
     expect(
-      (screen.getByLabelText("上架售價（含稅）", { selector: "input" }) as HTMLInputElement).value,
+      (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value,
     ).toBe("");
   });
 
@@ -354,7 +392,7 @@ describe("AcquisitionPage", () => {
     renderPage();
     await userEvent.type(await screen.findByLabelText("收購價"), "1200");
     await userEvent.type(
-      screen.getByLabelText("上架售價（含稅）", { selector: "input" }),
+      screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }),
       "2000",
     );
     expect(await screen.findByText(/毛利 /)).toBeTruthy();

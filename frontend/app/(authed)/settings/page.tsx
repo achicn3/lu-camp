@@ -11,7 +11,7 @@ import {
   removeTable,
   sameTables,
 } from "@/features/settings/dineInTables";
-import { clampRate, formatPct, parsePctInput, parseRateInput } from "@/features/settings/helpers";
+import { clampRate, formatPct, parsePctInput, parseRateInput, ratePercentValue } from "@/features/settings/helpers";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -140,7 +140,7 @@ function GeneralSettingsCard({
     mutation.mutate(body);
   }
 
-  const taxPct = (parseFloat(settings.tax_rate) * 100).toString();
+  const taxPct = ratePercentValue(settings.tax_rate);
   const outflowNum = parseNtd(settings.monthly_fixed_cash_outflow);
   const minSpendNum = parseNtd(settings.store_credit_min_spend);
 
@@ -293,8 +293,8 @@ function MobilePaymentCard({
     mutation.mutate(body);
   }
 
-  const linepayPct = (parseFloat(settings.linepay_fee_pct) * 100).toString();
-  const taiwanpayPct = (parseFloat(settings.taiwanpay_fee_pct) * 100).toString();
+  const linepayPct = ratePercentValue(settings.linepay_fee_pct);
+  const taiwanpayPct = ratePercentValue(settings.taiwanpay_fee_pct);
 
   return (
     <form className="card" onSubmit={onSubmit}>
@@ -475,7 +475,7 @@ function PremiumRateCard({
   onSaved: () => void;
 }) {
   const [rateInput, setRateInput] = useState<string>(
-    () => (parseFloat(settings.premium_rate) * 100).toString(),
+    () => ratePercentValue(settings.premium_rate),
   );
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
@@ -503,7 +503,7 @@ function PremiumRateCard({
 
   function handleAdopt() {
     if (!suggestion) return;
-    const suggestedPct = (parseFloat(suggestion.suggested_rate) * 100).toString();
+    const suggestedPct = ratePercentValue(suggestion.suggested_rate);
     setRateInput(suggestedPct);
   }
 

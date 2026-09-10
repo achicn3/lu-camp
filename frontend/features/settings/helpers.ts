@@ -24,6 +24,20 @@ export function formatPct(rateStr: string): string {
 }
 
 /**
+ * 小數率字串 → 百分比數字字串（不含 %），給輸入框當預設值用。
+ *
+ * **不要寫成 `parseFloat(rate) * 100`**：JS 浮點會讓 "0.0220" 變成
+ * 2.1999999999999997、"0.0290" 變成 2.9000000000000004，輸入框直接把這串數字
+ * 顯示給店主看，像是系統把設定值改壞了（實際上 DB 存的 Numeric(5,4) 是對的，
+ * 只有畫面錯）。率最多四位小數，收整到四位就把誤差消掉了。
+ */
+export function ratePercentValue(rateStr: string): string {
+  const pct = parseFloat(rateStr) * 100;
+  if (!Number.isFinite(pct)) return "0";
+  return parseFloat(pct.toFixed(4)).toString();
+}
+
+/**
  * 解析使用者輸入的百分比數字（如 "10" 表示 10%）為小數率字串（"0.1000"）。
  * 非法輸入回 null。僅接受 >= 0 的數字。
  */

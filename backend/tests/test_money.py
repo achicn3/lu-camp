@@ -194,3 +194,54 @@ def test_discounted_price_bounds(price: Decimal, pct: int, expected: int) -> Non
 def test_discounted_price_invalid_pct_raises(pct: int) -> None:
     with pytest.raises(InvalidDiscountPct):
         discounted_price(Decimal("1000"), pct)
+
+
+# ── 行動支付手續費納入建議售價（裁示 2026-09-09）────────────────────────
+#
+# 手續費是店家被金流商抽走的錢，不加進標價的話目標毛利就達不到。採「精確補償」：
+# 讓**扣掉手續費之後的未稅實得**正好等於 cost ÷ (1 − margin)，而不是把費率直接乘上去。
+FEE = Decimal("0.022")  # 兩種行動支付取較高者；測試用固定值
+
+
+def test_suggested_price_without_fee_is_unchanged() -> None:
+    """不帶手續費時與舊行為完全相同——既有呼叫端不受影響。"""
+    assert suggested_price(Decimal("1000"), 45, RATE) == suggested_price(
+        Decimal("1000"), 45, RATE, Decimal(0)
+    )
+
+
+def test_suggested_price_with_fee_compensates_exactly() -> None:
+    """收 1000、毛利 45%、稅 5%、手續費 2.2% → 1954。
+
+    驗算：未稅目標 1000/0.55 = 1818.18；含稅 P 需滿足
+    P/1.05 − P×0.022 = 1818.18 → P = 1954.14 → 1954。
+    """
+    assert suggested_price(Decimal("1000"), 45, RATE, FEE) == 1954
+
+
+def test_suggested_price_with_fee_really_hits_the_target_margin() -> None:
+    """反推驗證：照這個價賣掉、扣掉手續費之後，未稅實得要回到目標毛利。
+
+    只比對區間而非精確值——整數元收整必然有一元上下的誤差，重點是不能系統性少賺。
+    """
+    cost, margin = Decimal("1000"), 45
+    price = Decimal(suggested_price(cost, margin, RATE, FEE))
+    net_after_fee = price / (Decimal(1) + RATE) - price * FEE
+    realised_margin = (net_after_fee - cost) / net_after_fee * 100
+    assert Decimal("44.9") < realised_margin < Decimal("45.1")
+
+
+def test_suggested_price_zero_fee_matches_old_formula() -> None:
+    """費率 0 退化為舊式，向後相容。"""
+    assert suggested_price(Decimal("1000"), 0, RATE, Decimal(0)) == 1050
+
+
+def test_suggested_price_rejects_fee_that_swallows_the_whole_price() -> None:
+    """手續費×(1+稅率) ≥ 1 會讓分母 ≤ 0：那是無意義的設定，明確拒絕而不是回怪數字。"""
+    with pytest.raises(InvalidTaxRate):
+        suggested_price(Decimal("1000"), 45, RATE, Decimal("0.96"))
+
+
+def test_suggested_price_rejects_negative_fee() -> None:
+    with pytest.raises(InvalidTaxRate):
+        suggested_price(Decimal("1000"), 45, RATE, Decimal("-0.01"))

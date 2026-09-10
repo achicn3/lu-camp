@@ -7,6 +7,7 @@ import {
   netOfTaxInclusive,
   splitValid,
   suggestedListedPrice,
+  taxAndFeeInclusivePrice,
   taxInclusivePrice,
 } from "@/features/acquisition/pricing";
 
@@ -126,5 +127,63 @@ describe("splitValid / creditPremiumPreview", () => {
     expect(creditPremiumPreview(333, "0.1")).toBe(33); // 33.3 → 33
     // 精確乘積 1.5 應 HALF_UP 為 2；Number(0.0003) 的二進位乘法曾得到 1.49999… → 1。
     expect(creditPremiumPreview(5000, "0.0003")).toBe(2);
+  });
+});
+
+// ── 行動支付手續費納入建議售價（裁示 2026-09-09）────────────────────────
+//
+// 與後端 core/money.suggested_price 同式；兩邊都測同一組數字，避免哪天只改一邊。
+describe("suggestedListedPrice 納入手續費", () => {
+  const FEE = 0.022; // 兩種行動支付取較高者
+
+  it("不帶費率時與舊行為完全相同", () => {
+    expect(suggestedListedPrice(1000, 45, RATE)).toBe(suggestedListedPrice(1000, 45, RATE, 0));
+  });
+
+  it("收 1000、毛利 45%、稅 5%、費 2.2% → 1954（與後端同值）", () => {
+    expect(suggestedListedPrice(1000, 45, RATE, FEE)).toBe(1954);
+  });
+
+  it("補的是精確值，不是直接乘上費率", () => {
+    // 直接乘：round(1818.18 × 1.05 × 1.022) = 1951，補償不足。
+    expect(suggestedListedPrice(1000, 45, RATE, FEE)).toBeGreaterThan(1951);
+  });
+
+  it("照這個價賣掉、扣掉手續費後，未稅實得要回到目標毛利", () => {
+    const price = suggestedListedPrice(1000, 45, RATE, FEE) as number;
+    const netAfterFee = price / (1 + RATE) - price * FEE;
+    const realised = ((netAfterFee - 1000) / netAfterFee) * 100;
+    expect(realised).toBeGreaterThan(44.9);
+    expect(realised).toBeLessThan(45.1);
+  });
+
+  it("費率把整個售價吃光（費率×(1+稅率) ≥ 1）回 null，不回怪數字", () => {
+    expect(suggestedListedPrice(1000, 45, RATE, 0.96)).toBeNull();
+  });
+
+  it("負費率回 null", () => {
+    expect(suggestedListedPrice(1000, 45, RATE, -0.01)).toBeNull();
+  });
+});
+
+describe("含稅含費售價與對應的毛利率", () => {
+  const FEE = 0.022;
+
+  it("未稅 → 含稅含費：1818 在稅 5%、費 2.2% 下是 1954", () => {
+    expect(taxAndFeeInclusivePrice(1818, RATE, FEE)).toBe(1954);
+  });
+
+  it("費率 0 時與純加稅相同（向後相容）", () => {
+    expect(taxAndFeeInclusivePrice(2010, RATE, 0)).toBe(taxInclusivePrice(2010, RATE));
+  });
+
+  it("毛利率要把手續費一起扣掉，否則會高估", () => {
+    // 標價 1954、成本 1000：不扣手續費看起來 46%，扣了才是真正的 45%。
+    expect(marginPct(1954, 1000, RATE, 0)).toBe(46);
+    expect(marginPct(1954, 1000, RATE, FEE)).toBe(45);
+  });
+
+  it("毛利率不帶費率時維持舊行為", () => {
+    expect(marginPct(2111, 1000, RATE)).toBe(marginPct(2111, 1000, RATE, 0));
   });
 });

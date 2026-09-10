@@ -20,7 +20,7 @@ import {
   marginPct,
   maxAcquisitionCost,
   suggestedListedPrice,
-  taxInclusivePrice,
+  taxAndFeeInclusivePrice,
 } from "@/features/acquisition/pricing";
 import { PriceHint } from "@/features/acquisition/PriceHint";
 import { expandByQty, qtyErrors, rowsPayableTotal } from "@/features/acquisition/quantity";
@@ -355,6 +355,7 @@ function ItemRowCard({
   refreshCategories,
   defaultCommissionPct,
   taxRate,
+  feeRate,
   taxRateLoading,
   taxRateUnavailable,
 }: {
@@ -369,6 +370,8 @@ function ItemRowCard({
   defaultCommissionPct: string;
   /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
   taxRate: number | null;
+  /** 行動支付手續費率，取兩種支付的較高者；讀不到為 0（不補、不墊高客人價格）。 */
+  feeRate: number;
   /** settings 尚在載入；提示店員先不要把未稅價直接當成含稅價輸入。 */
   taxRateLoading: boolean;
   /** 設定**已回來**但拿不到可用稅率——只有這時才該對店員喊錯，載入中不算。 */
@@ -414,11 +417,14 @@ function ItemRowCard({
   const listed = parseNtd(row.listedPrice);
   const margin =
     listed !== null && cost !== null && taxRate !== null
-      ? marginPct(listed, cost, taxRate)
+      ? marginPct(listed, cost, taxRate, feeRate)
       : null;
-  // 估計轉售價（未稅）對應的含稅價：自動帶入上架售價、也是按鈕上顯示的數字。
+  // 估計轉售價（未稅）對應的客人實付價（含稅＋行動支付手續費）：自動帶入上架售價、
+  // 也是按鈕上顯示的數字。
   const resaleTaxInclusive =
-    resale !== null && taxRate !== null ? taxInclusivePrice(resale, taxRate) : null;
+    resale !== null && taxRate !== null
+      ? taxAndFeeInclusivePrice(resale, taxRate, feeRate)
+      : null;
 
   // onChange 由父層以行內箭頭函式傳入、每次 render 都換身分，不能進相依陣列
   // （會變成每次 render 都覆蓋一次上架售價）。改以 ref 取最新的一份；
@@ -449,7 +455,7 @@ function ItemRowCard({
     // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
     if (type === "CONSIGNMENT") return;
     if (resale === null || taxRate === null) return;
-    const target = taxInclusivePrice(resale, taxRate);
+    const target = taxAndFeeInclusivePrice(resale, taxRate, feeRate);
     if (target === null) return;
     const next = String(target);
     if (next === row.listedPrice) {
@@ -471,7 +477,7 @@ function ItemRowCard({
     if (!(directResaleEdit || ((taxRateChanged || typeChanged) && stillOurs))) return;
     autoFilled.current = next;
     onChangeRef.current({ listedPrice: next });
-  }, [resale, taxRate, type, row.listedPrice]);
+  }, [resale, taxRate, feeRate, type, row.listedPrice]);
 
   function searchBrands(q: string): Promise<ComboOption[]> {
     return api
@@ -649,11 +655,11 @@ function ItemRowCard({
 
       <label className="field">
         <span className="field-label">
-          上架售價（含稅）
+          上架售價（含稅與手續費）
           <InfoTip
             text={
               autoTaxApplies
-                ? "客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價會自動加稅帶進來，你也可以直接改這裡。"
+                ? "客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價，系統會自動加上營業稅與行動支付手續費帶進來，你也可以直接改這裡。"
                 : "客人實際要付的含稅價格，會存入系統並印在標籤上。寄售請直接輸入與寄售人談定的架上價。"
             }
           />
@@ -664,7 +670,7 @@ function ItemRowCard({
               onClick={() =>
                 onChange({
                   listedPrice: String(
-                    suggestedListedPrice(cost, category.target_margin_pct, taxRate) ?? cost,
+                    suggestedListedPrice(cost, category.target_margin_pct, taxRate, feeRate) ?? cost,
                   ),
                 })
               }
@@ -672,20 +678,20 @@ function ItemRowCard({
               套用建議（目標毛利 {category.target_margin_pct}%）
             </button>
           )}
-          {/* 估計轉售價是未稅（店家實際入袋），上架售價是含稅（客人付的）。
-              輸入時已自動同步；這顆按鈕是給「手動改過之後想把含稅價再帶回來」用的。 */}
+          {/* 估計轉售價是未稅（店家實際入袋），上架售價是客人付的（含稅＋行動支付手續費）。
+              輸入時已自動同步；這顆按鈕是給「手動改過之後想把價格再帶回來」用的。 */}
           {autoTaxApplies && resaleTaxInclusive !== null && (
             <button
               type="button"
               className="acq-link"
               onClick={() => onChange({ listedPrice: String(resaleTaxInclusive) })}
             >
-              帶入含稅價格（{formatNtd(resaleTaxInclusive)}）
+              帶入客人實付價（{formatNtd(resaleTaxInclusive)}）
             </button>
           )}
         </span>
         <input
-          aria-label="上架售價（含稅）"
+          aria-label="上架售價（含稅與手續費）"
           inputMode="numeric"
           value={row.listedPrice}
           onChange={(e) => onChange({ listedPrice: e.target.value })}
@@ -966,6 +972,15 @@ export default function AcquisitionPage() {
   // 「還在載入」不等於「讀不到」：查詢尚未回來就喊錯誤，等於在後端慢或網路抖一下時
   // 叫店員自行加稅——他照做之後那筆就少收一個稅額，而且不會被之後的自動同步修正。
   const taxRateUnavailable = settings.isFetched && taxRate === null;
+  // 行動支付手續費（裁示 2026-09-09）：標價要把它補回來，否則目標毛利達不到。
+  // **取兩種支付的較高者**——定價當下不知道客人會刷哪一種，抓低的那個會少補。
+  // 讀不到就當 0：寧可少補一點，也不要在設定沒載入時把價格墊高、客人多付。
+  const feeRate = (() => {
+    const rates = [settings.data?.linepay_fee_pct, settings.data?.taiwanpay_fee_pct]
+      .map((r) => (r === undefined ? Number.NaN : Number(r)))
+      .filter((r) => Number.isFinite(r) && r >= 0 && r < 1);
+    return rates.length > 0 ? Math.max(...rates) : 0;
+  })();
   const drawerOpen = drawer.data != null;
 
   const payable = isBulk
@@ -1336,6 +1351,7 @@ export default function AcquisitionPage() {
               }
               defaultCommissionPct={defaultCommissionPct}
               taxRate={taxRate}
+              feeRate={feeRate}
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}
             />
