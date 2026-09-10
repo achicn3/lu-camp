@@ -118,7 +118,12 @@ export function marginPct(
   if (listedTaxInclusiveNtd <= 0 || feeRate < 0) return null;
   // 手續費也要扣：標價現在含手續費（裁示 2026-09-09），只還原稅、不扣費的話
   // 分母把被金流商抽走的錢也算成店家的，毛利會系統性高估（1954/1000：46% vs 45%）。
-  const fee = roundNtd(listedTaxInclusiveNtd * feeRate);
+  // 費用也走整數比值：`listed * feeRate` 的浮點乘法會在剛好落在 .5 的商上少一元
+  // （5750 × 2.2% = 126.5，浮點得 126.4999… → 126，應為 127）。
+  const fee = roundRatio(
+    BigInt(listedTaxInclusiveNtd) * BigInt(rateBasisPoints(feeRate)),
+    BigInt(BASIS_POINTS_PER_UNIT),
+  );
   const net = netOfTaxInclusive(listedTaxInclusiveNtd, taxRate) - fee;
   if (net <= 0) return null;
   const numerator = BigInt(net - costNtd) * BigInt(PERCENT_POINTS_PER_UNIT);

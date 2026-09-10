@@ -214,6 +214,22 @@ describe("AcquisitionPage", () => {
     );
   });
 
+  it("手續費率設定晚到時，上架售價要補算（與稅率同等對待）", async () => {
+    // 設定查詢還沒回來時 feeRate 是 0；回來之後價格必須跟著補算，否則會停在
+    // 沒補手續費的舊數字。稅率有這道保護，費率一開始沒有——兩者同屬設定變動。
+    stub({ holdSettings: true, linepayFee: "0.0150", taiwanpayFee: "0.0220" });
+    renderPage();
+    const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
+    await userEvent.type(resale, "2010");
+    releaseSettings?.();
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement)
+          .value,
+      ).toBe("2160"),
+    );
+  });
+
   it("手續費為 0 時與純加稅相同——沒設定行動支付的店不受影響", async () => {
     stub({ linepayFee: "0.0000", taiwanpayFee: "0.0000" });
     renderPage();

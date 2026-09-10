@@ -444,13 +444,17 @@ function ItemRowCard({
   const syncedResale = useRef<number | null>(resale);
   const syncedTaxRate = useRef<number | null>(taxRate);
   const syncedType = useRef<AcqType>(type);
+  const syncedFeeRate = useRef<number>(feeRate);
   const autoFilled = useRef<string | null>(null);
   useEffect(() => {
     const resaleChanged = syncedResale.current !== resale;
-    const taxRateChanged = syncedTaxRate.current !== taxRate;
+    // 手續費率與稅率同屬「設定變動」：兩者都會改變同一個計算結果，補算條件必須一致。
+    // 只追蹤稅率的話，設定頁改了費率、這頁重新抓到新值時，價格會停在舊費率算出來的數字。
+    const rateChanged = syncedTaxRate.current !== taxRate || syncedFeeRate.current !== feeRate;
     const typeChanged = syncedType.current !== type;
     syncedResale.current = resale;
     syncedTaxRate.current = taxRate;
+    syncedFeeRate.current = feeRate;
     syncedType.current = type;
     // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
     if (type === "CONSIGNMENT") return;
@@ -464,7 +468,7 @@ function ItemRowCard({
     }
     // 只有兩種情況會寫入：
     // 1. **店員在買斷分頁親自改了估計轉售價** → 一律覆蓋（店主裁示 2026-08-22）。
-    // 2. 稅率設定剛到位、或從寄售分頁切回買斷 → 僅在上架售價還空著、或仍是我們上次
+    // 2. 稅率／手續費率設定剛到位、或從寄售分頁切回買斷 → 僅在上架售價還空著、或仍是我們上次
     //    自動填的值時才補；否則會把店員已經手打好的價格無聲換掉。
     //
     // 為什麼「切分頁」不能走第 1 條：切分頁是導覽動作，不是定價決定。店員在寄售分頁
@@ -474,7 +478,7 @@ function ItemRowCard({
     // 他連重打的機會都沒有。
     const stillOurs = row.listedPrice === "" || row.listedPrice === autoFilled.current;
     const directResaleEdit = resaleChanged && !typeChanged;
-    if (!(directResaleEdit || ((taxRateChanged || typeChanged) && stillOurs))) return;
+    if (!(directResaleEdit || ((rateChanged || typeChanged) && stillOurs))) return;
     autoFilled.current = next;
     onChangeRef.current({ listedPrice: next });
   }, [resale, taxRate, feeRate, type, row.listedPrice]);
