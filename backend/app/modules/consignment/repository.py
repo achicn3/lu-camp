@@ -207,6 +207,27 @@ class ConsignmentRepository:
         total = await self._session.scalar(stmt)
         return Decimal(total if total is not None else 0)
 
+    async def commission_by_sale_item(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[tuple[int, int], Decimal]:
+        """指定銷售集合各寄售品結算存的抽成，鍵為 (sale_id, serialized_item_id)。
+
+        不篩狀態：經營洞察不 net 退貨（D-8），售出列照算、抽成也照當時存的金額算。
+        """
+        if not sale_ids:
+            return {}
+        rows = await self._session.execute(
+            select(
+                ConsignmentSettlement.sale_id,
+                ConsignmentSettlement.serialized_item_id,
+                ConsignmentSettlement.commission_amount,
+            ).where(
+                ConsignmentSettlement.store_id == store_id,
+                ConsignmentSettlement.sale_id.in_(sale_ids),
+            )
+        )
+        return {(sale_id, item_id): amount for sale_id, item_id, amount in rows}
+
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的「有效」寄售抽成合計（SC-5b/毛利推導；唯讀，店家收入只認抽成）。
 

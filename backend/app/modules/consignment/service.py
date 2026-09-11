@@ -258,6 +258,12 @@ class ConsignmentService:
         """每序號品最新一筆結算（會員中心寄售清單；一 SQL 取回，不漏品）。"""
         return await self._repo.latest_settlement_by_item_ids(store_id, serialized_item_ids)
 
+    async def commission_by_sale_item(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[tuple[int, int], Decimal]:
+        """各寄售品結算存的抽成，鍵 (sale_id, serialized_item_id)（經營洞察；唯讀）。"""
+        return await self._repo.commission_by_sale_item(store_id, sale_ids)
+
     async def commission_total_for_sales(self, store_id: int, sale_ids: list[int]) -> Decimal:
         """指定銷售集合的寄售抽成合計（SC-5b §5B 毛利；唯讀，§2 經 service）。"""
         return await self._repo.commission_total_for_sales(store_id, sale_ids)

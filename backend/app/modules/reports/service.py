@@ -78,7 +78,8 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total)
+# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, line_total,
+#                 sale_id, serialized_item_id)
 _SoldRow = tuple[
     int | None,
     int | None,
@@ -88,6 +89,8 @@ _SoldRow = tuple[
     datetime,
     datetime | None,
     Decimal,
+    int,
+    int,
 ]
 
 
@@ -491,12 +494,29 @@ class ReportsService:
         )
 
     @staticmethod
-    def _normalize_serialized(rows: list[_SoldRow]) -> list[_NormRow]:
-        """序號品售出列 → 正規化列（每筆 1 件；買斷毛利=成交−成本，寄售=round(成交×抽成%)）。"""
+    def _normalize_serialized(
+        rows: list[_SoldRow], commissions: dict[tuple[int, int], Decimal]
+    ) -> list[_NormRow]:
+        """序號品售出列 → 正規化列（每筆 1 件；買斷毛利=成交−成本，寄售=結算存的抽成）。
+
+        寄售不依現行公式重算（§7.2 口徑曾改，ADR-021）：讀結算列當時存的金額，與銷售毛利
+        報表（margin_breakdown）同源，舊銷售也維持當時的數字。無結算列視為 0，同 margin_breakdown。
+        """
         out: list[_NormRow] = []
-        for brand_id, category_id, ownership, cost, pct, intake, sold, line_total in rows:
-            if ownership == OwnershipType.CONSIGNMENT and pct is not None:
-                margin = Decimal(round_ntd(line_total * Decimal(pct) / 100))
+        for (
+            brand_id,
+            category_id,
+            ownership,
+            cost,
+            _pct,
+            intake,
+            sold,
+            line_total,
+            sale_id,
+            item_id,
+        ) in rows:
+            if ownership == OwnershipType.CONSIGNMENT:
+                margin = commissions.get((sale_id, item_id), Decimal(0))
             elif cost is not None:
                 margin = line_total - cost
             else:
@@ -581,7 +601,9 @@ class ReportsService:
         """
         ser = await self._sales.serialized_sold_rows(store_id, date_from, date_to)
         bulk = await self._sales.bulk_sold_rows(store_id, date_from, date_to)
-        norm = self._normalize_serialized(ser) + self._normalize_bulk(bulk)
+        consigned_sale_ids = list({r[8] for r in ser if r[2] == OwnershipType.CONSIGNMENT})
+        commissions = await self._consignment.commission_by_sale_item(store_id, consigned_sale_ids)
+        norm = self._normalize_serialized(ser, commissions) + self._normalize_bulk(bulk)
         # 依正規化列實際出現的品牌/類型 id 取名（不受清單上限限制；Codex P2）。
         brand_ids = list({n.brand_id for n in norm if n.brand_id is not None})
         cat_ids = list({n.category_id for n in norm if n.category_id is not None})

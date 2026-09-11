@@ -2214,6 +2214,8 @@ class SalesService:
             datetime,
             datetime | None,
             Decimal,
+            int,
+            int,
         ]
     ]:
         """期間售出序號品的洞察原始列（經營洞察報表逐品牌/類型彙整用）。"""

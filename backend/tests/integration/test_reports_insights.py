@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
+from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.inventory.models import Brand, BulkLot, Category, SerializedItem
 from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
@@ -48,8 +49,15 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _sell(
-    session: AsyncSession, store_id: int, clerk_id: int, item: SerializedItem, price: Decimal
+    session: AsyncSession,
+    store_id: int,
+    clerk_id: int,
+    item: SerializedItem,
+    price: Decimal,
+    *,
+    store_commission: Decimal | None = None,
 ) -> None:
+    """直接寫一筆銷售；寄售品以 store_commission 同時寫結算列（真實結帳也會建）。"""
     sale = Sale(
         store_id=store_id, clerk_user_id=clerk_id,
         subtotal=price, tax=Decimal(0), total=price,
@@ -64,6 +72,15 @@ async def _sell(
             unit_price=price, line_total=price,
         )
     )
+    if store_commission is not None:
+        assert item.commission_pct is not None
+        session.add(
+            ConsignmentSettlement(
+                store_id=store_id, serialized_item_id=item.id, sale_id=sale.id,
+                gross=price, commission_pct=item.commission_pct,
+                commission_amount=store_commission, payout_amount=price - store_commission,
+            )
+        )
     await session.flush()
 
 
@@ -98,7 +115,11 @@ async def test_insights_brand_breakdown_units_revenue_margin(
     db_session.add_all([owned, consign])
     await db_session.flush()
     await _sell(db_session, store.id, clerk.id, owned, Decimal(5220))  # 折後成交
-    await _sell(db_session, store.id, clerk.id, consign, Decimal(2000))
+    # 寄售人依未稅分潤（ADR-021）：未稅 1905、店家未稅抽成 round(952.5)=953、寄售人 952，
+    # 結算存店家留下的 2000−952=1048。
+    await _sell(
+        db_session, store.id, clerk.id, consign, Decimal(2000), store_commission=Decimal(1048)
+    )
 
     resp = await client.get(
         "/api/v1/reports/insights",
@@ -111,8 +132,8 @@ async def test_insights_brand_breakdown_units_revenue_margin(
     snow = rows["Snow Peak"]
     assert snow["units_sold"] == 2
     assert snow["revenue"] == "7220"  # 5220 + 2000
-    # 毛利：買斷 5220-3000=2220 ＋ 寄售抽成 round(2000*50/100)=1000 → 3220
-    assert snow["margin"] == "3220"
+    # 毛利：買斷 5220-3000=2220 ＋ 寄售取結算存的抽成 1048 → 3268（與銷售毛利報表同源）
+    assert snow["margin"] == "3268"
     assert snow["avg_unit_price"] == "3610"  # 7220 / 2
     assert snow["avg_days_in_stock"] is not None
 
@@ -285,3 +306,39 @@ async def test_insights_requires_manager(
         headers=_auth(token),
     )
     assert resp.status_code == 403
+
+
+async def test_insights_consignment_margin_keeps_historical_settlement_amount(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """洞察的寄售毛利讀結算列存的抽成，不依現行公式重算——口徑改變前的舊銷售維持當時金額。"""
+    store = Store(name="門市")
+    db_session.add(store)
+    await db_session.flush()
+    mgr = User(store_id=store.id, username="mgr", password_hash="h", role=UserRole.MANAGER)
+    clerk = User(store_id=store.id, username="clk", password_hash="h", role=UserRole.CLERK)
+    brand = Brand(store_id=store.id, name="Coleman")
+    db_session.add_all([mgr, clerk, brand])
+    await db_session.flush()
+    token = encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+    consign = SerializedItem(
+        store_id=store.id, item_code="CON-OLD", name="舊寄售", grade=Grade.A,
+        ownership_type=OwnershipType.CONSIGNMENT, listed_price=Decimal(1050),
+        commission_pct=50, brand_id=brand.id, status=SerializedItemStatus.SOLD,
+        intake_date=datetime(2026, 6, 1, tzinfo=UTC), sold_date=datetime(2026, 6, 20, tzinfo=UTC),
+    )
+    db_session.add(consign)
+    await db_session.flush()
+    # ADR-021 之前以含稅價對半：店家 525（現行公式會是 550）。
+    await _sell(
+        db_session, store.id, clerk.id, consign, Decimal(1050), store_commission=Decimal(525)
+    )
+
+    resp = await client.get(
+        "/api/v1/reports/insights",
+        params={"from": "2026-01-01T00:00:00Z", "to": "2026-12-31T00:00:00Z"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    rows = {r["label"]: r for r in resp.json()["brand_breakdown"]}
+    assert rows["Coleman"]["margin"] == "525"

@@ -17,7 +17,8 @@ from app.shared.enums import ConsignmentSettlementStatus
 class ConsignmentSettlement(Base, TimestampMixin):
     """寄售結算：賣出寄售品時建立（PENDING）。
 
-    抽成金額 = round_ntd(售價 × commission_pct / 100)；應付寄售人 = 售價 − 抽成金額。
+    寄售人依未稅售價分潤（ADR-021）：應付寄售人 = 未稅 − round_ntd(未稅 × commission_pct / 100)；
+    抽成金額 = 售價 − 應付寄售人（店家未稅抽成＋代繳營業稅）。
     店家收入只認抽成（commission_amount），不認全額售價（§7.2/§7.3）。
     """
 

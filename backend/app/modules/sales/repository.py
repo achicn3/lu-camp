@@ -35,8 +35,10 @@ from app.shared.enums import (
     TenderType,
 )
 
-# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, net_amount)
+# 經營洞察售出列：(brand_id, category_id, ownership, cost, commission_pct, intake, sold, net_amount,
+#                 sale_id, serialized_item_id)
 # 成本取成交快照、成交額取實付，且排除贈品——與 margin_breakdown 同口徑。
+# sale_id／serialized_item_id 供寄售品對回結算列取當時存的抽成。
 _SoldRowDB = tuple[
     int | None,
     int | None,
@@ -46,6 +48,8 @@ _SoldRowDB = tuple[
     datetime,
     datetime | None,
     Decimal,
+    int,
+    int,
 ]
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
 #            intake, sold, net_amount)
@@ -467,7 +471,8 @@ class SalesRepository:
     ) -> list[_SoldRowDB]:
         """期間（未作廢）售出序號品的洞察原始列。
 
-        欄位：品牌/類型/持有/成本/抽成%/入庫/售出/成交額；供經營洞察逐品牌/類型彙整。
+        欄位：品牌/類型/持有/成本/抽成%/入庫/售出/成交額/銷售 id/序號品 id；
+        供經營洞察逐品牌/類型彙整。
         """
         rows = await self._session.execute(
             select(
@@ -484,6 +489,8 @@ class SalesRepository:
                 Sale.created_at,
                 # 成交額認**實付**（net_amount）：用 line_total 會以折前金額高估營收與毛利。
                 SaleLine.net_amount,
+                SaleLine.sale_id,
+                SerializedItem.id,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(SerializedItem, SaleLine.serialized_item_id == SerializedItem.id)
