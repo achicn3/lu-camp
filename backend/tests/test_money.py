@@ -7,6 +7,7 @@ import pytest
 
 from app.core.money import (
     commission,
+    consignment_split,
     discounted_price,
     round_ntd,
     split_tax_inclusive,
@@ -245,3 +246,59 @@ def test_suggested_price_rejects_fee_that_swallows_the_whole_price() -> None:
 def test_suggested_price_rejects_negative_fee() -> None:
     with pytest.raises(InvalidTaxRate):
         suggested_price(Decimal("1000"), 45, RATE, Decimal("-0.01"))
+
+
+# ── 寄售分帳：寄售人依「未稅」售價拿份額（裁示 2026-09-11）─────────────
+#
+# 發票是店家對全額開的，營業稅全由店家繳。舊規則以含稅售價算抽成，寄售人拿含稅價的
+# 一半，等於店家替寄售人吸收了他那份稅：1050 的寄售品寄售人拿 525、店家繳完 50 元稅
+# 只剩 475。新規則讓雙方對半分的是「未稅」售價 1000：寄售人 500、店家 500（另代收 50 稅）。
+
+
+def test_consignment_split_pays_consignor_on_tax_exclusive_price() -> None:
+    commission_amount, payout = consignment_split(Decimal("1050"), 50, RATE)
+    assert payout == 500  # 寄售人拿未稅 1000 的一半
+    # 抽成欄記店家留下的含稅部分（未稅抽成 500 ＋ 代收稅 50），
+    # DB 約束 commission_amount + payout_amount = gross 才能成立。
+    assert commission_amount == 550
+
+
+def test_consignment_split_always_balances_to_gross() -> None:
+    """DB 有 CHECK commission_amount + payout_amount = gross：任何輸入都不能破這條。"""
+    for gross in (1, 7, 99, 100, 101, 105, 1050, 2111, 45678):
+        for pct in (0, 1, 30, 37, 50, 99, 100):
+            commission_amount, payout = consignment_split(Decimal(gross), pct, RATE)
+            assert commission_amount + payout == gross, (gross, pct)
+            assert commission_amount >= 0 and payout >= 0, (gross, pct)
+
+
+def test_consignment_split_store_keeps_its_share_plus_the_whole_tax() -> None:
+    """店家留下的 = 未稅抽成 ＋ 整筆營業稅；寄售人一毛稅都不負擔。"""
+    gross = Decimal("2111")
+    net, tax = split_tax_inclusive(gross, RATE)
+    commission_amount, payout = consignment_split(gross, 37, RATE)
+    assert commission_amount - tax == commission(Decimal(net), 37)  # 店家的未稅抽成
+    assert payout == net - commission(Decimal(net), 37)  # 寄售人拿未稅的剩餘份額
+
+
+def test_consignment_split_rounds_the_store_share_like_before() -> None:
+    """沿用舊規則的捨入慣例：四捨五入的是店家抽成，寄售人拿剩下的。
+
+    未稅 101、抽 50%：店家 round(50.5)=51，寄售人 50。
+    """
+    commission_amount, payout = consignment_split(Decimal("106"), 50, RATE)  # 106/1.05 → 101
+    assert payout == 50
+    assert commission_amount == 56  # 51 ＋ 稅 5
+
+
+def test_consignment_split_zero_tax_matches_old_rule() -> None:
+    """稅率 0 時退化為舊規則（抽成以售價計），向後相容。"""
+    commission_amount, payout = consignment_split(Decimal("1050"), 50, Decimal(0))
+    assert (commission_amount, payout) == (525, 525)
+
+
+def test_consignment_split_rejects_bad_inputs() -> None:
+    with pytest.raises(InvalidCommissionPct):
+        consignment_split(Decimal("1050"), 101, RATE)
+    with pytest.raises(InvalidTaxRate):
+        consignment_split(Decimal("1050"), 50, Decimal("1"))

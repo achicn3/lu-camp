@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog, write_audit_log
-from app.core.money import commission, format_ntd
+from app.core.money import consignment_split, format_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.repository import ConsignmentRepository
@@ -218,22 +218,23 @@ class ConsignmentService:
         sale_id: int,
         gross: Decimal,
         commission_pct: int,
+        tax_rate: Decimal,
     ) -> ConsignmentSettlement:
         """賣出寄售品 → 建 PENDING 結算。
 
-        commission_amount = round_ntd(gross × pct / 100)；payout = gross − commission。
-        店家收入只認 commission_amount（§7.3）。
+        寄售人依「未稅」售價拿份額（§7.2，見 core/money.consignment_split）：
+        payout = 未稅 − round_ntd(未稅 × pct / 100)；commission_amount = gross − payout，
+        即店家留下的含稅部分（未稅抽成＋代繳營業稅）。店家收入只認 commission_amount（§7.3）。
         """
-        commission_amount = commission(gross, commission_pct)
-        payout = gross - Decimal(commission_amount)
+        _store_share, payout = consignment_split(gross, commission_pct, tax_rate)
         settlement = ConsignmentSettlement(
             store_id=store_id,
             serialized_item_id=serialized_item_id,
             sale_id=sale_id,
             gross=gross,
             commission_pct=commission_pct,
-            commission_amount=Decimal(commission_amount),
-            payout_amount=payout,
+            commission_amount=gross - Decimal(payout),
+            payout_amount=Decimal(payout),
         )
         return await self._repo.add(settlement)
 

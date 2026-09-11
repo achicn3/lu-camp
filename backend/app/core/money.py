@@ -142,13 +142,28 @@ def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
 
 
 def commission(gross: Decimal, pct: int) -> int:
-    """寄售抽成金額 = round_ntd(售價 × pct / 100)（§7.2）。
+    """抽成金額 = round_ntd(金額 × pct / 100)。
 
     pct 為整數百分數，限 0–100；超出視為錯誤（避免負抽成或 >全額）。
-    應付寄售人 = gross − commission(gross, pct)，由呼叫端相減。
+    寄售分帳請用 consignment_split（先還原未稅再抽成，§7.2），不要直接拿含稅售價套本式。
     """
     if not COMMISSION_PCT_MIN <= pct <= COMMISSION_PCT_MAX:
         raise InvalidCommissionPct(
             f"commission_pct 須介於 {COMMISSION_PCT_MIN}-{COMMISSION_PCT_MAX}，收到 {pct}"
         )
     return round_ntd(gross * Decimal(pct) / Decimal(100))
+
+
+def consignment_split(gross: Decimal, pct: int, tax_rate: Decimal) -> tuple[int, int]:
+    """寄售品賣出後的分帳（§7.2）：回傳（店家留下的含稅部分, 應付寄售人）。
+
+    寄售人依「未稅」售價拿份額——發票由店家對全額開、營業稅由店家繳，稅不是寄售人的錢：
+    `未稅 = split_tax_inclusive(gross)[0]`、`店家未稅抽成 = commission(未稅, pct)`、
+    `應付寄售人 = 未稅 − 店家未稅抽成`。店家留下的 = `gross − 應付寄售人`
+    （＝ 未稅抽成 ＋ 營業稅），兩者相加恆等於 gross。
+    例：含稅 1050、抽 50%、稅 5% → 寄售人 500、店家 550（其中 50 是代繳的稅）。
+    tax_rate=0 時退化為舊式 commission(gross, pct)。
+    """
+    net, _tax = split_tax_inclusive(gross, tax_rate)
+    payout = net - commission(Decimal(net), pct)
+    return round_ntd(gross) - payout, payout

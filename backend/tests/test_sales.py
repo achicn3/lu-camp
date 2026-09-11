@@ -12,7 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import MAX_NTD, commission, split_tax_inclusive
+from app.core.money import MAX_NTD, split_tax_inclusive
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
@@ -190,7 +190,7 @@ async def test_consignment_sale_creates_pending_settlement_store_takes_commissio
         db_session,
         store_id,
         code="C1",
-        price=Decimal("2000"),
+        price=Decimal("1050"),
         ownership=OwnershipType.CONSIGNMENT,
         consignor_id=consignor.id,
         commission_pct=50,
@@ -209,11 +209,11 @@ async def test_consignment_sale_creates_pending_settlement_store_takes_commissio
     assert settlement.sale_id == sale.id
     assert settlement.serialized_item_id == ser.id
     assert settlement.status == ConsignmentSettlementStatus.PENDING
-    assert settlement.gross == Decimal("2000")
-    # 店家收入只認抽成；應付寄售人 = 售價 − 抽成。
-    expected_commission = commission(Decimal("2000"), 50)
-    assert settlement.commission_amount == Decimal(expected_commission)  # 1000
-    assert settlement.payout_amount == Decimal("2000") - Decimal(expected_commission)  # 1000
+    assert settlement.gross == Decimal("1050")
+    # 寄售人依「未稅」售價拿份額（稅是店家要繳的）：未稅 1000 的一半＝500；
+    # 店家留下 550＝未稅抽成 500＋代繳營業稅 50（預設稅率 5%）。
+    assert settlement.payout_amount == Decimal(500)
+    assert settlement.commission_amount == Decimal(550)
     assert settlement.commission_amount + settlement.payout_amount == settlement.gross
 
     # DB 自己也要背書結算算式，不能只相信 service 建列當下算對。

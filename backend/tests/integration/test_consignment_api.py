@@ -34,7 +34,7 @@ from app.shared.enums import (
 
 _PRICE = Decimal("1800")
 _PCT = 40
-_PAYOUT = "1080"
+_PAYOUT = "1028"  # 寄售人拿未稅 1714 扣店家抽成 686（§7.2）
 
 
 @pytest_asyncio.fixture

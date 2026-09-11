@@ -62,7 +62,7 @@
 - 寫入 `stock_movement`（IN）。
 
 ### E. Consignment / 寄售管理
-- 寄售品賣出時自動產生 `consignment_settlement`（`commission_pct` 為整數百分數，預設 50）：`gross=售價`、`commission_amount=round_ntd(售價 × commission_pct / 100)`、`payout_amount=售價−commission_amount`、`status=PENDING`。
+- 寄售品賣出時自動產生 `consignment_settlement`（`commission_pct` 為整數百分數，預設 50）：`gross=售價`、`payout_amount=未稅−round_ntd(未稅 × commission_pct / 100)`（`未稅=round_ntd(售價 ÷ (1+tax_rate))`，寄售人依未稅價分潤，見 ADR-021）、`commission_amount=售價−payout_amount`（店家未稅抽成＋營業稅）、`status=PENDING`。
 - 付款給寄售人：標記 `PAID`，產生現金抽屜出帳，寫稽核。
 - 未售出處理：可「退回寄售人」（`RETURNED_TO_CONSIGNOR`，stock_movement OUT）或調整拋售價。
 - 報表：寄售在庫、應付未付清單、已實現抽成收入。

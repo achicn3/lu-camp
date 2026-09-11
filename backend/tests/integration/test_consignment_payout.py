@@ -12,7 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog
-from app.core.money import commission
 from app.modules.cashdrawer.models import CashMovement
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
@@ -36,8 +35,10 @@ from app.shared.exceptions import NoOpenCashSession, SettlementNotFound, Settlem
 
 _PRICE = Decimal("1800")
 _PCT = 40
-_COMMISSION = Decimal(commission(_PRICE, _PCT))  # 720
-_PAYOUT = _PRICE - _COMMISSION  # 1080
+# 寄售人依未稅售價拿份額（§7.2）：未稅 round(1800/1.05)=1714，店家未稅抽成 round(1714×40%)=686，
+# 寄售人 1714−686=1028；店家留下 1800−1028=772（其中 86 是代繳的營業稅）。
+_PAYOUT = Decimal("1028")
+_COMMISSION = _PRICE - _PAYOUT  # 772
 _OPENING = Decimal("1000")
 
 

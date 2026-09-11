@@ -406,8 +406,9 @@ async def test_consignment_not_discounted_by_default(
     assert sale.total == Decimal(1000)  # 寄售預設不折
     s = await _settlement(db_session, sale.id)
     assert s.gross == Decimal(1000)
-    assert s.commission_amount == Decimal(500)
-    assert s.payout_amount == Decimal(500)
+    # 寄售人依未稅售價分潤（§7.2）：未稅 952 的一半 476；店家 524（含代繳稅 48）。
+    assert s.commission_amount == Decimal(524)
+    assert s.payout_amount == Decimal(476)
 
 
 async def test_consignment_discount_pays_consignor_on_discounted_price(
@@ -415,7 +416,8 @@ async def test_consignment_discount_pays_consignor_on_discounted_price(
 ) -> None:
     """寄售折扣一律按比例分攤（docs/21 §8.1）：客人付折後 900，寄售人也按折後價分潤。
 
-    gross=折後 900、抽成與應付一起縮水（50% → 450/450）；店家不吸收、不會虧損。
+    gross=折後 900、抽成與應付一起縮水（未稅 857 的 50% → 寄售人 428、店家 472）；
+    店家不吸收、不會虧損。
     """
     await _make_campaign(
         db_session,
@@ -440,8 +442,8 @@ async def test_consignment_discount_pays_consignor_on_discounted_price(
     assert sale.total == Decimal(900)  # 客人付折後
     s = await _settlement(db_session, sale.id)
     assert s.gross == Decimal(900)  # 寄售人按折後分潤（非原價）
-    assert s.commission_amount == Decimal(450)  # 50% of 900
-    assert s.payout_amount == Decimal(450)
+    assert s.commission_amount == Decimal(472)  # 未稅抽成 round(857×50%)=429 ＋ 稅 43
+    assert s.payout_amount == Decimal(428)  # 857 − 429
 
 
 async def test_consignment_low_commission_discount_no_loss(
@@ -449,7 +451,8 @@ async def test_consignment_low_commission_discount_no_loss(
 ) -> None:
     """即使抽成率低、折扣高，按比例分攤也不會讓店家虧損（無需虧損守衛）。
 
-    抽成 5%、折扣 10%：gross=折後 900、抽成 45、應付 855；店家淨 900−855=45=抽成，恆 ≥0。
+    抽成 5%、折扣 10%：gross=折後 900、未稅 857、店家未稅抽成 43、應付 814；
+    店家淨 900−814=86=抽成欄（未稅抽成 43＋代繳稅 43），恆 ≥0。
     """
     await _make_campaign(
         db_session,
@@ -474,8 +477,8 @@ async def test_consignment_low_commission_discount_no_loss(
     assert sale.total == Decimal(900)
     s = await _settlement(db_session, sale.id)
     assert s.gross == Decimal(900)
-    assert s.commission_amount == Decimal(45)  # 5% of 900
-    assert s.payout_amount == Decimal(855)
+    assert s.commission_amount == Decimal(86)  # 未稅抽成 round(857×5%)=43 ＋ 稅 43
+    assert s.payout_amount == Decimal(814)  # 857 − 43
 
 
 async def test_campaign_status_draft_after_create(

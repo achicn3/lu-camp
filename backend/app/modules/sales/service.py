@@ -1189,6 +1189,7 @@ class SalesService:
                 sale_id=sale.id,
                 gross=gross,
                 commission_pct=commission_pct,
+                tax_rate=settings.tax_rate,
             )
 
         # 會員點數累積（docs/16 §0）：floor(可累點金額/100)，同交易內、與銷售同生共死；

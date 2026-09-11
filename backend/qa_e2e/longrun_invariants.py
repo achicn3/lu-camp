@@ -19,10 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.main  # noqa: F401  # 觸發模型註冊
 from app.core.db import get_sessionmaker
-from app.core.money import round_ntd
+from app.core.money import consignment_split
 from app.core.national_id import is_valid_national_id
 from app.modules.cashdrawer.models import CashSession
 from app.modules.cashdrawer.service import CashDrawerService
+from app.modules.settings.defaults import DEFAULT_TAX_RATE
 from app.shared.enums import CashSessionStatus
 
 # 身分證字號形狀（英文字母＋性別碼＋8 碼數字）；命中後仍須通過檢核碼才算真證號。
@@ -122,21 +123,28 @@ async def b1_serialized_no_double_sell(session: AsyncSession) -> None:
 
 
 async def b2_consignment_math(session: AsyncSession) -> None:
-    """B2：每筆寄售結算 commission/payout 算術正確且 gross 對齊售出行金額。"""
+    """B2：每筆寄售結算 commission/payout 算術正確且 gross 對齊售出行金額。
+
+    寄售人依未稅售價分潤（ADR-021）。結算列沒存成交當下的稅率，這裡以該店目前設定
+    （無設定列時用預設）驗算——長跑期間不改稅率，故等價。
+    """
     rows = (
         await session.execute(
             text(
                 """
-        SELECT cs.id, cs.gross, cs.commission_pct, cs.commission_amount, cs.payout_amount
+        SELECT cs.id, cs.gross, cs.commission_pct, cs.commission_amount, cs.payout_amount,
+               s.tax_rate
         FROM consignment_settlements cs
+        LEFT JOIN settings s ON s.store_id = cs.store_id
         """
             )
         )
     ).all()
     bad_math = []
-    for sid, gross, pct, comm, payout in rows:
-        exp_comm = round_ntd(Decimal(gross) * Decimal(pct) / Decimal(100))
-        exp_payout = Decimal(gross) - exp_comm
+    for sid, gross, pct, comm, payout, tax_rate in rows:
+        rate = DEFAULT_TAX_RATE if tax_rate is None else Decimal(tax_rate)
+        exp_comm_int, exp_payout_int = consignment_split(Decimal(gross), pct, rate)
+        exp_comm, exp_payout = Decimal(exp_comm_int), Decimal(exp_payout_int)
         if Decimal(comm) != exp_comm or Decimal(payout) != exp_payout:
             bad_math.append((sid, gross, pct, comm, payout, str(exp_comm), str(exp_payout)))
     check("B2 寄售抽成/應付算術", len(bad_math) == 0, f"錯算 {bad_math[:5]}")

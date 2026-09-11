@@ -84,8 +84,9 @@ async def test_cancelled_settlement_commission_excluded(db_session: AsyncSession
     date_from, date_to = _window()
 
     before = await sales.margin_breakdown(store_id, date_from, date_to)
-    assert before.consignment_commission_income == Decimal(500)  # 1000 × 50%
-    assert before.gross_margin == Decimal(500)
+    # 寄售人依未稅售價分潤（ADR-021）：未稅 952 → 寄售人 476，店家留 524（含代繳稅 48）。
+    assert before.consignment_commission_income == Decimal(524)
+    assert before.gross_margin == Decimal(524)
 
     await ReturnsService(db_session).create_return(
         store_id,
@@ -159,5 +160,5 @@ async def test_active_settlements_still_counted(db_session: AsyncSession) -> Non
 
     date_from, date_to = _window()
     bd = await SalesService(db_session).margin_breakdown(store_id, date_from, date_to)
-    assert bd.consignment_commission_income == Decimal(1000)  # 500 + 500
+    assert bd.consignment_commission_income == Decimal(1048)  # 524 + 524（ADR-021）
     _ = sale1

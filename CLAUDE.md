@@ -72,7 +72,8 @@
 ## 7. 領域核心不變量（必須以測試守護）
 
 1. 序號商品（serialized item）一旦 `SOLD` 不可再被售出或重複入庫。
-2. 寄售商品賣出時（`commission_pct` 為整數百分數，預設 50）：`抽成金額 = round_ntd(售價 × commission_pct / 100)`、`應付寄售人 = 售價 − 抽成金額`，並產生 `consignment_settlement`（狀態 `PENDING`）。
+2. 寄售商品賣出時（`commission_pct` 為整數百分數，預設 50），**寄售人依「未稅」售價分潤**——發票由店家對全額開、營業稅由店家繳：`未稅 = round_ntd(售價 ÷ (1 + tax_rate))`、`應付寄售人 = 未稅 − round_ntd(未稅 × commission_pct / 100)`、`抽成金額 = 售價 − 應付寄售人`（＝ 店家未稅抽成 ＋ 營業稅，DB 約束 `抽成 + 應付 = 售價` 照舊成立），並產生 `consignment_settlement`（狀態 `PENDING`）。例：含稅 1050、抽成 50%、稅 5% → 寄售人 500、抽成金額 550。實作 `core/money.consignment_split()`；`tax_rate` 取自 `settings`，`tax_rate=0` 時退化為舊式。
+   > 2026-09-11 起改此口徑（原式以含稅售價算抽成，寄售人拿 525、店家繳稅後只剩 475）。見 `docs/adr/ADR-021-consignment-payout-on-tax-exclusive-price.md`。
 3. 買斷商品毛利 = 售價 − 收購成本；寄售商品店家收入只認抽成，不認全額售價。
 4. 現金抽屜對帳：`結帳應有現金 = 開帳零用金 + 銷售現金收入 − 收購付出 − 寄售付款 ± 手動調整`；差異需記錄。
 5. 退貨且原銷售已開發票時，必須產生折讓單（allowance）而非直接刪除發票。

@@ -233,13 +233,14 @@ async def test_consignment_recognizes_commission_only(
     await _sell(client, clerk, [{"line_type": "SERIALIZED", "item_code": "CON-1"}], key="c1")
 
     body = await _margin(client, mgr)
-    # 營業額認全額 1000；認列營收與毛利只認抽成 500
+    # 營業額認全額 1000；認列營收與毛利只認抽成——寄售人依未稅售價分潤（ADR-021），
+    # 未稅 952 → 寄售人 476、店家 524（含代繳稅 48）。
     assert body["gross_turnover"] == "1000"
-    assert body["consignment_commission_income"] == "500"
-    assert body["recognized_revenue"] == "500"
-    assert body["gross_margin"] == "500"
+    assert body["consignment_commission_income"] == "524"
+    assert body["recognized_revenue"] == "524"
+    assert body["gross_margin"] == "524"
     assert body["owned_cogs"] == "0"
-    assert body["gross_margin_rate"] == "1.0000"  # 500 / 500（抽成為純利）
+    assert body["gross_margin_rate"] == "1.0000"  # 524 / 524（抽成為純利）
 
 
 async def test_catalog_is_unknown_cost_not_fake_margin(

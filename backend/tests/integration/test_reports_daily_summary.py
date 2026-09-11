@@ -204,9 +204,10 @@ async def test_daily_summary_consignment_turnover_vs_recognized(
 
     s = await _summary(client, mgr, day)
     assert s["gross_turnover"] == "1000"  # 流水認全額
-    assert s["recognized_revenue"] == "500"  # 只認抽成
-    assert s["consignment_commission_income"] == "500"
-    assert s["gross_margin"] == "500"
+    # 只認抽成：寄售人依未稅售價分潤（ADR-021），未稅 952 → 寄售人 476、店家 524（含稅 48）。
+    assert s["recognized_revenue"] == "524"
+    assert s["consignment_commission_income"] == "524"
+    assert s["gross_margin"] == "524"
 
 
 async def test_daily_summary_empty_day(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
