@@ -1611,3 +1611,150 @@ async def test_stale_cart_put_with_different_table_is_not_treated_as_a_retry(
     )
     assert retry.status_code == 200, retry.text
     assert retry.json()["revision"] == second.json()["revision"]
+
+
+# ── 稽核 F03／F02（2026-09-10）：付款回應無法證明沒扣款時，必須鎖單而不是叫店員重收 ──
+
+
+class _ScriptedPayResponseTransport(_UncertainLinePayTransport):
+    """pay 回傳指定的回應內容（而不是拋出傳輸錯誤），用來模擬平台實際回的各種結果碼。"""
+
+    def __init__(self, pay_response: dict[str, object]) -> None:
+        super().__init__()
+        self.pay_response = pay_response
+
+    async def send(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: str | None,
+    ) -> dict[str, object]:
+        if url.endswith("/check"):
+            self.check_calls += 1
+            return self.check_response
+        if url.endswith("/oneTimeKeys/pay"):
+            self.pay_calls += 1
+            return self.pay_response
+        raise AssertionError(f"未預期的 LINE Pay URL：{url}")
+
+
+async def _post_linepay_sale(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    suffix: str,
+    pay_response: dict[str, object],
+) -> tuple[httpx.Response, CartSession, int, _ScriptedPayResponseTransport]:
+    seeded, store_id, _terminal_id, _task_id, sale_payload = await _prepare_signed_linepay_cart(
+        client, db_session, suffix=suffix
+    )
+    transport = _ScriptedPayResponseTransport(pay_response)
+    linepay_client = _uncertain_linepay_client(transport)
+    monkeypatch.setattr("app.modules.sales.router._linepay_client", lambda: linepay_client)
+    response = await client.post(
+        "/api/v1/sales",
+        headers={**_auth(seeded.manager_token), "Idempotency-Key": f"audit-f03-{suffix}"},
+        json=sale_payload,
+    )
+    cart_session_id = sale_payload["cart_session_id"]
+    assert isinstance(cart_session_id, int)
+    cart = await db_session.get(CartSession, cart_session_id)
+    assert cart is not None
+    await db_session.refresh(cart)
+    sales = await db_session.scalar(
+        select(func.count()).select_from(Sale).where(Sale.store_id == store_id)
+    )
+    return response, cart, int(sales or 0), transport
+
+
+async def test_linepay_in_progress_response_locks_cart_instead_of_asking_to_rescan(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1145 是官方的「付款進行中」。原本會回「整筆交易取消，請改用其他方式或重新掃碼」，
+    店員照做就可能讓客人被扣兩次。現在必須鎖單、明講禁止再次付款。"""
+    response, cart, sales, transport = await _post_linepay_sale(
+        client,
+        db_session,
+        monkeypatch,
+        suffix="91",
+        pay_response={"returnCode": "1145", "returnMessage": "Payment in progress."},
+    )
+
+    assert response.status_code == 409
+    assert "PAYMENT_UNCERTAIN" in response.text
+    assert "禁止再次付款" in response.text
+    assert "重新掃碼" not in response.text
+    assert cart.status.value == "PAYMENT_UNCERTAIN"
+    assert sales == 0
+    assert transport.pay_calls == 1
+
+
+async def test_linepay_unknown_return_code_is_treated_as_uncertain(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """官方表上沒有的碼：不認得就不能假設沒扣款。"""
+    response, cart, sales, _ = await _post_linepay_sale(
+        client,
+        db_session,
+        monkeypatch,
+        suffix="92",
+        pay_response={"returnCode": "7777"},
+    )
+
+    assert response.status_code == 409
+    assert "PAYMENT_UNCERTAIN" in response.text
+    assert cart.status.value == "PAYMENT_UNCERTAIN"
+    assert sales == 0
+
+
+async def test_linepay_amount_mismatch_locks_cart(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """稽核 F02：請收 70、平台回報實付 71。錢動了但數字不符，不能記成足額成功。"""
+    response, cart, sales, _ = await _post_linepay_sale(
+        client,
+        db_session,
+        monkeypatch,
+        suffix="93",
+        pay_response={
+            "returnCode": "0000",
+            "returnMessage": "Success.",
+            "info": {
+                "transactionId": 2026091100000000077,
+                "payInfo": [{"method": "BALANCE", "amount": 71}],
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert "PAYMENT_UNCERTAIN" in response.text
+    assert cart.status.value == "PAYMENT_UNCERTAIN"
+    assert sales == 0
+
+
+async def test_linepay_definitive_reject_does_not_lock_cart(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """對照組：付款碼無效（1133）是真的在扣款前就被擋下，不必鎖單，店員可以請客人重掃。
+    沒有這組對照，上面幾支即使把「所有非 0000 都鎖單」也會通過——那樣店員每次都得找店長。"""
+    response, cart, sales, _ = await _post_linepay_sale(
+        client,
+        db_session,
+        monkeypatch,
+        suffix="94",
+        pay_response={"returnCode": "1133", "returnMessage": "invalid OneTimeKey"},
+    )
+
+    assert "PAYMENT_UNCERTAIN" not in response.text
+    assert cart.status.value != "PAYMENT_UNCERTAIN"
+    assert sales == 0

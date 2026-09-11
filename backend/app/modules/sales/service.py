@@ -46,6 +46,7 @@ from app.modules.sales.inputs import (
     TenderInput,
 )
 from app.modules.sales.linepay import (
+    DEFINITIVE_PAY_REJECT_CODES,
     RETURN_CODE_ALREADY_REFUNDED,
     LinePayClient,
     LinePayResult,
@@ -105,6 +106,7 @@ from app.shared.exceptions import (
     InvalidStateTransition,
     LinePayChargeFailed,
     LinePayRefundAmbiguous,
+    LinePayResultUncertain,
     ManualRefundRequired,
     MenuItemNotFound,
     MenuItemUnavailable,
@@ -1430,11 +1432,27 @@ class SalesService:
                 product_name="門市消費",
             )
             if not result.is_success or result.transaction_id is None:
+                # 只有官方結果碼表中「扣款前就被擋下」的碼才算確定拒付（稽核 F03）。
+                # 其餘——付款進行中、重複請求、內部錯誤、不認得的碼——都無法證明沒扣款：
+                # attempt 維持 POSSIBLE，走結果不明的鎖單路徑，**絕不能叫店員重新收款**。
+                if result.return_code not in DEFINITIVE_PAY_REJECT_CODES:
+                    raise LinePayResultUncertain(
+                        f"LINE Pay 無法確認是否已扣款（returnCode={result.return_code or '無'}）；"
+                        "請勿重新收款，本筆已鎖定，請由店長查原交易"
+                    )
                 if attempt_state is not None:
                     attempt_state.status = "FAILED"
                 raise LinePayChargeFailed(
                     f"LINE Pay 收款失敗（returnCode={result.return_code}），"
                     "整筆交易取消，請改用其他方式或重新掃碼"
+                )
+            # 平台回 0000 表示錢動了，但回報的實付總額若與請款不符，就不能當成足額成功
+            # （稽核 F02）。沒帶 payInfo 則沿用舊行為：官方文件未標為必要，當成缺陷會鎖住
+            # 每一筆正常付款。attempt 維持 POSSIBLE：錢確實動了，不能讓畫面以為沒扣。
+            if result.amount is not None and result.amount != tender.amount:
+                raise LinePayResultUncertain(
+                    f"LINE Pay 回報實付 {result.amount} 元，與請款 {tender.amount} 元不符；"
+                    "請勿重新收款，本筆已鎖定，請由店長核對"
                 )
             if attempt_state is not None:
                 attempt_state.status = "SUCCESS"

@@ -35,10 +35,50 @@ import httpx
 from app.shared.exceptions import LinePayNotConfigured, LinePayTransportError
 
 _CURRENCY = "TWD"
-_HTTP_TIMEOUT_SECONDS = 20.0
+# 讀取逾時：官方要求 pay 至少 40 秒、check／refund 至少 20 秒（Offline API v4，2026-09-11 查閱）。
+# 共用一個值取兩者較大者即可同時滿足，不必為每種操作分別設定。短於下限的代價是：本來會成功
+# 的慢回應被當成逾時，平白變成「結果不明」而鎖單（原本是 20 秒，稽核 F03）。
+LINEPAY_READ_TIMEOUT_SECONDS = 40.0
 _PAY_PATH = "/v4/payments/oneTimeKeys/pay"
 RETURN_CODE_SUCCESS = "0000"
 RETURN_CODE_ALREADY_REFUNDED = "1165"  # refund：平台已退款（重試冪等，視為成功）
+
+# pay 的「確定拒付」白名單：請求在扣款前就被平台擋下，可以放心請客人換方式或重掃。
+# 依 Offline API v4「結果程式碼」表（2026-09-11 查閱）逐一挑出。
+#
+# **刻意用白名單而非黑名單**：不在這裡的一律當「結果未確認」、鎖單查原單——包含
+# 官方表上沒有的碼與空值。反過來列「哪些是處理中」的話，漏列一個就又會叫店員重收。
+# 以下這些**不可**加進來，它們都代表前次可能已經扣款：
+#   1145 付款進行中、1152 有相同交易歷史、1172 同訂單號已有交易、1198 請求重複、
+#   1199／9000 內部錯誤（無法判斷）。
+DEFINITIVE_PAY_REJECT_CODES: frozenset[str] = frozenset(
+    {
+        "1101",  # 該用戶不是 LINE Pay 用戶
+        "1102",  # 該用戶目前無法使用 LINE Pay 交易
+        "1104",  # 商店尚未註冊為合作商店
+        "1105",  # 該合作商店目前無法使用 LINE Pay
+        "1106",  # 請求標頭訊息有錯誤
+        "1110",  # 該信用卡無法正常使用
+        "1124",  # 金額訊息有誤
+        "1133",  # 無效的付款碼（oneTimeKey）
+        "1141",  # 帳戶狀態有問題
+        "1142",  # 餘額不足
+        "1153",  # 付款請求金額和請款金額不同
+        "1159",  # 無付款請求訊息
+        "1178",  # 合作商店不支援該貨幣
+        "1183",  # 付款金額低於最低金額
+        "1184",  # 付款金額高於最高金額
+        "2020",  # EPI 預授權階段未能預留限額
+        "2021",  # 超出受限用戶的支付限額
+        "2022",  # 超出使用者的支付限額
+        "2023",  # 超出個別使用者在該商戶的限額
+        "2024",  # 超出商戶可收款限額
+        "2101",  # 參數錯誤
+        "2102",  # JSON 數據格式錯誤
+        "2103",  # 輸入了不允許的參數
+        "2104",  # 無效的請求
+    }
+)
 _CHECK_STATUS_COMPLETE = "COMPLETE"
 
 
@@ -115,7 +155,7 @@ class LinePayResult:
     transaction_id: str | None
     status: str | None  # check 的 info.status（COMPLETE/FAIL/CANCEL/AUTH_READY）；pay 無
     raw: dict[str, object]  # 原始回應（對帳存證，落 linepay_transactions.raw_response）
-    amount: Decimal | None = None  # check 的 Σ info.payInfo[].amount（供 check-first 金額比對）
+    amount: Decimal | None = None  # pay／check 的 Σ info.payInfo[].amount（核對實付金額）
     # 客人綁在 LINE Pay 上的手機條碼載具（見 _mobile_carrier）。沒有就是 None。
     mobile_carrier: str | None = None
 
@@ -188,8 +228,28 @@ def _mobile_carrier(info: object) -> str | None:
     return None
 
 
+def _pay_info_total(info: object) -> Decimal | None:
+    """Σ info.payInfo[].amount；沒有 payInfo 回 None（官方文件未標為必要，不可當成缺陷）。
+
+    一筆付款可能拆成多種方式（例如餘額＋點數），要比對的是總額而不是第一項。
+    """
+    if not isinstance(info, dict):
+        return None
+    pay_info = info.get("payInfo")
+    if not isinstance(pay_info, list):
+        return None
+    total = Decimal(0)
+    for entry in pay_info:
+        if isinstance(entry, dict) and entry.get("amount") is not None:
+            total += Decimal(str(entry["amount"]))
+    return total
+
+
 def parse_pay_result(resp: dict[str, object]) -> LinePayResult:
-    """oneTimeKeys/pay 回應解析。成功（0000）必含 info.transactionId，缺則視為傳輸不可信。"""
+    """oneTimeKeys/pay 回應解析。成功（0000）必含 info.transactionId，缺則視為傳輸不可信。
+
+    `amount` 為平台回報的實付總額（payInfo 合計），呼叫端用來核對是否等於請款金額。
+    """
     code = str(resp.get("returnCode") or "")
     message = str(resp.get("returnMessage") or "")
     info = resp.get("info")
@@ -202,6 +262,7 @@ def parse_pay_result(resp: dict[str, object]) -> LinePayResult:
         transaction_id=tx,
         status=None,
         raw=resp,
+        amount=_pay_info_total(info),
         mobile_carrier=_mobile_carrier(info),
     )
 
@@ -213,17 +274,9 @@ def parse_check_result(resp: dict[str, object]) -> LinePayResult:
     info = resp.get("info")
     tx = _transaction_id_str(info)
     status = None
-    amount: Decimal | None = None
-    if isinstance(info, dict):
-        if info.get("status") is not None:
-            status = str(info.get("status"))
-        pay_info = info.get("payInfo")
-        if isinstance(pay_info, list):
-            total = Decimal(0)
-            for entry in pay_info:
-                if isinstance(entry, dict) and entry.get("amount") is not None:
-                    total += Decimal(str(entry["amount"]))
-            amount = total
+    if isinstance(info, dict) and info.get("status") is not None:
+        status = str(info.get("status"))
+    amount = _pay_info_total(info)
     return LinePayResult(
         return_code=code,
         return_message=message,
@@ -259,7 +312,7 @@ class HttpxLinePayTransport:
         self, method: str, url: str, headers: dict[str, str], body: str | None
     ) -> dict[str, object]:
         try:
-            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(timeout=LINEPAY_READ_TIMEOUT_SECONDS) as client:
                 resp = await client.request(
                     method, url, headers=headers, content=body if body else None
                 )

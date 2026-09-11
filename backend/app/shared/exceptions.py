@@ -447,10 +447,23 @@ class LinePayTransportError(DomainError):
     """
 
 
+class LinePayResultUncertain(LinePayTransportError):
+    """LINE Pay 有回應，但回應**無法證明沒扣款**：付款進行中、重複請求、內部錯誤、
+    不認得的回應碼，或成功回應的實付金額與請款不符。
+
+    與 `LinePayTransportError` 同屬「結果未知」，故繼承它、沿用同一條復原路徑
+    （router 攔下後鎖定這筆交易、交店長進入付款對帳），**絕不能提示店員重新收款**
+    ——原本把這類回應當成拒付並叫店員「重新掃碼」，正是會讓客人被扣兩次的地方
+    （稽核 F03／F02，2026-09-10）。
+    """
+
+
 class LinePayChargeFailed(DomainError):
-    """LINE Pay 明確拒付/授權失敗（returnCode≠0000）或查詢非 COMPLETE。
+    """LINE Pay **明確拒付**：回應碼屬於「請求在扣款前就被擋下」的那一類
+    （見 `linepay.DEFINITIVE_PAY_REJECT_CODES`），或查詢結果非 COMPLETE。
 
     fail-closed：整筆銷售不成立、回滾（不得留下無付款的已完成單）。店員改用其他方式或重掃。
+    無法確定是否已扣款的回應**不屬於這裡**，走 `LinePayResultUncertain`。
     """
 
 
