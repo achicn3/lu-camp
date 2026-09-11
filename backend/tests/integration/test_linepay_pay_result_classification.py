@@ -88,6 +88,7 @@ async def _pay(
     [
         "1145",  # 付款進行中
         "1152",  # 有相同交易歷史——前次可能已扣款
+        "1153",  # 付款請求金額和請款金額不同——平台端已不一致
         "1172",  # 同訂單號已有交易紀錄——前次很可能已扣款
         "1198",  # API 呼叫請求重複
         "1199",  # 內部請求錯誤：無法判斷
@@ -143,7 +144,7 @@ async def test_definitive_reject_still_allows_retry(db_session: AsyncSession, co
 
 def test_reject_whitelist_does_not_contain_ambiguous_codes() -> None:
     """白名單裡混進任何一個「可能已扣款」的碼，就等於又會叫店員重收一次。"""
-    ambiguous = {"1145", "1152", "1172", "1198", "1199", "9000", ""}
+    ambiguous = {"1145", "1152", "1153", "1172", "1198", "1199", "9000", ""}
     assert DEFINITIVE_PAY_REJECT_CODES.isdisjoint(ambiguous)
     assert "0000" not in DEFINITIVE_PAY_REJECT_CODES
 
