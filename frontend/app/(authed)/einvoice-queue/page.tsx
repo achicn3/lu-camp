@@ -80,12 +80,6 @@ export default function EInvoiceQueuePage() {
     void queryClient.invalidateQueries({ queryKey: ["einvoice-queue-badge"] });
   };
 
-  /** 處理掉這頁最後一筆時退回上一頁：那列會離開目前的篩選，留在原頁只剩一片空白，
-   *  看起來像「沒有待處理的」——正是這一頁最不該給人的錯覺。「全部」不會少列，故不動。 */
-  const stepBackIfPageEmptied = () => {
-    if (filter !== "ALL" && page > 0 && (queue.data?.items.length ?? 0) <= 1) setPage(page - 1);
-  };
-
   const sendNow = useMutation({
     mutationFn: async (item: QueueItem) => {
       const { data, error } = await api.POST("/api/v1/einvoice/queue/{queue_id}/send", {
@@ -100,7 +94,6 @@ export default function EInvoiceQueuePage() {
           ? `#${data.id} 已送交平台。`
           : `#${data.id} 平台未接受：${data.last_error ?? "未知原因"}（可重試）。`,
       );
-      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -116,7 +109,6 @@ export default function EInvoiceQueuePage() {
     },
     onSuccess: (data) => {
       setNote(`#${data.id} 已排回待送出，接著按「立即送出」。`);
-      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -136,7 +128,6 @@ export default function EInvoiceQueuePage() {
     },
     onSuccess: (invoice) => {
       setNote(`發票已開立：${invoice.invoice_no ?? "（已取號）"}。`);
-      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -195,7 +186,7 @@ export default function EInvoiceQueuePage() {
 
       {/* 讀取失敗時**不得**顯示「共 0 筆」：那是在後端掛掉的當下告訴店長「沒事」，
           正是這一頁存在的理由的反面（Codex 第七輪）。只有讀成功才報數。 */}
-      <p className="hint">
+      <p className="hint eiq-summary">
         {queue.isLoading
           ? "讀取中…"
           : queue.isSuccess
@@ -288,7 +279,20 @@ export default function EInvoiceQueuePage() {
               {queue.isSuccess && items.length === 0 && (
                 <tr>
                   <td colSpan={8} className="empty-state">
-                    {filter === "ATTENTION" ? "目前沒有需要處理的發票。" : "沒有符合的項目。"}
+                    {/* 停在已經沒有東西的頁碼時，別說「沒有需要處理的」——處理中的當下
+                        清單會變短，那句話會讓人以為全部清完了。講實話並給一條路回去。 */}
+                    {page > 0 ? (
+                      <>
+                        這一頁已經沒有項目了（其他頁可能還有）。
+                        <button type="button" className="btn-ghost" onClick={() => setPage(0)}>
+                          回第一頁
+                        </button>
+                      </>
+                    ) : filter === "ATTENTION" ? (
+                      "目前沒有需要處理的發票。"
+                    ) : (
+                      "沒有符合的項目。"
+                    )}
                   </td>
                 </tr>
               )}

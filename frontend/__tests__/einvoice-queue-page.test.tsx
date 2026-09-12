@@ -86,7 +86,7 @@ describe("/einvoice-queue 分頁", () => {
     expect(screen.queryByText("#137")).toBeNull();
   });
 
-  it("在最後一頁處理掉剩下的之後，退回還存在的頁，不留一片空白假裝沒事", async () => {
+  it("在最後一頁處理掉剩下的之後，說清楚是這頁空了並給路回去，不謊稱沒有待處理的", async () => {
     setToken(fakeJwt({ sub: "1", role: "MANAGER", store_id: 1 }));
     vi.spyOn(window, "confirm").mockReturnValue(true); // 開立要二次確認
     let total = 101; // 3 頁；最後一頁只有 1 筆
@@ -121,9 +121,12 @@ describe("/einvoice-queue 分頁", () => {
 
     await userEvent.click(screen.getAllByRole("button", { name: /立即送出第 \d+ 筆/ })[0]);
 
-    // 第 3 頁已經不存在了；畫面要退到第 2 頁並真的有列，而不是停著空白
-    await waitFor(() => expect(screen.getByText(/第 2 \/ 2 頁・共 100 筆/)).toBeDefined());
-    expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
+    // 不自動跳頁（重試之類的處置後那列還在清單裡，跳走會讓人按不到按鈕）；
+    // 但也不能說「目前沒有需要處理的發票」——其他頁還有 100 筆。
+    await waitFor(() => expect(screen.getByText(/這一頁已經沒有項目了/)).toBeDefined());
+    expect(screen.queryByText(/目前沒有需要處理的發票/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "回第一頁" }));
+    await waitFor(() => expect(screen.getByText(/第 1 \/ 2 頁・共 100 筆/)).toBeDefined());
   });
 
   it("換篩選頁籤時回到第一頁，不會停在舊頁碼查出空清單", async () => {

@@ -149,15 +149,15 @@ try {
 
   // 預設頁籤「需要處理」必須與導覽列紅點同口徑：紅點說有 N 筆、點進來卻看不到，
   // 就是畫面對店長說謊（Codex 第六輪）。先驗預設頁籤讀得到，再切「全部」找那一列。
-  await page.getByText(/共 \d+ 筆/).waitFor({ timeout: 20000 });
+  await page.locator(".eiq-summary", { hasText: /共 \d+ 筆/ }).waitFor({ timeout: 20000 });
   const attentionCount = Number(
-    ((await page.getByText(/共 \d+ 筆/).textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
+    ((await page.locator(".eiq-summary").textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
   );
 
   await page.getByRole("button", { name: "全部" }).click();
-  await page.getByText(/共 \d+ 筆/).waitFor({ timeout: 20000 });
+  await page.locator(".eiq-summary", { hasText: /共 \d+ 筆/ }).waitFor({ timeout: 20000 });
   const allCount = Number(
-    ((await page.getByText(/共 \d+ 筆/).textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
+    ((await page.locator(".eiq-summary").textContent()) ?? "").match(/共 (\d+) 筆/)?.[1] ?? "-1",
   );
   ok("清單讀取成功", allCount >= 0, `全部 ${allCount} 筆`);
 
