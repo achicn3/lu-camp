@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { Pagination } from "@/features/common/Pagination";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -30,6 +31,10 @@ const STATUS_LABELS: Record<UploadStatus, string> = {
 /** 篩選頁籤。預設「需要處理」——與導覽列紅點**同一個口徑**：紅點說有 N 筆、
  *  點進來卻看不到，等於畫面對店長說謊（Codex 第六輪）。 */
 type FilterKey = UploadStatus | "ALL" | "ATTENTION";
+/** 佇列只增不減（每張開立都留一列），實機已見上萬筆——一定要能翻頁，
+ *  否則卡最久、最該處理的那些永遠在清單尾巴看不到。 */
+const PAGE_SIZE = 50;
+
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "ATTENTION", label: "需要處理" },
   { key: "FAILED", label: "平台退回" },
@@ -48,17 +53,19 @@ function extractDetail(error: unknown): string | null {
 export default function EInvoiceQueuePage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<FilterKey>("ATTENTION");
+  const [page, setPage] = useState(0);
   const [note, setNote] = useState<string | null>(null);
 
   const queue = useQuery({
-    queryKey: ["einvoice-queue", filter],
+    queryKey: ["einvoice-queue", filter, page],
     queryFn: async () => {
+      const paging = { limit: PAGE_SIZE, offset: page * PAGE_SIZE };
       const query =
         filter === "ALL"
-          ? { limit: 100 }
+          ? paging
           : filter === "ATTENTION"
-            ? { needs_attention: true, limit: 100 }
-            : { status: filter, limit: 100 };
+            ? { needs_attention: true, ...paging }
+            : { status: filter, ...paging };
       const { data, error } = await api.GET("/api/v1/einvoice/queue", {
         params: { query },
       });
@@ -71,6 +78,12 @@ export default function EInvoiceQueuePage() {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["einvoice-queue"] });
     void queryClient.invalidateQueries({ queryKey: ["einvoice-queue-badge"] });
+  };
+
+  /** 處理掉這頁最後一筆時退回上一頁：那列會離開目前的篩選，留在原頁只剩一片空白，
+   *  看起來像「沒有待處理的」——正是這一頁最不該給人的錯覺。「全部」不會少列，故不動。 */
+  const stepBackIfPageEmptied = () => {
+    if (filter !== "ALL" && page > 0 && (queue.data?.items.length ?? 0) <= 1) setPage(page - 1);
   };
 
   const sendNow = useMutation({
@@ -87,6 +100,7 @@ export default function EInvoiceQueuePage() {
           ? `#${data.id} 已送交平台。`
           : `#${data.id} 平台未接受：${data.last_error ?? "未知原因"}（可重試）。`,
       );
+      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -102,6 +116,7 @@ export default function EInvoiceQueuePage() {
     },
     onSuccess: (data) => {
       setNote(`#${data.id} 已排回待送出，接著按「立即送出」。`);
+      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -121,6 +136,7 @@ export default function EInvoiceQueuePage() {
     },
     onSuccess: (invoice) => {
       setNote(`發票已開立：${invoice.invoice_no ?? "（已取號）"}。`);
+      stepBackIfPageEmptied();
       invalidate();
     },
     onError: (err: Error) => setNote(err.message),
@@ -156,7 +172,10 @@ export default function EInvoiceQueuePage() {
             type="button"
             className={`chip ${filter === f.key ? "chip-active" : ""}`}
             aria-pressed={filter === f.key}
-            onClick={() => setFilter(f.key)}
+            onClick={() => {
+              setFilter(f.key);
+              setPage(0); // 換頁籤還停在舊頁碼會查出一片空白
+            }}
           >
             {f.label}
           </button>
@@ -180,7 +199,7 @@ export default function EInvoiceQueuePage() {
         {queue.isLoading
           ? "讀取中…"
           : queue.isSuccess
-            ? `共 ${queue.data.total} 筆${queue.data.total > items.length ? "（僅顯示最新 100 筆）" : ""}`
+            ? `共 ${queue.data.total} 筆`
             : "讀不到清單，無法確認有沒有待處理的發票。"}
       </p>
 
@@ -277,6 +296,14 @@ export default function EInvoiceQueuePage() {
           </table>
         </div>
       </div>
+
+      <Pagination
+        page={page}
+        count={items.length}
+        pageSize={PAGE_SIZE}
+        total={queue.data?.total}
+        onPage={setPage}
+      />
     </section>
   );
 }
