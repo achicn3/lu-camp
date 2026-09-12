@@ -171,9 +171,10 @@ function AllMembersTab() {
   const [submittedQ, setSubmittedQ] = useState("");
   const [page, setPage] = useState(0);
 
-  // 總筆數（與清單同條件）：用來算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 總筆數（與清單同條件，key 帶 page 以便換頁時一併重抓——別台新增的資料
+  // 若沒反映在總數，最後一頁會變成按不下去、那幾筆就看不到了）：用來算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
   const membersTotal = useQuery({
-    queryKey: ["contacts", "members", "count", submittedQ],
+    queryKey: ["contacts", "members", "count", submittedQ, page],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/contacts/members/count", {
         params: { query: { q: submittedQ || undefined } },

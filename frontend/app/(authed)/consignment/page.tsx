@@ -132,10 +132,11 @@ export default function ConsignmentPage() {
     },
   });
 
-  // 總筆數（與清單同條件）：沒有它就只能用「這頁剛好滿＝可能還有下一頁」猜，
+  // 總筆數（與清單同條件，key 帶 page 以便換頁時一併重抓——別台新增的資料
+  // 若沒反映在總數，最後一頁會變成按不下去、那幾筆就看不到了）：沒有它就只能用「這頁剛好滿＝可能還有下一頁」猜，
   // 資料剛好是整頁倍數時會多出一個空白頁。
   const settlementsTotal = useQuery({
-    queryKey: ["consignment", "settlements", "count", status, phone],
+    queryKey: ["consignment", "settlements", "count", status, phone, page],
     queryFn: async () => {
       const query: { status: SettlementStatus; phone?: string } = { status };
       if (phone) query.phone = phone;

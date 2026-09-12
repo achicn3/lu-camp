@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.callticket.models import CallTicket
@@ -43,58 +43,35 @@ class CallTicketRepository:
     ) -> int:
         """與 list_tickets 同條件的總筆數（歷史檢視分頁用）。
 
-        清單是「今天的候位 ＋ 歷史（已完成或跨日未完成）」兩段串接，總數同樣是兩段相加，
-        否則歷史那半的頁數會少算。
+        清單是「今天的候位 ＋ 歷史（已完成或跨日）」兩段串接，但總數**只查一次**：
+        兩段的條件互斥（候位＝今天且 WAITING；歷史＝已完成或非今天），OR 起來剛好覆蓋
+        全部且不重疊。分兩次查會在兩次之間被別台完成的那筆算進兩邊，憑空多一筆、
+        多出一個空白頁（READ COMMITTED 下兩次查詢看到的是不同快照）。
         """
+        conditions = [CallTicket.store_id == store_id]
         if ticket_date is not None:
-            conditions = [
-                CallTicket.store_id == store_id,
-                CallTicket.ticket_date == ticket_date,
-            ]
+            conditions.append(CallTicket.ticket_date == ticket_date)
             if not include_done:
                 conditions.append(CallTicket.status == CallTicketStatus.WAITING)
-            return int(
-                (
-                    await self._session.scalar(
-                        select(func.count()).select_from(CallTicket).where(*conditions)
+        else:
+            waiting_today = and_(
+                CallTicket.status == CallTicketStatus.WAITING,
+                CallTicket.ticket_date == today,
+            )
+            if include_done:
+                conditions.append(
+                    or_(
+                        waiting_today,
+                        CallTicket.status == CallTicketStatus.DONE,
+                        CallTicket.ticket_date != today,
                     )
                 )
-                or 0
-            )
-
-        waiting = int(
-            (
-                await self._session.scalar(
-                    select(func.count())
-                    .select_from(CallTicket)
-                    .where(
-                        CallTicket.store_id == store_id,
-                        CallTicket.status == CallTicketStatus.WAITING,
-                        CallTicket.ticket_date == today,
-                    )
-                )
-            )
-            or 0
+            else:
+                conditions.append(waiting_today)
+        total = await self._session.scalar(
+            select(func.count()).select_from(CallTicket).where(*conditions)
         )
-        if not include_done:
-            return waiting
-        done = int(
-            (
-                await self._session.scalar(
-                    select(func.count())
-                    .select_from(CallTicket)
-                    .where(
-                        CallTicket.store_id == store_id,
-                        or_(
-                            CallTicket.status == CallTicketStatus.DONE,
-                            CallTicket.ticket_date != today,
-                        ),
-                    )
-                )
-            )
-            or 0
-        )
-        return waiting + done
+        return int(total or 0)
 
     async def list_tickets(
         self,

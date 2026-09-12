@@ -278,9 +278,9 @@ export default function StocktakePage() {
     return (id: number) => map.get(id) ?? `#${id}`;
   }, [catalog.data]);
 
-  // 總筆數：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 總筆數（key 帶 page，換頁時一併重抓，才不會用到別台新增前的舊總數）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
   const stocktakesTotal = useQuery({
-    queryKey: ["stocktakes", "count"],
+    queryKey: ["stocktakes", "count", page],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/stocktakes/count");
       if (!data) throw new Error(extractDetail(error) ?? "讀取盤點單總筆數失敗");

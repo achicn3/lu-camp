@@ -65,10 +65,10 @@ export default function CallTicketsPage() {
 
   // 候位中一頁看完（不分頁）；歷史每頁小一點，翻頁才有意義。
   const pageSize = showDone ? CALL_TICKET_HISTORY_PAGE_SIZE : CALL_TICKET_PAGE_SIZE;
-  // 歷史檢視的總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 歷史檢視的總筆數（與清單同條件，key 帶 page 以便換頁時一併重抓）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
   // 候位中不分頁，故只有歷史才查。
   const historyTotal = useQuery({
-    queryKey: ["call-tickets", "count", dateFilter],
+    queryKey: ["call-tickets", "count", dateFilter, page],
     enabled: showDone,
     queryFn: async () => {
       const { data, error: err } = await api.GET("/api/v1/call-tickets/count", {

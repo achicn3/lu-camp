@@ -849,9 +849,10 @@ function PurchaseOrderList() {
     return (id: number) => map.get(id) ?? null;
   }, [catalog.data]);
 
-  // 總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 總筆數（與清單同條件，key 帶 page 以便換頁時一併重抓——別台新增的資料
+  // 若沒反映在總數，最後一頁會變成按不下去、那幾筆就看不到了）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
   const ordersTotal = useQuery({
-    queryKey: ["purchase-orders", "count", statusKey, submittedSearch],
+    queryKey: ["purchase-orders", "count", statusKey, submittedSearch, page],
     queryFn: async () => {
       const query: { status?: PoStatus[]; q?: string } = {};
       if (statuses.length > 0) query.status = statuses;
@@ -1336,7 +1337,7 @@ function SupplierManager() {
 
   // 管理清單含停用者（include_inactive）；建單供應商選單另走頁面頂層查詢（預設只取啟用中）。
   const listTotal = useQuery({
-    queryKey: ["suppliers", "list", "count", submittedSearch],
+    queryKey: ["suppliers", "list", "count", submittedSearch, page],
     queryFn: async () => {
       const { data, error } = await api.GET("/api/v1/suppliers/count", {
         params: { query: { q: submittedSearch || undefined, include_inactive: true } },

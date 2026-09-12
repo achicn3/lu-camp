@@ -282,10 +282,11 @@ export default function CampaignsPage() {
     retry: false,
   });
 
-  // 總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 總筆數（與清單同條件，key 帶 page 以便換頁時一併重抓——別台新增的資料
+  // 若沒反映在總數，最後一頁會變成按不下去、那幾筆就看不到了）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
   // 權限不足時清單查詢已負責顯示提示，這裡安靜跳過即可。
   const totalQuery = useQuery({
-    queryKey: ["campaigns", "count", statusFilter],
+    queryKey: ["campaigns", "count", statusFilter, page],
     queryFn: async () => {
       const { data, response } = await api.GET("/api/v1/campaigns/count", {
         params: { query: statusFilter === "ALL" ? {} : { status: statusFilter } },

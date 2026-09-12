@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -280,3 +281,19 @@ async def test_count_call_tickets_matches_the_filtered_list(
         "/api/v1/call-tickets/count", params={"include_done": True}, headers=_auth(clerk)
     )
     assert everything.json()["count"] == 2
+
+    # 跨日未完成的那種（已離開候位清單、只在歷史看得到）也要恰好算一次：
+    # 總數與清單是同一組條件的兩種讀法，數字不一致就會生出空白頁。
+    await db_session.execute(
+        text("UPDATE call_tickets SET ticket_date = ticket_date - 1 WHERE name = '留著'")
+    )
+    await db_session.flush()
+    listed = await client.get(
+        "/api/v1/call-tickets",
+        params={"include_done": True, "limit": 200},
+        headers=_auth(clerk),
+    )
+    total = await client.get(
+        "/api/v1/call-tickets/count", params={"include_done": True}, headers=_auth(clerk)
+    )
+    assert total.json()["count"] == len(listed.json()) == 2
