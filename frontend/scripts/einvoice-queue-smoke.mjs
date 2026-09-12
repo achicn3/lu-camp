@@ -204,6 +204,20 @@ try {
     }
     await page.screenshot({ path: join(SHOTS, "03-sent.png") });
   }
+
+  // 窄螢幕：整頁不得橫向捲動，寬表格只能在自己的框裡捲（版面與其他清單頁一致）。
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  const overflow = await page.evaluate(() => ({
+    page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    tableScrolls: (() => {
+      const wrap = document.querySelector(".eiq-table-wrap");
+      return wrap != null && wrap.scrollWidth > wrap.clientWidth;
+    })(),
+  }));
+  ok("窄螢幕整頁不橫向捲動", overflow.page <= 1, `溢出 ${overflow.page}px`);
+  ok("寬表格改在自己的框裡捲", overflow.tableScrolls);
+  await page.screenshot({ path: join(SHOTS, "04-mobile.png"), fullPage: true });
 } catch (err) {
   ok(`未預期錯誤：${err.message}`, false);
 } finally {

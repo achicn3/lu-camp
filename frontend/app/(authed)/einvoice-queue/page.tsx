@@ -139,20 +139,22 @@ export default function EInvoiceQueuePage() {
     );
 
   return (
-    <main className="page">
-      <h1>發票待處理</h1>
-      <p className="muted">
-        作廢與折讓由系統背景自動送交平台，通常一分鐘內完成。
-        「需要處理」列的是平台退回的、以及卡超過 30 分鐘還沒送出去的。
-        <strong>在送出成功之前，平台上那張發票仍然有效。</strong>
-      </p>
+    <section className="eiq-page">
+      <div className="eiq-head">
+        <h1 className="page-title">發票待處理</h1>
+        <p className="hint">
+          作廢與折讓由系統背景自動送交平台，通常一分鐘內完成。
+          「需要處理」列的是平台退回的、以及卡超過 30 分鐘還沒送出去的。
+        </p>
+        <p className="eiq-warning">在送出成功之前，平台上那張發票仍然有效。</p>
+      </div>
 
-      <div className="row" role="group" aria-label="狀態篩選">
+      <div className="eiq-tabs" role="group" aria-label="狀態篩選">
         {FILTERS.map((f) => (
           <button
             key={f.key}
             type="button"
-            className={filter === f.key ? "btn-primary" : "btn-ghost"}
+            className={`chip ${filter === f.key ? "chip-active" : ""}`}
             aria-pressed={filter === f.key}
             onClick={() => setFilter(f.key)}
           >
@@ -162,7 +164,7 @@ export default function EInvoiceQueuePage() {
       </div>
 
       {note !== null && (
-        <p role="status" className="form-note">
+        <p role="status" className="hint eiq-notice">
           {note}
         </p>
       )}
@@ -174,7 +176,7 @@ export default function EInvoiceQueuePage() {
 
       {/* 讀取失敗時**不得**顯示「共 0 筆」：那是在後端掛掉的當下告訴店長「沒事」，
           正是這一頁存在的理由的反面（Codex 第七輪）。只有讀成功才報數。 */}
-      <p className="muted">
+      <p className="hint">
         {queue.isLoading
           ? "讀取中…"
           : queue.isSuccess
@@ -182,91 +184,99 @@ export default function EInvoiceQueuePage() {
             : "讀不到清單，無法確認有沒有待處理的發票。"}
       </p>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>項目</th>
-            <th>發票號碼</th>
-            <th>交易</th>
-            <th>狀態</th>
-            <th>嘗試</th>
-            <th>建立時間</th>
-            <th>平台回覆</th>
-            <th>處理</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td>{ACTION_LABELS[item.action]}</td>
-              <td>{item.invoice_no ?? "—"}</td>
-              <td>{item.sale_id != null ? `#${item.sale_id}` : "—"}</td>
-              <td>{STATUS_LABELS[item.status]}</td>
-              <td>{item.attempts}</td>
-              <td>{formatTaipeiDateTime(item.created_at)}</td>
-              <td className="wrap">{item.last_error ?? "—"}</td>
-              <td>
-                {item.status === "PENDING" && (
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    disabled={busy}
-                    aria-label={`立即送出第 ${item.id} 筆`}
-                    onClick={() => {
-                      if (item.action === "ISSUE" && !confirmIssue(item)) return;
-                      setNote(null);
-                      sendNow.mutate(item);
-                    }}
-                  >
-                    立即送出
-                  </button>
-                )}
-                {item.status === "FAILED" && (
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    disabled={busy}
-                    aria-label={`重試第 ${item.id} 筆`}
-                    onClick={() => {
-                      setNote(null);
-                      retry.mutate(item);
-                    }}
-                  >
-                    重試
-                  </button>
-                )}
-                {/* 只有「待送出／平台退回」才補得了：UPLOADED 已經開好，CANCELLED 是這張
-                    F0401 已明確終止（登記手開紙本、或交易作廢），按下去只會拿回既有發票
-                    或吃 409，畫面卻寫著「將向國稅局開票」——誤導（Codex 第三輪）。 */}
-                {item.action === "ISSUE" &&
-                  (item.status === "PENDING" || item.status === "FAILED") &&
-                  item.sale_id != null && (
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    disabled={busy}
-                    aria-label={`重新開立銷售 ${item.sale_id} 的發票`}
-                    onClick={() => {
-                      if (!confirmIssue(item)) return;
-                      setNote(null);
-                      reissue.mutate(item);
-                    }}
-                  >
-                    重新開立
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {queue.isSuccess && items.length === 0 && (
-            <tr>
-              <td colSpan={8} className="muted">
-                {filter === "ATTENTION" ? "目前沒有需要處理的發票。" : "沒有符合的項目。"}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </main>
+      <div className="card eiq-card">
+        <div className="eiq-table-wrap">
+          <table className="data-table eiq-table">
+            <thead>
+              <tr>
+                <th>項目</th>
+                <th>發票號碼</th>
+                <th>交易</th>
+                <th>狀態</th>
+                <th>嘗試</th>
+                <th>建立時間</th>
+                <th>平台回覆</th>
+                <th>處理</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td>{ACTION_LABELS[item.action]}</td>
+                  <td>{item.invoice_no ?? "—"}</td>
+                  <td>{item.sale_id != null ? `#${item.sale_id}` : "—"}</td>
+                  <td>
+                    <span className={`eiq-badge eiq-${item.status.toLowerCase()}`}>
+                      {STATUS_LABELS[item.status]}
+                    </span>
+                  </td>
+                  <td>{item.attempts}</td>
+                  <td>{formatTaipeiDateTime(item.created_at)}</td>
+                  <td className="eiq-error-cell">{item.last_error ?? "—"}</td>
+                  <td className="eiq-actions">
+                    {item.status === "PENDING" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={busy}
+                        aria-label={`立即送出第 ${item.id} 筆`}
+                        onClick={() => {
+                          if (item.action === "ISSUE" && !confirmIssue(item)) return;
+                          setNote(null);
+                          sendNow.mutate(item);
+                        }}
+                      >
+                        立即送出
+                      </button>
+                    )}
+                    {item.status === "FAILED" && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={busy}
+                        aria-label={`重試第 ${item.id} 筆`}
+                        onClick={() => {
+                          setNote(null);
+                          retry.mutate(item);
+                        }}
+                      >
+                        重試
+                      </button>
+                    )}
+                    {/* 只有「待送出／平台退回」才補得了：UPLOADED 已經開好，CANCELLED 是這張
+                        F0401 已明確終止（登記手開紙本、或交易作廢），按下去只會拿回既有發票
+                        或吃 409，畫面卻寫著「將向國稅局開票」——誤導（Codex 第三輪）。 */}
+                    {item.action === "ISSUE" &&
+                      (item.status === "PENDING" || item.status === "FAILED") &&
+                      item.sale_id != null && (
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        disabled={busy}
+                        aria-label={`重新開立銷售 ${item.sale_id} 的發票`}
+                        onClick={() => {
+                          if (!confirmIssue(item)) return;
+                          setNote(null);
+                          reissue.mutate(item);
+                        }}
+                      >
+                        重新開立
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {queue.isSuccess && items.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="empty-state">
+                    {filter === "ATTENTION" ? "目前沒有需要處理的發票。" : "沒有符合的項目。"}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   );
 }
