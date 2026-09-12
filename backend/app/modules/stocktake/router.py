@@ -17,6 +17,7 @@ from app.shared.exceptions import (
     StocktakeNotDraft,
     StocktakeNotFound,
 )
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(tags=["stocktake"])
 
@@ -65,6 +66,12 @@ async def list_stocktakes(
         user.store_id, limit=limit, offset=offset
     )
     return [StocktakeRead.from_model(s) for s in stocktakes]
+
+
+@router.get("/stocktakes/count", response_model=ListCountRead, operation_id="countStocktakes")
+async def count_stocktakes(session: SessionDep, user: CurrentUserDep) -> ListCountRead:
+    """店內盤點單總筆數；盤點頁用它顯示「第 X / Y 頁」。"""
+    return ListCountRead(count=await StocktakeService(session).count_stocktakes(user.store_id))
 
 
 @router.get("/stocktakes/{stocktake_id}", response_model=StocktakeRead, operation_id="getStocktake")

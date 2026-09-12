@@ -6391,6 +6391,20 @@
         "title": "LinePayRefundStatus",
         "type": "string"
       },
+      "ListCountRead": {
+        "description": "符合同一組篩選條件的總筆數（清單頁算「第 X / Y 頁」用）。\n\n每個 `/count` 端點都必須與它的清單端點吃**同一組篩選參數**、走同一條查詢，\n否則畫面上的總頁數會與實際清單對不起來——那比沒有總頁數更糟。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "ListCountRead",
+        "type": "object"
+      },
       "LoginRequest": {
         "description": "登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。",
         "properties": {
@@ -13482,6 +13496,72 @@
         ]
       }
     },
+    "/api/v1/call-tickets/count": {
+      "get": {
+        "description": "與清單同條件的總筆數；歷史檢視用它顯示「第 X / Y 頁」。",
+        "operationId": "countCallTickets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_done",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Done",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ticket_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ticket Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Call Tickets",
+        "tags": [
+          "call-tickets"
+        ]
+      }
+    },
     "/api/v1/call-tickets/{ticket_id}/complete": {
       "post": {
         "description": "標記完成（**冪等**：已完成再按回原狀態，不報錯、不覆寫第一次的人與時間）。",
@@ -13650,6 +13730,61 @@
           }
         ],
         "summary": "Create Campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/count": {
+      "get": {
+        "description": "符合同一組篩選的活動總筆數；活動頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countCampaigns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CampaignStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Campaigns",
         "tags": [
           "campaigns"
         ]
@@ -15025,6 +15160,78 @@
         ]
       }
     },
+    "/api/v1/consignment/settlements/count": {
+      "get": {
+        "description": "符合同一組篩選的寄售結算總筆數；付款頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countConsignmentSettlements",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConsignmentSettlementStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "phone",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phone"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Settlements",
+        "tags": [
+          "consignment"
+        ]
+      }
+    },
     "/api/v1/consignment/settlements/{settlement_id}/pay": {
       "post": {
         "description": "付款給寄售人（payout = 售價 − 抽成）：現金出帳並結算轉 PAID，全程稽核、整筆原子。\n\n需開帳中（invariant #8）→ 否則 409；已付/已取消 → 409；找不到/他店 → 404。\n併發/重送以結算列鎖為準，只一筆成功、不重複出帳。",
@@ -15356,6 +15563,61 @@
           }
         ],
         "summary": "List Members With Credit",
+        "tags": [
+          "contacts"
+        ]
+      }
+    },
+    "/api/v1/contacts/members/count": {
+      "get": {
+        "description": "符合同一組搜尋條件的會員總筆數；會員頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countMembersWithCredit",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Members With Credit",
         "tags": [
           "contacts"
         ]
@@ -18665,6 +18927,81 @@
         ]
       }
     },
+    "/api/v1/purchase-orders/count": {
+      "get": {
+        "description": "符合同一組篩選的採購單總筆數；採購頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countPurchaseOrders",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/PurchaseOrderStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Purchase Orders",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
     "/api/v1/purchase-orders/{purchase_order_id}": {
       "get": {
         "operationId": "getPurchaseOrder",
@@ -21662,6 +21999,94 @@
         ]
       }
     },
+    "/api/v1/signing/tasks/count": {
+      "get": {
+        "description": "符合同一組篩選的簽署任務總筆數；簽署紀錄頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countSignatureTasks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SignatureTaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SignatureTaskKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "contact_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Signature Tasks",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
     "/api/v1/signing/tasks/{task_id}": {
       "get": {
         "operationId": "getSignatureTask",
@@ -21902,6 +22327,33 @@
           }
         ],
         "summary": "Create Stocktake",
+        "tags": [
+          "stocktake"
+        ]
+      }
+    },
+    "/api/v1/stocktakes/count": {
+      "get": {
+        "description": "店內盤點單總筆數；盤點頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countStocktakes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Stocktakes",
         "tags": [
           "stocktake"
         ]
@@ -22214,6 +22666,72 @@
           }
         ],
         "summary": "Create Supplier",
+        "tags": [
+          "purchasing"
+        ]
+      }
+    },
+    "/api/v1/suppliers/count": {
+      "get": {
+        "description": "符合同一組篩選的供應商總筆數；供應商管理頁用它顯示「第 X / Y 頁」。",
+        "operationId": "countSuppliers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCountRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Count Suppliers",
         "tags": [
           "purchasing"
         ]

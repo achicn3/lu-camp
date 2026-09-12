@@ -282,6 +282,20 @@ export default function CampaignsPage() {
     retry: false,
   });
 
+  // 總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  // 權限不足時清單查詢已負責顯示提示，這裡安靜跳過即可。
+  const totalQuery = useQuery({
+    queryKey: ["campaigns", "count", statusFilter],
+    queryFn: async () => {
+      const { data, response } = await api.GET("/api/v1/campaigns/count", {
+        params: { query: statusFilter === "ALL" ? {} : { status: statusFilter } },
+      });
+      if (!response.ok || !data) return undefined;
+      return data.count;
+    },
+    retry: false,
+  });
+
   const actionMutation = useMutation({
     mutationFn: async ({ action, id }: { action: "activate" | "end" | "cancel"; id: number }) => {
       const endpoint = action === "activate"
@@ -406,7 +420,13 @@ export default function CampaignsPage() {
           </table>
           {campaigns.length === 0 && <p className="hint">尚無活動</p>}
         </div>
-        <Pagination page={page} count={campaigns.length} pageSize={PAGE_SIZE} onPage={setPage} />
+        <Pagination
+          page={page}
+          count={campaigns.length}
+          pageSize={PAGE_SIZE}
+          total={totalQuery.data}
+          onPage={setPage}
+        />
       </div>
     </section>
   );

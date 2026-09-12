@@ -1157,3 +1157,61 @@ async def test_cost_changes_do_not_rewrite_the_cost_of_past_sales(
 
     await db_session.refresh(line)
     assert line.cost_snapshot == Decimal(100)  # 歷史成本不變
+
+
+async def test_count_purchase_orders_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購單總筆數與同條件清單一致（清單頁的「第 X / Y 頁」靠它）。"""
+    token, store_id, _ = await _seed_store(db_session)
+    supplier_id = await _create_supplier(client, token)
+    cat_id = await _seed_catalog(db_session, store_id)
+    po_id = await _create_po(client, token, supplier_id=supplier_id, catalog_product_id=cat_id)
+
+    total = await client.get("/api/v1/purchase-orders/count", headers=_auth(token))
+    assert total.status_code == 200, total.text
+    listed = await client.get(
+        "/api/v1/purchase-orders", params={"limit": 200}, headers=_auth(token)
+    )
+    assert total.json()["count"] == len(listed.json())
+
+    draft = await client.get(
+        "/api/v1/purchase-orders/count", params={"status": "DRAFT"}, headers=_auth(token)
+    )
+    draft_list = await client.get(
+        "/api/v1/purchase-orders",
+        params={"status": "DRAFT", "limit": 200},
+        headers=_auth(token),
+    )
+    assert draft.json()["count"] == len(draft_list.json())
+    by_number = await client.get(
+        "/api/v1/purchase-orders/count", params={"q": str(po_id)}, headers=_auth(token)
+    )
+    by_number_list = await client.get(
+        "/api/v1/purchase-orders", params={"q": str(po_id), "limit": 200}, headers=_auth(token)
+    )
+    assert by_number.json()["count"] == len(by_number_list.json())
+
+
+async def test_count_suppliers_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """供應商總筆數與同條件清單一致——含停用與否是兩個不同的數字。"""
+    token, _store_id, _ = await _seed_store(db_session)
+    keep = await _create_supplier(client, token, name="留著")
+    gone = await _create_supplier(client, token, name="停用")
+    deact = await client.post(f"/api/v1/suppliers/{gone}/deactivate", headers=_auth(token))
+    assert deact.status_code == 200, deact.text
+
+    active = await client.get("/api/v1/suppliers/count", headers=_auth(token))
+    assert active.status_code == 200, active.text
+    active_list = await client.get(
+        "/api/v1/suppliers", params={"limit": 200}, headers=_auth(token)
+    )
+    assert active.json()["count"] == len(active_list.json())
+    assert {s["id"] for s in active_list.json()} == {keep}
+
+    everything = await client.get(
+        "/api/v1/suppliers/count", params={"include_inactive": True}, headers=_auth(token)
+    )
+    assert everything.json()["count"] == 2

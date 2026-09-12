@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.campaigns.models import Campaign
@@ -49,6 +49,13 @@ class CampaignRepository:
         if limit is not None:
             stmt = stmt.limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def count(self, store_id: int, *, status: CampaignStatus | None = None) -> int:
+        """符合同一組篩選的活動總筆數（不分頁；清單頁算總頁數用）。"""
+        stmt = select(func.count()).select_from(Campaign).where(Campaign.store_id == store_id)
+        if status is not None:
+            stmt = stmt.where(Campaign.status == status)
+        return int((await self._session.scalar(stmt)) or 0)
 
     async def get_effective(self, store_id: int, now: datetime) -> Campaign | None:
         """目前生效中活動：status=ACTIVE 且 now ∈ [starts_at, ends_at)（同店至多一個）。"""

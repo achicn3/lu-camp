@@ -33,6 +33,69 @@ class CallTicketRepository:
         )
         return ticket
 
+    async def count_tickets(
+        self,
+        store_id: int,
+        *,
+        include_done: bool,
+        today: date,
+        ticket_date: date | None = None,
+    ) -> int:
+        """與 list_tickets 同條件的總筆數（歷史檢視分頁用）。
+
+        清單是「今天的候位 ＋ 歷史（已完成或跨日未完成）」兩段串接，總數同樣是兩段相加，
+        否則歷史那半的頁數會少算。
+        """
+        if ticket_date is not None:
+            conditions = [
+                CallTicket.store_id == store_id,
+                CallTicket.ticket_date == ticket_date,
+            ]
+            if not include_done:
+                conditions.append(CallTicket.status == CallTicketStatus.WAITING)
+            return int(
+                (
+                    await self._session.scalar(
+                        select(func.count()).select_from(CallTicket).where(*conditions)
+                    )
+                )
+                or 0
+            )
+
+        waiting = int(
+            (
+                await self._session.scalar(
+                    select(func.count())
+                    .select_from(CallTicket)
+                    .where(
+                        CallTicket.store_id == store_id,
+                        CallTicket.status == CallTicketStatus.WAITING,
+                        CallTicket.ticket_date == today,
+                    )
+                )
+            )
+            or 0
+        )
+        if not include_done:
+            return waiting
+        done = int(
+            (
+                await self._session.scalar(
+                    select(func.count())
+                    .select_from(CallTicket)
+                    .where(
+                        CallTicket.store_id == store_id,
+                        or_(
+                            CallTicket.status == CallTicketStatus.DONE,
+                            CallTicket.ticket_date != today,
+                        ),
+                    )
+                )
+            )
+            or 0
+        )
+        return waiting + done
+
     async def list_tickets(
         self,
         store_id: int,

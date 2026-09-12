@@ -36,6 +36,7 @@ from app.shared.exceptions import (
     SupplierNotFound,
 )
 from app.shared.http import ERROR_CODE_HEADER
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(tags=["purchasing"])
 
@@ -107,6 +108,20 @@ async def list_suppliers(
         user.store_id, q=q, limit=limit, offset=offset, include_inactive=include_inactive
     )
     return [SupplierRead.model_validate(supplier) for supplier in suppliers]
+
+
+@router.get("/suppliers/count", response_model=ListCountRead, operation_id="countSuppliers")
+async def count_suppliers(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    include_inactive: Annotated[bool, Query()] = False,
+) -> ListCountRead:
+    """符合同一組篩選的供應商總筆數；供應商管理頁用它顯示「第 X / Y 頁」。"""
+    total = await PurchasingService(session).count_suppliers(
+        user.store_id, q=q, include_inactive=include_inactive
+    )
+    return ListCountRead(count=total)
 
 
 @router.get("/suppliers/{supplier_id}", response_model=SupplierRead, operation_id="getSupplier")
@@ -265,6 +280,22 @@ async def list_purchase_orders(
         user.store_id, statuses=po_status, q=q, limit=limit, offset=offset
     )
     return [PurchaseOrderRead.from_model(po) for po in purchase_orders]
+
+
+@router.get(
+    "/purchase-orders/count", response_model=ListCountRead, operation_id="countPurchaseOrders"
+)
+async def count_purchase_orders(
+    session: SessionDep,
+    user: CurrentUserDep,
+    po_status: Annotated[list[PurchaseOrderStatus] | None, Query(alias="status")] = None,
+    q: Annotated[str | None, Query(max_length=100)] = None,
+) -> ListCountRead:
+    """符合同一組篩選的採購單總筆數；採購頁用它顯示「第 X / Y 頁」。"""
+    total = await PurchasingService(session).count_purchase_orders(
+        user.store_id, statuses=po_status, q=q
+    )
+    return ListCountRead(count=total)
 
 
 @router.get(

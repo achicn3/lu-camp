@@ -51,6 +51,10 @@ class StocktakeService:
     ) -> list[Stocktake]:
         return await self._repo.list_stocktakes(store_id, limit=limit, offset=offset)
 
+    async def count_stocktakes(self, store_id: int) -> int:
+        """店內盤點單總筆數（清單頁算總頁數用）。"""
+        return await self._repo.count_stocktakes(store_id)
+
     async def confirm_stocktake(
         self,
         store_id: int,

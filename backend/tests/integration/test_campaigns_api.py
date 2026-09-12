@@ -266,3 +266,20 @@ async def test_campaigns_create_is_persisted(
 
     count = await db_session.scalar(select(func.count()).select_from(Campaign))
     assert count == 1
+
+
+async def test_count_campaigns_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _clerk, _store = await _seed(db_session)
+    a = await _create(client, mgr, name="數 A")
+    await _create(client, mgr, name="數 B")
+    await client.post(f"/api/v1/campaigns/{a['id']}/activate", headers=_auth(mgr))
+
+    total = await client.get("/api/v1/campaigns/count", headers=_auth(mgr))
+    assert total.status_code == 200, total.text
+    assert total.json()["count"] == 2
+    active = await client.get(
+        "/api/v1/campaigns/count", params={"status": "ACTIVE"}, headers=_auth(mgr)
+    )
+    assert active.json()["count"] == 1

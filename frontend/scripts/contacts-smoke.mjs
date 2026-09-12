@@ -45,7 +45,7 @@ try {
   await page.getByLabel("住址（切結書顯示用）").fill("台中市西屯區煙霧路 1 號");
 
   // 1) 不合法身分證字號 → 前端擋下、不建檔
-  await page.getByLabel("身分證字號（收購/寄售必填）").fill("A123456788"); // 末碼錯
+  await page.getByLabel("身分證字號（收購時必填）").fill("A123456788"); // 末碼錯
   await page.click('button:has-text("建檔")');
   const err = page.locator('[role="alert"].form-error', { hasText: /身分證字號格式或檢核碼不正確/ });
   await err.waitFor({ state: "visible", timeout: 8000 });
@@ -53,7 +53,7 @@ try {
   await page.screenshot({ path: `${SHOTS}/01-invalid-national-id.png` });
 
   // 2) 改為合法身分證字號 → 建檔成功（表單清空、清單可見）
-  await page.getByLabel("身分證字號（收購/寄售必填）").fill(validNationalId());
+  await page.getByLabel("身分證字號（收購時必填）").fill(validNationalId());
   await page.click('button:has-text("建檔")');
   await page.waitForFunction(
     () => !document.querySelector('[role="alert"].form-error'),

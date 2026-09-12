@@ -123,6 +123,10 @@ class CampaignService:
     ) -> list[Campaign]:
         return await self._repo.list(store_id, status=status, limit=limit, offset=offset)
 
+    async def count_campaigns(self, store_id: int, *, status: CampaignStatus | None = None) -> int:
+        """符合同一組篩選的活動總筆數（清單頁算總頁數用）。"""
+        return await self._repo.count(store_id, status=status)
+
     async def get_effective(self, store_id: int, now: datetime) -> Campaign | None:
         """目前生效中活動（C2 結帳套折扣用）；無則 None。"""
         return await self._repo.get_effective(store_id, now)

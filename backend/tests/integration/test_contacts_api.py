@@ -879,3 +879,32 @@ async def test_list_members_with_credit(
         "/api/v1/contacts/members", params={"q": "0922222222"}, headers=_auth(token)
     )
     assert [r["name"] for r in by_phone.json()] == ["陳大寶"]
+
+
+async def test_count_members_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """會員總筆數與同條件清單一致（會員頁的「第 X / Y 頁」靠它）。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    for i in range(3):
+        await client.post(
+            "/api/v1/contacts",
+            json={"phone": _uphone(), "name": f"數數會員{i}", "roles": ["MEMBER"]},
+            headers=_auth(m_token),
+        )
+    total = await client.get("/api/v1/contacts/members/count", headers=_auth(m_token))
+    assert total.status_code == 200, total.text
+    listed = await client.get(
+        "/api/v1/contacts/members", params={"limit": 200}, headers=_auth(m_token)
+    )
+    assert total.json()["count"] == len(listed.json())
+
+    filtered = await client.get(
+        "/api/v1/contacts/members/count", params={"q": "數數會員1"}, headers=_auth(m_token)
+    )
+    filtered_list = await client.get(
+        "/api/v1/contacts/members",
+        params={"q": "數數會員1", "limit": 200},
+        headers=_auth(m_token),
+    )
+    assert filtered.json()["count"] == len(filtered_list.json()) == 1

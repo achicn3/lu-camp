@@ -4,7 +4,7 @@
 inventory service 處理（不直接碰 inventory 表）。
 """
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -45,6 +45,11 @@ class StocktakeRepository:
         )
         result: Stocktake | None = await self._session.scalar(stmt)
         return result
+
+    async def count_stocktakes(self, store_id: int) -> int:
+        """店內盤點單總筆數（不分頁；清單頁算總頁數用）。"""
+        stmt = select(func.count()).select_from(Stocktake).where(Stocktake.store_id == store_id)
+        return int((await self._session.scalar(stmt)) or 0)
 
     async def list_stocktakes(self, store_id: int, *, limit: int, offset: int) -> list[Stocktake]:
         stmt = (

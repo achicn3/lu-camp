@@ -59,6 +59,12 @@ class PurchasingService:
         )
         return await self._repo.add_supplier(supplier)
 
+    async def count_suppliers(
+        self, store_id: int, *, q: str | None = None, include_inactive: bool = False
+    ) -> int:
+        """符合同一組篩選的供應商總筆數（清單頁算總頁數用）。"""
+        return await self._repo.count_suppliers(store_id, q=q, include_inactive=include_inactive)
+
     async def list_suppliers(
         self,
         store_id: int,
@@ -259,6 +265,16 @@ class PurchasingService:
         refreshed = await self._repo.get_purchase_order(store_id, purchase_order.id)
         assert refreshed is not None
         return refreshed
+
+    async def count_purchase_orders(
+        self,
+        store_id: int,
+        *,
+        statuses: list[PurchaseOrderStatus] | None = None,
+        q: str | None = None,
+    ) -> int:
+        """符合同一組篩選的採購單總筆數（清單頁算總頁數用）。"""
+        return await self._repo.count_purchase_orders(store_id, statuses=statuses, q=q)
 
     async def list_purchase_orders(
         self,

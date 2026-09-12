@@ -36,6 +36,7 @@ from app.shared.exceptions import (
     SignatureTaskNotFound,
     SignatureTaskNotPending,
 )
+from app.shared.schemas import ListCountRead
 
 staff_router = APIRouter(prefix="/signing", tags=["signing"])
 kiosk_router = APIRouter(prefix="/kiosk", tags=["kiosk"])
@@ -183,6 +184,21 @@ async def list_signature_tasks(
         user.store_id, task_status, kind=kind, contact_id=contact_id, limit=limit, offset=offset
     )
     return [_to_read(t, await service.get_agreement_for_task(t)) for t in tasks]
+
+
+@staff_router.get("/tasks/count", response_model=ListCountRead, operation_id="countSignatureTasks")
+async def count_signature_tasks(
+    session: SessionDep,
+    user: StaffDep,
+    task_status: Annotated[SignatureTaskStatus | None, Query(alias="status")] = None,
+    kind: Annotated[SignatureTaskKind | None, Query()] = None,
+    contact_id: Annotated[int | None, Query(ge=1)] = None,
+) -> ListCountRead:
+    """符合同一組篩選的簽署任務總筆數；簽署紀錄頁用它顯示「第 X / Y 頁」。"""
+    total = await SigningService(session).count_tasks(
+        user.store_id, task_status, kind=kind, contact_id=contact_id
+    )
+    return ListCountRead(count=total)
 
 
 @staff_router.get(

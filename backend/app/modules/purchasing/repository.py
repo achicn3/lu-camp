@@ -29,9 +29,7 @@ class PurchasingRepository:
         result: Supplier | None = await self._session.scalar(stmt)
         return result
 
-    async def get_supplier_for_update(
-        self, store_id: int, supplier_id: int
-    ) -> Supplier | None:
+    async def get_supplier_for_update(self, store_id: int, supplier_id: int) -> Supplier | None:
         """鎖定供應商列（FOR UPDATE）：建單/送出檢查啟用狀態時序列化，擋下並發停用競態。"""
         stmt = (
             select(Supplier)
@@ -40,6 +38,17 @@ class PurchasingRepository:
         )
         result: Supplier | None = await self._session.scalar(stmt)
         return result
+
+    @staticmethod
+    def _suppliers_where(stmt: Any, store_id: int, q: str | None, include_inactive: bool) -> Any:
+        """供應商的篩選條件只寫這一份——清單與總筆數共用，兩者才不會各走各的。"""
+        stmt = stmt.where(Supplier.store_id == store_id)
+        if not include_inactive:
+            stmt = stmt.where(Supplier.is_active.is_(True))
+        if q:
+            pattern = f"%{q}%"
+            stmt = stmt.where(Supplier.name.ilike(pattern) | Supplier.contact.ilike(pattern))
+        return stmt
 
     async def list_suppliers(
         self,
@@ -50,14 +59,18 @@ class PurchasingRepository:
         offset: int,
         include_inactive: bool = False,
     ) -> list[Supplier]:
-        stmt = select(Supplier).where(Supplier.store_id == store_id)
-        if not include_inactive:
-            stmt = stmt.where(Supplier.is_active.is_(True))
-        if q:
-            pattern = f"%{q}%"
-            stmt = stmt.where(Supplier.name.ilike(pattern) | Supplier.contact.ilike(pattern))
+        stmt = self._suppliers_where(select(Supplier), store_id, q, include_inactive)
         stmt = stmt.order_by(Supplier.name).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_suppliers(
+        self, store_id: int, *, q: str | None = None, include_inactive: bool = False
+    ) -> int:
+        """符合同一組篩選的供應商總筆數（不分頁；供應商管理頁算總頁數用）。"""
+        stmt = self._suppliers_where(
+            select(func.count()).select_from(Supplier), store_id, q, include_inactive
+        )
+        return int((await self._session.scalar(stmt)) or 0)
 
     async def add_purchase_order(self, purchase_order: PurchaseOrder) -> PurchaseOrder:
         self._session.add(purchase_order)
@@ -83,23 +96,12 @@ class PurchasingRepository:
         result: PurchaseOrder | None = await self._session.scalar(stmt)
         return result
 
-    async def list_purchase_orders(
-        self,
-        store_id: int,
-        *,
-        statuses: list[PurchaseOrderStatus] | None = None,
-        q: str | None = None,
-        limit: int,
-        offset: int,
-    ) -> list[PurchaseOrder]:
-        stmt = (
-            select(PurchaseOrder)
-            .options(
-                selectinload(PurchaseOrder.lines),
-                selectinload(PurchaseOrder.receipts),
-            )
-            .where(PurchaseOrder.store_id == store_id)
-        )
+    @staticmethod
+    def _purchase_orders_where(
+        stmt: Any, store_id: int, statuses: list[PurchaseOrderStatus] | None, q: str | None
+    ) -> Any:
+        """採購單的篩選條件只寫這一份——清單與總筆數共用，兩者才不會各走各的。"""
+        stmt = stmt.where(PurchaseOrder.store_id == store_id)
         if statuses:
             stmt = stmt.where(PurchaseOrder.status.in_(statuses))
         if q:
@@ -111,8 +113,41 @@ class PurchasingRepository:
             if needle.isdigit():
                 conditions.append(PurchaseOrder.id == int(needle))
             stmt = stmt.where(or_(*conditions))
+        return stmt
+
+    async def list_purchase_orders(
+        self,
+        store_id: int,
+        *,
+        statuses: list[PurchaseOrderStatus] | None = None,
+        q: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> list[PurchaseOrder]:
+        stmt = self._purchase_orders_where(
+            select(PurchaseOrder).options(
+                selectinload(PurchaseOrder.lines),
+                selectinload(PurchaseOrder.receipts),
+            ),
+            store_id,
+            statuses,
+            q,
+        )
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def count_purchase_orders(
+        self,
+        store_id: int,
+        *,
+        statuses: list[PurchaseOrderStatus] | None = None,
+        q: str | None = None,
+    ) -> int:
+        """符合同一組篩選的採購單總筆數（不分頁；清單頁算總頁數用）。"""
+        stmt = self._purchase_orders_where(
+            select(func.count()).select_from(PurchaseOrder), store_id, statuses, q
+        )
+        return int((await self._session.scalar(stmt)) or 0)
 
     async def incoming_qty_by_catalog(
         self, store_id: int, catalog_ids: list[int]

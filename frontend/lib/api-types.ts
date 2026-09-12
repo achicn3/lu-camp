@@ -412,6 +412,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/call-tickets/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Call Tickets
+         * @description 與清單同條件的總筆數；歷史檢視用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countCallTickets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/call-tickets/{ticket_id}/complete": {
         parameters: {
             query?: never;
@@ -444,6 +464,26 @@ export interface paths {
         put?: never;
         /** Create Campaign */
         post: operations["createCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/campaigns/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Campaigns
+         * @description 符合同一組篩選的活動總筆數；活動頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countCampaigns"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -848,6 +888,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consignment/settlements/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Settlements
+         * @description 符合同一組篩選的寄售結算總筆數；付款頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countConsignmentSettlements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/consignment/settlements/{settlement_id}/pay": {
         parameters: {
             query?: never;
@@ -918,6 +978,26 @@ export interface paths {
          * @description 會員清單（role=MEMBER）併購物金餘額；姓名/電話可篩、分頁（§4 店別、§5 不以證號搜尋）。
          */
         get: operations["listMembersWithCredit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/contacts/members/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Members With Credit
+         * @description 符合同一組搜尋條件的會員總筆數；會員頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countMembersWithCredit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1895,6 +1975,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/purchase-orders/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Purchase Orders
+         * @description 符合同一組篩選的採購單總筆數；採購頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countPurchaseOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/purchase-orders/{purchase_order_id}": {
         parameters: {
             query?: never;
@@ -2730,6 +2830,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signing/tasks/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Signature Tasks
+         * @description 符合同一組篩選的簽署任務總筆數；簽署紀錄頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countSignatureTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signing/tasks/{task_id}": {
         parameters: {
             query?: never;
@@ -2799,6 +2919,26 @@ export interface paths {
          * @description 建立盤點單並快照店內所有一般商品的 system_qty。
          */
         post: operations["createStocktake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stocktakes/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Stocktakes
+         * @description 店內盤點單總筆數；盤點頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countStocktakes"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2899,6 +3039,26 @@ export interface paths {
         put?: never;
         /** Create Supplier */
         post: operations["createSupplier"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/suppliers/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Suppliers
+         * @description 符合同一組篩選的供應商總筆數；供應商管理頁用它顯示「第 X / Y 頁」。
+         */
+        get: operations["countSuppliers"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5410,6 +5570,17 @@ export interface components {
          * @enum {string}
          */
         LinePayRefundStatus: "PENDING" | "SUCCEEDED" | "FAILED";
+        /**
+         * ListCountRead
+         * @description 符合同一組篩選條件的總筆數（清單頁算「第 X / Y 頁」用）。
+         *
+         *     每個 `/count` 端點都必須與它的清單端點吃**同一組篩選參數**、走同一條查詢，
+         *     否則畫面上的總頁數會與實際清單對不起來——那比沒有總頁數更糟。
+         */
+        ListCountRead: {
+            /** Count */
+            count: number;
+        };
         /**
          * LoginRequest
          * @description 登入請求；長度上限鏡像 users 欄位，避免無意義長字串打到 DB/雜湊。
@@ -8274,6 +8445,38 @@ export interface operations {
             };
         };
     };
+    countCallTickets: {
+        parameters: {
+            query?: {
+                include_done?: boolean;
+                ticket_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     completeCallTicket: {
         parameters: {
             query?: never;
@@ -8358,6 +8561,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CampaignRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countCampaigns: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CampaignStatus"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
                 };
             };
             /** @description Validation Error */
@@ -9137,6 +9371,38 @@ export interface operations {
             };
         };
     };
+    countConsignmentSettlements: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ConsignmentSettlementStatus"] | null;
+                phone?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     payConsignmentSettlement: {
         parameters: {
             query?: never;
@@ -9290,6 +9556,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberWithCreditRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countMembersWithCredit: {
+        parameters: {
+            query?: {
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
                 };
             };
             /** @description Validation Error */
@@ -11176,6 +11473,38 @@ export interface operations {
             };
         };
     };
+    countPurchaseOrders: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["PurchaseOrderStatus"][] | null;
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getPurchaseOrder: {
         parameters: {
             query?: never;
@@ -12655,6 +12984,39 @@ export interface operations {
             };
         };
     };
+    countSignatureTasks: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["SignatureTaskStatus"] | null;
+                kind?: components["schemas"]["SignatureTaskKind"] | null;
+                contact_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getSignatureTask: {
         parameters: {
             query?: never;
@@ -12800,6 +13162,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StocktakeRead"];
+                };
+            };
+        };
+    };
+    countStocktakes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
                 };
             };
         };
@@ -12975,6 +13357,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SupplierRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    countSuppliers: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                include_inactive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCountRead"];
                 };
             };
             /** @description Validation Error */

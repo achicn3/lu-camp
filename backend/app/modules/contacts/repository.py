@@ -2,7 +2,7 @@
 
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.contacts.models import Contact
@@ -73,10 +73,9 @@ class ContactRepository:
         result: Contact | None = await self._session.scalar(stmt)
         return result
 
-    async def search(
-        self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
-    ) -> list[Contact]:
-        """以姓名/電話模糊搜尋；national_id 不可明文/部分搜尋，故不納入。分頁（docs/04）。"""
+    @staticmethod
+    def _search_select(store_id: int, role: str | None, q: str | None) -> Any:
+        """搜尋條件只寫這一份——清單與總筆數共用，兩者才不會各走各的。"""
         stmt = select(Contact).where(Contact.store_id == store_id)
         if role is not None:
             # ARRAY 包含該角色（@>）。
@@ -84,5 +83,18 @@ class ContactRepository:
         if q is not None:
             like = f"%{q}%"
             stmt = stmt.where(or_(Contact.name.ilike(like), Contact.phone.ilike(like)))
-        result = await self._session.scalars(stmt.order_by(Contact.id).limit(limit).offset(offset))
-        return list(result)
+        return stmt
+
+    async def search(
+        self, store_id: int, role: str | None, q: str | None, *, limit: int, offset: int
+    ) -> list[Contact]:
+        """以姓名/電話模糊搜尋；national_id 不可明文/部分搜尋，故不納入。分頁（docs/04）。"""
+        stmt = (
+            self._search_select(store_id, role, q).order_by(Contact.id).limit(limit).offset(offset)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def count_search(self, store_id: int, role: str | None, q: str | None) -> int:
+        """符合同一組搜尋條件的總筆數（不分頁；清單頁算總頁數用）。"""
+        stmt = select(func.count()).select_from(self._search_select(store_id, role, q).subquery())
+        return int((await self._session.scalar(stmt)) or 0)

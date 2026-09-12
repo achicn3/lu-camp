@@ -33,6 +33,7 @@ from app.shared.exceptions import (
     InvalidNationalId,
     MemberRemovalBlocked,
 )
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
@@ -115,6 +116,16 @@ async def list_members_with_credit(
         user.store_id, q, limit=limit, offset=offset
     )
     return [MemberWithCreditRead.from_model(c, bal) for c, bal in rows]
+
+
+@router.get("/members/count", response_model=ListCountRead, operation_id="countMembersWithCredit")
+async def count_members_with_credit(
+    session: SessionDep,
+    user: CurrentUserDep,
+    q: Annotated[str | None, Query()] = None,
+) -> ListCountRead:
+    """符合同一組搜尋條件的會員總筆數；會員頁用它顯示「第 X / Y 頁」。"""
+    return ListCountRead(count=await ContactService(session).count_members(user.store_id, q))
 
 
 @router.get("/{contact_id}", response_model=ContactRead, operation_id="getContact")

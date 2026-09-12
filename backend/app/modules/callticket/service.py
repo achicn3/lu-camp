@@ -90,6 +90,23 @@ class CallTicketService:
         await self._session.flush()
         return ticket
 
+    async def count_tickets(
+        self,
+        store_id: int,
+        *,
+        include_done: bool = False,
+        ticket_date: date | None = None,
+        now: datetime | None = None,
+    ) -> int:
+        """與 list_tickets 同條件的總筆數（歷史檢視算總頁數用）。"""
+        moment = now if now is not None else utc_now()
+        return await self._repo.count_tickets(
+            store_id,
+            include_done=include_done,
+            today=store_date(moment),
+            ticket_date=ticket_date,
+        )
+
     async def list_tickets(
         self,
         store_id: int,

@@ -230,3 +230,38 @@ async def test_list_settlements_filters_by_consignor_phone(
     )
     assert miss.status_code == 200, miss.text
     assert all(row["id"] != sid for row in miss.json())
+
+
+async def test_count_settlements_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """總筆數必須與同條件的清單一致——畫面靠它算「第 X / Y 頁」，對不起來就是騙人。"""
+    token, sid, _ = await _seed(db_session)
+    total = await client.get("/api/v1/consignment/settlements/count", headers=_auth(token))
+    assert total.status_code == 200, total.text
+    listed = await client.get(
+        "/api/v1/consignment/settlements", params={"limit": 200}, headers=_auth(token)
+    )
+    assert total.json()["count"] == len(listed.json())
+
+    pending = await client.get(
+        "/api/v1/consignment/settlements/count", params={"status": "PENDING"}, headers=_auth(token)
+    )
+    assert pending.json()["count"] == 1
+    await client.post(
+        f"/api/v1/consignment/settlements/{sid}/pay", headers=_auth(token, "pay-count")
+    )
+    after = await client.get(
+        "/api/v1/consignment/settlements/count", params={"status": "PENDING"}, headers=_auth(token)
+    )
+    assert after.json()["count"] == 0
+    by_phone = await client.get(
+        "/api/v1/consignment/settlements/count",
+        params={"phone": "0912-000-001"},
+        headers=_auth(token),
+    )
+    assert by_phone.json()["count"] == 1
+    no_match = await client.get(
+        "/api/v1/consignment/settlements/count", params={"phone": "0999"}, headers=_auth(token)
+    )
+    assert no_match.json()["count"] == 0

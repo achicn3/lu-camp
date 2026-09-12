@@ -16,6 +16,7 @@ from app.modules.campaigns.schemas import CampaignCreateRequest, CampaignRead
 from app.modules.campaigns.service import CampaignService
 from app.shared.enums import CampaignStatus
 from app.shared.exceptions import CampaignConflict, CampaignNotFound, InvalidDiscountPct
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -74,6 +75,17 @@ async def list_campaigns(
         user.store_id, status=campaign_status, limit=limit, offset=offset
     )
     return [_to_read(c) for c in campaigns]
+
+
+@router.get("/count", response_model=ListCountRead, operation_id="countCampaigns")
+async def count_campaigns(
+    session: SessionDep,
+    user: ManagerDep,
+    campaign_status: Annotated[CampaignStatus | None, Query(alias="status")] = None,
+) -> ListCountRead:
+    """符合同一組篩選的活動總筆數；活動頁用它顯示「第 X / Y 頁」。"""
+    total = await CampaignService(session).count_campaigns(user.store_id, status=campaign_status)
+    return ListCountRead(count=total)
 
 
 @router.get("/{campaign_id}", response_model=CampaignRead, operation_id="getCampaign")

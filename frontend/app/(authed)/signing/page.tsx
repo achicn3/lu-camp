@@ -9,6 +9,7 @@ import {
   SIGNING_PAYOUT_LABELS,
   SIGNING_STATUS_LABELS,
 } from "@/features/signing/labels";
+import { Pagination } from "@/features/common/Pagination";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -27,6 +28,23 @@ export default function SigningPage() {
   const [kindFilter, setKindFilter] = useState<string>("");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<SignatureTask | null>(null);
+
+  // 總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  const totalQuery = useQuery({
+    queryKey: ["signing-tasks", "count", statusFilter, kindFilter],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/signing/tasks/count", {
+        params: {
+          query: {
+            ...(statusFilter ? { status: statusFilter as SignatureTask["status"] } : {}),
+            ...(kindFilter ? { kind: kindFilter as SignatureTask["kind"] } : {}),
+          },
+        },
+      });
+      if (!data) throw new Error(String(error ?? "載入失敗"));
+      return data.count;
+    },
+  });
 
   const query = useQuery({
     queryKey: ["signing-tasks", statusFilter, kindFilter, page],
@@ -124,19 +142,15 @@ export default function SigningPage() {
           </tbody>
         </table>
       ) : null}
-      <div className="pager" style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-          上一頁
-        </button>
-        <span>第 {page + 1} 頁</span>
-        <button
-          type="button"
-          disabled={tasks.length < PAGE_SIZE}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          下一頁
-        </button>
-      </div>
+      {/* 改用全站共用的分頁（原本是這一頁自己手刻、樣式也與其他頁不同）。 */}
+      <Pagination
+        page={page}
+        count={tasks.length}
+        pageSize={PAGE_SIZE}
+        total={totalQuery.data}
+        unit="筆"
+        onPage={setPage}
+      />
       {selected ? (
         <SignatureEvidenceDialog
           taskId={selected.id}

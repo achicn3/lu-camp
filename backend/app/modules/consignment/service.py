@@ -206,6 +206,16 @@ class ConsignmentService:
             store_id, status=status, phone=phone, limit=limit, offset=offset
         )
 
+    async def count_settlements(
+        self,
+        store_id: int,
+        *,
+        status: ConsignmentSettlementStatus | None = None,
+        phone: str | None = None,
+    ) -> int:
+        """符合同一組篩選的寄售結算總筆數（清單頁算總頁數用；§4 店別範圍）。"""
+        return await self._repo.count_settlements(store_id, status=status, phone=phone)
+
     async def all_settlements_for_report(self, store_id: int) -> list[dict[str, Any]]:
         """店內所有寄售結算（不分頁、不篩狀態；R4 應付報表唯讀用）。"""
         return await self._repo.all_settlements_for_report(store_id)

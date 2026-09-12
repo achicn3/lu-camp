@@ -22,6 +22,7 @@ from app.shared.exceptions import (
     SettlementNotFound,
     SettlementNotPending,
 )
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(prefix="/consignment", tags=["consignment"])
 
@@ -54,6 +55,24 @@ async def list_settlements(
         user.store_id, status=settlement_status, phone=phone, limit=limit, offset=offset
     )
     return [ConsignmentSettlementRead.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/settlements/count",
+    response_model=ListCountRead,
+    operation_id="countConsignmentSettlements",
+)
+async def count_settlements(
+    session: SessionDep,
+    user: CurrentUserDep,
+    settlement_status: Annotated[ConsignmentSettlementStatus | None, Query(alias="status")] = None,
+    phone: Annotated[str | None, Query(max_length=20)] = None,
+) -> ListCountRead:
+    """符合同一組篩選的寄售結算總筆數；付款頁用它顯示「第 X / Y 頁」。"""
+    total = await ConsignmentService(session).count_settlements(
+        user.store_id, status=settlement_status, phone=phone
+    )
+    return ListCountRead(count=total)
 
 
 @router.post(

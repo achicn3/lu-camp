@@ -227,3 +227,16 @@ async def test_confirm_cross_store_returns_404(
         f"/api/v1/stocktakes/{st_id}/confirm", json={"counts": []}, headers=_auth(token_b)
     )
     assert resp.status_code == 404, resp.text
+
+
+async def test_count_stocktakes_matches_the_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    token, store_id, _ = await _seed_store(db_session)
+    await _seed_catalog(db_session, store_id, sku="A", qty=3)
+    await client.post("/api/v1/stocktakes", headers=_auth(token))
+
+    total = await client.get("/api/v1/stocktakes/count", headers=_auth(token))
+    assert total.status_code == 200, total.text
+    listed = await client.get("/api/v1/stocktakes", params={"limit": 200}, headers=_auth(token))
+    assert total.json()["count"] == len(listed.json()) == 1

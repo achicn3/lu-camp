@@ -1411,6 +1411,17 @@ class SigningService:
         task = await self.active_task_for_device(store_id, device_id)
         return task if task is not None and task.id == task_id else None
 
+    async def count_tasks(
+        self,
+        store_id: int,
+        status: SignatureTaskStatus | None,
+        *,
+        kind: SignatureTaskKind | None = None,
+        contact_id: int | None = None,
+    ) -> int:
+        """符合同一組篩選的簽署任務總筆數（清單頁算總頁數用）。"""
+        return await self._repo.count_tasks(store_id, status, kind=kind, contact_id=contact_id)
+
     async def list_tasks(
         self,
         store_id: int,

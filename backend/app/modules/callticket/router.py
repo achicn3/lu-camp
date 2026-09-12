@@ -15,6 +15,7 @@ from app.core.deps import CurrentUser, get_current_user
 from app.modules.callticket.schemas import CallTicketCreateRequest, CallTicketRead
 from app.modules.callticket.service import CallTicketService
 from app.shared.exceptions import CallTicketNotFound
+from app.shared.schemas import ListCountRead
 
 router = APIRouter(prefix="/call-tickets", tags=["call-tickets"])
 
@@ -64,6 +65,20 @@ async def list_call_tickets(
         ticket_date=ticket_date,
     )
     return [CallTicketRead.model_validate(row) for row in rows]
+
+
+@router.get("/count", response_model=ListCountRead, operation_id="countCallTickets")
+async def count_call_tickets(
+    session: SessionDep,
+    user: AuthDep,
+    include_done: Annotated[bool, Query()] = False,
+    ticket_date: Annotated[date | None, Query()] = None,
+) -> ListCountRead:
+    """與清單同條件的總筆數；歷史檢視用它顯示「第 X / Y 頁」。"""
+    total = await CallTicketService(session).count_tickets(
+        user.store_id, include_done=include_done, ticket_date=ticket_date
+    )
+    return ListCountRead(count=total)
 
 
 @router.post(

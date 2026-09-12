@@ -849,6 +849,21 @@ function PurchaseOrderList() {
     return (id: number) => map.get(id) ?? null;
   }, [catalog.data]);
 
+  // 總筆數（與清單同條件）：算「第 X / Y 頁」，也避免整頁倍數時多出空白頁。
+  const ordersTotal = useQuery({
+    queryKey: ["purchase-orders", "count", statusKey, submittedSearch],
+    queryFn: async () => {
+      const query: { status?: PoStatus[]; q?: string } = {};
+      if (statuses.length > 0) query.status = statuses;
+      if (submittedSearch) query.q = submittedSearch;
+      const { data, error } = await api.GET("/api/v1/purchase-orders/count", {
+        params: { query },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取採購單總筆數失敗");
+      return data.count;
+    },
+  });
+
   const orders = useQuery({
     queryKey: ["purchase-orders", statusKey, submittedSearch, page],
     queryFn: async () => {
@@ -1148,7 +1163,14 @@ function PurchaseOrderList() {
         </div>
       )}
       {!orders.isPending && !orders.isError && (
-        <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+        <Pagination
+          page={page}
+          count={rows.length}
+          pageSize={PAGE_SIZE}
+          total={ordersTotal.data}
+          unit="張"
+          onPage={setPage}
+        />
       )}
 
       {detailPo !== null && (
@@ -1313,6 +1335,17 @@ function SupplierManager() {
   const [rowError, setRowError] = useState<string | null>(null);
 
   // 管理清單含停用者（include_inactive）；建單供應商選單另走頁面頂層查詢（預設只取啟用中）。
+  const listTotal = useQuery({
+    queryKey: ["suppliers", "list", "count", submittedSearch],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/suppliers/count", {
+        params: { query: { q: submittedSearch || undefined, include_inactive: true } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取供應商總筆數失敗");
+      return data.count;
+    },
+  });
+
   const list = useQuery({
     queryKey: ["suppliers", "list", submittedSearch, page],
     queryFn: async () => {
@@ -1516,7 +1549,14 @@ function SupplierManager() {
             </div>
           </>
         )}
-        <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+        <Pagination
+          page={page}
+          count={rows.length}
+          pageSize={PAGE_SIZE}
+          total={listTotal.data}
+          unit="家"
+          onPage={setPage}
+        />
       </div>
 
       {editing !== null && (

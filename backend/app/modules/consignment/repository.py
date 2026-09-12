@@ -145,6 +145,22 @@ class ConsignmentRepository:
         )
         return [dict(row) for row in (await self._session.execute(stmt)).mappings().all()]
 
+    async def count_settlements(
+        self,
+        store_id: int,
+        *,
+        status: ConsignmentSettlementStatus | None = None,
+        phone: str | None = None,
+    ) -> int:
+        """符合同一組篩選的總筆數（不分頁）。
+
+        直接數 list 用的那條 select 的子查詢——條件只寫一次，總數與清單不會各走各的。
+        """
+        stmt = select(func.count()).select_from(
+            self._settlements_select(store_id, status, phone).subquery()
+        )
+        return int((await self._session.scalar(stmt)) or 0)
+
     async def all_settlements_for_report(self, store_id: int) -> list[dict[str, Any]]:
         """店內所有寄售結算（不分頁、不篩狀態；應付報表用，呈現/合計由 service 決定）。"""
         stmt = self._settlements_select(store_id, None).order_by(ConsignmentSettlement.id.desc())

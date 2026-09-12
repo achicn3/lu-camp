@@ -260,3 +260,23 @@ async def test_bad_ticket_date_is_rejected(
         "/api/v1/call-tickets?ticket_date=not-a-date", headers=_auth(clerk)
     )
     assert resp.status_code == 422
+
+
+async def test_count_call_tickets_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """歷史清單分頁要靠總筆數；候位中與含已完成是兩個不同的數字。"""
+    clerk, _, _ = await _seed(db_session)
+    await client.post("/api/v1/call-tickets", json={"name": "留著"}, headers=_auth(clerk))
+    done = (
+        await client.post("/api/v1/call-tickets", json={"name": "完成"}, headers=_auth(clerk))
+    ).json()
+    await client.post(f"/api/v1/call-tickets/{done['id']}/complete", headers=_auth(clerk))
+
+    waiting = await client.get("/api/v1/call-tickets/count", headers=_auth(clerk))
+    assert waiting.status_code == 200, waiting.text
+    assert waiting.json()["count"] == 1
+    everything = await client.get(
+        "/api/v1/call-tickets/count", params={"include_done": True}, headers=_auth(clerk)
+    )
+    assert everything.json()["count"] == 2

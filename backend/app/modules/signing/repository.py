@@ -1,8 +1,9 @@
 """signing 資料存取：簽署任務、狀態事件與切結書版本。"""
 
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
@@ -162,6 +163,38 @@ class SigningRepository:
         )
         return list(rows)
 
+    @staticmethod
+    def _tasks_where(
+        stmt: Any,
+        store_id: int,
+        status: SignatureTaskStatus | None,
+        kind: SignatureTaskKind | None,
+        contact_id: int | None,
+    ) -> Any:
+        """簽署任務的篩選條件只寫這一份——清單與總筆數共用，兩者才不會各走各的。"""
+        stmt = stmt.where(SignatureTask.store_id == store_id)
+        if status is not None:
+            stmt = stmt.where(SignatureTask.status == status)
+        if kind is not None:
+            stmt = stmt.where(SignatureTask.kind == kind)
+        if contact_id is not None:
+            stmt = stmt.where(SignatureTask.contact_id == contact_id)
+        return stmt
+
+    async def count_tasks(
+        self,
+        store_id: int,
+        status: SignatureTaskStatus | None,
+        *,
+        kind: SignatureTaskKind | None = None,
+        contact_id: int | None = None,
+    ) -> int:
+        """符合同一組篩選的簽署任務總筆數（不分頁；清單頁算總頁數用）。"""
+        stmt = self._tasks_where(
+            select(func.count()).select_from(SignatureTask), store_id, status, kind, contact_id
+        )
+        return int((await self._session.scalar(stmt)) or 0)
+
     async def list_tasks(
         self,
         store_id: int,
@@ -172,13 +205,7 @@ class SigningRepository:
         limit: int,
         offset: int,
     ) -> list[SignatureTask]:
-        stmt = select(SignatureTask).where(SignatureTask.store_id == store_id)
-        if status is not None:
-            stmt = stmt.where(SignatureTask.status == status)
-        if kind is not None:
-            stmt = stmt.where(SignatureTask.kind == kind)
-        if contact_id is not None:
-            stmt = stmt.where(SignatureTask.contact_id == contact_id)
+        stmt = self._tasks_where(select(SignatureTask), store_id, status, kind, contact_id)
         stmt = stmt.order_by(SignatureTask.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 

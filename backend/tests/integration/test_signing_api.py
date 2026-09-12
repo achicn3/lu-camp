@@ -570,3 +570,33 @@ async def test_list_filters_and_staff_history_remain_available(
     )
     assert listed.status_code == 200
     assert [row["id"] for row in listed.json()] == [task["id"]]
+
+
+async def test_count_signature_tasks_matches_the_filtered_list(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """簽署紀錄頁分頁要靠總筆數；篩選條件必須與清單同一組。"""
+    seeded = await _prepare(client, db_session)
+    task = await _create_task(client, seeded)
+
+    total = await client.get("/api/v1/signing/tasks/count", headers=_auth(seeded.clerk_token))
+    assert total.status_code == 200, total.text
+    listed = await client.get(
+        "/api/v1/signing/tasks", params={"limit": 200}, headers=_auth(seeded.clerk_token)
+    )
+    assert total.json()["count"] == len(listed.json())
+
+    await client.post(
+        f"/api/v1/signing/tasks/{task['id']}/cancel", headers=_auth(seeded.clerk_token)
+    )
+    voided = await client.get(
+        "/api/v1/signing/tasks/count",
+        params={"status": "VOIDED", "kind": "ACQUISITION_AFFIDAVIT"},
+        headers=_auth(seeded.clerk_token),
+    )
+    voided_list = await client.get(
+        "/api/v1/signing/tasks",
+        params={"status": "VOIDED", "kind": "ACQUISITION_AFFIDAVIT", "limit": 200},
+        headers=_auth(seeded.clerk_token),
+    )
+    assert voided.json()["count"] == len(voided_list.json()) == 1

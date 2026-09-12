@@ -290,6 +290,10 @@ class ContactService:
         )
         return [(m, balances.get(m.id, Decimal(0))) for m in members]
 
+    async def count_members(self, store_id: int, q: str | None) -> int:
+        """符合同一組搜尋條件的會員總筆數（會員頁算總頁數用；§5 不以 national_id 搜尋）。"""
+        return await self._repo.count_search(store_id, ContactRole.MEMBER.value, q)
+
     async def masked_national_id(self, store_id: int, contact_id: int) -> str | None:
         """回部分遮罩的 national_id（如 A12****789；證號遮罩，D1），無則 None。
 

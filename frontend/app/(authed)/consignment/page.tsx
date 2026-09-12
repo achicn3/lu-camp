@@ -132,6 +132,21 @@ export default function ConsignmentPage() {
     },
   });
 
+  // 總筆數（與清單同條件）：沒有它就只能用「這頁剛好滿＝可能還有下一頁」猜，
+  // 資料剛好是整頁倍數時會多出一個空白頁。
+  const settlementsTotal = useQuery({
+    queryKey: ["consignment", "settlements", "count", status, phone],
+    queryFn: async () => {
+      const query: { status: SettlementStatus; phone?: string } = { status };
+      if (phone) query.phone = phone;
+      const { data, error } = await api.GET("/api/v1/consignment/settlements/count", {
+        params: { query },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取寄售結算總筆數失敗");
+      return data.count;
+    },
+  });
+
   const settlements = useQuery({
     queryKey: ["consignment", "settlements", status, phone, page],
     queryFn: async () => {
@@ -319,7 +334,13 @@ export default function ConsignmentPage() {
           </div>
         )}
         {!settlements.isPending && !settlements.isError && (
-          <Pagination page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+          <Pagination
+            page={page}
+            count={rows.length}
+            pageSize={PAGE_SIZE}
+            total={settlementsTotal.data}
+            onPage={setPage}
+          />
         )}
       </div>
 
