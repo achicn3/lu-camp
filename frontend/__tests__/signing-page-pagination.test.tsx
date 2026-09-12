@@ -89,4 +89,42 @@ describe("/signing 分頁", () => {
     expect(countCalls.length).toBeGreaterThan(1);
     expect(screen.getByRole("button", { name: /下一頁/ }).hasAttribute("disabled")).toBe(false);
   });
+
+  it("換篩選時不沿用上一個篩選的總數（否則會多出一個翻不回來的空白頁）", async () => {
+    setToken(fakeJwt({ sub: "1", role: "MANAGER", store_id: 1 }));
+    // 第一個篩選 40 筆（兩頁）；換篩選後只剩 1 筆。
+    let total = 40;
+    let countDelay = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const json = (data: unknown) =>
+          new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (url.pathname.endsWith("/tasks/count")) {
+          // 總數比清單慢回來——正是「沿用舊總數」會露餡的時序。
+          if (countDelay > 0) await new Promise((r) => setTimeout(r, countDelay));
+          return json({ count: total });
+        }
+        const limit = Number(url.searchParams.get("limit") ?? "20");
+        const offset = Number(url.searchParams.get("offset") ?? "0");
+        const ids = Array.from({ length: total }, (_, i) => total - i).slice(offset, offset + limit);
+        return json(ids.map(task));
+      }),
+    );
+    renderPage();
+    await screen.findByText("第 1 / 2 頁・共 40 筆");
+
+    total = 1;
+    countDelay = 60;
+    await userEvent.selectOptions(screen.getAllByRole("combobox")[1], "STORE_CREDIT_USE");
+
+    // 清單先回來（只剩 1 筆）的那段時間內，不能因為沿用舊的 40 而讓「下一頁」可按。
+    await waitFor(() => expect(screen.getAllByRole("row").length).toBe(2)); // 表頭＋1 筆
+    const next = screen.queryByRole("button", { name: /下一頁/ });
+    expect(next === null || next.hasAttribute("disabled")).toBe(true);
+  });
 });

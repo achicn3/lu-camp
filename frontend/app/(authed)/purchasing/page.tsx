@@ -863,10 +863,6 @@ function PurchaseOrderList() {
       if (!data) throw new Error(extractDetail(error) ?? "讀取採購單總筆數失敗");
       return data.count;
     },
-      // 換頁重抓期間沿用上一個總數，避免標籤在「第 X / Y 頁・共 N 筆」與「第 N 頁」之間閃動。
-      // 與 /inventory 篩選下拉的取捨不同：那裡撐住舊值會讓人選到上一個品牌的型號，
-      // 這裡只是個數字，短暫舊值不會讓人做錯動作。
-      placeholderData: (previous?: number) => previous,
   });
 
   const orders = useQuery({
@@ -1172,7 +1168,7 @@ function PurchaseOrderList() {
           page={page}
           count={rows.length}
           pageSize={PAGE_SIZE}
-          total={ordersTotal.data}
+          total={ordersTotal.isError ? undefined : ordersTotal.data}
           unit="張"
           onPage={setPage}
         />
@@ -1349,10 +1345,6 @@ function SupplierManager() {
       if (!data) throw new Error(extractDetail(error) ?? "讀取供應商總筆數失敗");
       return data.count;
     },
-      // 換頁重抓期間沿用上一個總數，避免標籤在「第 X / Y 頁・共 N 筆」與「第 N 頁」之間閃動。
-      // 與 /inventory 篩選下拉的取捨不同：那裡撐住舊值會讓人選到上一個品牌的型號，
-      // 這裡只是個數字，短暫舊值不會讓人做錯動作。
-      placeholderData: (previous?: number) => previous,
   });
 
   const list = useQuery({
@@ -1562,7 +1554,7 @@ function SupplierManager() {
           page={page}
           count={rows.length}
           pageSize={PAGE_SIZE}
-          total={listTotal.data}
+          total={listTotal.isError ? undefined : listTotal.data}
           unit="家"
           onPage={setPage}
         />

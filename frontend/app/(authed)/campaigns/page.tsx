@@ -295,10 +295,6 @@ export default function CampaignsPage() {
       return data.count;
     },
     retry: false,
-      // 換頁重抓期間沿用上一個總數，避免標籤在「第 X / Y 頁・共 N 筆」與「第 N 頁」之間閃動。
-      // 與 /inventory 篩選下拉的取捨不同：那裡撐住舊值會讓人選到上一個品牌的型號，
-      // 這裡只是個數字，短暫舊值不會讓人做錯動作。
-      placeholderData: (previous?: number) => previous,
   });
 
   const actionMutation = useMutation({
@@ -429,7 +425,7 @@ export default function CampaignsPage() {
           page={page}
           count={campaigns.length}
           pageSize={PAGE_SIZE}
-          total={totalQuery.data}
+          total={totalQuery.isError ? undefined : totalQuery.data}
           onPage={setPage}
         />
       </div>
