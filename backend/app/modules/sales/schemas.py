@@ -423,6 +423,10 @@ class SaleRead(BaseModel):
     store_id: int
     clerk_user_id: int
     buyer_contact_id: int | None
+    # 看明細的人要看得懂是誰經手、賣給誰（裁示 2026-09-12）：id 沒有意義。
+    # 由 router 經 user／contacts service 補上（§2 不跨模組讀表）；查不到 → None。
+    clerk_name: str | None = None
+    buyer_name: str | None = None
     subtotal: NTDAmount
     tax: NTDAmount
     total: NTDAmount
@@ -507,6 +511,12 @@ class SaleSummaryRead(BaseModel):
     # 手開紙本——否則店員會先被叫去台灣Pay App 退款，送出後才被後端擋下，錢已經出去了。
     # 由 router 經 einvoice service 補上（§2 不跨模組讀表）；無發票 → None。
     invoice_issue_channel: EInvoiceIssueChannel | None = None
+    # 交易內容與發票號碼（裁示 2026-09-12）：店員回頭查帳最常問「這筆賣了什麼、發票幾號」，
+    # 原本兩者都得逐筆點開明細才看得到。品項數算行數（同品項買 2 個算一項）。
+    # 由 router 經各自的 service 補上（§2 不跨模組讀表）；無明細/無發票 → None。
+    first_item_name: str | None = None
+    item_count: int = 0
+    invoice_no: str | None = None
     # 這張發票印不印證明聯（存載具或捐贈 → False）。交易紀錄據此不顯示列印按鈕；
     # 沒有發票的銷售為 None。
     invoice_print_mark: bool | None = None

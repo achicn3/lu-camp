@@ -6686,6 +6686,10 @@ export interface components {
         SaleRead: {
             /** Buyer Contact Id */
             buyer_contact_id: number | null;
+            /** Buyer Name */
+            buyer_name?: string | null;
+            /** Clerk Name */
+            clerk_name?: string | null;
             /** Clerk User Id */
             clerk_user_id: number;
             /**
@@ -6760,12 +6764,21 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** First Item Name */
+            first_item_name?: string | null;
             /** Id */
             id: number;
             invoice_issue_channel?: components["schemas"]["EInvoiceIssueChannel"] | null;
+            /** Invoice No */
+            invoice_no?: string | null;
             /** Invoice Print Mark */
             invoice_print_mark?: boolean | null;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
+            /**
+             * Item Count
+             * @default 0
+             */
+            item_count: number;
             payment_method: components["schemas"]["PaymentMethod"];
             service_mode?: components["schemas"]["ServiceMode"] | null;
             /** Signature Task Id */

@@ -156,8 +156,11 @@ try {
   // **限定在交易清單那張表**：店長畫面還有 LINE Pay 待對帳表，用全頁 tbody tr
   // 會把它的列一起算進來而誤紅（Codex 第二輪）。
   const salesRows = page.locator("table.sales-list tbody tr");
-  const row = salesRows.filter({ hasText: String(sale.id) });
-  const todayRow = salesRows.filter({ hasText: String(todaySale.id) });
+  // **用單號欄的 `#id` 定位，不是「列裡含有這個數字」**：後者會被金額、時間、品名或
+  // 發票號碼裡的同樣數字命中（清單開始顯示交易內容與發票號碼之後更容易誤中）。
+  const rowOf = (id) => salesRows.filter({ hasText: new RegExp(`#${id}(?!\\d)`) });
+  const row = rowOf(sale.id);
+  const todayRow = rowOf(todaySale.id);
   await todayRow.first().waitFor({ timeout: 20000 });
   ok(
     "預設（今日）看得到今天那筆、看不到昨天那筆",
@@ -219,6 +222,65 @@ try {
   await row.first().waitFor({ timeout: 20000 });
   ok("交易編號帶 # 也查得到", true, `#${sale.id}`);
   await page.screenshot({ path: join(SHOTS, "05-by-hash-id.png") });
+
+  // ── 交易內容與明細（裁示 2026-09-12）：清單要看得出賣了什麼，按鈕點得開完整品項 ──
+  const twoItemAcq = await api("/api/v1/acquisitions", {
+    method: "POST",
+    token,
+    expect: [201],
+    headers: { "Idempotency-Key": `SMOKE_HIST_ACQ3_${runId}` },
+    body: {
+      type: "BUYOUT",
+      contact_id: seller.id,
+      payout_method: "CASH",
+      note: "sales history smoke (two items)",
+      items: [
+        { name: `SMOKE_ITEM_A_${runId}`, grade: "A", listed_price: "300", acquisition_cost: "100" },
+        { name: `SMOKE_ITEM_B_${runId}`, grade: "A", listed_price: "200", acquisition_cost: "80" },
+      ],
+    },
+  });
+  const twoItemSale = await api("/api/v1/sales", {
+    method: "POST",
+    token,
+    expect: [201],
+    headers: { "Idempotency-Key": `SMOKE_HIST_SALE3_${runId}` },
+    body: {
+      lines: [
+        { line_type: "SERIALIZED", item_code: twoItemAcq.item_codes[0], qty: 1 },
+        { line_type: "SERIALIZED", item_code: twoItemAcq.item_codes[1], qty: 1 },
+      ],
+      tenders: [{ tender_type: "CASH", amount: "500" }],
+    },
+  });
+
+  await page.getByRole("button", { name: "回今日" }).click();
+  const twoItemRow = rowOf(twoItemSale.id);
+  await twoItemRow.first().waitFor({ timeout: 20000 });
+  const twoItemText = (await twoItemRow.first().innerText()) ?? "";
+  ok(
+    "清單直接看得到交易內容（第一項品名＋共幾項）",
+    twoItemText.includes(`SMOKE_ITEM_A_${runId}`) && twoItemText.includes("等 2 項"),
+    twoItemText.replace(/\n/g, " · ").slice(0, 80),
+  );
+
+  await twoItemRow.first().getByRole("button", { name: /查看銷售 \d+ 的明細/ }).click();
+  const dialog = page.locator('[role="dialog"][aria-label="交易明細"]');
+  await dialog.waitFor({ timeout: 15000 });
+  await dialog.getByText(`SMOKE_ITEM_B_${runId}`).waitFor({ timeout: 15000 });
+  const dialogText = (await dialog.innerText()) ?? "";
+  ok(
+    "明細列出全部品項與經手資訊",
+    dialogText.includes(`SMOKE_ITEM_A_${runId}`) &&
+      dialogText.includes(`SMOKE_ITEM_B_${runId}`) &&
+      dialogText.includes(USERNAME) &&
+      dialogText.includes("現金"),
+    dialogText.replace(/\n+/g, " · ").slice(0, 100),
+  );
+  await page.screenshot({ path: join(SHOTS, "06-detail-dialog.png") });
+  await dialog.getByRole("button", { name: "關閉" }).click();
+  await dialog.waitFor({ state: "detached", timeout: 10000 });
+  ok("關閉後回到清單", (await dialog.count()) === 0);
 } catch (err) {
   ok(`未預期錯誤：${err.message}`, false);
 } finally {

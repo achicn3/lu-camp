@@ -9231,6 +9231,28 @@
             ],
             "title": "Buyer Contact Id"
           },
+          "buyer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Name"
+          },
+          "clerk_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clerk Name"
+          },
           "clerk_user_id": {
             "title": "Clerk User Id",
             "type": "integer"
@@ -9367,6 +9389,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "first_item_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Item Name"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -9381,6 +9414,17 @@
               }
             ]
           },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
           "invoice_print_mark": {
             "anyOf": [
               {
@@ -9394,6 +9438,11 @@
           },
           "invoice_status": {
             "$ref": "#/components/schemas/SaleInvoiceStatus"
+          },
+          "item_count": {
+            "default": 0,
+            "title": "Item Count",
+            "type": "integer"
           },
           "payment_method": {
             "$ref": "#/components/schemas/PaymentMethod"

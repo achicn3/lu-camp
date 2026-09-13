@@ -1,0 +1,146 @@
+// @vitest-environment jsdom
+// 交易明細對話框（裁示 2026-09-12）：清單一列塞不下，點「明細」要一次看完
+// 全部品項與經手資訊（收銀員、付款方式、會員、發票號碼）。
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+}));
+
+import SalesPage from "@/app/(authed)/sales/page";
+import { clearToken, setToken } from "@/lib/token";
+
+function fakeJwt(payload: Record<string, unknown>): string {
+  const b64 = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString("base64url");
+  return `${b64({ alg: "HS256" })}.${b64(payload)}.sig`;
+}
+
+const SUMMARY = {
+  id: 42,
+  store_id: 1,
+  subtotal: "1300",
+  tax: "62",
+  total: "1300",
+  invoice_status: "ISSUED",
+  status: "COMPLETED",
+  created_at: "2026-09-13T02:00:00Z",
+  payment_method: "CASH",
+  buyer_contact_id: 7,
+  signature_task_id: null,
+  service_mode: null,
+  table_no: null,
+  invoice_issue_channel: "AMEGO",
+  invoice_print_mark: true,
+  first_item_name: "USB 充電營燈",
+  item_count: 2,
+  invoice_no: "AB12345678",
+};
+
+const DETAIL = {
+  ...SUMMARY,
+  clerk_user_id: 3,
+  clerk_name: "小美",
+  buyer_name: "王小明",
+  total_discount: "0",
+  total_manual_discount: "0",
+  gift_retail_value: "0",
+  lines: [
+    {
+      id: 1,
+      line_type: "CATALOG",
+      serialized_item_id: null,
+      catalog_product_id: 5,
+      bulk_lot_id: null,
+      menu_item_id: null,
+      description: "USB 充電營燈",
+      qty: 2,
+      unit_price: "590",
+      line_total: "1180",
+      original_unit_price: null,
+      discount_amount: "0",
+      line_kind: "NORMAL",
+      manual_discount_amount: "0",
+      net_amount: "1180",
+      gift_reason_name: null,
+      gift_note: null,
+      returned_qty: 0,
+    },
+    {
+      id: 2,
+      line_type: "CATALOG",
+      serialized_item_id: null,
+      catalog_product_id: 6,
+      bulk_lot_id: null,
+      menu_item_id: null,
+      description: "營繩",
+      qty: 1,
+      unit_price: "120",
+      line_total: "120",
+      original_unit_price: "120",
+      discount_amount: "0",
+      line_kind: "GIFT",
+      manual_discount_amount: "0",
+      net_amount: "0",
+      gift_reason_name: "滿額贈",
+      gift_note: null,
+      returned_qty: 0,
+    },
+  ],
+  tenders: [{ id: 1, tender_type: "CASH", amount: "1180", fee_amount: "0" }],
+};
+
+function renderPage() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  return render(<SalesPage />, { wrapper });
+}
+
+afterEach(() => {
+  cleanup();
+  clearToken();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
+
+describe("交易紀錄的明細", () => {
+  it("清單顯示交易內容與發票號碼，點明細看得到全部品項與經手資訊", async () => {
+    setToken(fakeJwt({ sub: "1", role: "MANAGER", store_id: 1 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const json = (data: unknown) =>
+          new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (/\/api\/v1\/sales\/\d+$/.test(url.pathname)) return json(DETAIL);
+        if (url.pathname === "/api/v1/sales") return json([SUMMARY]);
+        return json([]);
+      }),
+    );
+    renderPage();
+
+    // 清單：第一項品名＋共幾項、發票號碼都看得到，不必點開
+    const row = await screen.findByRole("row", { name: /USB 充電營燈/ });
+    expect(within(row).getByText(/等 2 項/)).toBeDefined();
+    expect(within(row).getByText("AB12345678")).toBeDefined();
+
+    await userEvent.click(within(row).getByRole("button", { name: /查看銷售 42 的明細/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "交易明細" });
+    expect(within(dialog).getByText("小美")).toBeDefined(); // 收銀員
+    expect(within(dialog).getByText("王小明")).toBeDefined(); // 會員
+    expect(within(dialog).getByText("現金")).toBeDefined(); // 付款方式
+    // 全部品項（含贈品，並標示出來——它不計入應付，看明細的人必須分得出來）
+    expect(within(dialog).getByText("USB 充電營燈")).toBeDefined();
+    expect(within(dialog).getByText("營繩")).toBeDefined();
+    expect(within(dialog).getByText("贈品")).toBeDefined();
+  });
+});

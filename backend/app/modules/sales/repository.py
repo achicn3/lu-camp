@@ -387,6 +387,36 @@ class SalesRepository:
         result = await self._session.scalars(stmt)
         return list(result)
 
+    async def line_summaries(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, tuple[str, int]]:
+        """各銷售的「第一項品名, 品項數」（交易紀錄清單顯示交易內容用；一次查完不逐筆）。
+
+        品項數算的是**行數**（同一品項買 2 個算一項）；贈品也是交易的一部分，照算。
+        第一項取最小 id 的那行，與明細的排序一致。
+        """
+        if not sale_ids:
+            return {}
+        first_line = (
+            select(SaleLine.sale_id, func.min(SaleLine.id).label("first_id"))
+            .where(SaleLine.store_id == store_id, SaleLine.sale_id.in_(sale_ids))
+            .group_by(SaleLine.sale_id)
+            .subquery()
+        )
+        counts = (
+            select(SaleLine.sale_id, func.count().label("line_count"))
+            .where(SaleLine.store_id == store_id, SaleLine.sale_id.in_(sale_ids))
+            .group_by(SaleLine.sale_id)
+            .subquery()
+        )
+        stmt = (
+            select(first_line.c.sale_id, SaleLine.description, counts.c.line_count)
+            .join(SaleLine, SaleLine.id == first_line.c.first_id)
+            .join(counts, counts.c.sale_id == first_line.c.sale_id)
+        )
+        rows = await self._session.execute(stmt)
+        return {sale_id: (description, int(count)) for sale_id, description, count in rows.all()}
+
     async def list_sales(
         self,
         store_id: int,

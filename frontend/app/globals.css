@@ -3574,6 +3574,45 @@ body {
 .data-table.sales-list td {
   white-space: nowrap;
 }
+/* 交易明細對話框：上半是這筆的基本事實，下半是完整品項（可捲）。 */
+.sale-detail-dialog {
+  max-width: 720px;
+  width: min(720px, 92vw);
+}
+.sale-detail-facts,
+.sale-detail-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+.sale-detail-facts dt,
+.sale-detail-totals dt {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.sale-detail-facts dd,
+.sale-detail-totals dd {
+  margin: 0;
+}
+.sale-detail-lines-wrap {
+  max-height: 45vh;
+  overflow: auto;
+}
+.sale-detail-lines .num {
+  text-align: right;
+}
+.sale-detail-totals {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+}
+
+/* 交易內容是唯一可能很長的欄：給它上限並截字，其餘欄位維持一列一筆好掃視。 */
+.data-table.sales-list td.sales-items {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ── 叫號（docs/38）──────────────────────────────────────────── */
 .call-ticket-form {

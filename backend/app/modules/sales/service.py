@@ -2017,6 +2017,12 @@ class SalesService:
             return []
         return await self._repo.list_sales_by_ids(store_id, sale_ids)
 
+    async def line_summaries(
+        self, store_id: int, sale_ids: list[int]
+    ) -> dict[int, tuple[str, int]]:
+        """各銷售的（第一項品名, 品項數）；交易紀錄清單顯示交易內容用。"""
+        return await self._repo.line_summaries(store_id, sale_ids)
+
     async def list_sales(
         self,
         store_id: int,

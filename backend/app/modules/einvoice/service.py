@@ -404,17 +404,17 @@ class EInvoiceService:
             )
         )
 
-    async def issue_channels_for_sales(
+    async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]
-    ) -> dict[int, tuple[EInvoiceIssueChannel, bool]]:
-        """一批銷售各自的發票開立來源（docs/36；跨模組供 sales 列表用，§2 經 service）。
+    ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None]]:
+        """一批銷售各自的發票開立來源、列印註記與號碼（docs/36；供 sales 列表，§2 經 service）。
 
         沒有發票的銷售不會出現在結果裡。交易紀錄要據此**在顯示任何退款指示之前**就知道
         「這筆是手開紙本」——否則店員會先被叫去退款，之後才被後端擋下（錢已經出去了）。
         """
         if not sale_ids:
             return {}
-        return await self._repo.issue_channels_for_sales(store_id, sale_ids)
+        return await self._repo.invoice_info_for_sales(store_id, sale_ids)
 
     async def list_registerable_sale_ids(
         self, store_id: int, *, limit: int, offset: int

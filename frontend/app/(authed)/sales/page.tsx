@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { INVOICE_STATUS_LABELS, labelFor } from "@/features/member/labels";
+import { INVOICE_STATUS_LABELS, PAYMENT_METHOD_LABELS, labelFor } from "@/features/member/labels";
 import { terminalInstallationId } from "@/features/customer-display/PosCustomerDisplay";
 import { SALES_PAGE_SIZE, nextSalesPageParam } from "@/features/sales/pagination";
 import { printKitchenTicket, printRaw, printSaleDetail } from "@/lib/agent";
@@ -91,6 +91,142 @@ const SALE_STATUS_LABELS: Record<string, string> = {
   RETURNED: "已退貨",
   VOIDED: "已作廢",
 };
+
+/**
+ * 交易明細（裁示 2026-09-12）：清單一列塞不下全部品項與經手資訊，這裡一次看完。
+ *
+ * 只讀，不做任何動作——退貨/作廢/補印各自有既有入口，混在一起容易誤按。
+ */
+function SaleDetailDialog({ sale, onClose }: { sale: SaleSummary; onClose: () => void }) {
+  const detail = useQuery({
+    queryKey: ["sale-detail", sale.id],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/sales/{sale_id}", {
+        params: { path: { sale_id: sale.id } },
+      });
+      if (!data) throw new Error(extractDetail(error) ?? "讀取交易明細失敗");
+      return data;
+    },
+  });
+  const d = detail.data;
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="交易明細">
+      <div className="card pos-dialog sale-detail-dialog">
+        <h2>交易明細 #{sale.id}</h2>
+        {detail.isPending ? (
+          <p>載入中…</p>
+        ) : detail.isError ? (
+          <p role="alert" className="form-error">
+            {(detail.error as Error).message}
+          </p>
+        ) : d === undefined ? null : (
+          <>
+            <dl className="sale-detail-facts">
+              <div>
+                <dt>時間</dt>
+                <dd>{formatTaipeiDateTime(d.created_at)}</dd>
+              </div>
+              <div>
+                <dt>收銀員</dt>
+                <dd>{d.clerk_name ?? `#${d.clerk_user_id}`}</dd>
+              </div>
+              <div>
+                <dt>付款方式</dt>
+                <dd>{labelFor(PAYMENT_METHOD_LABELS, d.payment_method)}</dd>
+              </div>
+              <div>
+                <dt>會員</dt>
+                <dd>{d.buyer_name ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>發票</dt>
+                <dd>
+                  {labelFor(INVOICE_STATUS_LABELS, d.invoice_status)}
+                  {sale.invoice_no != null && <span className="row-sub">{sale.invoice_no}</span>}
+                </dd>
+              </div>
+              <div>
+                <dt>狀態</dt>
+                <dd>{labelFor(SALE_STATUS_LABELS, d.status)}</dd>
+              </div>
+              {d.service_mode !== null && d.service_mode !== undefined && (
+                <div>
+                  <dt>內用/外帶</dt>
+                  <dd>{d.service_mode === "DINE_IN" ? `內用 ${d.table_no ?? ""}` : "外帶"}</dd>
+                </div>
+              )}
+            </dl>
+
+            <div className="sale-detail-lines-wrap">
+              <table className="data-table sale-detail-lines">
+                <thead>
+                  <tr>
+                    <th>品項</th>
+                    <th className="num">數量</th>
+                    <th className="num">單價</th>
+                    <th className="num">小計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td>
+                        {line.description}
+                        {line.line_kind === "GIFT" && <span className="pos-gift-badge">贈品</span>}
+                        {line.returned_qty > 0 && (
+                          <span className="row-sub">已退 {line.returned_qty}</span>
+                        )}
+                      </td>
+                      <td className="num">{line.qty}</td>
+                      <td className="num money">${formatNtd(parseNtd(line.unit_price) ?? 0)}</td>
+                      <td className="num money">${formatNtd(parseNtd(line.net_amount) ?? 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <dl className="sale-detail-totals">
+              {parseNtd(d.total_discount) !== 0 && (
+                <div>
+                  <dt>活動折扣</dt>
+                  <dd className="money">−${formatNtd(parseNtd(d.total_discount) ?? 0)}</dd>
+                </div>
+              )}
+              {parseNtd(d.total_manual_discount) !== 0 && (
+                <div>
+                  <dt>臨時折扣</dt>
+                  <dd className="money">−${formatNtd(parseNtd(d.total_manual_discount) ?? 0)}</dd>
+                </div>
+              )}
+              <div>
+                <dt>總額</dt>
+                <dd className="money">${formatNtd(parseNtd(d.total) ?? 0)}</dd>
+              </div>
+            </dl>
+
+            {d.tenders.length > 0 && (
+              <p className="hint">
+                收款：
+                {d.tenders
+                  .map(
+                    (t) =>
+                      `${refundTenderLabel[t.tender_type as keyof typeof refundTenderLabel] ?? t.tender_type} $${formatNtd(parseNtd(t.amount) ?? 0)}`,
+                  )
+                  .join("、")}
+              </p>
+            )}
+          </>
+        )}
+        <div className="pos-dialog-actions">
+          <button type="button" className="btn-primary" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ManualInvoiceDialog({
   sale,
@@ -1254,6 +1390,7 @@ export default function SalesPage() {
     getNextPageParam: nextSalesPageParam,
   });
   const [manualInvoiceTarget, setManualInvoiceTarget] = useState<SaleSummary | null>(null);
+  const [detailTarget, setDetailTarget] = useState<SaleSummary | null>(null);
   const rows = sales.data?.pages.flat() ?? [];
 
   return (
@@ -1382,9 +1519,10 @@ export default function SalesPage() {
             <tr>
               <th>時間</th>
               <th>單號</th>
+              <th>交易內容</th>
               <th>總額</th>
               <th>桌號</th>
-              <th>發票狀態</th>
+              <th>發票</th>
               <th>狀態</th>
               <th aria-label="簽收" />
               {isManager && <th aria-label="操作" />}
@@ -1400,6 +1538,14 @@ export default function SalesPage() {
                 <tr key={sale.id}>
                   <td>{timeLabel(sale.created_at)}</td>
                   <td>#{sale.id}</td>
+                  {/* 交易內容（裁示 2026-09-12）：店員回頭查帳最常問「這筆賣了什麼」，
+                      原本得逐筆點開明細。一列塞不下全部品項，故顯示第一項＋還有幾項。 */}
+                  <td className="sales-items">
+                    {sale.first_item_name ?? "—"}
+                    {sale.item_count > 1 && (
+                      <span className="row-sub">等 {sale.item_count} 項</span>
+                    )}
+                  </td>
                   <td>
                     <span className="money">${formatNtd(parseNtd(sale.total) ?? 0)}</span>
                   </td>
@@ -1418,9 +1564,21 @@ export default function SalesPage() {
                     {sale.invoice_issue_channel === "MANUAL_PAPER" && (
                       <span className="pos-gift-badge">手開紙本</span>
                     )}
+                    {/* 號碼直接印在清單上：對帳、客人來問都是先報號碼（裁示 2026-09-12）。 */}
+                    {sale.invoice_no !== null && sale.invoice_no !== undefined && (
+                      <span className="row-sub">{sale.invoice_no}</span>
+                    )}
                   </td>
                   <td>{voided ? "已作廢" : labelFor(SALE_STATUS_LABELS, sale.status)}</td>
                   <td>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      aria-label={`查看銷售 ${sale.id} 的明細`}
+                      onClick={() => setDetailTarget(sale)}
+                    >
+                      明細
+                    </button>
                     {!voided && !returned && (
                       <button
                         type="button"
@@ -1584,6 +1742,9 @@ export default function SalesPage() {
             invalidateSaleViews(queryClient);
           }}
         />
+      )}
+      {detailTarget !== null && (
+        <SaleDetailDialog sale={detailTarget} onClose={() => setDetailTarget(null)} />
       )}
       {manualInvoiceTarget !== null && (
         <ManualInvoiceDialog

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.time import AwareDateTime
+from app.modules.contacts.service import ContactService
 from app.modules.customerdisplay.service import CustomerDisplayService
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.sales.linepay import (
@@ -32,6 +33,7 @@ from app.modules.sales.schemas import (
     SaleSummaryRead,
 )
 from app.modules.sales.service import LinePayAttemptState, SalesService
+from app.modules.user.service import UserService
 from app.shared.enums import UserRole
 from app.shared.exceptions import (
     CrossStoreReference,
@@ -511,14 +513,17 @@ async def list_sales(
         sales = await svc.list_sales(
             user.store_id, date_from=date_from, date_to=date_to, limit=limit, offset=offset
         )
-    channels = await einvoice.issue_channels_for_sales(
-        user.store_id, [sale.id for sale in sales]
-    )
+    sale_ids = [sale.id for sale in sales]
+    invoices = await einvoice.invoice_info_for_sales(user.store_id, sale_ids)
+    lines = await svc.line_summaries(user.store_id, sale_ids)
     return [
         SaleSummaryRead.model_validate(sale).model_copy(
             update={
-                "invoice_issue_channel": (channels.get(sale.id) or (None, None))[0],
-                "invoice_print_mark": (channels.get(sale.id) or (None, None))[1],
+                "invoice_issue_channel": (invoices.get(sale.id) or (None, None, None))[0],
+                "invoice_print_mark": (invoices.get(sale.id) or (None, None, None))[1],
+                "invoice_no": (invoices.get(sale.id) or (None, None, None))[2],
+                "first_item_name": (lines.get(sale.id) or (None, 0))[0],
+                "item_count": (lines.get(sale.id) or (None, 0))[1],
             }
         )
         for sale in sales
@@ -537,7 +542,18 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
     from app.modules.returns.service import ReturnsService
 
     returned = await ReturnsService(session).returned_qty_for_sale(user.store_id, sale.id)
-    return SaleRead.build(sale, lines, tenders, returned_by_line=returned)
+    clerk = await UserService(session).get_user_in_store(user.store_id, sale.clerk_user_id)
+    buyer = (
+        None
+        if sale.buyer_contact_id is None
+        else await ContactService(session).get_contact(user.store_id, sale.buyer_contact_id)
+    )
+    return SaleRead.build(sale, lines, tenders, returned_by_line=returned).model_copy(
+        update={
+            "clerk_name": None if clerk is None else clerk.username,
+            "buyer_name": None if buyer is None else buyer.name,
+        }
+    )
 
 
 @router.post("/{sale_id}/void", response_model=SaleRead, operation_id="voidSale")
