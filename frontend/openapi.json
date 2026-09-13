@@ -3005,6 +3005,17 @@
             "title": "Commission Amount",
             "type": "string"
           },
+          "commission_net": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission Net"
+          },
           "commission_pct": {
             "title": "Commission Pct",
             "type": "integer"
@@ -3077,6 +3088,17 @@
             ],
             "title": "Item Name"
           },
+          "net_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Amount"
+          },
           "paid_at": {
             "anyOf": [
               {
@@ -3134,6 +3156,17 @@
           "store_id": {
             "title": "Store Id",
             "type": "integer"
+          },
+          "tax_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Amount"
           }
         },
         "required": [
@@ -5678,6 +5711,269 @@
           "created_at"
         ],
         "title": "InvoiceRead",
+        "type": "object"
+      },
+      "InvoiceRegisterReport": {
+        "description": "發票月報（申報用；US-068）：依期間列出銷項、作廢、折讓、進項與尚未完成的發票。\n\n**未完成的另列**（待開立／平台退回）：它們不是當期銷項，混進總額會讓申報數字錯，\n但也不能不顯示——那正是月底要先清掉的東西。",
+        "properties": {
+          "allowances": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Allowances",
+            "type": "array"
+          },
+          "date_from": {
+            "format": "date-time",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date-time",
+            "title": "Date To",
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "input_invoices": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Input Invoices",
+            "type": "array"
+          },
+          "issued": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Issued",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/InvoiceRegisterTotals"
+          },
+          "unfinished": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Unfinished",
+            "type": "array"
+          },
+          "voided": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Voided",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "store_id",
+          "date_from",
+          "date_to",
+          "issued",
+          "voided",
+          "allowances",
+          "input_invoices",
+          "unfinished",
+          "totals"
+        ],
+        "title": "InvoiceRegisterReport",
+        "type": "object"
+      },
+      "InvoiceRegisterRow": {
+        "description": "發票月報的一列（銷項／作廢／折讓／進項／未完成共用同一組欄位）。\n\n`number` 是那一類自己的單號（發票號、折讓單號、進項發票號）；`reference` 是原交易\n的識別（交易編號或採購單），會計核帳時要能一路找回原單。",
+        "properties": {
+          "buyer_tax_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buyer Tax Id"
+          },
+          "counterparty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counterparty"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
+          "issue_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Channel"
+          },
+          "issued_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued On"
+          },
+          "net": {
+            "title": "Net",
+            "type": "string"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "sale_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sale Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "string"
+          },
+          "void_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Void Reason"
+          }
+        },
+        "required": [
+          "number",
+          "issued_on",
+          "counterparty",
+          "net",
+          "tax",
+          "total"
+        ],
+        "title": "InvoiceRegisterRow",
+        "type": "object"
+      },
+      "InvoiceRegisterTotals": {
+        "description": "各類合計——匯出檔與畫面要能互相核對（US-068）。",
+        "properties": {
+          "allowance_tax": {
+            "title": "Allowance Tax",
+            "type": "string"
+          },
+          "allowance_total": {
+            "title": "Allowance Total",
+            "type": "string"
+          },
+          "input_tax": {
+            "title": "Input Tax",
+            "type": "string"
+          },
+          "input_total": {
+            "title": "Input Total",
+            "type": "string"
+          },
+          "issued_net": {
+            "title": "Issued Net",
+            "type": "string"
+          },
+          "issued_tax": {
+            "title": "Issued Tax",
+            "type": "string"
+          },
+          "issued_total": {
+            "title": "Issued Total",
+            "type": "string"
+          },
+          "voided_total": {
+            "title": "Voided Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issued_total",
+          "issued_net",
+          "issued_tax",
+          "voided_total",
+          "allowance_total",
+          "allowance_tax",
+          "input_total",
+          "input_tax"
+        ],
+        "title": "InvoiceRegisterTotals",
         "type": "object"
       },
       "InvoiceReprintPayloadRead": {
@@ -19943,6 +20239,76 @@
           }
         ],
         "summary": "Inventory Value",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/invoice-register": {
+      "get": {
+        "description": "發票月報（申報用；US-068）：銷項、作廢、折讓、進項與未完成。半開區間 [from, to)。\n\n匯出成一張表，每列標明類別——會計要的是能逐筆核對的清單，不是四個分開的檔案。",
+        "operationId": "invoiceRegisterReport",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AwareDateTime"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "json",
+              "enum": [
+                "json",
+                "csv",
+                "xlsx"
+              ],
+              "title": "Format",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceRegisterReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Invoice Register",
         "tags": [
           "reports"
         ]

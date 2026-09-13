@@ -167,3 +167,20 @@ def consignment_split(gross: Decimal, pct: int, tax_rate: Decimal) -> tuple[int,
     net, _tax = split_tax_inclusive(gross, tax_rate)
     payout = net - commission(Decimal(net), pct)
     return round_ntd(gross) - payout, payout
+
+
+def consignment_breakdown(
+    gross: Decimal, commission_amount: Decimal, tax_rate: Decimal
+) -> tuple[int, int, int]:
+    """把已存下的寄售結算拆成（未稅售價, 營業稅, 店家未稅抽成），給人看懂錢怎麼分。
+
+    **從存下來的金額回推，不重算分潤**：畫面與帳上永遠是同一組數字（ADR-021）。
+    店家留下的 `commission_amount` ＝ 未稅抽成 ＋ 代收的營業稅，故未稅抽成＝扣掉稅額。
+    例：含稅 1050、抽成欄 550、稅率 5% → 未稅 1000、稅 50、店家未稅抽成 500
+    （寄售人拿 gross − commission_amount ＝ 500）。
+
+    `tax_rate` 取自 settings（§6 不得寫死）；結算列未存成交當下的稅率，稅率若曾調整，
+    舊結算的**拆解**會依現行稅率換算，但兩個關鍵金額（抽成、應付）仍是當時存下的值。
+    """
+    net, tax = split_tax_inclusive(gross, tax_rate)
+    return net, tax, round_ntd(commission_amount) - tax

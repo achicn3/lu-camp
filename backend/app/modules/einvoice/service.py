@@ -404,6 +404,18 @@ class EInvoiceService:
             )
         )
 
+    async def invoices_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[Invoice]:
+        """期間內的發票（申報月報；跨模組供 reports 用，§2 經 service）。"""
+        return await self._repo.invoices_in_period(store_id, date_from, date_to)
+
+    async def allowances_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[InvoiceAllowance, str | None, int]]:
+        """期間內的折讓單＋原發票號碼／銷售編號（申報月報）。"""
+        return await self._repo.allowances_in_period(store_id, date_from, date_to)
+
     async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]
     ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None]]:

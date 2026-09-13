@@ -39,4 +39,9 @@ class ConsignmentSettlementRead(BaseModel):
     consignor_id: int | None = None
     consignor_name: str | None = None
     consignor_phone: str | None = None
+    # 講清楚錢怎麼分（ADR-021）：只給「抽成／應付」會讓寄售人以為店家抽走了含稅的那一份。
+    # 由 router 依 settings 稅率自存下的金額回推（不重算分潤），故與帳上永遠一致。
+    net_amount: NTDAmount | None = None
+    tax_amount: NTDAmount | None = None
+    commission_net: NTDAmount | None = None
     sale_created_at: datetime | None = None

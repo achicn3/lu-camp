@@ -26,6 +26,7 @@ from app.modules.reports.schemas import (
     GiftReport,
     InsightsReport,
     InventoryValueReport,
+    InvoiceRegisterReport,
     SalesMarginReport,
     TrendsReport,
 )
@@ -501,6 +502,90 @@ async def sales_margin(
                     [f"付款方式 {method.method} 手續費", format_ntd(method.fee)],
                 )
             ],
+        ],
+    )
+    return export_response(exp, fmt)
+
+
+@router.get(
+    "/invoice-register",
+    response_model=InvoiceRegisterReport,
+    operation_id="invoiceRegisterReport",
+)
+async def invoice_register(
+    session: SessionDep,
+    user: ManagerDep,
+    date_from: Annotated[AwareDateTime, Query(alias="from")],
+    date_to: Annotated[AwareDateTime, Query(alias="to")],
+    fmt: Annotated[ExportFormat, Query(alias="format")] = "json",
+) -> InvoiceRegisterReport | Response:
+    """發票月報（申報用；US-068）：銷項、作廢、折讓、進項與未完成。半開區間 [from, to)。
+
+    匯出成一張表，每列標明類別——會計要的是能逐筆核對的清單，不是四個分開的檔案。
+    """
+    if date_to <= date_from:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="to 必須晚於 from"
+        )
+    report = await ReportsService(session).invoice_register(
+        user.store_id, date_from=date_from, date_to=date_to
+    )
+    if fmt == "json":
+        return report
+    meta = [
+        ("產生時間", store_datetime_iso(report.generated_at)),
+        ("店別", str(report.store_id)),
+        ("期間起", store_datetime_iso(report.date_from)),
+        ("期間迄", store_datetime_iso(report.date_to)),
+        ("銷項合計", format_ntd(report.totals.issued_total)),
+        ("作廢合計", format_ntd(report.totals.voided_total)),
+        ("折讓合計", format_ntd(report.totals.allowance_total)),
+        ("進項合計", format_ntd(report.totals.input_total)),
+    ]
+    categories = [
+        ("銷項", report.issued),
+        ("作廢", report.voided),
+        ("折讓", report.allowances),
+        ("進項", report.input_invoices),
+        ("未完成", report.unfinished),
+    ]
+    exp = TabularExport(
+        sheet="發票月報",
+        filename_stem=f"invoice-register-{report.store_id}",
+        meta=meta,
+        headers=[
+            "類別",
+            "單號",
+            "日期",
+            "對象",
+            "買方統編",
+            "未稅",
+            "稅額",
+            "總額",
+            "狀態",
+            "作廢原因",
+            "開立來源",
+            "原發票號",
+            "關聯",
+        ],
+        rows=[
+            [
+                label,
+                row.number or "",
+                "" if row.issued_on is None else row.issued_on.isoformat(),
+                row.counterparty or "",
+                row.buyer_tax_id or "",
+                format_ntd(row.net),
+                format_ntd(row.tax),
+                format_ntd(row.total),
+                row.status or "",
+                row.void_reason or "",
+                row.issue_channel or "",
+                row.invoice_no or "",
+                row.reference or "",
+            ]
+            for label, rows in categories
+            for row in rows
         ],
     )
     return export_response(exp, fmt)

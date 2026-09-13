@@ -71,3 +71,29 @@ def test_v2_has_no_line_break_inside_a_paragraph() -> None:
         lines = block.split("\n")
         body_lines = lines[1:] if re.match(r"^[一二三四五六]、", block) else lines
         assert len(body_lines) <= 1, f"段落內仍有換行：{block[:30]}"
+
+
+def test_v3_states_that_consignment_commission_is_計算於未稅價() -> None:
+    """寄售分潤改以未稅價計算（ADR-021），合約必須講明白——不然是店家單方說了算。
+
+    v1／v2 只寫「寄售抽成比例」，客人合理會以為是含稅標價的比例；
+    1050 元的寄售品，以為拿 525、實際拿 500，正是會吵起來的地方。
+    """
+    _title, body = AGREEMENT_TEXTS[3]
+    assert "未稅" in body
+    assert "1,050" in body and "500" in body  # 要有看得懂的實例
+    assert "營業稅" in body
+
+
+def test_v3_keeps_everything_else_identical_to_v2() -> None:
+    """只動第二條（交易確認）：其餘條款一字不改，改版才看得出改了什麼。"""
+    _t2, v2 = AGREEMENT_TEXTS[2]
+    _t3, v3 = AGREEMENT_TEXTS[3]
+    clauses2 = v2.split("\n\n")
+    clauses3 = v3.split("\n\n")
+    assert len(clauses2) == len(clauses3)
+    for i, (a, b) in enumerate(zip(clauses2, clauses3, strict=True)):
+        if a.startswith("二、"):
+            assert a != b
+        else:
+            assert a == b, f"第 {i} 段不該變"

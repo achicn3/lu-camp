@@ -588,3 +588,57 @@ class DineInReport(BaseModel):
     summary: DineInSummary
     trend: list[DineInTrendBucket]
     hourly: list[DineInHourBucket]
+
+
+class InvoiceRegisterRow(BaseModel):
+    """發票月報的一列（銷項／作廢／折讓／進項／未完成共用同一組欄位）。
+
+    `number` 是那一類自己的單號（發票號、折讓單號、進項發票號）；`reference` 是原交易
+    的識別（交易編號或採購單），會計核帳時要能一路找回原單。
+    """
+
+    number: str | None
+    issued_on: date | None
+    counterparty: str | None  # 銷項＝買方統編/名稱；進項＝供應商
+    buyer_tax_id: str | None = None
+    net: NTDAmount
+    tax: NTDAmount
+    total: NTDAmount
+    status: str | None = None
+    void_reason: str | None = None
+    issue_channel: str | None = None  # 電子（AMEGO）或手開紙本
+    sale_id: int | None = None
+    invoice_no: str | None = None  # 折讓：原發票號
+    reference: str | None = None
+
+
+class InvoiceRegisterTotals(BaseModel):
+    """各類合計——匯出檔與畫面要能互相核對（US-068）。"""
+
+    issued_total: NTDAmount
+    issued_net: NTDAmount
+    issued_tax: NTDAmount
+    voided_total: NTDAmount
+    allowance_total: NTDAmount
+    allowance_tax: NTDAmount
+    input_total: NTDAmount
+    input_tax: NTDAmount
+
+
+class InvoiceRegisterReport(BaseModel):
+    """發票月報（申報用；US-068）：依期間列出銷項、作廢、折讓、進項與尚未完成的發票。
+
+    **未完成的另列**（待開立／平台退回）：它們不是當期銷項，混進總額會讓申報數字錯，
+    但也不能不顯示——那正是月底要先清掉的東西。
+    """
+
+    generated_at: datetime
+    store_id: int
+    date_from: datetime
+    date_to: datetime
+    issued: list[InvoiceRegisterRow]
+    voided: list[InvoiceRegisterRow]
+    allowances: list[InvoiceRegisterRow]
+    input_invoices: list[InvoiceRegisterRow]
+    unfinished: list[InvoiceRegisterRow]
+    totals: InvoiceRegisterTotals

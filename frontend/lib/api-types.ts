@@ -2286,6 +2286,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports/invoice-register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Invoice Register
+         * @description 發票月報（申報用；US-068）：銷項、作廢、折讓、進項與未完成。半開區間 [from, to)。
+         *
+         *     匯出成一張表，每列標明類別——會計要的是能逐筆核對的清單，不是四個分開的檔案。
+         */
+        get: operations["invoiceRegisterReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reports/sales-margin": {
         parameters: {
             query?: never;
@@ -4223,6 +4245,8 @@ export interface components {
         ConsignmentSettlementRead: {
             /** Commission Amount */
             commission_amount: string;
+            /** Commission Net */
+            commission_net?: string | null;
             /** Commission Pct */
             commission_pct: number;
             /** Consignor Id */
@@ -4244,6 +4268,8 @@ export interface components {
             item_code?: string | null;
             /** Item Name */
             item_name?: string | null;
+            /** Net Amount */
+            net_amount?: string | null;
             /** Paid At */
             paid_at: string | null;
             /** Paid By */
@@ -4261,6 +4287,8 @@ export interface components {
             status: components["schemas"]["ConsignmentSettlementStatus"];
             /** Store Id */
             store_id: number;
+            /** Tax Amount */
+            tax_amount?: string | null;
         };
         /**
          * ConsignmentSettlementStatus
@@ -5307,6 +5335,100 @@ export interface components {
             tax: string;
             /** Total */
             total: string;
+        };
+        /**
+         * InvoiceRegisterReport
+         * @description 發票月報（申報用；US-068）：依期間列出銷項、作廢、折讓、進項與尚未完成的發票。
+         *
+         *     **未完成的另列**（待開立／平台退回）：它們不是當期銷項，混進總額會讓申報數字錯，
+         *     但也不能不顯示——那正是月底要先清掉的東西。
+         */
+        InvoiceRegisterReport: {
+            /** Allowances */
+            allowances: components["schemas"]["InvoiceRegisterRow"][];
+            /**
+             * Date From
+             * Format: date-time
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date-time
+             */
+            date_to: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Input Invoices */
+            input_invoices: components["schemas"]["InvoiceRegisterRow"][];
+            /** Issued */
+            issued: components["schemas"]["InvoiceRegisterRow"][];
+            /** Store Id */
+            store_id: number;
+            totals: components["schemas"]["InvoiceRegisterTotals"];
+            /** Unfinished */
+            unfinished: components["schemas"]["InvoiceRegisterRow"][];
+            /** Voided */
+            voided: components["schemas"]["InvoiceRegisterRow"][];
+        };
+        /**
+         * InvoiceRegisterRow
+         * @description 發票月報的一列（銷項／作廢／折讓／進項／未完成共用同一組欄位）。
+         *
+         *     `number` 是那一類自己的單號（發票號、折讓單號、進項發票號）；`reference` 是原交易
+         *     的識別（交易編號或採購單），會計核帳時要能一路找回原單。
+         */
+        InvoiceRegisterRow: {
+            /** Buyer Tax Id */
+            buyer_tax_id?: string | null;
+            /** Counterparty */
+            counterparty: string | null;
+            /** Invoice No */
+            invoice_no?: string | null;
+            /** Issue Channel */
+            issue_channel?: string | null;
+            /** Issued On */
+            issued_on: string | null;
+            /** Net */
+            net: string;
+            /** Number */
+            number: string | null;
+            /** Reference */
+            reference?: string | null;
+            /** Sale Id */
+            sale_id?: number | null;
+            /** Status */
+            status?: string | null;
+            /** Tax */
+            tax: string;
+            /** Total */
+            total: string;
+            /** Void Reason */
+            void_reason?: string | null;
+        };
+        /**
+         * InvoiceRegisterTotals
+         * @description 各類合計——匯出檔與畫面要能互相核對（US-068）。
+         */
+        InvoiceRegisterTotals: {
+            /** Allowance Tax */
+            allowance_tax: string;
+            /** Allowance Total */
+            allowance_total: string;
+            /** Input Tax */
+            input_tax: string;
+            /** Input Total */
+            input_total: string;
+            /** Issued Net */
+            issued_net: string;
+            /** Issued Tax */
+            issued_tax: string;
+            /** Issued Total */
+            issued_total: string;
+            /** Voided Total */
+            voided_total: string;
         };
         /**
          * InvoiceReprintPayloadRead
@@ -11973,6 +12095,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InventoryValueReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invoiceRegisterReport: {
+        parameters: {
+            query: {
+                from: components["schemas"]["AwareDateTime"];
+                to: components["schemas"]["AwareDateTime"];
+                format?: "json" | "csv" | "xlsx";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceRegisterReport"];
                 };
             };
             /** @description Validation Error */

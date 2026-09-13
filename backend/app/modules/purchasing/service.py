@@ -266,6 +266,12 @@ class PurchasingService:
         assert refreshed is not None
         return refreshed
 
+    async def input_invoices_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[GoodsReceipt, str]]:
+        """期間內的進項發票（申報月報；跨模組供 reports 用，§2 經 service）。"""
+        return await self._repo.input_invoices_in_period(store_id, date_from, date_to)
+
     async def count_purchase_orders(
         self,
         store_id: int,

@@ -23,7 +23,9 @@ from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
 from app.modules.contacts.service import ContactService
+from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.service import InventoryService
+from app.modules.purchasing.service import PurchasingService
 from app.modules.reports.aging import BUCKET_KEYS as INVENTORY_BUCKET_KEYS
 from app.modules.reports.aging import _bucket_for_age
 from app.modules.reports.schemas import (
@@ -55,6 +57,9 @@ from app.modules.reports.schemas import (
     InsightsRevenueMix,
     InsightsTurnover,
     InventoryValueReport,
+    InvoiceRegisterReport,
+    InvoiceRegisterRow,
+    InvoiceRegisterTotals,
     LiabilityReport,
     MemberBalanceRow,
     PaymentMethodTotal,
@@ -70,7 +75,7 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.service import UserService
-from app.shared.enums import CampaignStatus, OwnershipType, ServiceMode
+from app.shared.enums import CampaignStatus, InvoiceStatus, OwnershipType, ServiceMode
 from app.shared.exceptions import DomainError
 
 
@@ -171,6 +176,8 @@ class ReportsService:
         self._consignment = ConsignmentService(session)
         self._campaigns = CampaignService(session)
         self._users = UserService(session)
+        self._einvoice = EInvoiceService(session)
+        self._purchasing = PurchasingService(session)
 
     async def consignment_payables(
         self, store_id: int, *, status_filter: str
@@ -586,6 +593,96 @@ class ReportsService:
         ]
         result.sort(key=lambda row: row.revenue, reverse=True)
         return result
+
+    async def invoice_register(
+        self, store_id: int, *, date_from: datetime, date_to: datetime
+    ) -> InvoiceRegisterReport:
+        """發票月報（US-068）：期間內的銷項、作廢、折讓、進項，與尚未完成的發票。
+
+        分類依據是發票**狀態**，不是有沒有號碼：作廢與折讓各自成類，待開立／平台退回
+        歸「未完成」且**不計入銷項合計**——那是月底要先處理掉的，不是當期銷項。
+        """
+        invoices = await self._einvoice.invoices_in_period(store_id, date_from, date_to)
+        allowance_rows = await self._einvoice.allowances_in_period(store_id, date_from, date_to)
+        receipts = await self._purchasing.input_invoices_in_period(store_id, date_from, date_to)
+
+        issued: list[InvoiceRegisterRow] = []
+        voided: list[InvoiceRegisterRow] = []
+        unfinished: list[InvoiceRegisterRow] = []
+        for invoice in invoices:
+            row = InvoiceRegisterRow(
+                number=invoice.invoice_no,
+                issued_on=invoice.invoice_date,
+                counterparty=invoice.buyer_name,
+                buyer_tax_id=invoice.buyer_tax_id,
+                net=invoice.net,
+                tax=invoice.tax,
+                total=invoice.total,
+                status=invoice.status.value,
+                void_reason=None if invoice.void_reason is None else invoice.void_reason.value,
+                issue_channel=invoice.issue_channel.value,
+                sale_id=invoice.sale_id,
+                reference=f"交易 #{invoice.sale_id}",
+            )
+            if invoice.status == InvoiceStatus.ISSUED:
+                issued.append(row)
+            elif invoice.status == InvoiceStatus.VOID:
+                voided.append(row)
+            else:
+                unfinished.append(row)
+
+        allowances = [
+            InvoiceRegisterRow(
+                number=allowance.allowance_no,
+                issued_on=allowance.created_at.date(),
+                counterparty=None,
+                net=allowance.net,
+                tax=allowance.tax,
+                total=allowance.total,
+                status="VOIDED" if allowance.voided else None,
+                invoice_no=invoice_no,
+                sale_id=sale_id,
+                reference=f"交易 #{sale_id}",
+            )
+            for allowance, invoice_no, sale_id in allowance_rows
+        ]
+        input_invoices = [
+            InvoiceRegisterRow(
+                number=receipt.invoice_number,
+                issued_on=receipt.invoice_date,
+                counterparty=supplier_name,
+                net=receipt.invoice_net or Decimal(0),
+                tax=receipt.invoice_tax or Decimal(0),
+                total=receipt.invoice_total or Decimal(0),
+                reference=f"採購單 #{receipt.purchase_order_id}",
+            )
+            for receipt, supplier_name in receipts
+        ]
+
+        def _sum(rows: list[InvoiceRegisterRow], field: str) -> Decimal:
+            return Decimal(sum(getattr(row, field) for row in rows))
+
+        return InvoiceRegisterReport(
+            generated_at=_now(),
+            store_id=store_id,
+            date_from=date_from,
+            date_to=date_to,
+            issued=issued,
+            voided=voided,
+            allowances=allowances,
+            input_invoices=input_invoices,
+            unfinished=unfinished,
+            totals=InvoiceRegisterTotals(
+                issued_total=_sum(issued, "total"),
+                issued_net=_sum(issued, "net"),
+                issued_tax=_sum(issued, "tax"),
+                voided_total=_sum(voided, "total"),
+                allowance_total=_sum(allowances, "total"),
+                allowance_tax=_sum(allowances, "tax"),
+                input_total=_sum(input_invoices, "total"),
+                input_tax=_sum(input_invoices, "tax"),
+            ),
+        )
 
     async def insights(
         self, store_id: int, *, date_from: datetime, date_to: datetime

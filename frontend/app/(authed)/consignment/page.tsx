@@ -96,6 +96,14 @@ function ConfirmDialog({
             <dd className="money">{money(row.payout_amount)}</dd>
           </div>
         </dl>
+        {/* 當面付款時最容易被問「為什麼不是一半」：把未稅價、稅與店家抽成攤開講（ADR-021）。 */}
+        {row.net_amount !== null && row.net_amount !== undefined && (
+          <p className="hint">
+            售價 {money(row.gross)}（含稅）＝未稅 {money(row.net_amount)}＋營業稅{" "}
+            {money(row.tax_amount ?? "0")}；抽成 {row.commission_pct}% 以未稅價計算，
+            店家 {money(row.commission_net ?? "0")}、寄售人 {money(row.payout_amount)}。
+          </p>
+        )}
         {error !== null && (
           <p role="alert" className="form-error">
             {error}
@@ -304,10 +312,22 @@ export default function ConsignmentPage() {
                       #{row.sale_id}
                       <span className="row-sub">{dt(row.sale_created_at ?? row.created_at)}</span>
                     </td>
-                    <td className="money">{money(row.gross)}</td>
+                    {/* 錢怎麼分要看得懂（ADR-021）：售價是含稅標價，分潤談的是未稅價。
+                        只寫「抽成 550」會被誤會成店家抽走含稅的那份，其中 50 是代收的稅。 */}
+                    <td className="money">
+                      {money(row.gross)}
+                      {row.net_amount !== null && row.net_amount !== undefined && (
+                        <span className="row-sub">未稅 {money(row.net_amount)}</span>
+                      )}
+                    </td>
                     <td>
                       <span className="money">{money(row.commission_amount)}</span>
                       <span className="row-sub">{row.commission_pct}%</span>
+                      {row.commission_net !== null && row.commission_net !== undefined && (
+                        <span className="row-sub">
+                          未稅 {money(row.commission_net)}＋稅 {money(row.tax_amount ?? "0")}
+                        </span>
+                      )}
                     </td>
                     <td className="money settle-payout">{money(row.payout_amount)}</td>
                     <td>

@@ -265,3 +265,29 @@ async def test_count_settlements_matches_the_filtered_list(
         "/api/v1/consignment/settlements/count", params={"phone": "0999"}, headers=_auth(token)
     )
     assert no_match.json()["count"] == 0
+
+
+async def test_list_settlements_shows_the_untaxed_breakdown(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """寄售人要看得懂錢怎麼分：清單要拆出未稅售價、營業稅與店家未稅抽成（ADR-021）。
+
+    只顯示「抽成 772／應付 1028」會讓人以為店家抽了 772；實際店家未稅抽成 686，
+    另外 86 是代收代繳的營業稅。
+    """
+    token, _sid, _ = await _seed(db_session)
+    rows = (
+        await client.get(
+            "/api/v1/consignment/settlements", params={"limit": 200}, headers=_auth(token)
+        )
+    ).json()
+    row = next(r for r in rows if r["item_code"] == "C1")
+    assert row["gross"] == "1800"
+    assert row["net_amount"] == "1714"  # round(1800 / 1.05)
+    assert row["tax_amount"] == "86"
+    assert row["commission_net"] == "686"  # 店家未稅抽成
+    assert row["payout_amount"] == _PAYOUT  # 1028
+    # 拆出來的數字要跟存下來的兩個金額對得起來
+    assert int(row["net_amount"]) + int(row["tax_amount"]) == int(row["gross"])
+    assert int(row["commission_net"]) + int(row["tax_amount"]) == int(row["commission_amount"])
+    assert int(row["commission_net"]) + int(row["payout_amount"]) == int(row["net_amount"])

@@ -51,6 +51,52 @@ class EInvoiceRepository:
         result: Invoice | None = await self._session.scalar(stmt)
         return result
 
+    async def invoices_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[Invoice]:
+        """期間內的發票（申報月報用）。
+
+        **以開立日（invoice_date）歸期**——申報看的是發票日期，不是系統建檔時間；
+        尚未配號／尚未開立成功的沒有開立日，改用建檔時間才不會整批消失。
+        """
+        stmt = (
+            select(Invoice)
+            .where(
+                Invoice.store_id == store_id,
+                or_(
+                    and_(
+                        Invoice.invoice_date.is_not(None),
+                        Invoice.invoice_date >= date_from.date(),
+                        Invoice.invoice_date < date_to.date(),
+                    ),
+                    and_(
+                        Invoice.invoice_date.is_(None),
+                        Invoice.created_at >= date_from,
+                        Invoice.created_at < date_to,
+                    ),
+                ),
+            )
+            .order_by(Invoice.invoice_date, Invoice.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def allowances_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[InvoiceAllowance, str | None, int]]:
+        """期間內的折讓單，附原發票號碼與銷售編號（申報要對得回原交易）。"""
+        stmt = (
+            select(InvoiceAllowance, Invoice.invoice_no, Invoice.sale_id)
+            .join(Invoice, Invoice.id == InvoiceAllowance.invoice_id)
+            .where(
+                InvoiceAllowance.store_id == store_id,
+                InvoiceAllowance.created_at >= date_from,
+                InvoiceAllowance.created_at < date_to,
+            )
+            .order_by(InvoiceAllowance.id)
+        )
+        rows = await self._session.execute(stmt)
+        return [(allowance, no, sale_id) for allowance, no, sale_id in rows.all()]
+
     async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]
     ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None]]:

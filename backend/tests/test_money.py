@@ -7,6 +7,7 @@ import pytest
 
 from app.core.money import (
     commission,
+    consignment_breakdown,
     consignment_split,
     discounted_price,
     round_ntd,
@@ -302,3 +303,30 @@ def test_consignment_split_rejects_bad_inputs() -> None:
         consignment_split(Decimal("1050"), 101, RATE)
     with pytest.raises(InvalidTaxRate):
         consignment_split(Decimal("1050"), 50, Decimal("1"))
+
+
+def test_consignment_breakdown_explains_the_split_to_the_consignor() -> None:
+    """寄售人看得懂的拆法：含稅 1050 → 未稅 1000、稅 50、店家未稅抽成 500、自己 500。
+
+    三個數字都是從「已存下來的」gross 與 commission_amount 推回去的，不重算分潤——
+    畫面與帳上的金額永遠一致（ADR-021）。
+    """
+    net, tax, commission_net = consignment_breakdown(Decimal("1050"), Decimal("550"), RATE)
+    assert (net, tax, commission_net) == (1000, 50, 500)
+
+
+def test_consignment_breakdown_matches_the_stored_amounts_for_any_input() -> None:
+    for gross in (1, 7, 99, 105, 106, 1050, 1800, 2111):
+        for pct in (0, 5, 37, 40, 50, 99, 100):
+            store_share, payout = consignment_split(Decimal(gross), pct, RATE)
+            net, tax, commission_net = consignment_breakdown(
+                Decimal(gross), Decimal(store_share), RATE
+            )
+            assert net + tax == gross, (gross, pct)
+            assert commission_net + payout == net, (gross, pct)  # 未稅的兩份加起來＝未稅售價
+            assert commission_net + tax == store_share, (gross, pct)
+
+
+def test_consignment_breakdown_with_zero_tax_has_no_tax_line() -> None:
+    net, tax, commission_net = consignment_breakdown(Decimal("1000"), Decimal("500"), Decimal(0))
+    assert (net, tax, commission_net) == (1000, 0, 500)

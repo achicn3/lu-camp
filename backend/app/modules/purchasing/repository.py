@@ -1,5 +1,6 @@
 """purchasing 資料存取層。"""
 
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
@@ -135,6 +136,27 @@ class PurchasingRepository:
         )
         stmt = stmt.order_by(PurchaseOrder.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
+
+    async def input_invoices_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[tuple[GoodsReceipt, str]]:
+        """期間內已登記進項發票的收貨批次＋供應商名（申報月報）。
+
+        以**發票日期**歸期（與銷項同口徑）；收貨與發票日期常不同月，用收貨日會錯月。
+        """
+        stmt = (
+            select(GoodsReceipt, PurchaseOrder.supplier_name)
+            .join(PurchaseOrder, PurchaseOrder.id == GoodsReceipt.purchase_order_id)
+            .where(
+                GoodsReceipt.store_id == store_id,
+                GoodsReceipt.invoice_number.is_not(None),
+                GoodsReceipt.invoice_date >= date_from.date(),
+                GoodsReceipt.invoice_date < date_to.date(),
+            )
+            .order_by(GoodsReceipt.invoice_date, GoodsReceipt.id)
+        )
+        rows = await self._session.execute(stmt)
+        return [(receipt, supplier_name) for receipt, supplier_name in rows.all()]
 
     async def count_purchase_orders(
         self,

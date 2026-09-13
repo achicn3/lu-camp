@@ -46,6 +46,7 @@ type DiscountReport = components["schemas"]["DiscountReport"];
 type GiftReport = components["schemas"]["GiftReport"];
 type InventoryValueReport = components["schemas"]["InventoryValueReport"];
 type ConsignmentPayablesReport = components["schemas"]["ConsignmentPayablesReport"];
+type InvoiceRegisterRow = components["schemas"]["InvoiceRegisterRow"];
 type CampaignPerformanceReport = components["schemas"]["CampaignPerformanceReport"];
 
 type Tab =
@@ -60,6 +61,7 @@ type Tab =
   | "campaign-performance"
   | "inventory-value"
   | "consignment-payables"
+  | "invoice-register"
   | "liability"
   | "flows"
   | "effectiveness"
@@ -77,6 +79,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "campaign-performance", label: "活動成效" },
   { key: "inventory-value", label: "庫存價值" },
   { key: "consignment-payables", label: "寄售應付" },
+  { key: "invoice-register", label: "發票月報" },
   { key: "liability", label: "負債" },
   { key: "flows", label: "流量" },
   { key: "effectiveness", label: "效益指標" },
@@ -1436,6 +1439,150 @@ function ConsignmentPayablesPanel() {
 
 // 臨時折扣報表：沒有主管核准機制（店主裁示不設上限），這份是事後稽核的主要依據，
 // 所以「依店員」那一段與依原因同樣重要。
+/** 發票月報（US-068）：月底會計要的逐筆清單——銷項、作廢、折讓、進項，以及還沒完成的。 */
+function InvoiceRegisterPanel() {
+  const defaults = defaultDateRange();
+  const [from, setFrom] = useState(defaults.from);
+  const [to, setTo] = useState(defaults.to);
+
+  const query = useQuery({
+    queryKey: ["reports", "invoice-register", { from, to }],
+    queryFn: async () => {
+      const { data, error, response } = await api.GET("/api/v1/reports/invoice-register", {
+        params: { query: { from: startOfDay(from), to: exclusiveEnd(to) } },
+      });
+      if (response.ok && data) return data;
+      throw new Error(extractDetail(error) ?? "讀取發票月報失敗");
+    },
+  });
+  const report = query.data;
+
+  function handleDownload(fmt: "csv" | "xlsx") {
+    const url = buildExportUrl("/api/v1/reports/invoice-register", fmt, {
+      from: startOfDay(from),
+      to: exclusiveEnd(to),
+    });
+    void downloadReport(url, `invoice-register-${from}-${to}.${fmt}`);
+  }
+
+  const sections: { label: string; rows: InvoiceRegisterRow[]; note?: string }[] = report
+    ? [
+        { label: "銷項", rows: report.issued },
+        { label: "作廢", rows: report.voided },
+        { label: "折讓", rows: report.allowances },
+        { label: "進項", rows: report.input_invoices },
+        {
+          label: "未完成",
+          rows: report.unfinished,
+          note: "待開立或平台退回：申報前要先處理掉，這些不計入銷項合計。",
+        },
+      ]
+    : [];
+
+  return (
+    <div>
+      <p className="rpt-intro">
+        <b>這頁在看什麼？</b>　月底申報要的逐筆清單：<b>銷項、作廢、折讓、進項</b>各自列出，
+        並另列還沒完成的發票。可下載 CSV／Excel 交給會計核帳。
+      </p>
+      <div className="rpt-filters">
+        <label>
+          起始日期
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          結束日期
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+      </div>
+      {query.isPending && <p className="hint">載入中...</p>}
+      {query.isError && <ErrorBlock message={query.error.message} />}
+      {report && (
+        <>
+          <dl className="rpt-summary">
+            <div className="rpt-stat rpt-stat-hero">
+              <dt>銷項合計</dt>
+              <dd><MoneyText value={report.totals.issued_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>銷項稅額</dt>
+              <dd><MoneyText value={report.totals.issued_tax} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>作廢合計</dt>
+              <dd><MoneyText value={report.totals.voided_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>折讓合計</dt>
+              <dd><MoneyText value={report.totals.allowance_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>進項合計</dt>
+              <dd><MoneyText value={report.totals.input_total} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>進項稅額</dt>
+              <dd><MoneyText value={report.totals.input_tax} /></dd>
+            </div>
+          </dl>
+
+          {sections.map((section) => (
+            <div key={section.label}>
+              <h3 className="rpt-subtitle">
+                {section.label}（{section.rows.length} 筆）
+              </h3>
+              {section.note !== undefined && <p className="hint">{section.note}</p>}
+              {section.rows.length === 0 ? (
+                <p className="empty-state">本期間沒有{section.label}。</p>
+              ) : (
+                <div className="inv-table-wrap">
+                  <table className="inv-table">
+                    <thead>
+                      <tr>
+                        <th>單號</th>
+                        <th>日期</th>
+                        <th>對象</th>
+                        <th>未稅</th>
+                        <th>稅額</th>
+                        <th>總額</th>
+                        <th>備註</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {section.rows.map((row, index) => (
+                        <tr key={`${section.label}-${row.number ?? index}`}>
+                          <td>{row.number ?? "（未配號）"}</td>
+                          <td>{row.issued_on ?? "—"}</td>
+                          <td>
+                            {row.counterparty ?? "—"}
+                            {row.buyer_tax_id !== null && row.buyer_tax_id !== undefined && (
+                              <span className="row-sub">統編 {row.buyer_tax_id}</span>
+                            )}
+                          </td>
+                          <td><MoneyText value={row.net} /></td>
+                          <td><MoneyText value={row.tax} /></td>
+                          <td><MoneyText value={row.total} /></td>
+                          <td>
+                            {[row.status, row.void_reason, row.invoice_no, row.reference]
+                              .filter((part) => part !== null && part !== undefined && part !== "")
+                              .join("・")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <DownloadButtons onDownload={handleDownload} />
+        </>
+      )}
+    </div>
+  );
+}
+
 function DiscountPanel() {
   const defaults = defaultDateRange();
   const [from, setFrom] = useState(defaults.from);
@@ -2263,6 +2410,8 @@ function TabContent({ tab }: { tab: Tab }): ReactNode {
       return <InventoryValuePanel />;
     case "consignment-payables":
       return <ConsignmentPayablesPanel />;
+    case "invoice-register":
+      return <InvoiceRegisterPanel />;
     case "discounts":
       return <DiscountPanel />;
     case "gifts":
