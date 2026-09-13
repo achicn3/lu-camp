@@ -148,4 +148,40 @@ describe("交易紀錄的明細", () => {
     expect(within(dialog).getByText("ZZ99887766")).toBeDefined();
     expect(within(dialog).queryByText("AB12345678")).toBeNull();
   });
+
+  it("開啟時鍵盤焦點進入對話框且出不去，關閉後回到原本的按鈕", async () => {
+    // 只用 aria-modal 擋不住鍵盤：焦點留在背景時按 Tab 會走到「退貨」，
+    // Enter 就在這個唯讀視窗背後開了退貨流程（Codex 審查實測）。
+    setToken(fakeJwt({ sub: "1", role: "MANAGER", store_id: 1 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const json = (data: unknown) =>
+          new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (/\/api\/v1\/sales\/\d+$/.test(url.pathname)) return json(DETAIL);
+        if (url.pathname === "/api/v1/sales") return json([SUMMARY]);
+        return json([]);
+      }),
+    );
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: /USB 充電營燈/ });
+    const opener = within(row).getByRole("button", { name: /查看銷售 42 的明細/ });
+    await userEvent.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "交易明細" });
+
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    for (let i = 0; i < 6; i += 1) {
+      await userEvent.tab();
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "關閉" }));
+    expect(screen.queryByRole("dialog", { name: "交易明細" })).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
 });

@@ -15,6 +15,7 @@ import { terminalInstallationId } from "@/features/customer-display/PosCustomerD
 import { SALES_PAGE_SIZE, nextSalesPageParam } from "@/features/sales/pagination";
 import { printKitchenTicket, printRaw, printSaleDetail } from "@/lib/agent";
 import { SignatureEvidenceDialog } from "@/features/signing/SignatureEvidenceDialog";
+import { useDialogFocus } from "@/features/common/useDialogFocus";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -98,6 +99,7 @@ const SALE_STATUS_LABELS: Record<string, string> = {
  * 只讀，不做任何動作——退貨/作廢/補印各自有既有入口，混在一起容易誤按。
  */
 function SaleDetailDialog({ sale, onClose }: { sale: SaleSummary; onClose: () => void }) {
+  const dialogRef = useDialogFocus<HTMLDivElement>();
   const detail = useQuery({
     queryKey: ["sale-detail", sale.id],
     queryFn: async () => {
@@ -110,7 +112,18 @@ function SaleDetailDialog({ sale, onClose }: { sale: SaleSummary; onClose: () =>
   });
   const d = detail.data;
   return (
-    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="交易明細">
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="交易明細"
+      ref={dialogRef}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        // Esc 關閉：唯讀視窗沒有理由困住人（鍵盤與觸控都要出得去）。
+        if (event.key === "Escape") onClose();
+      }}
+    >
       <div className="card pos-dialog sale-detail-dialog">
         <h2>交易明細 #{sale.id}</h2>
         {detail.isPending ? (
