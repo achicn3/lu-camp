@@ -80,7 +80,6 @@ from app.shared.enums import (
     EInvoiceIssueChannel,
     InvoiceStatus,
     OwnershipType,
-    SaleStatus,
     ServiceMode,
     UploadStatus,
 )
@@ -684,22 +683,35 @@ class ReportsService:
             for receipt, supplier_name in receipts
         ]
 
-        # 手開紙本＋原銷售已退貨/作廢：電子端不會有任何折讓或作廢紀錄，只能請人去處理紙本。
-        paper_sale_ids = [
-            invoice.sale_id
-            for invoice in invoices
+        # 手開紙本的單退貨／作廢時，電子端不會有折讓或作廢（docs/36 由店家線下辦紙本），
+        # 所以要自己把「該去處理紙本的」列出來。三個容易漏掉的點：
+        #   1. **部分退貨** sale 仍是 COMPLETED，不能只看銷售狀態
+        #   2. **跨月退貨**（8/31 開票、9/10 退）原發票不在本期清單裡，要另外抓
+        #   3. 本地作廢的紙本票已在「作廢」類別看得到，不必重複列
+        returned_sale_ids = await self._returns.period_returned_sale_ids(
+            store_id, date_from, date_to
+        )
+        paper_invoices = [
+            invoice
+            for invoice in await self._einvoice.invoices_for_sales(store_id, returned_sale_ids)
             if invoice.issue_channel == EInvoiceIssueChannel.MANUAL_PAPER
             and invoice.status == InvoiceStatus.ISSUED
         ]
-        paper_sales = {
-            sale.id: sale.status
-            for sale in await self._sales.list_sales_by_ids(store_id, paper_sale_ids)
-        }
         manual_paper_adjustments = [
-            row.model_copy(update={"status": paper_sales[row.sale_id].value})
-            for row in issued
-            if row.sale_id is not None
-            and paper_sales.get(row.sale_id) in (SaleStatus.RETURNED, SaleStatus.VOIDED)
+            InvoiceRegisterRow(
+                number=invoice.invoice_no,
+                issued_on=invoice.invoice_date,
+                counterparty=invoice.buyer_name,
+                buyer_tax_id=invoice.buyer_tax_id,
+                net=invoice.net,
+                tax=invoice.tax,
+                total=invoice.total,
+                status="RETURNED",
+                issue_channel=invoice.issue_channel.value,
+                sale_id=invoice.sale_id,
+                reference=f"退貨・交易 #{invoice.sale_id}",
+            )
+            for invoice in paper_invoices
         ]
 
         def _sum(rows: list[InvoiceRegisterRow], field: str) -> Decimal:

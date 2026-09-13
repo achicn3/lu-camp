@@ -377,6 +377,12 @@ class ReturnsService:
             allow_expired_provider_recovery=allow_expired_provider_recovery,
         )
 
+    async def period_returned_sale_ids(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[int]:
+        """期間內發生退貨的銷售 id（含部分退；申報月報要據此找出待人工調整的紙本發票）。"""
+        return await self._repo.period_returned_sale_ids(store_id, date_from, date_to)
+
     async def margin_adjustments(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> "ReturnsMarginAdjustments":

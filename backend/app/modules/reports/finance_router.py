@@ -548,6 +548,8 @@ async def invoice_register(
         ("折讓", report.allowances),
         ("進項", report.input_invoices),
         ("未完成", report.unfinished),
+        # 會計拿到的是下載檔、不是畫面：警示不進匯出等於沒有警示。
+        ("手開紙本待調整", report.manual_paper_adjustments),
     ]
     exp = TabularExport(
         sheet="發票月報",

@@ -101,6 +101,15 @@ class EInvoiceRepository:
         rows = await self._session.execute(stmt)
         return [(allowance, no, sale_id) for allowance, no, sale_id in rows.all()]
 
+    async def invoices_for_sales(self, store_id: int, sale_ids: list[int]) -> list[Invoice]:
+        """指定銷售的發票（**不套期間**）——跨月退貨時原發票不在本期清單裡。"""
+        if not sale_ids:
+            return []
+        stmt = select(Invoice).where(
+            Invoice.store_id == store_id, Invoice.sale_id.in_(sale_ids)
+        )
+        return list((await self._session.scalars(stmt)).all())
+
     async def allowance_upload_status(
         self, store_id: int, allowance_ids: list[int]
     ) -> dict[int, UploadStatus]:

@@ -18,7 +18,8 @@ from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, Supplier
-from app.modules.sales.models import Sale
+from app.modules.returns.models import CustomerReturn, ReturnLine
+from app.modules.sales.models import Sale, SaleLine
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
@@ -28,6 +29,7 @@ from app.shared.enums import (
     InvoiceType,
     InvoiceVoidReason,
     PurchaseOrderStatus,
+    SaleLineType,
     SaleStatus,
     UploadStatus,
     UserRole,
@@ -497,6 +499,7 @@ async def test_invoice_register_flags_manual_paper_returns_for_manual_adjustment
         total=Decimal(1050),
     )
     db_session.add(invoice)
+    await _return_one_line(db_session, store_id, sale_id, clerk_id, when=when)
     sale = await db_session.get(Sale, sale_id)
     assert sale is not None
     sale.status = SaleStatus.RETURNED  # 已整筆退貨，紙本依國稅局程序另行處理
@@ -525,6 +528,7 @@ async def test_invoice_register_does_not_flag_normal_electronic_returns(
     await _invoice(
         db_session, store_id, sale_id, no="AA10000050", when=date(2026, 9, 10), total="500"
     )
+    await _return_one_line(db_session, store_id, sale_id, clerk_id, when=when)
     sale = await db_session.get(Sale, sale_id)
     assert sale is not None
     sale.status = SaleStatus.RETURNED
@@ -538,3 +542,150 @@ async def test_invoice_register_does_not_flag_normal_electronic_returns(
         )
     ).json()
     assert body["manual_paper_adjustments"] == []
+
+
+async def _return_one_line(
+    session: AsyncSession, store_id: int, sale_id: int, clerk_id: int, *, when: datetime
+) -> None:
+    """在 sale 上建一行並退掉一件（部分退貨：sale.status 仍是 COMPLETED）。"""
+    line = SaleLine(
+        store_id=store_id,
+        sale_id=sale_id,
+        line_type=SaleLineType.CATALOG,
+        description="退一件",
+        qty=2,
+        unit_price=Decimal(525),
+        line_total=Decimal(1050),
+        net_amount=Decimal(1050),
+    )
+    session.add(line)
+    await session.flush()
+    customer_return = CustomerReturn(
+        store_id=store_id,
+        sale_id=sale_id,
+        reason="部分退貨",
+        clerk_user_id=clerk_id,
+        refund_amount=Decimal(525),
+        created_at=when,
+    )
+    session.add(customer_return)
+    await session.flush()
+    session.add(
+        ReturnLine(
+            store_id=store_id,
+            return_id=customer_return.id,
+            sale_line_id=line.id,
+            qty=1,
+            refund_amount=Decimal(525),
+        )
+    )
+    await session.flush()
+
+
+async def test_invoice_register_flags_partial_paper_returns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """**部分**退貨時 sale 仍是 COMPLETED——不能只看銷售狀態，否則整批漏掉。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=when)
+    db_session.add(
+        Invoice(
+            store_id=store_id,
+            sale_id=sale_id,
+            invoice_type=InvoiceType.B2C,
+            invoice_no="MP10000002",
+            invoice_date=date(2026, 9, 10),
+            status=InvoiceStatus.ISSUED,
+            issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+            net=Decimal(1000),
+            tax=Decimal(50),
+            total=Decimal(1050),
+        )
+    )
+    await _return_one_line(db_session, store_id, sale_id, clerk_id, when=when)
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["manual_paper_adjustments"]] == ["MP10000002"]
+
+
+async def test_invoice_register_flags_paper_returns_from_a_previous_month(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """8/31 開的紙本、9/10 才退——9 月的月報必須看得到這筆待調整。
+
+    以開立日篩選的話，這張發票根本不在 9 月的清單裡，於是既沒折讓也沒有任何提示。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    issued_when = datetime(2026, 8, 31, 6, 0, tzinfo=UTC)
+    returned_when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=issued_when)
+    db_session.add(
+        Invoice(
+            store_id=store_id,
+            sale_id=sale_id,
+            invoice_type=InvoiceType.B2C,
+            invoice_no="MP10000003",
+            invoice_date=date(2026, 8, 31),
+            status=InvoiceStatus.ISSUED,
+            issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+            net=Decimal(1000),
+            tax=Decimal(50),
+            total=Decimal(1050),
+            created_at=issued_when,
+        )
+    )
+    await _return_one_line(db_session, store_id, sale_id, clerk_id, when=returned_when)
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["manual_paper_adjustments"]] == ["MP10000003"]
+    assert [row["number"] for row in body["issued"]] == []  # 8 月開的票不算 9 月銷項
+
+
+async def test_invoice_register_export_includes_paper_adjustments(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """匯出檔也要有這個警示——會計拿到的是下載檔，不是畫面。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=when)
+    db_session.add(
+        Invoice(
+            store_id=store_id,
+            sale_id=sale_id,
+            invoice_type=InvoiceType.B2C,
+            invoice_no="MP10000004",
+            invoice_date=date(2026, 9, 10),
+            status=InvoiceStatus.ISSUED,
+            issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+            net=Decimal(1000),
+            tax=Decimal(50),
+            total=Decimal(1050),
+        )
+    )
+    await _return_one_line(db_session, store_id, sale_id, clerk_id, when=when)
+
+    resp = await client.get(
+        "/api/v1/reports/invoice-register",
+        params={
+            "from": "2026-09-01T00:00:00+08:00",
+            "to": "2026-10-01T00:00:00+08:00",
+            "format": "csv",
+        },
+        headers=_auth(mgr),
+    )
+    text = resp.content.decode("utf-8-sig")
+    assert "手開紙本待調整" in text
+    assert text.count("MP10000004") >= 2  # 銷項一列、待調整一列
