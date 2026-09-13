@@ -3575,9 +3575,14 @@ body {
   white-space: nowrap;
 }
 /* 交易明細對話框：上半是這筆的基本事實，下半是完整品項（可捲）。 */
+/* 高度也要卡在畫面內：POS 常見 800×600，品項一多整個對話框會長過螢幕，
+   而 backdrop 是固定置中、不可捲的——唯一的「關閉」會掉到看不到的地方（Codex 審查）。
+   外框限高並讓內容自己捲，關閉鍵永遠留在畫面上。 */
 .sale-detail-dialog {
   max-width: 720px;
   width: min(720px, 92vw);
+  max-height: calc(100vh - 2 * var(--sp-4));
+  overflow: auto;
 }
 .sale-detail-facts,
 .sale-detail-totals {
@@ -3598,6 +3603,13 @@ body {
 .sale-detail-lines-wrap {
   max-height: 45vh;
   overflow: auto;
+}
+/* 關閉鍵黏在對話框底部：品項捲動時也一直看得到、按得到。 */
+.sale-detail-dialog .pos-dialog-actions {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  padding-top: var(--sp-3);
 }
 .sale-detail-lines .num {
   text-align: right;

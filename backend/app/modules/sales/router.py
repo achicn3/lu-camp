@@ -542,6 +542,9 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
     from app.modules.returns.service import ReturnsService
 
     returned = await ReturnsService(session).returned_qty_for_sale(user.store_id, sale.id)
+    invoice = (await EInvoiceService(session).invoice_info_for_sales(user.store_id, [sale.id])).get(
+        sale.id
+    )
     clerk = await UserService(session).get_user_in_store(user.store_id, sale.clerk_user_id)
     buyer = (
         None
@@ -552,6 +555,7 @@ async def get_sale(sale_id: int, session: SessionDep, user: CurrentUserDep) -> S
         update={
             "clerk_name": None if clerk is None else clerk.username,
             "buyer_name": None if buyer is None else buyer.name,
+            "invoice_no": None if invoice is None else invoice[2],
         }
     )
 

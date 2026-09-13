@@ -142,7 +142,8 @@ function SaleDetailDialog({ sale, onClose }: { sale: SaleSummary; onClose: () =>
                 <dt>發票</dt>
                 <dd>
                   {labelFor(INVOICE_STATUS_LABELS, d.invoice_status)}
-                  {sale.invoice_no != null && <span className="row-sub">{sale.invoice_no}</span>}
+                  {/* 號碼取**這次**明細查到的，不是清單那份可能已過期的快照。 */}
+                  {d.invoice_no != null && <span className="row-sub">{d.invoice_no}</span>}
                 </dd>
               </div>
               <div>

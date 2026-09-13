@@ -724,6 +724,7 @@ async def test_get_sale_detail_names_the_clerk_and_the_buyer(
     body = detail.json()
     assert body["clerk_user_id"] == clerk_id
     assert body["clerk_name"] == "clk"
+    assert body["invoice_no"] is None  # 這筆沒開發票
     assert body["buyer_name"] == "王小明"
     # 明細本來就有品項，這裡一併確認清單頁的「查看明細」拿得到完整品項
     assert [line["description"] for line in body["lines"]] == ["飲料"]
@@ -744,3 +745,37 @@ async def test_get_sale_detail_without_buyer_has_no_buyer_name(
     body = (await client.get(f"/api/v1/sales/{created['id']}", headers=_auth(token))).json()
     assert body["buyer_contact_id"] is None
     assert body["buyer_name"] is None
+
+
+async def test_get_sale_detail_reads_the_invoice_number_fresh(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """明細的發票號碼要**當次查**：清單載入後別台才開立的發票，點開明細也要看得到號碼。"""
+    token, store_id, _ = await _seed(db_session)
+    cat = await _seed_catalog(db_session, store_id, price="100", qty=10)
+    created = (
+        await client.post(
+            "/api/v1/sales",
+            json={"lines": [_catalog_line(cat, 1)]},
+            headers=_auth(token, idem="detail-fresh-invoice"),
+        )
+    ).json()
+    before = (await client.get(f"/api/v1/sales/{created['id']}", headers=_auth(token))).json()
+    assert before["invoice_no"] is None
+
+    db_session.add(
+        Invoice(
+            store_id=store_id,
+            sale_id=created["id"],
+            invoice_no="CD87654321",
+            invoice_type=InvoiceType.B2C,
+            status=InvoiceStatus.ISSUED,
+            net=Decimal("95"),
+            tax=Decimal("5"),
+            total=Decimal("100"),
+        )
+    )
+    await db_session.flush()
+
+    after = (await client.get(f"/api/v1/sales/{created['id']}", headers=_auth(token))).json()
+    assert after["invoice_no"] == "CD87654321"

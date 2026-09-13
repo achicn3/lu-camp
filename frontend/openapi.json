@@ -9271,6 +9271,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
           "invoice_status": {
             "$ref": "#/components/schemas/SaleInvoiceStatus"
           },

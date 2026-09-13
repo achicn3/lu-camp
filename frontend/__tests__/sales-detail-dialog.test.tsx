@@ -40,8 +40,10 @@ const SUMMARY = {
   invoice_no: "AB12345678",
 };
 
+// 明細另外帶回**當次查到**的發票號碼：清單那份可能是別台開立前的舊快照。
 const DETAIL = {
   ...SUMMARY,
+  invoice_no: "ZZ99887766",
   clerk_user_id: 3,
   clerk_name: "小美",
   buyer_name: "王小明",
@@ -142,5 +144,8 @@ describe("交易紀錄的明細", () => {
     expect(within(dialog).getByText("USB 充電營燈")).toBeDefined();
     expect(within(dialog).getByText("營繩")).toBeDefined();
     expect(within(dialog).getByText("贈品")).toBeDefined();
+    // 號碼取明細當次查到的那個，不是清單的舊快照
+    expect(within(dialog).getByText("ZZ99887766")).toBeDefined();
+    expect(within(dialog).queryByText("AB12345678")).toBeNull();
   });
 });

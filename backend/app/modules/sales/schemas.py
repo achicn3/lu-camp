@@ -427,6 +427,9 @@ class SaleRead(BaseModel):
     # 由 router 經 user／contacts service 補上（§2 不跨模組讀表）；查不到 → None。
     clerk_name: str | None = None
     buyer_name: str | None = None
+    # 發票號碼跟著**這次**的明細查詢回來：清單那份可能是幾分鐘前的快照，
+    # 期間別台開立了發票，只看快照會顯示「已開立」卻沒有號碼（Codex 審查）。
+    invoice_no: str | None = None
     subtotal: NTDAmount
     tax: NTDAmount
     total: NTDAmount

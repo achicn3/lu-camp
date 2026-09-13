@@ -6704,6 +6704,8 @@ export interface components {
             gift_retail_value: string;
             /** Id */
             id: number;
+            /** Invoice No */
+            invoice_no?: string | null;
             invoice_status: components["schemas"]["SaleInvoiceStatus"];
             /**
              * Lines
