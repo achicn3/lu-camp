@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.time import store_date
 from app.modules.einvoice.models import (
     EInvoiceResultEvent,
     EInvoiceUploadQueue,
@@ -58,6 +59,9 @@ class EInvoiceRepository:
 
         **以開立日（invoice_date）歸期**——申報看的是發票日期，不是系統建檔時間；
         尚未配號／尚未開立成功的沒有開立日，改用建檔時間才不會整批消失。
+
+        期間界線一律換算成**台灣日曆日**：傳進來的是 UTC（台北 9/1 00:00 ＝ 8/31 16:00Z），
+        直接對 UTC 取 date() 會把整條界線往前挪一天，9 月的月報會混進 8/31、漏掉 9/30。
         """
         stmt = (
             select(Invoice)
@@ -66,8 +70,8 @@ class EInvoiceRepository:
                 or_(
                     and_(
                         Invoice.invoice_date.is_not(None),
-                        Invoice.invoice_date >= date_from.date(),
-                        Invoice.invoice_date < date_to.date(),
+                        Invoice.invoice_date >= store_date(date_from),
+                        Invoice.invoice_date < store_date(date_to),
                     ),
                     and_(
                         Invoice.invoice_date.is_(None),
@@ -96,6 +100,31 @@ class EInvoiceRepository:
         )
         rows = await self._session.execute(stmt)
         return [(allowance, no, sale_id) for allowance, no, sale_id in rows.all()]
+
+    async def allowance_upload_status(
+        self, store_id: int, allowance_ids: list[int]
+    ) -> dict[int, UploadStatus]:
+        """各折讓單的 G0401 上傳狀態（同一折讓取最新一筆佇列列）。
+
+        折讓在**平台核可（UPLOADED）之前**只是本地紀錄：待送或被退回的不能算進申報金額，
+        否則報出去的折讓金額在平台上根本不存在。
+        """
+        if not allowance_ids:
+            return {}
+        stmt = (
+            select(EInvoiceUploadQueue.allowance_id, EInvoiceUploadQueue.status)
+            .where(
+                EInvoiceUploadQueue.store_id == store_id,
+                EInvoiceUploadQueue.allowance_id.in_(allowance_ids),
+            )
+            .order_by(EInvoiceUploadQueue.allowance_id, EInvoiceUploadQueue.id)
+        )
+        rows = await self._session.execute(stmt)
+        latest: dict[int, UploadStatus] = {}
+        for allowance_id, status in rows.all():
+            if allowance_id is not None:
+                latest[allowance_id] = status
+        return latest
 
     async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]

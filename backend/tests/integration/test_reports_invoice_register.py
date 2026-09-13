@@ -16,16 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.einvoice.models import Invoice, InvoiceAllowance
+from app.modules.einvoice.models import EInvoiceUploadQueue, Invoice, InvoiceAllowance
 from app.modules.purchasing.models import GoodsReceipt, PurchaseOrder, Supplier
 from app.modules.sales.models import Sale
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
+    EInvoiceAction,
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
     PurchaseOrderStatus,
+    UploadStatus,
     UserRole,
 )
 
@@ -152,15 +154,25 @@ async def test_invoice_register_lists_the_period_by_category(
     allowance_invoice = await _invoice(
         db_session, store_id, allowance_sale, no="AA10000004", when=date(2026, 9, 13), total="800"
     )
+    allowance = InvoiceAllowance(
+        store_id=store_id,
+        invoice_id=allowance_invoice,
+        allowance_no="DD10000001",
+        net=Decimal(190),
+        tax=Decimal(10),
+        total=Decimal(200),
+        created_at=inside,
+    )
+    db_session.add(allowance)
+    await db_session.flush()
+    # 折讓要平台核可才算數（見另一支測試）：這筆已 UPLOADED。
     db_session.add(
-        InvoiceAllowance(
+        EInvoiceUploadQueue(
             store_id=store_id,
-            invoice_id=allowance_invoice,
-            allowance_no="DD10000001",
-            net=Decimal(190),
-            tax=Decimal(10),
-            total=Decimal(200),
-            created_at=inside,
+            action=EInvoiceAction.ALLOWANCE,
+            message_type="G0401",
+            allowance_id=allowance.id,
+            status=UploadStatus.UPLOADED,
         )
     )
     # 期間外的發票不能混進來
@@ -295,3 +307,165 @@ async def test_invoice_register_is_manager_only(
         headers=_auth(clerk),
     )
     assert resp.status_code == 403
+
+
+async def test_invoice_register_uses_taiwan_calendar_dates(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """期間是**台灣日曆日**：9 月的月報不能混進 8/31、也不能漏掉 9/30。
+
+    from/to 進到後端是 UTC（9/1 00:00+08 ＝ 8/31 16:00Z）。直接對 UTC 取 .date()
+    會把界線整個往前挪一天——申報數字就從第一步錯起。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    aug31 = await _sale(db_session, store_id, clerk_id, total="100", when=when)
+    await _invoice(
+        db_session, store_id, aug31, no="AA20260831", when=date(2026, 8, 31), total="100"
+    )
+    sep30 = await _sale(db_session, store_id, clerk_id, total="200", when=when)
+    await _invoice(
+        db_session, store_id, sep30, no="AA20260930", when=date(2026, 9, 30), total="200"
+    )
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    numbers = {row["number"] for row in body["issued"]}
+    assert "AA20260831" not in numbers  # 8/31 是上個月
+    assert "AA20260930" in numbers  # 9/30 仍在本月
+
+
+async def test_invoice_register_keeps_invoices_whose_void_is_unconfirmed(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """作廢待平台確認（VOID_PENDING）之前，那張發票**仍然有效**（ADR-019）。
+
+    先從銷項拿掉會低報營業額；但也不能不提醒，所以另外列進「未完成」。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=when)
+    await _invoice(
+        db_session,
+        store_id,
+        sale_id,
+        no="AA10000030",
+        when=date(2026, 9, 10),
+        total="1050",
+        status=InvoiceStatus.VOID_PENDING,
+        void_reason=InvoiceVoidReason.SALE_VOID,  # 已申請作廢，平台尚未確認
+    )
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["issued"]] == ["AA10000030"]
+    assert body["totals"]["issued_total"] == "1050"  # 平台確認作廢前仍是銷項
+    assert body["totals"]["voided_total"] == "0"
+    assert [row["number"] for row in body["unfinished"]] == ["AA10000030"]  # 但要提醒去收尾
+
+
+async def test_invoice_register_excludes_drafts_that_were_never_issued(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """開立前就被作廢的（沒有號碼）不是「作廢發票」——平台上從來沒有那張票。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="700", when=when)
+    invoice = Invoice(
+        store_id=store_id,
+        sale_id=sale_id,
+        invoice_type=InvoiceType.B2C,
+        invoice_no=None,  # 從未取得字軌號碼
+        invoice_date=None,
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+        net=Decimal(667),
+        tax=Decimal(33),
+        total=Decimal(700),
+        created_at=when,
+    )
+    db_session.add(invoice)
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert body["voided"] == []
+    assert body["totals"]["voided_total"] == "0"
+    assert len(body["unfinished"]) == 1  # 仍要看得到，但不是作廢稅單
+
+
+async def test_invoice_register_separates_allowances_the_platform_has_not_accepted(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """折讓要平台核可（G0401 UPLOADED）才算數；待送或被退回的不能進申報合計。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="800", when=when)
+    invoice_id = await _invoice(
+        db_session, store_id, sale_id, no="AA10000040", when=date(2026, 9, 10), total="800"
+    )
+    accepted = InvoiceAllowance(
+        store_id=store_id,
+        invoice_id=invoice_id,
+        allowance_no="DD10000010",
+        net=Decimal(95),
+        tax=Decimal(5),
+        total=Decimal(100),
+        created_at=when,
+    )
+    pending = InvoiceAllowance(
+        store_id=store_id,
+        invoice_id=invoice_id,
+        allowance_no=None,
+        net=Decimal(190),
+        tax=Decimal(10),
+        total=Decimal(200),
+        created_at=when,
+    )
+    db_session.add_all([accepted, pending])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            EInvoiceUploadQueue(
+                store_id=store_id,
+                action=EInvoiceAction.ALLOWANCE,
+                message_type="G0401",
+                allowance_id=accepted.id,
+                status=UploadStatus.UPLOADED,
+            ),
+            EInvoiceUploadQueue(
+                store_id=store_id,
+                action=EInvoiceAction.ALLOWANCE,
+                message_type="G0401",
+                allowance_id=pending.id,
+                status=UploadStatus.FAILED,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["allowances"]] == ["DD10000010"]
+    assert body["totals"]["allowance_total"] == "100"  # 被退回的 200 不算
+    assert any(row["total"] == "200" for row in body["unfinished"])

@@ -7,6 +7,7 @@ from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.time import store_date
 from app.modules.purchasing.models import (
     GoodsReceipt,
     PurchaseOrder,
@@ -143,6 +144,7 @@ class PurchasingRepository:
         """期間內已登記進項發票的收貨批次＋供應商名（申報月報）。
 
         以**發票日期**歸期（與銷項同口徑）；收貨與發票日期常不同月，用收貨日會錯月。
+        界線換算成台灣日曆日（同 einvoice：對 UTC 取 date() 會整條往前挪一天）。
         """
         stmt = (
             select(GoodsReceipt, PurchaseOrder.supplier_name)
@@ -150,8 +152,8 @@ class PurchasingRepository:
             .where(
                 GoodsReceipt.store_id == store_id,
                 GoodsReceipt.invoice_number.is_not(None),
-                GoodsReceipt.invoice_date >= date_from.date(),
-                GoodsReceipt.invoice_date < date_to.date(),
+                GoodsReceipt.invoice_date >= store_date(date_from),
+                GoodsReceipt.invoice_date < store_date(date_to),
             )
             .order_by(GoodsReceipt.invoice_date, GoodsReceipt.id)
         )

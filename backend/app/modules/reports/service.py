@@ -75,7 +75,13 @@ from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.service import UserService
-from app.shared.enums import CampaignStatus, InvoiceStatus, OwnershipType, ServiceMode
+from app.shared.enums import (
+    CampaignStatus,
+    InvoiceStatus,
+    OwnershipType,
+    ServiceMode,
+    UploadStatus,
+)
 from app.shared.exceptions import DomainError
 
 
@@ -624,28 +630,45 @@ class ReportsService:
                 sale_id=invoice.sale_id,
                 reference=f"交易 #{invoice.sale_id}",
             )
+            # 曾經真的開出去（有字軌號碼）才是稅單；開立前就作廢的只是本地草稿，
+            # 平台上從來沒有那張票，不能算成「作廢發票」（docs/24）。
+            was_issued = invoice.invoice_no is not None
             if invoice.status == InvoiceStatus.ISSUED:
                 issued.append(row)
-            elif invoice.status == InvoiceStatus.VOID:
+            elif invoice.status == InvoiceStatus.VOID_PENDING and was_issued:
+                # 作廢已申請、平台尚未確認：那張發票**現在仍然有效**（ADR-019），
+                # 先從銷項拿掉會低報營業額；但也要提醒去收尾，故兩邊都列。
+                issued.append(row)
+                unfinished.append(row)
+            elif invoice.status == InvoiceStatus.VOID and was_issued:
                 voided.append(row)
             else:
                 unfinished.append(row)
 
-        allowances = [
-            InvoiceRegisterRow(
+        # 折讓要平台核可（G0401 UPLOADED）才算數；待送或被退回的另列、不進合計。
+        allowance_status = await self._einvoice.allowance_upload_status(
+            store_id, [allowance.id for allowance, _no, _sale_id in allowance_rows]
+        )
+        allowances: list[InvoiceRegisterRow] = []
+        for allowance, invoice_no, sale_id in allowance_rows:
+            upload = allowance_status.get(allowance.id)
+            row = InvoiceRegisterRow(
                 number=allowance.allowance_no,
-                issued_on=allowance.created_at.date(),
+                issued_on=store_date(allowance.created_at),
                 counterparty=None,
                 net=allowance.net,
                 tax=allowance.tax,
                 total=allowance.total,
-                status="VOIDED" if allowance.voided else None,
+                status="VOIDED" if allowance.voided else (None if upload is None else upload.value),
                 invoice_no=invoice_no,
                 sale_id=sale_id,
-                reference=f"交易 #{sale_id}",
+                reference=f"折讓・交易 #{sale_id}",
             )
-            for allowance, invoice_no, sale_id in allowance_rows
-        ]
+            if upload == UploadStatus.UPLOADED and not allowance.voided:
+                allowances.append(row)
+            else:
+                unfinished.append(row)
+
         input_invoices = [
             InvoiceRegisterRow(
                 number=receipt.invoice_number,

@@ -416,6 +416,12 @@ class EInvoiceService:
         """期間內的折讓單＋原發票號碼／銷售編號（申報月報）。"""
         return await self._repo.allowances_in_period(store_id, date_from, date_to)
 
+    async def allowance_upload_status(
+        self, store_id: int, allowance_ids: list[int]
+    ) -> dict[int, UploadStatus]:
+        """各折讓單的 G0401 上傳狀態（申報月報要據此排除未獲平台核可的）。"""
+        return await self._repo.allowance_upload_status(store_id, allowance_ids)
+
     async def invoice_info_for_sales(
         self, store_id: int, sale_ids: list[int]
     ) -> dict[int, tuple[EInvoiceIssueChannel, bool, str | None]]:
