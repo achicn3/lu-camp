@@ -180,6 +180,16 @@ describe("交易紀錄的明細", () => {
       expect(dialog.contains(document.activeElement)).toBe(true);
     }
 
+    // 品項區要在焦點循環裡：品項一多會出現捲軸，只用鍵盤的人得聚焦到它才捲得動。
+    const lines = within(dialog).getByRole("group", { name: "交易品項（可捲動）" });
+    expect(lines.tabIndex).toBe(0);
+    let reachedLines = false;
+    for (let i = 0; i < 6; i += 1) {
+      await userEvent.tab();
+      if (document.activeElement === lines) reachedLines = true;
+    }
+    expect(reachedLines).toBe(true);
+
     await userEvent.click(within(dialog).getByRole("button", { name: "關閉" }));
     expect(screen.queryByRole("dialog", { name: "交易明細" })).toBeNull();
     expect(document.activeElement).toBe(opener);

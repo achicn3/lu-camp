@@ -171,7 +171,14 @@ function SaleDetailDialog({ sale, onClose }: { sale: SaleSummary; onClose: () =>
               )}
             </dl>
 
-            <div className="sale-detail-lines-wrap">
+            {/* 品項多到超出這個框時要捲：只用鍵盤的人得先能聚焦到這裡才捲得動
+                （焦點鎖只認得可聚焦元素，少了 tabIndex 就會在「關閉」上打轉）。 */}
+            <div
+              className="sale-detail-lines-wrap"
+              tabIndex={0}
+              role="group"
+              aria-label="交易品項（可捲動）"
+            >
               <table className="data-table sale-detail-lines">
                 <thead>
                   <tr>
