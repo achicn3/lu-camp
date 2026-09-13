@@ -36,8 +36,12 @@ export function useDialogFocus<T extends HTMLElement>() {
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
+      // 點標題或背景會把焦點放到外框本身（tabIndex=-1）。此時 Shift+Tab 的「上一個」
+      // 就是對話框外面的東西——外框也要算成往回的邊界，否則焦點會溜到背景那一列的
+      // 「作廢」，Enter 就在唯讀視窗背後開了作廢確認（Codex 審查實測）。
       const leavingForward = !event.shiftKey && (active === last || !node.contains(active));
-      const leavingBackward = event.shiftKey && (active === first || !node.contains(active));
+      const leavingBackward =
+        event.shiftKey && (active === first || active === node || !node.contains(active));
       if (leavingForward) {
         event.preventDefault();
         first.focus();

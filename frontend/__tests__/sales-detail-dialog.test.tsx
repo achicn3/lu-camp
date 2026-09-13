@@ -194,4 +194,39 @@ describe("交易紀錄的明細", () => {
     expect(screen.queryByRole("dialog", { name: "交易明細" })).toBeNull();
     expect(document.activeElement).toBe(opener);
   });
+
+  it("點過標題或背景之後 Shift+Tab 也出不去（焦點落在外框時的破口）", async () => {
+    // 點標題／背景會把焦點放到對話框外框本身；此時 Shift+Tab 若沒被擋，
+    // 會跳到背景那一列的「作廢」，Enter 就在明細背後開了作廢確認（Codex 審查實測）。
+    setToken(fakeJwt({ sub: "1", role: "MANAGER", store_id: 1 }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        const json = (data: unknown) =>
+          new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        if (/\/api\/v1\/sales\/\d+$/.test(url.pathname)) return json(DETAIL);
+        if (url.pathname === "/api/v1/sales") return json([SUMMARY]);
+        return json([]);
+      }),
+    );
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: /USB 充電營燈/ });
+    await userEvent.click(within(row).getByRole("button", { name: /查看銷售 42 的明細/ }));
+    const dialog = await screen.findByRole("dialog", { name: "交易明細" });
+
+    await userEvent.click(within(dialog).getByRole("heading", { name: /交易明細/ }));
+    await userEvent.tab({ shift: true });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // 再往回按幾次也一樣出不去
+    for (let i = 0; i < 3; i += 1) {
+      await userEvent.tab({ shift: true });
+      expect(dialog.contains(document.activeElement)).toBe(true);
+    }
+  });
 });
