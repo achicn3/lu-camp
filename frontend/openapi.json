@@ -5752,6 +5752,13 @@
             "title": "Issued",
             "type": "array"
           },
+          "manual_paper_adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Manual Paper Adjustments",
+            "type": "array"
+          },
           "store_id": {
             "title": "Store Id",
             "type": "integer"
@@ -5784,6 +5791,7 @@
           "allowances",
           "input_invoices",
           "unfinished",
+          "manual_paper_adjustments",
           "totals"
         ],
         "title": "InvoiceRegisterReport",

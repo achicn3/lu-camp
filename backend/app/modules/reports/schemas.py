@@ -641,4 +641,7 @@ class InvoiceRegisterReport(BaseModel):
     allowances: list[InvoiceRegisterRow]
     input_invoices: list[InvoiceRegisterRow]
     unfinished: list[InvoiceRegisterRow]
+    # 手開紙本的單退貨／作廢時**不會**產生電子折讓或作廢（docs/36 由店家線下依國稅局
+    # 程序處理）。不標出來，月報會顯示成「整筆退了但銷項照算、折讓 0」而毫無提示。
+    manual_paper_adjustments: list[InvoiceRegisterRow]
     totals: InvoiceRegisterTotals

@@ -1476,6 +1476,13 @@ function InvoiceRegisterPanel() {
           rows: report.unfinished,
           note: "待開立或平台退回：申報前要先處理掉，這些不計入銷項合計。",
         },
+        {
+          label: "手開紙本待調整",
+          rows: report.manual_paper_adjustments,
+          note:
+            "這幾筆是手開紙本發票、原交易已退貨或作廢。電子端不會自動產生折讓或作廢，" +
+            "要依國稅局程序處理紙本；在處理完之前，上面的銷項合計仍包含它們。",
+        },
       ]
     : [];
 

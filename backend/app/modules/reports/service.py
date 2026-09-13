@@ -77,8 +77,10 @@ from app.modules.storecredit.suggestion_service import PremiumSuggestionService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     CampaignStatus,
+    EInvoiceIssueChannel,
     InvoiceStatus,
     OwnershipType,
+    SaleStatus,
     ServiceMode,
     UploadStatus,
 )
@@ -682,6 +684,24 @@ class ReportsService:
             for receipt, supplier_name in receipts
         ]
 
+        # 手開紙本＋原銷售已退貨/作廢：電子端不會有任何折讓或作廢紀錄，只能請人去處理紙本。
+        paper_sale_ids = [
+            invoice.sale_id
+            for invoice in invoices
+            if invoice.issue_channel == EInvoiceIssueChannel.MANUAL_PAPER
+            and invoice.status == InvoiceStatus.ISSUED
+        ]
+        paper_sales = {
+            sale.id: sale.status
+            for sale in await self._sales.list_sales_by_ids(store_id, paper_sale_ids)
+        }
+        manual_paper_adjustments = [
+            row.model_copy(update={"status": paper_sales[row.sale_id].value})
+            for row in issued
+            if row.sale_id is not None
+            and paper_sales.get(row.sale_id) in (SaleStatus.RETURNED, SaleStatus.VOIDED)
+        ]
+
         def _sum(rows: list[InvoiceRegisterRow], field: str) -> Decimal:
             return Decimal(sum(getattr(row, field) for row in rows))
 
@@ -695,6 +715,7 @@ class ReportsService:
             allowances=allowances,
             input_invoices=input_invoices,
             unfinished=unfinished,
+            manual_paper_adjustments=manual_paper_adjustments,
             totals=InvoiceRegisterTotals(
                 issued_total=_sum(issued, "total"),
                 issued_net=_sum(issued, "net"),

@@ -23,10 +23,12 @@ from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import (
     EInvoiceAction,
+    EInvoiceIssueChannel,
     InvoiceStatus,
     InvoiceType,
     InvoiceVoidReason,
     PurchaseOrderStatus,
+    SaleStatus,
     UploadStatus,
     UserRole,
 )
@@ -469,3 +471,70 @@ async def test_invoice_register_separates_allowances_the_platform_has_not_accept
     assert [row["number"] for row in body["allowances"]] == ["DD10000010"]
     assert body["totals"]["allowance_total"] == "100"  # 被退回的 200 不算
     assert any(row["total"] == "200" for row in body["unfinished"])
+
+
+async def test_invoice_register_flags_manual_paper_returns_for_manual_adjustment(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """手開紙本的單退貨後**不會**產生電子折讓（docs/36）——月報必須自己把它標出來。
+
+    不標的話：整筆退掉的 1,050 元在月報上仍是 1,050 元銷項、折讓 0，會計照著申報就錯了，
+    而且畫面上完全看不出哪裡要人工處理。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=when)
+    invoice = Invoice(
+        store_id=store_id,
+        sale_id=sale_id,
+        invoice_type=InvoiceType.B2C,
+        invoice_no="MP10000001",
+        invoice_date=date(2026, 9, 10),
+        status=InvoiceStatus.ISSUED,
+        issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+        net=Decimal(1000),
+        tax=Decimal(50),
+        total=Decimal(1050),
+    )
+    db_session.add(invoice)
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    sale.status = SaleStatus.RETURNED  # 已整筆退貨，紙本依國稅局程序另行處理
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["manual_paper_adjustments"]] == ["MP10000001"]
+    assert body["manual_paper_adjustments"][0]["status"] == "RETURNED"
+    # 發票本身仍是有效銷項（紙本處置是店家線下作業），但要有這張待辦清單
+    assert [row["number"] for row in body["issued"]] == ["MP10000001"]
+
+
+async def test_invoice_register_does_not_flag_normal_electronic_returns(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """電子發票的退貨有折讓／作廢流程接手，不該混進人工待辦清單。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="500", when=when)
+    await _invoice(
+        db_session, store_id, sale_id, no="AA10000050", when=date(2026, 9, 10), total="500"
+    )
+    sale = await db_session.get(Sale, sale_id)
+    assert sale is not None
+    sale.status = SaleStatus.RETURNED
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert body["manual_paper_adjustments"] == []

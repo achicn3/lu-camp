@@ -5365,6 +5365,8 @@ export interface components {
             input_invoices: components["schemas"]["InvoiceRegisterRow"][];
             /** Issued */
             issued: components["schemas"]["InvoiceRegisterRow"][];
+            /** Manual Paper Adjustments */
+            manual_paper_adjustments: components["schemas"]["InvoiceRegisterRow"][];
             /** Store Id */
             store_id: number;
             totals: components["schemas"]["InvoiceRegisterTotals"];
