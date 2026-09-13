@@ -37,6 +37,17 @@ def store_datetime_iso(value: datetime) -> str:
     return _aware_utc(value).astimezone(STORE_TIME_ZONE).isoformat()
 
 
+
+def store_period_end_day(date_to: datetime) -> date:
+    """報表期間的結束界線 → 要**涵蓋到**的最後一個台北日曆日。
+
+    半開區間的 `to` 通常是次日 00:00（台北），此時最後一天是前一天；但呼叫端也可能
+    送 9/30 23:59:59 這種寫法，那一整天仍必須算進來。統一用「結束瞬間往前一微秒所在的
+    台北日」，兩種寫法都得到同一個答案，不會整天無聲消失。
+    """
+    return store_date(date_to - timedelta(microseconds=1))
+
+
 def store_day_bounds(value: date) -> tuple[datetime, datetime]:
     """回傳台灣營業日對應的 UTC 半開區間 ``[start, end)``。"""
     local_start = datetime(value.year, value.month, value.day, tzinfo=STORE_TIME_ZONE)

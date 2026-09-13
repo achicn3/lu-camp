@@ -1477,11 +1477,17 @@ function InvoiceRegisterPanel() {
           note: "待開立或平台退回：申報前要先處理掉，這些不計入銷項合計。",
         },
         {
+          label: "前期發票本期作廢",
+          rows: report.voided_from_earlier_periods,
+          note: "上個月（或更早）開立、這個月才完成作廢：要回頭辦那一期的更正；不計入本期合計。",
+        },
+        {
           label: "手開紙本待調整",
           rows: report.manual_paper_adjustments,
           note:
-            "這幾筆是手開紙本發票、原交易已退貨或作廢。電子端不會自動產生折讓或作廢，" +
-            "要依國稅局程序處理紙本；在處理完之前，上面的銷項合計仍包含它們。",
+            "這幾筆是手開紙本發票、原交易在本期有退貨。電子端不會自動產生折讓或作廢，" +
+            "要依國稅局程序處理紙本；在處理完之前，上面的銷項合計仍包含它們，" +
+            "可扣的金額見上方「紙本待調整退款」。",
         },
       ]
     : [];
@@ -1530,6 +1536,10 @@ function InvoiceRegisterPanel() {
             <div className="rpt-stat">
               <dt>進項稅額</dt>
               <dd><MoneyText value={report.totals.input_tax} /></dd>
+            </div>
+            <div className="rpt-stat">
+              <dt>紙本待調整退款</dt>
+              <dd><MoneyText value={report.totals.manual_paper_refund_total} /></dd>
             </div>
           </dl>
 

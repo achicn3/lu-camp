@@ -7,7 +7,7 @@ from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.time import store_date
+from app.core.time import store_date, store_period_end_day
 from app.modules.purchasing.models import (
     GoodsReceipt,
     PurchaseOrder,
@@ -153,7 +153,7 @@ class PurchasingRepository:
                 GoodsReceipt.store_id == store_id,
                 GoodsReceipt.invoice_number.is_not(None),
                 GoodsReceipt.invoice_date >= store_date(date_from),
-                GoodsReceipt.invoice_date < store_date(date_to),
+                GoodsReceipt.invoice_date <= store_period_end_day(date_to),
             )
             .order_by(GoodsReceipt.invoice_date, GoodsReceipt.id)
         )

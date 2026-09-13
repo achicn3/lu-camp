@@ -12,7 +12,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.core.time import store_date
+from app.core.time import store_date, store_period_end_day
 from app.modules.einvoice.models import (
     EInvoiceResultEvent,
     EInvoiceUploadQueue,
@@ -62,6 +62,8 @@ class EInvoiceRepository:
 
         期間界線一律換算成**台灣日曆日**：傳進來的是 UTC（台北 9/1 00:00 ＝ 8/31 16:00Z），
         直接對 UTC 取 date() 會把整條界線往前挪一天，9 月的月報會混進 8/31、漏掉 9/30。
+        結束界線取「涵蓋結束瞬間的那個台北日」：`to` 給 9/30 23:59:59（看起來很合理的月底寫法）
+        時，仍要含 9/30 整天——否則整天的銷項會無聲消失。
         """
         stmt = (
             select(Invoice)
@@ -71,7 +73,7 @@ class EInvoiceRepository:
                     and_(
                         Invoice.invoice_date.is_not(None),
                         Invoice.invoice_date >= store_date(date_from),
-                        Invoice.invoice_date < store_date(date_to),
+                        Invoice.invoice_date <= store_period_end_day(date_to),
                     ),
                     and_(
                         Invoice.invoice_date.is_(None),
@@ -100,6 +102,34 @@ class EInvoiceRepository:
         )
         rows = await self._session.execute(stmt)
         return [(allowance, no, sale_id) for allowance, no, sale_id in rows.all()]
+
+    async def invoices_voided_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[Invoice]:
+        """本期**完成作廢**的發票（依 F0501 送出成功的時間），不論發票是哪一期開的。
+
+        8/31 開、9/2 作廢的票，用開立日歸期的話在 9 月月報完全看不到——既不在銷項、
+        也不在作廢，沒有任何提示要去辦更正。
+        """
+        stmt = (
+            select(Invoice)
+            .join(
+                EInvoiceUploadQueue,
+                and_(
+                    EInvoiceUploadQueue.invoice_id == Invoice.id,
+                    EInvoiceUploadQueue.store_id == Invoice.store_id,
+                ),
+            )
+            .where(
+                Invoice.store_id == store_id,
+                EInvoiceUploadQueue.action == EInvoiceAction.VOID,
+                EInvoiceUploadQueue.status == UploadStatus.UPLOADED,
+                EInvoiceUploadQueue.uploaded_at >= date_from,
+                EInvoiceUploadQueue.uploaded_at < date_to,
+            )
+            .order_by(Invoice.id)
+        )
+        return list((await self._session.scalars(stmt)).all())
 
     async def invoices_for_sales(self, store_id: int, sale_ids: list[int]) -> list[Invoice]:
         """指定銷售的發票（**不套期間**）——跨月退貨時原發票不在本期清單裡。"""

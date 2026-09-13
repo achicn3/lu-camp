@@ -537,10 +537,16 @@ async def invoice_register(
         ("店別", str(report.store_id)),
         ("期間起", store_datetime_iso(report.date_from)),
         ("期間迄", store_datetime_iso(report.date_to)),
+        # 畫面顯示幾個數字，匯出就要有幾個：少了稅額，會計會自己去加總「稅額」欄，
+        # 而那一欄混著作廢、未完成與進項（同一張票還可能出現兩次）——申報就錯了。
         ("銷項合計", format_ntd(report.totals.issued_total)),
+        ("銷項稅額", format_ntd(report.totals.issued_tax)),
         ("作廢合計", format_ntd(report.totals.voided_total)),
         ("折讓合計", format_ntd(report.totals.allowance_total)),
+        ("折讓稅額", format_ntd(report.totals.allowance_tax)),
         ("進項合計", format_ntd(report.totals.input_total)),
+        ("進項稅額", format_ntd(report.totals.input_tax)),
+        ("手開紙本待調整退款", format_ntd(report.totals.manual_paper_refund_total)),
     ]
     categories = [
         ("銷項", report.issued),
@@ -550,6 +556,7 @@ async def invoice_register(
         ("未完成", report.unfinished),
         # 會計拿到的是下載檔、不是畫面：警示不進匯出等於沒有警示。
         ("手開紙本待調整", report.manual_paper_adjustments),
+        ("前期發票本期作廢", report.voided_from_earlier_periods),
     ]
     exp = TabularExport(
         sheet="發票月報",

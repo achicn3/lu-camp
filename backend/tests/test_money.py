@@ -330,3 +330,14 @@ def test_consignment_breakdown_matches_the_stored_amounts_for_any_input() -> Non
 def test_consignment_breakdown_with_zero_tax_has_no_tax_line() -> None:
     net, tax, commission_net = consignment_breakdown(Decimal("1000"), Decimal("500"), Decimal(0))
     assert (net, tax, commission_net) == (1000, 0, 500)
+
+
+def test_consignment_breakdown_never_shows_a_negative_share_for_legacy_rows() -> None:
+    """改制前的舊結算（以含稅價抽成、抽成又低）扣掉稅會變負——畫面不能出現「未稅 −50」。
+
+    ADR-021 §4 明說舊列不回溯改寫，所以這種資料會一直存在；夾在 0，
+    抽成與應付仍是當初存下來的金額。
+    """
+    net, tax, commission_net = consignment_breakdown(Decimal("1050"), Decimal("0"), RATE)
+    assert (net, tax) == (1000, 50)
+    assert commission_net == 0

@@ -416,6 +416,12 @@ class EInvoiceService:
         """期間內的折讓單＋原發票號碼／銷售編號（申報月報）。"""
         return await self._repo.allowances_in_period(store_id, date_from, date_to)
 
+    async def invoices_voided_in_period(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> list[Invoice]:
+        """本期完成作廢的發票（申報月報：前期開立、本期作廢的也要看得到）。"""
+        return await self._repo.invoices_voided_in_period(store_id, date_from, date_to)
+
     async def invoices_for_sales(self, store_id: int, sale_ids: list[int]) -> list[Invoice]:
         """指定銷售的發票（不套期間；申報月報處理跨月退貨用）。"""
         return await self._repo.invoices_for_sales(store_id, sale_ids)

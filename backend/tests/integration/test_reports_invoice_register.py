@@ -57,12 +57,19 @@ def _auth(token: str) -> dict[str, str]:
 
 
 async def _seed(session: AsyncSession) -> tuple[str, str, int, int]:
-    """建店＋店長/店員，回 (manager_token, clerk_token, store_id, clerk_id)。"""
+    """建店＋店長/店員，回 (manager_token, clerk_token, store_id, clerk_id)。
+
+    帳號名帶店 id：跨店測試會建第二家店，username 全庫唯一。
+    """
     store = Store(name="發票月報店")
     session.add(store)
     await session.flush()
-    mgr = User(store_id=store.id, username="ir-mgr", password_hash="h", role=UserRole.MANAGER)
-    clerk = User(store_id=store.id, username="ir-clk", password_hash="h", role=UserRole.CLERK)
+    mgr = User(
+        store_id=store.id, username=f"ir-mgr-{store.id}", password_hash="h", role=UserRole.MANAGER
+    )
+    clerk = User(
+        store_id=store.id, username=f"ir-clk-{store.id}", password_hash="h", role=UserRole.CLERK
+    )
     session.add_all([mgr, clerk])
     await session.flush()
     return (
@@ -512,8 +519,12 @@ async def test_invoice_register_flags_manual_paper_returns_for_manual_adjustment
             headers=_auth(mgr),
         )
     ).json()
-    assert [row["number"] for row in body["manual_paper_adjustments"]] == ["MP10000001"]
-    assert body["manual_paper_adjustments"][0]["status"] == "RETURNED"
+    row = body["manual_paper_adjustments"][0]
+    assert [r["number"] for r in body["manual_paper_adjustments"]] == ["MP10000001"]
+    # 退了多少要看得出來：這筆只退了 525（部分），不是整張 1,050
+    assert row["status"] == "部分退貨"
+    assert "本期退款 525" in row["reference"]
+    assert body["totals"]["manual_paper_refund_total"] == "525"
     # 發票本身仍是有效銷項（紙本處置是店家線下作業），但要有這張待辦清單
     assert [row["number"] for row in body["issued"]] == ["MP10000001"]
 
@@ -689,3 +700,308 @@ async def test_invoice_register_export_includes_paper_adjustments(
     text = resp.content.decode("utf-8-sig")
     assert "手開紙本待調整" in text
     assert text.count("MP10000004") >= 2  # 銷項一列、待調整一列
+
+
+async def _input_invoice(
+    session: AsyncSession,
+    store_id: int,
+    clerk_id: int,
+    *,
+    number: str,
+    when: date,
+    total: str,
+) -> None:
+    """建一張進項發票（供應商＋採購單＋收貨批次）。"""
+    supplier = Supplier(store_id=store_id, name=f"供應商{number}")
+    session.add(supplier)
+    await session.flush()
+    po = PurchaseOrder(
+        store_id=store_id,
+        supplier_id=supplier.id,
+        supplier_name=supplier.name,
+        status=PurchaseOrderStatus.RECEIVED,
+        ordered_by=clerk_id,
+    )
+    session.add(po)
+    await session.flush()
+    net = Decimal(int(Decimal(total) / Decimal("1.05")))
+    session.add(
+        GoodsReceipt(
+            store_id=store_id,
+            purchase_order_id=po.id,
+            received_by=clerk_id,
+            invoice_number=number,
+            invoice_date=when,
+            invoice_net=net,
+            invoice_tax=Decimal(total) - net,
+            invoice_total=Decimal(total),
+        )
+    )
+    await session.flush()
+
+
+async def test_invoice_register_covers_the_whole_last_day_even_if_to_is_23_59(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """`to` 寫成 9/30 23:59:59（很自然的月底寫法）時，9/30 整天仍要算進來。
+
+    只用「台北日 <」當界線的話，這一整天的銷項與進項會無聲消失——而這支端點的輸出
+    是拿去申報的。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 30, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="300", when=when)
+    await _invoice(
+        db_session, store_id, sale_id, no="AA20260930", when=date(2026, 9, 30), total="300"
+    )
+    await _input_invoice(
+        db_session, store_id, clerk_id, number="BB20260930", when=date(2026, 9, 30), total="105"
+    )
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-09-30T23:59:59+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["issued"]] == ["AA20260930"]
+    assert [row["number"] for row in body["input_invoices"]] == ["BB20260930"]
+
+
+async def test_invoice_register_input_invoices_respect_taiwan_day_boundaries(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """進項的期間界線也要用台北日（原本只有銷項有測試，進項改壞了不會紅）。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    await _input_invoice(
+        db_session, store_id, clerk_id, number="BB20260831", when=date(2026, 8, 31), total="105"
+    )
+    await _input_invoice(
+        db_session, store_id, clerk_id, number="BB20260930", when=date(2026, 9, 30), total="210"
+    )
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    numbers = {row["number"] for row in body["input_invoices"]}
+    assert numbers == {"BB20260930"}  # 8/31 是上個月
+
+
+async def test_invoice_register_allowance_period_uses_taiwan_time(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """折讓依建立時間歸期：台北 9/30 23:50（＝ UTC 15:50）仍屬 9 月。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    sale_id = await _sale(
+        db_session, store_id, clerk_id, total="800", when=datetime(2026, 9, 20, 6, tzinfo=UTC)
+    )
+    invoice_id = await _invoice(
+        db_session, store_id, sale_id, no="AA10000060", when=date(2026, 9, 20), total="800"
+    )
+    late = InvoiceAllowance(
+        store_id=store_id,
+        invoice_id=invoice_id,
+        allowance_no="DD20260930",
+        net=Decimal(95),
+        tax=Decimal(5),
+        total=Decimal(100),
+        created_at=datetime(2026, 9, 30, 15, 50, tzinfo=UTC),  # 台北 9/30 23:50
+    )
+    db_session.add(late)
+    await db_session.flush()
+    db_session.add(
+        EInvoiceUploadQueue(
+            store_id=store_id,
+            action=EInvoiceAction.ALLOWANCE,
+            message_type="G0401",
+            allowance_id=late.id,
+            status=UploadStatus.UPLOADED,
+        )
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["allowances"]] == ["DD20260930"]
+    assert body["allowances"][0]["issued_on"] == "2026-09-30"  # 顯示日期也要是台北日
+
+
+async def test_invoice_register_never_leaks_another_store(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """§4 店別範圍：別家店的發票、折讓、進項、紙本待調整都不得出現在本店月報。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    other_mgr, _other_clerk, other_store, other_clerk = await _seed(db_session)
+    when = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
+
+    mine = await _sale(db_session, store_id, clerk_id, total="1050", when=when)
+    await _invoice(
+        db_session, store_id, mine, no="AA10000070", when=date(2026, 9, 10), total="1050"
+    )
+    await _input_invoice(
+        db_session, store_id, clerk_id, number="BB10000070", when=date(2026, 9, 10), total="105"
+    )
+
+    theirs = await _sale(db_session, other_store, other_clerk, total="9999", when=when)
+    await _invoice(
+        db_session, other_store, theirs, no="ZZ99999999", when=date(2026, 9, 10), total="9999"
+    )
+    await _input_invoice(
+        db_session,
+        other_store,
+        other_clerk,
+        number="ZZ88888888",
+        when=date(2026, 9, 10),
+        total="210",
+    )
+    paper_sale = await _sale(db_session, other_store, other_clerk, total="1050", when=when)
+    db_session.add(
+        Invoice(
+            store_id=other_store,
+            sale_id=paper_sale,
+            invoice_type=InvoiceType.B2C,
+            invoice_no="ZZ77777777",
+            invoice_date=date(2026, 9, 10),
+            status=InvoiceStatus.ISSUED,
+            issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+            net=Decimal(1000),
+            tax=Decimal(50),
+            total=Decimal(1050),
+        )
+    )
+    await _return_one_line(db_session, other_store, paper_sale, other_clerk, when=when)
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    every_number = {
+        row["number"]
+        for key in ("issued", "voided", "allowances", "input_invoices", "unfinished",
+                    "manual_paper_adjustments")
+        for row in body[key]
+    }
+    assert every_number == {"AA10000070", "BB10000070"}
+    assert body["totals"]["issued_total"] == "1050"
+
+    # 另一家店看到的是自己的那些
+    other_body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(other_mgr),
+        )
+    ).json()
+    assert {row["number"] for row in other_body["issued"]} == {"ZZ99999999", "ZZ77777777"}
+    assert [row["number"] for row in other_body["manual_paper_adjustments"]] == ["ZZ77777777"]
+
+
+async def test_invoice_register_shows_earlier_invoices_voided_this_period(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """8/31 開、9/2 才完成作廢的票：9 月月報要看得到，否則沒人知道要去辦上期更正。
+
+    用開立日歸期的話，它既不在 9 月的銷項、也不在 9 月的作廢，完全消失。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    issued_when = datetime(2026, 8, 31, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=issued_when)
+    invoice_id = await _invoice(
+        db_session,
+        store_id,
+        sale_id,
+        no="AA20260831V",
+        when=date(2026, 8, 31),
+        total="1050",
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+    )
+    db_session.add(
+        EInvoiceUploadQueue(
+            store_id=store_id,
+            action=EInvoiceAction.VOID,
+            message_type="F0501",
+            invoice_id=invoice_id,
+            status=UploadStatus.UPLOADED,
+            uploaded_at=datetime(2026, 9, 2, 3, 0, tzinfo=UTC),  # 本期完成作廢
+        )
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["voided_from_earlier_periods"]] == ["AA20260831V"]
+    assert body["voided"] == []  # 本期開立的作廢才進這段
+    assert body["totals"]["voided_total"] == "0"  # 上期的數字不混進本期合計
+
+
+async def test_invoice_register_does_not_double_list_same_period_voids(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """本期開立、本期作廢的只出現在「作廢」，不重複列進前期那段。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    when = datetime(2026, 9, 5, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="500", when=when)
+    invoice_id = await _invoice(
+        db_session,
+        store_id,
+        sale_id,
+        no="AA10000080",
+        when=date(2026, 9, 5),
+        total="500",
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+    )
+    db_session.add(
+        EInvoiceUploadQueue(
+            store_id=store_id,
+            action=EInvoiceAction.VOID,
+            message_type="F0501",
+            invoice_id=invoice_id,
+            status=UploadStatus.UPLOADED,
+            uploaded_at=datetime(2026, 9, 6, 3, 0, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["voided"]] == ["AA10000080"]
+    assert body["voided_from_earlier_periods"] == []
+    assert body["totals"]["voided_total"] == "500"
+
+
+async def test_invoice_register_rejects_an_inverted_period(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """迄早於起：拒絕而不是回一份空報表（空報表會被當成「本期沒有發票」）。"""
+    mgr, _clerk, _store_id, _clerk_id = await _seed(db_session)
+    resp = await client.get(
+        "/api/v1/reports/invoice-register",
+        params={"from": "2026-10-01T00:00:00+08:00", "to": "2026-09-01T00:00:00+08:00"},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422

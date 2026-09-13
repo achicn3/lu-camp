@@ -5374,6 +5374,8 @@ export interface components {
             unfinished: components["schemas"]["InvoiceRegisterRow"][];
             /** Voided */
             voided: components["schemas"]["InvoiceRegisterRow"][];
+            /** Voided From Earlier Periods */
+            voided_from_earlier_periods: components["schemas"]["InvoiceRegisterRow"][];
         };
         /**
          * InvoiceRegisterRow
@@ -5429,6 +5431,8 @@ export interface components {
             issued_tax: string;
             /** Issued Total */
             issued_total: string;
+            /** Manual Paper Refund Total */
+            manual_paper_refund_total: string;
             /** Voided Total */
             voided_total: string;
         };

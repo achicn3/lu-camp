@@ -72,6 +72,29 @@ class ReturnsRepository:
             for tender_type, amount in (await self._session.execute(tender_stmt)).all()
         ]
 
+    async def period_refunds_by_sale(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[int, tuple[Decimal, int]]:
+        """期間內各銷售的（退款金額合計, 退貨筆數）。
+
+        手開紙本待調整要據此告訴會計「這期退了多少」——只印整張發票金額的話，
+        部分退 525 元的單看起來像整張 1,050 都要處理。
+        """
+        rows = await self._session.execute(
+            select(
+                CustomerReturn.sale_id,
+                func.coalesce(func.sum(CustomerReturn.refund_amount), 0),
+                func.count(),
+            )
+            .where(
+                CustomerReturn.store_id == store_id,
+                CustomerReturn.created_at >= date_from,
+                CustomerReturn.created_at < date_to,
+            )
+            .group_by(CustomerReturn.sale_id)
+        )
+        return {int(sale_id): (Decimal(total), int(count)) for sale_id, total, count in rows.all()}
+
     async def period_returned_sale_ids(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[int]:

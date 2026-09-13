@@ -5,7 +5,6 @@
 付款限店員/管理者（CurrentUserDep）+ 稽核；現金出帳須開帳中（invariant #8）。
 """
 
-from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -13,10 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user
-from app.core.money import consignment_breakdown
 from app.modules.consignment.schemas import ConsignmentSettlementRead
 from app.modules.consignment.service import ConsignmentService
-from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import ConsignmentSettlementStatus
 from app.shared.exceptions import (
     DomainError,
@@ -57,22 +54,7 @@ async def list_settlements(
     rows = await ConsignmentService(session).list_settlements(
         user.store_id, status=settlement_status, phone=phone, limit=limit, offset=offset
     )
-    tax_rate = (await StoreSettingsService(session).get_effective_settings(user.store_id)).tax_rate
-    reads = []
-    for row in rows:
-        net, tax, commission_net = consignment_breakdown(
-            Decimal(row["gross"]), Decimal(row["commission_amount"]), tax_rate
-        )
-        reads.append(
-            ConsignmentSettlementRead.model_validate(row).model_copy(
-                update={
-                    "net_amount": Decimal(net),
-                    "tax_amount": Decimal(tax),
-                    "commission_net": Decimal(commission_net),
-                }
-            )
-        )
-    return reads
+    return [ConsignmentSettlementRead.model_validate(row) for row in rows]
 
 
 @router.get(

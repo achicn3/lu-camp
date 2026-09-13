@@ -183,4 +183,7 @@ def consignment_breakdown(
     舊結算的**拆解**會依現行稅率換算，但兩個關鍵金額（抽成、應付）仍是當時存下的值。
     """
     net, tax = split_tax_inclusive(gross, tax_rate)
-    return net, tax, round_ntd(commission_amount) - tax
+    # 改制前（ADR-021 之前）的舊結算是以含稅價抽成，抽成很低時扣掉稅會變負的
+    # （例：pct=0、含稅 1050 → 抽成 0、稅 50 → −50）。舊列不回溯改寫，但畫面不能顯示
+    # 「未稅 −50」這種讀不懂的數字；夾在 0，兩個關鍵金額（抽成、應付）仍是存下來的值。
+    return net, tax, max(0, round_ntd(commission_amount) - tax)

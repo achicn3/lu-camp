@@ -377,6 +377,12 @@ class ReturnsService:
             allow_expired_provider_recovery=allow_expired_provider_recovery,
         )
 
+    async def period_refunds_by_sale(
+        self, store_id: int, date_from: datetime, date_to: datetime
+    ) -> dict[int, tuple[Decimal, int]]:
+        """期間內各銷售的退款金額與筆數（申報月報的紙本待調整用）。"""
+        return await self._repo.period_refunds_by_sale(store_id, date_from, date_to)
+
     async def period_returned_sale_ids(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[int]:

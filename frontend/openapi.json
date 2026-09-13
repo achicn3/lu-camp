@@ -5779,6 +5779,13 @@
             },
             "title": "Voided",
             "type": "array"
+          },
+          "voided_from_earlier_periods": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceRegisterRow"
+            },
+            "title": "Voided From Earlier Periods",
+            "type": "array"
           }
         },
         "required": [
@@ -5792,6 +5799,7 @@
           "input_invoices",
           "unfinished",
           "manual_paper_adjustments",
+          "voided_from_earlier_periods",
           "totals"
         ],
         "title": "InvoiceRegisterReport",
@@ -5966,6 +5974,10 @@
             "title": "Issued Total",
             "type": "string"
           },
+          "manual_paper_refund_total": {
+            "title": "Manual Paper Refund Total",
+            "type": "string"
+          },
           "voided_total": {
             "title": "Voided Total",
             "type": "string"
@@ -5979,7 +5991,8 @@
           "allowance_total",
           "allowance_tax",
           "input_total",
-          "input_tax"
+          "input_tax",
+          "manual_paper_refund_total"
         ],
         "title": "InvoiceRegisterTotals",
         "type": "object"

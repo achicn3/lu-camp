@@ -623,6 +623,8 @@ class InvoiceRegisterTotals(BaseModel):
     allowance_tax: NTDAmount
     input_total: NTDAmount
     input_tax: NTDAmount
+    # 手開紙本待調整的本期退款合計：畫面說「銷項合計仍包含它們」，總得給個可扣的數字。
+    manual_paper_refund_total: NTDAmount
 
 
 class InvoiceRegisterReport(BaseModel):
@@ -644,4 +646,7 @@ class InvoiceRegisterReport(BaseModel):
     # 手開紙本的單退貨／作廢時**不會**產生電子折讓或作廢（docs/36 由店家線下依國稅局
     # 程序處理）。不標出來，月報會顯示成「整筆退了但銷項照算、折讓 0」而毫無提示。
     manual_paper_adjustments: list[InvoiceRegisterRow]
+    # 前期開立、本期才完成作廢的：用開立日歸期的話這種票在本期完全看不到（既不在銷項也不在
+    # 作廢），會計不會知道要去辦上期的更正。依 F0501 送出成功時間另列一段。
+    voided_from_earlier_periods: list[InvoiceRegisterRow]
     totals: InvoiceRegisterTotals

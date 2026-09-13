@@ -15,10 +15,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog, write_audit_log
-from app.core.money import consignment_split, format_ntd
+from app.core.money import consignment_breakdown, consignment_split, format_ntd
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.models import ConsignmentSettlement
 from app.modules.consignment.repository import ConsignmentRepository
+from app.modules.settings.service import StoreSettingsService
 from app.shared.enums import CashMovementType, ConsignmentSettlementStatus
 from app.shared.exceptions import IdempotencyKeyConflict, SettlementNotFound, SettlementNotPending
 
@@ -201,10 +202,30 @@ class ConsignmentService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """店內寄售結算列（可篩 status／寄售人手機；付款工作清單/應付查詢；§4 店別範圍）。"""
-        return await self._repo.list_settlements(
+        """店內寄售結算列（可篩 status／寄售人手機；付款工作清單/應付查詢；§4 店別範圍）。
+
+        一併補上未稅／稅／店家未稅抽成的拆解（ADR-021）——寄售人當面會問「為什麼不是
+        一半」，畫面得答得出來。由已存下的金額回推，不重算分潤。
+        """
+        rows = await self._repo.list_settlements(
             store_id, status=status, phone=phone, limit=limit, offset=offset
         )
+        return [await self._with_breakdown(store_id, row) for row in rows]
+
+    async def _with_breakdown(self, store_id: int, row: dict[str, Any]) -> dict[str, Any]:
+        """替結算列補上 net_amount／tax_amount／commission_net。"""
+        tax_rate = (
+            await StoreSettingsService(self._session).get_effective_settings(store_id)
+        ).tax_rate
+        net, tax, commission_net = consignment_breakdown(
+            Decimal(row["gross"]), Decimal(row["commission_amount"]), tax_rate
+        )
+        return {
+            **row,
+            "net_amount": Decimal(net),
+            "tax_amount": Decimal(tax),
+            "commission_net": Decimal(commission_net),
+        }
 
     async def count_settlements(
         self,

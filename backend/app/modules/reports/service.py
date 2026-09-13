@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.money import round_ntd, split_tax_inclusive
+from app.core.money import format_ntd, round_ntd, split_tax_inclusive
 from app.core.time import (
     STORE_TIME_ZONE,
     store_bucket_bounds,
@@ -85,6 +85,12 @@ from app.shared.enums import (
 )
 from app.shared.exceptions import DomainError
 
+
+def _require_amount(value: Decimal | None, number: str | None, field: str) -> Decimal:
+    """進項發票的金額缺一不可（有 DB 約束保證）；真的缺就明確報錯，不要默默當 0。"""
+    if value is None:
+        raise DomainError(f"進項發票 {number or '(無號碼)'} 缺少{field}，無法產出申報清單")
+    return value
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -675,9 +681,11 @@ class ReportsService:
                 number=receipt.invoice_number,
                 issued_on=receipt.invoice_date,
                 counterparty=supplier_name,
-                net=receipt.invoice_net or Decimal(0),
-                tax=receipt.invoice_tax or Decimal(0),
-                total=receipt.invoice_total or Decimal(0),
+                # DB 約束保證「有號碼就一定有三個金額」；真的是 None 就是資料壞了，
+                # 用 `or 0` 會把它悄悄變成 0 混進申報數字（§9 錯誤處理要明確）。
+                net=_require_amount(receipt.invoice_net, receipt.invoice_number, "未稅"),
+                tax=_require_amount(receipt.invoice_tax, receipt.invoice_number, "稅額"),
+                total=_require_amount(receipt.invoice_total, receipt.invoice_number, "總額"),
                 reference=f"採購單 #{receipt.purchase_order_id}",
             )
             for receipt, supplier_name in receipts
@@ -688,9 +696,8 @@ class ReportsService:
         #   1. **部分退貨** sale 仍是 COMPLETED，不能只看銷售狀態
         #   2. **跨月退貨**（8/31 開票、9/10 退）原發票不在本期清單裡，要另外抓
         #   3. 本地作廢的紙本票已在「作廢」類別看得到，不必重複列
-        returned_sale_ids = await self._returns.period_returned_sale_ids(
-            store_id, date_from, date_to
-        )
+        refunds_by_sale = await self._returns.period_refunds_by_sale(store_id, date_from, date_to)
+        returned_sale_ids = list(refunds_by_sale)
         paper_invoices = [
             invoice
             for invoice in await self._einvoice.invoices_for_sales(store_id, returned_sale_ids)
@@ -706,12 +713,41 @@ class ReportsService:
                 net=invoice.net,
                 tax=invoice.tax,
                 total=invoice.total,
-                status="RETURNED",
+                # 只印整張發票金額的話，部分退的單看起來像整張都要處理。
+                status="全額退貨" if refund >= invoice.total else "部分退貨",
                 issue_channel=invoice.issue_channel.value,
                 sale_id=invoice.sale_id,
-                reference=f"退貨・交易 #{invoice.sale_id}",
+                reference=(
+                    f"本期退款 {format_ntd(refund)}"
+                    f"（{refunds_by_sale[invoice.sale_id][1]} 筆）・交易 #{invoice.sale_id}"
+                ),
             )
             for invoice in paper_invoices
+            for refund in [refunds_by_sale[invoice.sale_id][0]]
+        ]
+
+        # 前期開立、本期作廢：依 F0501 完成時間抓，與本期開立的作廢分開列，
+        # 才不會把上期的數字混進本期合計（也不會整筆消失）。
+        period_dates = {invoice.id for invoice in invoices}
+        voided_from_earlier_periods = [
+            InvoiceRegisterRow(
+                number=invoice.invoice_no,
+                issued_on=invoice.invoice_date,
+                counterparty=invoice.buyer_name,
+                buyer_tax_id=invoice.buyer_tax_id,
+                net=invoice.net,
+                tax=invoice.tax,
+                total=invoice.total,
+                status=invoice.status.value,
+                void_reason=None if invoice.void_reason is None else invoice.void_reason.value,
+                issue_channel=invoice.issue_channel.value,
+                sale_id=invoice.sale_id,
+                reference=f"前期發票本期作廢・交易 #{invoice.sale_id}",
+            )
+            for invoice in await self._einvoice.invoices_voided_in_period(
+                store_id, date_from, date_to
+            )
+            if invoice.id not in period_dates  # 本期開立的已在「作廢」那段
         ]
 
         def _sum(rows: list[InvoiceRegisterRow], field: str) -> Decimal:
@@ -728,6 +764,7 @@ class ReportsService:
             input_invoices=input_invoices,
             unfinished=unfinished,
             manual_paper_adjustments=manual_paper_adjustments,
+            voided_from_earlier_periods=voided_from_earlier_periods,
             totals=InvoiceRegisterTotals(
                 issued_total=_sum(issued, "total"),
                 issued_net=_sum(issued, "net"),
@@ -737,6 +774,12 @@ class ReportsService:
                 allowance_tax=_sum(allowances, "tax"),
                 input_total=_sum(input_invoices, "total"),
                 input_tax=_sum(input_invoices, "tax"),
+                manual_paper_refund_total=Decimal(
+                    sum(
+                        refunds_by_sale[invoice.sale_id][0]
+                        for invoice in paper_invoices
+                    )
+                ),
             ),
         )
 
