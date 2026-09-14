@@ -902,8 +902,14 @@ async def test_invoice_register_never_leaks_another_store(
     ).json()
     every_number = {
         row["number"]
-        for key in ("issued", "voided", "allowances", "input_invoices", "unfinished",
-                    "manual_paper_adjustments")
+        for key in (
+            "issued",
+            "voided",
+            "allowances",
+            "input_invoices",
+            "unfinished",
+            "manual_paper_adjustments",
+        )
         for row in body[key]
     }
     assert every_number == {"AA10000070", "BB10000070"}
@@ -1067,3 +1073,109 @@ async def test_invoice_register_shows_paper_invoices_voided_this_period(
         )
     ).json()
     assert [row["number"] for row in body["voided_from_earlier_periods"]] == ["MP20260831V"]
+
+
+async def test_invoice_register_counts_an_electronic_void_in_one_period_only(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """電子票 8/31 申請作廢、9/1 平台核可：只能算在 9 月，不可兩個月各列一次。
+
+    每次作廢狀態轉移都會寫稽核，若稽核那一臂也認電子票，8 月（申請）與 9 月（核可）
+    會各出現一次，會計以為要辦兩次更正。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    issued_when = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=issued_when)
+    invoice_id = await _invoice(
+        db_session,
+        store_id,
+        sale_id,
+        no="AA20260820V",
+        when=date(2026, 8, 20),
+        total="1050",
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+    )
+    db_session.add(
+        AuditLog(  # 8/31 店員按下作廢（轉 VOID_PENDING）
+            store_id=store_id,
+            actor_user_id=clerk_id,
+            action="VOID_INVOICE",
+            entity_type="invoice",
+            entity_id=str(invoice_id),
+            after={"source": "STAFF"},
+            created_at=datetime(2026, 8, 31, 15, 50, tzinfo=UTC),
+        )
+    )
+    db_session.add(
+        EInvoiceUploadQueue(  # 9/1 平台核可
+            store_id=store_id,
+            action=EInvoiceAction.VOID,
+            message_type="F0501",
+            invoice_id=invoice_id,
+            status=UploadStatus.UPLOADED,
+            uploaded_at=datetime(2026, 9, 1, 2, 0, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    async def voided_earlier(date_from: str, date_to: str) -> list[str]:
+        body = (
+            await client.get(
+                "/api/v1/reports/invoice-register",
+                params={"from": date_from, "to": date_to},
+                headers=_auth(mgr),
+            )
+        ).json()
+        return [str(row["number"]) for row in body["voided_from_earlier_periods"]]
+
+    august = await voided_earlier("2026-08-01T00:00:00+08:00", "2026-09-01T00:00:00+08:00")
+    september = await voided_earlier("2026-09-01T00:00:00+08:00", "2026-10-01T00:00:00+08:00")
+    assert august == []  # 申請作廢那個月不算
+    assert september == ["AA20260820V"]  # 平台核可那個月才算，且只算一次
+
+
+async def test_invoice_register_excludes_unnumbered_drafts_voided_in_a_later_period(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """從未配號的草稿跨月作廢：平台上沒有那張票，不能列成作廢稅單（與本期同一口徑）。"""
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    sale_when = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="700", when=sale_when)
+    draft = Invoice(
+        store_id=store_id,
+        sale_id=sale_id,
+        invoice_type=InvoiceType.B2C,
+        invoice_no=None,  # 從未開立成功
+        invoice_date=None,
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+        net=Decimal(667),
+        tax=Decimal(33),
+        total=Decimal(700),
+        created_at=sale_when,
+    )
+    db_session.add(draft)
+    await db_session.flush()
+    db_session.add(
+        AuditLog(
+            store_id=store_id,
+            actor_user_id=clerk_id,
+            action="VOID_INVOICE",
+            entity_type="invoice",
+            entity_id=str(draft.id),
+            after={"source": "STAFF"},
+            created_at=datetime(2026, 9, 3, 3, 0, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert body["voided_from_earlier_periods"] == []
+    assert body["voided"] == []

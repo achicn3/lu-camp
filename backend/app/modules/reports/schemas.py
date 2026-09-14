@@ -647,6 +647,7 @@ class InvoiceRegisterReport(BaseModel):
     # 程序處理）。不標出來，月報會顯示成「整筆退了但銷項照算、折讓 0」而毫無提示。
     manual_paper_adjustments: list[InvoiceRegisterRow]
     # 前期開立、本期才完成作廢的：用開立日歸期的話這種票在本期完全看不到（既不在銷項也不在
-    # 作廢），會計不會知道要去辦上期的更正。依 F0501 送出成功時間另列一段。
+    # 作廢），會計不會知道要去辦上期的更正。電子票依 F0501 送出成功時間、手開紙本依作廢
+    # 稽核時間（紙本不排 F0501）；兩者都要求曾經配號。
     voided_from_earlier_periods: list[InvoiceRegisterRow]
     totals: InvoiceRegisterTotals

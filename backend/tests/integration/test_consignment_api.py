@@ -291,3 +291,18 @@ async def test_list_settlements_shows_the_untaxed_breakdown(
     assert int(row["net_amount"]) + int(row["tax_amount"]) == int(row["gross"])
     assert int(row["commission_net"]) + int(row["tax_amount"]) == int(row["commission_amount"])
     assert int(row["commission_net"]) + int(row["payout_amount"]) == int(row["net_amount"])
+
+
+async def test_pay_response_also_carries_the_untaxed_breakdown(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """付款結果也要帶未稅拆解——同一個 schema 不該在兩個端點語意不同。"""
+    token, sid, _ = await _seed(db_session)
+    body = (
+        await client.post(
+            f"/api/v1/consignment/settlements/{sid}/pay", headers=_auth(token, "pay-breakdown")
+        )
+    ).json()
+    assert body["net_amount"] == "1714"  # round(1800 / 1.05)
+    assert body["tax_amount"] == "86"
+    assert body["commission_net"] == "686"

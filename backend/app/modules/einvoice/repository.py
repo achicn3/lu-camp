@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Integer, and_, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -27,6 +27,10 @@ from app.shared.enums import (
     InvoiceStatus,
     UploadStatus,
 )
+
+# 發票作廢的稽核 action／entity（與 einvoice/service 的寫入點成對）。
+_VOID_INVOICE_AUDIT_ACTION = "VOID_INVOICE"
+_INVOICE_AUDIT_ENTITY = "invoice"
 
 
 class EInvoiceRepository:
@@ -107,7 +111,10 @@ class EInvoiceRepository:
     async def invoices_voided_in_period(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[Invoice]:
-        """本期**完成作廢**的發票（依 F0501 送出成功的時間），不論發票是哪一期開的。
+        """本期**完成作廢**的發票，不論發票是哪一期開的。
+
+        歸期依作廢真正完成的時間：電子票看 F0501 送出成功、手開紙本看作廢稽核
+        （紙本不排 F0501）。兩者都要求曾經配號——沒有字軌的草稿不是作廢稅單。
 
         8/31 開、9/2 作廢的票，用開立日歸期的話在 9 月月報完全看不到——既不在銷項、
         也不在作廢，沒有任何提示要去辦更正。
@@ -123,26 +130,33 @@ class EInvoiceRepository:
             )
         )
         # 手開紙本作廢**不排 F0501**（平台上沒有那張票，einvoice/service 走純本地作廢），
-        # 所以佇列裡找不到；改以作廢當下寫的稽核紀錄歸期，否則跨期的紙本作廢在任何一段
-        # 都看不到——正是這段要解決的失敗模式。
-        paper_voided = (
-            select(AuditLog.entity_id)
-            .where(
-                AuditLog.store_id == store_id,
-                AuditLog.action == "VOID_INVOICE",
-                AuditLog.entity_type == "invoice",
-                AuditLog.created_at >= date_from,
-                AuditLog.created_at < date_to,
-            )
+        # 所以佇列裡找不到；改以作廢當下寫的稽核紀錄歸期。
+        #
+        # **只認紙本**：電子票每次作廢狀態轉移也會寫同一個 action 的稽核，若一併認，
+        # 8/31 申請作廢、9/1 平台核可的票會在 8 月與 9 月各列一次，會計以為要辦兩次更正。
+        # 電子票由上面的 F0501 那一臂涵蓋就夠了。
+        # 比對用發票 id 轉成字串，而不是把稽核的 entity_id 轉成整數——後者遇到非數字的
+        # entity_id 會讓整支月報變成 500。
+        paper_voided = select(AuditLog.entity_id).where(
+            AuditLog.store_id == store_id,
+            AuditLog.action == _VOID_INVOICE_AUDIT_ACTION,
+            AuditLog.entity_type == _INVOICE_AUDIT_ENTITY,
+            AuditLog.created_at >= date_from,
+            AuditLog.created_at < date_to,
         )
         stmt = (
             select(Invoice)
             .where(
                 Invoice.store_id == store_id,
                 Invoice.status == InvoiceStatus.VOID,
+                # 從未配號的草稿不是「作廢稅單」（平台上沒有那張票）——與本期那段同一口徑。
+                Invoice.invoice_no.is_not(None),
                 or_(
                     Invoice.id.in_(platform_voided),
-                    Invoice.id.in_(select(cast(paper_voided.subquery().c.entity_id, Integer))),
+                    and_(
+                        Invoice.issue_channel == EInvoiceIssueChannel.MANUAL_PAPER,
+                        cast(Invoice.id, String).in_(paper_voided),
+                    ),
                 ),
             )
             .order_by(Invoice.id)
