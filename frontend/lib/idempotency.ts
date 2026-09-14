@@ -1,3 +1,4 @@
+import type { components } from "@/lib/api-types";
 import { newIdempotencyKey } from "@/lib/uuid";
 
 // 收購/結帳等帶 Idempotency-Key 的請求：回應遺失/失敗時是否可安全「丟棄」凍結的冪等鍵。
@@ -87,18 +88,11 @@ export function pendingAcqIdemKeyServerSnapshot(): string | null {
 // SKU 留白時後端會自動編號；若已 commit 但回應遺失，重掛後換鍵會再建一筆 AUTO-* 商品。
 // 因此送出前依店別保存「鍵＋原始 body」，採購與庫存頁共用同一筆待確認狀態；
 // 重掛後必須以原 body 重放，成功或確定未提交的 4xx 才可清除。
-export interface CatalogCreateRequestBody {
+// 沿用 API 合約；本地表單固定帶 sku，金額已經 parseNtd 正規化為整數。
+export type CatalogCreateRequestBody = components["schemas"]["CatalogProductCreateRequest"] & {
   sku: string | null;
-  name: string;
   unit_price: number;
-  reorder_point: number;
-  brand_id?: number | null;
-  /** 型號／分類（選填，2026-09-14 起）。同備註：舊的待重送內容沒有這兩個鍵。 */
-  product_model_id?: number | null;
-  category_id?: number | null;
-  /** 商品備註（選填）。舊的待重送內容沒有這個鍵，故 validator 只在存在時檢查型別。 */
-  note?: string | null;
-}
+};
 
 export interface PendingCatalogCreate {
   key: string;

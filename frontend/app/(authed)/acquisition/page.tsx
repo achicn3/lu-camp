@@ -769,7 +769,12 @@ async function resolveBrands(
 ): Promise<(string | null)[]> {
   if (items.every((i) => i.brandId === null)) return items.map(() => null);
   const brands = await brandNameMap(kind);
-  return items.map((i) => (i.brandId === null ? null : (brands.get(i.brandId) ?? null)));
+  return items.map((i) => {
+    if (i.brandId === null) return null;
+    const name = brands.get(i.brandId);
+    if (!name?.trim()) throw new Error("查不到品牌名稱，請重新整理後再列印標籤");
+    return name;
+  });
 }
 
 // ── 標籤列印（Brother 標籤機）：收購完成後，逐一補印序號品 / 散裝批的條碼標籤 ──

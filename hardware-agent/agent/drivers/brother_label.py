@@ -35,9 +35,15 @@ from agent.errors import DeviceOffline, DeviceTimeout
 _MODEL = "QL-810W"
 _LABEL_ID = "29"  # DK-22210 29mm 連續（brother_ql LabelsManager 之 identifier）
 LABEL_HEIGHT_DOTS = 306  # label "29" 之 dots_printable 寬（橫式版面的高）
-# 標籤長度上限 480 dots ≈ 40.6mm（300dpi）：與短品名單行標籤（如 8 字品名 ≈40mm）
-# 同級大小（使用者裁示 2026-06-11），長品名換行/截斷而非變長條。
-MAX_LABEL_WIDTH_DOTS = 480
+# 文字（品名/品牌）的換行與截斷基準：480 dots ≈ 40.6mm，與短品名單行標籤同級大小
+# （使用者裁示 2026-06-11），長品名換行/截斷而非變長條。**放寬長度上限時這個數不跟著動**
+# ——跟著動的話，原本會換行的中長品名會改成單行大字，既有商品的標籤版面就變了。
+_TEXT_WIDTH_DOTS = 480
+# 標籤長度上限 530 dots ≈ 44.9mm：條碼**不可截斷**，而系統自動編號（`AUTO-` ＋ 12 碼
+# hex，共 17 字）的 Code128 實測要 406–516 dots。卡在 480 的話，採購頁建商品時只要
+# 沒手填編號，那個商品就永遠印不出標籤——不是邊界情形，是全部。裁示 2026-09-14 放寬。
+# 只有條碼撐得到這個寬度；短編號的標籤尺寸完全不變。
+MAX_LABEL_WIDTH_DOTS = 530
 _MARGIN = 12
 # 品名：單行塞得下就用單行（短品名維持原版面）；塞不下降字級換行（最多
 # 三行、超出截斷加「…」），同時條碼/識別碼/價格帶下移縮排，挪出空間。字級與行距見 _Bands。
@@ -127,7 +133,7 @@ _WRAPPED_BRANDED: _Bands = {
     "barcode_height": 84,
     "code_top": 212,  # 24px：到 246
     "code_font_px": 24,
-    "price_top": 250,  # 44px 數字：到 301
+    "price_top": 246,  # 44px 的 NT$ 含美元符號到 303，底部保留 2 dots
     "price_font_px": 44,
     "condition_font_px": 26,
 }
@@ -221,10 +227,11 @@ def build_label_image(
 ) -> Image.Image:
     """組橫式標籤影像（'L' 灰階、白底黑字、高固定 `LABEL_HEIGHT_DOTS`）。
 
-    寬度依內容（品名/條碼/價格的最大寬）伸縮，**上限 `MAX_LABEL_WIDTH_DOTS`**
-    （≈40mm，與短品名單行標籤同級大小）：品名單行 56px 塞得下用單行；塞不下降
-    34px 換行（最多三行、超出截斷加「…」），條碼/識別碼/價格帶同步下移縮排。
-    29mm 連續紙長度自由。
+    寬度依內容（品名/條碼/價格的最大寬）伸縮，**上限 `MAX_LABEL_WIDTH_DOTS`**（≈45mm）。
+    品名與品牌另以較窄的 `_TEXT_WIDTH_DOTS`（≈40mm）為換行/截斷基準：品名單行塞得下
+    就用單行，塞不下降字級換行（最多三行、超出截斷加「…」），條碼/識別碼/價格帶同步
+    下移縮排。兩個數分開，是為了讓**只有條碼**（不可截斷）撐得到 45mm，文字排版維持
+    原樣。29mm 連續紙長度自由。
 
     Args:
         brand: 品牌，獨立一行印在品名上方（裁示 2026-09-14）。`None`／空白＝**整行不印**，
@@ -238,7 +245,7 @@ def build_label_image(
     barcode_width = len(modules) * _BARCODE_MODULE_PX + 2 * _BARCODE_QUIET_PX
 
     probe = ImageDraw.Draw(Image.new("L", (1, 1), 255))
-    name_limit = MAX_LABEL_WIDTH_DOTS - 2 * _MARGIN
+    name_limit = _TEXT_WIDTH_DOTS - 2 * _MARGIN
     single_bands, wrapped_bands = (
         (_SINGLE_BRANDED, _WRAPPED_BRANDED) if brand_text else (_SINGLE, _WRAPPED)
     )

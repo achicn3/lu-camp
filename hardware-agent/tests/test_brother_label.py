@@ -7,17 +7,32 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
+import agent.drivers.brother_label as label_driver
 from agent.config import PrinterEndpoint, label_font_path_from_env
+from agent.devices import AgentDevices, default_fake_devices
 from agent.drivers.brother_label import (
+    _BARCODE_TOP,
+    _BARCODE_TOP_WRAPPED,
+    _CONDITION_GAP_PX,
+    _MARGIN,
+    _SINGLE,
+    _SINGLE_BRANDED,
+    _TEXT_WIDTH_DOTS,
+    _WRAPPED,
+    _WRAPPED_BRANDED,
     LABEL_HEIGHT_DOTS,
+    MAX_LABEL_WIDTH_DOTS,
     BrotherLabelPrinter,
     LabelContentTooWide,
     build_label_image,
 )
 from agent.errors import DeviceOffline, DeviceTimeout
-from agent.fakes import LabelCall
+from agent.fakes import FakeLabelPrinter, LabelCall
+from agent.main import create_app
 
 _EP = PrinterEndpoint(host="192.0.2.45")  # TEST-NET 假位址；真機 IP 由環境提供
 _FONT = label_font_path_from_env()  # 預設 repo 內建字型
@@ -45,7 +60,6 @@ class TestBuildLabelImage:
     def test_barcode_bars_are_vertical_and_present(self) -> None:
         """條碼帶內的 bar 為垂直線：帶內任兩列的黑白樣式一致、且確實有 bar。"""
         image = build_label_image("ITM-0001", "帳篷", 1000, _FONT)
-        from agent.drivers.brother_label import _BARCODE_TOP
 
         row_a = [image.getpixel((x, _BARCODE_TOP + 10)) for x in range(image.width)]
         row_b = [image.getpixel((x, _BARCODE_TOP + 60)) for x in range(image.width)]
@@ -53,19 +67,20 @@ class TestBuildLabelImage:
         assert 0 in row_a  # 有黑 bar
 
     def test_long_name_wraps_and_caps_width(self) -> None:
-        """長品名：降字級換行（最多三行）、標籤長度不超過 ≈40mm 上限
-        （與短品名單行標籤同級大小，使用者裁示 2026-06-11）。"""
-        from agent.drivers.brother_label import MAX_LABEL_WIDTH_DOTS
+        """長品名：降字級換行（最多三行）、標籤長度不超過 ≈40mm
+        （與短品名單行標籤同級大小，使用者裁示 2026-06-11）。
 
+        對 `_TEXT_WIDTH_DOTS` 斷言而非整體長度上限：2026-09-14 放寬的是**條碼**撐得到的
+        寬度，長品名不得變成長條這條規則沒有變。
+        """
         image = build_label_image(
             "ITM-0003", "Snow Peak 雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT
         )
-        assert image.width <= MAX_LABEL_WIDTH_DOTS
-        assert MAX_LABEL_WIDTH_DOTS / 300 * 25.4 <= 41.0  # 上限 ≈ 40mm
+        assert image.width <= _TEXT_WIDTH_DOTS
+        assert _TEXT_WIDTH_DOTS / 300 * 25.4 <= 41.0  # 品名撐出來的長度仍 ≈ 40mm
 
     def test_wrapped_layout_keeps_vertical_barcode(self) -> None:
         """兩行版面的條碼帶位置下移後，bar 仍為垂直線且存在。"""
-        from agent.drivers.brother_label import _BARCODE_TOP_WRAPPED
 
         image = build_label_image(
             "ITM-0003", "Snow Peak 雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT
@@ -74,6 +89,39 @@ class TestBuildLabelImage:
         row_b = [image.getpixel((x, _BARCODE_TOP_WRAPPED + 60)) for x in range(image.width)]
         assert row_a == row_b
         assert 0 in row_a
+
+    def test_system_generated_sku_fits(self) -> None:
+        """系統自動編號（`AUTO-` ＋ 12 碼 hex，共 17 字）一律要印得出來。
+
+        採購頁建一般商品時商品編號可留白、由系統自動編；若這種編號印不出標籤，
+        等於「一般商品補印」對所有沒手填編號的商品都是死的（裁示 2026-09-14 放寬長度）。
+        17 字的 Code128 實測需 406–516 dots，隨字元組合浮動，故整個範圍都要蓋到。
+        """
+        worst = "AUTO-ABCDEFABCDEF"  # 全字母＝Code128 最不緊湊的編法
+        for brand, condition in ((None, None), ("Snow Peak", "全新")):
+            image = build_label_image(
+                worst, "營繩 4mm", 180, _FONT, brand=brand, condition=condition
+            )
+            assert image.width <= MAX_LABEL_WIDTH_DOTS
+
+    def test_text_wrapping_is_not_loosened_by_the_wider_cap(self) -> None:
+        """放寬長度上限**只讓條碼撐得更寬**，不得讓品名變晚換行。
+
+        品名換行基準綁在 `_TEXT_WIDTH_DOTS`（維持原值），不是綁在放寬後的長度上限；
+        綁錯的話，原本會換行的中長品名會改成單行大字，既有標籤的版面就跟著變了。
+        """
+        assert _TEXT_WIDTH_DOTS < MAX_LABEL_WIDTH_DOTS  # 真的是兩個不同的數
+        probe = ImageDraw.Draw(Image.new("L", (1, 1), 255))
+        font = ImageFont.truetype(_FONT, _SINGLE["name_font_px"])
+        # 找一個寬度落在「舊基準塞不下、放寬後的上限塞得下」之間的品名
+        name = "防"
+        while probe.textlength(name, font=font) <= _TEXT_WIDTH_DOTS - 2 * _MARGIN:
+            name += "防"
+        assert probe.textlength(name, font=font) <= MAX_LABEL_WIDTH_DOTS - 2 * _MARGIN
+        image = build_label_image("ITM-0001", name, 100, _FONT)
+        # 有換行才會用到 _WRAPPED 的條碼位置；沒換行代表基準被放寬污染了
+        row_a = [image.getpixel((x, _WRAPPED["barcode_top"] + 10)) for x in range(image.width)]
+        assert 0 in row_a, "這個長度的品名仍應換行（條碼落在換行版的位置）"
 
     def test_overlong_code_is_rejected_not_oversized(self) -> None:
         """識別碼過長（條碼在最小窄條下仍超出長度上限）→ 如實拒印（條碼不可截斷，
@@ -93,7 +141,6 @@ class TestBuildLabelImage:
         assert a.tobytes() == b.tobytes()
 
     def test_different_codes_render_different_barcodes(self) -> None:
-        from agent.drivers.brother_label import _BARCODE_TOP
 
         a = build_label_image("ITM-0001", "帳篷", 1000, _FONT)
         b = build_label_image("LOT-9999", "帳篷", 1000, _FONT)
@@ -107,7 +154,6 @@ class TestBrandLine:
 
     def test_brand_occupies_its_own_line_above_the_name(self) -> None:
         """品牌自成一行：換品牌只改品牌帶，品名帶逐像素不變（沒有跟品名擠在一起）。"""
-        from agent.drivers.brother_label import _SINGLE_BRANDED
 
         a = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Snow Peak")
         b = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Coleman")
@@ -137,7 +183,6 @@ class TestBrandLine:
 
     def test_branded_layout_keeps_vertical_barcode(self) -> None:
         """品牌行把條碼帶往下推之後，bar 仍是垂直線且存在（沒被品牌行蓋掉）。"""
-        from agent.drivers.brother_label import _SINGLE_BRANDED
 
         image = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Snow Peak")
         top = _SINGLE_BRANDED["barcode_top"]
@@ -147,7 +192,6 @@ class TestBrandLine:
         assert 0 in row_a
 
     def test_branded_wrapped_layout_keeps_vertical_barcode(self) -> None:
-        from agent.drivers.brother_label import _WRAPPED_BRANDED
 
         image = build_label_image(
             "ITM-0003", "雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT, brand="Snow Peak"
@@ -158,9 +202,46 @@ class TestBrandLine:
         assert row_a == row_b
         assert 0 in row_a
 
+    def test_branded_layouts_keep_the_barcode_band_clean(self) -> None:
+        """有品牌的兩種版面，條碼帶內**每一列**都必須一模一樣。
+
+        只驗兩列（上面那兩個測試）漏得掉降部滲墨：品名的 p/y/g 尾巴垂進條碼帶，
+        bar 上緣多出墨點，掃描器就可能讀錯。這裡整帶逐列比對。
+
+        **不驗無品牌的兩種**：那兩組版面本次未更動（與 main 逐像素相同），而它們在
+        英文降部品名下確實會滲進條碼帶上緣——既有問題，修它等於改掉現有標籤外觀，
+        不在這次變更範圍內，另行回報。
+        """
+
+        cases = [
+            ("Gypsy", _SINGLE_BRANDED),  # 降部最兇的短品名 → 單行版
+            ("gjpqy " * 12, _WRAPPED_BRANDED),  # 降部最兇的長品名 → 換行版
+        ]
+        for name, bands in cases:
+            image = build_label_image(
+                "ITM-0001", name, 1000, _FONT, brand="Jpqgy Peak", condition="二手"
+            )
+            top, height = bands["barcode_top"], bands["barcode_height"]
+            rows = {
+                tuple(image.getpixel((x, y)) for x in range(image.width))
+                for y in range(top, top + height + 1)
+            }
+            assert len(rows) == 1, f"品名 {name!r}：條碼帶有 {len(rows)} 種列樣式，有東西滲進來"
+
+    @pytest.mark.parametrize("price", [0, 1000, 12800])
+    def test_wrapped_price_and_condition_are_not_clipped(
+        self, monkeypatch: pytest.MonkeyPatch, price: int
+    ) -> None:
+        args = ("ITM-0001", "Snow Peak 雪峰 Amenity Dome 五人帳篷", price, _FONT)
+        image = build_label_image(*args, brand="Snow Peak", condition="二手")
+        monkeypatch.setattr(label_driver, "LABEL_HEIGHT_DOTS", 350)
+        reference = build_label_image(*args, brand="Snow Peak", condition="二手")
+        bounds = ImageChops.invert(reference).getbbox()
+        assert bounds is not None and bounds[3] <= image.height
+        assert image.tobytes() == reference.crop((0, 0, image.width, image.height)).tobytes()
+
     def test_long_brand_is_truncated_not_widened(self) -> None:
         """過長品牌截斷加「…」：截斷點之後的差異不影響輸出，且不撐破長度上限。"""
-        from agent.drivers.brother_label import MAX_LABEL_WIDTH_DOTS
 
         base = "超長品牌名稱測試用文字" * 4
         a = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand=base + "Ａ")
@@ -195,7 +276,6 @@ class TestConditionMarker:
         （不用「圖片中線」切左右——「NT$1000」本身就跨過中線。改用價格行內最長的
         一段空白當分界，那才是版面真正的間隙。）
         """
-        from agent.drivers.brother_label import _CONDITION_GAP_PX, _MARGIN, _SINGLE
 
         image = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="二手")
         top = _SINGLE["price_top"]
@@ -242,10 +322,6 @@ class _SendRecorder:
 class TestLabelTooWideHttpMapping:
     async def test_print_label_with_overlong_code_returns_422(self) -> None:
         """經 /print/label 真機驅動路徑：內容超寬 → 422（不送印、不印超長標籤）。"""
-        import httpx
-
-        from agent.devices import AgentDevices, default_fake_devices
-        from agent.main import create_app
 
         recorder = _SendRecorder()
         base = default_fake_devices()
@@ -270,11 +346,6 @@ class TestLabelTooWideHttpMapping:
 class TestLabelRequestPassesBrandAndCondition:
     async def test_brand_and_condition_reach_the_printer(self) -> None:
         """/print/label 的品牌與標示要原樣交到驅動，不可在路由層被吃掉。"""
-        import httpx
-
-        from agent.devices import AgentDevices, default_fake_devices
-        from agent.fakes import FakeLabelPrinter
-        from agent.main import create_app
 
         label_printer = FakeLabelPrinter()
         base = default_fake_devices()
@@ -303,11 +374,6 @@ class TestLabelRequestPassesBrandAndCondition:
 
     async def test_omitting_brand_and_condition_still_works(self) -> None:
         """舊版前端（只送 code/name/price）不得因為新欄位而壞掉。"""
-        import httpx
-
-        from agent.devices import AgentDevices, default_fake_devices
-        from agent.fakes import FakeLabelPrinter
-        from agent.main import create_app
 
         label_printer = FakeLabelPrinter()
         base = default_fake_devices()

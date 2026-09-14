@@ -126,15 +126,14 @@ function BadgeChip({ badge }: { badge: Badge }) {
 
 type BrandOption = { id: number; name: string };
 
-// 標籤用的品牌名：查不到就回 null＝標籤上那一行整行不印。顯示用的 brandName 回「—」，
-// 那是畫面上的佔位符，印到標籤上會變成莫名其妙的一行破折號。
-function labelBrand(brands: readonly BrandOption[], id: number | null): string | null {
+// null 是商品沒有品牌；undefined 是有品牌卻尚未取得名稱，必須暫停列印。
+function labelBrand(brands: readonly BrandOption[], id: number | null): string | null | undefined {
   if (id === null) return null;
-  return brands.find((b) => b.id === id)?.name ?? null;
+  return brands.find((b) => b.id === id)?.name.trim() || undefined;
 }
 
 // 單件補印：條碼/品名/整數元售價/品牌/全新或二手直接來自清單列；經 hardware-agent
-// /print/label。品牌是店內主檔的顯示名，查不到就不給（標籤那一行不印），不要送 "—"。
+// /print/label。品牌名稱未取得時不送印，避免把查詢異常當成沒有品牌。
 function ReprintLabelButton({
   code,
   name,
@@ -145,11 +144,14 @@ function ReprintLabelButton({
   code: string;
   name: string;
   price: number;
-  brand: string | null;
+  brand: string | null | undefined;
   condition: LabelCondition;
 }) {
   const print = useMutation({
-    mutationFn: () => printLabel(code, name, price, { brand, condition }),
+    mutationFn: () => {
+      if (brand === undefined) throw new Error("品牌名稱尚未取得，請重新整理後再試");
+      return printLabel(code, name, price, { brand, condition });
+    },
   });
   return (
     <span className="inv-reprint">
@@ -157,10 +159,13 @@ function ReprintLabelButton({
         type="button"
         className="btn-ghost inv-reprint-btn"
         onClick={() => print.mutate()}
-        disabled={print.isPending}
+        disabled={print.isPending || brand === undefined}
       >
         {print.isPending ? "列印中…" : "補印標籤"}
       </button>
+      {brand === undefined && (
+        <span className="form-error inv-reprint-err">品牌名稱尚未取得；若持續無法列印，請重新整理</span>
+      )}
       {print.isSuccess && <span className="inv-reprint-ok">✓ 已送出</span>}
       {print.isError && (
         <span className="form-error inv-reprint-err" title={print.error.message}>

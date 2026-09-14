@@ -92,9 +92,23 @@ try {
   ok("出現「列印標籤（N 張）」按鈕", true, (await labelBtn.textContent()) ?? "");
   await page.screenshot({ path: `${SHOTS}/b3-01-label-button.png` });
 
+  // 有品牌但查詢成功回傳缺項，不得默默印成無品牌；恢復後可用同一筆收購重試。
+  const brandOptions = "**/api/v1/serialized-items/filter-options*";
+  await page.route(brandOptions, async (route) => {
+    const response = await route.fetch();
+    const data = await response.json();
+    await route.fulfill({ response, json: { ...data, brands: [] } });
+  });
+  await labelBtn.click();
+  await page.locator(".acq-print-labels .form-error, .acq-print-labels .form-success").waitFor({ timeout: 5000 });
+  ok("品牌缺項時不送印", labels.length === 0);
+  ok("品牌缺項提供錯誤原因", (await page.locator(".acq-print-labels").textContent()).includes("品牌名稱"));
+  await page.screenshot({ path: `${SHOTS}/b3-03-brand-missing.png` });
+  await page.unroute(brandOptions);
+
   // 4) 點擊 → 經代理列印 → 顯示「已送出 N 張標籤」（代理需在 :8001 回應）
   await labelBtn.click();
-  await page.waitForSelector(".acq-print-labels .form-success, .acq-print-labels .form-error", {
+  await page.waitForSelector(".acq-print-labels .form-success", {
     timeout: 15000,
   });
   const sent = await page.locator(".acq-print-labels .form-success").count();

@@ -90,11 +90,24 @@ try {
   await page.waitForURL(`${BASE}/`);
   ok("登入成功", true);
 
+  const optionsUrl = "**/api/v1/serialized-items/filter-options*";
+  let releaseOptions;
+  const optionsReady = new Promise((resolve) => { releaseOptions = resolve; });
+  await page.route(optionsUrl, async (route) => { await optionsReady; await route.continue(); });
+
   // 2) 進庫存頁（預設序號品分頁）
   await page.click('a:has-text("庫存")');
   await page.waitForURL(`${BASE}/inventory`);
   await page.waitForSelector('[role="tab"]:has-text("序號品")');
   await page.waitForSelector(".inv-table tbody tr");
+  const pendingPrint = page.locator(".inv-reprint-btn").first();
+  await pendingPrint.waitFor();
+  ok("品牌仍在載入時停用補印", await pendingPrint.isDisabled());
+  ok("品牌載入中不送印", labels.length === 0);
+  await page.screenshot({ path: `${SHOTS}/inv-reprint-00-brand-pending.png` });
+  releaseOptions();
+  await page.waitForFunction(() => !document.querySelector(".inv-reprint-btn")?.disabled);
+  await page.unroute(optionsUrl);
   await filterInStock("在庫");
   await page.screenshot({ path: `${SHOTS}/inv-reprint-01-serialized.png` });
 
@@ -137,6 +150,15 @@ try {
     );
     await page.screenshot({ path: `${SHOTS}/inv-reprint-05-branded.png` });
   }
+  await page.route(optionsUrl, (route) => route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "test lookup unavailable" }) }));
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByText(/品牌名稱尚未取得/).first().waitFor();
+  ok("品牌查詢失敗停用補印", await page.locator(".inv-reprint-btn").first().isDisabled());
+  await page.screenshot({ path: `${SHOTS}/inv-reprint-06-brand-failed.png` });
+  await page.unroute(optionsUrl);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !document.querySelector(".inv-reprint-btn")?.disabled);
+  ok("重新整理取得品牌後可補印", await page.locator(".inv-reprint-btn").first().isEnabled());
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
 } finally {

@@ -355,6 +355,45 @@ describe("InventoryPage", () => {
     });
   });
 
+  it.each([
+    { tab: "序號品", endpoint: "serialized-items", rows: SERIALIZED, code: "SER-001", name: "登山帳篷", price: 3500, condition: "二手" },
+    { tab: "一般商品", endpoint: "catalog-products", rows: CATALOG, code: "SKU-9", name: "瓦斯罐", price: 120, condition: "全新" },
+    { tab: "散裝批", endpoint: "bulk-lots", rows: BULK, code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
+  ].flatMap((c) => ["pending", "failed", "missing"].map((state) => ({ ...c, state }))))("$tab blocks printing when the assigned brand is $state, then recovers", async (c) => {
+    const { state } = c;
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const labels: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/print/label")) {
+        labels.push(JSON.parse(String(init?.body ?? "{}")));
+        return json({ ok: true });
+      }
+      if (url.includes(`/${c.endpoint}/filter-options`)) {
+        if (state === "pending") return pending;
+        return state === "failed" ? json({ detail: "unavailable" }, 500) : json({ ...FILTER_OPTIONS, brands: [] });
+      }
+      if (new URL(url).pathname.endsWith(`/${c.endpoint}`)) return json(c.rows.map((row) => ({ ...row, brand_id: 11 })));
+      return route(url) ?? json([]);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: c.tab }));
+    await screen.findByText(c.code);
+    const button = screen.getByRole("button", { name: "補印標籤" });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    expect(await screen.findByText(/品牌名稱尚未取得/)).toBeTruthy();
+    await userEvent.click(button);
+    expect(labels).toHaveLength(0);
+    if (state === "pending") {
+      release(json(FILTER_OPTIONS));
+      await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+      await userEvent.click(button);
+      await screen.findByText("✓ 已送出");
+      expect(labels).toEqual([{ code: c.code, name: c.name, price: c.price, brand: "蠻牛", condition: c.condition }]);
+    }
+  });
+
   it("sold serialized item shows no reprint button", async () => {
     vi.stubGlobal(
       "fetch",
