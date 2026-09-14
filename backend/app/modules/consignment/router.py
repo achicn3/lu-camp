@@ -109,4 +109,18 @@ async def pay_settlement(
         await session.rollback()
         raise
     await session.commit()
-    return ConsignmentSettlementRead.model_validate(settlement)
+    # 付款結果也帶未稅拆解：同一個 schema 在兩個端點語意不同的話，OpenAPI 的使用者會踩到。
+    row = await svc.settlement_with_breakdown(
+        user.store_id,
+        {
+            "gross": settlement.gross,
+            "commission_amount": settlement.commission_amount,
+        },
+    )
+    return ConsignmentSettlementRead.model_validate(settlement).model_copy(
+        update={
+            "net_amount": row["net_amount"],
+            "tax_amount": row["tax_amount"],
+            "commission_net": row["commission_net"],
+        }
+    )

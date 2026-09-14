@@ -92,6 +92,7 @@ def _require_amount(value: Decimal | None, number: str | None, field: str) -> De
         raise DomainError(f"進項發票 {number or '(無號碼)'} 缺少{field}，無法產出申報清單")
     return value
 
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -713,12 +714,13 @@ class ReportsService:
                 net=invoice.net,
                 tax=invoice.tax,
                 total=invoice.total,
-                # 只印整張發票金額的話，部分退的單看起來像整張都要處理。
-                status="全額退貨" if refund >= invoice.total else "部分退貨",
+                # 只印整張發票金額的話，看不出這期實際要調整多少。
+                # **不以單期退款判斷全額／部分**：分兩期各退一半時，第二期會誤標成「部分」。
+                status="本期有退貨",
                 issue_channel=invoice.issue_channel.value,
                 sale_id=invoice.sale_id,
                 reference=(
-                    f"本期退款 {format_ntd(refund)}"
+                    f"本期退款 {format_ntd(refund)}／發票 {format_ntd(invoice.total)}"
                     f"（{refunds_by_sale[invoice.sale_id][1]} 筆）・交易 #{invoice.sale_id}"
                 ),
             )
@@ -728,7 +730,7 @@ class ReportsService:
 
         # 前期開立、本期作廢：依 F0501 完成時間抓，與本期開立的作廢分開列，
         # 才不會把上期的數字混進本期合計（也不會整筆消失）。
-        period_dates = {invoice.id for invoice in invoices}
+        invoice_ids_in_period = {invoice.id for invoice in invoices}
         voided_from_earlier_periods = [
             InvoiceRegisterRow(
                 number=invoice.invoice_no,
@@ -747,7 +749,7 @@ class ReportsService:
             for invoice in await self._einvoice.invoices_voided_in_period(
                 store_id, date_from, date_to
             )
-            if invoice.id not in period_dates  # 本期開立的已在「作廢」那段
+            if invoice.id not in invoice_ids_in_period  # 本期開立的已在「作廢」那段
         ]
 
         def _sum(rows: list[InvoiceRegisterRow], field: str) -> Decimal:
@@ -775,10 +777,7 @@ class ReportsService:
                 input_total=_sum(input_invoices, "total"),
                 input_tax=_sum(input_invoices, "tax"),
                 manual_paper_refund_total=Decimal(
-                    sum(
-                        refunds_by_sale[invoice.sale_id][0]
-                        for invoice in paper_invoices
-                    )
+                    sum(refunds_by_sale[invoice.sale_id][0] for invoice in paper_invoices)
                 ),
             ),
         )

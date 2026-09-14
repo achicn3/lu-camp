@@ -540,6 +540,7 @@ async def invoice_register(
         # 畫面顯示幾個數字，匯出就要有幾個：少了稅額，會計會自己去加總「稅額」欄，
         # 而那一欄混著作廢、未完成與進項（同一張票還可能出現兩次）——申報就錯了。
         ("銷項合計", format_ntd(report.totals.issued_total)),
+        ("銷項未稅", format_ntd(report.totals.issued_net)),
         ("銷項稅額", format_ntd(report.totals.issued_tax)),
         ("作廢合計", format_ntd(report.totals.voided_total)),
         ("折讓合計", format_ntd(report.totals.allowance_total)),

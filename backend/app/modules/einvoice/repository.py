@@ -8,10 +8,11 @@ from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Integer, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core.audit import AuditLog
 from app.core.time import store_date, store_period_end_day
 from app.modules.einvoice.models import (
     EInvoiceResultEvent,
@@ -111,23 +112,41 @@ class EInvoiceRepository:
         8/31 開、9/2 作廢的票，用開立日歸期的話在 9 月月報完全看不到——既不在銷項、
         也不在作廢，沒有任何提示要去辦更正。
         """
-        stmt = (
-            select(Invoice)
-            .join(
-                EInvoiceUploadQueue,
-                and_(
-                    EInvoiceUploadQueue.invoice_id == Invoice.id,
-                    EInvoiceUploadQueue.store_id == Invoice.store_id,
-                ),
-            )
+        platform_voided = (
+            select(EInvoiceUploadQueue.invoice_id)
             .where(
-                Invoice.store_id == store_id,
+                EInvoiceUploadQueue.store_id == store_id,
                 EInvoiceUploadQueue.action == EInvoiceAction.VOID,
                 EInvoiceUploadQueue.status == UploadStatus.UPLOADED,
                 EInvoiceUploadQueue.uploaded_at >= date_from,
                 EInvoiceUploadQueue.uploaded_at < date_to,
             )
+        )
+        # 手開紙本作廢**不排 F0501**（平台上沒有那張票，einvoice/service 走純本地作廢），
+        # 所以佇列裡找不到；改以作廢當下寫的稽核紀錄歸期，否則跨期的紙本作廢在任何一段
+        # 都看不到——正是這段要解決的失敗模式。
+        paper_voided = (
+            select(AuditLog.entity_id)
+            .where(
+                AuditLog.store_id == store_id,
+                AuditLog.action == "VOID_INVOICE",
+                AuditLog.entity_type == "invoice",
+                AuditLog.created_at >= date_from,
+                AuditLog.created_at < date_to,
+            )
+        )
+        stmt = (
+            select(Invoice)
+            .where(
+                Invoice.store_id == store_id,
+                Invoice.status == InvoiceStatus.VOID,
+                or_(
+                    Invoice.id.in_(platform_voided),
+                    Invoice.id.in_(select(cast(paper_voided.subquery().c.entity_id, Integer))),
+                ),
+            )
             .order_by(Invoice.id)
+            .distinct()
         )
         return list((await self._session.scalars(stmt)).all())
 

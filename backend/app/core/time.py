@@ -37,7 +37,6 @@ def store_datetime_iso(value: datetime) -> str:
     return _aware_utc(value).astimezone(STORE_TIME_ZONE).isoformat()
 
 
-
 def store_period_end_day(date_to: datetime) -> date:
     """報表期間的結束界線 → 要**涵蓋到**的最後一個台北日曆日。
 

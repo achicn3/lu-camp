@@ -95,25 +95,6 @@ class ReturnsRepository:
         )
         return {int(sale_id): (Decimal(total), int(count)) for sale_id, total, count in rows.all()}
 
-    async def period_returned_sale_ids(
-        self, store_id: int, date_from: datetime, date_to: datetime
-    ) -> list[int]:
-        """期間內**發生退貨**的銷售 id（部分退也算）。
-
-        不能用 sale.status 判斷：部分退貨時銷售仍是 COMPLETED，只有整單退完才變 RETURNED。
-        也不能用原銷售/發票日期篩：8/31 開的票 9/10 退，那筆調整屬於 9 月。
-        """
-        rows = await self._session.scalars(
-            select(CustomerReturn.sale_id)
-            .where(
-                CustomerReturn.store_id == store_id,
-                CustomerReturn.created_at >= date_from,
-                CustomerReturn.created_at < date_to,
-            )
-            .distinct()
-        )
-        return [int(sale_id) for sale_id in rows]
-
     async def period_return_sale_line_ids(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[int]:

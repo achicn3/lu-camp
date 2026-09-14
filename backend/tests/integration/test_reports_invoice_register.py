@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import AuditLog
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
@@ -246,10 +247,18 @@ async def test_invoice_register_lists_the_period_by_category(
     assert body["input_invoices"][0]["counterparty"] == "裝備大盤商"
 
     # 合計要能與畫面核對
-    assert body["totals"]["issued_total"] == "3950"  # 1050 + 2100 + 800（折讓那張仍是銷項）
-    assert body["totals"]["voided_total"] == "500"
-    assert body["totals"]["allowance_total"] == "200"
-    assert body["totals"]["input_total"] == "1050"
+    totals = body["totals"]
+    assert totals["issued_total"] == "3950"  # 1050 + 2100 + 800（折讓那張仍是銷項）
+    assert totals["voided_total"] == "500"
+    assert totals["allowance_total"] == "200"
+    assert totals["input_total"] == "1050"
+    # **稅額也要守住**：申報書填的是未稅銷售額與稅額，合計算錯或接錯欄位不能只靠人眼看。
+    assert totals["issued_net"] == "3761"  # 1000 + 2000 + 761（fixture 的未稅取整無條件捨去）
+    assert totals["issued_tax"] == "189"  # 50 + 100 + 39
+    assert int(totals["issued_net"]) + int(totals["issued_tax"]) == int(totals["issued_total"])
+    assert totals["allowance_tax"] == "10"
+    assert totals["input_tax"] == "50"
+    assert totals["manual_paper_refund_total"] == "0"  # 本期沒有紙本待調整
 
 
 async def test_invoice_register_lists_unfinished_invoices_separately(
@@ -306,6 +315,9 @@ async def test_invoice_register_exports_csv_with_period_and_store(
     text = resp.content.decode("utf-8-sig")
     assert "銷項" in text and "AA10000020" in text
     assert "期間" in text and "店別" in text
+    # 畫面上有的合計，匯出檔就要有——會計拿到的是這個檔（US-068）。
+    for label in ("銷項合計", "銷項稅額", "折讓稅額", "進項稅額", "手開紙本待調整退款"):
+        assert label in text, label
 
 
 async def test_invoice_register_is_manager_only(
@@ -509,7 +521,7 @@ async def test_invoice_register_flags_manual_paper_returns_for_manual_adjustment
     await _return_one_line(db_session, store_id, sale_id, clerk_id, when=when)
     sale = await db_session.get(Sale, sale_id)
     assert sale is not None
-    sale.status = SaleStatus.RETURNED  # 已整筆退貨，紙本依國稅局程序另行處理
+    sale.status = SaleStatus.RETURNED  # 紙本依國稅局程序另行處理（本例只退其中 525）
     await db_session.flush()
 
     body = (
@@ -522,8 +534,8 @@ async def test_invoice_register_flags_manual_paper_returns_for_manual_adjustment
     row = body["manual_paper_adjustments"][0]
     assert [r["number"] for r in body["manual_paper_adjustments"]] == ["MP10000001"]
     # 退了多少要看得出來：這筆只退了 525（部分），不是整張 1,050
-    assert row["status"] == "部分退貨"
-    assert "本期退款 525" in row["reference"]
+    assert row["status"] == "本期有退貨"
+    assert "本期退款 525／發票 1050" in row["reference"]
     assert body["totals"]["manual_paper_refund_total"] == "525"
     # 發票本身仍是有效銷項（紙本處置是店家線下作業），但要有這張待辦清單
     assert [row["number"] for row in body["issued"]] == ["MP10000001"]
@@ -1005,3 +1017,53 @@ async def test_invoice_register_rejects_an_inverted_period(
         headers=_auth(mgr),
     )
     assert resp.status_code == 422
+
+
+async def test_invoice_register_shows_paper_invoices_voided_this_period(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """手開紙本的跨期作廢也要看得到：它不排 F0501，只留稽核紀錄。
+
+    8/31 開的紙本、9/2 店長確認紙本已作廢 → 9 月月報若什麼都不顯示，
+    沒人知道要回頭更正 8 月已申報的銷項（與電子發票那條是同一種失敗）。
+    """
+    mgr, _clerk, store_id, clerk_id = await _seed(db_session)
+    issued_when = datetime(2026, 8, 31, 6, 0, tzinfo=UTC)
+    sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=issued_when)
+    invoice = Invoice(
+        store_id=store_id,
+        sale_id=sale_id,
+        invoice_type=InvoiceType.B2C,
+        invoice_no="MP20260831V",
+        invoice_date=date(2026, 8, 31),
+        status=InvoiceStatus.VOID,
+        void_reason=InvoiceVoidReason.SALE_VOID,
+        issue_channel=EInvoiceIssueChannel.MANUAL_PAPER,
+        net=Decimal(1000),
+        tax=Decimal(50),
+        total=Decimal(1050),
+        created_at=issued_when,
+    )
+    db_session.add(invoice)
+    await db_session.flush()
+    db_session.add(
+        AuditLog(
+            store_id=store_id,
+            actor_user_id=clerk_id,
+            action="VOID_INVOICE",
+            entity_type="invoice",
+            entity_id=str(invoice.id),
+            after={"source": "manual_paper_disposed"},
+            created_at=datetime(2026, 9, 2, 3, 0, tzinfo=UTC),
+        )
+    )
+    await db_session.flush()
+
+    body = (
+        await client.get(
+            "/api/v1/reports/invoice-register",
+            params={"from": "2026-09-01T00:00:00+08:00", "to": "2026-10-01T00:00:00+08:00"},
+            headers=_auth(mgr),
+        )
+    ).json()
+    assert [row["number"] for row in body["voided_from_earlier_periods"]] == ["MP20260831V"]

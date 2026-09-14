@@ -24,6 +24,19 @@ from app.shared.enums import CashMovementType, ConsignmentSettlementStatus
 from app.shared.exceptions import IdempotencyKeyConflict, SettlementNotFound, SettlementNotPending
 
 
+def _with_breakdown(row: dict[str, Any], tax_rate: Decimal) -> dict[str, Any]:
+    """替結算列補上 net_amount／tax_amount／commission_net（純計算，好單獨測）。"""
+    net, tax, commission_net = consignment_breakdown(
+        Decimal(row["gross"]), Decimal(row["commission_amount"]), tax_rate
+    )
+    return {
+        **row,
+        "net_amount": Decimal(net),
+        "tax_amount": Decimal(tax),
+        "commission_net": Decimal(commission_net),
+    }
+
+
 class ConsignmentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -210,22 +223,17 @@ class ConsignmentService:
         rows = await self._repo.list_settlements(
             store_id, status=status, phone=phone, limit=limit, offset=offset
         )
-        return [await self._with_breakdown(store_id, row) for row in rows]
+        # 稅率**整份清單取一次**：同一個交易裡不會變，逐列去撈等於一頁最多 200 道多餘查詢。
+        tax_rate = await self._tax_rate(store_id)
+        return [_with_breakdown(row, tax_rate) for row in rows]
 
-    async def _with_breakdown(self, store_id: int, row: dict[str, Any]) -> dict[str, Any]:
-        """替結算列補上 net_amount／tax_amount／commission_net。"""
-        tax_rate = (
-            await StoreSettingsService(self._session).get_effective_settings(store_id)
-        ).tax_rate
-        net, tax, commission_net = consignment_breakdown(
-            Decimal(row["gross"]), Decimal(row["commission_amount"]), tax_rate
-        )
-        return {
-            **row,
-            "net_amount": Decimal(net),
-            "tax_amount": Decimal(tax),
-            "commission_net": Decimal(commission_net),
-        }
+    async def settlement_with_breakdown(self, store_id: int, row: dict[str, Any]) -> dict[str, Any]:
+        """單列補拆解（付款結果也要帶，否則同一個 schema 在兩個端點語意不同）。"""
+        return _with_breakdown(row, await self._tax_rate(store_id))
+
+    async def _tax_rate(self, store_id: int) -> Decimal:
+        settings = await StoreSettingsService(self._session).get_effective_settings(store_id)
+        return settings.tax_rate
 
     async def count_settlements(
         self,

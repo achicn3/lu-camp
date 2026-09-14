@@ -383,12 +383,6 @@ class ReturnsService:
         """期間內各銷售的退款金額與筆數（申報月報的紙本待調整用）。"""
         return await self._repo.period_refunds_by_sale(store_id, date_from, date_to)
 
-    async def period_returned_sale_ids(
-        self, store_id: int, date_from: datetime, date_to: datetime
-    ) -> list[int]:
-        """期間內發生退貨的銷售 id（含部分退；申報月報要據此找出待人工調整的紙本發票）。"""
-        return await self._repo.period_returned_sale_ids(store_id, date_from, date_to)
-
     async def margin_adjustments(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> "ReturnsMarginAdjustments":
