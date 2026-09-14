@@ -122,6 +122,8 @@ function isCatalogCreateBody(value: unknown): value is CatalogCreateRequestBody 
     typeof body.reorder_point === "number" &&
     Number.isInteger(body.reorder_point) &&
     (body.note === undefined || body.note === null || typeof body.note === "string") &&
+    // 三個主檔 id 同性質一起驗；型別錯了在讀回時就擋，不要送出去吃後端 422。
+    isOptionalId(body.brand_id) &&
     isOptionalId(body.product_model_id) &&
     isOptionalId(body.category_id)
   );

@@ -329,8 +329,10 @@ class CatalogProductRead(BaseModel):
     unit_price: NTDAmount
     quantity_on_hand: int
     reorder_point: int
-    product_model_id: int | None = None
-    category_id: int | None = None
+    # 回應模型不給預設值：給了就會在生成型別變成 optional（`product_model_id?`），
+    # 消費端得處理「沒有這個鍵／值是 null」兩種狀態。與序號品的同名欄位保持一致。
+    product_model_id: int | None
+    category_id: int | None
     note: str | None = None
     incoming_qty: int = 0
 

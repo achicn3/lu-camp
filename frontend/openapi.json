@@ -2756,7 +2756,9 @@
           "brand_id",
           "unit_price",
           "quantity_on_hand",
-          "reorder_point"
+          "reorder_point",
+          "product_model_id",
+          "category_id"
         ],
         "title": "CatalogProductRead",
         "type": "object"

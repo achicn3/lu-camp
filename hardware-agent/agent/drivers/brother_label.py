@@ -15,7 +15,11 @@ lot_code／一般商品 sku）、NT$ 價格＋全新或二手標示（選填，�
 （docs/15 §2），不在此驅動範圍。
 
 2026-09-14 裁示加上品牌與全新/二手：品牌自成一行、沒品牌就整行不印、成色（S–D）不印。
-沒給品牌時版面與這次變更前**逐像素相同**，既有標籤不會因此改樣。
+加品牌**沒有動到**無品牌版面的排版基準（見 `_TEXT_WIDTH_DOTS`）。
+2026-09-15 另修無品牌兩種版面的兩項 main 既有缺陷：(a) `NT$` 的錢字號被下邊界削掉
+6／4 dots，price_top 各上移同樣的量；(b) 品名的英文降部壓進條碼帶上緣 6／4 列，
+barcode_top 各下移、底部不動只縮上緣。**這兩種版面的既有標籤外觀因此有這點位移**，
+那是把被切掉的字補回來、把壓在 bar 上的墨挪開，不是版面漂移。
 """
 
 from __future__ import annotations
@@ -73,10 +77,11 @@ class _Bands(TypedDict):
     condition_font_px: int
 
 
-# 四種變體：品名單行/換行 × 有無品牌行。無品牌的兩種維持原版面一像素不動（既有標籤
-# 不因這次變更而改樣）。有品牌的兩種空間從三處借：品名降一級、條碼縮高（仍 ≈7.5mm，
-# 遠高於 Code128 可掃下限）、換行版品名由三行改兩行——品牌已承擔一部分辨識，
-# 硬留三行會把條碼壓到掃不動。整張標籤不加長，維持 40mm 上限裁示。
+# 四種變體：品名單行/換行 × 有無品牌行。無品牌的兩種沿用原版面，只有 price_top 與
+# barcode_top 微調（2026-09-15 修兩項 main 既有缺陷，見模組 docstring）。
+# 有品牌的兩種空間從三處借：品名降一級、
+# 條碼縮高（仍 ≈7.5mm，遠高於 Code128 可掃下限）、換行版品名由三行改兩行——品牌已承擔
+# 一部分辨識，硬留三行會把條碼壓到掃不動。文字不加長，維持 40mm 裁示（見 _TEXT_WIDTH_DOTS）。
 _SINGLE: _Bands = {
     "brand_top": 0,
     "brand_font_px": 0,
@@ -84,8 +89,10 @@ _SINGLE: _Bands = {
     "name_font_px": 56,
     "name_line_step": 38,
     "name_max_lines": 1,
-    "barcode_top": 78,
-    "barcode_height": 120,
+    # 85 而非 78：品名的英文降部（Gypsy 的 p/y）最低到 83，原本壓在 bar 上緣 6 列，
+    # 掃描器可能讀錯（main 既有，2026-09-15 修）。底部不動、只縮上緣，仍有 ≈9.6mm。
+    "barcode_top": 85,
+    "barcode_height": 113,
     "code_top": 206,
     "code_font_px": 30,
     # 234 而非 240：`NT$` 的錢字號尾巴比數字低一截，240 會被下邊界削掉 6 dots
@@ -101,8 +108,8 @@ _WRAPPED: _Bands = {
     "name_font_px": 34,
     "name_line_step": 38,
     "name_max_lines": 3,
-    "barcode_top": 124,
-    "barcode_height": 88,
+    "barcode_top": 129,  # 同 _SINGLE：第三行降部最低到 127，原本壓進 4 列；仍有 ≈7.0mm
+    "barcode_height": 83,
     "code_top": 216,
     "code_font_px": 24,
     "price_top": 244,  # 同 _SINGLE：248 會削掉錢字號 4 dots；上移後與識別碼仍留 17 dots

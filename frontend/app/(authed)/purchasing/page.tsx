@@ -360,6 +360,9 @@ function CreatePurchaseOrder({
       setNewProductSku("");
       setNewProductPrice("");
       setNewProductReorderPoint("0");
+      setNewProductBrand(null);
+      setNewProductModel(null);
+      setNewProductCategory(null);
       setNewProductError(null);
       void queryClient.invalidateQueries({ queryKey: ["catalog-products"] });
     },
@@ -495,7 +498,15 @@ function CreatePurchaseOrder({
                     <CreatableCombobox
                       label="型號"
                       selectedId={newProductModel?.id ?? null}
-                      disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                      // 沒選品牌就不能選型號（比照收購頁）。後端只在 brand_id 有值時才比對
+                      // 型號是否同品牌，所以「有型號、沒品牌」是合法組合——但那種商品標籤
+                      // 印不出品牌、依品牌收斂的篩選也永遠找不到它，正是這次要解決的問題。
+                      placeholder={newProductBrand === null ? "先選品牌" : "選擇或新增型號"}
+                      disabled={
+                        newProductBrand === null ||
+                        pendingCatalogCreate !== null ||
+                        createProduct.isPending
+                      }
                       search={(q) =>
                         api
                           .GET("/api/v1/product-models", {

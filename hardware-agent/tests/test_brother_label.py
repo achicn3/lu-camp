@@ -28,6 +28,7 @@ from agent.drivers.brother_label import (
     MAX_LABEL_WIDTH_DOTS,
     BrotherLabelPrinter,
     LabelContentTooWide,
+    _Bands,
     build_label_image,
 )
 from agent.errors import DeviceOffline, DeviceTimeout
@@ -202,31 +203,32 @@ class TestBrandLine:
         assert row_a == row_b
         assert 0 in row_a
 
-    def test_branded_layouts_keep_the_barcode_band_clean(self) -> None:
-        """有品牌的兩種版面，條碼帶內**每一列**都必須一模一樣。
+    @pytest.mark.parametrize(
+        ("label", "name", "brand", "bands"),
+        [
+            ("單行無品牌", "Gypsy", None, _SINGLE),
+            ("換行無品牌", "gjpqy " * 12, None, _WRAPPED),
+            ("單行有品牌", "Gypsy", "Jpqgy Peak", _SINGLE_BRANDED),
+            ("換行有品牌", "gjpqy " * 12, "Jpqgy Peak", _WRAPPED_BRANDED),
+        ],
+    )
+    def test_no_variant_lets_text_bleed_into_the_barcode_band(
+        self, label: str, name: str, brand: str | None, bands: _Bands
+    ) -> None:
+        """四種版面的條碼帶內，**每一列**都必須一模一樣。
 
-        只驗兩列（上面那兩個測試）漏得掉降部滲墨：品名的 p/y/g 尾巴垂進條碼帶，
-        bar 上緣多出墨點，掃描器就可能讀錯。這裡整帶逐列比對。
-
-        **不驗無品牌的兩種**：那兩組版面本次未更動（與 main 逐像素相同），而它們在
-        英文降部品名下確實會滲進條碼帶上緣——既有問題，修它等於改掉現有標籤外觀，
-        不在這次變更範圍內，另行回報。
+        只抽驗兩列漏得掉降部滲墨：品名的 p/y/g/j 尾巴垂進條碼帶，bar 上緣多出墨點，
+        掃描器就可能讀錯。這裡整帶逐列比對。無品牌那兩種原本各滲 7／4 列（main 既有，
+        2026-09-15 一併修）——既然已為同類缺陷（錢字號被削）動過這兩個版面，
+        就沒有理由只修一半。
         """
-
-        cases = [
-            ("Gypsy", _SINGLE_BRANDED),  # 降部最兇的短品名 → 單行版
-            ("gjpqy " * 12, _WRAPPED_BRANDED),  # 降部最兇的長品名 → 換行版
-        ]
-        for name, bands in cases:
-            image = build_label_image(
-                "ITM-0001", name, 1000, _FONT, brand="Jpqgy Peak", condition="二手"
-            )
-            top, height = bands["barcode_top"], bands["barcode_height"]
-            rows = {
-                tuple(image.getpixel((x, y)) for x in range(image.width))
-                for y in range(top, top + height + 1)
-            }
-            assert len(rows) == 1, f"品名 {name!r}：條碼帶有 {len(rows)} 種列樣式，有東西滲進來"
+        image = build_label_image("ITM-0001", name, 1000, _FONT, brand=brand, condition="二手")
+        top, height = bands["barcode_top"], bands["barcode_height"]
+        rows = {
+            tuple(image.getpixel((x, y)) for x in range(image.width))
+            for y in range(top, top + height + 1)
+        }
+        assert len(rows) == 1, f"{label}：條碼帶有 {len(rows)} 種列樣式，有東西滲進來"
 
     @pytest.mark.parametrize("price", [0, 1000, 12800])
     def test_wrapped_price_and_condition_are_not_clipped(

@@ -132,6 +132,29 @@ function labelBrand(brands: readonly BrandOption[], id: number | null): string |
   return brands.find((b) => b.id === id)?.name.trim() || undefined;
 }
 
+/**
+ * 「品牌清單沒載進來，補印暫時停用」的分頁層級提示。
+ *
+ * 逐列掛同一句話會在整頁鋪出二十行紅字，店員只會學會無視；這裡整頁講一次。
+ * 只在**這一頁真的有列受影響**時才出現（有 brand_id 卻查不到名字），沒品牌的商品
+ * 本來就不印品牌，不該被這個提示干擾。
+ */
+function BrandLookupNotice({
+  rows,
+  brands,
+}: {
+  rows: readonly { brand_id: number | null }[];
+  brands: readonly BrandOption[];
+}) {
+  const affected = rows.some((r) => labelBrand(brands, r.brand_id) === undefined);
+  if (!affected) return null;
+  return (
+    <p role="status" className="form-error">
+      品牌名稱尚未取得，受影響的商品暫時無法補印標籤；請稍候或重新整理。
+    </p>
+  );
+}
+
 // 單件補印：條碼/品名/整數元售價/品牌/全新或二手直接來自清單列；經 hardware-agent
 // /print/label。品牌名稱未取得時不送印，避免把查詢異常當成沒有品牌。
 function ReprintLabelButton({
@@ -160,12 +183,10 @@ function ReprintLabelButton({
         className="btn-ghost inv-reprint-btn"
         onClick={() => print.mutate()}
         disabled={print.isPending || brand === undefined}
+        title={brand === undefined ? "品牌名稱尚未取得，暫時無法列印" : undefined}
       >
         {print.isPending ? "列印中…" : "補印標籤"}
       </button>
-      {brand === undefined && (
-        <span className="form-error inv-reprint-err">品牌名稱尚未取得；若持續無法列印，請重新整理</span>
-      )}
       {print.isSuccess && <span className="inv-reprint-ok">✓ 已送出</span>}
       {print.isError && (
         <span className="form-error inv-reprint-err" title={print.error.message}>
@@ -1015,6 +1036,7 @@ function SerializedPanel() {
           ))}
         </select>
       </SearchBar>
+      <BrandLookupNotice rows={rows} brands={brands} />
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
@@ -1307,6 +1329,7 @@ function CatalogPanel() {
           ))}
         </select>
       </SearchBar>
+      <BrandLookupNotice rows={rows} brands={brands} />
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
@@ -1489,6 +1512,7 @@ function BulkPanel() {
           </select>
         )}
       </SearchBar>
+      <BrandLookupNotice rows={rows} brands={brands} />
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}

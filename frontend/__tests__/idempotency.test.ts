@@ -124,6 +124,30 @@ describe("待確認一般商品建檔持久化", () => {
     });
   });
 
+  it("品牌／型號／分類是選填：沒帶那些鍵的舊內容仍讀得回來", () => {
+    // 部署前就躺在 localStorage 的待重送沒有這三個鍵，必須照樣重放（否則舊鍵會卡死）。
+    savePendingCatalogCreate(1, { key: "catalog-idem-legacy", body });
+    expect(loadPendingCatalogCreate(1)?.body).toEqual(body);
+
+    const full = { ...body, brand_id: 3, product_model_id: 7, category_id: 11 };
+    savePendingCatalogCreate(2, { key: "catalog-idem-full", body: full });
+    expect(loadPendingCatalogCreate(2)?.body).toEqual(full);
+  });
+
+  it.each([
+    ["brand_id", "abc"],
+    ["product_model_id", "abc"],
+    ["category_id", 1.5],
+    ["product_model_id", true],
+  ])("localStorage 被寫入非法的 %s 就整筆丟棄，不拿去重送", (field, bad) => {
+    // 這幾個欄位會原樣送進後端；型別錯了應在讀回時就擋掉，而不是送出去吃 422。
+    localStorage.setItem(
+      "lu-camp.catalog-create-pending-idem.1",
+      JSON.stringify({ key: "catalog-idem-bad", body: { ...body, [field]: bad } }),
+    );
+    expect(loadPendingCatalogCreate(1)).toBeNull();
+  });
+
   it("不同店別不會誤用待確認請求，清除也只影響指定店別", () => {
     savePendingCatalogCreate(1, { key: "catalog-idem-1", body });
     savePendingCatalogCreate(2, { key: "catalog-idem-2", body: { ...body, name: "二店營繩" } });
