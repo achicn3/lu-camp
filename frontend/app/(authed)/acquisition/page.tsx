@@ -740,30 +740,84 @@ function ItemRowCard({
   );
 }
 
+/** 一件要印的標籤：品名/價格取自後端存下來的內容，品牌待解析。 */
+type PendingLabel = { code: string; name: string; price: number; brandId: number | null };
+
+/**
+ * 品牌 id → 顯示名。
+ *
+ * 品項端點只回 `brand_id`，而品牌**沒有 by-id 端點**；改用篩選選項的「使用中品牌」——
+ * 它不分狀態地列出所有掛著品項的品牌，所以剛收進來的這件，其品牌一定在裡面。
+ *
+ * **查不到就報錯，不默默印一張沒有品牌的標籤**：這裡的呼叫端已經確認有品項掛了品牌，
+ * 缺的是名字。靜默省略那一行，店員會拿到一張看起來正常、實際少了資訊的標籤。
+ */
+async function brandNameMap(kind: "serialized" | "bulk"): Promise<Map<number, string>> {
+  const path =
+    kind === "serialized"
+      ? ("/api/v1/serialized-items/filter-options" as const)
+      : ("/api/v1/bulk-lots/filter-options" as const);
+  const { data, error } = await api.GET(path, { params: { query: {} } });
+  if (!data) throw new Error(detail(error) ?? "查不到品牌名稱，無法列印含品牌的標籤");
+  return new Map(data.brands.map((b) => [b.id, b.name]));
+}
+
+/** 補上品牌名；沒有 brand_id 的品項回 null＝標籤上那一行整行不印（裁示 2026-09-14 第 2 點）。 */
+async function resolveBrands(
+  items: PendingLabel[],
+  kind: "serialized" | "bulk",
+): Promise<(string | null)[]> {
+  if (items.every((i) => i.brandId === null)) return items.map(() => null);
+  const brands = await brandNameMap(kind);
+  return items.map((i) => (i.brandId === null ? null : (brands.get(i.brandId) ?? null)));
+}
+
 // ── 標籤列印（Brother 標籤機）：收購完成後，逐一補印序號品 / 散裝批的條碼標籤 ──
+// 收購進來的一律是二手（新品走採購／一般商品），所以標示固定「二手」；成色不印。
 function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null }) {
   const total = codes.length + (lot !== null ? 1 : 0);
 
   const print = useMutation({
     mutationFn: async () => {
-      let sent = 0;
+      const items: PendingLabel[] = [];
       for (const code of codes) {
         const { data, error } = await api.GET("/api/v1/serialized-items/by-code/{item_code}", {
           params: { path: { item_code: code } },
         });
         if (!data) throw new Error(detail(error) ?? `查無序號品 ${code}`);
-        await printLabel(code, data.name, parseNtd(data.listed_price) ?? 0);
-        sent += 1;
+        items.push({
+          code,
+          name: data.name,
+          price: parseNtd(data.listed_price) ?? 0,
+          brandId: data.brand_id,
+        });
       }
+      const lots: PendingLabel[] = [];
       if (lot !== null) {
         const { data, error } = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
           params: { path: { lot_code: lot } },
         });
         if (!data) throw new Error(detail(error) ?? `查無散裝批 ${lot}`);
-        await printLabel(lot, data.name, parseNtd(data.unit_price) ?? 0);
-        sent += 1;
+        lots.push({
+          code: lot,
+          name: data.name,
+          price: parseNtd(data.unit_price) ?? 0,
+          brandId: data.brand_id,
+        });
       }
-      return sent;
+
+      // 品牌先全部解析完再開始送印：中途才發現查不到品牌，前面幾張已經印出去了，
+      // 補印得重來一輪，標籤紙也白花了。
+      const brands = [
+        ...(await resolveBrands(items, "serialized")),
+        ...(await resolveBrands(lots, "bulk")),
+      ];
+
+      const all = [...items, ...lots];
+      for (const [i, it] of all.entries()) {
+        await printLabel(it.code, it.name, it.price, { brand: brands[i], condition: "二手" });
+      }
+      return all.length;
     },
   });
 

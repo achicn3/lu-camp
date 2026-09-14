@@ -310,7 +310,49 @@ describe("InventoryPage", () => {
     expect(await screen.findByText("✓ 已送出")).toBeTruthy();
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain("/print/label");
-    expect(calls[0].body).toEqual({ code: "SER-001", name: "登山帳篷", price: 3500 });
+    // 品牌獨立一行、二手標示（裁示 2026-09-14）；成色不印。
+    expect(calls[0].body).toEqual({
+      code: "SER-001",
+      name: "登山帳篷",
+      price: 3500,
+      brand: "蠻牛",
+      condition: "二手",
+    });
+  });
+
+  // 標籤內容（裁示 2026-09-14）：品牌獨立一行、沒品牌就不送、散裝與一般商品都要能印。
+  // 一般商品來自採購＝全新；序號品與散裝批來自收購＝二手。成色不印。
+  it.each([
+    { tab: "一般商品", row: "SKU-9", code: "SKU-9", name: "瓦斯罐", price: 120, condition: "全新" },
+    { tab: "散裝批", row: "LOT-7", code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
+  ])("$tab row prints a label marked $condition", async (c) => {
+    const calls: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/print/label")) {
+          calls.push({ url, body: JSON.parse(String(init?.body ?? "{}")) });
+          return json({ ok: true });
+        }
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: c.tab }));
+    await screen.findByText(c.row);
+    await userEvent.click(screen.getByRole("button", { name: "補印標籤" }));
+    expect(await screen.findByText("✓ 已送出")).toBeTruthy();
+    // 這兩筆 fixture 都沒有品牌 → brand 送 null，代理端整行不印。
+    expect(calls[0].body).toEqual({
+      code: c.code,
+      name: c.name,
+      price: c.price,
+      brand: null,
+      condition: c.condition,
+    });
   });
 
   it("sold serialized item shows no reprint button", async () => {

@@ -201,8 +201,13 @@ PATCH  /api/v1/settings        # einvoice_enabled, default_commission_pct, defau
 POST   http://localhost:<port>/print/receipt    { sale }
 POST   http://localhost:<port>/print/detail      { sale }   # 商品明細聯(逐項品名/數量/單價/小計/總計)
 POST   http://localhost:<port>/print/einvoice    { invoice }
-POST   http://localhost:<port>/print/label       { code(item_code 或 lot_code), name, price }
+POST   http://localhost:<port>/print/label       { code(item_code / lot_code / sku), name, price,
+                                                  brand?, condition? }
        # 以 1D Code 128 編碼 code(識別碼); 標籤含品名/價格等可讀文字
+       # brand: 品牌，獨立一行印在品名上方; 空或未給＝那一行整行不印(裁示 2026-09-14)
+       # condition: 「全新」(採購來的一般商品) 或「二手」(收購來的序號品/散裝批), 與價格同行靠右
+       #            成色(S–D)不印——客人看標籤只需要知道新舊, 分級是店內作業用語
+       # 兩者皆選填: 舊版前端只送 code/name/price 仍須正常列印
 POST   http://localhost:<port>/drawer/open
 GET    http://localhost:<port>/health
 GET    http://localhost:<port>/devices/status

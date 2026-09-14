@@ -319,8 +319,21 @@ class DeviceStatus(BaseModel):
 class LabelPrinter(Protocol):
     """標籤機（Brother QL-810W）：列印商品條碼標籤。"""
 
-    def print_label(self, code: str, name: str, price: int) -> None:
-        """列印標籤：可讀文字（品名/價格）+ Code 128 條碼（編碼識別碼）。"""
+    def print_label(
+        self,
+        code: str,
+        name: str,
+        price: int,
+        *,
+        brand: str | None = None,
+        condition: str | None = None,
+    ) -> None:
+        """列印標籤：可讀文字（品牌/品名/價格/全新或二手標示）+ Code 128 條碼（編碼識別碼）。
+
+        Args:
+            brand: 品牌，獨立一行印在品名上方；`None`／空白＝整行不印（裁示 2026-09-14）。
+            condition: 全新／二手標示（如「二手 A」），與價格同一行靠右；`None`／空白＝不印。
+        """
         ...
 
 

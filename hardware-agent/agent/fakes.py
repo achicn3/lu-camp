@@ -9,6 +9,7 @@ Fake 與真機驅動實作**同一組 `agent.interfaces` Protocol**，供無實�
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from agent.errors import (
     CoverOpen,
@@ -29,20 +30,38 @@ from agent.interfaces import (
 )
 
 
+class LabelCall(NamedTuple):
+    """一次標籤列印的完整內容（供測試斷言品牌／標示真的傳到了驅動）。"""
+
+    code: str
+    name: str
+    price: int
+    brand: str | None = None
+    condition: str | None = None
+
+
 class FakeLabelPrinter:
     """標籤機 Fake。`offline`/`timeout` 模擬連線失敗。"""
 
     def __init__(self, *, offline: bool = False, timeout: bool = False) -> None:
         self.offline = offline
         self.timeout = timeout
-        self.labels: list[tuple[str, str, int]] = []
+        self.labels: list[LabelCall] = []
 
-    def print_label(self, code: str, name: str, price: int) -> None:
+    def print_label(
+        self,
+        code: str,
+        name: str,
+        price: int,
+        *,
+        brand: str | None = None,
+        condition: str | None = None,
+    ) -> None:
         if self.timeout:
             raise DeviceTimeout("fake label printer timeout")
         if self.offline:
             raise DeviceOffline("fake label printer offline")
-        self.labels.append((code, name, price))
+        self.labels.append(LabelCall(code, name, price, brand, condition))
 
 
 class FakeReceiptPrinter:

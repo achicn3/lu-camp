@@ -17,6 +17,7 @@ from agent.drivers.brother_label import (
     build_label_image,
 )
 from agent.errors import DeviceOffline, DeviceTimeout
+from agent.fakes import LabelCall
 
 _EP = PrinterEndpoint(host="192.0.2.45")  # TEST-NET 假位址；真機 IP 由環境提供
 _FONT = label_font_path_from_env()  # 預設 repo 內建字型
@@ -101,6 +102,132 @@ class TestBuildLabelImage:
         assert row_a != row_b
 
 
+class TestBrandLine:
+    """品牌獨立一行（裁示 2026-09-14）：有品牌才印，沒品牌整行不留白。"""
+
+    def test_brand_occupies_its_own_line_above_the_name(self) -> None:
+        """品牌自成一行：換品牌只改品牌帶，品名帶逐像素不變（沒有跟品名擠在一起）。"""
+        from agent.drivers.brother_label import _SINGLE_BRANDED
+
+        a = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Snow Peak")
+        b = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Coleman")
+        assert a.height == b.height == LABEL_HEIGHT_DOTS
+        assert a.width == b.width  # 兩個品牌都比品名/條碼窄，不影響長度
+
+        name_top = _SINGLE_BRANDED["name_top"]
+        brand_band = range(_SINGLE_BRANDED["brand_top"], name_top)
+        name_band = range(name_top, _SINGLE_BRANDED["barcode_top"])
+
+        def rows(img: object, band: range) -> list[list[int]]:
+            width: int = img.width  # type: ignore[attr-defined]
+            get = img.getpixel  # type: ignore[attr-defined]
+            return [[get((x, y)) for x in range(width)] for y in band]
+
+        # 小字經抗鋸齒後不一定有純黑像素，用灰階門檻判斷「有沒有著墨」。
+        assert any(px < 200 for row in rows(a, brand_band) for px in row), "有品牌就要印出品牌行"
+        assert rows(a, brand_band) != rows(b, brand_band), "不同品牌，品牌行要不同"
+        assert rows(a, name_band) == rows(b, name_band), "品名帶不得受品牌影響"
+
+    def test_blank_brand_prints_nothing_extra(self) -> None:
+        """沒品牌＝整行不印（不是印空字串後留一條白帶）：與不給品牌的輸出逐像素相同。"""
+        plain = build_label_image("ITM-0001", "帳篷", 1000, _FONT)
+        for empty in (None, "", "   "):
+            same = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand=empty)
+            assert same.tobytes() == plain.tobytes(), f"brand={empty!r} 不應改變版面"
+
+    def test_branded_layout_keeps_vertical_barcode(self) -> None:
+        """品牌行把條碼帶往下推之後，bar 仍是垂直線且存在（沒被品牌行蓋掉）。"""
+        from agent.drivers.brother_label import _SINGLE_BRANDED
+
+        image = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand="Snow Peak")
+        top = _SINGLE_BRANDED["barcode_top"]
+        row_a = [image.getpixel((x, top + 10)) for x in range(image.width)]
+        row_b = [image.getpixel((x, top + 60)) for x in range(image.width)]
+        assert row_a == row_b
+        assert 0 in row_a
+
+    def test_branded_wrapped_layout_keeps_vertical_barcode(self) -> None:
+        from agent.drivers.brother_label import _WRAPPED_BRANDED
+
+        image = build_label_image(
+            "ITM-0003", "雪峰 Amenity Dome M 五人帳篷二手極新", 12800, _FONT, brand="Snow Peak"
+        )
+        top = _WRAPPED_BRANDED["barcode_top"]
+        row_a = [image.getpixel((x, top + 10)) for x in range(image.width)]
+        row_b = [image.getpixel((x, top + 60)) for x in range(image.width)]
+        assert row_a == row_b
+        assert 0 in row_a
+
+    def test_long_brand_is_truncated_not_widened(self) -> None:
+        """過長品牌截斷加「…」：截斷點之後的差異不影響輸出，且不撐破長度上限。"""
+        from agent.drivers.brother_label import MAX_LABEL_WIDTH_DOTS
+
+        base = "超長品牌名稱測試用文字" * 4
+        a = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand=base + "Ａ")
+        b = build_label_image("ITM-0001", "帳篷", 1000, _FONT, brand=base + "Ｂ")
+        assert a.tobytes() == b.tobytes()
+        assert a.width <= MAX_LABEL_WIDTH_DOTS
+
+
+class TestConditionMarker:
+    """全新／二手標示（裁示 2026-09-14）：與價格同一行靠右，客人一眼看得到。"""
+
+    def test_condition_is_rendered(self) -> None:
+        plain = build_label_image("ITM-0001", "帳篷", 1000, _FONT)
+        marked = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="二手")
+        assert marked.height == LABEL_HEIGHT_DOTS
+        assert _dark_pixels(marked) > _dark_pixels(plain)
+
+    def test_blank_condition_prints_nothing_extra(self) -> None:
+        plain = build_label_image("ITM-0001", "帳篷", 1000, _FONT)
+        for empty in (None, "", "  "):
+            same = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition=empty)
+            assert same.tobytes() == plain.tobytes(), f"condition={empty!r} 不應改變版面"
+
+    def test_different_conditions_render_differently(self) -> None:
+        used = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="二手")
+        new = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="全新")
+        assert used.tobytes() != new.tobytes()
+
+    def test_condition_sits_right_of_price_with_a_gap(self) -> None:
+        """價格靠左、標示靠右：同一行、之間有一整段留白、且標示貼著右邊界。
+
+        （不用「圖片中線」切左右——「NT$1000」本身就跨過中線。改用價格行內最長的
+        一段空白當分界，那才是版面真正的間隙。）
+        """
+        from agent.drivers.brother_label import _CONDITION_GAP_PX, _MARGIN, _SINGLE
+
+        image = build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="二手")
+        top = _SINGLE["price_top"]
+        dark = {
+            x
+            for y in range(top, min(image.height, top + _SINGLE["price_font_px"]))
+            for x in range(image.width)
+            if image.getpixel((x, y)) == 0
+        }
+        assert dark, "價格行應有著墨"
+
+        blank_runs: list[tuple[int, int]] = []
+        run_start: int | None = None
+        for x in range(min(dark), max(dark) + 1):
+            if x in dark:
+                if run_start is not None:
+                    blank_runs.append((run_start, x))
+                    run_start = None
+            elif run_start is None:
+                run_start = x
+        assert blank_runs, "價格與標示之間要有留白"
+        gap_start, gap_end = max(blank_runs, key=lambda r: r[1] - r[0])
+        assert gap_end - gap_start >= _CONDITION_GAP_PX, "間隙要夠寬，不能黏在一起"
+        assert any(x > gap_end for x in dark), "間隙右側要有標示"
+        assert max(dark) <= image.width - _MARGIN, "標示不得超出右邊界"
+        assert max(dark) > image.width - _MARGIN - 120, "標示要靠右對齊"
+
+    def test_overwide_condition_is_rejected_not_oversized(self) -> None:
+        with pytest.raises(LabelContentTooWide):
+            build_label_image("ITM-0001", "帳篷", 1000, _FONT, condition="二手" * 40)
+
+
 class _SendRecorder:
     def __init__(self, exc: Exception | None = None) -> None:
         self.calls: list[tuple[PrinterEndpoint, bytes]] = []
@@ -138,6 +265,67 @@ class TestLabelTooWideHttpMapping:
         assert resp.status_code == 422
         assert resp.json()["error"] == "LabelContentTooWide"
         assert recorder.calls == []  # 未送任何位元組到印表機
+
+
+class TestLabelRequestPassesBrandAndCondition:
+    async def test_brand_and_condition_reach_the_printer(self) -> None:
+        """/print/label 的品牌與標示要原樣交到驅動，不可在路由層被吃掉。"""
+        import httpx
+
+        from agent.devices import AgentDevices, default_fake_devices
+        from agent.fakes import FakeLabelPrinter
+        from agent.main import create_app
+
+        label_printer = FakeLabelPrinter()
+        base = default_fake_devices()
+        app = create_app(
+            AgentDevices(
+                label_printer=label_printer,
+                receipt_printer=base.receipt_printer,
+                cash_drawer=base.cash_drawer,
+                status_provider=base.status_provider,
+            )
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/print/label",
+                json={
+                    "code": "ITM-0001",
+                    "name": "帳篷",
+                    "price": 1000,
+                    "brand": "Snow Peak",
+                    "condition": "二手",
+                },
+            )
+        assert resp.status_code == 200
+        assert label_printer.labels == [LabelCall("ITM-0001", "帳篷", 1000, "Snow Peak", "二手")]
+
+    async def test_omitting_brand_and_condition_still_works(self) -> None:
+        """舊版前端（只送 code/name/price）不得因為新欄位而壞掉。"""
+        import httpx
+
+        from agent.devices import AgentDevices, default_fake_devices
+        from agent.fakes import FakeLabelPrinter
+        from agent.main import create_app
+
+        label_printer = FakeLabelPrinter()
+        base = default_fake_devices()
+        app = create_app(
+            AgentDevices(
+                label_printer=label_printer,
+                receipt_printer=base.receipt_printer,
+                cash_drawer=base.cash_drawer,
+                status_provider=base.status_provider,
+            )
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/print/label", json={"code": "ITM-0001", "name": "帳篷", "price": 1000}
+            )
+        assert resp.status_code == 200
+        assert label_printer.labels == [LabelCall("ITM-0001", "帳篷", 1000, None, None)]
 
 
 class TestBrotherLabelPrinter:

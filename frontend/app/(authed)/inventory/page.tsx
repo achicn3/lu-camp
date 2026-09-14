@@ -21,7 +21,7 @@ import {
   sellThroughPct,
   serializedStatusBadge,
 } from "@/features/inventory/inventory";
-import { printLabel } from "@/lib/agent";
+import { type LabelCondition, printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -124,17 +124,33 @@ function BadgeChip({ badge }: { badge: Badge }) {
   return <span className={`inv-badge inv-tone-${badge.tone}`}>{badge.label}</span>;
 }
 
-// 單件補印：條碼/品名/整數元售價直接來自清單列；經 hardware-agent /print/label。
+type BrandOption = { id: number; name: string };
+
+// 標籤用的品牌名：查不到就回 null＝標籤上那一行整行不印。顯示用的 brandName 回「—」，
+// 那是畫面上的佔位符，印到標籤上會變成莫名其妙的一行破折號。
+function labelBrand(brands: readonly BrandOption[], id: number | null): string | null {
+  if (id === null) return null;
+  return brands.find((b) => b.id === id)?.name ?? null;
+}
+
+// 單件補印：條碼/品名/整數元售價/品牌/全新或二手直接來自清單列；經 hardware-agent
+// /print/label。品牌是店內主檔的顯示名，查不到就不給（標籤那一行不印），不要送 "—"。
 function ReprintLabelButton({
   code,
   name,
   price,
+  brand,
+  condition,
 }: {
   code: string;
   name: string;
   price: number;
+  brand: string | null;
+  condition: LabelCondition;
 }) {
-  const print = useMutation({ mutationFn: () => printLabel(code, name, price) });
+  const print = useMutation({
+    mutationFn: () => printLabel(code, name, price, { brand, condition }),
+  });
   return (
     <span className="inv-reprint">
       <button
@@ -1033,6 +1049,8 @@ function SerializedPanel() {
                   code={item.item_code}
                   name={item.name}
                   price={parseNtd(item.listed_price) ?? 0}
+                  brand={labelBrand(brands, item.brand_id)}
+                  condition="二手"
                 />
               )}
             </td>
@@ -1315,6 +1333,16 @@ function CatalogPanel() {
                 {isManager && (
                   <ChangePriceButton kind="catalog" id={product.id} currentPrice={product.unit_price} />
                 )}
+                {/* 一般商品也要印標籤（裁示 2026-09-14）：條碼走 sku，採購來的一律標「全新」。 */}
+                {product.quantity_on_hand > 0 && (
+                  <ReprintLabelButton
+                    code={product.sku}
+                    name={product.name}
+                    price={parseNtd(product.unit_price) ?? 0}
+                    brand={labelBrand(brands, product.brand_id)}
+                    condition="全新"
+                  />
+                )}
               </td>
             </tr>
           );
@@ -1498,6 +1526,8 @@ function BulkPanel() {
                   code={lot.lot_code}
                   name={lot.name}
                   price={parseNtd(lot.unit_price) ?? 0}
+                  brand={labelBrand(brands, lot.brand_id)}
+                  condition="二手"
                 />
               )}
             </td>

@@ -16,6 +16,7 @@ from agent.fakes import (
     FakeLabelPrinter,
     FakeReceiptPrinter,
     FakeStatusProvider,
+    LabelCall,
 )
 from agent.interfaces import (
     CashDrawer,
@@ -63,7 +64,9 @@ def test_default_fake_devices_bundles_all() -> None:
 def test_fake_label_printer_records_and_simulates_failure() -> None:
     ok = FakeLabelPrinter()
     ok.print_label("ABC123", "帳篷", 1500)
-    assert ok.labels == [("ABC123", "帳篷", 1500)]
+    assert ok.labels == [LabelCall("ABC123", "帳篷", 1500, brand=None, condition=None)]
+    ok.print_label("ABC123", "帳篷", 1500, brand="Snow Peak", condition="二手")
+    assert ok.labels[-1] == LabelCall("ABC123", "帳篷", 1500, "Snow Peak", "二手")
     with pytest.raises(DeviceOffline):
         FakeLabelPrinter(offline=True).print_label("X", "n", 1)
     with pytest.raises(DeviceTimeout):

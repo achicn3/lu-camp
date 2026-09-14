@@ -9,7 +9,12 @@ import { join } from "node:path";
 
 import { chromium } from "playwright";
 
+import { uniquePhone, validNationalId } from "./_national-id.mjs";
+
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
+// 每次跑都用新的賣方：身分證字號會被去重比對，沿用同一組第二次就建不出來。
+const RUN = Date.now() % 100000;
+const SELLER_NAME = `標籤測試賣家 ${RUN}`;
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
 mkdirSync(SHOTS, { recursive: true });
 const results = [];
@@ -21,6 +26,17 @@ function ok(name, pass, detail = "") {
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
+
+// 攔下真正送到代理的標籤內容：畫面說「已送出」不代表印的東西是對的。
+const labels = [];
+page.on("request", (req) => {
+  if (!req.url().includes("/print/label")) return;
+  try {
+    labels.push(JSON.parse(req.postData() ?? "{}"));
+  } catch {
+    labels.push({ parseError: req.postData() });
+  }
+});
 
 try {
   // 1) 登入
@@ -37,10 +53,11 @@ try {
   await page.waitForURL(`${BASE}/acquisition`);
   await page.waitForSelector('[role="tab"]:has-text("買斷")');
   await page.click('button:has-text("建立新賣方")');
-  await page.fill('input[aria-label="姓名"]', "標籤測試賣家");
-  await page.fill('input[aria-label="身分證字號"]', "A123456789");
+  await page.fill('input[aria-label="姓名"]', SELLER_NAME);
+  await page.fill('input[aria-label="手機"]', uniquePhone(RUN));  // 手機後來改為必填
+  await page.fill('input[aria-label="身分證字號"]', validNationalId(RUN));
   await page.click('button:has-text("建立並選取")');
-  await page.waitForSelector("text=標籤測試賣家");
+  await page.waitForSelector(`text=${SELLER_NAME}`);
 
   await page.fill('input[aria-label="品名"]', "標籤測試外套");
   await page.locator(".acq-row select").first().selectOption("A");
@@ -58,13 +75,13 @@ try {
   await page.fill('input[aria-label="估計轉售價"]', "3000");
   // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
   await page.waitForFunction(
-    () => (document.querySelector('input[aria-label="上架售價（含稅）"]')?.value ?? "") !== "",
+    () => (document.querySelector('input[aria-label="上架售價（含稅與手續費）"]')?.value ?? "") !== "",
     null,
     { timeout: 5000 },
   );
   await page.waitForSelector("text=建議最高收購成本");
   await page.fill('input[aria-label="收購價"]', "1000");
-  await page.fill('input[aria-label="上架售價（含稅）"]', "3000");
+  await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "3000");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector("text=收購完成");
   ok("買斷送出完成（有序號條碼）", await page.locator("text=序號條碼").isVisible());
@@ -95,8 +112,17 @@ try {
     );
   }
   await page.screenshot({ path: `${SHOTS}/b3-02-label-printed.png` });
+
+  // 5) 標籤內容（裁示 2026-09-14）：收購進來的一律「二手」、品牌獨立一行原樣帶上，成色不印。
+  ok("有攔到標籤送出", labels.length > 0, `${labels.length} 張`);
+  for (const [i, l] of labels.entries()) {
+    ok(`第 ${i + 1} 張標示「二手」`, l.condition === "二手", `condition=${JSON.stringify(l.condition)}`);
+    ok(`第 ${i + 1} 張品牌為 TestBrand`, l.brand === "TestBrand", `brand=${JSON.stringify(l.brand)}`);
+  }
 } catch (err) {
   ok("煙霧流程例外", false, String(err));
+  // 失敗時留一張現場截圖，否則只有一行 timeout 訊息，查不出卡在哪一步。
+  await page.screenshot({ path: `${SHOTS}/b3-99-failure.png` }).catch(() => {});
 } finally {
   await browser.close();
 }

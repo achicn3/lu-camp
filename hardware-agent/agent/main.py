@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -57,6 +58,9 @@ class LabelRequest(BaseModel):
     code: str
     name: str
     price: int
+    # 兩者皆選填：舊版前端只送 code/name/price，升級代理不得讓它壞掉。
+    brand: str | None = None  # 品牌，獨立一行；空＝不印那一行
+    condition: str | None = None  # 「全新」／「二手 A」；空＝不印
 
 
 def create_app(devices: AgentDevices | None = None) -> FastAPI:
@@ -129,7 +133,14 @@ def create_app(devices: AgentDevices | None = None) -> FastAPI:
     async def label(req: LabelRequest, devices: DevicesDep) -> OkResponse:
         # 真機列印為同步阻塞 I/O，卸載到 worker thread，勿阻塞事件迴圈。
         await anyio.to_thread.run_sync(
-            devices.label_printer.print_label, req.code, req.name, req.price
+            functools.partial(
+                devices.label_printer.print_label,
+                req.code,
+                req.name,
+                req.price,
+                brand=req.brand,
+                condition=req.condition,
+            )
         )
         return ok_response(devices, "label")
 

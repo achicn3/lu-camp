@@ -196,15 +196,29 @@ export async function printAcquisitionReceipt(r: AcquisitionReceiptPrint): Promi
   });
 }
 
+/** 標籤上的「全新／二手」標示。成色（A/B/C…）不印——裁示 2026-09-14。 */
+export type LabelCondition = "全新" | "二手";
+
 /**
- * 送商品標籤（Brother 標籤機）：條碼=code（序號品 item_code / 散裝 lot_code）、品名、整數元售價。
+ * 送商品標籤（Brother 標籤機）：條碼=code（序號品 item_code / 散裝 lot_code / 一般商品
+ * sku）、品名、整數元售價，外加選填的品牌與全新/二手標示。
+ *
+ * `brand` 空或未給＝標籤上那一行整行不印（不是留一條白帶）；`condition` 同理。
+ * 兩者都是選填，舊版硬體代理收到多的欄位會忽略，不會壞。
  */
 export async function printLabel(
   code: string,
   name: string,
   price: number,
+  opts: { brand?: string | null; condition?: LabelCondition | null } = {},
 ): Promise<void> {
-  await postAgent("/print/label", { code, name, price });
+  await postAgent("/print/label", {
+    code,
+    name,
+    price,
+    brand: opts.brand ?? null,
+    condition: opts.condition ?? null,
+  });
 }
 
 /**
