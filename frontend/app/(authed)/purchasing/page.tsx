@@ -238,6 +238,11 @@ function CreatePurchaseOrder({
   const [newProductSku, setNewProductSku] = useState("");
   const [newProductPrice, setNewProductPrice] = useState("");
   const [newProductReorderPoint, setNewProductReorderPoint] = useState("0");
+  // 品牌／型號／分類（2026-09-14 裁示：採購建品比照收購頁）。型號依品牌收斂，
+  // 換品牌要清掉型號，否則會送出別牌的型號。
+  const [newProductBrand, setNewProductBrand] = useState<ComboOption | null>(null);
+  const [newProductModel, setNewProductModel] = useState<ComboOption | null>(null);
+  const [newProductCategory, setNewProductCategory] = useState<ComboOption | null>(null);
   const [newProductError, setNewProductError] = useState<string | null>(null);
   // 送出成功後遞增 → 重掛供應商 combobox，連同內部文字一併清空（避免顯示舊值卻無 id）。
   const [supplierKey, setSupplierKey] = useState(0);
@@ -317,11 +322,16 @@ function CreatePurchaseOrder({
           throw new Error("低庫存提醒點請輸入零或正整數");
         pending = {
           key: newIdempotencyKey(),
+          // 沒選就**不帶那些鍵**：待重送的內容與舊版逐位元相同，跨版本重播才不會被
+          // 後端當成「同鍵不同內容」而拒絕（後端指紋也是同一套省略規則）。
           body: {
             sku: newProductSku.trim() || null,
             name,
             unit_price: unitPrice,
             reorder_point: reorderPoint,
+            ...(newProductBrand === null ? {} : { brand_id: newProductBrand.id }),
+            ...(newProductModel === null ? {} : { product_model_id: newProductModel.id }),
+            ...(newProductCategory === null ? {} : { category_id: newProductCategory.id }),
           },
         };
         savePendingCatalogCreate(catalogCreateStoreId, pending);
@@ -361,6 +371,9 @@ function CreatePurchaseOrder({
     setNewProductSku("");
     setNewProductPrice("");
     setNewProductReorderPoint("0");
+    setNewProductBrand(null);
+    setNewProductModel(null);
+    setNewProductCategory(null);
     setNewProductError(null);
     setNewProductOpen(true);
   }
@@ -457,6 +470,73 @@ function CreatePurchaseOrder({
                         onChange={(event) => setNewProductSku(event.target.value)}
                       />
                     </label>
+                    {/* 品牌／型號／分類：與收購頁同一組主檔與同一個元件（可直接新增）。
+                        換品牌要清掉型號，否則會把別牌的型號送出去。 */}
+                    <CreatableCombobox
+                      label="品牌"
+                      selectedId={newProductBrand?.id ?? null}
+                      disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                      search={(q) =>
+                        api
+                          .GET("/api/v1/brands", { params: { query: { q } } })
+                          .then(({ data }) => (data ?? []).map((b) => ({ id: b.id, name: b.name })))
+                      }
+                      create={(name) =>
+                        api.POST("/api/v1/brands", { body: { name } }).then(({ data, error }) => {
+                          if (!data) throw new Error(extractDetail(error) ?? "建立品牌失敗");
+                          return { id: data.id, name: data.name };
+                        })
+                      }
+                      onChange={(option) => {
+                        setNewProductBrand(option);
+                        setNewProductModel(null);
+                      }}
+                    />
+                    <CreatableCombobox
+                      label="型號"
+                      selectedId={newProductModel?.id ?? null}
+                      disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                      search={(q) =>
+                        api
+                          .GET("/api/v1/product-models", {
+                            params: { query: { q, brand_id: newProductBrand?.id ?? undefined } },
+                          })
+                          .then(({ data }) => (data ?? []).map((m) => ({ id: m.id, name: m.name })))
+                      }
+                      create={(name) => {
+                        if (newProductBrand === null) {
+                          return Promise.reject(new Error("請先選擇品牌"));
+                        }
+                        return api
+                          .POST("/api/v1/product-models", {
+                            body: { brand_id: newProductBrand.id, name },
+                          })
+                          .then(({ data, error }) => {
+                            if (!data) throw new Error(extractDetail(error) ?? "建立型號失敗");
+                            return { id: data.id, name: data.name };
+                          });
+                      }}
+                      onChange={setNewProductModel}
+                    />
+                    <CreatableCombobox
+                      label="分類"
+                      selectedId={newProductCategory?.id ?? null}
+                      disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                      search={(q) =>
+                        api
+                          .GET("/api/v1/categories", { params: { query: { q, limit: 200 } } })
+                          .then(({ data }) => (data ?? []).map((c) => ({ id: c.id, name: c.name })))
+                      }
+                      create={(name) =>
+                        api.POST("/api/v1/categories", { body: { name } }).then(
+                          ({ data, error }) => {
+                            if (!data) throw new Error(extractDetail(error) ?? "建立分類失敗");
+                            return { id: data.id, name: data.name };
+                          },
+                        )
+                      }
+                      onChange={setNewProductCategory}
+                    />
                     <label className="field">
                       <span>售價（含稅整數元）*</span>
                       <input

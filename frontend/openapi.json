@@ -2500,6 +2500,17 @@
             ],
             "title": "Brand Id"
           },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "name": {
             "maxLength": 150,
             "minLength": 1,
@@ -2517,6 +2528,17 @@
               }
             ],
             "title": "Note"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
           },
           "reorder_point": {
             "default": 0,
@@ -2659,6 +2681,17 @@
             ],
             "title": "Brand Id"
           },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -2682,6 +2715,17 @@
               }
             ],
             "title": "Note"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
           },
           "quantity_on_hand": {
             "title": "Quantity On Hand",

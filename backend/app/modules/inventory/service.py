@@ -85,6 +85,8 @@ def _catalog_create_fingerprint(
     reorder_point: int,
     brand_id: int | None,
     note: str | None,
+    product_model_id: int | None = None,
+    category_id: int | None = None,
 ) -> str:
     """一般商品建檔內容的穩定指紋；同冪等鍵僅允許精確重播原始請求。
 
@@ -102,6 +104,13 @@ def _catalog_create_fingerprint(
     }
     if note is not None:
         payload["note"] = note
+    # 型號／分類同樣是**後加欄位**：沒填就整個鍵省略，指紋退化成加它們之前的舊式，
+    # 讓部署前就躺在瀏覽器裡的待重送仍能正常重播；有填則納入比對，
+    # 同鍵改型號不會靜默沿用舊商品。
+    if product_model_id is not None:
+        payload["product_model_id"] = product_model_id
+    if category_id is not None:
+        payload["category_id"] = category_id
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -799,6 +808,8 @@ class InventoryService:
         unit_price: Decimal,
         reorder_point: int = 0,
         brand_id: int | None = None,
+        product_model_id: int | None = None,
+        category_id: int | None = None,
         note: str | None = None,
         idempotency_key: str | None = None,
     ) -> CatalogProduct:
@@ -807,7 +818,12 @@ class InventoryService:
         SKU 留白時產生 `AUTO-` 識別碼；同店 SKU 唯一（重複 → DuplicateCatalogProduct）。
         帶 Idempotency-Key 時，同 key＋同內容重送回原商品；同 key＋不同內容拒絕。
         """
-        await self._validate_item_references(store_id, brand_id=brand_id)
+        await self._validate_item_references(
+            store_id,
+            brand_id=brand_id,
+            product_model_id=product_model_id,
+            category_id=category_id,
+        )
         fingerprint = (
             _catalog_create_fingerprint(
                 sku=sku,
@@ -816,6 +832,8 @@ class InventoryService:
                 reorder_point=reorder_point,
                 brand_id=brand_id,
                 note=note,
+                product_model_id=product_model_id,
+                category_id=category_id,
             )
             if idempotency_key is not None
             else None
@@ -845,6 +863,8 @@ class InventoryService:
             quantity_on_hand=0,
             reorder_point=reorder_point,
             brand_id=brand_id,
+            product_model_id=product_model_id,
+            category_id=category_id,
             note=note,
             create_idempotency_key=idempotency_key,
             create_fingerprint=fingerprint,

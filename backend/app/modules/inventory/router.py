@@ -482,6 +482,8 @@ async def create_catalog_product(
             unit_price=payload.unit_price,
             reorder_point=payload.reorder_point,
             brand_id=payload.brand_id,
+            product_model_id=payload.product_model_id,
+            category_id=payload.category_id,
             note=payload.note,
             idempotency_key=idempotency_key,
         )

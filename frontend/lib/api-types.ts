@@ -4044,10 +4044,14 @@ export interface components {
         CatalogProductCreateRequest: {
             /** Brand Id */
             brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
             /** Name */
             name: string;
             /** Note */
             note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
             /**
              * Reorder Point
              * @default 0
@@ -4096,6 +4100,8 @@ export interface components {
         CatalogProductRead: {
             /** Brand Id */
             brand_id: number | null;
+            /** Category Id */
+            category_id?: number | null;
             /** Id */
             id: number;
             /**
@@ -4107,6 +4113,8 @@ export interface components {
             name: string;
             /** Note */
             note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
             /** Quantity On Hand */
             quantity_on_hand: number;
             /** Reorder Point */

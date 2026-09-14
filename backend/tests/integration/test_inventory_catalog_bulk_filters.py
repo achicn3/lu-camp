@@ -18,7 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
-from app.modules.inventory.models import Brand, BulkLot, CatalogProduct, Category
+from app.modules.inventory.models import (
+    Brand,
+    BulkLot,
+    CatalogProduct,
+    Category,
+    ProductModel,
+)
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import BulkAcquisitionBasis, BulkLotStatus, Grade, UserRole
@@ -304,3 +310,84 @@ async def test_bulk_options_do_not_leak_other_stores_names(
 async def test_counts_require_authentication(client: httpx.AsyncClient) -> None:
     assert (await client.get(CATALOG_COUNT)).status_code == 401
     assert (await client.get(BULK_COUNT)).status_code == 401
+
+
+async def test_create_catalog_accepts_brand_model_and_category(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購建品要能填品牌／型號／分類（2026-09-14 裁示：比照收購頁）。
+
+    少了它們，同一款營繩在「收購來的二手」與「採購來的全新」之間，庫存篩選與標籤
+    就對不起來。
+    """
+    store_id = await _seed_store(db_session, "採購建品店")
+    brand = await _brand(db_session, store_id, "Snow Peak")
+    category = await _category(db_session, store_id, "配件")
+    model = ProductModel(store_id=store_id, brand_id=brand.id, name="營繩 4mm")
+    db_session.add(model)
+    await db_session.flush()
+
+    resp = await client.post(
+        CATALOG,
+        json={
+            "name": "營繩 4mm（全新）",
+            "unit_price": "180",
+            "brand_id": brand.id,
+            "product_model_id": model.id,
+            "category_id": category.id,
+        },
+        headers={**_auth(store_id), "Idempotency-Key": "catalog-brand-model"},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["brand_id"] == brand.id
+    assert body["product_model_id"] == model.id
+    assert body["category_id"] == category.id
+
+
+async def test_create_catalog_rejects_another_stores_model(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """§4：型號與分類同樣要限本店，不能借用別店的主檔。"""
+    store_id = await _seed_store(db_session, "本店")
+    other_store = await _seed_store(db_session, "別店")
+    other_brand = await _brand(db_session, other_store, "別店品牌")
+    other_model = ProductModel(store_id=other_store, brand_id=other_brand.id, name="別店型號")
+    db_session.add(other_model)
+    await db_session.flush()
+
+    resp = await client.post(
+        CATALOG,
+        json={
+            "name": "借用別店型號",
+            "unit_price": "100",
+            "product_model_id": other_model.id,
+        },
+        headers={**_auth(store_id), "Idempotency-Key": "catalog-cross-store"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_catalog_same_key_different_model_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """同一個冪等鍵改了型號要被擋——否則重送會靜默沿用舊商品，店員以為改到了。"""
+    store_id = await _seed_store(db_session, "冪等店")
+    brand = await _brand(db_session, store_id, "品牌")
+    first = ProductModel(store_id=store_id, brand_id=brand.id, name="型號一")
+    second = ProductModel(store_id=store_id, brand_id=brand.id, name="型號二")
+    db_session.add_all([first, second])
+    await db_session.flush()
+    headers = {**_auth(store_id), "Idempotency-Key": "catalog-same-key"}
+    body = {"name": "同鍵商品", "unit_price": "100", "product_model_id": first.id}
+
+    created = await client.post(CATALOG, json=body, headers=headers)
+    assert created.status_code == 201, created.text
+    replay = await client.post(CATALOG, json=body, headers=headers)
+    assert replay.status_code in (200, 201)  # 同鍵同內容＝重播原商品
+    assert replay.json()["id"] == created.json()["id"]
+
+    changed = await client.post(
+        CATALOG, json={**body, "product_model_id": second.id}, headers=headers
+    )
+    assert changed.status_code == 409

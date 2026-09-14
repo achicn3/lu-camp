@@ -93,6 +93,9 @@ export interface CatalogCreateRequestBody {
   unit_price: number;
   reorder_point: number;
   brand_id?: number | null;
+  /** 型號／分類（選填，2026-09-14 起）。同備註：舊的待重送內容沒有這兩個鍵。 */
+  product_model_id?: number | null;
+  category_id?: number | null;
   /** 商品備註（選填）。舊的待重送內容沒有這個鍵，故 validator 只在存在時檢查型別。 */
   note?: string | null;
 }
@@ -110,6 +113,10 @@ function catalogCreateStorageKey(storeId: number): string {
   return `${CATALOG_CREATE_IDEM_PREFIX}.${storeId}`;
 }
 
+function isOptionalId(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === "number" && Number.isInteger(value));
+}
+
 function isCatalogCreateBody(value: unknown): value is CatalogCreateRequestBody {
   if (value === null || typeof value !== "object") return false;
   const body = value as Record<string, unknown>;
@@ -120,7 +127,9 @@ function isCatalogCreateBody(value: unknown): value is CatalogCreateRequestBody 
     Number.isFinite(body.unit_price) &&
     typeof body.reorder_point === "number" &&
     Number.isInteger(body.reorder_point) &&
-    (body.note === undefined || body.note === null || typeof body.note === "string")
+    (body.note === undefined || body.note === null || typeof body.note === "string") &&
+    isOptionalId(body.product_model_id) &&
+    isOptionalId(body.category_id)
   );
 }
 

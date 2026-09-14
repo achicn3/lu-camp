@@ -115,6 +115,11 @@ class CatalogProduct(Base, TimestampMixin):
     sku: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(150))
     brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
+    # 型號與分類（2026-09-14）：採購建品比照收購，且標籤要印品牌、庫存篩選要對得起來。
+    product_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_models.id"), index=True
+    )
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), index=True)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     # 進貨成本（可空）。先前完全沒有此欄位，導致一般商品的營收只能歸入「成本未知」、
     # 報表不假造毛利。填了之後，成交當下會快照到 sale_lines.cost_snapshot。

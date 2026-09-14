@@ -274,6 +274,9 @@ class CatalogProductCreateRequest(BaseModel):
     unit_price: NTDAmount
     reorder_point: int = Field(default=0, ge=0)
     brand_id: int | None = None
+    # 型號與分類（2026-09-14）：採購建品比照收購頁，庫存篩選與標籤才對得起來。
+    product_model_id: int | None = None
+    category_id: int | None = None
     # 商品備註（選填）：採購品沒有收購單，建檔是唯一能在源頭寫下備註的地方。
     note: str | None = Field(default=None, max_length=500)
 
@@ -326,6 +329,8 @@ class CatalogProductRead(BaseModel):
     unit_price: NTDAmount
     quantity_on_hand: int
     reorder_point: int
+    product_model_id: int | None = None
+    category_id: int | None = None
     note: str | None = None
     incoming_qty: int = 0
 
