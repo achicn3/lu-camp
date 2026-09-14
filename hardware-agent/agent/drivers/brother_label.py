@@ -88,7 +88,9 @@ _SINGLE: _Bands = {
     "barcode_height": 120,
     "code_top": 206,
     "code_font_px": 30,
-    "price_top": 240,
+    # 234 而非 240：`NT$` 的錢字號尾巴比數字低一截，240 會被下邊界削掉 6 dots
+    # （main 既有，2026-09-15 修）。上移後與識別碼仍留 13 dots。
+    "price_top": 234,
     "price_font_px": 56,
     "condition_font_px": 34,
 }
@@ -103,7 +105,7 @@ _WRAPPED: _Bands = {
     "barcode_height": 88,
     "code_top": 216,
     "code_font_px": 24,
-    "price_top": 248,
+    "price_top": 244,  # 同 _SINGLE：248 會削掉錢字號 4 dots；上移後與識別碼仍留 17 dots
     "price_font_px": 48,
     "condition_font_px": 28,
 }

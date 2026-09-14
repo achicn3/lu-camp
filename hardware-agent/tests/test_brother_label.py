@@ -240,6 +240,42 @@ class TestBrandLine:
         assert bounds is not None and bounds[3] <= image.height
         assert image.tobytes() == reference.crop((0, 0, image.width, image.height)).tobytes()
 
+    @pytest.mark.parametrize(
+        ("label", "name", "brand", "condition"),
+        [
+            ("單行無品牌", "帳篷", None, None),
+            ("換行無品牌", "Snow Peak 雪峰 Amenity Dome 五人帳篷二手極新", None, None),
+            ("單行有品牌", "帳篷", "Snow Peak", "二手"),
+            ("換行有品牌", "Snow Peak 雪峰 Amenity Dome 五人帳篷二手極新", "Snow Peak", "二手"),
+        ],
+    )
+    @pytest.mark.parametrize("price", [0, 180, 12800])
+    def test_no_variant_clips_anything_at_the_bottom(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        label: str,
+        name: str,
+        brand: str | None,
+        condition: str | None,
+        price: int,
+    ) -> None:
+        """四種版面都不得有任何東西被下邊界切掉。
+
+        `NT$` 的錢字號尾巴比數字低一截，四種版面各自的 price_top 都要為它留位置——
+        無品牌那兩種原本各切掉 6／4 dots（main 既有，2026-09-15 一併修）。
+        做法沿用：在加高的畫布上重畫一次當基準，比對正常高度版本有沒有被裁掉內容。
+        """
+        args = ("ITM-0001", name, price, _FONT)
+        image = build_label_image(*args, brand=brand, condition=condition)
+        monkeypatch.setattr(label_driver, "LABEL_HEIGHT_DOTS", 400)
+        reference = build_label_image(*args, brand=brand, condition=condition)
+        bounds = ImageChops.invert(reference).getbbox()
+        assert bounds is not None, f"{label}：整張空白"
+        assert bounds[3] <= image.height, (
+            f"{label}（NT${price}）：內容畫到 y={bounds[3]}，超出標籤高度 {image.height}"
+        )
+        assert image.tobytes() == reference.crop((0, 0, image.width, image.height)).tobytes()
+
     def test_long_brand_is_truncated_not_widened(self) -> None:
         """過長品牌截斷加「…」：截斷點之後的差異不影響輸出，且不撐破長度上限。"""
 
