@@ -15,6 +15,8 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core.audit import AuditLog
 from app.core.time import store_date, store_period_end_day
 from app.modules.einvoice.models import (
+    INVOICE_AUDIT_ENTITY,
+    VOID_INVOICE_AUDIT_ACTION,
     EInvoiceResultEvent,
     EInvoiceUploadQueue,
     Invoice,
@@ -27,10 +29,6 @@ from app.shared.enums import (
     InvoiceStatus,
     UploadStatus,
 )
-
-# 發票作廢的稽核 action／entity（與 einvoice/service 的寫入點成對）。
-_VOID_INVOICE_AUDIT_ACTION = "VOID_INVOICE"
-_INVOICE_AUDIT_ENTITY = "invoice"
 
 
 class EInvoiceRepository:
@@ -139,8 +137,8 @@ class EInvoiceRepository:
         # entity_id 會讓整支月報變成 500。
         paper_voided = select(AuditLog.entity_id).where(
             AuditLog.store_id == store_id,
-            AuditLog.action == _VOID_INVOICE_AUDIT_ACTION,
-            AuditLog.entity_type == _INVOICE_AUDIT_ENTITY,
+            AuditLog.action == VOID_INVOICE_AUDIT_ACTION,
+            AuditLog.entity_type == INVOICE_AUDIT_ENTITY,
             AuditLog.created_at >= date_from,
             AuditLog.created_at < date_to,
         )

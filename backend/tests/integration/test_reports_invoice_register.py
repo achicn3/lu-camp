@@ -909,6 +909,7 @@ async def test_invoice_register_never_leaks_another_store(
             "input_invoices",
             "unfinished",
             "manual_paper_adjustments",
+            "voided_from_earlier_periods",
         )
         for row in body[key]
     }
@@ -1084,14 +1085,16 @@ async def test_invoice_register_counts_an_electronic_void_in_one_period_only(
     會各出現一次，會計以為要辦兩次更正。
     """
     mgr, _clerk, store_id, clerk_id = await _seed(db_session)
-    issued_when = datetime(2026, 8, 20, 6, 0, tzinfo=UTC)
+    # **開立日要在兩個查詢期間之外**（7 月）：若開在 8 月，8 月那次查詢本來就會把它
+    # 當成「本期開立」而先去重掉，斷言就變成有沒有修正都成立的空測試。
+    issued_when = datetime(2026, 7, 20, 6, 0, tzinfo=UTC)
     sale_id = await _sale(db_session, store_id, clerk_id, total="1050", when=issued_when)
     invoice_id = await _invoice(
         db_session,
         store_id,
         sale_id,
-        no="AA20260820V",
-        when=date(2026, 8, 20),
+        no="AA20260720V",
+        when=date(2026, 7, 20),
         total="1050",
         status=InvoiceStatus.VOID,
         void_reason=InvoiceVoidReason.SALE_VOID,
@@ -1132,7 +1135,7 @@ async def test_invoice_register_counts_an_electronic_void_in_one_period_only(
     august = await voided_earlier("2026-08-01T00:00:00+08:00", "2026-09-01T00:00:00+08:00")
     september = await voided_earlier("2026-09-01T00:00:00+08:00", "2026-10-01T00:00:00+08:00")
     assert august == []  # 申請作廢那個月不算
-    assert september == ["AA20260820V"]  # 平台核可那個月才算，且只算一次
+    assert september == ["AA20260720V"]  # 平台核可那個月才算，且只算一次
 
 
 async def test_invoice_register_excludes_unnumbered_drafts_voided_in_a_later_period(

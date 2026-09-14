@@ -49,6 +49,12 @@ def _enum_col(enum_cls: type) -> Enum:
     return Enum(enum_cls, native_enum=False, length=30, create_constraint=True)
 
 
+# 發票作廢的稽核 action／entity：寫入端（service）與讀取端（repository 的月報查詢）共用，
+# 只靠註解維繫的話，哪天改了字串，月報的紙本作廢那一段會靜默變空而且沒有測試會紅。
+VOID_INVOICE_AUDIT_ACTION = "VOID_INVOICE"
+INVOICE_AUDIT_ENTITY = "invoice"
+
+
 class Invoice(Base, TimestampMixin):
     """一張已在本地開立的發票（對應一筆 sale）。
 

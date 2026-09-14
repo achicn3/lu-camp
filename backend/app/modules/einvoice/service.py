@@ -48,6 +48,8 @@ from app.modules.einvoice.amego import (
 )
 from app.modules.einvoice.dropper import EInvoiceDropper
 from app.modules.einvoice.models import (
+    INVOICE_AUDIT_ENTITY,
+    VOID_INVOICE_AUDIT_ACTION,
     EInvoiceResultEvent,
     EInvoiceUploadQueue,
     Invoice,
@@ -589,8 +591,8 @@ class EInvoiceService:
             self._session,
             store_id=store_id,
             actor_user_id=actor_user_id,
-            action="VOID_INVOICE",
-            entity_type="invoice",
+            action=VOID_INVOICE_AUDIT_ACTION,
+            entity_type=INVOICE_AUDIT_ENTITY,
             entity_id=str(invoice.id),
             before={"status": status_before.value},
             after={
