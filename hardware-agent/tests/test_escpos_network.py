@@ -17,20 +17,23 @@
 from __future__ import annotations
 
 import threading
-import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 
 import pytest
 from escpos.exceptions import DeviceNotFoundError
 
 from agent.config import PrinterEndpoint
 from agent.devices import real_epson_devices_from_env
+from agent.drivers import escpos_network
 from agent.drivers.brother_label import BrotherLabelPrinter
 from agent.drivers.escpos_network import NetworkEscposWriter, RealCashDrawer
 from agent.drivers.escpos_receipt import EscposReceiptPrinter
 from agent.drivers.status_real import RealStatusProvider
 from agent.errors import DeviceOffline, DeviceTimeout
 from agent.fakes import FakeLabelPrinter
+
+_WAIT_TIMEOUT = 5.0
 
 _EP = PrinterEndpoint(host="10.0.0.5", port=9100, timeout=2.0)
 
@@ -137,19 +140,21 @@ class _ConcurrencyTracker:
 
 
 class _TrackingFakeNetwork(_FakeNetwork):
-    """在 `_raw` 內睡一小段時間製造重疊窗口，並記錄同時間有幾條連線在跑（供排隊斷言）。"""
+    """從 open 到 close 記錄連線數；在連線內執行明確的同步協調。"""
 
-    def __init__(self, tracker: _ConcurrencyTracker, *, hold_seconds: float = 0.05) -> None:
+    def __init__(self, tracker: _ConcurrencyTracker, on_write: Callable[[], None]) -> None:
         super().__init__()
         self._tracker = tracker
-        self._hold_seconds = hold_seconds
+        self._on_write = on_write
+        self.connected = threading.Event()
 
     def open(self, raise_not_found: bool = True) -> None:
         super().open(raise_not_found)
         self._tracker.enter()
+        self.connected.set()
 
     def _raw(self, msg: bytes) -> None:
-        time.sleep(self._hold_seconds)
+        self._on_write()
         super()._raw(msg)
 
     def close(self) -> None:
@@ -157,46 +162,111 @@ class _TrackingFakeNetwork(_FakeNetwork):
         self._tracker.exit()
 
 
-def test_writer_serializes_concurrent_operations_to_same_host_port() -> None:
-    """兩個不同 NetworkEscposWriter 指到同一台印表機（host:port 相同）——例如發票機的
-    證明聯列印跟同一台上的錢櫃 kick——絕不可同時各開一條連線,必須排隊。"""
+def _write_in_thread(writer: NetworkEscposWriter, data: bytes, errors: list[Exception]) -> None:
+    """把工作執行緒的例外帶回主執行緒斷言，避免只產生 pytest warning。"""
+    try:
+        writer.write(data)
+    except Exception as exc:
+        errors.append(exc)
+
+
+def test_writer_serializes_concurrent_operations_to_same_host_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同 host:port 的第二個 writer 必須在第一條連線關閉前等待同一把鎖。"""
     tracker = _ConcurrencyTracker()
-    fake1 = _TrackingFakeNetwork(tracker)
-    fake2 = _TrackingFakeNetwork(tracker)
+    release_first = threading.Event()
+    second_blocked = threading.Event()
+    observed_locks: list[threading.Lock] = []
+    original_lock_for = escpos_network._lock_for
+
+    @contextmanager
+    def observe_lock(host: str, port: int) -> Iterator[None]:
+        # 使用產品真正的鎖；非阻塞取得失敗才通知主執行緒，證明已發生競爭。
+        lock = original_lock_for(host, port)
+        observed_locks.append(lock)
+        if not lock.acquire(blocking=False):
+            second_blocked.set()
+            assert lock.acquire(timeout=_WAIT_TIMEOUT), "writer timed out waiting for lock"
+        try:
+            yield
+        finally:
+            lock.release()
+
+    monkeypatch.setattr(escpos_network, "_lock_for", observe_lock)
+
+    def hold_first_connection() -> None:
+        assert release_first.wait(timeout=_WAIT_TIMEOUT), "first connection was not released"
+
+    fake1 = _TrackingFakeNetwork(tracker, hold_first_connection)
+    fake2 = _TrackingFakeNetwork(tracker, lambda: None)
     writer1 = NetworkEscposWriter(_EP, printer_factory=_factory_for(fake1))
     writer2 = NetworkEscposWriter(_EP, printer_factory=_factory_for(fake2))
-
-    t1 = threading.Thread(target=writer1.write, args=(b"invoice-proof",))
-    t2 = threading.Thread(target=writer2.write, args=(b"drawer-kick",))
+    errors: list[Exception] = []
+    t1 = threading.Thread(
+        target=_write_in_thread, args=(writer1, b"invoice-proof", errors), daemon=True
+    )
+    t2 = threading.Thread(
+        target=_write_in_thread, args=(writer2, b"drawer-kick", errors), daemon=True
+    )
     t1.start()
-    t2.start()
-    t1.join(timeout=5)
-    t2.join(timeout=5)
+    try:
+        assert fake1.connected.wait(timeout=_WAIT_TIMEOUT), "first writer did not connect"
+        t2.start()
+        assert second_blocked.wait(timeout=_WAIT_TIMEOUT), "second writer did not contend for lock"
+        assert len(observed_locks) == 2
+        assert observed_locks[0] is observed_locks[1]
+        first_closed_while_second_waits = fake1.closed
+        assert not first_closed_while_second_waits
+        assert not fake2.connected.is_set()
+        assert tracker.max_active == 1
+    finally:
+        release_first.set()
+        t1.join(timeout=_WAIT_TIMEOUT)
+        if t2.ident is not None:
+            t2.join(timeout=_WAIT_TIMEOUT)
 
     assert not t1.is_alive() and not t2.is_alive()
+    assert not errors, errors
     assert tracker.max_active == 1  # 從未同時有兩條連線在同一台印表機上
     assert fake1.sent == [b"invoice-proof"]
     assert fake2.sent == [b"drawer-kick"]
+    assert fake1.closed and fake2.closed
 
 
 def test_writer_does_not_serialize_operations_to_different_hosts() -> None:
-    """不同印表機（host 不同）之間不該互相排隊——鎖必須依 (host, port) 分開,不能是全域鎖。"""
+    """不同 host 的兩條連線必須在 close 前於 Barrier 會合，證明確實同時連線。"""
     tracker = _ConcurrencyTracker()
+    connected_together = threading.Barrier(2, timeout=_WAIT_TIMEOUT)
+
+    def meet_inside_connection() -> None:
+        connected_together.wait(timeout=_WAIT_TIMEOUT)
+
     ep_a = PrinterEndpoint(host="10.0.0.5", port=9100, timeout=2.0)
     ep_b = PrinterEndpoint(host="10.0.0.6", port=9100, timeout=2.0)
-    fake_a = _TrackingFakeNetwork(tracker, hold_seconds=0.2)
-    fake_b = _TrackingFakeNetwork(tracker, hold_seconds=0.2)
+    fake_a = _TrackingFakeNetwork(tracker, meet_inside_connection)
+    fake_b = _TrackingFakeNetwork(tracker, meet_inside_connection)
     writer_a = NetworkEscposWriter(ep_a, printer_factory=_factory_for(fake_a))
     writer_b = NetworkEscposWriter(ep_b, printer_factory=_factory_for(fake_b))
-
-    t1 = threading.Thread(target=writer_a.write, args=(b"a",))
-    t2 = threading.Thread(target=writer_b.write, args=(b"b",))
+    errors: list[Exception] = []
+    t1 = threading.Thread(target=_write_in_thread, args=(writer_a, b"a", errors), daemon=True)
+    t2 = threading.Thread(target=_write_in_thread, args=(writer_b, b"b", errors), daemon=True)
     t1.start()
     t2.start()
-    t1.join(timeout=5)
-    t2.join(timeout=5)
+    try:
+        t1.join(timeout=_WAIT_TIMEOUT)
+        t2.join(timeout=_WAIT_TIMEOUT)
+    finally:
+        connected_together.abort()
+        t1.join(timeout=_WAIT_TIMEOUT)
+        t2.join(timeout=_WAIT_TIMEOUT)
 
+    assert not t1.is_alive() and not t2.is_alive()
+    assert not errors, errors
     assert tracker.max_active == 2  # 兩台不同印表機真的同時在跑,不該互相卡隊
+    assert fake_a.sent == [b"a"]
+    assert fake_b.sent == [b"b"]
+    assert fake_a.closed and fake_b.closed
 
 
 def test_real_epson_devices_builder_wires_epson_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -274,8 +344,11 @@ def test_real_devices_use_longer_timeout_for_writes_than_for_background_probing(
     assert isinstance(writer, NetworkEscposWriter)
     assert writer._endpoint.timeout == 8.0
     assert isinstance(devices.cash_drawer, RealCashDrawer)
-    assert devices.cash_drawer._writer._endpoint.timeout == 8.0
+    drawer_writer = devices.cash_drawer._writer
+    assert isinstance(drawer_writer, NetworkEscposWriter)
+    assert drawer_writer._endpoint.timeout == 8.0
     # 背景探測維持短逾時,不受 AGENT_PRINT_TIMEOUT 影響
+    assert isinstance(devices.status_provider, RealStatusProvider)
     assert devices.status_provider._epson.timeout == 2.0
 
 
@@ -285,6 +358,7 @@ def test_real_devices_print_timeout_defaults_without_env(monkeypatch: pytest.Mon
     monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)
     monkeypatch.delenv("AGENT_PRINT_TIMEOUT", raising=False)
     devices = real_epson_devices_from_env()
+    assert isinstance(devices.receipt_printer, EscposReceiptPrinter)
     writer = devices.receipt_printer._writer
     assert isinstance(writer, NetworkEscposWriter)
     assert writer._endpoint.timeout > 2.0
