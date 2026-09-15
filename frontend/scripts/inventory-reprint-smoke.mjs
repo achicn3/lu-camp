@@ -42,6 +42,12 @@ async function filterInStock(label) {
   await page.waitForSelector(".inv-table tbody tr", { timeout: 15000 });
 }
 
+/** 第一顆可用補印鈕所在那一列的文字（用來看它的成色）。 */
+async function firstReprintRowText() {
+  const row = page.locator(".inv-table tbody tr").filter({ has: page.locator(".inv-reprint-btn") });
+  return (await row.first().textContent()) ?? "";
+}
+
 /** 按下某一列的補印鈕，等代理回應，回傳這次送出的 payload。 */
 async function reprintFirstRow(tab) {
   const before = labels.length;
@@ -111,8 +117,10 @@ try {
   await filterInStock("在庫");
   await page.screenshot({ path: `${SHOTS}/inv-reprint-01-serialized.png` });
 
-  // 3) 序號品：收購進來的＝二手
-  checkLabel("序號品", await reprintFirstRow("序號品"), "二手");
+  // 3) 序號品：只有成色「全新未拆」印全新，其餘印二手（2026-09-16）——依那一列實際的成色判斷。
+  const serializedRow = await firstReprintRowText();
+  const serializedExpect = serializedRow.includes("全新未拆") ? "全新" : "二手";
+  checkLabel("序號品", await reprintFirstRow("序號品"), serializedExpect);
   await page.screenshot({ path: `${SHOTS}/inv-reprint-02-sent.png` });
 
   // 4) 一般商品：採購進來的＝全新（這個分頁本來沒有補印鈕，裁示後才加）
@@ -127,6 +135,28 @@ try {
   await filterInStock("販售中");
   checkLabel("散裝批", await reprintFirstRow("散裝批"), "二手");
   await page.screenshot({ path: `${SHOTS}/inv-reprint-04-bulk.png` });
+
+  // 5b) 成色「全新未拆」一定印「全新」：直接用成色篩選，不靠清單第一列剛好是哪一件。
+  //     （先跑 `SMOKE_GRADE=N node scripts/label-print-smoke.mjs` 會收進一件全新未拆的品項。）
+  await page.click('[role="tab"]:has-text("序號品")');
+  await page.waitForSelector(".inv-table tbody tr");
+  await filterInStock("在庫");
+  const gradeSelect = page.locator('select[aria-label="成色"]').first();
+  const gradeOptions = await gradeSelect.locator("option").allTextContents();
+  if (!gradeOptions.includes("全新未拆")) {
+    ok("有全新未拆的在庫品可供驗證", false, `成色選項：${gradeOptions.join("、")}`);
+  } else {
+    await gradeSelect.selectOption({ label: "全新未拆" });
+    await page.waitForSelector(".inv-table tbody tr");
+    const newPayload = await reprintFirstRow("全新未拆的序號品");
+    ok(
+      "全新未拆的標籤印「全新」",
+      newPayload !== null && newPayload.condition === "全新",
+      `condition=${JSON.stringify(newPayload?.condition)}`,
+    );
+    await page.screenshot({ path: `${SHOTS}/inv-reprint-04b-new-unopened.png` });
+    await gradeSelect.selectOption({ label: "全部成色" });
+  }
 
   // 6) 品牌真的會送到標籤：挑一個實際有品牌的篩選值，印出來的 payload 必須帶那個名字。
   //    （前面三張是清單第一列，可能剛好都沒品牌＝驗到的是「不印那一行」那條規則。）

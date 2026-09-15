@@ -70,7 +70,7 @@ erDiagram
 `id, store_id, sku, name, brand_id?, category_id, unit_price, quantity_on_hand, reorder_point, cost_method, supplier_id?, create_idempotency_key?, create_fingerprint?, created_at`
 - `(store_id, create_idempotency_key)` 在非空時唯一；建檔重送以 `create_fingerprint` 驗證內容相同後回放原商品，避免 SKU 留白時重複產生商品主檔。
 
-### serialized_item（序號化單品：二手買斷/寄售，等級 S–D）
+### serialized_item（序號化單品：買斷/寄售，等級 N、S–D）
 - `id, store_id, item_code(唯一條碼,建檔當下產生即固定、永不變), name, brand_id?, product_model_id?(型號主檔,供歷史/報表), category_id, grade(S|A|B|C|D), ownership_type(OWNED|CONSIGNMENT)`
 - `item_code` 於建檔當下產生即**固定、永不變**，與 POS 掃描結帳所用為**同一套碼**；標籤以 **1D Code 128** 編碼此識別碼（內容只放 `item_code`），可隨時補印（見 04 列印端點）。
 - `photos`：不存二進位於 DB；以關聯記錄存**檔案系統相對路徑 + metadata**（檔名、content_type、size），media 卷另行備份，路徑抽象化以便日後換物件儲存。
@@ -145,4 +145,4 @@ erDiagram
 
 ### setting（系統設定，**單列具型別**，每店一列、Pydantic 驗證）
 `einvoice_enabled(bool), default_commission_pct(int,=50), default_margin_pct(int,=45,定價輔助目標毛利率), tax_rate(=0.05), default_reorder_point, einvoice_print_proof_when_carrier(bool,預設 false), ...`
-- `grade_enum`：S/A/B/C/D/E 六級（可設定用語）。預設語意：S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、**E=散裝（秤斤/整袋收，走 bulk_lot）**。S–D 為序號單品，E 為散裝批。
+- `grade_enum`：N/S/A/B/C/D/E 七級（可設定用語）。預設語意：N=全新未拆（2026-09-16 新增）、S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、**E=散裝（秤斤/整袋收，走 bulk_lot）**。N、S–D 為序號單品，E 為散裝批。分類定價規則（category_pricing_rules）依 N、S–D 各一組。

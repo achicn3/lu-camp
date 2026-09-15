@@ -80,7 +80,7 @@ describe("收購定價提示", () => {
 
     // 上面講 A 級 35–45，這行講的卻是 C 級的 20；不標成色就會被讀成 A 級行情崩了。
     const latest = await screen.findByText(/最近一次收這款/);
-    expect(latest.textContent).toContain("C 有使用痕跡");
+    expect(latest.textContent).toContain("C 普通");
     expect(latest.textContent).toContain("收 20");
     expect(latest.textContent).toContain("賣 70");
   });
@@ -89,7 +89,7 @@ describe("收購定價提示", () => {
     stubHint(A_AND_C);
     wrap(<PriceHint brandId={1} productModelId={2} grade="S" />);
 
-    await screen.findByText(/但沒收過 S 全新\/未使用/);
+    await screen.findByText(/但沒收過 S 超熱門搶手貨/);
     expect(screen.queryByText(/收購 35–45/)).toBeNull();
   });
 
@@ -101,7 +101,16 @@ describe("收購定價提示", () => {
     await user.click(await screen.findByRole("button", { name: /看各成色行情/ }));
     const table = screen.getByRole("table");
     expect(table.textContent).toContain("A 近全新/精品");
-    expect(table.textContent).toContain("C 有使用痕跡");
+    expect(table.textContent).toContain("C 普通");
+  });
+
+  it("成色說明與收購下拉同一份：全新未拆不會被講成別的，S 也不再寫成「全新」", async () => {
+    // 定價提示原本自帶一份說明，S 寫「全新/未使用」，跟下拉的「S 超熱門搶手貨」互相矛盾；
+    // 加了全新未拆之後，同一頁出現兩個「全新」會讓店員選錯。
+    stubHint(A_AND_C);
+    wrap(<PriceHint brandId={1} productModelId={2} grade="N" />);
+    await screen.findByText(/但沒收過 全新未拆/);
+    expect(screen.queryByText(/全新\/未使用/)).toBeNull();
   });
 
   it("沒有收購價紀錄時只講售價，不得補 0 唬人", async () => {

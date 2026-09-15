@@ -382,7 +382,7 @@ class InventoryService:
     PRICE_HINT_WINDOW_MONTHS = 12
     _PRICE_HINT_WINDOW = timedelta(days=365)
     # 由好到差；店員視線由上往下就是價格由高到低。E 是散裝、不會出現在序號品，殿後即可。
-    _GRADE_ORDER = (Grade.S, Grade.A, Grade.B, Grade.C, Grade.D, Grade.E)
+    _GRADE_ORDER = (Grade.N, Grade.S, Grade.A, Grade.B, Grade.C, Grade.D, Grade.E)
 
     async def acquisition_price_hint(
         self, store_id: int, *, brand_id: int, product_model_id: int

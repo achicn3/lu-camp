@@ -74,7 +74,7 @@ class Category(Base, TimestampMixin):
 class CategoryPricingRule(Base, TimestampMixin):
     """分類 × 成色帶 的收購定價規則（雙重約束參數；F6 收購定價輔助讀取）。
 
-    成色帶限 S/A/B/C/D（E 走散裝，無此規則）。manager 可批次更新。
+    成色帶限 N/S/A/B/C/D（E 走散裝，無此規則）。manager 可批次更新。
     """
 
     __tablename__ = "category_pricing_rules"

@@ -21,6 +21,7 @@ import {
   sellThroughPct,
   serializedStatusBadge,
 } from "@/features/inventory/inventory";
+import { labelConditionForGrade } from "@/features/inventory/grades";
 import { type LabelCondition, printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -1077,7 +1078,7 @@ function SerializedPanel() {
                   name={item.name}
                   price={parseNtd(item.listed_price) ?? 0}
                   brand={labelBrand(brands, item.brand_id)}
-                  condition="二手"
+                  condition={labelConditionForGrade(item.grade)}
                 />
               )}
             </td>
@@ -1556,7 +1557,7 @@ function BulkPanel() {
                   name={lot.name}
                   price={parseNtd(lot.unit_price) ?? 0}
                   brand={labelBrand(brands, lot.brand_id)}
-                  condition="二手"
+                  condition={labelConditionForGrade(lot.grade)}
                 />
               )}
             </td>

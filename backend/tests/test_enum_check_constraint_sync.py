@@ -14,6 +14,7 @@ from types import ModuleType
 
 from app.shared.enums import (
     EInvoiceIssueChannel,
+    Grade,
     SaleInvoiceStatus,
     SaleStatus,
     ServiceMode,
@@ -56,3 +57,18 @@ def test_service_mode_check_lists_every_enum_value() -> None:
     """內用/外帶（docs/35）。"""
     migration = _load("b4d6f8a1c3e5_dine_in_service_mode_and_kitchen_ticket.py")
     assert set(migration._SERVICE_MODES) == {m.value for m in ServiceMode}
+
+
+def test_grade_check_lists_every_enum_value() -> None:
+    """成色（含 2026-09-16 新增的全新未拆 N）。
+
+    同一個 Grade 列舉用在三張表的 CHECK（serialized_items、bulk_lots、
+    category_pricing_rules），migration 必須三張都重建成完整清單。
+    """
+    migration = _load("e6a2c8f4b1d9_grade_new_unopened.py")
+    assert set(migration._GRADES) == {g.value for g in Grade}
+    assert set(migration._TABLES) == {
+        ("serialized_items", "grade"),
+        ("bulk_lots", "grade"),
+        ("category_pricing_rules", "condition_band"),
+    }

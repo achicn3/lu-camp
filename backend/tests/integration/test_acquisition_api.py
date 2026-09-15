@@ -115,6 +115,36 @@ async def test_buyout_happy_path(client: httpx.AsyncClient, db_session: AsyncSes
     assert got.json()["type"] == "BUYOUT"
 
 
+@pytest.mark.parametrize("acq_type", ["BUYOUT", "CONSIGNMENT"])
+async def test_new_unopened_grade_is_accepted_for_serialized_items(
+    client: httpx.AsyncClient, db_session: AsyncSession, acq_type: str
+) -> None:
+    """成色「全新未拆」（N，2026-09-16）：買斷與寄售都可以選，並原樣存進序號品。
+
+    標籤右下角據此印「全新」而非「二手」——所以值必須真的落地，不能在路上被改掉。
+    """
+    _, token = await _seed_token(db_session)
+    await _open_drawer(client, token)
+    contact_id = await _make_seller(client, token)
+    item: dict[str, object] = {"name": "未拆封爐頭", "grade": "N", "listed_price": "2400"}
+    if acq_type == "BUYOUT":
+        item["acquisition_cost"] = "1200"
+    else:
+        item["commission_pct"] = 50
+
+    resp = await client.post(
+        "/api/v1/acquisitions",
+        json={"type": acq_type, "contact_id": contact_id, "items": [item]},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    code = resp.json()["item_codes"][0]
+
+    got = await client.get(f"/api/v1/serialized-items/by-code/{code}", headers=_auth(token))
+    assert got.status_code == 200, got.text
+    assert got.json()["grade"] == "N"
+
+
 async def test_acquisition_audit_has_no_national_id_plaintext(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

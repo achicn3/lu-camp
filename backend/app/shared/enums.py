@@ -31,8 +31,13 @@ class ContactRole(StrEnum):
 
 
 class Grade(StrEnum):
-    """成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。"""
+    """成色分級。N、S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
 
+    N＝全新未拆（2026-09-16 裁示新增，排最前）。它是**唯一**讓序號品標籤右下角印「全新」
+    的成色，其餘一律印「二手」。代價是一件全新未拆的熱門貨不能同時標 S（成色單選）。
+    """
+
+    N = "N"
     S = "S"
     A = "A"
     B = "B"

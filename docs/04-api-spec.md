@@ -205,8 +205,8 @@ POST   http://localhost:<port>/print/label       { code(item_code / lot_code / s
                                                   brand?, condition? }
        # 以 1D Code 128 編碼 code(識別碼); 標籤含品名/價格等可讀文字
        # brand: 品牌，獨立一行印在品名上方; 空或未給＝那一行整行不印(裁示 2026-09-14)
-       # condition: 「全新」(採購來的一般商品) 或「二手」(收購來的序號品/散裝批), 與價格同行靠右
-       #            成色(S–D)不印——客人看標籤只需要知道新舊, 分級是店內作業用語
+       # condition: 「全新」(採購來的一般商品, 或成色為全新未拆 N 的序號品) 或「二手」(其餘序號品/散裝批),
+       #            與價格同行靠右; 成色本身不印——客人看標籤只需要知道新舊, 分級是店內作業用語
        # 兩者皆選填: 舊版前端只送 code/name/price 仍須正常列印
 POST   http://localhost:<port>/drawer/open
 GET    http://localhost:<port>/health

@@ -49,11 +49,11 @@
 - **/login**：帳密登入 → 取 token。API：`/auth/login`。全角色。
 - **/pos（結帳）**：掃 `item_code`（序號品）、選一般商品、或選/掃**散裝堆**（E，按該堆均一價、可一次多件）加入購物車；右側結帳區顯示小計/稅/總額、會員歸戶（選填）、發票選項。發票區支援 B2B 統編、捐贈碼與**手機條碼載具**：條碼槍掃入或手動輸入，前端驗證 8 碼且首碼 `/`，API 送 `mobile_carrier`，後端固定映射 `CarrierType=3J0002`。目前不支援自然人憑證或其他載具，也不會從會員資料自動帶入。手機條碼／捐贈不印證明聯；`print_mark` 由後端依資料判斷，不是前端可切換欄位。若 `einvoice_enabled=false` 則整個發票區隱藏並標示「本期不開票」。主行動「結帳」→ 後端建 sale →（開票時）產發票 + 排上傳 → 依發票結果觸發列印、開錢櫃。**結帳完成畫面顯示「列印商品明細」按鈕，店員視客人需求手動點選列印（可重複補印）**；非自動印。寄售品售出由後端自動建結算、前端提示。API：`/sales`、`/sales/{id}/print-detail`、`/serialized-items/by-code/{code}`、`/settings`。
 - **/acquisition（收購鑑價入庫）**：先選/建賣方或寄售人（**姓名、身分證字號必填**；身分證號可由後端 blind index 去重比對既有賣方）→ 選類型：
-  - 買斷/寄售（S–D）：逐件鑑價（**品牌選擇可當場新增**、**品名 autocomplete 既有型號**[選既有自動帶入品牌/分類與價格歷史，輸入全新則順手建型號]、分類、成色 S–D、選填拍照、定價；買斷填收購價、寄售填拋售價與抽成預設 50）。
+  - 買斷/寄售（全新未拆、S–D）：逐件鑑價（**品牌選擇可當場新增**、**品名 autocomplete 既有型號**[選既有自動帶入品牌/分類與價格歷史，輸入全新則順手建型號]、分類、成色（全新未拆、S–D）、選填拍照、定價；買斷填收購價、寄售填拋售價與抽成預設 50）。
     - **定價輔助 UI（定價計算機）**：輸入收購價後，顯示依目標毛利率算的**建議含稅售價**（`round_ntd(收購價 ÷ (1 − margin_pct/100) × (1 + tax_rate))`——目標毛利對未稅計，見 ADR-016；`default_margin_pct` 預設 45、margin 限 0–99、`tax_rate` 取自 settings）與**該型號歷史售價**參考；店員可手動覆蓋毛利率或售價任一數字。
   - **散裝（E）**：建立一「堆」——選品牌、填整堆收購成本、收購基準（秤斤/整袋）、件數（可估算）、**該堆每件均一價**、可命名（如「A堆」）。
   買斷/散裝顯示「應付現金」並提示付款（現金出帳）；完成後列印序號條碼或整堆標籤。API：`/acquisitions`、`/acquisitions/{id}/print-labels`、`/contacts`、`/contacts/lookup`、`/brands`、`/product-models`、`/product-models/{id}/pricing`。
-- **/inventory**：三個分頁——序號品（S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、一般商品（庫存量、低庫存標示、改價；建檔時 SKU 可留白由系統產生）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。序號品與散裝堆（含商品詳情頁）皆有「**列印條碼**」按鈕，可隨時補印（識別碼固定不變、1D Code 128）。API：`/serialized-items`、`/serialized-items/{id}/print-label`、`/catalog-products`、`/bulk-lots`、`/bulk-lots/{id}/print-label`。
+- **/inventory**：三個分頁——序號品（全新未拆、S–D，可篩 status/ownership、查件、改價留痕、上下架、看照片）、一般商品（庫存量、低庫存標示、改價；建檔時 SKU 可留白由系統產生）、**散裝批（E）**（各堆：均一價、剩餘/總件數、收購成本、售出進度；改價/調整件數留痕）。序號品與散裝堆（含商品詳情頁）皆有「**列印條碼**」按鈕，可隨時補印（識別碼固定不變、1D Code 128）。API：`/serialized-items`、`/serialized-items/{id}/print-label`、`/catalog-products`、`/bulk-lots`、`/bulk-lots/{id}/print-label`。
 - **/consignment**：待結算/應付未付清單；「付款給寄售人」（現金出帳）；退回寄售人。API：`/consignment/*`。
 - **/contacts**：會員/賣方/寄售人查詢與建檔；會員消費紀錄/點數；身分證字號預設遮罩，MANAGER 可解密查看（寫稽核）。API：`/contacts*`。
 - **/purchasing**：供應商、採購單草稿/送出/取消、分批收貨、各批進項發票與低庫存提醒。店員與管理者搜尋不到一般商品時皆可使用「建立一般商品」；品名與售價必填、SKU 選填，建立成功後直接加入採購明細。商品建檔送出前依店別持久化 `Idempotency-Key`＋原始 request body，回應不明後即使重整、導覽或切換庫存分頁，也必須以原內容與原 key 重放，直到後端和解。預設待收貨清單包含 `ORDERED`、`PARTIAL`。API：`/suppliers`、`/catalog-products`、`/purchase-orders`、`/purchase-orders/{id}/submit|cancel|receive`、`/purchase-orders/{id}/receipts/{receipt_id}/invoice`。

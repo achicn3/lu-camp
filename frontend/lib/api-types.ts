@@ -5077,10 +5077,13 @@ export interface components {
         };
         /**
          * Grade
-         * @description 成色分級。S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
+         * @description 成色分級。N、S-D 走序號單品（serialized_item），E 為散裝批（bulk_lot）。
+         *
+         *     N＝全新未拆（2026-09-16 裁示新增，排最前）。它是**唯一**讓序號品標籤右下角印「全新」
+         *     的成色，其餘一律印「二手」。代價是一件全新未拆的熱門貨不能同時標 S（成色單選）。
          * @enum {string}
          */
-        Grade: "S" | "A" | "B" | "C" | "D" | "E";
+        Grade: "N" | "S" | "A" | "B" | "C" | "D" | "E";
         /**
          * GradePriceStat
          * @description 同款商品在某個成色下的歷史行情：收購價與上架售價各自的區間。

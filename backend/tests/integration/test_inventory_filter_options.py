@@ -184,11 +184,11 @@ async def test_options_grades_sorted_best_first(
     """成色由好到差，不是資料庫回傳的隨機順序。"""
     store_id = await _seed_store(db_session)
     bull = await _brand(db_session, store_id, "蠻牛")
-    for grade in (Grade.C, Grade.S, Grade.B):
+    for grade in (Grade.C, Grade.S, Grade.N, Grade.B):
         await _item(db_session, store_id, brand=bull, grade=grade)
 
     body = (await client.get(OPTIONS, params={"brand_id": bull.id}, headers=_auth(store_id))).json()
-    assert body["grades"] == ["S", "B", "C"]
+    assert body["grades"] == ["N", "S", "B", "C"]  # 全新未拆排最前
 
 
 async def test_options_are_store_scoped(

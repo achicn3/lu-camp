@@ -1,5 +1,6 @@
 // F6 收購表單驗證純邏輯：對齊後端 AcquisitionCreate 的必填/互斥，提交前先擋（回 zh-TW 錯誤）。
 // 草稿欄位多為字串（表單狀態）；此處只驗形狀，不送網路。
+import { SERIALIZED_GRADES } from "@/features/inventory/grades";
 import { parseNtd } from "@/lib/money";
 
 import { qtyErrors, rowsPayableTotal } from "./quantity";
@@ -62,13 +63,14 @@ export function isPositiveIntNtd(input: string): boolean {
   return value !== null && value > 0;
 }
 
-const VALID_GRADES = new Set<string>(["S", "A", "B", "C", "D"]);
+// 序號品可選的成色＝共用清單（全新未拆＋S–D），不另外抄一份以免加值時漏改。
+const VALID_GRADES = new Set<string>(SERIALIZED_GRADES);
 
 export function serializedRowErrors(type: AcqType, index: number, row: ItemDraft): string[] {
   const errors: string[] = [];
   const tag = `第 ${index + 1} 列`;
   if (!row.name.trim()) errors.push(`${tag}：品名必填`);
-  if (!VALID_GRADES.has(row.grade)) errors.push(`${tag}：成色必選（S–D）`);
+  if (!VALID_GRADES.has(row.grade)) errors.push(`${tag}：成色必選（全新未拆、S–D）`);
   if (row.categoryId === null) errors.push(`${tag}：分類必選`);
   if (!isPositiveIntNtd(row.listedPrice)) errors.push(`${tag}：上架售價須為正整數元`);
   if (type === "BUYOUT" && !isPositiveIntNtd(row.acquisitionCost)) {

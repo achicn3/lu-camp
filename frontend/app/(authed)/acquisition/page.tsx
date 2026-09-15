@@ -15,6 +15,7 @@ import {
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
 import { ACQ_TYPE_LABEL, GRADE_LABEL, PAYOUT_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
+import { gradeShortName, labelConditionForGrade } from "@/features/inventory/grades";
 import {
   creditPremiumPreview,
   marginPct,
@@ -598,7 +599,9 @@ function ItemRowCard({
       {maxCost !== null && (
         <p className="acq-aid">
           建議最高收購成本：<strong className="money">{formatNtd(maxCost)}</strong>
-          {category !== null ? `（${category.name}・${row.grade} 級規則）` : ""}
+          {category !== null && row.grade !== ""
+            ? `（${category.name}・${gradeShortName(row.grade)}規則）`
+            : ""}
         </p>
       )}
 
@@ -741,7 +744,13 @@ function ItemRowCard({
 }
 
 /** 一件要印的標籤：品名/價格取自後端存下來的內容，品牌待解析。 */
-type PendingLabel = { code: string; name: string; price: number; brandId: number | null };
+type PendingLabel = {
+  code: string;
+  name: string;
+  price: number;
+  brandId: number | null;
+  grade: components["schemas"]["Grade"];
+};
 
 /**
  * 品牌 id → 顯示名。
@@ -778,7 +787,7 @@ async function resolveBrands(
 }
 
 // ── 標籤列印（Brother 標籤機）：收購完成後，逐一補印序號品 / 散裝批的條碼標籤 ──
-// 收購進來的一律是二手（新品走採購／一般商品），所以標示固定「二手」；成色不印。
+// 右下角的全新／二手依成色決定：只有「全新未拆」印全新，其餘印二手（2026-09-16）；成色本身不印。
 function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null }) {
   const total = codes.length + (lot !== null ? 1 : 0);
 
@@ -795,6 +804,7 @@ function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null
           name: data.name,
           price: parseNtd(data.listed_price) ?? 0,
           brandId: data.brand_id,
+          grade: data.grade,
         });
       }
       const lots: PendingLabel[] = [];
@@ -808,6 +818,7 @@ function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null
           name: data.name,
           price: parseNtd(data.unit_price) ?? 0,
           brandId: data.brand_id,
+          grade: data.grade,
         });
       }
 
@@ -820,7 +831,10 @@ function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null
 
       const all = [...items, ...lots];
       for (const [i, it] of all.entries()) {
-        await printLabel(it.code, it.name, it.price, { brand: brands[i], condition: "二手" });
+        await printLabel(it.code, it.name, it.price, {
+          brand: brands[i],
+          condition: labelConditionForGrade(it.grade),
+        });
       }
       return all.length;
     },

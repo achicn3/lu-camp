@@ -63,6 +63,20 @@ describe("serializedRowErrors", () => {
     );
     expect(errs.length).toBe(4);
   });
+  it("全新未拆（N）是合法成色，買斷與寄售都能選", () => {
+    expect(serializedRowErrors("BUYOUT", 0, item({ grade: "N" }))).toEqual([]);
+    expect(
+      serializedRowErrors("CONSIGNMENT", 0, item({ grade: "N", commissionPct: "50" })),
+    ).toEqual([]);
+  });
+  it("散裝的 E 不能出現在序號品；沒選成色時提示要列出全新未拆", () => {
+    expect(serializedRowErrors("BUYOUT", 0, item({ grade: "E" }))).toContain(
+      "第 1 列：成色必選（全新未拆、S–D）",
+    );
+    expect(serializedRowErrors("BUYOUT", 0, item({ grade: "" }))).toContain(
+      "第 1 列：成色必選（全新未拆、S–D）",
+    );
+  });
   it("consignment requires commission 0–100, not cost", () => {
     expect(serializedRowErrors("CONSIGNMENT", 0, item({ commissionPct: "50" }))).toEqual([]);
     expect(

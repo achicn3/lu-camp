@@ -3,6 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+// 成色說明一律用共用那份：這裡原本自帶一份，S 寫「全新/未使用」、C 寫「有使用痕跡」，
+// 跟店員實際在選的收購下拉（S 超熱門搶手貨、C 普通）互相矛盾；加了全新未拆之後，
+// 同一頁出現兩個「全新」會讓人選錯（2026-09-16）。
+import { GRADE_LABEL } from "@/features/inventory/grades";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDate } from "@/lib/datetime";
@@ -11,14 +15,6 @@ import { formatNtd, parseNtd } from "@/lib/money";
 type Grade = components["schemas"]["Grade"];
 type GradeStat = components["schemas"]["GradePriceStat"];
 
-const GRADE_LABEL: Record<string, string> = {
-  S: "S 全新/未使用",
-  A: "A 近全新/精品",
-  B: "B 良好",
-  C: "C 有使用痕跡",
-  D: "D 明顯瑕疵",
-  E: "E 散裝",
-};
 
 /** 「35」「35–45」——同一個數字不重複講兩次，店員一眼看到的是區間還是定值。 */
 function range(min: string | null | undefined, max: string | null | undefined): string | null {

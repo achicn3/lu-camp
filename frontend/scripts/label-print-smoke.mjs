@@ -14,6 +14,10 @@ import { uniquePhone, validNationalId } from "./_national-id.mjs";
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 // 每次跑都用新的賣方：身分證字號會被去重比對，沿用同一組第二次就建不出來。
 const RUN = Date.now() % 100000;
+// 收購的成色（預設 A）。只有「全新未拆」N 標籤印「全新」，其餘印「二手」（2026-09-16）。
+// 兩條路都要驗：`SMOKE_GRADE=A` 一次、`SMOKE_GRADE=N` 一次。
+const GRADE = process.env.SMOKE_GRADE ?? "A";
+const EXPECT_CONDITION = GRADE === "N" ? "全新" : "二手";
 const SELLER_NAME = `標籤測試賣家 ${RUN}`;
 const SHOTS = process.env.SMOKE_SHOTS ?? join(homedir(), "tmp", "lu-camp-shots");
 mkdirSync(SHOTS, { recursive: true });
@@ -60,7 +64,7 @@ try {
   await page.waitForSelector(`text=${SELLER_NAME}`);
 
   await page.fill('input[aria-label="品名"]', "標籤測試外套");
-  await page.locator(".acq-row select").first().selectOption("A");
+  await page.locator(".acq-row select").first().selectOption(GRADE);
 
   const brand = page.getByLabel("品牌");
   await brand.click();
@@ -90,7 +94,7 @@ try {
   const labelBtn = page.locator('.acq-print-labels button:has-text("列印標籤")');
   await labelBtn.waitFor();
   ok("出現「列印標籤（N 張）」按鈕", true, (await labelBtn.textContent()) ?? "");
-  await page.screenshot({ path: `${SHOTS}/b3-01-label-button.png` });
+  await page.screenshot({ path: `${SHOTS}/b3-01-label-button-${GRADE}.png` });
 
   // 有品牌但查詢成功回傳缺項，不得默默印成無品牌；恢復後可用同一筆收購重試。
   const brandOptions = "**/api/v1/serialized-items/filter-options*";
@@ -127,10 +131,14 @@ try {
   }
   await page.screenshot({ path: `${SHOTS}/b3-02-label-printed.png` });
 
-  // 5) 標籤內容（裁示 2026-09-14）：收購進來的一律「二手」、品牌獨立一行原樣帶上，成色不印。
+  // 5) 標籤內容：全新／二手依成色（只有全新未拆印全新）、品牌獨立一行原樣帶上，成色本身不印。
   ok("有攔到標籤送出", labels.length > 0, `${labels.length} 張`);
   for (const [i, l] of labels.entries()) {
-    ok(`第 ${i + 1} 張標示「二手」`, l.condition === "二手", `condition=${JSON.stringify(l.condition)}`);
+    ok(
+      `第 ${i + 1} 張標示「${EXPECT_CONDITION}」（成色 ${GRADE}）`,
+      l.condition === EXPECT_CONDITION,
+      `condition=${JSON.stringify(l.condition)}`,
+    );
     ok(`第 ${i + 1} 張品牌為 TestBrand`, l.brand === "TestBrand", `brand=${JSON.stringify(l.brand)}`);
   }
 } catch (err) {

@@ -31,13 +31,13 @@
 - `national_id` 加密儲存、限 `MANAGER` 解密查看、查看寫稽核。**不可明文/部分搜尋**；另存 `national_id_blind_index = HMAC(national_id, 金鑰)` 做**精確去重比對**（避免同一賣方重複建檔），日常找人以姓名/電話查詢。
 
 ### C. Inventory / 庫存（四型態）
-**成色/等級列舉 `grade` = S/A/B/C/D/E（六級，可設定用語）**：S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、E=散裝（秤斤/整袋收）。其中 **S–D 為序號單品，E 為散裝批**。
+**成色/等級列舉 `grade` = N/S/A/B/C/D/E（七級，可設定用語）**：N=全新未拆、S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、E=散裝（秤斤/整袋收）。其中 **N、S–D 為序號單品，E 為散裝批**。N 於 2026-09-16 新增，是唯一讓序號品標籤右下角印「全新」的成色（其餘印「二手」）；成色單選，全新未拆的熱門貨不能同時標 S。
 
 庫存追蹤型態：
 1. **一般商品 SKU（`catalog_product`）**：飲料、全新商品。以數量管理，ownership 一律 `OWNED`。
-2. **序號化單品（`serialized_item`，等級 S–D）**：每件唯一，含：
+2. **序號化單品（`serialized_item`，等級 N、S–D）**：每件唯一，含：
    - `ownership_type`：`OWNED`（二手買斷）/ `CONSIGNMENT`（寄售，如帳篷）
-   - `grade`：S/A/B/C/D
+   - `grade`：N/S/A/B/C/D
    - `photos`：選填、可多張
    - `OWNED`：`acquisition_cost`（收購成本）
    - `CONSIGNMENT`：`consignor_id`、`commission_pct`（預設 50）
@@ -50,7 +50,7 @@
 ### D. Acquisition / 收購鑑價入庫
 - 一張 `acquisition` 單據對應一次入庫事件：`type = BUYOUT | CONSIGNMENT | BULK_LOT`、賣方/寄售人 `contact`（必填姓名+national_id）、經手店員、日期。
 - 流程：選/建聯絡人 → 鑑價 → 確認。
-  - `BUYOUT`（序號買斷，S–D）：逐件分級、選填拍照、定收購價；當場**付現金**（現金出帳），建立 `serialized_item(ownership=OWNED)`，每件產 `item_code` 並列印條碼標籤。
+  - `BUYOUT`（序號買斷，N、S–D）：逐件分級、選填拍照、定收購價；當場**付現金**（現金出帳），建立 `serialized_item(ownership=OWNED)`，每件產 `item_code` 並列印條碼標籤。
   - `CONSIGNMENT`（寄售）：逐件，不付現，定拋售價與抽成（預設 50），建立 `serialized_item(ownership=CONSIGNMENT)`，列印標籤。
   - `BULK_LOT`（E 級散裝）：按重量/整袋收購，記錄整堆收購成本、件數（可估算）、**該堆每件均一價**；當場**付現金**（現金出帳），建立一筆 `bulk_lot`，產 `lot_code` 並可列印整堆標籤。
 - **建檔（品牌/品名主檔 + autocomplete）**：

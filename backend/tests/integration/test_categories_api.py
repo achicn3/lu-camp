@@ -61,11 +61,11 @@ async def test_create_category_seeds_rules_and_default_target(
     # 同名再建 → 去重
     again = await client.post("/api/v1/categories", json={"name": "登山服飾"}, headers=_auth(mgr))
     assert again.json()["id"] == cat_id
-    # seed 5 個成色帶規則（S–D，不含 E）
+    # seed 6 個成色帶規則（全新未拆 N＋S–D，不含 E 散裝）
     rules = (
         await client.get(f"/api/v1/categories/{cat_id}/pricing-rules", headers=_auth(mgr))
     ).json()
-    assert sorted(r["condition_band"] for r in rules) == ["A", "B", "C", "D", "S"]
+    assert sorted(r["condition_band"] for r in rules) == ["A", "B", "C", "D", "N", "S"]
     assert all(r["discount_ceiling_pct"] == 60 for r in rules)
 
 

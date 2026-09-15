@@ -11,8 +11,8 @@ from decimal import Decimal
 
 from app.shared.enums import Grade
 
-# 成色帶（E 走散裝，無此規則）。
-PRICING_BANDS: tuple[Grade, ...] = (Grade.S, Grade.A, Grade.B, Grade.C, Grade.D)
+# 成色帶（E 走散裝，無此規則）。N（全新未拆）沿用同一組預設參數，店長日後可再調。
+PRICING_BANDS: tuple[Grade, ...] = (Grade.N, Grade.S, Grade.A, Grade.B, Grade.C, Grade.D)
 
 DEFAULT_DISCOUNT_CEILING_PCT = 60
 DEFAULT_MIN_MARGIN_PCT = 40
