@@ -191,7 +191,7 @@ try {
   // 最近一次是 C 級那件；必須連成色一起講，否則會被誤讀成 A 級的行情。
   ok(
     "最近一次有標成色，不會跟上面的區間混淆",
-    subLine.includes("C 有使用痕跡") && subLine.includes("收 20") && subLine.includes("賣 70"),
+    subLine.includes("C 普通") && subLine.includes("收 20") && subLine.includes("賣 70"),
     subLine,
   );
   await page.screenshot({ path: join(SHOTS, "03-hint-grade-a.png"), fullPage: true });
@@ -201,14 +201,14 @@ try {
   const tableText = await page.locator(".price-hint-table").innerText();
   ok(
     "展開後一眼比較各成色（A 與 C 都在）",
-    tableText.includes("A 近全新/精品") && tableText.includes("C 有使用痕跡") && tableText.includes("70"),
+    tableText.includes("A 近全新/精品") && tableText.includes("C 普通") && tableText.includes("70"),
     tableText.replace(/\n/g, " | "),
   );
   await page.screenshot({ path: join(SHOTS, "04-all-grades.png"), fullPage: true });
 
   // 換成沒收過的成色：提示仍在，但要老實說這個成色沒收過，不能拿別的成色的價唬人。
   await page.locator(".acq-row select").first().selectOption("S");
-  await page.getByText(/但沒收過 S 全新\/未使用/).waitFor();
+  await page.getByText(/但沒收過 S 超熱門搶手貨/).waitFor();
   ok("沒收過的成色會明說，不拿別級距的價唬人", true);
   await page.screenshot({ path: join(SHOTS, "05-grade-never-acquired.png"), fullPage: true });
 

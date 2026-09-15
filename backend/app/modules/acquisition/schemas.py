@@ -40,7 +40,7 @@ def _ensure_whole_nonneg(value: Decimal, field: str) -> Decimal:
 
 
 class AcquisitionItemIn(BaseModel):
-    """序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。"""
+    """序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 N、S-D（E 走散裝）。"""
 
     name: str = Field(min_length=1)
     grade: Grade

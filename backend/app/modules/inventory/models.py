@@ -136,7 +136,7 @@ class CatalogProduct(Base, TimestampMixin):
 
 
 class SerializedItem(Base, TimestampMixin):
-    """序號單品（S-D）。item_code 建檔即固定、全域唯一（與 POS 掃碼同一套碼）。"""
+    """序號單品（成色 N、S-D）。item_code 建檔即固定、全域唯一（與 POS 掃碼同一套碼）。"""
 
     __tablename__ = "serialized_items"
 
