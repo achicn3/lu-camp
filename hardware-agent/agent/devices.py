@@ -6,9 +6,13 @@ Fake，實機上線時改注入真機驅動（T15/T16/T18），**上層路由零
 
 from __future__ import annotations
 
+import dataclasses
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from agent.config import (
+    PrinterEndpoint,
     brother_endpoint_from_env,
     drawer_endpoint_from_env,
     epson_endpoint_from_env,
@@ -121,6 +125,22 @@ def default_fake_devices() -> AgentDevices:
     )
 
 
+_DEFAULT_PRINT_TIMEOUT = 8.0
+"""真正列印/開櫃連線逾時（秒）預設值——與背景健康探測（`AGENT_DEVICE_PROBE_TIMEOUT`，
+預設 2.0 秒）刻意分開：探測要跑得快，但真實操作若遇上印表機正忙著印上一張單子
+（結帳時證明聯列印與錢櫃 kick 常幾乎同時發生，見 2026-09-15 實測），2 秒太容易誤判
+離線。真正的併發防護是 `escpos_network._lock_for` 的排隊鎖，這個較長的逾時只是
+「鎖排到它時，印表機的 TCP 監聽是否已釋放」這道更窄窗口的餘裕，非主要防線。
+"""
+
+
+def _with_print_timeout(endpoint: PrinterEndpoint, env: Mapping[str, str]) -> PrinterEndpoint:
+    """回傳同一端點的副本，但逾時改用 `AGENT_PRINT_TIMEOUT`（給真正列印/開櫃用，
+    不影響傳給 `RealStatusProvider` 的原始端點——背景探測仍用探測逾時）。"""
+    print_timeout = float(env.get("AGENT_PRINT_TIMEOUT", str(_DEFAULT_PRINT_TIMEOUT)))
+    return dataclasses.replace(endpoint, timeout=print_timeout)
+
+
 def real_epson_devices_from_env() -> AgentDevices:
     """真機組合：EPSON 收據機 + 錢櫃必接；Brother 標籤機選配（T18）。
 
@@ -132,10 +152,12 @@ def real_epson_devices_from_env() -> AgentDevices:
       未設即收據機；本店實機錢櫃插在發票機那台）。
     - `label_printer`：`AGENT_BROTHER_HOST` 有設 → `BrotherLabelPrinter`（brother_ql 光柵、
       網路）；未設 → `FakeLabelPrinter`（不列管）。
-    - `status_provider`：探測 EPSON（+依附錢櫃）；Brother 有設一併列管。
+    - `status_provider`：探測 EPSON（+依附錢櫃）；Brother 有設一併列管——用**探測用**逾時
+      （`AGENT_DEVICE_PROBE_TIMEOUT`），與真正列印/開櫃用的逾時分開（見 `_with_print_timeout`）。
 
     連線資訊（IP/port/逾時）一律由環境變數提供，程式碼不寫死。
     """
+    env = os.environ
     epson = epson_endpoint_from_env()
     brother = brother_endpoint_from_env()
     kitchen = kitchen_endpoint_from_env()
@@ -146,21 +168,27 @@ def real_epson_devices_from_env() -> AgentDevices:
         if brother is not None
         else FakeLabelPrinter()
     )
+    epson_w = _with_print_timeout(epson, env)
+    drawer_w = _with_print_timeout(drawer, env)
+    kitchen_w = _with_print_timeout(kitchen, env) if kitchen is not None else None
+    invoice_w = _with_print_timeout(invoice, env) if invoice is not None else None
     return AgentDevices(
         label_printer=label_printer,
-        receipt_printer=EscposReceiptPrinter(NetworkEscposWriter(epson), encoding=epson.encoding),
-        cash_drawer=RealCashDrawer(NetworkEscposWriter(drawer)),
+        receipt_printer=EscposReceiptPrinter(
+            NetworkEscposWriter(epson_w), encoding=epson.encoding
+        ),
+        cash_drawer=RealCashDrawer(NetworkEscposWriter(drawer_w)),
         status_provider=RealStatusProvider(
             epson=epson, brother=brother, kitchen=kitchen, invoice=invoice, drawer=drawer
         ),
         kitchen_printer=(
-            EscposReceiptPrinter(NetworkEscposWriter(kitchen), encoding=kitchen.encoding)
-            if kitchen is not None
+            EscposReceiptPrinter(NetworkEscposWriter(kitchen_w), encoding=kitchen.encoding)
+            if kitchen is not None and kitchen_w is not None
             else None
         ),
         invoice_printer=(
-            EscposReceiptPrinter(NetworkEscposWriter(invoice), encoding=invoice.encoding)
-            if invoice is not None
+            EscposReceiptPrinter(NetworkEscposWriter(invoice_w), encoding=invoice.encoding)
+            if invoice_w is not None and invoice is not None
             else None
         ),
     )

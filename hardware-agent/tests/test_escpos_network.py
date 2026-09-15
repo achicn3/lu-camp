@@ -1,14 +1,23 @@
 """真機 EPSON 網路驅動單元測試（測 A wiring）——全程免實機。
 
-注入假的 escpos Network（記錄 open/_raw/close、可設定丟例外），驗證：
+注入假的 escpos Network（記錄 open/_raw/close、可設定丟出指定例外），驗證：
 - `NetworkEscposWriter` lazy 連線、送出 ESC/POS 位元組、必關閉，且把連線/逾時的
   OSError 在邊界翻成 `agent.errors` 的 DeviceError（離線→DeviceOffline、逾時→DeviceTimeout）。
 - `RealCashDrawer` 經同一連線送 kick 指令、錯誤同樣翻成 DeviceError。
-- `real_epson_devices_from_env` 組出「EPSON 真機收據+錢櫃、Brother 維持 Fake、狀態 EPSON-only」。
+- **同一台實體印表機的操作必須排隊**（2026-09-15 實測踩過的真故障：錢櫃跟發票證明聯
+  共用同一台 EPSON 的同一條 RJ45，結帳時兩個請求幾乎同時各開一條 TCP 連線，其中一個
+  連線逾時、店員只能拿鑰匙開櫃）。`NetworkEscposWriter` 現在以 `(host, port)` 為鍵用
+  `threading.Lock` 序列化——不同印表機之間仍可平行，同一台則不可同時有兩條連線。
+- `real_epson_devices_from_env` 組出「EPSON 真機收據+錢櫃、Brother 維持 Fake、狀態 EPSON-only」，
+  且真正列印/開櫃用的逾時（`AGENT_PRINT_TIMEOUT`）比背景健康探測用的逾時
+  （`AGENT_DEVICE_PROBE_TIMEOUT`）更寬容——探測要跑得快，但真實操作不該因印表機
+  正忙著印上一張單子就直接判離線。
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 
 import pytest
@@ -109,6 +118,87 @@ def test_real_cash_drawer_offline_maps_device_error() -> None:
         RealCashDrawer(writer).open()
 
 
+class _ConcurrencyTracker:
+    """執行緒安全地記錄「同時間有幾個在跑」的峰值，用來斷言有沒有真的排隊/真的平行。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+
+    def enter(self) -> None:
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+
+    def exit(self) -> None:
+        with self._lock:
+            self._active -= 1
+
+
+class _TrackingFakeNetwork(_FakeNetwork):
+    """在 `_raw` 內睡一小段時間製造重疊窗口，並記錄同時間有幾條連線在跑（供排隊斷言）。"""
+
+    def __init__(self, tracker: _ConcurrencyTracker, *, hold_seconds: float = 0.05) -> None:
+        super().__init__()
+        self._tracker = tracker
+        self._hold_seconds = hold_seconds
+
+    def open(self, raise_not_found: bool = True) -> None:
+        super().open(raise_not_found)
+        self._tracker.enter()
+
+    def _raw(self, msg: bytes) -> None:
+        time.sleep(self._hold_seconds)
+        super()._raw(msg)
+
+    def close(self) -> None:
+        super().close()
+        self._tracker.exit()
+
+
+def test_writer_serializes_concurrent_operations_to_same_host_port() -> None:
+    """兩個不同 NetworkEscposWriter 指到同一台印表機（host:port 相同）——例如發票機的
+    證明聯列印跟同一台上的錢櫃 kick——絕不可同時各開一條連線,必須排隊。"""
+    tracker = _ConcurrencyTracker()
+    fake1 = _TrackingFakeNetwork(tracker)
+    fake2 = _TrackingFakeNetwork(tracker)
+    writer1 = NetworkEscposWriter(_EP, printer_factory=_factory_for(fake1))
+    writer2 = NetworkEscposWriter(_EP, printer_factory=_factory_for(fake2))
+
+    t1 = threading.Thread(target=writer1.write, args=(b"invoice-proof",))
+    t2 = threading.Thread(target=writer2.write, args=(b"drawer-kick",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert not t1.is_alive() and not t2.is_alive()
+    assert tracker.max_active == 1  # 從未同時有兩條連線在同一台印表機上
+    assert fake1.sent == [b"invoice-proof"]
+    assert fake2.sent == [b"drawer-kick"]
+
+
+def test_writer_does_not_serialize_operations_to_different_hosts() -> None:
+    """不同印表機（host 不同）之間不該互相排隊——鎖必須依 (host, port) 分開,不能是全域鎖。"""
+    tracker = _ConcurrencyTracker()
+    ep_a = PrinterEndpoint(host="10.0.0.5", port=9100, timeout=2.0)
+    ep_b = PrinterEndpoint(host="10.0.0.6", port=9100, timeout=2.0)
+    fake_a = _TrackingFakeNetwork(tracker, hold_seconds=0.2)
+    fake_b = _TrackingFakeNetwork(tracker, hold_seconds=0.2)
+    writer_a = NetworkEscposWriter(ep_a, printer_factory=_factory_for(fake_a))
+    writer_b = NetworkEscposWriter(ep_b, printer_factory=_factory_for(fake_b))
+
+    t1 = threading.Thread(target=writer_a.write, args=(b"a",))
+    t2 = threading.Thread(target=writer_b.write, args=(b"b",))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+
+    assert tracker.max_active == 2  # 兩台不同印表機真的同時在跑,不該互相卡隊
+
+
 def test_real_epson_devices_builder_wires_epson_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """只設 AGENT_EPSON_HOST；receipt+drawer=真機、label=Fake、狀態 EPSON-only（無 Brother）。"""
     monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
@@ -165,3 +255,36 @@ def test_real_devices_builder_falls_back_to_receipt_printer_without_kitchen_host
     assert devices.kitchen_ticket_printer is devices.receipt_printer
     assert isinstance(devices.status_provider, RealStatusProvider)
     assert devices.status_provider._kitchen is None
+
+
+def test_real_devices_use_longer_timeout_for_writes_than_for_background_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真正列印/開櫃（`NetworkEscposWriter`）用 `AGENT_PRINT_TIMEOUT`（預設較寬容）；
+    背景健康探測（`RealStatusProvider`）仍用 `AGENT_DEVICE_PROBE_TIMEOUT`（預設較短、
+    避免拖慢 /devices/status 輪詢）——兩者不可再共用同一個 2 秒值,那正是錢櫃 kick
+    在印表機忙碌片刻時就被誤判逾時的原因之一。"""
+    monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
+    monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)
+    monkeypatch.setenv("AGENT_DEVICE_PROBE_TIMEOUT", "2.0")
+    monkeypatch.setenv("AGENT_PRINT_TIMEOUT", "8.0")
+    devices = real_epson_devices_from_env()
+    assert isinstance(devices.receipt_printer, EscposReceiptPrinter)
+    writer = devices.receipt_printer._writer
+    assert isinstance(writer, NetworkEscposWriter)
+    assert writer._endpoint.timeout == 8.0
+    assert isinstance(devices.cash_drawer, RealCashDrawer)
+    assert devices.cash_drawer._writer._endpoint.timeout == 8.0
+    # 背景探測維持短逾時,不受 AGENT_PRINT_TIMEOUT 影響
+    assert devices.status_provider._epson.timeout == 2.0
+
+
+def test_real_devices_print_timeout_defaults_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未設 `AGENT_PRINT_TIMEOUT` 時仍要有個比探測逾時寬容的預設值,不是退回 2 秒。"""
+    monkeypatch.setenv("AGENT_EPSON_HOST", "192.168.0.42")
+    monkeypatch.delenv("AGENT_BROTHER_HOST", raising=False)
+    monkeypatch.delenv("AGENT_PRINT_TIMEOUT", raising=False)
+    devices = real_epson_devices_from_env()
+    writer = devices.receipt_printer._writer
+    assert isinstance(writer, NetworkEscposWriter)
+    assert writer._endpoint.timeout > 2.0

@@ -13,10 +13,19 @@
 
 `RealCashDrawer` 經同一台 EPSON 連線送錢櫃 kick 指令（接在 EPSON drawer port），
 錯誤同樣由 writer 邊界翻成 `DeviceError`。
+
+**同一台實體印表機的操作必須排隊（2026-09-15 實測踩過）**：錢櫃跟發票機共用同一條
+RJ45（`AGENT_DRAWER_HOST` 常等於 `AGENT_INVOICE_HOST`），結帳時證明聯列印與錢櫃
+kick 幾乎同時發生，各自開一條全新 TCP 連線去搶同一台印表機唯一的連線槽，其中一個
+就連線逾時（店員只能拿鑰匙開櫃）。以 `(host, port)` 為鍵的 `threading.Lock`
+序列化：同一台印表機的操作一次只跑一個，不同印表機之間仍可平行——`write()` 由
+`anyio.to_thread.run_sync` 從真正的 OS 執行緒呼叫，故用 `threading.Lock`
+而非 `asyncio.Lock`（後者只在同一個事件迴圈內有效，跨執行緒無效）。
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Protocol, cast
 
@@ -26,6 +35,20 @@ from escpos.printer import Network
 from agent.config import PrinterEndpoint
 from agent.errors import DeviceOffline, DeviceTimeout
 from agent.escpos_printer import SupportsWrite, open_drawer
+
+_registry_guard = threading.Lock()
+_device_locks: dict[tuple[str, int], threading.Lock] = {}
+
+
+def _lock_for(host: str, port: int) -> threading.Lock:
+    """回傳（必要時建立）某台實體印表機專屬的鎖，全行程共用、以 (host, port) 為鍵。"""
+    key = (host, port)
+    with _registry_guard:
+        lock = _device_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _device_locks[key] = lock
+        return lock
 
 
 class _EscposNetwork(Protocol):
@@ -60,26 +83,30 @@ class NetworkEscposWriter:
         self._printer_factory = printer_factory
 
     def write(self, data: bytes) -> None:
-        """連線→送出 ESC/POS 位元組→關閉；連線/逾時錯誤翻成 DeviceError，且必關閉。"""
-        printer = self._printer_factory(
-            self._endpoint.host, self._endpoint.port, self._endpoint.timeout
-        )
-        try:
+        """連線→送出 ESC/POS 位元組→關閉；連線/逾時錯誤翻成 DeviceError，且必關閉。
+
+        對同一台印表機（同 host:port）的操作以鎖排隊——見模組頂部說明。
+        """
+        with _lock_for(self._endpoint.host, self._endpoint.port):
+            printer = self._printer_factory(
+                self._endpoint.host, self._endpoint.port, self._endpoint.timeout
+            )
             try:
-                printer.open()
-            except DeviceNotFoundError as exc:
-                # 連不上（被拒/不可達/連線逾時，escpos 已包成 DeviceNotFoundError）→ 離線
-                raise DeviceOffline(
-                    f"EPSON {self._endpoint.host}:{self._endpoint.port} 連線失敗：{exc}"
-                ) from exc
-            try:
-                printer._raw(data)
-            except TimeoutError as exc:  # 送出逾時（TimeoutError 為 OSError 子類，須先攔）
-                raise DeviceTimeout(f"EPSON {self._endpoint.host} 列印逾時：{exc}") from exc
-            except OSError as exc:  # 連線中斷/broken pipe 等
-                raise DeviceOffline(f"EPSON {self._endpoint.host} 列印中斷：{exc}") from exc
-        finally:
-            printer.close()
+                try:
+                    printer.open()
+                except DeviceNotFoundError as exc:
+                    # 連不上（被拒/不可達/連線逾時，escpos 已包成 DeviceNotFoundError）→ 離線
+                    raise DeviceOffline(
+                        f"EPSON {self._endpoint.host}:{self._endpoint.port} 連線失敗：{exc}"
+                    ) from exc
+                try:
+                    printer._raw(data)
+                except TimeoutError as exc:  # 送出逾時（TimeoutError 為 OSError 子類，須先攔）
+                    raise DeviceTimeout(f"EPSON {self._endpoint.host} 列印逾時：{exc}") from exc
+                except OSError as exc:  # 連線中斷/broken pipe 等
+                    raise DeviceOffline(f"EPSON {self._endpoint.host} 列印中斷：{exc}") from exc
+            finally:
+                printer.close()
 
 
 class RealCashDrawer:
