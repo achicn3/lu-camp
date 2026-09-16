@@ -119,6 +119,52 @@ describe("AcquisitionPage", () => {
     expect(screen.getByRole("button", { name: "更換" })).toBeTruthy();
   });
 
+  it("搜尋打的是手機號碼 → 按建立新賣方時自動帶進手機欄", async () => {
+    // 店員剛打完號碼才發現查無此人，沒理由要他再打一次（裁示 2026-09-16）。
+    stub();
+    renderPage();
+    await userEvent.type(screen.getByLabelText("賣方搜尋"), "0912-345-678");
+    await userEvent.click(screen.getByRole("button", { name: /建立新賣方/ }));
+    expect((screen.getByLabelText("手機") as HTMLInputElement).value).toBe("0912345678");
+    expect((screen.getByLabelText("姓名") as HTMLInputElement).value).toBe("");
+  });
+
+  it("搜尋打的是姓名 → 帶進姓名欄，不會把名字塞進手機欄", async () => {
+    stub();
+    renderPage();
+    await userEvent.type(screen.getByLabelText("賣方搜尋"), "王小明");
+    await userEvent.click(screen.getByRole("button", { name: /建立新賣方/ }));
+    expect((screen.getByLabelText("姓名") as HTMLInputElement).value).toBe("王小明");
+    expect((screen.getByLabelText("手機") as HTMLInputElement).value).toBe("");
+  });
+
+  it("手機格式不對 → 當場擋下並說明格式，不送出建檔", async () => {
+    const posts: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (url.includes("/categories")) return json([]);
+        if (url.includes("/settings")) return json({ premium_rate: "0.1000", default_margin_pct: 45 });
+        if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+        if (url.includes("/contacts") && method === "POST") {
+          posts.push(url);
+          return json(SELLER, 201);
+        }
+        return json([]);
+      }),
+    );
+    renderPage();
+    await userEvent.click(screen.getByRole("button", { name: /建立新賣方/ }));
+    await userEvent.type(screen.getByLabelText("姓名"), "王賣家");
+    await userEvent.type(screen.getByLabelText("手機"), "0911");
+    await userEvent.type(screen.getByLabelText("身分證字號"), "A123456789");
+    await userEvent.click(screen.getByRole("button", { name: "建立並選取" }));
+    expect(await screen.findByText(/09 開頭的 10 碼/)).toBeTruthy();
+    expect(posts).toHaveLength(0);
+  });
+
   it("建新賣方缺手機 → 擋下、不送出建檔", async () => {
     const posts: string[] = [];
     vi.stubGlobal(

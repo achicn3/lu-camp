@@ -34,6 +34,7 @@ class SettingsRead(BaseModel):
     tax_rate: RateOut
     default_commission_pct: int
     default_margin_pct: int
+    purchase_default_margin_pct: int
     allow_clerk_manage_categories: bool
     require_acquisition_affidavit: bool
     signature_png_retention_days: int
@@ -72,6 +73,7 @@ class SettingsUpdateRequest(BaseModel):
     tax_rate: Annotated[Decimal, Field(ge=0, lt=1)] | None = None
     default_commission_pct: Annotated[int, Field(ge=0, le=100)] | None = None
     default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
+    purchase_default_margin_pct: Annotated[int, Field(ge=0, le=99)] | None = None
     allow_clerk_manage_categories: bool | None = None
     require_acquisition_affidavit: bool | None = None
     signature_png_retention_days: Annotated[int, Field(ge=1, le=3650)] | None = None

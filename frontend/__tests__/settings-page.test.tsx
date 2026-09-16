@@ -29,6 +29,7 @@ const SETTINGS = {
   tax_rate: "0.0500",
   default_commission_pct: 50,
   default_margin_pct: 45,
+  purchase_default_margin_pct: 30,
   premium_rate: "0.1000",
   premium_rate_min: "0.0000",
   premium_rate_max: "0.2000",
@@ -230,8 +231,11 @@ describe("/settings", () => {
     const commissionInput = screen.getByLabelText("寄售抽成預設 (%)");
     expect((commissionInput as HTMLInputElement).value).toBe("50");
     // 定價目標毛利顯示 45
-    const marginInput = screen.getByLabelText("定價目標毛利 (%)");
+    const marginInput = screen.getByLabelText("收購定價目標毛利 (%)");
     expect((marginInput as HTMLInputElement).value).toBe("45");
+    // 採購（新品進貨）另有一個，預設 30——兩者刻意分開，二手與新品的目標毛利本來就不同。
+    const purchaseMargin = screen.getByLabelText("採購定價目標毛利 (%)");
+    expect((purchaseMargin as HTMLInputElement).value).toBe("30");
   });
 
   it("MANAGER 看到溢價率區且顯示當日建議值", async () => {

@@ -9,7 +9,10 @@ from decimal import Decimal
 DEFAULT_EINVOICE_ENABLED = False
 DEFAULT_TAX_RATE = Decimal("0.05")  # 營業稅率 5%
 DEFAULT_COMMISSION_PCT = 50  # 寄售抽成預設（整數百分數，§7.2）
-DEFAULT_MARGIN_PCT = 45  # 定價輔助目標毛利率（整數百分數，§7.9）
+DEFAULT_MARGIN_PCT = 45  # 收購定價輔助目標毛利率（整數百分數，§7.9）
+# 採購（新品進貨）建立商品時毛利率欄位先帶的值（裁示 2026-09-16）。二手議價空間大、
+# 目標毛利本來就比新品高，故與收購那個分開。每件商品在建立當下仍可各自調整。
+DEFAULT_PURCHASE_MARGIN_PCT = 30
 DEFAULT_ALLOW_CLERK_MANAGE_CATEGORIES = False  # 分類維護預設限 MANAGER（docs/13 §2）。
 DEFAULT_REQUIRE_ACQUISITION_AFFIDAVIT = False  # 收購須手持切結預設關（docs/23 K4；店家就緒後開）。
 # 簽名 PNG 個資載體預設保留半年；第一版只列待清理報表，不實際刪檔。

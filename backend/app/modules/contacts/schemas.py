@@ -2,11 +2,26 @@
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.money import format_ntd
+from app.core.phone import InvalidPhone, normalize_phone
 from app.modules.contacts.models import Contact
 from app.shared.enums import ContactRole
+
+
+def _phone_field(value: str | None) -> str | None:
+    """手機一律正規化後再存（09 開頭 10 碼）。
+
+    未提供（PATCH 沒帶這個欄位）就放行；有帶就必須是合法手機——`InvalidPhone` 由
+    Pydantic 包成 422，店員當場看到「手機號碼須為 09 開頭的 10 碼數字」。
+    """
+    if value is None:
+        return None
+    try:
+        return normalize_phone(value)
+    except InvalidPhone as exc:  # Pydantic 只把 ValueError 轉成 422，領域例外會變 500
+        raise ValueError(str(exc)) from exc
 
 _MASK = "***"
 
@@ -21,6 +36,8 @@ class ContactCreate(BaseModel):
 
     name: str = Field(min_length=1)
     phone: str = Field(min_length=1)
+
+    _normalize_phone = field_validator("phone")(_phone_field)
     national_id: str | None = None
     address: str | None = Field(default=None, max_length=200)  # K1：住址（明文，D5）
     roles: list[ContactRole] = Field(default_factory=lambda: [ContactRole.MEMBER])
@@ -49,6 +66,8 @@ class ContactUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1)
     phone: str | None = None
+
+    _normalize_phone = field_validator("phone")(_phone_field)
     national_id: str | None = None
     address: str | None = Field(default=None, max_length=200)  # 可改可清（PATCH 語意）
     # 這裡**刻意不強制補回 MEMBER**（建檔時才強制）。曾試著在 PATCH 也補，結果是

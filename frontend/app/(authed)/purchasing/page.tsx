@@ -14,6 +14,7 @@ import {
 } from "react";
 
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
+import { suggestedListedPrice } from "@/features/acquisition/pricing";
 import { Pagination } from "@/features/common/Pagination";
 import {
   type CatalogProduct,
@@ -236,7 +237,13 @@ function CreatePurchaseOrder({
   const [newProductOpen, setNewProductOpen] = useState(false);
   const [newProductName, setNewProductName] = useState("");
   const [newProductSku, setNewProductSku] = useState("");
-  const [newProductPrice, setNewProductPrice] = useState("");
+  // 售價與毛利率都是「**沒碰過**就用推導值」：null＝店員還沒自己輸入過。
+  // 用 null 而不是空字串來表示，是為了讓「清空」真的清得掉——寫成「空的就補預設」，
+  // 按清除會立刻被塞回去，接著輸入就變成 3050 這種數字。
+  const [newProductPrice, setNewProductPrice] = useState<string | null>(null);
+  // 進貨成本與預估毛利率（裁示 2026-09-16）：毛利率**逐件**設定，預設取設定值。
+  const [newProductCost, setNewProductCost] = useState("");
+  const [newProductMargin, setNewProductMargin] = useState<string | null>(null);
   const [newProductReorderPoint, setNewProductReorderPoint] = useState("0");
   // 品牌／型號／分類（2026-09-14 裁示：採購建品比照收購頁）。型號依品牌收斂，
   // 換品牌要清掉型號，否則會送出別牌的型號。
@@ -266,6 +273,12 @@ function CreatePurchaseOrder({
   }
 
   const productSearchText = pendingCatalogCreate?.body.name ?? search;
+  // 稅率與手續費率一律從設定讀，不寫死（CLAUDE.md §6/§7.9）。
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
+  });
+
   const productSearch = useQuery({
     queryKey: ["catalog-products", "search", productSearchText],
     enabled: pendingCatalogCreate === null && productSearchText.trim().length > 0,
@@ -300,11 +313,11 @@ function CreatePurchaseOrder({
     onError: (err: Error) => setFormError(err.message),
   });
 
-  function addProduct(product: CatalogProduct) {
+  function addProduct(product: CatalogProduct, unitCost = "") {
     setLines((prev) =>
       prev.some((l) => l.product.id === product.id)
         ? prev
-        : [...prev, { key: nextDraftKey(), product, qty: 1, unitCost: "" }],
+        : [...prev, { key: nextDraftKey(), product, qty: 1, unitCost }],
     );
   }
 
@@ -314,7 +327,7 @@ function CreatePurchaseOrder({
       let pending = pendingCatalogCreate;
       if (pending === null) {
         const name = newProductName.trim();
-        const unitPrice = parseNtd(newProductPrice);
+        const unitPrice = parseNtd(priceValue);
         const reorderPoint = parseNtd(newProductReorderPoint);
         if (name === "") throw new Error("請輸入一般商品名稱");
         if (unitPrice === null || unitPrice <= 0) throw new Error("售價請輸入正整數");
@@ -353,12 +366,17 @@ function CreatePurchaseOrder({
     },
     onSuccess: (product) => {
       clearPendingCatalogCreate(catalogCreateStoreId);
-      addProduct(product);
+      // 建立時填的進貨成本直接帶進這張採購單的明細，不必再打第二次（裁示 2026-09-16）。
+      // 成本寫進商品是**收貨時**的事，這裡只是先把數字接過去。
+      const cost = parseNtd(newProductCost);
+      addProduct(product, cost !== null && cost > 0 ? String(cost) : "");
       setSearch("");
       setNewProductOpen(false);
       setNewProductName("");
       setNewProductSku("");
-      setNewProductPrice("");
+      setNewProductPrice(null);
+      setNewProductCost("");
+      setNewProductMargin(null);
       setNewProductReorderPoint("0");
       setNewProductBrand(null);
       setNewProductModel(null);
@@ -369,10 +387,35 @@ function CreatePurchaseOrder({
     onError: (err: Error) => setNewProductError(err.message),
   });
 
+  // 手續費取兩種行動支付的較高者（定價當下不知道客人會刷哪種，取低的會少補）；
+  // 讀不到就當 0——寧可少補，也不要在設定沒載入時把價格墊高、讓客人多付。
+  const feeRate = (() => {
+    const rates = [settings.data?.linepay_fee_pct, settings.data?.taiwanpay_fee_pct]
+      .map((r) => (r === undefined ? Number.NaN : Number(r)))
+      .filter((r) => Number.isFinite(r) && r >= 0 && r < 1);
+    return rates.length > 0 ? Math.max(...rates) : 0;
+  })();
+  const taxRate = Number(settings.data?.tax_rate ?? 0);
+  const defaultMargin = settings.data?.purchase_default_margin_pct;
+
+  // 毛利率顯示值：店員沒碰過就用設定的預設（設定還沒載入時留白，不要先塞 0 再跳動）。
+  const marginValue = newProductMargin ?? (defaultMargin === undefined ? "" : String(defaultMargin));
+  const costNum = parseNtd(newProductCost);
+  const marginNum = Number.parseInt(marginValue, 10);
+  const suggestedPrice =
+    costNum !== null && costNum > 0 && Number.isInteger(marginNum)
+      ? suggestedListedPrice(costNum, marginNum, taxRate, feeRate)
+      : null;
+  // 售價顯示值：店員沒自己改過就用建議售價；改過就以他填的為準，不再被自動覆蓋
+  //（否則他打完價格、回頭調一下毛利率，剛打的數字就沒了）。
+  const priceValue = newProductPrice ?? (suggestedPrice === null ? "" : String(suggestedPrice));
+
   function openNewProduct() {
     setNewProductName(search.trim());
     setNewProductSku("");
-    setNewProductPrice("");
+    setNewProductPrice(null);
+    setNewProductCost("");
+    setNewProductMargin(null);
     setNewProductReorderPoint("0");
     setNewProductBrand(null);
     setNewProductModel(null);
@@ -453,6 +496,7 @@ function CreatePurchaseOrder({
                     </button>
                   </div>
                   <div className="pur-product-create-grid">
+                    <p className="pur-form-section">商品資料</p>
                     <label className="field">
                       <span>品名 *</span>
                       <input
@@ -548,16 +592,45 @@ function CreatePurchaseOrder({
                       }
                       onChange={setNewProductCategory}
                     />
+                    <p className="pur-form-section">定價（填成本與毛利率就會算出建議售價）</p>
+                    <label className="field">
+                      <span>進貨成本（整數元）</span>
+                      <input
+                        aria-label="一般商品進貨成本"
+                        inputMode="numeric"
+                        value={newProductCost}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductCost(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>預估毛利率（%）</span>
+                      <input
+                        aria-label="一般商品預估毛利率"
+                        inputMode="numeric"
+                        value={marginValue}
+                        disabled={pendingCatalogCreate !== null || createProduct.isPending}
+                        onChange={(event) => setNewProductMargin(event.target.value)}
+                      />
+                    </label>
                     <label className="field">
                       <span>售價（含稅整數元）*</span>
                       <input
                         aria-label="一般商品售價"
                         inputMode="numeric"
-                        value={pendingCatalogCreate?.body.unit_price ?? newProductPrice}
+                        value={pendingCatalogCreate?.body.unit_price ?? priceValue}
                         disabled={pendingCatalogCreate !== null || createProduct.isPending}
                         onChange={(event) => setNewProductPrice(event.target.value)}
                       />
                     </label>
+                    {suggestedPrice !== null && (
+                      <p className="hint pur-price-hint">
+                        建議售價 <strong className="money">{formatNtd(suggestedPrice)}</strong>
+                        （成本 {formatNtd(costNum ?? 0)}・毛利 {marginNum}%・已含營業稅與行動支付
+                        手續費）。可直接改售價，改了就以你填的為準。
+                      </p>
+                    )}
+                    <p className="pur-form-section">庫存</p>
                     <label className="field">
                       <span>低庫存提醒點</span>
                       <input

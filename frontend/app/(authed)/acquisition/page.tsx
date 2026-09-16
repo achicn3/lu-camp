@@ -16,6 +16,7 @@ import {
 import { CreatableCombobox, type ComboOption } from "@/features/acquisition/CreatableCombobox";
 import { ACQ_TYPE_LABEL, GRADE_LABEL, PAYOUT_LABEL, SERIALIZED_GRADES } from "@/features/acquisition/labels";
 import { gradeShortName, labelConditionForGrade } from "@/features/inventory/grades";
+import { PHONE_HINT, looksLikePhone, normalizeMobile } from "@/lib/phone";
 import {
   creditPremiumPreview,
   marginPct,
@@ -241,11 +242,16 @@ function SellerSection({
       setError("姓名、電話、身分證字號皆必填");
       return;
     }
+    const mobile = normalizeMobile(phone);
+    if (mobile === null) {
+      setError(`${PHONE_HINT}，請確認後重新輸入`);
+      return;
+    }
     if (!isValidNationalId(nid)) {
       setError("身分證字號格式或檢核碼不正確，請確認後重新輸入");
       return;
     }
-    createMut.mutate({ name, phone, national_id: nid });
+    createMut.mutate({ name, phone: mobile, national_id: nid });
   }
 
   return (
@@ -276,8 +282,21 @@ function SellerSection({
       </button>
       {showCreate && (
         <form className="acq-create-seller" onSubmit={onCreate}>
-          <input name="name" placeholder="姓名" aria-label="姓名" />
-          <input name="phone" placeholder="手機" aria-label="手機" inputMode="tel" />
+          {/* 搜尋字直接帶進來：店員剛打完號碼才發現查無此人，沒理由要他再打一次。
+              純數字視為電話、其餘視為姓名（裁示 2026-09-16）。 */}
+          <input
+            name="name"
+            placeholder="姓名"
+            aria-label="姓名"
+            defaultValue={looksLikePhone(q) ? "" : q.trim()}
+          />
+          <input
+            name="phone"
+            placeholder="手機"
+            aria-label="手機"
+            inputMode="tel"
+            defaultValue={looksLikePhone(q) ? (normalizeMobile(q) ?? q.trim()) : ""}
+          />
           <input name="national_id" placeholder="身分證字號" aria-label="身分證字號" maxLength={10} />
           <button type="submit" className="btn-primary" disabled={createMut.isPending}>
             建立並選取

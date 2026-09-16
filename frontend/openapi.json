@@ -85,7 +85,7 @@
         "type": "object"
       },
       "AcquisitionItemIn": {
-        "description": "序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。",
+        "description": "序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 N、S-D（E 走散裝）。",
         "properties": {
           "acquisition_cost": {
             "anyOf": [
@@ -10640,6 +10640,10 @@
             "title": "Print Kitchen Ticket",
             "type": "boolean"
           },
+          "purchase_default_margin_pct": {
+            "title": "Purchase Default Margin Pct",
+            "type": "integer"
+          },
           "require_acquisition_affidavit": {
             "title": "Require Acquisition Affidavit",
             "type": "boolean"
@@ -10680,6 +10684,7 @@
           "tax_rate",
           "default_commission_pct",
           "default_margin_pct",
+          "purchase_default_margin_pct",
           "allow_clerk_manage_categories",
           "require_acquisition_affidavit",
           "signature_png_retention_days",
@@ -10936,6 +10941,19 @@
               }
             ],
             "title": "Print Kitchen Ticket"
+          },
+          "purchase_default_margin_pct": {
+            "anyOf": [
+              {
+                "maximum": 99.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Default Margin Pct"
           },
           "require_acquisition_affidavit": {
             "anyOf": [

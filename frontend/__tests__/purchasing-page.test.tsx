@@ -324,6 +324,95 @@ describe("/purchasing", () => {
     expect(screen.getByText("AUTO-A1B2C3D4E5F6")).toBeTruthy();
   });
 
+  it("填進貨成本與毛利率就自動算出建議售價；成本也帶進採購明細那一列", async () => {
+    // 裁示 2026-09-16：毛利率逐件設定（預設取設定值 30%），建議售價含營業稅與行動支付
+    // 手續費補償（與收購同一套算法，CLAUDE.md §7.9）。
+    loginAs("MANAGER");
+    const created = { ...CATALOG, id: 91, sku: "AUTO-COST01", name: "濾掛咖啡", unit_price: "77" };
+    let createdBody: string | null = null;
+    stubFetch((url, init) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/settings"))
+        return json({
+          tax_rate: "0.05",
+          purchase_default_margin_pct: 30,
+          linepay_fee_pct: "0.0220",
+          taiwanpay_fee_pct: "0.0000",
+        });
+      if (url.includes("/catalog-products") && init.method === "POST") {
+        createdBody = init.body as string;
+        return json(created, 201);
+      }
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await user.type(screen.getByLabelText("搜尋一般商品"), "濾掛咖啡");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+
+    // 毛利率預設帶設定值
+    const margin = screen.getByLabelText("一般商品預估毛利率") as HTMLInputElement;
+    await waitFor(() => expect(margin.value).toBe("30"));
+
+    // 成本 50、毛利 30%、稅 5%、手續費 2.2%
+    //   未稅目標 = 50 ÷ 0.7 = 71.43；含稅 = 75.0；補手續費 ÷ (1 − 0.022×1.05) = 76.8 → 77
+    await user.type(screen.getByLabelText("一般商品進貨成本"), "50");
+    const price = screen.getByLabelText("一般商品售價") as HTMLInputElement;
+    await waitFor(() => expect(price.value).toBe("77"));
+
+    await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
+    await waitFor(() => expect(createdBody).not.toBeNull());
+    expect(JSON.parse(createdBody as unknown as string).unit_price).toBe(77);
+
+    // 成本自動帶進明細那一列，不必再打一次
+    const costInput = (await screen.findByLabelText("進貨單價 濾掛咖啡")) as HTMLInputElement;
+    expect(costInput.value).toBe("50");
+  });
+
+  it("毛利率可逐件調整；改了就重算建議售價，手改售價後不再被蓋掉", async () => {
+    loginAs("MANAGER");
+    stubFetch((url) => {
+      if (url.includes("/suppliers")) return json([SUPPLIER]);
+      if (url.includes("/settings"))
+        return json({
+          tax_rate: "0.05",
+          purchase_default_margin_pct: 30,
+          linepay_fee_pct: "0.0000",
+          taiwanpay_fee_pct: "0.0000",
+        });
+      if (url.includes("/catalog-products")) return json([]);
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await user.type(screen.getByLabelText("搜尋一般商品"), "帳篷");
+    await user.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await user.type(screen.getByLabelText("一般商品進貨成本"), "1000");
+
+    const price = screen.getByLabelText("一般商品售價") as HTMLInputElement;
+    await waitFor(() => expect(price.value).toBe("1500")); // 1000÷0.7×1.05
+
+    const margin = screen.getByLabelText("一般商品預估毛利率") as HTMLInputElement;
+    await user.clear(margin);
+    await user.type(margin, "50");
+    await waitFor(() => expect(price.value).toBe("2100")); // 1000÷0.5×1.05
+
+    // 店員自己改過售價之後，再動毛利率也不該偷改他填的數字
+    await user.clear(price);
+    await user.type(price, "1999");
+    await user.clear(margin);
+    await user.type(margin, "40");
+    await waitFor(() => expect(margin.value).toBe("40"));
+    expect(price.value).toBe("1999");
+  });
+
   it("建立一般商品回應失敗後重試會沿用同一冪等鍵", async () => {
     loginAs("CLERK");
     const created = {

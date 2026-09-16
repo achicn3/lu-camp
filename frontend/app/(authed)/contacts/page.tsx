@@ -14,6 +14,7 @@ import { Pagination } from "@/features/common/Pagination";
 import { rolesLabel } from "@/features/member/labels";
 import { isValidNationalId } from "@/features/member/national-id";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { PHONE_HINT, normalizeMobile } from "@/lib/phone";
 
 type Contact = components["schemas"]["ContactRead"];
 type ContactRole = components["schemas"]["ContactRole"];
@@ -322,6 +323,12 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
       setError("請輸入電話");
       return;
     }
+    // 同一支號碼不同寫法會被「同店電話唯一」當成兩個人，故在邊界收斂成標準寫法。
+    const mobile = normalizeMobile(phone);
+    if (mobile === null) {
+      setError(`${PHONE_HINT}，請確認後重新輸入`);
+      return;
+    }
     const nationalId = String(form.get("national_id")).trim() || null;
     // 身分證字號為選填，但一旦填寫須通過檢核（避免手動輸入錯誤）；後端 422 為最終防線。
     if (nationalId !== null && !isValidNationalId(nationalId)) {
@@ -331,7 +338,7 @@ function CreateMemberCard({ onCreated }: { onCreated: () => void }) {
     const address = String(form.get("address")).trim() || null;
     mutation.mutate(
       // 不再問角色：每個人建檔就是會員，賣東西時由收購流程自動補上賣方標記。
-      { name, phone, national_id: nationalId, address, roles: ["MEMBER"] as ContactRole[] },
+      { name, phone: mobile, national_id: nationalId, address, roles: ["MEMBER"] as ContactRole[] },
       { onSuccess: () => formEl.reset() },
     );
   }

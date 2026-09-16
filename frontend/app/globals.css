@@ -2695,6 +2695,23 @@ body {
     grid-template-columns: 1fr;
   }
 }
+/* 建立商品表單的分組小標：橫跨整列，把「商品資料 / 定價 / 庫存」分開，
+   否則八個欄位擠成一長串，店員找不到剛才要填哪個（2026-09-16）。 */
+.pur-form-section {
+  grid-column: 1 / -1;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--muted);
+}
+.pur-form-section:first-child {
+  margin-top: 0;
+}
+/* 建議售價說明：跟著定價那組，橫跨整列 */
+.pur-price-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
 .pur-qty,
 .pur-cost,
 .st-count {

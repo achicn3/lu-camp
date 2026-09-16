@@ -543,15 +543,15 @@ async def test_update_contact_partial_leaves_unset_fields_intact(
 ) -> None:
     _, m_token, c_token = await _setup_store_and_tokens(db_session)
     cid = await _create_contact(
-        client, m_token, name="原名", phone="0911", roles=["MEMBER"], source_note="保留"
+        client, m_token, name="原名", phone="0911222333", roles=["MEMBER"], source_note="保留"
     )
 
     resp = await client.patch(
-        f"/api/v1/contacts/{cid}", json={"phone": "0999"}, headers=_auth(c_token)
+        f"/api/v1/contacts/{cid}", json={"phone": "0999888777"}, headers=_auth(c_token)
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["phone"] == "0999"
+    assert body["phone"] == "0999888777"
     assert body["name"] == "原名"  # 未提供 → 不動
     assert body["source_note"] == "保留"
     assert body["roles"] == ["MEMBER"]
@@ -908,3 +908,59 @@ async def test_count_members_matches_the_filtered_list(
         headers=_auth(m_token),
     )
     assert filtered.json()["count"] == len(filtered_list.json()) == 1
+
+
+@pytest.mark.parametrize("bad", ["0911", "0812345678", "02-1234-5678", "0912abc678", "  "])
+async def test_create_contact_rejects_anything_but_a_mobile_number(
+    client: httpx.AsyncClient, db_session: AsyncSession, bad: str
+) -> None:
+    """手機只收 09 開頭 10 碼（裁示 2026-09-16）。門市自己的市話不走這條。"""
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    resp = await client.post(
+        "/api/v1/contacts",
+        json={"name": "格式錯", "phone": bad, "roles": ["MEMBER"]},
+        headers=_auth(m_token),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_phone_is_stored_normalized_so_the_same_number_cannot_be_duplicated(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """`0912-345-678` 與 `0912345678` 是同一支：正規化後存，第二次建檔要被唯一約束擋下。
+
+    沒有正規化的話兩種寫法各建一筆，同一個人被拆成兩個會員（點數、收購紀錄各分一半）。
+    """
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    first = await client.post(
+        "/api/v1/contacts",
+        json={"name": "王小明", "phone": "0912-345-678", "roles": ["MEMBER"]},
+        headers=_auth(m_token),
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["phone"] == "0912345678"
+
+    again = await client.post(
+        "/api/v1/contacts",
+        json={"name": "王小明", "phone": "0912 345 678", "roles": ["MEMBER"]},
+        headers=_auth(m_token),
+    )
+    assert again.status_code == 409, again.text
+
+
+async def test_update_also_normalizes_and_validates_phone(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, m_token, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, m_token, name="改號", phone=_uphone(), roles=["MEMBER"])
+
+    ok = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"phone": "0922-333-444"}, headers=_auth(m_token)
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["phone"] == "0922333444"
+
+    bad = await client.patch(
+        f"/api/v1/contacts/{cid}", json={"phone": "0911"}, headers=_auth(m_token)
+    )
+    assert bad.status_code == 422, bad.text

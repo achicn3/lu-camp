@@ -3174,7 +3174,7 @@ export interface components {
         };
         /**
          * AcquisitionItemIn
-         * @description 序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 S-D（E 走散裝）。
+         * @description 序號單品入庫明細（BUYOUT/CONSIGNMENT）。grade 限 N、S-D（E 走散裝）。
          */
         AcquisitionItemIn: {
             /** Acquisition Cost */
@@ -7248,6 +7248,8 @@ export interface components {
             premium_rate_min: string;
             /** Print Kitchen Ticket */
             print_kitchen_ticket: boolean;
+            /** Purchase Default Margin Pct */
+            purchase_default_margin_pct: number;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit: boolean;
             /** Signature Cleanup Enforcement Mode */
@@ -7309,6 +7311,8 @@ export interface components {
             premium_rate_min?: number | string | null;
             /** Print Kitchen Ticket */
             print_kitchen_ticket?: boolean | null;
+            /** Purchase Default Margin Pct */
+            purchase_default_margin_pct?: number | null;
             /** Require Acquisition Affidavit */
             require_acquisition_affidavit?: boolean | null;
             /** Signature Cleanup Enforcement Mode */

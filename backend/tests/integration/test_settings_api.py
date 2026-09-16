@@ -52,6 +52,8 @@ async def test_get_returns_defaults(client: httpx.AsyncClient, db_session: Async
     assert body["tax_rate"] == "0.05"  # 字串傳輸（§11）
     assert body["default_commission_pct"] == 50
     assert body["default_margin_pct"] == 45
+    # 採購（新品進貨）與收購（二手）的目標毛利本來就不同，各有預設（裁示 2026-09-16）。
+    assert body["purchase_default_margin_pct"] == 30
     assert body["allow_clerk_manage_categories"] is False
 
 
@@ -123,3 +125,30 @@ async def test_patch_out_of_range_returns_422(
 async def test_get_requires_auth(client: httpx.AsyncClient) -> None:
     resp = await client.get("/api/v1/settings")
     assert resp.status_code == 401
+
+
+async def test_manager_can_change_purchase_default_margin(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """採購預設毛利率只是「建立商品時先帶的數字」，每件仍可各自改；但要能不改程式就調整。"""
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    patch = await client.patch(
+        "/api/v1/settings", json={"purchase_default_margin_pct": 35}, headers=_auth(token)
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["purchase_default_margin_pct"] == 35
+    got = await client.get("/api/v1/settings", headers=_auth(token))
+    assert got.json()["purchase_default_margin_pct"] == 35
+    assert got.json()["default_margin_pct"] == 45  # 收購那個不受影響
+
+
+@pytest.mark.parametrize("bad", [-1, 100, 150])
+async def test_purchase_default_margin_must_stay_in_range(
+    client: httpx.AsyncClient, db_session: AsyncSession, bad: int
+) -> None:
+    """毛利率 ≥100 會讓「成本 ÷ (1−毛利)」除以零或變負（CLAUDE.md §7.9 的邊界）。"""
+    token = await _seed_user(db_session, UserRole.MANAGER)
+    resp = await client.patch(
+        "/api/v1/settings", json={"purchase_default_margin_pct": bad}, headers=_auth(token)
+    )
+    assert resp.status_code == 422, resp.text

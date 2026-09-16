@@ -75,6 +75,7 @@ function GeneralSettingsCard({
     const taxRateRaw = String(form.get("tax_rate") ?? "");
     const commissionRaw = String(form.get("default_commission_pct") ?? "");
     const marginRaw = String(form.get("default_margin_pct") ?? "");
+    const purchaseMarginRaw = String(form.get("purchase_default_margin_pct") ?? "");
     const outflowRaw = String(form.get("monthly_fixed_cash_outflow") ?? "");
     const minSpendRaw = String(form.get("store_credit_min_spend") ?? "");
     const retentionRaw = String(form.get("signature_png_retention_days") ?? "");
@@ -93,7 +94,13 @@ function GeneralSettingsCard({
     }
     const margin = parsePctInput(marginRaw);
     if (margin === null) {
-      setError("定價目標毛利請輸入 0-99 的整數");
+      setError("收購定價目標毛利請輸入 0-99 的整數");
+      return;
+    }
+    // 同樣 0-99：≥100 會讓「成本 ÷ (1−毛利)」除以零或變負（CLAUDE.md §7.9 邊界）。
+    const purchaseMargin = parsePctInput(purchaseMarginRaw);
+    if (purchaseMargin === null) {
+      setError("採購定價目標毛利請輸入 0-99 的整數");
       return;
     }
     const outflow = parseNtd(outflowRaw);
@@ -126,6 +133,8 @@ function GeneralSettingsCard({
     if (parseFloat(taxRate) !== parseFloat(settings.tax_rate)) body.tax_rate = taxRate;
     if (commission !== settings.default_commission_pct) body.default_commission_pct = commission;
     if (margin !== settings.default_margin_pct) body.default_margin_pct = margin;
+    if (purchaseMargin !== settings.purchase_default_margin_pct)
+      body.purchase_default_margin_pct = purchaseMargin;
     if (outflow !== parseNtd(settings.monthly_fixed_cash_outflow))
       body.monthly_fixed_cash_outflow = outflow;
     if (minSpend !== parseNtd(settings.store_credit_min_spend))
@@ -184,13 +193,27 @@ function GeneralSettingsCard({
         />
       </label>
       <label className="field">
-        <span className="field-label">定價目標毛利 (%)</span>
+        <span className="field-label">收購定價目標毛利 (%)</span>
         <input
           name="default_margin_pct"
           inputMode="numeric"
           defaultValue={String(settings.default_margin_pct)}
           required
         />
+      </label>
+      <label className="field">
+        {/* 與收購分開：二手議價空間大、目標毛利本來就比新品高（裁示 2026-09-16）。
+            這只是建立商品時「先帶的數字」，每件仍可各自調整。 */}
+        <span className="field-label">採購定價目標毛利 (%)</span>
+        <input
+          name="purchase_default_margin_pct"
+          // 標籤內另有說明文字，會被併進可及名稱；明確指定才對得上（其他欄位沒有說明文字）。
+          aria-label="採購定價目標毛利 (%)"
+          inputMode="numeric"
+          defaultValue={String(settings.purchase_default_margin_pct)}
+          required
+        />
+        <span className="hint">採購建立商品時先帶的毛利率，每件仍可各自調整。</span>
       </label>
       <label className="field">
         <span className="field-label">月固定現金支出</span>

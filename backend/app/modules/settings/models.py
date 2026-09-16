@@ -58,6 +58,12 @@ class StoreSettings(Base, TimestampMixin):
     default_margin_pct: Mapped[int] = mapped_column(
         Integer, server_default=text("45"), nullable=False
     )
+    # 採購（新品進貨）建立商品時，毛利率欄位先帶的數字（裁示 2026-09-16，預設 30）。
+    # **與收購的 default_margin_pct 分開**：二手品議價空間大、目標毛利本來就比新品高。
+    # 這只是「預設值」——每件商品在建立當下仍可各自調整。
+    purchase_default_margin_pct: Mapped[int] = mapped_column(
+        Integer, server_default=text("30"), nullable=False
+    )
     allow_clerk_manage_categories: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), nullable=False
     )

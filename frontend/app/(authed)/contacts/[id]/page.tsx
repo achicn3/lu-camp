@@ -23,6 +23,7 @@ import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import { formatTaipeiDateTime } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
+import { PHONE_HINT, normalizeMobile } from "@/lib/phone";
 
 type Overview = components["schemas"]["MemberOverviewRead"];
 
@@ -536,9 +537,15 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
   function onSubmitProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const rawPhone = String(form.get("phone")).trim();
+    // 電話可以清空（PATCH 語意），但**有填就必須合法**——否則舊資料一存就把錯誤格式留下來。
+    if (rawPhone !== "" && normalizeMobile(rawPhone) === null) {
+      setError(`${PHONE_HINT}，請確認後重新輸入`);
+      return;
+    }
     patch.mutate({
       name: String(form.get("name")).trim(),
-      phone: String(form.get("phone")).trim() || null,
+      phone: rawPhone === "" ? null : normalizeMobile(rawPhone),
       address: String(form.get("address")).trim() || null,
       source_note: String(form.get("source_note")).trim() || null,
     });
