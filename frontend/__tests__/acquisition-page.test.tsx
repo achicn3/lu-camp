@@ -129,6 +129,29 @@ describe("AcquisitionPage", () => {
     expect((screen.getByLabelText("姓名") as HTMLInputElement).value).toBe("");
   });
 
+  it("有連字號的號碼原樣送出查詢（正規化由後端做，同一條規則只留一個實作）", async () => {
+    // 後端 contacts/repository._search_select 會把 0912-345-678 正規化後比對，
+    // 所以前端不再自己轉一次——兩邊各自實作同一條規則遲早會漂移。
+    const queries: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/contacts?") || /\/contacts\?.*q=/.test(url)) {
+          queries.push(new URL(url).searchParams.get("q") ?? "");
+          return json([]);
+        }
+        if (url.includes("/categories")) return json([]);
+        if (url.includes("/settings")) return json({ premium_rate: "0.1000", default_margin_pct: 45 });
+        if (url.includes("/cash-sessions/current")) return json({ id: 1, status: "OPEN" });
+        return json([]);
+      }),
+    );
+    renderPage();
+    await userEvent.type(screen.getByLabelText("賣方搜尋"), "0912-345-678");
+    await waitFor(() => expect(queries.some((q) => q === "0912-345-678")).toBe(true));
+  });
+
   it("搜尋打的是姓名 → 帶進姓名欄，不會把名字塞進手機欄", async () => {
     stub();
     renderPage();

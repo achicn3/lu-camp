@@ -31,5 +31,5 @@ def normalize_phone(raw: str) -> str:
     """
     collapsed = unicodedata.normalize("NFKC", raw or "").translate(_SEPARATORS)
     if not _MOBILE_RE.fullmatch(collapsed):
-        raise InvalidPhone(f"手機號碼須為 09 開頭的 10 碼數字，收到「{raw}」")
+        raise InvalidPhone("手機號碼須為 09 開頭的 10 碼數字")
     return collapsed

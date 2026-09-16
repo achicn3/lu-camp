@@ -132,6 +132,8 @@ function SellerSection({
   const results = useQuery({
     queryKey: ["contacts-search", q],
     queryFn: async () => {
+      // 號碼的各種寫法由**後端**在搜尋條件裡正規化（contacts/repository._search_select），
+      // 前端原樣送即可——同一條規則只留一個實作，才不會兩邊各自漂移。
       const { data } = await api.GET("/api/v1/contacts", { params: { query: { q } } });
       return data ?? [];
     },

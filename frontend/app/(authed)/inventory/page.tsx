@@ -1266,14 +1266,15 @@ function CatalogPanel() {
     queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
     enabled: isManager,
   });
-  const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
+  const taxValue = settings.data?.tax_rate;
+  const rawTaxRate = taxValue != null && String(taxValue).trim() !== "" ? Number(taxValue) : Number.NaN;
   const taxRate =
     Number.isFinite(rawTaxRate) && rawTaxRate >= 0 && rawTaxRate < 1 ? rawTaxRate : null;
-  // 沿用收購頁：兩種行動支付取較高費率，讀不到費率時以 0 計。
+  // 庫存頁顯示預估毛利，缺費率時不能用零高估店家收益。
   const feeRates = [settings.data?.linepay_fee_pct, settings.data?.taiwanpay_fee_pct]
-    .map((rate) => rate === undefined ? Number.NaN : Number(rate))
+    .map((rate) => rate == null || String(rate).trim() === "" ? Number.NaN : Number(rate))
     .filter((rate) => Number.isFinite(rate) && rate >= 0 && rate < 1);
-  const feeRate = feeRates.length > 0 ? Math.max(...feeRates) : 0;
+  const feeRate = feeRates.length === 2 ? Math.max(...feeRates) : null;
   // 一般商品只有品牌一個篩選維度，所以沒有東西可以收斂。
   const optionsQuery = useQuery({
     queryKey: ["inventory", "catalog-filter-options"],
@@ -1344,8 +1345,9 @@ function CatalogPanel() {
         </select>
       </SearchBar>
       <BrandLookupNotice rows={rows} brands={brands} />
-      {isManager && settings.isFetched && taxRate === null && (
-        <p role="status">無法取得稅率設定，毛利率暫不顯示。</p>
+      {isManager && <p className="hint">最新進價取最近一次收貨單價，非庫存平均成本；預估毛利率依目前標價扣稅及較高行動支付費率推算，非已成交毛利。</p>}
+      {isManager && settings.isFetched && (settings.isError || taxRate === null || feeRate === null) && (
+        <p role="status">無法取得完整稅率或手續費設定，預估毛利率暫不顯示。</p>
       )}
       <TableShell
         loading={query.isFetching}
@@ -1353,7 +1355,7 @@ function CatalogPanel() {
         empty={rows.length === 0}
         headers={[
           "商品編號", "品牌", "品名", "單價",
-          ...(isManager ? ["進貨成本", "毛利率"] : []),
+          ...(isManager ? ["最新進價", "預估毛利率"] : []),
           "現有量", "再訂購點", "操作",
         ]}
       >
@@ -1361,7 +1363,7 @@ function CatalogPanel() {
           const low = isLowStock(product.quantity_on_hand, product.reorder_point);
           const cost = product.unit_cost == null ? null : parseNtd(product.unit_cost);
           const price = parseNtd(product.unit_price);
-          const margin = isManager && cost !== null && price !== null && taxRate !== null
+          const margin = isManager && !settings.isError && cost !== null && price !== null && taxRate !== null && feeRate !== null
             ? marginPct(price, cost, taxRate, feeRate)
             : null;
           return (

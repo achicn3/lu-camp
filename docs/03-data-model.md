@@ -144,5 +144,5 @@ erDiagram
 `id, store_id, actor_user_id, action, entity_type, entity_id, before(json,去PII), after(json,去PII), is_sensitive, created_at`
 
 ### setting（系統設定，**單列具型別**，每店一列、Pydantic 驗證）
-`einvoice_enabled(bool), default_commission_pct(int,=50), default_margin_pct(int,=45,定價輔助目標毛利率), tax_rate(=0.05), default_reorder_point, einvoice_print_proof_when_carrier(bool,預設 false), ...`
+`einvoice_enabled(bool), default_commission_pct(int,=50), default_margin_pct(int,=45,收購目標毛利率), purchase_default_margin_pct(int,=30,採購目標毛利率0–99), tax_rate(=0.05), default_reorder_point, einvoice_print_proof_when_carrier(bool,預設 false), ...`
 - `grade_enum`：N/S/A/B/C/D/E 七級（可設定用語）。預設語意：N=全新未拆（2026-09-16 新增）、S=超熱門搶手貨、A=近全新/精品、B=良好、C=普通、D=較差、**E=散裝（秤斤/整袋收，走 bulk_lot）**。N、S–D 為序號單品，E 為散裝批。分類定價規則（category_pricing_rules）依 N、S–D 各一組。

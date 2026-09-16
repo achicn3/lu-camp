@@ -56,6 +56,7 @@ function SearchTab() {
         if (error) throw new Error(extractDetail(error) ?? "查詢失敗");
         return data ? [data] : [];
       }
+      // 號碼的各種寫法由後端在搜尋條件裡正規化，前端原樣送即可（見 acquisition 頁同段說明）。
       const { data, error } = await api.GET("/api/v1/contacts", {
         params: { query: { q: submitted.value, limit: PAGE_SIZE } },
       });

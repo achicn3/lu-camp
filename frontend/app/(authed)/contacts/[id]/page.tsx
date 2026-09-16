@@ -538,14 +538,18 @@ function EditTab({ contactId, contact }: { contactId: number; contact: Overview[
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const rawPhone = String(form.get("phone")).trim();
-    // 電話可以清空（PATCH 語意），但**有填就必須合法**——否則舊資料一存就把錯誤格式留下來。
-    if (rawPhone !== "" && normalizeMobile(rawPhone) === null) {
+    // **只有真的改過電話才送**（PATCH 語意：沒帶的欄位不動）。加上手機格式檢查之前，
+    // 庫裡存在市話與不完整號碼；若每次都把表單裡的舊值帶上去，店員只想改住址也會被
+    // 422 擋下，那筆資料就永遠編不了——而他根本沒碰電話欄。
+    const phoneChanged = rawPhone !== (contact.phone ?? "");
+    if (phoneChanged && normalizeMobile(rawPhone) === null) {
       setError(`${PHONE_HINT}，請確認後重新輸入`);
       return;
     }
     patch.mutate({
       name: String(form.get("name")).trim(),
-      phone: rawPhone === "" ? null : normalizeMobile(rawPhone),
+      // 未修改電話時省略欄位；修改後必須通過上面的非空與格式檢查。
+      ...(phoneChanged ? { phone: normalizeMobile(rawPhone) } : {}),
       address: String(form.get("address")).trim() || null,
       source_note: String(form.get("source_note")).trim() || null,
     });

@@ -395,15 +395,19 @@ function CreatePurchaseOrder({
       .filter((r) => Number.isFinite(r) && r >= 0 && r < 1);
     return rates.length > 0 ? Math.max(...rates) : 0;
   })();
-  const taxRate = Number(settings.data?.tax_rate ?? 0);
+  const rawTaxRate = settings.data?.tax_rate;
+  const taxRate = rawTaxRate != null && String(rawTaxRate).trim() !== "" ? Number(rawTaxRate) : Number.NaN;
+  const taxRateValid = !settings.isError && Number.isFinite(taxRate) && taxRate >= 0 && taxRate < 1;
+  const taxRateLoading = !settings.isFetched;
   const defaultMargin = settings.data?.purchase_default_margin_pct;
 
   // 毛利率顯示值：店員沒碰過就用設定的預設（設定還沒載入時留白，不要先塞 0 再跳動）。
   const marginValue = newProductMargin ?? (defaultMargin === undefined ? "" : String(defaultMargin));
   const costNum = parseNtd(newProductCost);
-  const marginNum = Number.parseInt(marginValue, 10);
+  const marginNum = /^\d+$/.test(marginValue.trim()) ? Number(marginValue) : Number.NaN;
+  const marginValid = Number.isInteger(marginNum) && marginNum >= 0 && marginNum <= 99;
   const suggestedPrice =
-    costNum !== null && costNum > 0 && Number.isInteger(marginNum)
+    taxRateValid && costNum !== null && costNum > 0 && marginValid
       ? suggestedListedPrice(costNum, marginNum, taxRate, feeRate)
       : null;
   // 售價顯示值：店員沒自己改過就用建議售價；改過就以他填的為準，不再被自動覆蓋
@@ -623,6 +627,14 @@ function CreatePurchaseOrder({
                         onChange={(event) => setNewProductPrice(event.target.value)}
                       />
                     </label>
+                    {!taxRateValid && (
+                      <p role="status" className="hint pur-price-hint">
+                        {taxRateLoading ? "稅率設定載入中，暫不計算建議售價。" : "讀不到稅率設定，請直接輸入含稅售價。"}
+                      </p>
+                    )}
+                    {marginValue.trim() !== "" && !marginValid && (
+                      <p role="alert" className="form-error">毛利率請輸入 0–99 的整數</p>
+                    )}
                     {suggestedPrice !== null && (
                       <p className="hint pur-price-hint">
                         建議售價 <strong className="money">{formatNtd(suggestedPrice)}</strong>

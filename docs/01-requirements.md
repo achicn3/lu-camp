@@ -176,7 +176,7 @@
 
 ### P. Settings / 系統設定
 - 採**單列、具型別**的設定（每店一列、Pydantic 驗證），非 stringly-typed key-value。
-- `einvoice_enabled`、`default_commission_pct`（預設寄售抽成 50，整數百分數）、`default_margin_pct`（定價輔助目標毛利率，整數百分數，預設 45）、`tax_rate`（預設 5%）與稅務處理、成色分級列舉、reorder 預設、店家基本/發票資訊（統編、字軌）等。
+- `einvoice_enabled`、`default_commission_pct`（預設寄售抽成 50，整數百分數）、`default_margin_pct`（收購定價輔助，整數百分數，預設 45）、`purchase_default_margin_pct`（採購新品定價輔助，0–99 整數百分數，預設 30）、`tax_rate`（預設 5%）與稅務處理、成色分級列舉、reorder 預設、店家基本/發票資訊（統編、字軌）等。
 
 ---
 

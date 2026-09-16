@@ -217,8 +217,8 @@ describe("InventoryPage", () => {
     }));
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
-    expect(await screen.findByRole("columnheader", { name: "進貨成本" })).toBeTruthy();
-    expect(screen.getByRole("columnheader", { name: "毛利率" })).toBeTruthy();
+    expect(await screen.findByRole("columnheader", { name: "最新進價" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "預估毛利率" })).toBeTruthy();
     // 手算：round(1954 / 1.05)=1861；round(1954*0.022)=43；實得1818。
     // (1818-1000)/1818=44.994...%，沿收購頁顯示整數45%。
     expect(await screen.findByText("45%")).toBeTruthy();
@@ -270,9 +270,28 @@ describe("InventoryPage", () => {
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     const row = (await screen.findByText("SKU-9")).closest("tr")!;
-    expect(screen.queryByRole("columnheader", { name: "進貨成本" })).toBeNull();
-    expect(screen.queryByRole("columnheader", { name: "毛利率" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "最新進價" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "預估毛利率" })).toBeNull();
     expect(within(row).getAllByRole("cell")).toHaveLength(7);
+  });
+
+  it.each(["failed", "missing-fee", "null-fee", "blank-tax"])("設定 %s 時保留成本但不顯示誤導的毛利率", async (mode) => {
+    loginManager();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/settings")) {
+        if (mode === "failed") return json({ detail: "unavailable" }, 500);
+        return json({ tax_rate: mode === "blank-tax" ? "" : "0.05", linepay_fee_pct: mode === "missing-fee" ? undefined : mode === "null-fee" ? null : "0.022", taiwanpay_fee_pct: "0.01" });
+      }
+      if (new URL(url).pathname === "/api/v1/catalog-products") return json([{ ...CATALOG[0], unit_price: "1954", unit_cost: "1000" }]);
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    const row = (await screen.findByText("SKU-9")).closest("tr")!;
+    await screen.findByText(/無法取得完整稅率或手續費設定/);
+    expect(within(row).getAllByRole("cell")[4].textContent).toBe("1,000");
+    expect(within(row).getAllByRole("cell")[5].textContent).toBe("—");
   });
 
   it("serialized tab lists items with ownership + status badges", async () => {

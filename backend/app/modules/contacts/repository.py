@@ -2,9 +2,10 @@
 
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, or_, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.phone import InvalidPhone, normalize_phone
 from app.modules.contacts.models import Contact
 
 
@@ -82,7 +83,17 @@ class ContactRepository:
             stmt = stmt.where(Contact.roles.contains([role]))
         if q is not None:
             like = f"%{q}%"
-            stmt = stmt.where(or_(Contact.name.ilike(like), Contact.phone.ilike(like)))
+            matches: list[ColumnElement[bool]] = [
+                Contact.name.ilike(like),
+                Contact.phone.ilike(like),
+            ]
+            try:
+                normalized = normalize_phone(q)
+            except InvalidPhone:
+                normalized = q
+            if normalized != q:
+                matches.append(Contact.phone == normalized)
+            stmt = stmt.where(or_(*matches))
         return stmt
 
     async def search(

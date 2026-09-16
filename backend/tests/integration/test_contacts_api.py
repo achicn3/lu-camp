@@ -23,7 +23,7 @@ from app.modules.contacts.models import Contact
 from app.modules.store.models import Store
 from app.modules.storecredit.models import StoreCreditAccount
 from app.modules.user.models import User
-from app.shared.enums import UserRole
+from app.shared.enums import ContactRole, UserRole
 
 NATIONAL_ID = "A123456789"
 
@@ -964,3 +964,44 @@ async def test_update_also_normalizes_and_validates_phone(
         f"/api/v1/contacts/{cid}", json={"phone": "0911"}, headers=_auth(m_token)
     )
     assert bad.status_code == 422, bad.text
+
+
+async def test_editing_other_fields_does_not_trip_on_a_legacy_bad_phone(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """舊資料的電話不合新規則時，只改住址仍要能存檔。
+
+    2026-09-16 加上「只收 09 開頭 10 碼」之前，庫裡存在市話與不完整號碼。若 PATCH
+    無條件帶上表單裡的舊電話，店員只想改住址也會被 422 擋下——那筆資料就永遠編不了，
+    而他根本沒碰電話欄。PATCH 語意本來就是「沒帶的欄位不動」。
+    """
+    store_id, m_token, _ = await _setup_store_and_tokens(db_session)
+    legacy = Contact(
+        store_id=store_id, name="舊會員", phone="956475589", roles=[ContactRole.MEMBER]
+    )
+    db_session.add(legacy)
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"/api/v1/contacts/{legacy.id}", json={"address": "台北市中正區"}, headers=_auth(m_token)
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["address"] == "台北市中正區"
+    assert resp.json()["phone"] == "956475589"  # 沒帶就不動，不會被改寫也不會被擋
+
+
+@pytest.mark.parametrize("query", ["0912-345-678", "０９１２３４５６７８", "0912 345 678"])
+async def test_formatted_phone_search_finds_normalized_contact(
+    client: httpx.AsyncClient, db_session: AsyncSession, query: str
+) -> None:
+    _, manager, _ = await _setup_store_and_tokens(db_session)
+    cid = await _create_contact(client, manager, name="查詢測試", phone="0912345678")
+    response = await client.get("/api/v1/contacts", params={"q": query}, headers=_auth(manager))
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()] == [cid]
+    # 總筆數走 /contacts/members/count（與清單共用同一組搜尋條件）；沒有 /contacts/count 這條路由。
+    count = await client.get(
+        "/api/v1/contacts/members/count", params={"q": query}, headers=_auth(manager)
+    )
+    assert count.status_code == 200
+    assert count.json()["count"] == 1

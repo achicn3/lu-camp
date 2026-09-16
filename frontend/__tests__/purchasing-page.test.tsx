@@ -413,6 +413,53 @@ describe("/purchasing", () => {
     expect(price.value).toBe("1999");
   });
 
+  it.each(["failed", "pending", "null", "blank", "nan"])("稅率 %s 時手填毛利也不能用零稅率推價", async (mode) => {
+    loginAs("MANAGER");
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { release = resolve; });
+    const valid = { tax_rate: "0.05", purchase_default_margin_pct: 30, linepay_fee_pct: "0.022", taiwanpay_fee_pct: "0.01" };
+    stubFetch((url) => {
+      if (url.includes("/settings")) {
+        if (mode === "pending") return pending;
+        if (mode === "failed") return json({ detail: "unavailable" }, 500);
+        return json({ ...valid, tax_rate: mode === "null" ? null : mode === "blank" ? "" : "invalid" });
+      }
+      return json([]);
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await userEvent.type(screen.getByLabelText("搜尋一般商品"), "測試帳篷");
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await userEvent.type(screen.getByLabelText("一般商品進貨成本"), "1000");
+    await userEvent.clear(screen.getByLabelText("一般商品預估毛利率"));
+    await userEvent.type(screen.getByLabelText("一般商品預估毛利率"), "30");
+    const price = screen.getByLabelText("一般商品售價") as HTMLInputElement;
+    expect(price.value).toBe("");
+    expect(screen.getByText(mode === "pending" ? /稅率設定載入中/ : /讀不到稅率設定/)).toBeTruthy();
+    if (mode === "pending") {
+      release(json(valid));
+      // 手算 1000 / .7 * 1.05 / (1 - .022 * 1.05) = 1535.469...，整數1535。
+      await waitFor(() => expect(price.value).toBe("1535"));
+    } else {
+      await userEvent.type(price, "1600");
+      expect(price.value).toBe("1600");
+    }
+  });
+
+  it.each(["30.5", "30abc", "100", "-1"])("毛利率 %s 不可截斷成整數推價", async (value) => {
+    loginAs("MANAGER");
+    stubFetch((url) => url.includes("/settings") ? json({ tax_rate: "0.05", purchase_default_margin_pct: 30, linepay_fee_pct: "0", taiwanpay_fee_pct: "0" }) : json([]));
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 建立採購單" }));
+    await userEvent.type(screen.getByLabelText("搜尋一般商品"), "測試帳篷");
+    await userEvent.click(await screen.findByRole("button", { name: "＋ 建立一般商品" }));
+    await userEvent.type(screen.getByLabelText("一般商品進貨成本"), "1000");
+    await userEvent.clear(screen.getByLabelText("一般商品預估毛利率"));
+    await userEvent.type(screen.getByLabelText("一般商品預估毛利率"), value);
+    expect((screen.getByLabelText("一般商品售價") as HTMLInputElement).value).toBe("");
+    expect(screen.getByText("毛利率請輸入 0–99 的整數")).toBeTruthy();
+  });
+
   it("建立一般商品回應失敗後重試會沿用同一冪等鍵", async () => {
     loginAs("CLERK");
     const created = {
