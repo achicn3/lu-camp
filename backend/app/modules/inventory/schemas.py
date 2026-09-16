@@ -337,6 +337,12 @@ class CatalogProductRead(BaseModel):
     incoming_qty: int = 0
 
 
+class CatalogProductListRead(CatalogProductRead):
+    """一般商品清單；unit_cost 僅 MANAGER 可見，其餘角色由 router 遮罩為 null。"""
+
+    unit_cost: NTDAmountOpt
+
+
 class BulkLotRead(BaseModel):
     """散裝堆輸出（POS 明確選堆/庫存列表；含收購成本與售出進度）。"""
 

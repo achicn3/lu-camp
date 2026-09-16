@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // /inventory 庫存頁測試：三分頁清單渲染、狀態/持有 badge、低庫存標示、售出進度、分頁切換。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +153,9 @@ const FILTER_OPTIONS = {
 const optionRequests: string[] = [];
 
 function route(url: string): Response | null {
+  if (url.endsWith("/settings")) {
+    return json({ tax_rate: "0.05", linepay_fee_pct: "0.022", taiwanpay_fee_pct: "0.01" });
+  }
   if (url.includes("/serialized-items/filter-options")) {
     optionRequests.push(url);
     return json(FILTER_OPTIONS);
@@ -203,6 +206,75 @@ afterEach(() => {
 });
 
 describe("InventoryPage", () => {
+  it("管理者看到進貨成本與扣稅扣手續費的毛利率", async () => {
+    loginManager();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (new URL(url).pathname === "/api/v1/catalog-products") {
+        return json([{ ...CATALOG[0], unit_price: "1954", unit_cost: "1000" }]);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    expect(await screen.findByRole("columnheader", { name: "進貨成本" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "毛利率" })).toBeTruthy();
+    // 手算：round(1954 / 1.05)=1861；round(1954*0.022)=43；實得1818。
+    // (1818-1000)/1818=44.994...%，沿收購頁顯示整數45%。
+    expect(await screen.findByText("45%")).toBeTruthy();
+    expect(screen.getByText("1,000")).toBeTruthy();
+  });
+
+  it.each([
+    ["0.022", "0.01", "0.10", "41%"],
+    ["0.01", "0.022", "0.10", "41%"],
+  ])("費率%s/%s與稅率%s由 API 決定", async (linepay, taiwanpay, tax, expected) => {
+    loginManager();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/settings")) {
+        return json({ tax_rate: tax, linepay_fee_pct: linepay, taiwanpay_fee_pct: taiwanpay });
+      }
+      if (new URL(url).pathname === "/api/v1/catalog-products") {
+        return json([{ ...CATALOG[0], unit_price: "1954", unit_cost: "1020" }]);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    // round(1954/1.10)-round(1954*0.022)=1776-43=1733；713/1733 → 41%。
+    expect(await screen.findByText(expected)).toBeTruthy();
+  });
+
+  it("管理者在無成本時兩欄皆顯示破折號", async () => {
+    loginManager();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (new URL(url).pathname === "/api/v1/catalog-products") {
+        return json([{ ...CATALOG[0], unit_cost: null }]);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    const row = (await screen.findByText("SKU-9")).closest("tr")!;
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[4].textContent).toBe("—");
+    expect(cells[5].textContent).toBe("—");
+  });
+
+  it("店員看不到成本與毛利率表頭或儲存格", async () => {
+    const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    setToken(`${b64({ alg: "HS256" })}.${b64({ sub: "2", role: "CLERK", store_id: 1 })}.sig`);
+    stubInventory();
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    const row = (await screen.findByText("SKU-9")).closest("tr")!;
+    expect(screen.queryByRole("columnheader", { name: "進貨成本" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "毛利率" })).toBeNull();
+    expect(within(row).getAllByRole("cell")).toHaveLength(7);
+  });
+
   it("serialized tab lists items with ownership + status badges", async () => {
     stubInventory();
     renderPage();

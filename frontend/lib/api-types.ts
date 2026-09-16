@@ -4091,6 +4091,41 @@ export interface components {
             unit_price: string;
         };
         /**
+         * CatalogProductListRead
+         * @description 一般商品清單；unit_cost 僅 MANAGER 可見，其餘角色由 router 遮罩為 null。
+         */
+        CatalogProductListRead: {
+            /** Brand Id */
+            brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
+            /** Id */
+            id: number;
+            /**
+             * Incoming Qty
+             * @default 0
+             */
+            incoming_qty: number;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id: number | null;
+            /** Quantity On Hand */
+            quantity_on_hand: number;
+            /** Reorder Point */
+            reorder_point: number;
+            /** Sku */
+            sku: string;
+            /** Store Id */
+            store_id: number;
+            /** Unit Cost */
+            unit_cost: string | null;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
          * CatalogProductRead
          * @description 一般商品輸出（POS 選件/庫存列表）。
          *
@@ -9064,7 +9099,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CatalogProductRead"][];
+                    "application/json": components["schemas"]["CatalogProductListRead"][];
                 };
             };
             /** @description Validation Error */

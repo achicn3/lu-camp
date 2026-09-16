@@ -21,6 +21,7 @@ from app.modules.inventory.schemas import (
     CatalogFilterOptions,
     CatalogProductCreateRequest,
     CatalogProductDetailRead,
+    CatalogProductListRead,
     CatalogProductRead,
     CategoryCreate,
     CategoryRead,
@@ -414,7 +415,7 @@ async def list_serialized(
 
 @router.get(
     "/catalog-products",
-    response_model=list[CatalogProductRead],
+    response_model=list[CatalogProductListRead],
     operation_id="listCatalogProducts",
 )
 async def list_catalog(
@@ -425,13 +426,16 @@ async def list_catalog(
     low_stock: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[CatalogProductRead]:
+) -> list[CatalogProductListRead]:
     products, incoming = await InventoryService(session).list_catalog_with_incoming(
         user.store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
     )
     return [
-        CatalogProductRead.model_validate(product).model_copy(
-            update={"incoming_qty": incoming.get(product.id, 0)}
+        CatalogProductListRead.model_validate(product).model_copy(
+            update={
+                "incoming_qty": incoming.get(product.id, 0),
+                "unit_cost": product.unit_cost if user.role == UserRole.MANAGER.value else None,
+            }
         )
         for product in products
     ]

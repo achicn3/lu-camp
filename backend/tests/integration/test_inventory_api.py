@@ -244,6 +244,41 @@ async def test_list_catalog_products(client: httpx.AsyncClient, db_session: Asyn
     assert rows[0]["quantity_on_hand"] == 37
 
 
+@pytest.mark.parametrize("role", [UserRole.MANAGER, UserRole.CLERK])
+async def test_catalog_list_cost_is_manager_only(
+    client: httpx.AsyncClient, db_session: AsyncSession, role: UserRole
+) -> None:
+    store_id = await _seed_store(db_session)
+    manager = await _auth_manager(db_session, store_id)
+    db_session.add_all(
+        [
+            CatalogProduct(
+                store_id=store_id,
+                sku="COST",
+                name="有成本",
+                unit_price=Decimal("1954"),
+                unit_cost=Decimal("1000"),
+            ),
+            CatalogProduct(
+                store_id=store_id,
+                sku="NO-COST",
+                name="無成本",
+                unit_price=Decimal("120"),
+            ),
+        ]
+    )
+    await db_session.flush()
+    headers = manager if role == UserRole.MANAGER else _auth(store_id)
+    response = await client.get("/api/v1/catalog-products", headers=headers)
+    assert response.status_code == 200
+    rows = {row["sku"]: row for row in response.json()}
+    assert rows["COST"]["unit_cost"] == ("1000" if role == UserRole.MANAGER else None)
+    assert rows["NO-COST"]["unit_cost"] is None
+    # 遮罩不可改掉 ORM 成本：同一 session 隨後管理者仍取得原值。
+    again = await client.get("/api/v1/catalog-products", headers=manager)
+    assert next(row for row in again.json() if row["sku"] == "COST")["unit_cost"] == "1000"
+
+
 async def test_list_bulk_lots_with_status_filter(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -8,6 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 
+import { marginPct } from "@/features/acquisition/pricing";
 import {
   NOTE_MAX_LENGTH,
   type Badge,
@@ -46,7 +47,6 @@ function useIsManager(): boolean {
 type SerializedItem = components["schemas"]["SerializedItemRead"];
 type SerializedDetail = components["schemas"]["SerializedItemDetailRead"];
 type BulkLot = components["schemas"]["BulkLotRead"];
-type CatalogProduct = components["schemas"]["CatalogProductRead"];
 type SerializedStatus = components["schemas"]["SerializedItemStatus"];
 type BulkStatus = components["schemas"]["BulkLotStatus"];
 type Ownership = components["schemas"]["OwnershipType"];
@@ -1261,7 +1261,20 @@ function CatalogPanel() {
   const [page, setPage] = useState(0);
   const [detailId, setDetailId] = useState<number | null>(null);
   const isManager = useIsManager();
-  // 一般商品只有品牌一個維度（沒有型號/成色/分類欄位），所以沒有東西可以收斂。
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => (await api.GET("/api/v1/settings")).data ?? null,
+    enabled: isManager,
+  });
+  const rawTaxRate = settings.data ? Number(settings.data.tax_rate) : Number.NaN;
+  const taxRate =
+    Number.isFinite(rawTaxRate) && rawTaxRate >= 0 && rawTaxRate < 1 ? rawTaxRate : null;
+  // 沿用收購頁：兩種行動支付取較高費率，讀不到費率時以 0 計。
+  const feeRates = [settings.data?.linepay_fee_pct, settings.data?.taiwanpay_fee_pct]
+    .map((rate) => rate === undefined ? Number.NaN : Number(rate))
+    .filter((rate) => Number.isFinite(rate) && rate >= 0 && rate < 1);
+  const feeRate = feeRates.length > 0 ? Math.max(...feeRates) : 0;
+  // 一般商品只有品牌一個篩選維度，所以沒有東西可以收斂。
   const optionsQuery = useQuery({
     queryKey: ["inventory", "catalog-filter-options"],
     queryFn: async () => (await api.GET("/api/v1/catalog-products/filter-options", {})).data ?? null,
@@ -1303,7 +1316,7 @@ function CatalogPanel() {
       return data?.count ?? null;
     },
   });
-  const rows: CatalogProduct[] = query.data ?? [];
+  const rows = query.data ?? [];
 
   return (
     <div className="inv-panel">
@@ -1331,14 +1344,26 @@ function CatalogPanel() {
         </select>
       </SearchBar>
       <BrandLookupNotice rows={rows} brands={brands} />
+      {isManager && settings.isFetched && taxRate === null && (
+        <p role="status">無法取得稅率設定，毛利率暫不顯示。</p>
+      )}
       <TableShell
         loading={query.isFetching}
         error={query.isError ? query.error.message : null}
         empty={rows.length === 0}
-        headers={["商品編號", "品牌", "品名", "單價", "現有量", "再訂購點", "操作"]}
+        headers={[
+          "商品編號", "品牌", "品名", "單價",
+          ...(isManager ? ["進貨成本", "毛利率"] : []),
+          "現有量", "再訂購點", "操作",
+        ]}
       >
         {rows.map((product) => {
           const low = isLowStock(product.quantity_on_hand, product.reorder_point);
+          const cost = product.unit_cost == null ? null : parseNtd(product.unit_cost);
+          const price = parseNtd(product.unit_price);
+          const margin = isManager && cost !== null && price !== null && taxRate !== null
+            ? marginPct(price, cost, taxRate, feeRate)
+            : null;
           return (
             <tr key={product.id}>
               <td className="inv-code">{product.sku}</td>
@@ -1350,6 +1375,12 @@ function CatalogPanel() {
               <td>
                 <MoneyText value={product.unit_price} />
               </td>
+              {isManager && (
+                <>
+                  <td><MoneyText value={product.unit_cost} /></td>
+                  <td>{margin === null ? "—" : `${margin}%`}</td>
+                </>
+              )}
               <td>{product.quantity_on_hand}</td>
               <td>{product.reorder_point}</td>
               <td className="inv-row-actions">
