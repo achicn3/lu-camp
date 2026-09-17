@@ -2752,6 +2752,8 @@ class SalesService:
         """
         if not lines:
             raise EmptySale("結帳試算必須至少有一筆明細")
+        # 試算永遠不放行停售品：同一個 service 實例若先做過補單，旗標不能殘留到這裡。
+        self._allow_inactive_items = False
         campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
         quoted: list[QuoteLine] = []
         total = Decimal(0)

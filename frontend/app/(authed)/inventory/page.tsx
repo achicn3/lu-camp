@@ -363,7 +363,9 @@ function ItemEditButton({
   }
 
   async function patchPrice(): Promise<void> {
-    if (nextPrice.trim() === price) return;
+    // 比較正規化後的值：打「1,200」而原價就是 1200 時，字串比不相等會白送一次 PATCH，
+    // 稽核就多一筆 before == after 的改價紀錄。
+    if (parseNtd(nextPrice) === parseNtd(price)) return;
     // 前端先擋一次（0 或小數）：讓店員當場看到原因，而不是送出去才被後端退。
     // 用站上既有的 parseNtd：它吃得下「1,200」這種輸入，也會把值正規化再送出。
     const parsed = parseNtd(nextPrice);

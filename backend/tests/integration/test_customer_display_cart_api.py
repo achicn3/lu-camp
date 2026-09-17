@@ -1552,6 +1552,90 @@ async def test_uncertain_menu_checkout_reconciles_with_service_mode(
     assert sale.table_no == "A1"
 
 
+async def test_uncertain_checkout_reconciles_even_if_product_was_discontinued(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """商品在「已扣款、結果不明」期間被**停售**，補單仍必須成立本機銷售。
+
+    回歸測試：補單是從保存的原始請求重建**已經發生**的交易。若補單路徑漏帶
+    `rebuilding_paid_sale`，停售檢查會把它擋成 422 —— LINE Pay 已確認扣款卻補不出單，
+    錢收了、帳沒有，購物車永遠卡在 PAYMENT_UNCERTAIN。與「漏帶折扣／漏帶內用外帶」同類。
+    """
+    seeded = await _seed(db_session, "371")
+    terminal_id, _, _csrf = await _pair(client, seeded, suffix="371")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-371"))
+    assert manager is not None
+    await StoreSettingsService(db_session).update_settings(
+        manager.store_id,
+        actor_user_id=manager.id,
+        patch=SettingsUpdateRequest(linepay_enabled=True),
+    )
+    await db_session.commit()
+
+    lines = [{"line_type": "CATALOG", "catalog_product_id": seeded.product_id, "qty": 1}]
+    tenders = [
+        {
+            "tender_type": "LINE_PAY",
+            "amount": "120",
+            "line_pay_one_time_key": "OTK-discontinued",
+        }
+    ]
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json={"expected_revision": None, "lines": lines, "tenders": tenders},
+    )
+    assert created.status_code == 200, created.text
+
+    transport = _UncertainLinePayTransport()
+    linepay_client = _uncertain_linepay_client(transport)
+    monkeypatch.setattr("app.modules.sales.router._linepay_client", lambda: linepay_client)
+    monkeypatch.setattr(
+        "app.modules.sales.linepay.linepay_client_from_config",
+        lambda: linepay_client,
+    )
+    uncertain = await client.post(
+        "/api/v1/sales",
+        headers={**_auth(seeded.manager_token), "Idempotency-Key": "uncertain-discontinued"},
+        json={
+            "lines": lines,
+            "tenders": tenders,
+            "cart_session_id": created.json()["id"],
+            "cart_revision": created.json()["revision"],
+            "expected_einvoice_enabled": False,
+        },
+    )
+    assert uncertain.status_code == 409, uncertain.text
+    assert "PAYMENT_UNCERTAIN" in uncertain.text
+
+    # 店長在這段期間把商品停售（停售正是「這東西不賣了」的清理時機，最容易撞上）
+    product = await db_session.get(CatalogProduct, seeded.product_id)
+    assert product is not None
+    product.is_active = False
+    await db_session.commit()
+
+    transport.check_response = {
+        "returnCode": "0000",
+        "returnMessage": "Success.",
+        "info": {
+            "transactionId": 2026091700000000001,
+            "status": "COMPLETE",
+            "payInfo": [{"method": "LINE_PAY", "amount": 120}],
+        },
+    }
+    reconciled = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart/reconcile-payment",
+        headers=_auth(seeded.manager_token),
+        json={"action": "QUERY_PROVIDER"},
+    )
+    assert reconciled.status_code == 200, reconciled.text
+    assert reconciled.json()["outcome"] == "SUCCESS_CONFIRMED"
+    sale = await db_session.scalar(select(Sale))
+    assert sale is not None  # 錢收了，帳補得出來
+
+
 async def test_stale_cart_put_with_different_table_is_not_treated_as_a_retry(
     client: httpx.AsyncClient,
     db_session: AsyncSession,

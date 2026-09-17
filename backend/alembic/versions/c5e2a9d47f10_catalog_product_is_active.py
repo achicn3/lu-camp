@@ -32,19 +32,32 @@ def upgrade() -> None:
     )
 
 
-def downgrade() -> None:
-    """Downgrade schema.
+def abort_if_discontinued_exist(bind: sa.engine.Connection) -> None:
+    """有任何停售商品就拒絕降版（fail closed）。
 
-    **有停售商品時一律中止**（比照 b7e2c9a4f1d6 的先例）：這一欄一旦拿掉，所有停售品
-    會瞬間回到庫存清單與 POS 變成可售，而「哪些被停售」再也復原不了。要降版請先把
-    停售商品處理掉（恢復上架或確認可以重新開賣）。
+    這一欄一旦拿掉，所有停售品會瞬間回到庫存清單與 POS 變成可售，而「哪些被停售」
+    再也復原不了。回滾程式碼不必然要回滾 schema——這個欄位是 additive，舊版程式碼在
+    有它的資料庫上照樣跑。
+
+    先鎖後數（同一交易內）：只 SELECT 的話，計數完成到 DROP COLUMN 之間仍可能有人停售
+    並提交，ALTER 等它結束後照樣刪掉——fail-closed 就形同虛設。ACCESS EXCLUSIVE 與
+    DROP COLUMN 需要的鎖相同，等於把檢查與刪除變成一個原子動作（沿用 b7e2c9a4f1d6）。
     """
-    conn = op.get_bind()
-    inactive = conn.execute(
+    bind.execute(sa.text("LOCK TABLE catalog_products IN ACCESS EXCLUSIVE MODE"))
+    inactive = bind.execute(
         sa.text("SELECT count(*) FROM catalog_products WHERE is_active = false")
     ).scalar_one()
     if inactive:
         raise RuntimeError(
-            f"有 {inactive} 件停售商品，降版會讓它們全部重新開賣；請先處理後再降版"
+            f"拒絕降版：有 {inactive} 件停售商品，降版會讓它們全部重新開賣；"
+            "請先恢復上架或確認可以重新開賣後再降版"
         )
+
+
+def downgrade() -> None:
+    """Downgrade schema.
+
+    有停售商品時一律中止（見 `abort_if_discontinued_exist`）。
+    """
+    abort_if_discontinued_exist(op.get_bind())
     op.drop_column("catalog_products", "is_active")

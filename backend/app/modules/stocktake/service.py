@@ -33,9 +33,15 @@ class StocktakeService:
         """建立盤點單：為店內每個一般商品快照當前 system_qty（DRAFT、counted 未填）。"""
         # 停售的也要盤（2026-09-17）：停售只是「不再販售」，架上還有貨就得數得到，
         # 否則帳面數量永遠校不回來，而庫存價值報表仍把它算進去，兩邊永遠對不起來。
-        products = await self._inventory.list_catalog(
-            store_id, limit=_SNAPSHOT_CAP, offset=0, include_inactive=True
-        )
+        products = [
+            product
+            for product in await self._inventory.list_catalog(
+                store_id, limit=_SNAPSHOT_CAP, offset=0, include_inactive=True
+            )
+            # 停售但**還有貨**的要盤（否則帳面數量永遠校不回來）；停售又零庫存的排除——
+            # 那批沒東西可數，卻會因為「盤點過不能刪」而永遠刪不掉，跟「誤建的要能刪」相衝。
+            if product.is_active or product.quantity_on_hand != 0
+        ]
         stocktake = await self._repo.add_stocktake(
             Stocktake(store_id=store_id, created_by=actor_user_id)
         )

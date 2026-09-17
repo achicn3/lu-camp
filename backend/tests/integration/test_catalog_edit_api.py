@@ -511,3 +511,23 @@ async def test_discontinued_sku_still_blocks_duplicates(
         headers=_auth(mgr, "dup-1"),
     )
     assert resp.status_code == 409, resp.text
+
+
+async def test_zero_stock_discontinued_product_is_not_snapshotted_for_stocktake(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停售又沒庫存的不進盤點單：沒東西可數，卻會因「盤點過不能刪」而永遠刪不掉。"""
+    mgr, _, store_id = await _seed(db_session)
+    empty = CatalogProduct(
+        store_id=store_id, sku="EMPTY-1", name="停售零庫存", unit_price=Decimal(100)
+    )
+    db_session.add(empty)
+    await db_session.flush()
+    await client.patch(
+        f"/api/v1/catalog-products/{empty.id}", json={"is_active": False}, headers=_auth(mgr)
+    )
+
+    created = await client.post("/api/v1/stocktakes", json={}, headers=_auth(mgr, "st-empty"))
+    assert created.status_code == 201, created.text
+    detail = await client.get(f"/api/v1/stocktakes/{created.json()['id']}", headers=_auth(mgr))
+    assert empty.id not in [line["catalog_product_id"] for line in detail.json()["lines"]]
