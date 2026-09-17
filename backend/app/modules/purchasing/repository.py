@@ -21,6 +21,19 @@ class PurchasingRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def product_referenced(self, store_id: int, catalog_product_id: int) -> bool:
+        """這個商品有沒有出現在任何採購明細。"""
+        found = await self._session.scalar(
+            select(PurchaseOrderLine.id)
+            .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
+            .where(
+                PurchaseOrder.store_id == store_id,
+                PurchaseOrderLine.catalog_product_id == catalog_product_id,
+            )
+            .limit(1)
+        )
+        return found is not None
+
     async def add_supplier(self, supplier: Supplier) -> Supplier:
         self._session.add(supplier)
         await self._session.flush()

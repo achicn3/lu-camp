@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -551,6 +552,15 @@ class InventoryService:
             before=before,
         )
 
+    async def _delete_guarded(self, delete: Awaitable[None], blocked_message: str) -> None:
+        """刪除本身包在 savepoint 裡：檢查通過到刪除之間若剛好有人賣掉／進貨，外鍵會擋，
+        那是可預期的衝突，要回 409 讓店員知道「剛剛被用掉了」，不是 500。"""
+        try:
+            async with self._session.begin_nested():
+                await delete
+        except IntegrityError as exc:
+            raise ItemDeleteBlocked(blocked_message) from exc
+
     async def delete_serialized_item(
         self, store_id: int, item_id: int, *, actor_user_id: int
     ) -> bool:
@@ -559,6 +569,7 @@ class InventoryService:
         找不到→False。收購進來的請走收購作廢：那是付過錢的紀錄，不能用刪除繞過。
         """
         from app.modules.consignment.service import ConsignmentService
+        from app.modules.customerdisplay.service import CustomerDisplayService
         from app.modules.sales.service import SalesService
 
         item = await self._repo.get_serialized_for_update(store_id, item_id)
@@ -572,12 +583,19 @@ class InventoryService:
             raise ItemDeleteBlocked("這件賣過了，不能刪除（交易紀錄要留著）")
         if await ConsignmentService(self._session).serialized_referenced(store_id, item_id):
             raise ItemDeleteBlocked("這件有寄售結算紀錄，不能刪除")
+        if await CustomerDisplayService(self._session).item_referenced_by_pending_payment(
+            store_id, item_code=item.item_code
+        ):
+            raise ItemDeleteBlocked("這件在一筆待確認付款的交易裡，補單完成前不能刪除")
         before: dict[str, object] = {
             "item_code": item.item_code,
             "name": item.name,
             "grade": item.grade.value,
         }
-        await self._repo.delete_serialized_item(store_id, item_id)
+        await self._delete_guarded(
+            self._repo.delete_serialized_item(store_id, item_id),
+            "這件剛剛被用到了（賣出或入帳），不能刪除",
+        )
         await self._audit_delete(store_id, actor_user_id, "serialized_item", item_id, before)
         return True
 
@@ -585,11 +603,12 @@ class InventoryService:
         self, store_id: int, product_id: int, *, actor_user_id: int
     ) -> bool:
         """刪誤建的一般商品。賣過、進過貨、盤點過都擋下。找不到→False。"""
+        from app.modules.customerdisplay.service import CustomerDisplayService
         from app.modules.purchasing.service import PurchasingService
         from app.modules.sales.service import SalesService
         from app.modules.stocktake.service import StocktakeService
 
-        product = await self._repo.get_catalog(store_id, product_id)
+        product = await self._repo.get_catalog_for_update(store_id, product_id)
         if product is None:
             return False
         if await SalesService(self._session).item_referenced_by_sales(
@@ -600,13 +619,21 @@ class InventoryService:
             raise ItemDeleteBlocked("這件有採購紀錄，不能刪除（進貨帳要留著）")
         if await StocktakeService(self._session).product_referenced(store_id, product_id):
             raise ItemDeleteBlocked("這件盤點過，不能刪除（盤點紀錄要留著）")
+        if await CustomerDisplayService(self._session).item_referenced_by_pending_payment(
+            store_id, catalog_product_id=product_id
+        ):
+            raise ItemDeleteBlocked("這件在一筆待確認付款的交易裡，補單完成前不能刪除")
         before: dict[str, object] = {"sku": product.sku, "name": product.name}
-        await self._repo.delete_catalog_product(store_id, product_id)
+        await self._delete_guarded(
+            self._repo.delete_catalog_product(store_id, product_id),
+            "這件剛剛被用到了（賣出或入帳），不能刪除",
+        )
         await self._audit_delete(store_id, actor_user_id, "catalog_product", product_id, before)
         return True
 
     async def delete_bulk_lot(self, store_id: int, lot_id: int, *, actor_user_id: int) -> bool:
         """刪誤建的散裝批。賣過或收購進來的一律擋下。找不到→False。"""
+        from app.modules.customerdisplay.service import CustomerDisplayService
         from app.modules.sales.service import SalesService
 
         lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
@@ -616,12 +643,19 @@ class InventoryService:
             raise ItemDeleteBlocked("這堆是收購進來的，請用收購作廢，不要直接刪除")
         if await SalesService(self._session).item_referenced_by_sales(store_id, bulk_lot_id=lot_id):
             raise ItemDeleteBlocked("這堆賣過了，不能刪除（交易紀錄要留著）")
+        if await CustomerDisplayService(self._session).item_referenced_by_pending_payment(
+            store_id, bulk_lot_id=lot_id
+        ):
+            raise ItemDeleteBlocked("這堆在一筆待確認付款的交易裡，補單完成前不能刪除")
         before: dict[str, object] = {
             "lot_code": lot.lot_code,
             "name": lot.name,
             "total_qty": lot.total_qty,
         }
-        await self._repo.delete_bulk_lot(store_id, lot_id)
+        await self._delete_guarded(
+            self._repo.delete_bulk_lot(store_id, lot_id),
+            "這堆剛剛被用到了（賣出或入帳），不能刪除",
+        )
         await self._audit_delete(store_id, actor_user_id, "bulk_lot", lot_id, before)
         return True
 

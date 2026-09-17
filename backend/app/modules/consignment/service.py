@@ -44,16 +44,8 @@ class ConsignmentService:
         self._cashdrawer = CashDrawerService(session)
 
     async def serialized_referenced(self, store_id: int, serialized_item_id: int) -> bool:
-        """這件寄售品有沒有結算列（供庫存判斷可不可以刪）。"""
-        found = await self._session.scalar(
-            select(ConsignmentSettlement.id)
-            .where(
-                ConsignmentSettlement.store_id == store_id,
-                ConsignmentSettlement.serialized_item_id == serialized_item_id,
-            )
-            .limit(1)
-        )
-        return found is not None
+        """供庫存判斷可不可以刪：這件有沒有寄售結算紀錄。"""
+        return await self._repo.serialized_referenced(store_id, serialized_item_id)
 
     async def pay_settlement(
         self,

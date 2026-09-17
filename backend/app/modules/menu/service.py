@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Final
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -163,6 +164,7 @@ class MenuService:
         與 archive（下架）不同：下架只是從清單/POS 隱藏，資料列還在。誤建的品項要真的
         消失，否則清單會愈積愈多垃圾。
         """
+        from app.modules.customerdisplay.service import CustomerDisplayService
         from app.modules.sales.service import SalesService
 
         item = await self._repo.get_for_update(store_id, item_id)
@@ -172,8 +174,17 @@ class MenuService:
             store_id, menu_item_id=item_id
         ):
             raise ItemDeleteBlocked("這個品項賣過了，不能刪除，只能下架（交易紀錄要留著）")
+        if await CustomerDisplayService(self._session).item_referenced_by_pending_payment(
+            store_id, menu_item_id=item_id
+        ):
+            raise ItemDeleteBlocked("這個品項在一筆待確認付款的交易裡，補單完成前不能刪除")
         before = {"name": item.name, "unit_price": str(item.unit_price)}
-        await self._repo.delete(item)
+        # 檢查通過到刪除之間若剛好被結帳用掉，外鍵會擋——那是可預期的衝突，回 409 不是 500。
+        try:
+            async with self._session.begin_nested():
+                await self._repo.delete(item)
+        except IntegrityError as exc:
+            raise ItemDeleteBlocked("這個品項剛剛被結帳用到了，不能刪除") from exc
         await write_audit_log(
             self._session,
             store_id=store_id,

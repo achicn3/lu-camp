@@ -22,6 +22,17 @@ class ConsignmentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def serialized_referenced(self, store_id: int, serialized_item_id: int) -> bool:
+        """這件寄售品有沒有結算列。"""
+        found = await self._session.scalar(
+            select(ConsignmentSettlement.id).where(
+                ConsignmentSettlement.store_id == store_id,
+                ConsignmentSettlement.serialized_item_id == serialized_item_id,
+            )
+            .limit(1)
+        )
+        return found is not None
+
     async def add(self, settlement: ConsignmentSettlement) -> ConsignmentSettlement:
         self._session.add(settlement)
         await self._session.flush()

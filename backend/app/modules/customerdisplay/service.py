@@ -293,6 +293,40 @@ class CustomerDisplayService:
         """取得系統設定的 LINE Pay client，作為客顯付款與對帳的單一入口。"""
         return SalesService.configured_linepay_client()
 
+    async def item_referenced_by_pending_payment(
+        self,
+        store_id: int,
+        *,
+        item_code: str | None = None,
+        catalog_product_id: int | None = None,
+        bulk_lot_id: int | None = None,
+        menu_item_id: int | None = None,
+    ) -> bool:
+        """這個品項有沒有被「已扣款但還沒補成本機銷售」的購物車指名（Codex 審查 P1）。
+
+        LINE Pay 結果不明時，原始結帳請求整包存在 `payment_checkout_payload` 裡，之後
+        店長確認扣款成功就照它補單。品項被刪掉的話那張單永遠補不出來——錢收了、帳沒有。
+        這份快照是 JSON，沒有外鍵擋，只能在刪除前自己問一次。
+        """
+        for payload in await self._repo.pending_payment_payloads(store_id):
+            lines = payload.get("lines")
+            if not isinstance(lines, list):
+                continue
+            for line in lines:
+                if not isinstance(line, dict):
+                    continue
+                if (
+                    (item_code is not None and line.get("item_code") == item_code)
+                    or (
+                        catalog_product_id is not None
+                        and line.get("catalog_product_id") == catalog_product_id
+                    )
+                    or (bulk_lot_id is not None and line.get("bulk_lot_id") == bulk_lot_id)
+                    or (menu_item_id is not None and line.get("menu_item_id") == menu_item_id)
+                ):
+                    return True
+        return False
+
     async def create_device_session(
         self,
         *,

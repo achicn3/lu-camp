@@ -7,7 +7,6 @@
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -27,17 +26,8 @@ class StocktakeService:
         self._inventory = InventoryService(session)
 
     async def product_referenced(self, store_id: int, catalog_product_id: int) -> bool:
-        """這個商品有沒有被盤點過（供庫存判斷可不可以刪）。"""
-        found = await self._session.scalar(
-            select(StocktakeLine.id)
-            .join(Stocktake, StocktakeLine.stocktake_id == Stocktake.id)
-            .where(
-                Stocktake.store_id == store_id,
-                StocktakeLine.catalog_product_id == catalog_product_id,
-            )
-            .limit(1)
-        )
-        return found is not None
+        """供庫存判斷可不可以刪：這個商品有沒有盤點紀錄。"""
+        return await self._repo.product_referenced(store_id, catalog_product_id)
 
     async def create_stocktake(self, store_id: int, *, actor_user_id: int) -> Stocktake:
         """建立盤點單：為店內每個一般商品快照當前 system_qty（DRAFT、counted 未填）。"""

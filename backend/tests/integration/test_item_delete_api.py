@@ -6,6 +6,7 @@
 畫面上不要求店員自己分辨——一律按刪除，不能刪的由後端回 409 並說明原因。
 """
 
+import json
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 
@@ -299,3 +300,87 @@ async def test_purchased_catalog_product_cannot_be_deleted(
 
     resp = await client.delete(f"/api/v1/catalog-products/{product_id}", headers=_auth(mgr))
     assert resp.status_code == 409
+
+
+async def _pending_cart(
+    session: AsyncSession, store_id: int, payload: dict[str, object]
+) -> None:
+    """造一張「已扣款、結果不明、等著補單」的購物車，內含保存的原始結帳請求。"""
+    from sqlalchemy import text
+
+    from tests.integration.customer_display_helpers import ensure_paired_customer_display
+
+    actor_id = await session.scalar(select(User.id).where(User.store_id == store_id))
+    terminal, device = await ensure_paired_customer_display(
+        session, store_id=store_id, actor_user_id=actor_id
+    )
+    await session.execute(
+        text(
+            "INSERT INTO cart_sessions (store_id, pos_terminal_id, kiosk_device_id, status,"
+            " revision, snapshot, snapshot_fingerprint, payment_checkout_payload,"
+            " created_at, updated_at)"
+            " VALUES (:s, :t, :d, 'PAYMENT_UNCERTAIN', 1, '{}'::jsonb, 'fp',"
+            " CAST(:p AS jsonb), now(), now())"
+        ),
+        {"s": store_id, "t": terminal.id, "d": device.id, "p": json.dumps(payload)},
+    )
+    await session.flush()
+
+
+async def test_pending_payment_blocks_delete(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """LINE Pay 結果不明、等著補單的購物車指名了這件商品：刪掉的話那張單永遠補不出來。
+
+    那份快照是 JSON，沒有外鍵擋得住（Codex 審查 P1），只能在刪除前自己問一次。
+    """
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _catalog(db_session, store_id, sku="PENDING-SKU")
+    menu_id = await _menu(db_session, store_id, name="待補單的拿鐵")
+    payload = {
+        "lines": [
+            {"line_type": "CATALOG", "catalog_product_id": product_id, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": menu_id, "qty": 1},
+        ]
+    }
+    await _pending_cart(db_session, store_id, payload)
+
+    # 一次只驗一個端點：被擋下時 router 會 rollback，測試共用同一個 session，
+    # 連前面塞的測資（含這張待補單的購物車）都會跟著被捲掉。
+    resp = await client.delete(f"/api/v1/catalog-products/{product_id}", headers=_auth(mgr))
+    assert resp.status_code == 409, resp.text
+    assert "待確認付款" in resp.json()["detail"]
+    del menu_id
+
+
+async def test_pending_payment_blocks_menu_delete(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """餐飲同理：待補單的那張單指名它，補完之前不能刪。"""
+    mgr, _, store_id = await _seed(db_session)
+    menu_id = await _menu(db_session, store_id, name="待補單的拿鐵")
+    await _pending_cart(
+        db_session, store_id, {"lines": [{"line_type": "MENU", "menu_item_id": menu_id, "qty": 1}]}
+    )
+
+    resp = await client.delete(f"/api/v1/menu-items/{menu_id}/delete", headers=_auth(mgr))
+    assert resp.status_code == 409, resp.text
+    assert "待確認付款" in resp.json()["detail"]
+
+
+async def test_every_delete_endpoint_is_manager_only(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """四個端點一律 MANAGER-only（Codex 建議：原本只驗了一般商品）。
+
+    403 由權限相依在進 service 之前擋下，不會 rollback，所以四個可以連著驗。
+    """
+    _, clerk, store_id = await _seed(db_session)
+    paths = (
+        f"/api/v1/serialized-items/{await _serialized(db_session, store_id, code='RB-1')}",
+        f"/api/v1/catalog-products/{await _catalog(db_session, store_id, sku='RB-SKU')}",
+        f"/api/v1/bulk-lots/{await _bulk(db_session, store_id, code='RB-LOT')}",
+        f"/api/v1/menu-items/{await _menu(db_session, store_id, name='RB-拿鐵')}/delete",
+    )
+    for path in paths:
+        assert (await client.delete(path, headers=_auth(clerk))).status_code == 403, path

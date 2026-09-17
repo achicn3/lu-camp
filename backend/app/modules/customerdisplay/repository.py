@@ -20,6 +20,17 @@ class CustomerDisplayRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def pending_payment_payloads(self, store_id: int) -> list[dict[str, object]]:
+        """結果不明、等著補單的購物車所保存的結帳內容（通常 0~1 筆）。"""
+        rows = await self._session.scalars(
+            select(CartSession.payment_checkout_payload).where(
+                CartSession.store_id == store_id,
+                CartSession.status == CartSessionStatus.PAYMENT_UNCERTAIN,
+                CartSession.payment_checkout_payload.is_not(None),
+            )
+        )
+        return [row for row in rows.all() if isinstance(row, dict)]
+
     async def add(self, row: object) -> None:
         self._session.add(row)
         await self._session.flush()

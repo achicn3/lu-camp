@@ -15,6 +15,19 @@ class StocktakeRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def product_referenced(self, store_id: int, catalog_product_id: int) -> bool:
+        """這個商品有沒有被盤點過。"""
+        found = await self._session.scalar(
+            select(StocktakeLine.id)
+            .join(Stocktake, StocktakeLine.stocktake_id == Stocktake.id)
+            .where(
+                Stocktake.store_id == store_id,
+                StocktakeLine.catalog_product_id == catalog_product_id,
+            )
+            .limit(1)
+        )
+        return found is not None
+
     async def add_stocktake(self, stocktake: Stocktake) -> Stocktake:
         self._session.add(stocktake)
         await self._session.flush()
