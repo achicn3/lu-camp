@@ -7496,6 +7496,22 @@
             "title": "Sort Order",
             "type": "integer"
           },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
+          },
           "unit_price": {
             "anyOf": [
               {
@@ -7550,6 +7566,17 @@
             "title": "Store Id",
             "type": "integer"
           },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
+          },
           "unit_price": {
             "title": "Unit Price",
             "type": "string"
@@ -7560,6 +7587,7 @@
           "store_id",
           "name",
           "unit_price",
+          "unit_cost",
           "category",
           "is_available",
           "sort_order"
@@ -7616,6 +7644,22 @@
               }
             ],
             "title": "Sort Order"
+          },
+          "unit_cost": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost"
           },
           "unit_price": {
             "anyOf": [
@@ -10099,6 +10143,16 @@
           "date_to": {
             "format": "date-time",
             "title": "Date To",
+            "type": "string"
+          },
+          "food_cogs": {
+            "default": "0",
+            "title": "Food Cogs",
+            "type": "string"
+          },
+          "food_margin": {
+            "default": "0",
+            "title": "Food Margin",
             "type": "string"
           },
           "food_revenue": {

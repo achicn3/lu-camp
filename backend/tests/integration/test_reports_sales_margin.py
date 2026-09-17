@@ -154,8 +154,15 @@ async def _add_catalog(session: AsyncSession, store_id: int, *, price: str, qty:
     return product.id
 
 
-async def _add_menu(session: AsyncSession, store_id: int, *, name: str, price: str) -> int:
-    item = MenuItem(store_id=store_id, name=name, unit_price=Decimal(price))
+async def _add_menu(
+    session: AsyncSession, store_id: int, *, name: str, price: str, cost: str | None = None
+) -> int:
+    item = MenuItem(
+        store_id=store_id,
+        name=name,
+        unit_price=Decimal(price),
+        unit_cost=None if cost is None else Decimal(cost),
+    )
     session.add(item)
     await session.flush()
     return item.id
@@ -221,6 +228,56 @@ async def test_menu_revenue_recognized_and_split(
     assert body["unknown_cost_sales"] == "360"  # 餐飲無成本，不灌毛利
     assert body["gross_margin"] == "200"  # 僅二手 500−300
     assert body["gross_margin_rate"] == "0.4000"  # 餐飲排除於分母（200/500）
+
+
+async def test_menu_with_cost_recognizes_food_margin(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """有填成本的餐飲要算得出毛利，不能再被丟進「成本未知」（裁示 2026-09-17）。
+
+    成本存在品項上、成交時凍結成快照；報表照一般商品的口徑認列餐飲成本與毛利。
+    """
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    latte = await _add_menu(db_session, store_id, name="拿鐵", price="150", cost="45")
+    await _sell(client, clerk, [{"line_type": "MENU", "menu_item_id": latte, "qty": 2}], key="fm1")
+
+    body = await _margin(client, mgr)
+    assert body["gross_turnover"] == "300"
+    assert body["recognized_revenue"] == "300"
+    assert body["food_revenue"] == "300"
+    assert body["food_cogs"] == "90"  # 45 × 2
+    assert body["food_margin"] == "210"  # 300 − 90
+    assert body["gross_margin"] == "210"
+    assert body["unknown_cost_sales"] == "0"  # 成本已知，不再進未知桶
+    assert body["gross_margin_rate"] == "0.7000"  # 210 / 300
+
+
+async def test_menu_cost_known_and_unknown_split(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """沒填成本的餐飲維持舊口徑（全額認列、不假造毛利），有填的才進毛利分母。"""
+    mgr, clerk, store_id, _consignor, _clerk_id = await _seed(db_session)
+    latte = await _add_menu(db_session, store_id, name="拿鐵", price="150", cost="45")
+    water = await _add_menu(db_session, store_id, name="白開水", price="20")
+    await _sell(
+        client,
+        clerk,
+        [
+            {"line_type": "MENU", "menu_item_id": latte, "qty": 1},
+            {"line_type": "MENU", "menu_item_id": water, "qty": 1},
+        ],
+        key="fm2",
+    )
+
+    body = await _margin(client, mgr)
+    assert body["food_revenue"] == "170"  # 餐飲營收仍看全額
+    assert body["food_cogs"] == "45"
+    # 餐飲毛利只認有成本的拿鐵：150−45。用 food_revenue−food_cogs 反推會得到 125，
+    # 等於把白開水的成本當成 0。
+    assert body["food_margin"] == "105"
+    assert body["unknown_cost_sales"] == "20"  # 只有白開水未知
+    assert body["gross_margin"] == "105"  # 150 − 45
+    assert body["gross_margin_rate"] == "0.7000"  # 105 / 150（白開水排除於分母）
 
 
 async def test_consignment_recognizes_commission_only(

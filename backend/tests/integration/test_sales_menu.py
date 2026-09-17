@@ -68,8 +68,15 @@ async def _seed(session: AsyncSession) -> tuple[str, int, int]:
     return token, store.id, clerk.id
 
 
-async def _menu_item(session: AsyncSession, store_id: int, *, name: str, price: str) -> int:
-    item = MenuItem(store_id=store_id, name=name, unit_price=Decimal(price))
+async def _menu_item(
+    session: AsyncSession, store_id: int, *, name: str, price: str, cost: str | None = None
+) -> int:
+    item = MenuItem(
+        store_id=store_id,
+        name=name,
+        unit_price=Decimal(price),
+        unit_cost=None if cost is None else Decimal(cost),
+    )
     session.add(item)
     await session.flush()
     return item.id
@@ -158,6 +165,59 @@ async def test_menu_only_sale(client: httpx.AsyncClient, db_session: AsyncSessio
     assert line["line_type"] == "MENU"
     assert line["menu_item_id"] == coffee
     assert line["discount_amount"] == "0"
+
+
+async def test_menu_sale_freezes_cost_snapshot(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """賣出餐飲時把成本凍結進該筆明細，報表才算得出餐飲毛利（裁示 2026-09-17）。
+
+    凍結而非事後查：日後調整品項成本不得回頭改寫歷史毛利（沿用一般商品的既有口徑）。
+    """
+    token, store_id, _ = await _seed(db_session)
+    latte = await _menu_item(db_session, store_id, name="拿鐵", price="150", cost="45")
+    resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_menu_line(latte, 2)], "service_mode": "TAKEOUT"},
+        headers=_auth(token, "cost-1"),
+    )
+    assert resp.status_code == 201, resp.text
+    sale_id = resp.json()["id"]
+
+    cost = await db_session.scalar(
+        text("SELECT cost_snapshot FROM sale_lines WHERE sale_id = :sid AND line_type = 'MENU'"),
+        {"sid": sale_id},
+    )
+    assert cost == Decimal("90")  # 45 × 2（本行合計，與一般商品同口徑）
+
+    # 之後調高成本，已成交那筆不得被改寫
+    item = await db_session.get(MenuItem, latte)
+    assert item is not None
+    item.unit_cost = Decimal("60")
+    await db_session.flush()
+    again = await db_session.scalar(
+        text("SELECT cost_snapshot FROM sale_lines WHERE sale_id = :sid"), {"sid": sale_id}
+    )
+    assert again == Decimal("90")
+
+
+async def test_menu_without_cost_stays_unknown_instead_of_zero(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """沒填成本就維持「未知」（NULL），不可當成 0——那會讓報表以為毛利 100%。"""
+    token, store_id, _ = await _seed(db_session)
+    water = await _menu_item(db_session, store_id, name="白開水", price="10")
+    resp = await client.post(
+        "/api/v1/sales",
+        json={"lines": [_menu_line(water, 1)], "service_mode": "TAKEOUT"},
+        headers=_auth(token, "cost-2"),
+    )
+    assert resp.status_code == 201, resp.text
+    cost = await db_session.scalar(
+        text("SELECT cost_snapshot FROM sale_lines WHERE sale_id = :sid"),
+        {"sid": resp.json()["id"]},
+    )
+    assert cost is None
 
 
 async def test_mixed_secondhand_and_menu(

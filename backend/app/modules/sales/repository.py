@@ -83,8 +83,8 @@ class SalesMarginComponents:
     consignment_serialized_revenue: Decimal
     consignment_bulk_revenue: Decimal
     catalog_revenue: Decimal
-    menu_revenue: Decimal  # 餐飲/內用（全額認列、成本未建模 → 計入 unknown_cost）
-    unknown_cost_revenue: Decimal  # catalog + 餐飲 + 缺成本自有序號（營收認列但成本未知）
+    menu_revenue: Decimal  # 餐飲/內用**全額**營收（含下面有成本的部分；供餐飲/二手分列）
+    unknown_cost_revenue: Decimal  # catalog + 沒填成本的餐飲 + 缺成本自有序號（成本未知）
     cash_received: Decimal
     store_credit_redeemed: Decimal
     transaction_count: int
@@ -96,6 +96,10 @@ class SalesMarginComponents:
     # 有成本快照的一般商品（收貨帶入進價後才有）：營收與成本認列進毛利。
     catalog_known_revenue: Decimal = Decimal(0)
     catalog_cogs: Decimal = Decimal(0)
+    # 有填成本的餐飲品項（menu_items.unit_cost → 成交快照）：營收與成本認列進毛利。
+    # menu_known_revenue 是 menu_revenue 的子集，**不要再加一次進營業額**。
+    menu_known_revenue: Decimal = Decimal(0)
+    menu_cogs: Decimal = Decimal(0)
     manual_discount_total: Decimal = Decimal(0)
     # 贈品：原價價值與成本各自獨立成桶。**贈品成本絕不混進商品毛利**——營收 0 加全額成本
     # 會讓毛利率失真；贈品的代價要單獨看見，不是把毛利拉成負的。
@@ -1002,23 +1006,46 @@ class SalesRepository:
         catalog_known_revenue = Decimal(catalog_row[1])
         catalog_cogs = Decimal(catalog_row[2])
 
-        # 餐飲/內用營收：全額認列但成本未建模（同 catalog，計入 unknown_cost、不灌毛利率）。
-        menu_revenue = Decimal(
-            (
-                await self._session.execute(
-                    select(func.coalesce(func.sum(SaleLine.net_amount), 0))
-                    .join(Sale, SaleLine.sale_id == Sale.id)
-                    .where(
-                        Sale.store_id == store_id,
-                        Sale.status != SaleStatus.VOIDED,
-                        Sale.created_at >= date_from,
-                        Sale.created_at < date_to,
-                        SaleLine.line_type == SaleLineType.MENU,
-                        SaleLine.line_kind != SaleLineKind.GIFT,
-                    )
+        # 餐飲/內用營收：與一般商品同口徑分成「有成本快照」與「成本未知」兩桶。
+        # 咖啡/甜點的成本填在品項上、成交時凍結；沒填的仍走「不假造毛利」的舊路。
+        menu_row = (
+            await self._session.execute(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (SaleLine.cost_snapshot.is_(None), SaleLine.net_amount),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (SaleLine.cost_snapshot.is_not(None), SaleLine.net_amount),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                    func.coalesce(func.sum(SaleLine.cost_snapshot), 0),
                 )
-            ).scalar_one()
-        )
+                .join(Sale, SaleLine.sale_id == Sale.id)
+                .where(
+                    Sale.store_id == store_id,
+                    Sale.status != SaleStatus.VOIDED,
+                    Sale.created_at >= date_from,
+                    Sale.created_at < date_to,
+                    SaleLine.line_type == SaleLineType.MENU,
+                    SaleLine.line_kind != SaleLineKind.GIFT,
+                )
+            )
+        ).one()
+        menu_unknown_revenue = Decimal(menu_row[0])
+        menu_known_revenue = Decimal(menu_row[1])
+        menu_cogs = Decimal(menu_row[2])
+        menu_revenue = menu_unknown_revenue + menu_known_revenue
 
         tender_rows = list(
             await self._session.execute(
@@ -1099,7 +1126,7 @@ class SalesRepository:
             )
         ).one()
 
-        unknown_cost_revenue += catalog_revenue + menu_revenue
+        unknown_cost_revenue += catalog_revenue + menu_unknown_revenue
         return SalesMarginComponents(
             manual_discount_total=manual_discount_total,
             gift_retail_value=Decimal(gift_row[0]),
@@ -1114,6 +1141,8 @@ class SalesRepository:
             catalog_known_revenue=catalog_known_revenue,
             catalog_cogs=catalog_cogs,
             menu_revenue=menu_revenue,
+            menu_known_revenue=menu_known_revenue,
+            menu_cogs=menu_cogs,
             unknown_cost_revenue=unknown_cost_revenue,
             cash_received=cash_received,
             store_credit_redeemed=store_credit_redeemed,

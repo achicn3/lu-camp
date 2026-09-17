@@ -141,6 +141,10 @@ class SalesMarginReport(BaseModel):
     owned_cogs: NTDAmount  # 自有序號成本
     bulk_cogs: NTDAmount  # 自有散裝成本
     catalog_cogs: NTDAmount = Decimal(0)  # 一般商品成本（有成交成本快照者）
+    # 餐飲成本與毛利只認**有填成本**的品項；沒填成本的餐飲營收留在 unknown_cost_sales，
+    # 不可用 food_revenue − food_cogs 反推（那等於把成本未知當成 0）。
+    food_cogs: NTDAmount = Decimal(0)
+    food_margin: NTDAmount = Decimal(0)
     consignment_commission_income: NTDAmount
     gross_margin: NTDAmount
     gross_margin_rate: RateOpt  # 毛利 ÷ 已知成本營收；分母 0 → null

@@ -24,6 +24,10 @@ class MenuItem(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(150))
     # 含稅整數元售價（與全系統金額慣例一致，§6）。
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 成本（含耗材、包材等，由店主自行加總後填入；可空＝不知道）。裁示 2026-09-17。
+    # **不做原料主檔與配方用量**：要讓系統自動算單品成本得建原料、單位換算與扣庫存，
+    # 單店不划算。成交當下會快照到 `sale_lines.cost_snapshot`，日後調整不改寫歷史毛利。
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     # 磚分組（如「咖啡」「茶飲」「點心」）；可空，POS 之後可據此分區。
     category: Mapped[str | None] = mapped_column(String(50))
     # POS 是否可點（上架/停售切換，不影響歷史）。

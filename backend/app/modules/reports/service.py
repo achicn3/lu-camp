@@ -489,6 +489,8 @@ class ReportsService:
             owned_cogs=bd.owned_cogs,
             bulk_cogs=bd.bulk_cogs,
             catalog_cogs=bd.catalog_cogs,
+            food_cogs=bd.food_cogs,
+            food_margin=bd.food_margin,
             consignment_commission_income=bd.consignment_commission_income,
             gross_margin=bd.gross_margin,
             gross_margin_rate=bd.gross_margin_rate,

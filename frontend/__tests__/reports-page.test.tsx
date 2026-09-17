@@ -133,6 +133,8 @@ const SALES_MARGIN_DATA = {
   gross_margin_rate: "0.425",
   unknown_cost_sales: "20000",
   food_revenue: "88000",
+  food_cogs: "26000",
+  food_margin: "34000",  // 只認有填成本的餐飲：不等於 88000−26000
   secondhand_revenue: "312000",
   cash_received: "450000",
   store_credit_redeemed: "50000",
@@ -726,6 +728,11 @@ describe("ReportsPage", () => {
     // 餐飲/二手分列
     expect(screen.getByText("88,000")).toBeTruthy(); // food_revenue
     expect(screen.getByText("312,000")).toBeTruthy(); // secondhand_revenue
+    // 餐飲成本與毛利：毛利由後端算（只認有填成本的品項），前端不可用營收−成本反推
+    expect(screen.getByText("餐飲成本")).toBeTruthy();
+    expect(screen.getByText("26,000")).toBeTruthy(); // food_cogs
+    expect(screen.getByText("餐飲毛利（已填成本的品項）")).toBeTruthy();
+    expect(screen.getByText("34,000")).toBeTruthy(); // food_margin（≠ 88,000−26,000）
     // transaction_count
     expect(screen.getByText("200")).toBeTruthy();
     // 支付手續費（docs/30 §7）：淨毛利、手續費合計、付款方式淨收款（含 LINE Pay 列）

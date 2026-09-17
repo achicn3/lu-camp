@@ -6006,6 +6006,8 @@ export interface components {
              * @default 0
              */
             sort_order: number;
+            /** Unit Cost */
+            unit_cost?: number | string | null;
             /** Unit Price */
             unit_price: number | string;
         };
@@ -6023,6 +6025,8 @@ export interface components {
             sort_order: number;
             /** Store Id */
             store_id: number;
+            /** Unit Cost */
+            unit_cost: string | null;
             /** Unit Price */
             unit_price: string;
         };
@@ -6039,6 +6043,8 @@ export interface components {
             name?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+            /** Unit Cost */
+            unit_cost?: number | string | null;
             /** Unit Price */
             unit_price?: number | string | null;
         };
@@ -7035,6 +7041,16 @@ export interface components {
              * Format: date-time
              */
             date_to: string;
+            /**
+             * Food Cogs
+             * @default 0
+             */
+            food_cogs: string;
+            /**
+             * Food Margin
+             * @default 0
+             */
+            food_margin: string;
             /** Food Revenue */
             food_revenue: string;
             /**

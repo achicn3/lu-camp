@@ -41,6 +41,7 @@ class MenuService:
         *,
         name: str,
         unit_price: Decimal,
+        unit_cost: Decimal | None = None,
         category: str | None = None,
         sort_order: int = 0,
         actor_user_id: int,
@@ -53,6 +54,7 @@ class MenuService:
                 store_id=store_id,
                 name=name,
                 unit_price=unit_price,
+                unit_cost=unit_cost,
                 category=category,
                 sort_order=sort_order,
             )
@@ -64,7 +66,11 @@ class MenuService:
             action="CREATE_MENU_ITEM",
             entity_type="menu_item",
             entity_id=str(item.id),
-            after={"name": name, "unit_price": str(unit_price)},
+            after={
+                "name": name,
+                "unit_price": str(unit_price),
+                "unit_cost": None if unit_cost is None else str(unit_cost),
+            },
         )
         return item
 
@@ -75,6 +81,8 @@ class MenuService:
         *,
         name: str | None = None,
         unit_price: Decimal | None = None,
+        # 成本沿用 category 的 _UNSET 慣例：要能區分「沒提供（不變）」與「明確清空」。
+        unit_cost: Decimal | None | object = _UNSET,
         category: str | None | object = _UNSET,
         sort_order: int | None = None,
         is_available: bool | None = None,
@@ -93,6 +101,8 @@ class MenuService:
         if unit_price is not None:
             _validate_price(unit_price)
             item.unit_price = unit_price
+        if unit_cost is not _UNSET:
+            item.unit_cost = unit_cost  # type: ignore[assignment]
         if category is not _UNSET:
             item.category = category  # type: ignore[assignment]
         if sort_order is not None:

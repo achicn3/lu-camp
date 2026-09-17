@@ -480,6 +480,8 @@ async def sales_margin(
             ["毛利率", rate],
             ["成本未知營收", format_ntd(report.unknown_cost_sales)],
             ["餐飲營收", format_ntd(report.food_revenue)],
+            ["餐飲成本", format_ntd(report.food_cogs)],
+            ["餐飲毛利（已填成本的品項）", format_ntd(report.food_margin)],
             ["二手營收", format_ntd(report.secondhand_revenue)],
             ["現金淨收款（扣退款）", format_ntd(report.cash_received)],
             ["購物金淨收款（扣退款）", format_ntd(report.store_credit_redeemed)],

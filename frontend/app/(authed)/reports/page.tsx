@@ -1108,6 +1108,10 @@ function SalesMarginPanel() {
                   <td><MoneyText value={report.catalog_cogs} /></td>
                 </tr>
                 <tr>
+                  <td>餐飲成本</td>
+                  <td><MoneyText value={report.food_cogs} /></td>
+                </tr>
+                <tr>
                   <td>臨時折扣</td>
                   <td><MoneyText value={report.manual_discount_total} /></td>
                 </tr>
@@ -1150,6 +1154,11 @@ function SalesMarginPanel() {
                 <tr>
                   <td>餐飲營收</td>
                   <td><MoneyText value={report.food_revenue} /></td>
+                </tr>
+                <tr>
+                  {/* 後端同一口徑算好；沒填成本的餐飲留在「成本不明銷售額」，這裡不反推。 */}
+                  <td>餐飲毛利（已填成本的品項）</td>
+                  <td><MoneyText value={report.food_margin} /></td>
                 </tr>
                 <tr>
                   <td>成本不明銷售額</td>

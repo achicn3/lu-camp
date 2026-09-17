@@ -5,6 +5,7 @@
 售價不合法→422。寫入端點成功才 commit（get_session 不自動 commit）。
 """
 
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -53,6 +54,7 @@ async def create_menu_item(
             user.store_id,
             name=body.name,
             unit_price=body.unit_price,
+            unit_cost=body.unit_cost,
             category=body.category,
             sort_order=body.sort_order,
             actor_user_id=user.id,
@@ -78,6 +80,10 @@ async def update_menu_item(
     category_kw: dict[str, str | None] = (
         {"category": body.category} if "category" in body.model_fields_set else {}
     )
+    # 成本同理：明確送 null＝清空（不知道成本），沒送＝不變。
+    cost_kw: dict[str, Decimal | None] = (
+        {"unit_cost": body.unit_cost} if "unit_cost" in body.model_fields_set else {}
+    )
     try:
         item = await MenuService(session).update_menu_item(
             user.store_id,
@@ -88,6 +94,7 @@ async def update_menu_item(
             is_available=body.is_available,
             actor_user_id=user.id,
             **category_kw,
+            **cost_kw,
         )
     except MenuItemNotFound as exc:
         await session.rollback()

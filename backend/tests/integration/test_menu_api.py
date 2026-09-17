@@ -70,6 +70,58 @@ async def test_create_list_menu_item(client: httpx.AsyncClient, db_session: Asyn
     assert [i["name"] for i in listed.json()] == ["手沖-耶加"]
 
 
+async def test_create_with_cost_and_update_it(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """成本可填、可改、可清空（裁示 2026-09-17）。
+
+    餐飲原本完全沒有成本概念，賣出時成本記成未知，報表只看得到營收、算不出毛利。
+    成本由店主自行加總（豆子、耗材、包材…）後填一個數字——要讓系統自動算得建原料
+    主檔與配方用量，單店不划算。
+    """
+    _, mgr, _ = await _seed(db_session)
+    created = await client.post(
+        "/api/v1/menu-items",
+        json={"name": "拿鐵", "unit_price": "150", "unit_cost": "45"},
+        headers=_auth(mgr),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["unit_cost"] == "45"  # 字串傳輸（§11）
+    item_id = created.json()["id"]
+
+    changed = await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"unit_cost": "52"}, headers=_auth(mgr)
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["unit_cost"] == "52"
+    assert changed.json()["unit_price"] == "150"  # 未提供的欄位不動
+
+    cleared = await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"unit_cost": None}, headers=_auth(mgr)
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["unit_cost"] is None  # 不知道成本就誠實留空，不要填 0
+
+
+async def test_cost_is_optional_and_must_be_a_whole_non_negative_amount(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, mgr, _ = await _seed(db_session)
+    no_cost = await client.post(
+        "/api/v1/menu-items", json={"name": "白開水", "unit_price": "10"}, headers=_auth(mgr)
+    )
+    assert no_cost.status_code == 201
+    assert no_cost.json()["unit_cost"] is None
+
+    for bad in ("-1", "12.5"):
+        resp = await client.post(
+            "/api/v1/menu-items",
+            json={"name": f"壞成本{bad}", "unit_price": "100", "unit_cost": bad},
+            headers=_auth(mgr),
+        )
+        assert resp.status_code == 422, f"{bad} 應被擋下：{resp.text}"
+
+
 async def test_duplicate_name_409(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     _, mgr, _ = await _seed(db_session)
     payload = {"name": "拿鐵", "unit_price": "150"}

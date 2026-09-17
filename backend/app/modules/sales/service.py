@@ -170,6 +170,10 @@ class MarginBreakdown:
     payment_methods: tuple[tuple[str, Decimal, Decimal], ...]
     # 臨時折扣（少收的錢）與贈品（送出去的成本）性質不同，各自成桶、不互相混。
     catalog_cogs: Decimal = Decimal(0)  # 一般商品成本（有成本快照者）
+    # 餐飲成本與毛利**只認有填成本的品項**：沒填成本的餐飲營收留在 unknown_cost_sales，
+    # 用 food_revenue − food_cogs 反推會把它當成零成本，毛利灌水。
+    food_cogs: Decimal = Decimal(0)
+    food_margin: Decimal = Decimal(0)
     manual_discount_total: Decimal = Decimal(0)
     gift_retail_value: Decimal = Decimal(0)
     gift_cost: Decimal = Decimal(0)
@@ -2148,23 +2152,28 @@ class SalesService:
             + comp.consignment_bulk_revenue
             + comp.unknown_cost_revenue
             + comp.catalog_known_revenue
+            + comp.menu_known_revenue
         )
         recognized_revenue = (
             comp.owned_serialized_revenue
             + comp.owned_bulk_revenue
             + comp.unknown_cost_revenue
             + comp.catalog_known_revenue
+            + comp.menu_known_revenue
             + commission
         )
         owned_margin = comp.owned_serialized_revenue - comp.owned_serialized_cogs
         bulk_margin = comp.owned_bulk_revenue - comp.owned_bulk_cogs
         # 有成本快照的一般商品也認列毛利（收貨帶入進價後才有；沒有的仍走「成本未知」桶）。
         catalog_margin = comp.catalog_known_revenue - comp.catalog_cogs
-        gross_margin = owned_margin + bulk_margin + catalog_margin + commission
+        # 餐飲同理：品項有填成本才認毛利，沒填的留在「成本未知」桶（裁示 2026-09-17）。
+        menu_margin = comp.menu_known_revenue - comp.menu_cogs
+        gross_margin = owned_margin + bulk_margin + catalog_margin + menu_margin + commission
         known_cost_revenue = (
             comp.owned_serialized_revenue
             + comp.owned_bulk_revenue
             + comp.catalog_known_revenue
+            + comp.menu_known_revenue
             + commission
         )
         rate: Decimal | None = (
@@ -2187,6 +2196,8 @@ class SalesService:
             store_credit_redeemed=comp.store_credit_redeemed
             - refund_tenders.get(TenderType.STORE_CREDIT, Decimal(0)),
             transaction_count=comp.transaction_count,
+            food_cogs=comp.menu_cogs,
+            food_margin=menu_margin,
             food_revenue=comp.menu_revenue,
             secondhand_revenue=recognized_revenue - comp.menu_revenue,
             payment_fee_total=comp.payment_fee_total,
@@ -3123,7 +3134,13 @@ class SalesService:
                 menu_item_id=item.id,
                 description=item.name,
                 qty=line.qty,
-                **self._line_amounts(disc, qty=line.qty),  # 餐飲無成本模型 → cost 留 NULL
+                # 成本＝品項成本 × 數量，凍結於此（裁示 2026-09-17）。沒填成本就留 NULL
+                # ＝「成本未知」，報表照既有口徑處理——填 0 會讓毛利看起來是 100%。
+                **self._line_amounts(
+                    disc,
+                    qty=line.qty,
+                    cost=None if item.unit_cost is None else item.unit_cost * line.qty,
+                ),
             )
         )
         return item.unit_price * line.qty
