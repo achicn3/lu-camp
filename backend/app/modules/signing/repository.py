@@ -209,9 +209,23 @@ class SigningRepository:
         stmt = stmt.order_by(SignatureTask.id.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(stmt)).all())
 
-    async def get_agreement_by_version(self, version: int) -> AgreementVersion | None:
+    async def get_agreement_by_version(
+        self, store_id: int, version: int
+    ) -> AgreementVersion | None:
         result: AgreementVersion | None = await self._session.scalar(
-            select(AgreementVersion).where(AgreementVersion.version == version)
+            select(AgreementVersion).where(
+                AgreementVersion.store_id == store_id, AgreementVersion.version == version
+            )
+        )
+        return result
+
+    async def get_latest_agreement(self, store_id: int) -> AgreementVersion | None:
+        """該店版本號最大的一列＝目前生效的切結書。"""
+        result: AgreementVersion | None = await self._session.scalar(
+            select(AgreementVersion)
+            .where(AgreementVersion.store_id == store_id)
+            .order_by(AgreementVersion.version.desc())
+            .limit(1)
         )
         return result
 

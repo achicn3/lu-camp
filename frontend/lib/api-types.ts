@@ -88,6 +88,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agreements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Agreement
+         * @description 改切結書內文＝發新版本（201）；內容一字未改則沿用現版（200）。
+         */
+        post: operations["publishAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agreements/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Current Agreement
+         * @description 目前生效的切結書全文（店家沒改過就是內建版）。
+         */
+        get: operations["getCurrentAgreement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -3374,6 +3414,38 @@ export interface components {
             gt_365d: string;
             /** Lt 30D */
             lt_30d: string;
+        };
+        /**
+         * AgreementTextRead
+         * @description 目前生效的切結書全文（設定頁編輯視窗以它開場）。
+         */
+        AgreementTextRead: {
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * AgreementTextUpdateRequest
+         * @description 店家改切結書：整份覆蓋（標題＋內文）。
+         *
+         *     長度上限與 service 的 `_normalize_agreement_text` 同一組常數；正規化（CRLF、空行）
+         *     仍由 service 做，這裡只擋明顯過長／空白，避免把超大 payload 讀進來。
+         */
+        AgreementTextUpdateRequest: {
+            /** Body */
+            body: string;
+            /** Title */
+            title: string;
         };
         /** Format: date-time */
         AwareDateTime: string;
@@ -8063,6 +8135,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publishAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgreementTextUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementTextRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getCurrentAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgreementTextRead"];
                 };
             };
         };

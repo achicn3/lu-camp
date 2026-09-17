@@ -428,6 +428,9 @@ async def delete_customer_display_rows(session: AsyncSession, *, store_id: int) 
             "signature_task_events",
             "cart_sessions",
             "signature_tasks",
+            # 切結書版本列自 2026-09-17 起帶 store_id（店家可自行改內文），
+            # 不清掉的話後續刪 store 會被外鍵擋住。要排在 signature_tasks 之後。
+            "agreement_versions",
             "kiosk_pairing_codes",
             "kiosk_device_sessions",
             "terminal_kiosk_pairings",

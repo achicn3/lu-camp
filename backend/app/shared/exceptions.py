@@ -408,6 +408,13 @@ class SignatureContentMismatch(DomainError):
     這張收購——改了金額/品項就不可沿用舊簽署，須重新推送簽署。"""
 
 
+class InvalidAgreementText(DomainError):
+    """店家自訂的切結書標題/內文不合法（空白、超長）。
+
+    客人不能簽一張白紙，也不能簽一份在手持裝置上讀不完的東西。
+    """
+
+
 class AmegoNotConfigured(DomainError):
     """Amego 光貿 API 憑證未設定（AMEGO_APP_KEY 環境變數／店家統編）。
 

@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit_log
 from app.core.canonical import canonical_json_bytes
 from app.core.money import format_ntd
 from app.modules.customerdisplay.models import CartSessionEvent
@@ -45,6 +46,7 @@ from app.shared.enums import (
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
+    InvalidAgreementText,
     InvalidKioskPayout,
     InvalidSignatureImage,
     SignatureContentMismatch,
@@ -78,6 +80,37 @@ _PENDING_ACK_TTL = timedelta(seconds=60)
 _SIGNING_IDLE_TTL = timedelta(minutes=5)
 _SIGNED_CHECKOUT_TTL = timedelta(minutes=5)
 _ACTIVITY_WRITE_THROTTLE = timedelta(seconds=2)
+
+
+def _normalize_agreement_text(title: str, body: str) -> tuple[str, str]:
+    """把店家輸入的切結書內容正規化成「存進去就不會跑版」的形狀。
+
+    - CRLF/CR → LF：從 Word／網頁貼上的內容常帶 \r\n，不清掉手持端會多出空行。
+    - 去掉前後空白行；每行去掉行尾空白（尾隨空白在 pre-wrap 下會撐出怪縫）。
+    - 連續三個以上的空行壓成兩個：貼上的排版常帶一整片空行，會把內文擠出可視區。
+    空字串或超長一律拒絕——客人不能簽一張白紙，也不能簽一份螢幕上讀不完的東西。
+    """
+    clean_title = " ".join(title.replace("\r\n", "\n").replace("\r", "\n").split())
+    lines = [line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    collapsed: list[str] = []
+    for line in lines:
+        if line == "" and len(collapsed) >= 2 and collapsed[-1] == "" and collapsed[-2] == "":
+            continue
+        collapsed.append(line)
+    clean_body = "\n".join(collapsed).strip("\n")
+    if not clean_title:
+        raise InvalidAgreementText("切結書標題不可空白")
+    if len(clean_title) > agreements.MAX_AGREEMENT_TITLE_CHARS:
+        raise InvalidAgreementText(
+            f"切結書標題不可超過 {agreements.MAX_AGREEMENT_TITLE_CHARS} 字"
+        )
+    if not clean_body.strip():
+        raise InvalidAgreementText("切結書內文不可空白")
+    if len(clean_body) > agreements.MAX_AGREEMENT_BODY_CHARS:
+        raise InvalidAgreementText(
+            f"切結書內文不可超過 {agreements.MAX_AGREEMENT_BODY_CHARS} 字"
+        )
+    return clean_title, clean_body
 
 
 class SigningService:
@@ -167,7 +200,7 @@ class SigningService:
         agreement_version_id: int | None = None
         if data.kind is SignatureTaskKind.ACQUISITION_AFFIDAVIT:
             assert contact is not None  # 上方已強制此類型必有對象
-            agreement_version_id = (await self._get_or_seed_current_agreement()).id
+            agreement_version_id = (await self._get_or_seed_current_agreement(store_id)).id
             content = await self._enrich_affidavit_content(store_id, contact, contacts, content)
         elif data.kind is SignatureTaskKind.STORE_CREDIT_USE:
             assert contact is not None
@@ -1443,23 +1476,70 @@ class SigningService:
             return None
         return await self._repo.get_agreement_by_id(task.agreement_version_id)
 
-    async def _get_or_seed_current_agreement(self) -> AgreementVersion:
-        """取當前切結書版本；首次使用時自 agreements.AGREEMENT_TEXTS lazy 落庫。
+    async def _get_or_seed_current_agreement(self, store_id: int) -> AgreementVersion:
+        """取該店當前切結書版本；沒有任何一版時自 agreements.AGREEMENT_TEXTS lazy 落庫。
 
-        版本列不可變：改版＝AGREEMENT_TEXTS 加新條目→此處落新列，舊簽名仍指舊列。
-        單店單機、無並發種子競態（DB 唯一約束 uq_agreement_versions_version 為最終防線）。
+        版本列不可變：改版（程式內建改版或店家在設定頁改內文）＝落新列，舊簽名仍指舊列。
+        取「版本號最大」而非內建常數——店家自己改過之後，生效的是他那一版。
+        單店單機、無並發種子競態（唯一約束 uq_agreement_versions_store_version 為最終防線）。
         """
+        latest = await self._repo.get_latest_agreement(store_id)
+        if latest is not None and latest.version >= agreements.CURRENT_AGREEMENT_VERSION:
+            return latest
         version = agreements.CURRENT_AGREEMENT_VERSION
-        existing = await self._repo.get_agreement_by_version(version)
+        existing = await self._repo.get_agreement_by_version(store_id, version)
         if existing is not None:
             return existing
         title, body = agreements.AGREEMENT_TEXTS[version]
         try:
             return await self._repo.add_agreement(
-                AgreementVersion(version=version, title=title, body=body)
+                AgreementVersion(store_id=store_id, version=version, title=title, body=body)
             )
         except IntegrityError as exc:  # 首次落庫競態：另一筆先種成功
             raise SignatureTaskConflict("切結書版本初始化衝突，請重試") from exc
+
+    async def get_current_agreement(self, store_id: int) -> AgreementVersion:
+        """設定頁讀「目前這份」；沒改過就是內建版（要先落庫才有版本號可顯示）。"""
+        return await self._get_or_seed_current_agreement(store_id)
+
+    async def publish_agreement(
+        self, store_id: int, *, title: str, body: str, actor_user_id: int
+    ) -> tuple[AgreementVersion, bool]:
+        """店家改切結書內文＝發新版本，回 (版本列, 是否真的發了新版)。
+
+        **不改舊列**：已簽的簽名綁著簽署當下那一版，改字會讓「客人當初簽的是哪一份」
+        再也對不出來。內容一字未改就沿用現版，否則開關編輯視窗都會多一版、版本號失去意義。
+        """
+        normalized_title, normalized_body = _normalize_agreement_text(title, body)
+        current = await self._get_or_seed_current_agreement(store_id)
+        # 比對前把現版也正規化：內建版的內文結尾帶換行，不先對齊的話「原封不動按儲存」
+        # 會被當成有改，每開一次編輯視窗就多一版。
+        current_title, current_body = _normalize_agreement_text(current.title, current.body)
+        if current_title == normalized_title and current_body == normalized_body:
+            return current, False
+        try:
+            created = await self._repo.add_agreement(
+                AgreementVersion(
+                    store_id=store_id,
+                    version=current.version + 1,
+                    title=normalized_title,
+                    body=normalized_body,
+                    created_by_user_id=actor_user_id,
+                )
+            )
+        except IntegrityError as exc:  # 兩人同時儲存：版本號撞唯一鍵
+            raise SignatureTaskConflict("切結書剛被其他人更新，請重新載入後再存") from exc
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="UPDATE_AGREEMENT_TEXT",
+            entity_type="agreement_version",
+            entity_id=str(created.id),
+            before={"version": current.version, "title": current.title, "body": current.body},
+            after={"version": created.version, "title": created.title, "body": created.body},
+        )
+        return created, True
 
     @staticmethod
     def _decode_signature(signature_image_base64: str) -> bytes:

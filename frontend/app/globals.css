@@ -3036,6 +3036,9 @@ body {
   max-height: 260px;
   overflow-y: auto;
   white-space: pre-wrap;
+  /* 店主可自訂內文（2026-09-17）：沒有空白的超長字串（網址、連續標點）不強制斷行
+     會把整個簽署框撐破，客人就按不到同意鈕了。 */
+  overflow-wrap: anywhere;
   line-height: 1.7;
   font-size: var(--text-md);
   padding: var(--sp-3);

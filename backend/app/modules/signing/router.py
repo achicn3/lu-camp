@@ -15,6 +15,8 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.customerdisplay.router import KioskMutationDep, KioskPrincipalDep
 from app.modules.signing.models import AgreementVersion, SignatureTask
 from app.modules.signing.schemas import (
+    AgreementTextRead,
+    AgreementTextUpdateRequest,
     KioskActivityRequest,
     KioskSignRequest,
     KioskTaskRead,
@@ -28,6 +30,7 @@ from app.shared.enums import SignatureTaskKind, SignatureTaskStatus, UserRole
 from app.shared.exceptions import (
     AcquisitionRequiresNationalId,
     ContactNotFound,
+    InvalidAgreementText,
     InvalidKioskPayout,
     InvalidSignatureImage,
     SignatureContentMismatch,
@@ -39,6 +42,8 @@ from app.shared.exceptions import (
 from app.shared.schemas import ListCountRead
 
 staff_router = APIRouter(prefix="/signing", tags=["signing"])
+# 切結書內文的維護端點獨立於 /signing：它屬於「設定」而非某一次簽署。
+agreements_router = APIRouter(prefix="/agreements", tags=["signing"])
 kiosk_router = APIRouter(prefix="/kiosk", tags=["kiosk"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -442,3 +447,34 @@ async def sign_kiosk_task(
     result = _to_kiosk_read(task, agreement)
     await session.commit()
     return result
+
+
+@agreements_router.get(
+    "/current", response_model=AgreementTextRead, operation_id="getCurrentAgreement"
+)
+async def get_current_agreement(session: SessionDep, user: ManagerDep) -> AgreementTextRead:
+    """目前生效的切結書全文（店家沒改過就是內建版）。"""
+    agreement = await SigningService(session).get_current_agreement(user.store_id)
+    await session.commit()  # lazy 落庫的內建版要保留，否則每次讀都重種
+    return AgreementTextRead.model_validate(agreement)
+
+
+@agreements_router.post("", response_model=AgreementTextRead, operation_id="publishAgreement")
+async def publish_agreement(
+    payload: AgreementTextUpdateRequest,
+    session: SessionDep,
+    user: ManagerDep,
+    response: Response,
+) -> AgreementTextRead:
+    """改切結書內文＝發新版本（201）；內容一字未改則沿用現版（200）。"""
+    try:
+        agreement, created = await SigningService(session).publish_agreement(
+            user.store_id, title=payload.title, body=payload.body, actor_user_id=user.id
+        )
+    except InvalidAgreementText as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except SignatureTaskConflict as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await session.commit()
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return AgreementTextRead.model_validate(agreement)

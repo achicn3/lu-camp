@@ -36,15 +36,24 @@ def _enum_col(enum_cls: type) -> Enum:
 
 
 class AgreementVersion(Base):
-    """切結書/條款版本（不可變；lazy 由 agreements.AGREEMENT_TEXTS 落庫）。"""
+    """切結書/條款版本（不可變；首次由 agreements.AGREEMENT_TEXTS 落庫，之後店家可改版）。
+
+    **版本號以店為單位遞增**（§4）：店家在設定頁改內文＝為自己這家店新增一列，
+    不影響其他分店的版本號，也不動舊列——已簽的簽名永遠指向簽署當下那一份全文。
+    `created_by_user_id` 為改版者（內建版本落庫時為 NULL）。
+    """
 
     __tablename__ = "agreement_versions"
-    __table_args__ = (UniqueConstraint("version", name="uq_agreement_versions_version"),)
+    __table_args__ = (
+        UniqueConstraint("store_id", "version", name="uq_agreement_versions_store_version"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
     version: Mapped[int] = mapped_column()
     title: Mapped[str] = mapped_column(String(100))
     body: Mapped[str] = mapped_column(Text)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -61,3 +61,51 @@
 .settings-history-table th {
   font-weight: 600;
 }
+
+/* 收購切結書：卡片預覽與編輯視窗。預覽刻意沿用 .kiosk-agreement-body，
+   店主看到的排版就是客人在手持裝置上看到的排版。 */
+.agreement-meta {
+  display: flex;
+  gap: var(--sp-5);
+  margin: 0 0 var(--sp-3);
+}
+.agreement-meta dt {
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.agreement-meta dd {
+  margin: 0;
+  font-weight: 600;
+}
+.agreement-title-preview {
+  font-weight: 700;
+  margin: 0 0 var(--sp-2);
+}
+.agreement-preview {
+  /* 店主可能貼上沒有空白的超長字串（網址、連續標點）：不強制斷行就會撐破版面 */
+  overflow-wrap: anywhere;
+  margin-bottom: var(--sp-3);
+}
+.agreement-dialog {
+  max-width: 720px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.agreement-textarea {
+  width: 100%;
+  font: inherit;
+  line-height: 1.7;
+  resize: vertical;
+}
+/* 內文可以很長，視窗本身要捲動；但「儲存／取消」不能被捲到看不見的地方，
+   否則店主打完字找不到儲存鈕。釘在視窗底部。 */
+.agreement-dialog .pos-dialog-actions {
+  position: sticky;
+  bottom: calc(var(--sp-4) * -1);
+  background: var(--surface);
+  padding-block: var(--sp-3);
+  margin-top: 0;
+}
+.agreement-dialog .agreement-preview {
+  max-height: 180px;
+}

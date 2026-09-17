@@ -698,6 +698,64 @@
         "title": "AgingBuckets",
         "type": "object"
       },
+      "AgreementTextRead": {
+        "description": "目前生效的切結書全文（設定頁編輯視窗以它開場）。",
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "title",
+          "body",
+          "created_at"
+        ],
+        "title": "AgreementTextRead",
+        "type": "object"
+      },
+      "AgreementTextUpdateRequest": {
+        "description": "店家改切結書：整份覆蓋（標題＋內文）。\n\n長度上限與 service 的 `_normalize_agreement_text` 同一組常數；正規化（CRLF、空行）\n仍由 service 做，這裡只擋明顯過長／空白，避免把超大 payload 讀進來。",
+        "properties": {
+          "body": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Body",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body"
+        ],
+        "title": "AgreementTextUpdateRequest",
+        "type": "object"
+      },
       "AwareDateTime": {
         "format": "date-time",
         "type": "string"
@@ -12986,6 +13044,80 @@
         "summary": "Void Acquisition",
         "tags": [
           "acquisition"
+        ]
+      }
+    },
+    "/api/v1/agreements": {
+      "post": {
+        "description": "改切結書內文＝發新版本（201）；內容一字未改則沿用現版（200）。",
+        "operationId": "publishAgreement",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementTextUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementTextRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Publish Agreement",
+        "tags": [
+          "signing"
+        ]
+      }
+    },
+    "/api/v1/agreements/current": {
+      "get": {
+        "description": "目前生效的切結書全文（店家沒改過就是內建版）。",
+        "operationId": "getCurrentAgreement",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementTextRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Current Agreement",
+        "tags": [
+          "signing"
         ]
       }
     },

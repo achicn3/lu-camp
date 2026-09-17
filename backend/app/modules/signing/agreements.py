@@ -104,3 +104,8 @@ AGREEMENT_TEXTS: dict[int, tuple[str, str]] = {
 }
 
 CURRENT_AGREEMENT_VERSION = max(AGREEMENT_TEXTS)
+
+
+# 店家自訂內容的長度上限（schema 與 service 共用同一組常數，避免兩邊各自放寬）。
+MAX_AGREEMENT_TITLE_CHARS = 100  # 與 agreement_versions.title 欄寬一致
+MAX_AGREEMENT_BODY_CHARS = 20000  # 手持裝置讀得完，也不讓單次請求變成大物件

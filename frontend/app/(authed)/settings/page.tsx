@@ -22,6 +22,7 @@ type PremiumSuggestionResponse = components["schemas"]["PremiumSuggestionRespons
 type PremiumRateHistoryRead = components["schemas"]["PremiumRateHistoryRead"];
 type SignatureRetentionReportItem =
   components["schemas"]["SignatureRetentionReportItem"];
+type AgreementText = components["schemas"]["AgreementTextRead"];
 
 /** 後端回 401/403 時用以標記「無權限」，與一般讀取失敗區分（驅動「需管理者權限」提示）。 */
 class ForbiddenError extends Error {}
@@ -947,6 +948,157 @@ function SignatureRetentionReportCard({
   );
 }
 
+
+// -- 收購切結書內文（店家可自行修改；改內容＝發新版本，舊版不動）--
+function AgreementCard() {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+
+  const agreementQuery = useQuery({
+    queryKey: ["agreement", "current"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/agreements/current");
+      if (!data) throw new Error(extractDetail(error) ?? "讀取切結書失敗");
+      return data;
+    },
+    retry: false,
+  });
+
+  const current = agreementQuery.data ?? null;
+  return (
+    <div className="card">
+      <h2>收購切結書</h2>
+      <p className="hint">
+        客人在手持裝置上簽的就是這份全文。改了內容會存成新版本，先前簽過的簽名仍對應
+        他當初看到的那一份，不會被改掉。
+      </p>
+      {agreementQuery.isError && (
+        <p role="alert" className="form-error">
+          {agreementQuery.error.message}
+        </p>
+      )}
+      {current !== null && (
+        <>
+          <dl className="agreement-meta">
+            <div>
+              <dt>目前版本</dt>
+              <dd>第 {current.version} 版</dd>
+            </div>
+            <div>
+              <dt>最後更新</dt>
+              <dd>{formatTaipeiDateTime(current.created_at)}</dd>
+            </div>
+          </dl>
+          <p className="agreement-title-preview">{current.title}</p>
+          <div className="kiosk-agreement-body agreement-preview">{current.body}</div>
+          <button type="button" className="btn-primary" onClick={() => setEditing(true)}>
+            編輯切結書內容
+          </button>
+        </>
+      )}
+      {editing && current !== null && (
+        <AgreementEditDialog
+          current={current}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            void queryClient.invalidateQueries({ queryKey: ["agreement"] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AgreementEditDialog({
+  current,
+  onClose,
+  onSaved,
+}: {
+  current: AgreementText;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(current.title);
+  const [body, setBody] = useState(current.body);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const { data, error: err } = await api.POST("/api/v1/agreements", {
+        body: { title, body },
+      });
+      if (!data) throw new Error(extractDetail(err) ?? "儲存失敗");
+      return data;
+    },
+    onSuccess: onSaved,
+    onError: (err: Error) => setError(err.message),
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    if (title.trim() === "") {
+      setError("標題不可空白");
+      return;
+    }
+    if (body.trim() === "") {
+      setError("內文不可空白");
+      return;
+    }
+    save.mutate();
+  }
+
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="編輯切結書內容">
+      <form className="card pos-dialog agreement-dialog" onSubmit={submit}>
+        <h2>編輯切結書內容</h2>
+        <p className="hint">
+          儲存後會成為第 {current.version + 1} 版，之後的收購都用新版；已簽過的不受影響。
+        </p>
+        <label className="field">
+          <span className="field-label">標題</span>
+          <input
+            value={title}
+            maxLength={100}
+            aria-label="切結書標題"
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">內文</span>
+          <textarea
+            className="agreement-textarea"
+            value={body}
+            rows={16}
+            maxLength={20000}
+            aria-label="切結書內文"
+            onChange={(e) => setBody(e.target.value)}
+          />
+        </label>
+        <p className="hint">{body.length} / 20000 字</p>
+        {/* 預覽用手持裝置同一組樣式：店主在這裡看到的排版，就是客人簽名時看到的排版 */}
+        <p className="field-label">手持裝置上的樣子</p>
+        <p className="agreement-title-preview">{title}</p>
+        <div className="kiosk-agreement-body agreement-preview">{body}</div>
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button type="submit" className="btn-primary" disabled={save.isPending}>
+            {save.isPending ? "儲存中…" : "儲存"}
+          </button>
+          <button type="button" className="btn-ghost" onClick={onClose} disabled={save.isPending}>
+            取消
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
 
@@ -1043,6 +1195,7 @@ export default function SettingsPage() {
         ) : (
           <PremiumHistoryCard history={historyQuery.data ?? []} />
         )}
+        <AgreementCard />
         <ReasonCard title="贈品原因" kind="gift-reasons" />
         <ReasonCard title="折扣原因" kind="discount-reasons" />
         {retentionReportQuery.isError ? (

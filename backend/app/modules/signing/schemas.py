@@ -9,6 +9,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.signing.agreements import (
+    MAX_AGREEMENT_BODY_CHARS,
+    MAX_AGREEMENT_TITLE_CHARS,
+)
 from app.shared.enums import PayoutMethod, SignatureTaskKind, SignatureTaskStatus
 
 MAX_SIGNATURE_BYTES = 512_000  # 手寫簽名 PNG 綽綽有餘；擋整頁截圖/照片級 payload
@@ -102,3 +106,26 @@ class SignatureRetentionReportItem(BaseModel):
     retention_until: datetime
     reported_at: datetime
     signature_png_retained: bool
+
+
+class AgreementTextRead(BaseModel):
+    """目前生效的切結書全文（設定頁編輯視窗以它開場）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    version: int
+    title: str
+    body: str
+    created_at: datetime
+
+
+class AgreementTextUpdateRequest(BaseModel):
+    """店家改切結書：整份覆蓋（標題＋內文）。
+
+    長度上限與 service 的 `_normalize_agreement_text` 同一組常數；正規化（CRLF、空行）
+    仍由 service 做，這裡只擋明顯過長／空白，避免把超大 payload 讀進來。
+    """
+
+    title: str = Field(min_length=1, max_length=MAX_AGREEMENT_TITLE_CHARS)
+    body: str = Field(min_length=1, max_length=MAX_AGREEMENT_BODY_CHARS)

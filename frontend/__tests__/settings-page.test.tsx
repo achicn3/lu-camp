@@ -76,6 +76,14 @@ const HISTORY = [
   },
 ];
 
+const AGREEMENT = {
+  id: 7,
+  version: 2,
+  title: "二手商品讓售切結書 暨 個人資料告知同意書",
+  body: "一、物品來源保證\n本人切結保證……\n\n二、交易確認\n本人已逐項確認……",
+  created_at: "2026-09-01T02:00:00Z",
+};
+
 type FetchRoute = (url: string, init?: RequestInit) => Response | null;
 
 function stubFetch(route: FetchRoute) {
@@ -110,6 +118,7 @@ function renderPage() {
 
 function defaultStub(overrides?: Partial<{ settings: unknown; suggestion: unknown; history: unknown }>) {
   stubFetch((url) => {
+    if (url.includes("/agreements")) return json(AGREEMENT);
     if (url.includes("/settings/premium-rate/history")) return json(overrides?.history ?? HISTORY);
     if (url.includes("/settings")) return json(overrides?.settings ?? SETTINGS);
     if (url.includes("/premium-suggestion/today")) return json(overrides?.suggestion ?? SUGGESTION);
@@ -394,5 +403,88 @@ describe("/settings", () => {
     expect(await screen.findByText("溢價率變更紀錄")).toBeDefined();
     expect(screen.getByText("8%")).toBeDefined(); // old
     expect(screen.getByText(/調高溢價率/)).toBeDefined(); // reason
+  });
+
+  it("切結書卡片：顯示目前版本與全文，按鈕可開啟編輯視窗並帶入現有內容", async () => {
+    loginAs("MANAGER");
+    defaultStub();
+    renderPage();
+
+    expect(await screen.findByText("收購切結書")).toBeTruthy();
+    expect(await screen.findByText("第 2 版")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "編輯切結書內容" }));
+
+    const dialog = screen.getByRole("dialog", { name: "編輯切結書內容" });
+    expect(dialog).toBeTruthy();
+    // 初始內容＝現在這份，不是空白
+    expect((screen.getByLabelText("切結書標題") as HTMLInputElement).value).toBe(AGREEMENT.title);
+    expect((screen.getByLabelText("切結書內文") as HTMLTextAreaElement).value).toBe(AGREEMENT.body);
+  });
+
+  it("切結書：儲存送出整份內容；取消則不送任何請求", async () => {
+    loginAs("MANAGER");
+    const posted: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/agreements") && init?.method === "POST") {
+        posted.push(String(init.body));
+        return json({ ...AGREEMENT, version: 3, body: "新內文" }, 201);
+      }
+      if (url.includes("/agreements")) return json(AGREEMENT);
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      return null;
+    });
+    renderPage();
+    await screen.findByRole("button", { name: "編輯切結書內容" });
+
+    // 取消：不得送出
+    await userEvent.click(screen.getByRole("button", { name: "編輯切結書內容" }));
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(posted).toEqual([]);
+
+    await userEvent.click(screen.getByRole("button", { name: "編輯切結書內容" }));
+    const textarea = screen.getByLabelText("切結書內文");
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, "新內文");
+    await userEvent.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() => expect(posted.length).toBe(1));
+    expect(JSON.parse(posted[0])).toEqual({ title: AGREEMENT.title, body: "新內文" });
+  });
+
+  it("切結書：內文清空不送出，直接提示（客人不能簽一張白紙）", async () => {
+    loginAs("MANAGER");
+    const posted: string[] = [];
+    stubFetch((url, init) => {
+      if (url.includes("/agreements") && init?.method === "POST") {
+        posted.push(String(init.body));
+        return json(AGREEMENT, 201);
+      }
+      if (url.includes("/agreements")) return json(AGREEMENT);
+      if (url.includes("/settings/premium-rate/history")) return json(HISTORY);
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/premium-suggestion/today")) return json(SUGGESTION);
+      return null;
+    });
+    renderPage();
+    await screen.findByRole("button", { name: "編輯切結書內容" });
+    await userEvent.click(screen.getByRole("button", { name: "編輯切結書內容" }));
+    await userEvent.clear(screen.getByLabelText("切結書內文"));
+    await userEvent.click(screen.getByRole("button", { name: "儲存" }));
+
+    expect(await screen.findByText("內文不可空白")).toBeTruthy();
+    expect(posted).toEqual([]);
+  });
+
+  it("切結書預覽與手持裝置同一組樣式，超長無空白字串不得撐破版面", async () => {
+    loginAs("MANAGER");
+    defaultStub();
+    renderPage();
+    await screen.findByRole("button", { name: "編輯切結書內容" });
+    const preview = document.querySelector(".agreement-preview");
+    expect(preview).toBeTruthy();
+    // 同時掛 kiosk 的樣式 class：店主看到的排版＝客人看到的排版
+    expect(preview!.classList.contains("kiosk-agreement-body")).toBe(true);
   });
 });
