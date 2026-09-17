@@ -30,9 +30,7 @@ ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value)
 @router.get("/today", response_model=OpeningCheckTodayRead, operation_id="getOpeningCheckToday")
 async def get_today(session: SessionDep, user: StaffDep) -> OpeningCheckTodayRead:
     """今天做到哪。裝置狀態不在這裡——前端直接問 hardware-agent。"""
-    result = await OpeningCheckService(session).today(user.store_id)
-    await session.commit()  # 首次讀取會建立今天的狀態列
-    return result
+    return await OpeningCheckService(session).today(user.store_id)  # 唯讀，不寫庫
 
 
 @router.post(
@@ -57,14 +55,14 @@ async def set_item_done(
     return result
 
 
-@router.post(
-    "/today/skip", response_model=OpeningCheckTodayRead, operation_id="skipOpeningCheck"
-)
+@router.post("/today/skip", response_model=OpeningCheckTodayRead, operation_id="skipOpeningCheck")
 async def skip(
     payload: OpeningCheckSkipRequest, session: SessionDep, user: StaffDep
 ) -> OpeningCheckTodayRead:
     """今天略過一個自動項目（裁示：不必填原因）；明天會再檢查一次。"""
-    result = await OpeningCheckService(session).skip(user.store_id, payload.key)
+    result = await OpeningCheckService(session).skip(
+        user.store_id, payload.key, skipped=payload.skipped
+    )
     await session.commit()
     return result
 
@@ -79,7 +77,7 @@ async def create_item(
     payload: OpeningCheckItemCreateRequest, session: SessionDep, user: ManagerDep
 ) -> OpeningCheckItemRead:
     item = await OpeningCheckService(session).create_item(
-        user.store_id, label=payload.label, href=payload.href
+        user.store_id, label=payload.label, href=payload.href, actor_user_id=user.id
     )
     await session.commit()
     return OpeningCheckItemRead(id=item.id, label=item.label, href=item.href, done=False)
@@ -92,7 +90,9 @@ async def create_item(
 )
 async def delete_item(item_id: int, session: SessionDep, user: ManagerDep) -> None:
     """刪除＝封存：已勾過的歷史紀錄還指著它。"""
-    if not await OpeningCheckService(session).archive_item(user.store_id, item_id):
+    if not await OpeningCheckService(session).archive_item(
+        user.store_id, item_id, actor_user_id=user.id
+    ):
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到檢查項目")
     await session.commit()

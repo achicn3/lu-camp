@@ -9,6 +9,7 @@ import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react
 import { AGENT_SIMULATED_EVENT, fetchSimulatedDevices } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { decodeSession, logout, readTokenRole } from "@/lib/auth";
+import { useOpeningCheckStatus } from "@/features/openingcheck/status";
 import { useCurrentRole } from "@/lib/useCurrentRole";
 import { UNAUTHORIZED_EVENT, getToken, subscribeToken } from "@/lib/token";
 
@@ -133,15 +134,12 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
 
   // 開店前檢查（裁示 2026-09-17）：每天第一次進系統自動帶到那頁，未完成時選單留紅點。
   // 「今天有沒有導過」記在瀏覽器：導向是**這台裝置**的行為，完成狀態才是每店每日共用的。
-  const openingCheck = useQuery({
-    queryKey: ["opening-check", "today"],
-    queryFn: async () => (await api.GET("/api/v1/opening-check/today")).data ?? null,
-    enabled: token !== null,
-  });
+  // 與檢查頁共用同一份判斷（含裝置狀態）：兩邊各自算會出現「頁面說沒做完、選單說做完了」。
+  const openingCheck = useOpeningCheckStatus(token !== null && decodeSession() !== null);
 
   useEffect(() => {
-    const data = openingCheck.data;
-    if (data == null || data.completed) return;
+    const data = openingCheck.today.data;
+    if (data === undefined || !openingCheck.incomplete) return;
     if (pathname === "/opening-check" || pathname === "/login") return;
     // 一天只帶一次：沒做完也不擋，店員要去結帳就去（裁示：不擋，只跳一次＋紅點）。
     const mark = `lu-camp.opening-check.${data.business_date}`;
@@ -152,7 +150,7 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
       return; // 讀不到 localStorage（無痕/封鎖）就不自動導向，免得每次換頁都被拉走
     }
     router.replace("/opening-check");
-  }, [openingCheck.data, pathname, router]);
+  }, [openingCheck.today.data, openingCheck.incomplete, pathname, router]);
 
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
@@ -164,12 +162,9 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     item.ready ? (
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
-        {item.href === "/opening-check" &&
-          openingCheck.isSuccess &&
-          openingCheck.data !== null &&
-          !openingCheck.data.completed && (
-            <span className="nav-dot" aria-label="開店前檢查尚未完成" />
-          )}
+        {item.href === "/opening-check" && openingCheck.incomplete && (
+          <span className="nav-dot" aria-label="開店前檢查尚未完成" />
+        )}
         {item.href === "/einvoice-queue" &&
           einvoiceAttention.isSuccess &&
           einvoiceAttention.data > 0 && (
@@ -199,6 +194,10 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
               onClick={() => setMoreOpen(true)}
             >
               <span aria-hidden="true">☰</span> 選單
+              {/* 紅點畫在抽屜裡的連結上等於沒有：店員不點開就看不到。聚合到按鈕本身。 */}
+              {openingCheck.incomplete && (
+                <span className="nav-dot" aria-label="開店前檢查尚未完成" />
+              )}
             </button>
           )}
           {visible(PRIMARY_NAV).map((item) => renderLink(item))}

@@ -2524,6 +2524,16 @@
         "title": "CashSessionRead",
         "type": "object"
       },
+      "CashSessionState": {
+        "description": "開帳狀態三態。\n\n只有「有沒有 OPEN 的班別」是不夠的：昨天忘記關帳的話，今天會被當成已經開好帳，\n今天的現金收入被算進昨天的班別，對帳永遠對不平（§7 不變量 4）。",
+        "enum": [
+          "OPEN_TODAY",
+          "STALE",
+          "NONE"
+        ],
+        "title": "CashSessionState",
+        "type": "string"
+      },
       "CashSessionStatus": {
         "description": "現金抽屜班別狀態。",
         "enum": [
@@ -7871,6 +7881,7 @@
             "anyOf": [
               {
                 "maxLength": 200,
+                "pattern": "^/",
                 "type": "string"
               },
               {
@@ -7942,13 +7953,18 @@
         "type": "object"
       },
       "OpeningCheckSkipRequest": {
-        "description": "略過一個自動項目（`cash_session` 或 `device:<kind>:<id>`）。裁示：不必填原因。",
+        "description": "略過／取消略過一個自動項目。裁示：不必填原因。\n\nkey 只收認得的兩種：打錯字會靜默存進陣列、永遠不生效，店員還以為略過了。",
         "properties": {
           "key": {
             "maxLength": 100,
             "minLength": 1,
             "title": "Key",
             "type": "string"
+          },
+          "skipped": {
+            "default": true,
+            "title": "Skipped",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7968,6 +7984,9 @@
           "cash_session_open": {
             "title": "Cash Session Open",
             "type": "boolean"
+          },
+          "cash_session_state": {
+            "$ref": "#/components/schemas/CashSessionState"
           },
           "completed": {
             "title": "Completed",
@@ -7990,6 +8009,7 @@
         },
         "required": [
           "business_date",
+          "cash_session_state",
           "cash_session_open",
           "items",
           "skipped_keys",

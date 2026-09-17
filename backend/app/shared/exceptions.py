@@ -25,6 +25,10 @@ class ReasonNotFound(DomainError):
     """贈品／折扣原因代碼不存在或不屬本店。"""
 
 
+class OpeningCheckConflict(DomainError):
+    """開店前檢查的今日狀態列建立衝突（同一早兩台裝置同時開頁）。"""
+
+
 class ReasonConflict(DomainError):
     """原因代碼衝突（同店同 code 已存在）。"""
 

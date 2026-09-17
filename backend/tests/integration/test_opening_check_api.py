@@ -11,6 +11,7 @@
 """
 
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
@@ -195,9 +196,7 @@ async def test_deleted_item_disappears_from_today(
     assert today.json()["completed"] is True
 
 
-async def test_other_store_is_isolated(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_other_store_is_isolated(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     mgr, _, _store_id, _clerk_id = await _seed(db_session)
     other = Store(name="別家店")
     db_session.add(other)
@@ -207,12 +206,121 @@ async def test_other_store_is_isolated(
     )
     db_session.add(other_mgr)
     await db_session.flush()
-    other_token = encode_access_token(
-        user_id=other_mgr.id, role="MANAGER", store_id=other.id
-    )
+    other_token = encode_access_token(user_id=other_mgr.id, role="MANAGER", store_id=other.id)
 
-    await client.post(
-        "/api/v1/opening-check/items", json={"label": "只有本店"}, headers=_auth(mgr)
-    )
+    await client.post("/api/v1/opening-check/items", json={"label": "只有本店"}, headers=_auth(mgr))
     listed = await client.get("/api/v1/opening-check/today", headers=_auth(other_token))
     assert listed.json()["items"] == []
+
+
+async def test_yesterdays_unclosed_session_is_not_today_s_opening(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """昨天忘記關帳，今天不算「已開帳」——那正是這個檢查該攔的錯。
+
+    只看「有沒有 OPEN 的班別」會把昨天的班別當成今天開好了：今天的現金收入會被算進
+    昨天的班別，對帳永遠對不平（CLAUDE.md §7 不變量 4）。狀態要分成三種，訊息也要
+    直接告訴店員「先把昨天的帳結掉」。
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    mgr, _, store_id, clerk_id = await _seed(db_session)
+    await CashDrawerService(db_session).open_session(store_id, clerk_id, Decimal(1000))
+    await db_session.flush()
+    # 把開帳時間挪到昨天（班別仍是 OPEN）
+    await db_session.execute(
+        text("UPDATE cash_sessions SET opened_at = :t WHERE store_id = :s"),
+        {"t": datetime.now(UTC) - timedelta(days=1), "s": store_id},
+    )
+    await db_session.flush()
+
+    today = await client.get("/api/v1/opening-check/today", headers=_auth(mgr))
+    assert today.status_code == 200, today.text
+    assert today.json()["cash_session_state"] == "STALE"
+    assert today.json()["completed"] is False
+
+
+async def test_reading_today_does_not_write(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """GET 是唯讀：這支 query 掛在每一頁，第一個早晨兩台同時開頁不該互撞唯一鍵。"""
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
+
+    from app.modules.openingcheck.models import OpeningCheck
+
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    await client.get("/api/v1/opening-check/today", headers=_auth(mgr))
+    rows = await db_session.scalar(sa_select(func.count()).select_from(OpeningCheck))
+    assert rows == 0  # 沒有人打勾/略過之前，不該留下任何一列
+
+
+async def test_item_changes_are_audited(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """自訂項目是 MANAGER-only 的設定變更，增刪都要留稽核（§5）。"""
+    from sqlalchemy import select as sa_select
+
+    from app.core.audit import AuditLog
+
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    item_id = (
+        await client.post(
+            "/api/v1/opening-check/items", json={"label": "招牌燈"}, headers=_auth(mgr)
+        )
+    ).json()["id"]
+    await client.delete(f"/api/v1/opening-check/items/{item_id}", headers=_auth(mgr))
+
+    logs = (
+        await db_session.scalars(
+            sa_select(AuditLog)
+            .where(AuditLog.action.like("%OPENING_CHECK_ITEM%"))
+            .order_by(AuditLog.id)
+        )
+    ).all()
+    assert [log.action for log in logs] == [
+        "CREATE_OPENING_CHECK_ITEM",
+        "DELETE_OPENING_CHECK_ITEM",
+    ]
+
+
+async def test_skip_can_be_undone(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
+    """略過按錯要能取消：打勾可以取消，略過沒道理只能等明天。"""
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    await client.post(
+        "/api/v1/opening-check/today/skip", json={"key": "cash_session"}, headers=_auth(mgr)
+    )
+    undone = await client.post(
+        "/api/v1/opening-check/today/skip",
+        json={"key": "cash_session", "skipped": False},
+        headers=_auth(mgr),
+    )
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["skipped_keys"] == []
+    assert undone.json()["completed"] is False
+
+
+async def test_skip_rejects_unknown_key(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """key 打錯會靜默存進陣列、永遠不生效；只收得認得的兩種。"""
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/opening-check/today/skip", json={"key": "隨便打的"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_item_href_must_be_internal_path(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """連結只收站內路徑：這個值會直接餵給站內導覽。"""
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/opening-check/items",
+        json={"label": "外部連結", "href": "https://example.com"},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text

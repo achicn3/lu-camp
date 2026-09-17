@@ -53,10 +53,6 @@ class OpeningCheck(Base, TimestampMixin):
     business_date: Mapped[date] = mapped_column(Date)
     # 已勾的自訂項目 id。Postgres 的陣列不能掛外鍵，所以讀取時一律與現存項目取交集：
     # 項目被刪掉之後，這裡的殘值不會讓今天永遠完成不了（有測試守）。
-    done_item_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer), server_default=text("'{}'")
-    )
+    done_item_ids: Mapped[list[int]] = mapped_column(ARRAY(Integer), server_default=text("'{}'"))
     # 今天略過的自動項目 key（`cash_session`、`device:<kind>:<id>`）。裁示：不必填原因。
-    skipped_keys: Mapped[list[str]] = mapped_column(
-        ARRAY(String(100)), server_default=text("'{}'")
-    )
+    skipped_keys: Mapped[list[str]] = mapped_column(ARRAY(String(100)), server_default=text("'{}'"))

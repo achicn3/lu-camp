@@ -11,10 +11,14 @@
 //
 // 裝置狀態直接問 hardware-agent（與列印同一條路，代理就在店內電腦上），不經後端；
 // 但「今天略過哪一台」存後端，否則換一台裝置又要重按。
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 
-import { type AgentDevice, fetchDeviceStatus } from "@/lib/agent";
+import {
+  deviceKey,
+  devicePasses,
+  useOpeningCheckStatus,
+} from "@/features/openingcheck/status";
 import { api } from "@/lib/api";
 
 type CheckState = "pass" | "fail" | "skipped";
@@ -25,10 +29,6 @@ const DEVICE_LABEL: Record<string, string> = {
   CASH_DRAWER: "錢櫃",
   SCANNER: "掃描器",
 };
-
-function deviceKey(device: AgentDevice): string {
-  return `device:${device.kind}:${device.id}`;
-}
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -89,22 +89,9 @@ function AutoRow({
 export default function OpeningCheckPage() {
   const queryClient = useQueryClient();
 
-  const today = useQuery({
-    queryKey: ["opening-check", "today"],
-    queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/opening-check/today");
-      if (!data) throw new Error(extractDetail(error) ?? "讀取開店前檢查失敗");
-      return data;
-    },
-  });
-
-  // 代理連不到時回 null（「問不到」），不是空陣列——空陣列會被誤讀成「沒有任何裝置」，
-  // 畫面就會顯示全綠，等於謊報。
-  const devices = useQuery({
-    queryKey: ["opening-check", "devices"],
-    queryFn: fetchDeviceStatus,
-    refetchInterval: 30_000,
-  });
+  // 狀態與「算不算完成」與導覽列共用同一份判斷，免得頁面說沒做完、選單說做完了。
+  const { today, deviceList, devicesUnknown, skipped, allClear } =
+    useOpeningCheckStatus(true);
 
   const skip = useMutation({
     mutationFn: async (key: string) => {
@@ -132,7 +119,6 @@ export default function OpeningCheckPage() {
   // 打勾／略過失敗時要講出來：不講的話畫面看起來就是「按了沒反應」。
   const actionError = skip.error?.message ?? setDone.error?.message ?? null;
   const data = today.data;
-  const skipped = new Set(data?.skipped_keys ?? []);
   const busy = skip.isPending || setDone.isPending;
 
   const autoRows: {
@@ -144,37 +130,44 @@ export default function OpeningCheckPage() {
     actionLabel: string;
   }[] = [];
   if (data !== undefined) {
+    // 昨天忘記關帳要講清楚是哪一種問題：籠統說「還沒開帳」會讓店員直接按開帳，
+    // 結果被系統擋下（已有開著的班別），然後不知道該怎麼辦。
+    const stale = data.cash_session_state === "STALE";
     autoRows.push({
       key: "cash_session",
       label: "今日已開帳",
-      state: data.cash_session_open
+      state: data.cash_session_state === "OPEN_TODAY"
         ? "pass"
         : skipped.has("cash_session")
           ? "skipped"
           : "fail",
-      hint: data.cash_session_open
-        ? "已開帳，收現與收購付款可以進行"
-        : skipped.has("cash_session")
-          ? "今天略過，明天會再檢查一次"
-          : "還沒開帳，收現、收購付款都會被擋下",
+      hint:
+        data.cash_session_state === "OPEN_TODAY"
+          ? "已開帳，收現與收購付款可以進行"
+          : skipped.has("cash_session")
+            ? "今天略過，明天會再檢查一次"
+            : stale
+              ? "昨天的班別還沒關帳。先把昨天的帳結掉，再開今天的帳——不然今天的現金會被算進昨天"
+              : "還沒開帳，收現、收購付款都會被擋下",
       href: "/cash",
-      actionLabel: "去開帳",
+      actionLabel: stale ? "去結帳" : "去開帳",
     });
   }
-  for (const device of devices.data ?? []) {
+  for (const device of deviceList ?? []) {
     const key = deviceKey(device);
     const label = `${DEVICE_LABEL[device.kind] ?? device.kind}（${device.model}）`;
+    // 測試模式（fake）不算通過：這頁的承諾是「全綠＝可以開店」，而測試模式按了不會出紙。
     autoRows.push({
       key,
       label,
-      state: device.online ? "pass" : skipped.has(key) ? "skipped" : "fail",
-      hint: device.online
-        ? device.driver === "fake"
-          ? "測試模式（沒有接真機）"
-          : "連線正常"
+      state: devicePasses(device) ? "pass" : skipped.has(key) ? "skipped" : "fail",
+      hint: devicePasses(device)
+        ? "連線正常"
         : skipped.has(key)
           ? "今天略過，明天會再檢查一次"
-          : (device.probe_error ?? "連不上，相關列印會失敗"),
+          : device.driver === "fake"
+            ? "測試模式，按了不會有東西出來"
+            : (device.probe_error ?? "連不上，相關列印會失敗"),
       href: "/settings",
       actionLabel: "查看裝置",
     });
@@ -184,9 +177,6 @@ export default function OpeningCheckPage() {
   const autoDone = autoRows.filter((row) => row.state !== "fail").length;
   const doneCount = autoDone + manualItems.filter((item) => item.done).length;
   const total = autoRows.length + manualItems.length;
-  // 代理問不到時不能宣稱全部完成——寧可說「還在確認」，也不要謊報綠燈。
-  const devicesUnknown = devices.isFetched && devices.data === null;
-  const allClear = total > 0 && doneCount === total && !devicesUnknown;
 
   return (
     <section className="opening-page">

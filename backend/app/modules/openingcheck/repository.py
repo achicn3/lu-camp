@@ -39,13 +39,17 @@ class OpeningCheckRepository:
         await self._session.flush()
         return item
 
-    async def get_check(self, store_id: int, business_date: date) -> OpeningCheck | None:
-        check: OpeningCheck | None = await self._session.scalar(
-            select(OpeningCheck).where(
-                OpeningCheck.store_id == store_id,
-                OpeningCheck.business_date == business_date,
-            )
+    async def get_check(
+        self, store_id: int, business_date: date, *, for_update: bool = False
+    ) -> OpeningCheck | None:
+        """取某日狀態列。for_update=True 時上 row lock，供打勾/略過的讀改寫序列化。"""
+        stmt = select(OpeningCheck).where(
+            OpeningCheck.store_id == store_id,
+            OpeningCheck.business_date == business_date,
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        check: OpeningCheck | None = await self._session.scalar(stmt)
         return check
 
     async def add_check(self, check: OpeningCheck) -> OpeningCheck:

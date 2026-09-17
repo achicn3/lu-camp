@@ -134,12 +134,25 @@ try {
   );
   ok("自訂項目可打勾", true);
 
+  // 4b) 測試模式的裝置不算通過（按了不會出紙），要逐台略過才會全綠——
+  // 正式機接上真機後這一步不會出現。
+  const skipButtons = page.getByRole("button", { name: "今天略過" });
+  while ((await skipButtons.count()) > 0) {
+    await skipButtons.first().click();
+    await page.waitForTimeout(300);
+  }
+  ok("測試模式的裝置需逐台略過才算完成", true);
+
   // 5) 後端狀態與畫面一致，且「完成」是每店每日共用（用 API 直接確認）
   const today = await (
     await context.request.fetch(`${API}/api/v1/opening-check/today`, { headers })
   ).json();
   assert.equal(today.completed, true, `後端仍未完成：${JSON.stringify(today)}`);
   assert.ok(today.skipped_keys.includes("cash_session"));
+  assert.ok(
+    today.skipped_keys.some((k) => k.startsWith("device:")),
+    "裝置的略過沒有存到後端（換一台裝置就要重按）",
+  );
   ok("後端記錄每店每日的完成狀態", true, `略過 ${today.skipped_keys.join(",")}`);
   await page.screenshot({ path: `${SHOTS}/oc-02-complete.png`, fullPage: true });
 

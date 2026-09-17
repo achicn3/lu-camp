@@ -4281,6 +4281,15 @@ export interface components {
             variance: string | null;
         };
         /**
+         * CashSessionState
+         * @description 開帳狀態三態。
+         *
+         *     只有「有沒有 OPEN 的班別」是不夠的：昨天忘記關帳的話，今天會被當成已經開好帳，
+         *     今天的現金收入被算進昨天的班別，對帳永遠對不平（§7 不變量 4）。
+         * @enum {string}
+         */
+        CashSessionState: "OPEN_TODAY" | "STALE" | "NONE";
+        /**
          * CashSessionStatus
          * @description 現金抽屜班別狀態。
          * @enum {string}
@@ -6391,11 +6400,18 @@ export interface components {
         };
         /**
          * OpeningCheckSkipRequest
-         * @description 略過一個自動項目（`cash_session` 或 `device:<kind>:<id>`）。裁示：不必填原因。
+         * @description 略過／取消略過一個自動項目。裁示：不必填原因。
+         *
+         *     key 只收認得的兩種：打錯字會靜默存進陣列、永遠不生效，店員還以為略過了。
          */
         OpeningCheckSkipRequest: {
             /** Key */
             key: string;
+            /**
+             * Skipped
+             * @default true
+             */
+            skipped: boolean;
         };
         /**
          * OpeningCheckTodayRead
@@ -6409,6 +6425,7 @@ export interface components {
             business_date: string;
             /** Cash Session Open */
             cash_session_open: boolean;
+            cash_session_state: components["schemas"]["CashSessionState"];
             /** Completed */
             completed: boolean;
             /** Items */
