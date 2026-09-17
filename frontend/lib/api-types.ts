@@ -2024,6 +2024,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/opening-check/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Item */
+        post: operations["createOpeningCheckItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opening-check/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Item
+         * @description 刪除＝封存：已勾過的歷史紀錄還指著它。
+         */
+        delete: operations["deleteOpeningCheckItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opening-check/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Today
+         * @description 今天做到哪。裝置狀態不在這裡——前端直接問 hardware-agent。
+         */
+        get: operations["getOpeningCheckToday"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opening-check/today/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Item Done
+         * @description 勾／取消勾一條確認事項（按錯了要能取消）。
+         */
+        post: operations["setOpeningCheckItemDone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/opening-check/today/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip
+         * @description 今天略過一個自動項目（裁示：不必填原因）；明天會再檢查一次。
+         */
+        post: operations["skipOpeningCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/product-models": {
         parameters: {
             query?: never;
@@ -6262,6 +6359,62 @@ export interface components {
         NoteUpdateRequest: {
             /** Note */
             note?: string | null;
+        };
+        /** OpeningCheckItemCreateRequest */
+        OpeningCheckItemCreateRequest: {
+            /** Href */
+            href?: string | null;
+            /** Label */
+            label: string;
+        };
+        /** OpeningCheckItemDoneRequest */
+        OpeningCheckItemDoneRequest: {
+            /** Done */
+            done: boolean;
+        };
+        /**
+         * OpeningCheckItemRead
+         * @description 一條自訂確認事項在「今天」的樣子。
+         */
+        OpeningCheckItemRead: {
+            /**
+             * Done
+             * @default false
+             */
+            done: boolean;
+            /** Href */
+            href: string | null;
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+        };
+        /**
+         * OpeningCheckSkipRequest
+         * @description 略過一個自動項目（`cash_session` 或 `device:<kind>:<id>`）。裁示：不必填原因。
+         */
+        OpeningCheckSkipRequest: {
+            /** Key */
+            key: string;
+        };
+        /**
+         * OpeningCheckTodayRead
+         * @description 今天的檢查狀態。裝置狀態由前端直接問 hardware-agent，不在這裡。
+         */
+        OpeningCheckTodayRead: {
+            /**
+             * Business Date
+             * Format: date
+             */
+            business_date: string;
+            /** Cash Session Open */
+            cash_session_open: boolean;
+            /** Completed */
+            completed: boolean;
+            /** Items */
+            items: components["schemas"]["OpeningCheckItemRead"][];
+            /** Skipped Keys */
+            skipped_keys: string[];
         };
         /**
          * OwnershipType
@@ -11953,6 +12106,156 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createOpeningCheckItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpeningCheckItemCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpeningCheckItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteOpeningCheckItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getOpeningCheckToday: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpeningCheckTodayRead"];
+                };
+            };
+        };
+    };
+    setOpeningCheckItemDone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpeningCheckItemDoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpeningCheckTodayRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skipOpeningCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpeningCheckSkipRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpeningCheckTodayRead"];
+                };
             };
             /** @description Validation Error */
             422: {

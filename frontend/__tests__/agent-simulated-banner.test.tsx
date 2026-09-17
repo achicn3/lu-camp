@@ -17,6 +17,7 @@ import { clearToken, setToken } from "@/lib/token";
 // 本檔不驗導向行為（那是 authed-layout.test.tsx 的事），只需讓 useRouter 有東西可呼叫。
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
+  usePathname: () => "/",
 }));
 
 function makeToken(role: string, storeId = 1, sub = "1"): string {

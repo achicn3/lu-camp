@@ -7865,6 +7865,139 @@
         "title": "NoteUpdateRequest",
         "type": "object"
       },
+      "OpeningCheckItemCreateRequest": {
+        "properties": {
+          "href": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "label": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "OpeningCheckItemCreateRequest",
+        "type": "object"
+      },
+      "OpeningCheckItemDoneRequest": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "done"
+        ],
+        "title": "OpeningCheckItemDoneRequest",
+        "type": "object"
+      },
+      "OpeningCheckItemRead": {
+        "description": "一條自訂確認事項在「今天」的樣子。",
+        "properties": {
+          "done": {
+            "default": false,
+            "title": "Done",
+            "type": "boolean"
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "href"
+        ],
+        "title": "OpeningCheckItemRead",
+        "type": "object"
+      },
+      "OpeningCheckSkipRequest": {
+        "description": "略過一個自動項目（`cash_session` 或 `device:<kind>:<id>`）。裁示：不必填原因。",
+        "properties": {
+          "key": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "OpeningCheckSkipRequest",
+        "type": "object"
+      },
+      "OpeningCheckTodayRead": {
+        "description": "今天的檢查狀態。裝置狀態由前端直接問 hardware-agent，不在這裡。",
+        "properties": {
+          "business_date": {
+            "format": "date",
+            "title": "Business Date",
+            "type": "string"
+          },
+          "cash_session_open": {
+            "title": "Cash Session Open",
+            "type": "boolean"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpeningCheckItemRead"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "skipped_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skipped Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "business_date",
+          "cash_session_open",
+          "items",
+          "skipped_keys",
+          "completed"
+        ],
+        "title": "OpeningCheckTodayRead",
+        "type": "object"
+      },
       "OwnershipType": {
         "description": "序號品擁有型態。OWNED=買斷，CONSIGNMENT=寄售。",
         "enum": [
@@ -19742,6 +19875,225 @@
         "summary": "Delete Menu Item",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/opening-check/items": {
+      "post": {
+        "operationId": "createOpeningCheckItem",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningCheckItemCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningCheckItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Item",
+        "tags": [
+          "opening-check"
+        ]
+      }
+    },
+    "/api/v1/opening-check/items/{item_id}": {
+      "delete": {
+        "description": "刪除＝封存：已勾過的歷史紀錄還指著它。",
+        "operationId": "deleteOpeningCheckItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Item",
+        "tags": [
+          "opening-check"
+        ]
+      }
+    },
+    "/api/v1/opening-check/today": {
+      "get": {
+        "description": "今天做到哪。裝置狀態不在這裡——前端直接問 hardware-agent。",
+        "operationId": "getOpeningCheckToday",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningCheckTodayRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Today",
+        "tags": [
+          "opening-check"
+        ]
+      }
+    },
+    "/api/v1/opening-check/today/items/{item_id}": {
+      "post": {
+        "description": "勾／取消勾一條確認事項（按錯了要能取消）。",
+        "operationId": "setOpeningCheckItemDone",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningCheckItemDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningCheckTodayRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Item Done",
+        "tags": [
+          "opening-check"
+        ]
+      }
+    },
+    "/api/v1/opening-check/today/skip": {
+      "post": {
+        "description": "今天略過一個自動項目（裁示：不必填原因）；明天會再檢查一次。",
+        "operationId": "skipOpeningCheck",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningCheckSkipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpeningCheckTodayRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Skip",
+        "tags": [
+          "opening-check"
         ]
       }
     },

@@ -1100,6 +1100,137 @@ function AgreementEditDialog({
   );
 }
 
+
+// -- 開店前檢查項目 --
+// 店主自己決定每天開店要確認什麼；系統自動檢查的（開帳、各機器連線）不在這裡，那些不能手動打勾。
+function OpeningCheckItemsCard() {
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState("");
+  const [href, setHref] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const todayQuery = useQuery({
+    queryKey: ["opening-check", "today"],
+    queryFn: async () => {
+      const { data, error: err } = await api.GET("/api/v1/opening-check/today");
+      if (!data) throw new Error(extractDetail(err) ?? "讀取檢查項目失敗");
+      return data;
+    },
+  });
+
+  const create = useMutation({
+    mutationFn: async () => {
+      const { data, error: err } = await api.POST("/api/v1/opening-check/items", {
+        body: { label: label.trim(), href: href.trim() === "" ? null : href.trim() },
+      });
+      if (!data) throw new Error(extractDetail(err) ?? "新增失敗");
+      return data;
+    },
+    onSuccess: () => {
+      setError(null);
+      setLabel("");
+      setHref("");
+      void queryClient.invalidateQueries({ queryKey: ["opening-check"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: number) => {
+      const { error: err, response } = await api.DELETE(
+        "/api/v1/opening-check/items/{item_id}",
+        { params: { path: { item_id: id } } },
+      );
+      if (!response.ok) throw new Error(extractDetail(err) ?? "刪除失敗");
+    },
+    onSuccess: () => {
+      setError(null);
+      void queryClient.invalidateQueries({ queryKey: ["opening-check"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const items = todayQuery.data?.items ?? [];
+  return (
+    <div className="card">
+      <h2>開店前檢查項目</h2>
+      <p className="hint">
+        這些會出現在每天的「開店前檢查」頁，由店員逐項確認。開帳與各機器的連線狀態由系統
+        自動判斷，不需要也不能在這裡加。
+      </p>
+      <table className="inv-table">
+        <thead>
+          <tr>
+            <th>項目</th>
+            <th>點「前往處理」要去哪（選填）</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td>{item.label}</td>
+              <td>{item.href === null || item.href === "" ? "—" : item.href}</td>
+              <td>
+                <button
+                  type="button"
+                  className="btn-ghost btn-danger-text"
+                  disabled={remove.isPending}
+                  onClick={() => remove.mutate(item.id)}
+                >
+                  刪除
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {todayQuery.isSuccess && items.length === 0 && <p className="hint">目前沒有自訂項目。</p>}
+      {error !== null && (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      )}
+      <form
+        className="opening-add-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          if (label.trim() === "") {
+            setError("請輸入項目名稱");
+            return;
+          }
+          create.mutate();
+        }}
+      >
+        <label className="field">
+          <span className="field-label">新增項目</span>
+          <input
+            value={label}
+            aria-label="新增項目"
+            maxLength={100}
+            placeholder="例如：招牌燈打開"
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">連結（選填）</span>
+          <input
+            value={href}
+            aria-label="連結"
+            maxLength={200}
+            placeholder="例如：/cash"
+            onChange={(e) => setHref(e.target.value)}
+          />
+        </label>
+        <button type="submit" className="btn-primary" disabled={create.isPending}>
+          {create.isPending ? "新增中…" : "新增"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
 
@@ -1197,6 +1328,7 @@ export default function SettingsPage() {
           <PremiumHistoryCard history={historyQuery.data ?? []} />
         )}
         <AgreementCard />
+        <OpeningCheckItemsCard />
         <ReasonCard title="贈品原因" kind="gift-reasons" />
         <ReasonCard title="折扣原因" kind="discount-reasons" />
         {retentionReportQuery.isError ? (

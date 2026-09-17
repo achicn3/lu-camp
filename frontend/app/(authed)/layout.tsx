@@ -3,7 +3,7 @@
 // 前端隱藏不等於安全——後端對每個請求仍驗權（docs/10 §4）。
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 
 import { AGENT_SIMULATED_EVENT, fetchSimulatedDevices } from "@/lib/agent";
@@ -29,6 +29,7 @@ const PRIMARY_NAV: NavItem[] = [
 ];
 
 const MORE_NAV: NavItem[] = [
+  { href: "/opening-check", label: "開店前檢查", ready: true },
   { href: "/signing", label: "簽署紀錄", ready: true },
   { href: "/inventory", label: "庫存", ready: true },
   { href: "/consignment", label: "寄售付款", ready: true },
@@ -45,6 +46,7 @@ const MORE_NAV: NavItem[] = [
 const emptySubscribe = () => () => {};
 
 export default function AuthedLayout({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -129,6 +131,29 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AGENT_SIMULATED_EVENT, onSimulated);
   }, [simulatedDevices]);
 
+  // 開店前檢查（裁示 2026-09-17）：每天第一次進系統自動帶到那頁，未完成時選單留紅點。
+  // 「今天有沒有導過」記在瀏覽器：導向是**這台裝置**的行為，完成狀態才是每店每日共用的。
+  const openingCheck = useQuery({
+    queryKey: ["opening-check", "today"],
+    queryFn: async () => (await api.GET("/api/v1/opening-check/today")).data ?? null,
+    enabled: token !== null,
+  });
+
+  useEffect(() => {
+    const data = openingCheck.data;
+    if (data == null || data.completed) return;
+    if (pathname === "/opening-check" || pathname === "/login") return;
+    // 一天只帶一次：沒做完也不擋，店員要去結帳就去（裁示：不擋，只跳一次＋紅點）。
+    const mark = `lu-camp.opening-check.${data.business_date}`;
+    try {
+      if (window.localStorage.getItem(mark) !== null) return;
+      window.localStorage.setItem(mark, "1");
+    } catch {
+      return; // 讀不到 localStorage（無痕/封鎖）就不自動導向，免得每次換頁都被拉走
+    }
+    router.replace("/opening-check");
+  }, [openingCheck.data, pathname, router]);
+
   // 硬性閘門：非店務身分（含 KIOSK token）一律不渲染店務殼與其子頁，杜絕快取資料外洩。
   const session = decodeSession();
   if (!hydrated || token === null || session === null) return null;
@@ -139,6 +164,12 @@ export default function AuthedLayout({ children }: { children: ReactNode }) {
     item.ready ? (
       <Link key={item.href} href={item.href} className="nav-link" onClick={onClick}>
         {item.label}
+        {item.href === "/opening-check" &&
+          openingCheck.isSuccess &&
+          openingCheck.data !== null &&
+          !openingCheck.data.completed && (
+            <span className="nav-dot" aria-label="開店前檢查尚未完成" />
+          )}
         {item.href === "/einvoice-queue" &&
           einvoiceAttention.isSuccess &&
           einvoiceAttention.data > 0 && (

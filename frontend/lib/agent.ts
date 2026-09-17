@@ -250,3 +250,33 @@ export async function fetchSimulatedDevices(): Promise<string[] | null> {
     return null;
   }
 }
+
+/** 一台受管裝置的即時狀態（hardware-agent `/devices/status`，docs/04）。 */
+export type AgentDevice = {
+  id: string;
+  kind: string;
+  model: string;
+  online: boolean;
+  last_seen: string | null;
+  /** 探測本身失敗（驅動/套件/設定問題）；與單純離線要分開顯示，不可混為一談。 */
+  probe_error: string | null;
+  driver: string;
+};
+
+/**
+ * 取各裝置狀態。代理在店內電腦上，前端直接問它（與列印同一條路），不經後端。
+ *
+ * 連不到代理時回 `null`（代表「問不到」），不是空陣列——空陣列會被誤讀成「沒有任何裝置」，
+ * 開店前檢查就會顯示全綠，等於謊報。
+ */
+export async function fetchDeviceStatus(): Promise<AgentDevice[] | null> {
+  try {
+    const res = await globalThis.fetch(`${AGENT_BASE}/devices/status`);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { devices?: unknown };
+    if (!Array.isArray(body.devices)) return null;
+    return body.devices as AgentDevice[];
+  } catch {
+    return null;
+  }
+}

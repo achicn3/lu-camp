@@ -18,6 +18,7 @@ import app.modules.customerdisplay.models  # 註冊模型到 metadata（autogene
 import app.modules.einvoice.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.inventory.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.menu.models  # 註冊模型到 metadata（autogenerate 用）
+import app.modules.openingcheck.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.purchasing.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.returns.models  # 註冊模型到 metadata（autogenerate 用）
 import app.modules.sales.models  # 註冊模型到 metadata（autogenerate 用）
