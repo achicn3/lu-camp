@@ -502,6 +502,8 @@ class SalesService:
         self._session = session
         self._repo = SalesRepository(session)
         self._inventory = InventoryService(session)
+        # 補單時放行已停售商品（見 create_sale 的 rebuilding_paid_sale）。只在該次呼叫內有效。
+        self._allow_inactive_items = False
         self._cash = CashDrawerService(session)
         self._consignment = ConsignmentService(session)
         self._settings = StoreSettingsService(session)
@@ -803,6 +805,9 @@ class SalesService:
         linepay_client: LinePayClient | None = None,
         reconciled_linepay_result: LinePayResult | None = None,
         linepay_attempt: LinePayAttemptState | None = None,
+        # 補單（LINE Pay 已扣款、結果不明後補成立本機銷售）：這筆交易**已經發生**，
+        # 只是在補帳，所以不能用「商品現在還賣不賣」去擋，否則錢收了、帳補不出來。
+        rebuilding_paid_sale: bool = False,
     ) -> Sale:
         """建立銷售單並完成扣庫存/收款/結算；任一步失敗整筆回復（不 commit）。
 
@@ -814,6 +819,7 @@ class SalesService:
         不重跑任何副作用（防網路重試重複建單/收錢）。並行重送的競態由 sales 的
         (store_id, idempotency_key) 唯一約束在 flush/commit 擋下，由呼叫端據此回原單。
         """
+        self._allow_inactive_items = rebuilding_paid_sale
         if not lines:
             raise EmptySale("銷售單必須至少有一筆明細")
 
@@ -2881,9 +2887,8 @@ class SalesService:
             product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
             if product is None:
                 raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
-            # 停售的不能再賣（2026-09-17）：POS 掃碼已經找不到它，這裡是服務層的防線
-            # ——購物車還原、補單等路徑會直接帶 id 進來。
-            if not product.is_active:
+            # 停售的不能再賣（2026-09-17）：報價與實際成交是兩條路徑，兩邊都要擋。
+            if not product.is_active and not self._allow_inactive_items:
                 raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
             applies = _campaign_applies(
                 campaign, line_type=SaleLineType.CATALOG, is_consignment=False
@@ -3301,8 +3306,9 @@ class SalesService:
         product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
         if product is None:
             raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
-        # 停售的不能再賣（2026-09-17）：報價與實際成交是兩條路徑，兩邊都要擋。
-        if not product.is_active:
+        # 停售的不能再賣（2026-09-17）：POS 掃碼已經找不到它，這裡是服務層的防線
+        # ——購物車還原等路徑會直接帶 id 進來。補單例外（交易已經發生，只是在補帳）。
+        if not product.is_active and not self._allow_inactive_items:
             raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
         applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
         if discountable_out is not None:

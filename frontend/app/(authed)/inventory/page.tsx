@@ -365,9 +365,12 @@ function ItemEditButton({
   async function patchPrice(): Promise<void> {
     if (nextPrice.trim() === price) return;
     // 前端先擋一次（0 或小數）：讓店員當場看到原因，而不是送出去才被後端退。
-    const parsed = Number(nextPrice.trim());
-    if (!Number.isInteger(parsed) || parsed <= 0) throw new Error("售價須為正整數元");
-    const body = { unit_price: nextPrice.trim() };
+    // 用站上既有的 parseNtd：它吃得下「1,200」這種輸入，也會把值正規化再送出。
+    const parsed = parseNtd(nextPrice);
+    if (parsed === null || !Number.isInteger(parsed) || parsed <= 0) {
+      throw new Error("售價須為正整數元");
+    }
+    const body = { unit_price: String(parsed) };
     const { data, error: e } =
       kind === "serialized"
         ? await api.PATCH("/api/v1/serialized-items/{item_id}/price", {
@@ -395,9 +398,11 @@ function ItemEditButton({
     onSuccess: () => {
       setError(null);
       setOpen(false);
-      refresh();
     },
     onError: (err: Error) => setError(err.message),
+    // 這裡會依序送多個 PATCH（品名/再訂購點 → 售價）。中途失敗時前面那段其實已經存進去了，
+    // 不重載的話畫面還是舊值，店員會以為整筆都沒成功。無論成敗都重載。
+    onSettled: () => refresh(),
   });
 
   const toggleActive = useMutation({
@@ -477,7 +482,7 @@ function ItemEditButton({
         <label className="field">
           <span className="field-label">品名</span>
           <input
-            autoFocus
+            autoFocus={kind === "catalog"}
             aria-label="品名"
             value={nextName}
             maxLength={150}
@@ -508,6 +513,7 @@ function ItemEditButton({
           <span className="field-label">售價（含稅整數元）</span>
           <input
             inputMode="numeric"
+            autoFocus={kind !== "catalog"}
             aria-label="售價"
             value={nextPrice}
             disabled={busy}
@@ -516,7 +522,7 @@ function ItemEditButton({
         </label>
         <p className="hint">
           改價會記錄誰、何時、改前改後（稽核）。已經賣出去的那幾筆不受影響——交易紀錄與報表
-          用的是成交當下的價格。
+          用的是成交當下的價格。改了品名或售價後，貨架上的舊標籤還是舊的，記得補印。
         </p>
 
         {kind === "catalog" && (

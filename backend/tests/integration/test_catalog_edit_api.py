@@ -12,6 +12,7 @@ from collections.abc import AsyncGenerator
 from decimal import Decimal
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.cashdrawer.service import CashDrawerService
-from app.modules.inventory.models import CatalogProduct
+from app.modules.inventory.models import BulkLot, CatalogProduct
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
@@ -134,6 +135,7 @@ async def test_edit_is_audited(client: httpx.AsyncClient, db_session: AsyncSessi
         select(AuditLog).where(AuditLog.action == "UPDATE_CATALOG_PRODUCT")
     )
     assert log is not None
+    assert log.before is not None and log.after is not None
     assert log.before["name"] == "原名"
     assert log.after["name"] == "改過的名字"
 
@@ -212,3 +214,300 @@ async def test_reactivate(client: httpx.AsyncClient, db_session: AsyncSession) -
     assert resp.status_code == 200, resp.text
     listed = await client.get("/api/v1/catalog-products?q=BACK", headers=_auth(mgr))
     assert [p["sku"] for p in listed.json()] == ["BACK-1"]
+
+
+async def test_pending_payment_blocks_discontinue(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """已扣款、等著補單的購物車指名了這件商品：停售會讓那張單補不出來（錢收了、帳沒有）。
+
+    刪除早就擋了這件事，停售當初漏掉——停售正好是「這東西不賣了」的清理時機，最容易撞上。
+    """
+    import json as _json
+
+    from sqlalchemy import text
+
+    from tests.integration.customer_display_helpers import ensure_paired_customer_display
+
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="PEND-STOP", name="待補單商品")
+    actor_id = await db_session.scalar(select(User.id).where(User.store_id == store_id))
+    assert actor_id is not None
+    terminal, device = await ensure_paired_customer_display(
+        db_session, store_id=store_id, actor_user_id=actor_id
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO cart_sessions (store_id, pos_terminal_id, kiosk_device_id, status,"
+            " revision, snapshot, snapshot_fingerprint, payment_checkout_payload,"
+            " created_at, updated_at)"
+            " VALUES (:s, :t, :d, 'PAYMENT_UNCERTAIN', 1, '{}'::jsonb, 'fp',"
+            " CAST(:p AS jsonb), now(), now())"
+        ),
+        {
+            "s": store_id,
+            "t": terminal.id,
+            "d": device.id,
+            "p": _json.dumps(
+                {"lines": [{"line_type": "CATALOG", "catalog_product_id": product_id, "qty": 1}]}
+            ),
+        },
+    )
+    await db_session.flush()
+
+    resp = await client.patch(
+        f"/api/v1/catalog-products/{product_id}",
+        json={"is_active": False},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 409, resp.text
+    assert "待確認付款" in resp.json()["detail"]
+
+
+async def test_paid_sale_can_be_rebuilt_even_if_product_was_discontinued(
+    db_session: AsyncSession,
+) -> None:
+    """補單是**重建已經發生的交易**：就算商品已停售也必須補得出來，否則錢收了、帳沒有。
+
+    前一支測試擋住「先有待補單、後停售」；這支守反過來的順序（先停售、之後才確認扣款成功），
+    以及任何漏網情形。一般結帳仍照擋。
+    """
+    from decimal import Decimal as _D
+
+    from app.modules.sales.inputs import SaleLineInput, TenderInput
+    from app.modules.sales.service import SalesService
+    from app.shared.enums import SaleLineType, TenderType
+    from app.shared.exceptions import SaleLineInvalid
+
+    _mgr, _clerk, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="REBUILD-1", name="已停售但已扣款")
+    actor_id = await db_session.scalar(select(User.id).where(User.store_id == store_id))
+    assert actor_id is not None
+    product = await db_session.get(CatalogProduct, product_id)
+    assert product is not None
+    product.is_active = False
+    await db_session.flush()
+
+    lines = [
+        SaleLineInput(line_type=SaleLineType.CATALOG, catalog_product_id=product_id, qty=1)
+    ]
+    tenders = [TenderInput(tender_type=TenderType.CASH, amount=_D(100))]
+
+    # 一般結帳照擋
+    with pytest.raises(SaleLineInvalid):
+        await SalesService(db_session).create_sale(
+            store_id, actor_id, lines=lines, tenders=tenders
+        )
+
+    # 補單放行（這筆交易已經發生，只是在補帳）
+    sale = await SalesService(db_session).create_sale(
+        store_id, actor_id, lines=lines, tenders=tenders, rebuilding_paid_sale=True
+    )
+    assert sale.total == _D(100)
+
+
+async def test_cross_store_brand_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """別家店的品牌不可掛上來（§4），不存在的 id 要回 422 而不是 500。"""
+    from sqlalchemy import text
+
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="XSTORE-1", name="商品")
+    other = Store(name="別家店")
+    db_session.add(other)
+    await db_session.flush()
+    other_brand_id = await db_session.scalar(
+        text("INSERT INTO brands (store_id, name, created_at, updated_at)"
+             " VALUES (:s, '別店品牌', now(), now()) RETURNING id"),
+        {"s": other.id},
+    )
+
+    resp = await client.patch(
+        f"/api/v1/catalog-products/{product_id}",
+        json={"brand_id": other_brand_id},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_unknown_brand_id_is_422_not_500(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="BADREF-1", name="商品")
+    resp = await client.patch(
+        f"/api/v1/catalog-products/{product_id}",
+        json={"brand_id": 999999},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_rename_serialized_and_bulk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """序號品與散裝批的改名：權限、他店、空白、稽核前後值。"""
+    from decimal import Decimal as _D
+
+    from app.core.audit import AuditLog as _AuditLog
+    from app.modules.inventory.models import BulkLot, SerializedItem
+    from app.shared.enums import (
+        BulkAcquisitionBasis,
+        BulkLotStatus,
+        Grade,
+        OwnershipType,
+        SerializedItemStatus,
+    )
+
+    mgr, clerk, store_id = await _seed(db_session)
+    item = SerializedItem(
+        store_id=store_id,
+        item_code="REN-1",
+        name="打錯的帳篷",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        acquisition_cost=_D(500),
+        listed_price=_D(1000),
+        status=SerializedItemStatus.IN_STOCK,
+    )
+    lot = BulkLot(
+        store_id=store_id,
+        lot_code="REN-LOT",
+        name="打錯的雜物堆",
+        grade=Grade.E,
+        acquisition_cost=_D(300),
+        acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=_D(50),
+        total_qty=10,
+        remaining_qty=10,
+        status=BulkLotStatus.ON_SALE,
+    )
+    db_session.add_all([item, lot])
+    await db_session.flush()
+
+    # 店員不可改
+    assert (
+        await client.patch(
+            f"/api/v1/serialized-items/{item.id}/name",
+            json={"name": "x"},
+            headers=_auth(clerk),
+        )
+    ).status_code == 403
+
+    renamed = await client.patch(
+        f"/api/v1/serialized-items/{item.id}/name",
+        json={"name": "北歐風帳篷"},
+        headers=_auth(mgr),
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "北歐風帳篷"
+    assert renamed.json()["item_code"] == "REN-1"  # 條碼不動
+
+    lot_renamed = await client.patch(
+        f"/api/v1/bulk-lots/{lot.id}/name", json={"name": "露營小物堆"}, headers=_auth(mgr)
+    )
+    assert lot_renamed.status_code == 200, lot_renamed.text
+    assert lot_renamed.json()["name"] == "露營小物堆"
+
+    logs = (
+        await db_session.scalars(
+            select(_AuditLog)
+            .where(_AuditLog.action.in_(("RENAME_SERIALIZED_ITEM", "RENAME_BULK_LOT")))
+            .order_by(_AuditLog.id)
+        )
+    ).all()
+    pairs = []
+    for log in logs:
+        assert log.before is not None and log.after is not None
+        pairs.append((log.before["name"], log.after["name"]))
+    assert pairs == [
+        ("打錯的帳篷", "北歐風帳篷"),
+        ("打錯的雜物堆", "露營小物堆"),
+    ]
+
+
+def _lot(store_id: int, *, code: str, name: str) -> "BulkLot":
+    from decimal import Decimal as _D
+
+    from app.shared.enums import BulkAcquisitionBasis, BulkLotStatus, Grade
+
+    return BulkLot(
+        store_id=store_id,
+        lot_code=code,
+        name=name,
+        grade=Grade.E,
+        acquisition_cost=_D(100),
+        acquisition_basis=BulkAcquisitionBasis.BAG,
+        unit_price=_D(10),
+        total_qty=5,
+        remaining_qty=5,
+        status=BulkLotStatus.ON_SALE,
+    )
+
+
+async def test_rename_rejects_blank_name(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """空白品名擋下——清單上會變成看不出是什麼的空列。"""
+    mgr, _, store_id = await _seed(db_session)
+    own = _lot(store_id, code="OWN-LOT", name="自己的堆")
+    db_session.add(own)
+    await db_session.flush()
+    blank = await client.patch(
+        f"/api/v1/bulk-lots/{own.id}/name", json={"name": "   "}, headers=_auth(mgr)
+    )
+    assert blank.status_code == 422
+
+
+async def test_rename_other_store_is_not_found(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """他店的品項一律 404（不洩漏跨店資料）。"""
+    mgr, _, _ = await _seed(db_session)
+    other = Store(name="別家店")
+    db_session.add(other)
+    await db_session.flush()
+    lot = _lot(other.id, code="OTHER-LOT", name="別店的堆")
+    db_session.add(lot)
+    await db_session.flush()
+    resp = await client.patch(
+        f"/api/v1/bulk-lots/{lot.id}/name", json={"name": "改名"}, headers=_auth(mgr)
+    )
+    assert resp.status_code == 404
+
+
+async def test_discontinued_product_is_still_countable_in_stocktake(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停售但還有庫存的商品仍要盤得到，否則帳面數量永遠校不回來。"""
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="STOCKTAKE-1", name="停售但有貨")
+    await client.patch(
+        f"/api/v1/catalog-products/{product_id}", json={"is_active": False}, headers=_auth(mgr)
+    )
+
+    created = await client.post("/api/v1/stocktakes", json={}, headers=_auth(mgr, "st-1"))
+    assert created.status_code == 201, created.text
+    detail = await client.get(
+        f"/api/v1/stocktakes/{created.json()['id']}", headers=_auth(mgr)
+    )
+    counted = [line["catalog_product_id"] for line in detail.json()["lines"]]
+    assert product_id in counted
+
+
+async def test_discontinued_sku_still_blocks_duplicates(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """停售品仍佔著 SKU：拿同一個編號建檔要在服務層被擋，不是撞到唯一鍵才回滾。"""
+    mgr, _, store_id = await _seed(db_session)
+    product_id = await _product(db_session, store_id, sku="DUP-1", name="停售品")
+    await client.patch(
+        f"/api/v1/catalog-products/{product_id}", json={"is_active": False}, headers=_auth(mgr)
+    )
+    resp = await client.post(
+        "/api/v1/catalog-products",
+        json={"sku": "DUP-1", "name": "新商品", "unit_price": "100", "reorder_point": 0},
+        headers=_auth(mgr, "dup-1"),
+    )
+    assert resp.status_code == 409, resp.text

@@ -885,6 +885,14 @@ async def update_catalog_product(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    except ItemDeleteBlocked as exc:  # 待補單時不可停售
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CrossStoreReference as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     if product is None:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到一般商品")

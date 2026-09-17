@@ -35,6 +35,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema.
 
-    降版後停售的商品會全部回到清單與 POS（旗標消失）；資料本身不受影響。
+    **有停售商品時一律中止**（比照 b7e2c9a4f1d6 的先例）：這一欄一旦拿掉，所有停售品
+    會瞬間回到庫存清單與 POS 變成可售，而「哪些被停售」再也復原不了。要降版請先把
+    停售商品處理掉（恢復上架或確認可以重新開賣）。
     """
+    conn = op.get_bind()
+    inactive = conn.execute(
+        sa.text("SELECT count(*) FROM catalog_products WHERE is_active = false")
+    ).scalar_one()
+    if inactive:
+        raise RuntimeError(
+            f"有 {inactive} 件停售商品，降版會讓它們全部重新開賣；請先處理後再降版"
+        )
     op.drop_column("catalog_products", "is_active")

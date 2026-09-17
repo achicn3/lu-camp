@@ -31,7 +31,11 @@ class StocktakeService:
 
     async def create_stocktake(self, store_id: int, *, actor_user_id: int) -> Stocktake:
         """建立盤點單：為店內每個一般商品快照當前 system_qty（DRAFT、counted 未填）。"""
-        products = await self._inventory.list_catalog(store_id, limit=_SNAPSHOT_CAP, offset=0)
+        # 停售的也要盤（2026-09-17）：停售只是「不再販售」，架上還有貨就得數得到，
+        # 否則帳面數量永遠校不回來，而庫存價值報表仍把它算進去，兩邊永遠對不起來。
+        products = await self._inventory.list_catalog(
+            store_id, limit=_SNAPSHOT_CAP, offset=0, include_inactive=True
+        )
         stocktake = await self._repo.add_stocktake(
             Stocktake(store_id=store_id, created_by=actor_user_id)
         )

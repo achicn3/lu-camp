@@ -634,6 +634,17 @@ class InventoryService:
             "reorder_point": product.reorder_point,
             "is_active": product.is_active,
         }
+        # 參照一律先驗歸屬：不驗的話可以把**別家店**的品牌掛上來（違反 §4），
+        # 不存在的 id 則會讓外鍵錯誤冒到 router 變成 500。未提供的欄位用現值代入，
+        # 否則型號與品牌的一致性檢查會漏掉。
+        await self._validate_item_references(
+            store_id,
+            brand_id=product.brand_id if brand_id is _UNSET else brand_id,  # type: ignore[arg-type]
+            product_model_id=(
+                product.product_model_id if product_model_id is _UNSET else product_model_id  # type: ignore[arg-type]
+            ),
+            category_id=product.category_id if category_id is _UNSET else category_id,  # type: ignore[arg-type]
+        )
         if name is not None:
             cleaned = name.strip()
             if not cleaned:
@@ -649,6 +660,14 @@ class InventoryService:
             if reorder_point < 0:
                 raise SaleLineInvalid("再訂購點不可為負")
             product.reorder_point = reorder_point
+        if is_active is False and product.is_active:
+            # 停售比照刪除：待補單的購物車指名它時不能停售（補單會被擋→錢收了、帳沒有）。
+            from app.modules.customerdisplay.service import CustomerDisplayService
+
+            if await CustomerDisplayService(self._session).item_referenced_by_pending_payment(
+                store_id, catalog_product_id=product_id
+            ):
+                raise ItemDeleteBlocked("這件在一筆待確認付款的交易裡，補單完成前不能停售")
         if is_active is not None:
             product.is_active = is_active
         await self._session.flush()
@@ -1104,13 +1123,21 @@ class InventoryService:
                     raise IdempotencyKeyConflict("Idempotency-Key 已用於不同的一般商品建檔內容")
                 return replay
         resolved_sku = sku
+        # 去重要看得到**停售**商品：SKU 是唯一的，停售品仍佔著號碼。漏看會一路撞到
+        # 唯一鍵才被擋（白跑一次回滾），而且店員在清單上看不到是誰佔用。
         if resolved_sku is None:
             while True:
                 candidate = f"AUTO-{uuid4().hex[:12].upper()}"
-                if await self._repo.get_catalog_by_sku(store_id, candidate) is None:
+                taken = await self._repo.get_catalog_by_sku(
+                    store_id, candidate, include_inactive=True
+                )
+                if taken is None:
                     resolved_sku = candidate
                     break
-        elif await self._repo.get_catalog_by_sku(store_id, resolved_sku) is not None:
+        elif (
+            await self._repo.get_catalog_by_sku(store_id, resolved_sku, include_inactive=True)
+            is not None
+        ):
             raise DuplicateCatalogProduct(f"SKU「{resolved_sku}」已存在")
         product = CatalogProduct(
             store_id=store_id,
@@ -1151,12 +1178,19 @@ class InventoryService:
         brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
+        include_inactive: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CatalogProduct]:
         """列一般商品（POS 選件/庫存頁；篩品牌、q 搜品名/SKU、low_stock 篩 量≤再訂購點）。"""
         return await self._repo.list_catalog(
-            store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+            store_id,
+            brand_id=brand_id,
+            q=q,
+            low_stock=low_stock,
+            include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
         )
 
     async def list_catalog_with_incoming(

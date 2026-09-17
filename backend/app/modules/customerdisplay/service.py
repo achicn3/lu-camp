@@ -1464,6 +1464,9 @@ class CustomerDisplayService:
                     linepay_client if isinstance(linepay_client, LinePayClient) else None
                 ),
                 reconciled_linepay_result=confirmed_result,
+                # 這是在補一筆**已經扣款**的交易：商品期間被停售也必須補得出來，
+                # 否則錢收了、帳補不出來、購物車永遠卡在 PAYMENT_UNCERTAIN。
+                rebuilding_paid_sale=True,
             )
         return definitive, cart
 

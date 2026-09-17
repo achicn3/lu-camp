@@ -764,13 +764,18 @@ class InventoryRepository:
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
-    async def get_catalog_by_sku(self, store_id: int, sku: str) -> CatalogProduct | None:
-        """POS 掃碼用。停售的商品視同找不到——停售的意思就是「不要再賣了」。"""
-        stmt = select(CatalogProduct).where(
-            CatalogProduct.store_id == store_id,
-            CatalogProduct.sku == sku,
-            CatalogProduct.is_active.is_(True),
-        )
+    async def get_catalog_by_sku(
+        self, store_id: int, sku: str, *, include_inactive: bool = False
+    ) -> CatalogProduct | None:
+        """以 SKU 取一般商品。
+
+        POS 掃碼時停售的視同找不到（停售就是「不要再賣了」）；但**建檔去重**必須看得到
+        停售品，否則同 SKU 會一路走到唯一鍵才被擋，白跑一次回滾，店員也看不到是誰佔用。
+        """
+        conds = [CatalogProduct.store_id == store_id, CatalogProduct.sku == sku]
+        if not include_inactive:
+            conds.append(CatalogProduct.is_active.is_(True))
+        stmt = select(CatalogProduct).where(*conds)
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result
 
