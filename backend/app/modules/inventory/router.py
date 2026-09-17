@@ -5,6 +5,7 @@
 service 進行，庫存頁的改價/調整功能屬後續任務。
 """
 
+from collections.abc import Awaitable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
@@ -53,6 +54,7 @@ from app.shared.exceptions import (
     DuplicateCatalogProduct,
     IdempotencyKeyConflict,
     InvalidStateTransition,
+    ItemDeleteBlocked,
 )
 
 router = APIRouter(tags=["inventory"])
@@ -771,3 +773,66 @@ async def get_bulk_detail(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
     return BulkLotDetailRead.model_validate(detail)
+
+
+@router.delete(
+    "/serialized-items/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteSerializedItem",
+)
+async def delete_serialized_item(item_id: int, session: SessionDep, user: ManagerDep) -> None:
+    """刪誤建的序號品（沒賣過、非收購來源才行）。賣過或收購來的回 409 並說明原因。"""
+    await _delete_item(
+        session,
+        InventoryService(session).delete_serialized_item(
+            user.store_id, item_id, actor_user_id=user.id
+        ),
+        "找不到序號品",
+    )
+
+
+@router.delete(
+    "/catalog-products/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteCatalogProduct",
+)
+async def delete_catalog_product(product_id: int, session: SessionDep, user: ManagerDep) -> None:
+    """刪誤建的一般商品（沒賣過、沒進過貨、沒盤點過才行）。"""
+    await _delete_item(
+        session,
+        InventoryService(session).delete_catalog_product(
+            user.store_id, product_id, actor_user_id=user.id
+        ),
+        "找不到一般商品",
+    )
+
+
+@router.delete(
+    "/bulk-lots/{lot_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteBulkLot",
+)
+async def delete_bulk_lot(lot_id: int, session: SessionDep, user: ManagerDep) -> None:
+    """刪誤建的散裝批（沒賣過、非收購來源才行）。"""
+    await _delete_item(
+        session,
+        InventoryService(session).delete_bulk_lot(
+            user.store_id, lot_id, actor_user_id=user.id
+        ),
+        "找不到散裝批",
+    )
+
+
+async def _delete_item(
+    session: AsyncSession, deleting: Awaitable[bool], not_found_detail: str
+) -> None:
+    """三種品項的刪除只差在呼叫哪一支 service，錯誤處理完全相同。"""
+    try:
+        deleted = await deleting
+    except ItemDeleteBlocked as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not deleted:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
+    await session.commit()

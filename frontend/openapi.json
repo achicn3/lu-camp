@@ -13889,6 +13889,45 @@
       }
     },
     "/api/v1/bulk-lots/{lot_id}": {
+      "delete": {
+        "description": "刪誤建的散裝批（沒賣過、非收購來源才行）。",
+        "operationId": "deleteBulkLot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Bulk Lot",
+        "tags": [
+          "inventory"
+        ]
+      },
       "get": {
         "description": "以 id 取散裝批（POS 還原購物車用；他店/不存在一律 404）。\n\n與 `getCatalogProduct` 同理：還原時只有 id，`/detail` 限管理者。\n須宣告於 `/bulk-lots/by-code/{lot_code}` 之後。",
         "operationId": "getBulkLot",
@@ -15307,6 +15346,45 @@
       }
     },
     "/api/v1/catalog-products/{product_id}": {
+      "delete": {
+        "description": "刪誤建的一般商品（沒賣過、沒進過貨、沒盤點過才行）。",
+        "operationId": "deleteCatalogProduct",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Catalog Product",
+        "tags": [
+          "inventory"
+        ]
+      },
       "get": {
         "description": "以 id 取一般商品（POS 還原購物車用；他店/不存在一律 404）。\n\n客顯購物車還原時明細只留 id（沒有 sku），而 `/detail` 限管理者、店員讀不到；\n缺這支，重整或換店員接手後商品備註會消失、結帳不再提醒。\n須宣告於 `/catalog-products/by-sku/{sku}` 之後。",
         "operationId": "getCatalogProduct",
@@ -19391,6 +19469,47 @@
         ]
       }
     },
+    "/api/v1/menu-items/{item_id}/delete": {
+      "delete": {
+        "description": "真刪誤建的品項（沒賣過才行）；賣過的回 409，畫面改提供下架。",
+        "operationId": "deleteMenuItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Menu Item",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
     "/api/v1/product-models": {
       "get": {
         "operationId": "listProductModels",
@@ -22295,6 +22414,47 @@
           }
         ],
         "summary": "Acquisition Price Hint",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/{item_id}": {
+      "delete": {
+        "description": "刪誤建的序號品（沒賣過、非收購來源才行）。賣過或收購來的回 409 並說明原因。",
+        "operationId": "deleteSerializedItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Serialized Item",
         "tags": [
           "inventory"
         ]

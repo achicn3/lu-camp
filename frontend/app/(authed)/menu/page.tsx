@@ -236,13 +236,13 @@ function MenuItemRow({
     onError: (err: Error) => setRowError(err.message),
   });
 
-  const archive = useMutation({
+  // 刪除：沒賣過就真的刪掉（誤建的品項該消失）；賣過的後端回 409，改請他用「下架」。
+  const remove = useMutation({
     mutationFn: async () => {
-      const { data, error } = await api.DELETE("/api/v1/menu-items/{item_id}", {
+      const { error, response } = await api.DELETE("/api/v1/menu-items/{item_id}/delete", {
         params: { path: { item_id: item.id } },
       });
-      if (!data) throw new Error(extractDetail(error) ?? "刪除失敗");
-      return data;
+      if (!response.ok) throw new Error(extractDetail(error) ?? "刪除失敗");
     },
     onSuccess: () => {
       setRowError(null);
@@ -376,8 +376,13 @@ function MenuItemRow({
           <button
             type="button"
             className="btn-ghost btn-danger-text"
-            disabled={archive.isPending}
-            onClick={() => archive.mutate()}
+            disabled={remove.isPending}
+            onClick={() => {
+              setRowError(null);
+              if (window.confirm(`確定要刪除「${item.name}」？刪掉就找不回來了。`)) {
+                remove.mutate();
+              }
+            }}
           >
             刪除
           </button>

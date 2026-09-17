@@ -244,4 +244,41 @@ describe("/menu 餐飲菜單管理頁", () => {
     await waitFor(() => expect(patched).toContain("unit_cost"));
     expect(JSON.parse(patched).unit_cost).toBe(null);
   });
+
+  it("刪除：確認後打 delete 端點；賣過的顯示後端給的原因", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    stubFetch((url, method) => {
+      if (url.includes("/menu-items/1/delete") && method === "DELETE") {
+        calls.push(url);
+        return json({ detail: "這個品項賣過了，不能刪除，只能下架（交易紀錄要留著）" }, 409);
+      }
+      if (url.includes("/menu-items")) return json(ITEMS);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await screen.findByText("手沖-耶加");
+    await user.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(await screen.findByText(/賣過了/)).toBeTruthy();
+  });
+
+  it("刪除：取消確認就不送出（誤按不該讓商品消失）", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    stubFetch((url, method) => {
+      if (url.includes("/delete") && method === "DELETE") {
+        calls.push(url);
+        return json(null, 204);
+      }
+      if (url.includes("/menu-items")) return json(ITEMS);
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await screen.findByText("手沖-耶加");
+    await user.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    expect(calls).toEqual([]);
+  });
 });

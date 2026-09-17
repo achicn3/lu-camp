@@ -280,6 +280,13 @@ class ReturnConflict(DomainError):
     """退貨與目前狀態衝突（已全退、已作廢、或付款型態暫不支援）。"""
 
 
+class ItemDeleteBlocked(DomainError):
+    """品項已被交易／收購／採購／盤點參照，硬刪會讓那些紀錄指向不存在的商品。
+
+    裁示（2026-09-17）：沒賣過真刪、賣過只能下架。訊息要直接寫給店員看得懂的原因。
+    """
+
+
 class MenuItemNotFound(DomainError):
     """指定的餐飲菜單品項不存在（或不屬於本店、已封存）。"""
 

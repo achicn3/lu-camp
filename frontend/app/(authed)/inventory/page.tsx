@@ -301,6 +301,62 @@ function SearchBar({
 }
 
 // 改售價（管理者限定；後端寫稽核）。序號品改標價、一般商品/散裝改單價。
+// 刪除品項（管理者限定）。誤建的真刪，賣過/進過貨的由後端回 409，這裡把原因照實顯示，
+// 不要求店員自己判斷哪些刪得掉（裁示 2026-09-17）。
+function DeleteItemButton({
+  kind,
+  id,
+  name,
+}: {
+  kind: "serialized" | "catalog" | "bulk";
+  id: number;
+  name: string;
+}) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+
+  const mut = useMutation({
+    mutationFn: async () => {
+      const path =
+        kind === "serialized"
+          ? api.DELETE("/api/v1/serialized-items/{item_id}", { params: { path: { item_id: id } } })
+          : kind === "catalog"
+            ? api.DELETE("/api/v1/catalog-products/{product_id}", {
+                params: { path: { product_id: id } },
+              })
+            : api.DELETE("/api/v1/bulk-lots/{lot_id}", { params: { path: { lot_id: id } } });
+      const { error: e, response } = await path;
+      if (!response.ok) throw new Error(extractDetail(e) ?? "刪除失敗");
+    },
+    onSuccess: () => {
+      setError(null);
+      void qc.invalidateQueries({ queryKey: ["inventory"] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-ghost btn-danger-text"
+        disabled={mut.isPending}
+        onClick={() => {
+          setError(null);
+          if (window.confirm(`確定要刪除「${name}」？刪掉就找不回來了。`)) mut.mutate();
+        }}
+      >
+        刪除
+      </button>
+      {error !== null && (
+        <p role="alert" className="form-error menu-row-error">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
 function ChangePriceButton({
   kind,
   id,
@@ -1072,6 +1128,9 @@ function SerializedPanel() {
               {isManager && item.status === "IN_STOCK" && (
                 <ChangePriceButton kind="serialized" id={item.id} currentPrice={item.listed_price} />
               )}
+              {isManager && item.status === "IN_STOCK" && (
+                <DeleteItemButton kind="serialized" id={item.id} name={item.name} />
+              )}
               {item.status === "IN_STOCK" && (
                 <ReprintLabelButton
                   code={item.item_code}
@@ -1395,6 +1454,7 @@ function CatalogPanel() {
                 {isManager && (
                   <ChangePriceButton kind="catalog" id={product.id} currentPrice={product.unit_price} />
                 )}
+                {isManager && <DeleteItemButton kind="catalog" id={product.id} name={product.name} />}
                 {/* 一般商品也要印標籤（裁示 2026-09-14）：條碼走 sku，採購來的一律標「全新」。 */}
                 {product.quantity_on_hand > 0 && (
                   <ReprintLabelButton
@@ -1583,6 +1643,9 @@ function BulkPanel() {
               )}
               {isManager && lot.status === "ON_SALE" && (
                 <ChangePriceButton kind="bulk" id={lot.id} currentPrice={lot.unit_price} />
+              )}
+              {isManager && lot.status === "ON_SALE" && (
+                <DeleteItemButton kind="bulk" id={lot.id} name={lot.name} />
               )}
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton

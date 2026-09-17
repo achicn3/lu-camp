@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, case, func, select, update
+from sqlalchemy import CursorResult, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.inventory.models import (
@@ -692,6 +692,45 @@ class InventoryRepository:
         return int(await self._session.scalar(stmt) or 0)
 
     # ── 一般商品 ──
+    async def delete_serialized_item(self, store_id: int, item_id: int) -> None:
+        """刪品項並清掉它的庫存流水——留著會變成指向不存在商品的孤兒列。"""
+        await self._session.execute(
+            delete(StockMovement).where(
+                StockMovement.store_id == store_id, StockMovement.serialized_item_id == item_id
+            )
+        )
+        await self._session.execute(
+            delete(SerializedItem).where(
+                SerializedItem.store_id == store_id, SerializedItem.id == item_id
+            )
+        )
+        await self._session.flush()
+
+    async def delete_catalog_product(self, store_id: int, product_id: int) -> None:
+        await self._session.execute(
+            delete(StockMovement).where(
+                StockMovement.store_id == store_id,
+                StockMovement.catalog_product_id == product_id,
+            )
+        )
+        await self._session.execute(
+            delete(CatalogProduct).where(
+                CatalogProduct.store_id == store_id, CatalogProduct.id == product_id
+            )
+        )
+        await self._session.flush()
+
+    async def delete_bulk_lot(self, store_id: int, lot_id: int) -> None:
+        await self._session.execute(
+            delete(StockMovement).where(
+                StockMovement.store_id == store_id, StockMovement.bulk_lot_id == lot_id
+            )
+        )
+        await self._session.execute(
+            delete(BulkLot).where(BulkLot.store_id == store_id, BulkLot.id == lot_id)
+        )
+        await self._session.flush()
+
     async def get_catalog(self, store_id: int, catalog_id: int) -> CatalogProduct | None:
         stmt = select(CatalogProduct).where(
             CatalogProduct.id == catalog_id, CatalogProduct.store_id == store_id

@@ -10,6 +10,10 @@ class MenuRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def delete(self, item: MenuItem) -> None:
+        await self._session.delete(item)
+        await self._session.flush()
+
     async def add(self, item: MenuItem) -> MenuItem:
         self._session.add(item)
         await self._session.flush()

@@ -895,6 +895,37 @@ class SalesRepository:
             for line_id, reason_id, reason_name, description, qty, retail, cost in rows
         ]
 
+    async def item_referenced(
+        self,
+        store_id: int,
+        *,
+        serialized_item_id: int | None = None,
+        catalog_product_id: int | None = None,
+        bulk_lot_id: int | None = None,
+        menu_item_id: int | None = None,
+    ) -> bool:
+        """這個品項有沒有出現在任何一筆交易明細裡（**含已作廢**）。
+
+        作廢單的明細仍指著商品，硬刪一樣會讓交易紀錄斷鏈，所以不能只看未作廢的。
+        """
+        column, value = next(
+            (col, val)
+            for col, val in (
+                (SaleLine.serialized_item_id, serialized_item_id),
+                (SaleLine.catalog_product_id, catalog_product_id),
+                (SaleLine.bulk_lot_id, bulk_lot_id),
+                (SaleLine.menu_item_id, menu_item_id),
+            )
+            if val is not None
+        )
+        found = await self._session.scalar(
+            select(SaleLine.id)
+            .join(Sale, SaleLine.sale_id == Sale.id)
+            .where(Sale.store_id == store_id, column == value)
+            .limit(1)
+        )
+        return found is not None
+
     async def margin_components(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> SalesMarginComponents:

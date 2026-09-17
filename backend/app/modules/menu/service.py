@@ -16,6 +16,7 @@ from app.modules.menu.models import MenuItem
 from app.modules.menu.repository import MenuRepository
 from app.shared.exceptions import (
     DuplicateMenuItem,
+    ItemDeleteBlocked,
     MenuItemNotFound,
     SaleLineInvalid,
 )
@@ -155,6 +156,34 @@ class MenuService:
                 after={"unit_cost": None if unit_cost is None else str(unit_cost)},
             )
         return item
+
+    async def delete_menu_item(self, store_id: int, item_id: int, *, actor_user_id: int) -> bool:
+        """真刪誤建的菜單品項；賣過的擋下（裁示 2026-09-17）。找不到→False。
+
+        與 archive（下架）不同：下架只是從清單/POS 隱藏，資料列還在。誤建的品項要真的
+        消失，否則清單會愈積愈多垃圾。
+        """
+        from app.modules.sales.service import SalesService
+
+        item = await self._repo.get_for_update(store_id, item_id)
+        if item is None:
+            return False
+        if await SalesService(self._session).item_referenced_by_sales(
+            store_id, menu_item_id=item_id
+        ):
+            raise ItemDeleteBlocked("這個品項賣過了，不能刪除，只能下架（交易紀錄要留著）")
+        before = {"name": item.name, "unit_price": str(item.unit_price)}
+        await self._repo.delete(item)
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="DELETE_MENU_ITEM",
+            entity_type="menu_item",
+            entity_id=str(item_id),
+            before=before,
+        )
+        return True
 
     async def archive_menu_item(
         self, store_id: int, item_id: int, *, actor_user_id: int

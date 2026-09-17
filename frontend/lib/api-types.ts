@@ -359,7 +359,11 @@ export interface paths {
         get: operations["getBulkLot"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Bulk Lot
+         * @description 刪誤建的散裝批（沒賣過、非收購來源才行）。
+         */
+        delete: operations["deleteBulkLot"];
         options?: never;
         head?: never;
         patch?: never;
@@ -780,7 +784,11 @@ export interface paths {
         get: operations["getCatalogProduct"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Catalog Product
+         * @description 刪誤建的一般商品（沒賣過、沒進過貨、沒盤點過才行）。
+         */
+        delete: operations["deleteCatalogProduct"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1972,6 +1980,26 @@ export interface paths {
         patch: operations["updateMenuItem"];
         trace?: never;
     };
+    "/api/v1/menu-items/{item_id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Menu Item
+         * @description 真刪誤建的品項（沒賣過才行）；賣過的回 409，畫面改提供下架。
+         */
+        delete: operations["deleteMenuItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/product-models": {
         parameters: {
             query?: never;
@@ -2757,6 +2785,26 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/serialized-items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Serialized Item
+         * @description 刪誤建的序號品（沒賣過、非收購來源才行）。賣過或收購來的回 409 並說明原因。
+         */
+        delete: operations["deleteSerializedItem"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8613,6 +8661,35 @@ export interface operations {
             };
         };
     };
+    deleteBulkLot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getBulkLotDetail: {
         parameters: {
             query?: never;
@@ -9394,6 +9471,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CatalogProductRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -11676,6 +11782,35 @@ export interface operations {
             };
         };
     };
+    deleteMenuItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listProductModels: {
         parameters: {
             query?: {
@@ -13056,6 +13191,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PriceHintRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deleteSerializedItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

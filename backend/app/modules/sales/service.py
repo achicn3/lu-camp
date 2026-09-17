@@ -2219,6 +2219,24 @@ class SalesService:
             ),
         )
 
+    async def item_referenced_by_sales(
+        self,
+        store_id: int,
+        *,
+        serialized_item_id: int | None = None,
+        catalog_product_id: int | None = None,
+        bulk_lot_id: int | None = None,
+        menu_item_id: int | None = None,
+    ) -> bool:
+        """供庫存/菜單判斷「賣過沒有」：賣過就不能刪，否則交易紀錄會指向不存在的商品。"""
+        return await self._repo.item_referenced(
+            store_id,
+            serialized_item_id=serialized_item_id,
+            catalog_product_id=catalog_product_id,
+            bulk_lot_id=bulk_lot_id,
+            menu_item_id=menu_item_id,
+        )
+
     async def serialized_sold_rows(
         self, store_id: int, date_from: datetime, date_to: datetime
     ) -> list[

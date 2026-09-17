@@ -19,7 +19,12 @@ from app.modules.menu.schemas import (
     MenuItemUpdateRequest,
 )
 from app.modules.menu.service import MenuService
-from app.shared.exceptions import DuplicateMenuItem, MenuItemNotFound, SaleLineInvalid
+from app.shared.exceptions import (
+    DuplicateMenuItem,
+    ItemDeleteBlocked,
+    MenuItemNotFound,
+    SaleLineInvalid,
+)
 
 router = APIRouter(prefix="/menu-items", tags=["menu"])
 
@@ -124,3 +129,23 @@ async def archive_menu_item(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     await session.commit()
     return MenuItemRead.from_model(item)
+
+
+@router.delete(
+    "/{item_id}/delete",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteMenuItem",
+)
+async def delete_menu_item(item_id: int, session: SessionDep, user: ManagerDep) -> None:
+    """真刪誤建的品項（沒賣過才行）；賣過的回 409，畫面改提供下架。"""
+    try:
+        deleted = await MenuService(session).delete_menu_item(
+            user.store_id, item_id, actor_user_id=user.id
+        )
+    except ItemDeleteBlocked as exc:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not deleted:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到菜單品項")
+    await session.commit()

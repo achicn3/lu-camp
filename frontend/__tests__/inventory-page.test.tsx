@@ -726,4 +726,45 @@ describe("InventoryPage", () => {
     expect(screen.getByLabelText("型號")).toBeTruthy();
     expect(screen.getByLabelText("成色")).toBeTruthy();
   });
+
+  it("刪除一般商品：確認後打 DELETE；被擋下時照實顯示後端原因", async () => {
+    loginManager();
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "DELETE" && new URL(url).pathname.startsWith("/api/v1/catalog-products/")) {
+        calls.push(url);
+        return json({ detail: "這件有採購紀錄，不能刪除（進貨帳要留著）" }, 409);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("SKU-9");
+    await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    await waitFor(() => expect(calls.length).toBe(1));
+    expect(await screen.findByText(/採購紀錄/)).toBeTruthy();
+  });
+
+  it("刪除：取消確認不送出（誤按不該讓商品消失）", async () => {
+    loginManager();
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "DELETE") {
+        calls.push(url);
+        return json(null, 204);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("SKU-9");
+    await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    expect(calls).toEqual([]);
+  });
 });

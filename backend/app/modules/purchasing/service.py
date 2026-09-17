@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
@@ -46,6 +47,19 @@ class PurchasingService:
         self._session = session
         self._repo = PurchasingRepository(session)
         self._inventory = InventoryService(session)
+
+    async def product_referenced(self, store_id: int, catalog_product_id: int) -> bool:
+        """這個商品有沒有出現在任何採購明細（供庫存判斷可不可以刪）。"""
+        found = await self._session.scalar(
+            select(PurchaseOrderLine.id)
+            .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
+            .where(
+                PurchaseOrder.store_id == store_id,
+                PurchaseOrderLine.catalog_product_id == catalog_product_id,
+            )
+            .limit(1)
+        )
+        return found is not None
 
     async def create_supplier(self, store_id: int, payload: SupplierCreate) -> Supplier:
         name = payload.name.strip()

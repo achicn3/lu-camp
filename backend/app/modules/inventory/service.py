@@ -46,6 +46,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InsufficientStock,
     InvalidStateTransition,
+    ItemDeleteBlocked,
     OwnershipValidationError,
 )
 
@@ -531,6 +532,99 @@ class InventoryService:
         return await self._repo.category_names(store_id, ids)
 
     # ── 改售價（manager；含稅整數元；每次寫稽核 before/after，§5/§9）──
+    async def _audit_delete(
+        self,
+        store_id: int,
+        actor_user_id: int,
+        entity_type: str,
+        entity_id: int,
+        before: dict[str, object],
+    ) -> None:
+        """刪除一定要留稽核：東西刪掉之後，這裡是唯一查得到「刪了什麼」的地方。"""
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action=f"DELETE_{entity_type.upper()}",
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            before=before,
+        )
+
+    async def delete_serialized_item(
+        self, store_id: int, item_id: int, *, actor_user_id: int
+    ) -> bool:
+        """刪誤建的序號品。賣過或收購進來的一律擋下（裁示 2026-09-17）。
+
+        找不到→False。收購進來的請走收購作廢：那是付過錢的紀錄，不能用刪除繞過。
+        """
+        from app.modules.consignment.service import ConsignmentService
+        from app.modules.sales.service import SalesService
+
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
+        if item is None:
+            return False
+        if item.acquisition_id is not None:
+            raise ItemDeleteBlocked("這件是收購進來的，請用收購作廢，不要直接刪除")
+        if await SalesService(self._session).item_referenced_by_sales(
+            store_id, serialized_item_id=item_id
+        ):
+            raise ItemDeleteBlocked("這件賣過了，不能刪除（交易紀錄要留著）")
+        if await ConsignmentService(self._session).serialized_referenced(store_id, item_id):
+            raise ItemDeleteBlocked("這件有寄售結算紀錄，不能刪除")
+        before: dict[str, object] = {
+            "item_code": item.item_code,
+            "name": item.name,
+            "grade": item.grade.value,
+        }
+        await self._repo.delete_serialized_item(store_id, item_id)
+        await self._audit_delete(store_id, actor_user_id, "serialized_item", item_id, before)
+        return True
+
+    async def delete_catalog_product(
+        self, store_id: int, product_id: int, *, actor_user_id: int
+    ) -> bool:
+        """刪誤建的一般商品。賣過、進過貨、盤點過都擋下。找不到→False。"""
+        from app.modules.purchasing.service import PurchasingService
+        from app.modules.sales.service import SalesService
+        from app.modules.stocktake.service import StocktakeService
+
+        product = await self._repo.get_catalog(store_id, product_id)
+        if product is None:
+            return False
+        if await SalesService(self._session).item_referenced_by_sales(
+            store_id, catalog_product_id=product_id
+        ):
+            raise ItemDeleteBlocked("這件賣過了，不能刪除（交易紀錄要留著）")
+        if await PurchasingService(self._session).product_referenced(store_id, product_id):
+            raise ItemDeleteBlocked("這件有採購紀錄，不能刪除（進貨帳要留著）")
+        if await StocktakeService(self._session).product_referenced(store_id, product_id):
+            raise ItemDeleteBlocked("這件盤點過，不能刪除（盤點紀錄要留著）")
+        before: dict[str, object] = {"sku": product.sku, "name": product.name}
+        await self._repo.delete_catalog_product(store_id, product_id)
+        await self._audit_delete(store_id, actor_user_id, "catalog_product", product_id, before)
+        return True
+
+    async def delete_bulk_lot(self, store_id: int, lot_id: int, *, actor_user_id: int) -> bool:
+        """刪誤建的散裝批。賣過或收購進來的一律擋下。找不到→False。"""
+        from app.modules.sales.service import SalesService
+
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
+        if lot is None:
+            return False
+        if lot.acquisition_id is not None:
+            raise ItemDeleteBlocked("這堆是收購進來的，請用收購作廢，不要直接刪除")
+        if await SalesService(self._session).item_referenced_by_sales(store_id, bulk_lot_id=lot_id):
+            raise ItemDeleteBlocked("這堆賣過了，不能刪除（交易紀錄要留著）")
+        before: dict[str, object] = {
+            "lot_code": lot.lot_code,
+            "name": lot.name,
+            "total_qty": lot.total_qty,
+        }
+        await self._repo.delete_bulk_lot(store_id, lot_id)
+        await self._audit_delete(store_id, actor_user_id, "bulk_lot", lot_id, before)
+        return True
+
     async def update_serialized_price(
         self, store_id: int, item_id: int, *, unit_price: Decimal, actor_user_id: int
     ) -> SerializedItem | None:
