@@ -34,6 +34,16 @@ page.on("dialog", async (d) => {
 async function confirmDelete() {
   const dialog = page.getByRole("dialog", { name: "刪除商品" });
   await dialog.waitFor({ timeout: 10000 });
+  // 視窗掛在表格儲存格裡，會繼承 `.inv-table td` 的 nowrap，整段說明曾經衝出白框。
+  // 量實際寬度而不是看截圖：日後又被哪條 nowrap 規則吃到，這裡會紅。
+  const box = await page.evaluate(() => {
+    const card = document.querySelector(".confirm-dialog");
+    return { scrollW: card.scrollWidth, clientW: card.clientWidth };
+  });
+  assert.ok(
+    box.scrollW <= box.clientW + 1,
+    `確認視窗文字超出框外：scrollWidth ${box.scrollW} > clientWidth ${box.clientW}`,
+  );
   await dialog.getByRole("button", { name: "刪除", exact: true }).click();
 }
 

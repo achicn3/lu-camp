@@ -3880,10 +3880,21 @@ body {
 /* 站內確認視窗（取代 window.confirm）。刪除是不可逆的，所以主鈕走危險色。 */
 .confirm-dialog {
   max-width: 460px;
+  /* 這個視窗常常掛在表格儲存格裡（刪除鈕就在那一列），會繼承 `.inv-table td` 的
+     white-space: nowrap，整段說明就變一行直接衝出白框。明確拉回正常換行。 */
+  white-space: normal;
+  text-align: left;
 }
 .confirm-dialog-body {
   font-size: var(--text-md);
   line-height: 1.7;
+  white-space: normal;
+}
+.confirm-dialog-body p {
+  margin: 0 0 var(--sp-2);
+}
+.confirm-dialog-body p:last-child {
+  margin-bottom: 0;
 }
 .confirm-dialog-body strong {
   overflow-wrap: anywhere; /* 品名可能很長且不含空白 */
