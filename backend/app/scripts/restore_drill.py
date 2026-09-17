@@ -128,6 +128,9 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("採購-供應商數", "SELECT count(*) FROM suppliers"),
     ("活動-檔數", "SELECT count(*) FROM campaigns"),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
+    # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
+    ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),
+    ("開店檢查-每日狀態數", "SELECT count(*) FROM opening_checks"),
     ("LINE Pay-交易筆數", "SELECT count(*) FROM linepay_transactions"),
     # 防重複退款的唯一依據：崩潰/回應遺失後靠它判斷「這筆是否已退過」，弄丟＝可能多退真的錢。
     ("LINE Pay-退款嘗試筆數", "SELECT count(*) FROM linepay_refund_attempts"),
