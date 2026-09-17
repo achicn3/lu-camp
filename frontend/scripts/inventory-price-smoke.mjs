@@ -23,19 +23,20 @@ page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
 // 對某一分頁的「第一列」做改價並驗證持久化。clicks 第一顆「改價」鈕，
 // 讀回 prefilled 舊價 → 防呆 0 元 → 改 newPrice → 送出 → 重開同列確認值已變。
 async function changeFirstPrice(label, shotTag) {
-  // 第一顆改價鈕
-  const firstBtn = page.locator('button:has-text("改價")').first();
+  // 第一顆編輯鈕
+  // 改價併進單一「編輯」視窗（2026-09-17）：一列原本六顆鈕太吵。
+  const firstBtn = page.locator('button:has-text("編輯")').first();
   await firstBtn.waitFor({ state: "visible", timeout: 8000 });
   await firstBtn.click();
-  const dialog = page.locator('[aria-label="改售價"]');
+  const dialog = page.locator('[aria-label="編輯商品"]');
   await dialog.waitFor({ state: "visible", timeout: 4000 });
-  const input = dialog.locator('input[aria-label="新售價"]');
+  const input = dialog.locator('input[aria-label="售價"]');
   const oldPrice = Number(await input.inputValue());
   ok(`${label}：開啟改價視窗、帶出現價`, Number.isFinite(oldPrice) && oldPrice > 0, `現價=${oldPrice}`);
 
   // 防呆：0 元應被擋、視窗不關
   await input.fill("0");
-  await dialog.locator('button:has-text("送出")').click();
+  await dialog.locator('button:has-text("儲存")').click();
   const errVisible = await dialog
     .locator('text=售價須為正整數元')
     .isVisible()
@@ -48,15 +49,15 @@ async function changeFirstPrice(label, shotTag) {
   // 改成新價（與舊價不同、避免千分位逗號 → 取 < 1000 的明確值或舊價+137）
   const newPrice = oldPrice + 137;
   await input.fill(String(newPrice));
-  await dialog.locator('button:has-text("送出")').click();
+  await dialog.locator('button:has-text("儲存")').click();
   await dialog.waitFor({ state: "hidden", timeout: 6000 });
   ok(`${label}：送出後視窗關閉`, true);
 
   // 重開同一列，確認新價已持久（經後端寫入 + 列表重載）
-  await page.locator('button:has-text("改價")').first().click();
-  const dialog2 = page.locator('[aria-label="改售價"]');
+  await page.locator('button:has-text("編輯")').first().click();
+  const dialog2 = page.locator('[aria-label="編輯商品"]');
   await dialog2.waitFor({ state: "visible", timeout: 4000 });
-  const persisted = Number(await dialog2.locator('input[aria-label="新售價"]').inputValue());
+  const persisted = Number(await dialog2.locator('input[aria-label="售價"]').inputValue());
   ok(`${label}：新價已持久`, persisted === newPrice, `期望 ${newPrice}、實得 ${persisted}`);
   await dialog2.locator('button:has-text("取消")').click();
   await dialog2.waitFor({ state: "hidden", timeout: 4000 });

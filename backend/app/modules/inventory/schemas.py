@@ -335,6 +335,8 @@ class CatalogProductRead(BaseModel):
     category_id: int | None
     note: str | None = None
     incoming_qty: int = 0
+    # 停售（2026-09-17）：false 代表不再販售，清單與 POS 都不會出現；紀錄與庫存量不動。
+    is_active: bool = True
 
 
 class CatalogProductListRead(CatalogProductRead):
@@ -441,3 +443,23 @@ class InventoryCountRead(BaseModel):
     """符合目前篩選條件的總筆數（庫存頁算總頁數用）。"""
 
     count: int
+
+
+class CatalogProductUpdateRequest(BaseModel):
+    """改一般商品：未提供的欄位不變；品牌/型號/分類可明確設為 null 以清空。
+
+    **沒有 sku**：條碼已經印在標籤上，改了會掃不到，要換就建新商品。
+    """
+
+    name: str | None = Field(default=None, max_length=150)
+    brand_id: int | None = None
+    product_model_id: int | None = None
+    category_id: int | None = None
+    reorder_point: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+
+
+class ItemRenameRequest(BaseModel):
+    """改品名（序號品／散裝批）。空白一律擋下——清單上會變成看不出是什麼的空列。"""
+
+    name: str = Field(min_length=1, max_length=150)

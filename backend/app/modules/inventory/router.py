@@ -24,10 +24,12 @@ from app.modules.inventory.schemas import (
     CatalogProductDetailRead,
     CatalogProductListRead,
     CatalogProductRead,
+    CatalogProductUpdateRequest,
     CategoryCreate,
     CategoryRead,
     CategoryTargetUpdate,
     InventoryCountRead,
+    ItemRenameRequest,
     NoteUpdateRequest,
     PriceHintRead,
     PriceUpdateRequest,
@@ -55,6 +57,7 @@ from app.shared.exceptions import (
     IdempotencyKeyConflict,
     InvalidStateTransition,
     ItemDeleteBlocked,
+    SaleLineInvalid,
 )
 
 router = APIRouter(tags=["inventory"])
@@ -282,10 +285,15 @@ async def count_catalog_products(
     brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     low_stock: Annotated[bool, Query()] = False,
+    include_inactive: Annotated[bool, Query()] = False,
 ) -> InventoryCountRead:
     """一般商品在同一組篩選條件下的總筆數；庫存頁用它顯示「第 N / 共 M 頁」。"""
     total = await InventoryService(session).count_catalog_products(
-        user.store_id, brand_id=brand_id, q=q, low_stock=low_stock
+        user.store_id,
+        brand_id=brand_id,
+        q=q,
+        low_stock=low_stock,
+        include_inactive=include_inactive,
     )
     return InventoryCountRead(count=total)
 
@@ -426,11 +434,18 @@ async def list_catalog(
     brand_id: Annotated[int | None, Query(alias="brand_id")] = None,
     q: Annotated[str | None, Query(max_length=100)] = None,
     low_stock: Annotated[bool, Query()] = False,
+    include_inactive: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CatalogProductListRead]:
     products, incoming = await InventoryService(session).list_catalog_with_incoming(
-        user.store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+        user.store_id,
+        brand_id=brand_id,
+        q=q,
+        low_stock=low_stock,
+        include_inactive=include_inactive,
+        limit=limit,
+        offset=offset,
     )
     return [
         CatalogProductListRead.model_validate(product).model_copy(
@@ -836,3 +851,92 @@ async def _delete_item(
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail)
     await session.commit()
+
+
+@router.patch(
+    "/catalog-products/{product_id}",
+    response_model=CatalogProductRead,
+    operation_id="updateCatalogProduct",
+)
+async def update_catalog_product(
+    product_id: int,
+    payload: CatalogProductUpdateRequest,
+    session: SessionDep,
+    user: ManagerDep,
+) -> CatalogProductRead:
+    """改品名等資料，或停售／恢復上架。未提供的欄位不動（sku 一律不可改）。"""
+    fields = payload.model_fields_set
+    try:
+        product = await InventoryService(session).update_catalog_product(
+            user.store_id,
+            product_id,
+            name=payload.name,
+            reorder_point=payload.reorder_point,
+            is_active=payload.is_active,
+            actor_user_id=user.id,
+            **{
+                key: getattr(payload, key)
+                for key in ("brand_id", "product_model_id", "category_id")
+                if key in fields
+            },
+        )
+    except SaleLineInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if product is None:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到一般商品")
+    await session.commit()
+    return CatalogProductRead.model_validate(product)
+
+
+@router.patch(
+    "/serialized-items/{item_id}/name",
+    response_model=SerializedItemRead,
+    operation_id="renameSerializedItem",
+)
+async def rename_serialized_item(
+    item_id: int, payload: ItemRenameRequest, session: SessionDep, user: ManagerDep
+) -> SerializedItemRead:
+    """改序號品品名（含已售出；寫稽核）。歷史明細存的是成交當下的快照，不受影響。"""
+    try:
+        item = await InventoryService(session).rename_serialized_item(
+            user.store_id, item_id, name=payload.name, actor_user_id=user.id
+        )
+    except SaleLineInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if item is None:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此序號品")
+    await session.commit()
+    return SerializedItemRead.model_validate(item)
+
+
+@router.patch(
+    "/bulk-lots/{lot_id}/name",
+    response_model=BulkLotRead,
+    operation_id="renameBulkLot",
+)
+async def rename_bulk_lot(
+    lot_id: int, payload: ItemRenameRequest, session: SessionDep, user: ManagerDep
+) -> BulkLotRead:
+    """改散裝批名稱（寫稽核）。"""
+    try:
+        lot = await InventoryService(session).rename_bulk_lot(
+            user.store_id, lot_id, name=payload.name, actor_user_id=user.id
+        )
+    except SaleLineInvalid as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    if lot is None:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到此散裝批")
+    await session.commit()
+    return BulkLotRead.model_validate(lot)

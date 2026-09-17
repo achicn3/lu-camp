@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Final
 from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
@@ -49,6 +49,7 @@ from app.shared.exceptions import (
     InvalidStateTransition,
     ItemDeleteBlocked,
     OwnershipValidationError,
+    SaleLineInvalid,
 )
 
 _MOVEMENT_LABELS: dict[tuple[StockDirection, StockReason], str] = {
@@ -120,6 +121,10 @@ def _catalog_create_fingerprint(
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+# 區分「未提供（不變）」與「明確設為 None（清空）」：品牌/型號/分類都可以清掉。
+_UNSET: Final = object()
 
 
 class InventoryService:
@@ -599,6 +604,75 @@ class InventoryService:
         await self._audit_delete(store_id, actor_user_id, "serialized_item", item_id, before)
         return True
 
+    async def update_catalog_product(
+        self,
+        store_id: int,
+        product_id: int,
+        *,
+        name: str | None = None,
+        brand_id: int | None | object = _UNSET,
+        product_model_id: int | None | object = _UNSET,
+        category_id: int | None | object = _UNSET,
+        reorder_point: int | None = None,
+        is_active: bool | None = None,
+        actor_user_id: int,
+    ) -> CatalogProduct | None:
+        """改一般商品的資料與上下架狀態（寫稽核）。找不到→None。
+
+        **SKU 不給改**：它就是標籤上的條碼，改了已印出去的標籤會掃不到。
+        品名可以隨時改（含賣過的）——交易明細存的是成交當下的品名快照，歷史不受影響。
+        停售只影響清單與 POS 找不找得到，庫存數量與紀錄一概不動。
+        """
+        product = await self._repo.get_catalog_for_update(store_id, product_id)
+        if product is None:
+            return None
+        before: dict[str, object] = {
+            "name": product.name,
+            "brand_id": product.brand_id,
+            "product_model_id": product.product_model_id,
+            "category_id": product.category_id,
+            "reorder_point": product.reorder_point,
+            "is_active": product.is_active,
+        }
+        if name is not None:
+            cleaned = name.strip()
+            if not cleaned:
+                raise SaleLineInvalid("品名不可空白")
+            product.name = cleaned
+        if brand_id is not _UNSET:
+            product.brand_id = brand_id  # type: ignore[assignment]
+        if product_model_id is not _UNSET:
+            product.product_model_id = product_model_id  # type: ignore[assignment]
+        if category_id is not _UNSET:
+            product.category_id = category_id  # type: ignore[assignment]
+        if reorder_point is not None:
+            if reorder_point < 0:
+                raise SaleLineInvalid("再訂購點不可為負")
+            product.reorder_point = reorder_point
+        if is_active is not None:
+            product.is_active = is_active
+        await self._session.flush()
+        after: dict[str, object] = {
+            "name": product.name,
+            "brand_id": product.brand_id,
+            "product_model_id": product.product_model_id,
+            "category_id": product.category_id,
+            "reorder_point": product.reorder_point,
+            "is_active": product.is_active,
+        }
+        if before != after:
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="UPDATE_CATALOG_PRODUCT",
+                entity_type="catalog_product",
+                entity_id=str(product_id),
+                before=before,
+                after=after,
+            )
+        return product
+
     async def delete_catalog_product(
         self, store_id: int, product_id: int, *, actor_user_id: int
     ) -> bool:
@@ -716,6 +790,61 @@ class InventoryService:
     async def get_bulk_lot_by_id(self, store_id: int, lot_id: int) -> BulkLot | None:
         """以 id 取散裝批（限本店）。POS 還原購物車重新取回備註用。"""
         return await self._repo.get_bulk_lot(store_id, lot_id)
+
+    async def rename_serialized_item(
+        self, store_id: int, item_id: int, *, name: str, actor_user_id: int
+    ) -> SerializedItem | None:
+        """改序號品品名（含已售出；寫稽核）。找不到→None。
+
+        已成交的明細存的是成交當下的品名快照，所以改名不會改寫歷史——打錯字要能修。
+        """
+        item = await self._repo.get_serialized_for_update(store_id, item_id)
+        if item is None:
+            return None
+        cleaned = name.strip()
+        if not cleaned:
+            raise SaleLineInvalid("品名不可空白")
+        if cleaned == item.name:
+            return item
+        before, item.name = item.name, cleaned
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="RENAME_SERIALIZED_ITEM",
+            entity_type="serialized_item",
+            entity_id=str(item_id),
+            before={"name": before},
+            after={"name": cleaned},
+        )
+        return item
+
+    async def rename_bulk_lot(
+        self, store_id: int, lot_id: int, *, name: str, actor_user_id: int
+    ) -> BulkLot | None:
+        """改散裝批名稱（寫稽核）。找不到→None。"""
+        lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
+        if lot is None:
+            return None
+        cleaned = name.strip()
+        if not cleaned:
+            raise SaleLineInvalid("品名不可空白")
+        if cleaned == lot.name:
+            return lot
+        before, lot.name = lot.name, cleaned
+        await self._session.flush()
+        await write_audit_log(
+            self._session,
+            store_id=store_id,
+            actor_user_id=actor_user_id,
+            action="RENAME_BULK_LOT",
+            entity_type="bulk_lot",
+            entity_id=str(lot_id),
+            before={"name": before},
+            after={"name": cleaned},
+        )
+        return lot
 
     async def update_serialized_note(
         self, store_id: int, item_id: int, *, note: str | None, actor_user_id: int
@@ -1037,6 +1166,7 @@ class InventoryService:
         brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
+        include_inactive: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[CatalogProduct], dict[int, int]]:
@@ -1044,7 +1174,13 @@ class InventoryService:
         from app.modules.purchasing.service import PurchasingService
 
         products = await self._repo.list_catalog(
-            store_id, brand_id=brand_id, q=q, low_stock=low_stock, limit=limit, offset=offset
+            store_id,
+            brand_id=brand_id,
+            q=q,
+            low_stock=low_stock,
+            include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
         )
         incoming = await PurchasingService(self._session).incoming_qty_by_catalog(
             store_id, [p.id for p in products]
@@ -1087,10 +1223,15 @@ class InventoryService:
         brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
+        include_inactive: bool = False,
     ) -> int:
         """一般商品總筆數：與 list_catalog 同一組條件、不分頁（庫存頁算總頁數）。"""
         return await self._repo.count_catalog(
-            store_id, brand_id=brand_id, q=q, low_stock=low_stock
+            store_id,
+            brand_id=brand_id,
+            q=q,
+            low_stock=low_stock,
+            include_inactive=include_inactive,
         )
 
     async def catalog_filter_options(self, store_id: int) -> dict[str, Any]:

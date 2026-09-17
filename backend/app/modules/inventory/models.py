@@ -126,6 +126,9 @@ class CatalogProduct(Base, TimestampMixin):
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     quantity_on_hand: Mapped[int] = mapped_column(default=0, server_default=text("0"))
     reorder_point: Mapped[int] = mapped_column(default=0, server_default=text("0"))
+    # 停售（2026-09-17）：賣過/進過貨的商品刪不掉（紀錄要留著），但不賣了要能從庫存清單
+    # 與 POS 消失，否則誤建的東西會一直掛在那。只影響「找不找得到」，庫存數量與歷史不動。
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     # 建檔冪等：回應遺失後以同 key 重送，依原始請求指紋回放同一商品，不重複產生自動 SKU。
     create_idempotency_key: Mapped[str | None] = mapped_column(String(80))
     create_fingerprint: Mapped[str | None] = mapped_column(String(64))

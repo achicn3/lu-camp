@@ -48,6 +48,7 @@ const CATALOG = [
     quantity_on_hand: 2,
     reorder_point: 5,
     brand_id: null,
+    is_active: true,
   },
 ];
 const BULK = [
@@ -597,11 +598,11 @@ describe("InventoryPage", () => {
     );
     renderPage();
     await screen.findByText("SER-001");
-    await userEvent.click(screen.getByRole("button", { name: "改價" }));
-    const input = await screen.findByLabelText("新售價");
+    await userEvent.click(screen.getByRole("button", { name: "編輯" }));
+    const input = await screen.findByLabelText("售價");
     await userEvent.clear(input);
     await userEvent.type(input, "4200");
-    await userEvent.click(screen.getByRole("button", { name: "送出" }));
+    await userEvent.click(screen.getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(patched).not.toBeNull());
     expect(patched!.url).toContain("/serialized-items/1/price");
     expect(patched!.body).toEqual({ unit_price: "4200" });
@@ -742,7 +743,8 @@ describe("InventoryPage", () => {
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     await screen.findByText("SKU-9");
-    await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    await userEvent.click(await screen.findByRole("button", { name: "刪除這個商品" }));
     // 站內確認視窗（不是瀏覽器的 confirm）
     const dialog = await screen.findByRole("dialog", { name: "刪除商品" });
     expect(calls).toEqual([]);
@@ -766,9 +768,66 @@ describe("InventoryPage", () => {
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     await screen.findByText("SKU-9");
-    await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    await userEvent.click(await screen.findByRole("button", { name: "刪除這個商品" }));
     const dialog = await screen.findByRole("dialog", { name: "刪除商品" });
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls).toEqual([]);
+  });
+
+  it("編輯商品：改品名送 PATCH；商品編號不給改", async () => {
+    loginManager();
+    let patched = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "PATCH" && new URL(url).pathname.startsWith("/api/v1/catalog-products/")) {
+        patched =
+          input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+        return json({ ...CATALOG[0], name: "高山瓦斯罐" });
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "編輯商品" });
+    // 條碼不可改：視窗裡沒有可編輯的商品編號欄位
+    expect(within(dialog).queryByLabelText("商品編號")).toBeNull();
+    const nameInput = within(dialog).getByLabelText("品名");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "高山瓦斯罐");
+    await userEvent.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(patched).toContain("高山瓦斯罐"));
+    expect(JSON.parse(patched).sku).toBeUndefined();
+  });
+
+  it("停售：確認後送 is_active=false；停售中的顯示徽章並可恢復上架", async () => {
+    loginManager();
+    let patched = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "PATCH" && new URL(url).pathname.startsWith("/api/v1/catalog-products/")) {
+        patched =
+          input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
+        return json({ ...CATALOG[0], is_active: false });
+      }
+      if (new URL(url).pathname === "/api/v1/catalog-products") {
+        return json([{ ...CATALOG[0], is_active: patched === "" }]);
+      }
+      return route(url) ?? json(null, 404);
+    }));
+    renderPage();
+    await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
+    await screen.findByText("瓦斯罐");
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    await userEvent.click(await screen.findByRole("button", { name: "停售" }));
+    await waitFor(() => expect(JSON.parse(patched).is_active).toBe(false));
+    expect(await screen.findByText("已停售")).toBeTruthy();
+    // 再開一次編輯視窗，狀態區要變成「恢復上架」
+    await userEvent.click(screen.getAllByRole("button", { name: "編輯" })[0]);
+    expect(await screen.findByRole("button", { name: "恢復上架" })).toBeTruthy();
   });
 });

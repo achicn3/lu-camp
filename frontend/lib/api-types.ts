@@ -389,6 +389,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-lots/{lot_id}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Bulk Lot
+         * @description 改散裝批名稱（寫稽核）。
+         */
+        patch: operations["renameBulkLot"];
+        trace?: never;
+    };
     "/api/v1/bulk-lots/{lot_id}/note": {
         parameters: {
             query?: never;
@@ -791,7 +811,11 @@ export interface paths {
         delete: operations["deleteCatalogProduct"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Catalog Product
+         * @description 改品名等資料，或停售／恢復上架。未提供的欄位不動（sku 一律不可改）。
+         */
+        patch: operations["updateCatalogProduct"];
         trace?: never;
     };
     "/api/v1/catalog-products/{product_id}/detail": {
@@ -2830,6 +2854,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/{item_id}/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Serialized Item
+         * @description 改序號品品名（含已售出；寫稽核）。歷史明細存的是成交當下的快照，不受影響。
+         */
+        patch: operations["renameSerializedItem"];
+        trace?: never;
+    };
     "/api/v1/serialized-items/{item_id}/note": {
         parameters: {
             query?: never;
@@ -4228,6 +4272,11 @@ export interface components {
              * @default 0
              */
             incoming_qty: number;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
             /** Name */
             name: string;
             /** Note */
@@ -4266,6 +4315,11 @@ export interface components {
              * @default 0
              */
             incoming_qty: number;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
             /** Name */
             name: string;
             /** Note */
@@ -4282,6 +4336,26 @@ export interface components {
             store_id: number;
             /** Unit Price */
             unit_price: string;
+        };
+        /**
+         * CatalogProductUpdateRequest
+         * @description 改一般商品：未提供的欄位不變；品牌/型號/分類可明確設為 null 以清空。
+         *
+         *     **沒有 sku**：條碼已經印在標籤上，改了會掃不到，要換就建新商品。
+         */
+        CatalogProductUpdateRequest: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Reorder Point */
+            reorder_point?: number | null;
         };
         /**
          * CatalogPurchaseRead
@@ -5651,6 +5725,14 @@ export interface components {
             note?: string | null;
             /** Qty */
             qty: number;
+        };
+        /**
+         * ItemRenameRequest
+         * @description 改品名（序號品／散裝批）。空白一律擋下——清單上會變成看不出是什麼的空列。
+         */
+        ItemRenameRequest: {
+            /** Name */
+            name: string;
         };
         /**
          * ItemSourceRead
@@ -8721,6 +8803,41 @@ export interface operations {
             };
         };
     };
+    renameBulkLot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     updateBulkNote: {
         parameters: {
             query?: never;
@@ -9304,6 +9421,7 @@ export interface operations {
                 brand_id?: number | null;
                 q?: string | null;
                 low_stock?: boolean;
+                include_inactive?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -9405,6 +9523,7 @@ export interface operations {
                 brand_id?: number | null;
                 q?: string | null;
                 low_stock?: boolean;
+                include_inactive?: boolean;
             };
             header?: never;
             path?: never;
@@ -9500,6 +9619,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateCatalogProduct: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogProductUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProductRead"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -13250,6 +13404,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemDetailRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    renameSerializedItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */

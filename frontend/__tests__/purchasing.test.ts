@@ -27,6 +27,7 @@ function product(id: number): CatalogProduct {
     sku: `SKU-${id}`,
     name: `商品${id}`,
     brand_id: null,
+    is_active: true,
     product_model_id: null,
     category_id: null,
     unit_price: "100",

@@ -3899,3 +3899,28 @@ body {
 .confirm-dialog-body strong {
   overflow-wrap: anywhere; /* 品名可能很長且不含空白 */
 }
+
+/* 單一編輯視窗：分區標題讓「基本資料／售價／狀態／刪除」一眼分得開。 */
+.inv-edit-dialog {
+  max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+  white-space: normal;
+  text-align: left;
+}
+.inv-edit-section {
+  margin: var(--sp-3) 0 0;
+  font-weight: 700;
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+}
+.inv-edit-danger {
+  color: var(--danger);
+}
+.inv-edit-dialog > .pos-dialog-actions {
+  position: sticky;
+  bottom: calc(var(--sp-4) * -1);
+  background: var(--surface);
+  padding-block: var(--sp-3);
+}

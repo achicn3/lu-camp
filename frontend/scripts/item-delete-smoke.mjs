@@ -31,6 +31,12 @@ page.on("dialog", async (d) => {
   await d.dismiss();
 });
 
+async function openEditAndDelete(row) {
+  // 刪除併進「編輯」視窗（2026-09-17）
+  await row.getByRole("button", { name: "編輯" }).click();
+  await page.getByRole("button", { name: "刪除這個商品" }).click();
+}
+
 async function confirmDelete() {
   const dialog = page.getByRole("dialog", { name: "刪除商品" });
   await dialog.waitFor({ timeout: 10000 });
@@ -83,7 +89,7 @@ try {
   const row = page.locator(`tr:has-text("${sku}")`);
   await row.waitFor({ timeout: 10000 });
   await page.screenshot({ path: `${SHOTS}/del-01-before.png`, fullPage: true });
-  await row.locator('button:has-text("刪除")').click();
+  await openEditAndDelete(row);
   await page.screenshot({ path: `${SHOTS}/del-01b-confirm.png` });
   await confirmDelete();
   await row.waitFor({ state: "detached", timeout: 10000 });
@@ -116,12 +122,13 @@ try {
   await page.getByRole("tab", { name: "一般商品", exact: true }).click();
   const soldRow = page.locator(`tr:has-text("${soldSku}")`);
   await soldRow.waitFor({ timeout: 10000 });
-  await soldRow.locator('button:has-text("刪除")').click();
+  await openEditAndDelete(soldRow);
   await confirmDelete();
-  await soldRow.locator('[role="alert"]').waitFor({ timeout: 10000 });
+  const editDialog = page.getByRole("dialog", { name: "編輯商品" });
+  await editDialog.locator('[role="alert"]').waitFor({ timeout: 10000 });
   const blocked = deletes.find((d) => d.status === 409);
   assert.ok(blocked, `沒有被擋下的刪除請求：${JSON.stringify(deletes)}`);
-  const reason = await soldRow.locator('[role="alert"]').textContent();
+  const reason = await editDialog.locator('[role="alert"]').textContent();
   assert.ok(reason?.includes("採購"), `擋下的原因沒顯示給店員：${reason}`);
   ok("有紀錄的商品被擋下並說明原因", true, reason.trim());
   await page.screenshot({ path: `${SHOTS}/del-03-blocked.png`, fullPage: true });

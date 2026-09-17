@@ -313,10 +313,18 @@ class InventoryRepository:
         return int(await self._session.scalar(stmt) or 0)
 
     def _catalog_filters(
-        self, store_id: int, *, brand_id: int | None, q: str | None, low_stock: bool
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None,
+        q: str | None,
+        low_stock: bool,
+        include_inactive: bool = False,
     ) -> list[Any]:
         """清單與計數共用；分開寫遲早分岔，頁數就會跟翻得到的頁對不起來。"""
         conds: list[Any] = [CatalogProduct.store_id == store_id]
+        if not include_inactive:
+            conds.append(CatalogProduct.is_active.is_(True))
         if brand_id is not None:
             conds.append(CatalogProduct.brand_id == brand_id)
         if q:
@@ -333,12 +341,21 @@ class InventoryRepository:
         brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
+        include_inactive: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> list[CatalogProduct]:
         stmt = (
             select(CatalogProduct)
-            .where(*self._catalog_filters(store_id, brand_id=brand_id, q=q, low_stock=low_stock))
+            .where(
+                *self._catalog_filters(
+                    store_id,
+                    brand_id=brand_id,
+                    q=q,
+                    low_stock=low_stock,
+                    include_inactive=include_inactive,
+                )
+            )
             .order_by(CatalogProduct.name)
             .limit(limit)
             .offset(offset)
@@ -352,12 +369,21 @@ class InventoryRepository:
         brand_id: int | None = None,
         q: str | None = None,
         low_stock: bool = False,
+        include_inactive: bool = False,
     ) -> int:
         """符合同一組條件的一般商品總筆數（不含分頁）；庫存頁算總頁數用。"""
         stmt = (
             select(func.count())
             .select_from(CatalogProduct)
-            .where(*self._catalog_filters(store_id, brand_id=brand_id, q=q, low_stock=low_stock))
+            .where(
+                *self._catalog_filters(
+                    store_id,
+                    brand_id=brand_id,
+                    q=q,
+                    low_stock=low_stock,
+                    include_inactive=include_inactive,
+                )
+            )
         )
         return int((await self._session.scalar(stmt)) or 0)
 
@@ -739,8 +765,11 @@ class InventoryRepository:
         return result
 
     async def get_catalog_by_sku(self, store_id: int, sku: str) -> CatalogProduct | None:
+        """POS 掃碼用。停售的商品視同找不到——停售的意思就是「不要再賣了」。"""
         stmt = select(CatalogProduct).where(
-            CatalogProduct.store_id == store_id, CatalogProduct.sku == sku
+            CatalogProduct.store_id == store_id,
+            CatalogProduct.sku == sku,
+            CatalogProduct.is_active.is_(True),
         )
         result: CatalogProduct | None = await self._session.scalar(stmt)
         return result

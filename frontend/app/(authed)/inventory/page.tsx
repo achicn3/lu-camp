@@ -301,181 +301,300 @@ function SearchBar({
   );
 }
 
-// 改售價（管理者限定；後端寫稽核）。序號品改標價、一般商品/散裝改單價。
-// 刪除品項（管理者限定）。誤建的真刪，賣過/進過貨的由後端回 409，這裡把原因照實顯示，
-// 不要求店員自己判斷哪些刪得掉（裁示 2026-09-17）。
-function DeleteItemButton({
+// 單一「編輯」視窗（管理者限定）。原本改價／編輯／停售／刪除各一顆鈕，一列六顆太吵，
+// 整併成一個視窗分區呈現：基本資料｜售價｜狀態｜刪除。改價與刪除都會寫稽核。
+function ItemEditButton({
   kind,
   id,
   name,
+  price,
+  reorderPoint,
+  sku,
+  isActive,
 }: {
   kind: "serialized" | "catalog" | "bulk";
   id: number;
   name: string;
+  price: string;
+  reorderPoint?: number;
+  sku?: string;
+  isActive?: boolean;
 }) {
   const qc = useQueryClient();
-  const [confirming, setConfirming] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [nextName, setNextName] = useState(name);
+  const [nextPrice, setNextPrice] = useState(price);
+  const [nextReorder, setNextReorder] = useState(String(reorderPoint ?? 0));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mut = useMutation({
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["inventory"] });
+
+  async function patchName(): Promise<void> {
+    const trimmed = nextName.trim();
+    if (trimmed === name) return;
+    if (trimmed === "") throw new Error("品名不可空白");
+    if (kind === "catalog") return; // 一般商品的品名與再訂購點一起送（同一個端點）
+    const { data, error: e } =
+      kind === "serialized"
+        ? await api.PATCH("/api/v1/serialized-items/{item_id}/name", {
+            params: { path: { item_id: id } },
+            body: { name: trimmed },
+          })
+        : await api.PATCH("/api/v1/bulk-lots/{lot_id}/name", {
+            params: { path: { lot_id: id } },
+            body: { name: trimmed },
+          });
+    if (!data) throw new Error(extractDetail(e) ?? "改品名失敗");
+  }
+
+  async function patchCatalogFields(): Promise<void> {
+    if (kind !== "catalog") return;
+    const trimmed = nextName.trim();
+    const reorder = Number(nextReorder);
+    if (trimmed === "") throw new Error("品名不可空白");
+    if (!Number.isInteger(reorder) || reorder < 0) throw new Error("再訂購點須為 0 以上的整數");
+    if (trimmed === name && reorder === reorderPoint) return;
+    const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}", {
+      params: { path: { product_id: id } },
+      body: { name: trimmed, reorder_point: reorder },
+    });
+    if (!data) throw new Error(extractDetail(e) ?? "更新失敗");
+  }
+
+  async function patchPrice(): Promise<void> {
+    if (nextPrice.trim() === price) return;
+    // 前端先擋一次（0 或小數）：讓店員當場看到原因，而不是送出去才被後端退。
+    const parsed = Number(nextPrice.trim());
+    if (!Number.isInteger(parsed) || parsed <= 0) throw new Error("售價須為正整數元");
+    const body = { unit_price: nextPrice.trim() };
+    const { data, error: e } =
+      kind === "serialized"
+        ? await api.PATCH("/api/v1/serialized-items/{item_id}/price", {
+            params: { path: { item_id: id } },
+            body,
+          })
+        : kind === "catalog"
+          ? await api.PATCH("/api/v1/catalog-products/{product_id}/price", {
+              params: { path: { product_id: id } },
+              body,
+            })
+          : await api.PATCH("/api/v1/bulk-lots/{lot_id}/price", {
+              params: { path: { lot_id: id } },
+              body,
+            });
+    if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
+  }
+
+  const save = useMutation({
     mutationFn: async () => {
-      const path =
+      await patchCatalogFields();
+      await patchName();
+      await patchPrice();
+    },
+    onSuccess: () => {
+      setError(null);
+      setOpen(false);
+      refresh();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const toggleActive = useMutation({
+    mutationFn: async (active: boolean) => {
+      const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}", {
+        params: { path: { product_id: id } },
+        body: { is_active: active },
+      });
+      if (!data) throw new Error(extractDetail(e) ?? "更新失敗");
+    },
+    onSuccess: () => {
+      setError(null);
+      setOpen(false);
+      refresh();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => {
+      const { error: e, response } =
         kind === "serialized"
-          ? api.DELETE("/api/v1/serialized-items/{item_id}", { params: { path: { item_id: id } } })
+          ? await api.DELETE("/api/v1/serialized-items/{item_id}", {
+              params: { path: { item_id: id } },
+            })
           : kind === "catalog"
-            ? api.DELETE("/api/v1/catalog-products/{product_id}", {
+            ? await api.DELETE("/api/v1/catalog-products/{product_id}", {
                 params: { path: { product_id: id } },
               })
-            : api.DELETE("/api/v1/bulk-lots/{lot_id}", { params: { path: { lot_id: id } } });
-      const { error: e, response } = await path;
+            : await api.DELETE("/api/v1/bulk-lots/{lot_id}", { params: { path: { lot_id: id } } });
       if (!response.ok) throw new Error(extractDetail(e) ?? "刪除失敗");
     },
     onSuccess: () => {
       setError(null);
-      setConfirming(false);
-      void qc.invalidateQueries({ queryKey: ["inventory"] });
+      setConfirmingDelete(false);
+      setOpen(false);
+      refresh();
     },
     onError: (err: Error) => {
-      setConfirming(false); // 擋下的原因顯示在列上，視窗先收起來才看得到
-      setError(err.message);
+      setConfirmingDelete(false);
+      setError(err.message); // 擋下的原因（賣過、進過貨…）照實顯示在視窗裡
     },
   });
 
-  return (
-    <>
+  const busy = save.isPending || toggleActive.isPending || remove.isPending;
+
+  if (!open) {
+    return (
       <button
         type="button"
-        className="btn-ghost btn-danger-text"
-        disabled={mut.isPending}
+        className="btn-ghost"
         onClick={() => {
+          setNextName(name);
+          setNextPrice(price);
+          setNextReorder(String(reorderPoint ?? 0));
           setError(null);
-          setConfirming(true);
+          setOpen(true);
         }}
       >
-        刪除
+        編輯
       </button>
-      {confirming && (
+    );
+  }
+  return (
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="編輯商品">
+      <form
+        className="card pos-dialog inv-edit-dialog"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          save.mutate();
+        }}
+      >
+        <h2>編輯商品</h2>
+
+        <p className="inv-edit-section">基本資料</p>
+        <label className="field">
+          <span className="field-label">品名</span>
+          <input
+            autoFocus
+            aria-label="品名"
+            value={nextName}
+            maxLength={150}
+            disabled={busy}
+            onChange={(e) => setNextName(e.target.value)}
+          />
+        </label>
+        {kind === "catalog" && (
+          <>
+            <label className="field">
+              <span className="field-label">再訂購點</span>
+              <input
+                inputMode="numeric"
+                aria-label="再訂購點"
+                value={nextReorder}
+                disabled={busy}
+                onChange={(e) => setNextReorder(e.target.value)}
+              />
+            </label>
+            <p className="hint">
+              商品編號 <strong>{sku}</strong> 不能改——已印出去的標籤會掃不到。要換就建新商品。
+            </p>
+          </>
+        )}
+
+        <p className="inv-edit-section">售價</p>
+        <label className="field">
+          <span className="field-label">售價（含稅整數元）</span>
+          <input
+            inputMode="numeric"
+            aria-label="售價"
+            value={nextPrice}
+            disabled={busy}
+            onChange={(e) => setNextPrice(e.target.value)}
+          />
+        </label>
+        <p className="hint">
+          改價會記錄誰、何時、改前改後（稽核）。已經賣出去的那幾筆不受影響——交易紀錄與報表
+          用的是成交當下的價格。
+        </p>
+
+        {kind === "catalog" && (
+          <>
+            <p className="inv-edit-section">狀態</p>
+            <p className="hint">
+              {isActive
+                ? "停售後會從庫存清單與 POS 消失，但採購單、交易紀錄與庫存數量都不動，隨時可以恢復。"
+                : "這個商品目前停售中，不會出現在庫存清單與 POS。"}
+            </p>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={busy}
+              onClick={() => toggleActive.mutate(!isActive)}
+            >
+              {isActive ? "停售" : "恢復上架"}
+            </button>
+          </>
+        )}
+
+        <p className="inv-edit-section inv-edit-danger">刪除</p>
+        <p className="hint">
+          只有從沒賣過、沒進過貨的商品刪得掉；其他的系統會擋下並告訴你原因。
+        </p>
+        <button
+          type="button"
+          className="btn-ghost btn-danger-text"
+          disabled={busy}
+          onClick={() => {
+            setError(null);
+            setConfirmingDelete(true);
+          }}
+        >
+          刪除這個商品
+        </button>
+
+        {error !== null && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        <div className="pos-dialog-actions">
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {save.isPending ? "儲存中…" : "儲存"}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={busy}
+            onClick={() => setOpen(false)}
+          >
+            取消
+          </button>
+        </div>
+      </form>
+      {confirmingDelete && (
         <ConfirmDialog
           title="刪除商品"
           danger
-          busy={mut.isPending}
+          busy={remove.isPending}
           confirmLabel="刪除"
           body={
             <>
               <p>
                 確定要刪除 <strong>{name}</strong>？
               </p>
-              <p className="hint">
-                刪掉就找不回來了。賣過、進過貨或盤點過的商品刪不掉，系統會擋下並告訴你原因。
-              </p>
+              <p className="hint">刪掉就找不回來了。</p>
             </>
           }
-          onConfirm={() => mut.mutate()}
-          onCancel={() => setConfirming(false)}
+          onConfirm={() => remove.mutate()}
+          onCancel={() => setConfirmingDelete(false)}
         />
       )}
-      {error !== null && (
-        <p role="alert" className="form-error menu-row-error">
-          {error}
-        </p>
-      )}
-    </>
-  );
-}
-
-function ChangePriceButton({
-  kind,
-  id,
-  currentPrice,
-}: {
-  kind: "serialized" | "catalog" | "bulk";
-  id: number;
-  currentPrice: string;
-}) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState(currentPrice);
-  const [error, setError] = useState<string | null>(null);
-
-  const mut = useMutation({
-    mutationFn: async (price: string) => {
-      const body = { unit_price: price };
-      if (kind === "serialized") {
-        const { data, error: e } = await api.PATCH("/api/v1/serialized-items/{item_id}/price", {
-          params: { path: { item_id: id } },
-          body,
-        });
-        if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
-        return data;
-      }
-      if (kind === "catalog") {
-        const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}/price", {
-          params: { path: { product_id: id } },
-          body,
-        });
-        if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
-        return data;
-      }
-      const { data, error: e } = await api.PATCH("/api/v1/bulk-lots/{lot_id}/price", {
-        params: { path: { lot_id: id } },
-        body,
-      });
-      if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
-      return data;
-    },
-    onSuccess: () => {
-      setOpen(false);
-      void qc.invalidateQueries({ queryKey: ["inventory"] });
-    },
-    onError: (e: Error) => setError(e.message),
-  });
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    const n = parseNtd(value);
-    if (n === null || n <= 0 || !Number.isInteger(n)) {
-      setError("售價須為正整數元");
-      return;
-    }
-    mut.mutate(String(n));
-  }
-
-  if (!open) {
-    return (
-      <button type="button" className="btn-ghost" onClick={() => { setValue(currentPrice); setOpen(true); }}>
-        改價
-      </button>
-    );
-  }
-  return (
-    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="改售價">
-      <form className="card pos-dialog inv-price-dialog" onSubmit={submit}>
-        <h2>改售價</h2>
-        <p className="hint">改價為敏感操作，系統會記錄誰、何時、改前改後（稽核）。</p>
-        <label className="field">
-          <span className="field-label">新售價（含稅整數元）</span>
-          <input
-            inputMode="numeric"
-            autoFocus
-            aria-label="新售價"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-          />
-        </label>
-        {error !== null && <p role="alert" className="form-error">{error}</p>}
-        <div className="pos-dialog-actions">
-          <button type="submit" className="btn-primary" disabled={mut.isPending}>
-            {mut.isPending ? "更新中…" : "送出"}
-          </button>
-          <button type="button" className="btn-ghost" onClick={() => setOpen(false)} disabled={mut.isPending}>
-            取消
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
+
 
 // 列表內的備註摘要：內部作業備忘（「先別賣」「放 B 架」）要在列表就看得到，
 // 不必逐件點開明細。過長截斷，完整內容在明細與結帳提醒。
@@ -1152,10 +1271,12 @@ function SerializedPanel() {
                 </button>
               )}
               {isManager && item.status === "IN_STOCK" && (
-                <ChangePriceButton kind="serialized" id={item.id} currentPrice={item.listed_price} />
-              )}
-              {isManager && item.status === "IN_STOCK" && (
-                <DeleteItemButton kind="serialized" id={item.id} name={item.name} />
+                <ItemEditButton
+                  kind="serialized"
+                  id={item.id}
+                  name={item.name}
+                  price={item.listed_price}
+                />
               )}
               {item.status === "IN_STOCK" && (
                 <ReprintLabelButton
@@ -1341,6 +1462,8 @@ function CreateCatalogProduct() {
 
 function CatalogPanel() {
   const [lowStock, setLowStock] = useState(false);
+  // 停售的預設不出現；要找回來（或恢復上架）才勾這個。
+  const [showInactive, setShowInactive] = useState(false);
   const [brandId, setBrandId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(0);
@@ -1370,7 +1493,7 @@ function CatalogPanel() {
     id === null ? "—" : (brands.find((b) => b.id === id)?.name ?? "—");
 
   const query = useQuery({
-    queryKey: ["inventory", "catalog", { lowStock, brandId, q, page }],
+    queryKey: ["inventory", "catalog", { lowStock, brandId, q, page, showInactive }],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/api/v1/catalog-products", {
         params: {
@@ -1378,6 +1501,7 @@ function CatalogPanel() {
             brand_id: brandId === "" ? undefined : brandId,
             q: orUndefined(q),
             low_stock: lowStock ? true : undefined,
+            include_inactive: showInactive ? true : undefined,
             limit: PAGE_SIZE,
             offset: page * PAGE_SIZE,
           },
@@ -1388,7 +1512,7 @@ function CatalogPanel() {
     },
   });
   const totalQuery = useQuery({
-    queryKey: ["inventory", "catalog-count", { lowStock, brandId, q }],
+    queryKey: ["inventory", "catalog-count", { lowStock, brandId, q, showInactive }],
     queryFn: async () => {
       const { data } = await api.GET("/api/v1/catalog-products/count", {
         params: {
@@ -1396,6 +1520,7 @@ function CatalogPanel() {
             brand_id: brandId === "" ? undefined : brandId,
             q: orUndefined(q),
             low_stock: lowStock ? true : undefined,
+            include_inactive: showInactive ? true : undefined,
           },
         },
       });
@@ -1415,6 +1540,14 @@ function CatalogPanel() {
             onChange={(e) => { setLowStock(e.target.checked); setPage(0); }}
           />
           僅顯示低庫存
+        </label>
+        <label className="inv-check">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => { setShowInactive(e.target.checked); setPage(0); }}
+          />
+          顯示已停售
         </label>
         <select
           aria-label="品牌"
@@ -1457,6 +1590,12 @@ function CatalogPanel() {
               <td>{brandName(product.brand_id)}</td>
               <td>
                 {product.name}
+                {!product.is_active && (
+                  <>
+                    {" "}
+                    <BadgeChip badge={{ label: "已停售", tone: "muted" }} />
+                  </>
+                )}
                 <NoteLine note={product.note} />
               </td>
               <td>
@@ -1478,9 +1617,16 @@ function CatalogPanel() {
                   </button>
                 )}
                 {isManager && (
-                  <ChangePriceButton kind="catalog" id={product.id} currentPrice={product.unit_price} />
+                  <ItemEditButton
+                    kind="catalog"
+                    id={product.id}
+                    name={product.name}
+                    price={product.unit_price}
+                    reorderPoint={product.reorder_point}
+                    sku={product.sku}
+                    isActive={product.is_active}
+                  />
                 )}
-                {isManager && <DeleteItemButton kind="catalog" id={product.id} name={product.name} />}
                 {/* 一般商品也要印標籤（裁示 2026-09-14）：條碼走 sku，採購來的一律標「全新」。 */}
                 {product.quantity_on_hand > 0 && (
                   <ReprintLabelButton
@@ -1668,10 +1814,7 @@ function BulkPanel() {
                 </button>
               )}
               {isManager && lot.status === "ON_SALE" && (
-                <ChangePriceButton kind="bulk" id={lot.id} currentPrice={lot.unit_price} />
-              )}
-              {isManager && lot.status === "ON_SALE" && (
-                <DeleteItemButton kind="bulk" id={lot.id} name={lot.name} />
+                <ItemEditButton kind="bulk" id={lot.id} name={lot.name} price={lot.unit_price} />
               )}
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
@@ -1887,7 +2030,12 @@ function AgingPanel() {
                 </button>
               )}
               {isManager && (
-                <ChangePriceButton kind="serialized" id={item.id} currentPrice={item.listed_price} />
+                <ItemEditButton
+                  kind="serialized"
+                  id={item.id}
+                  name={item.name}
+                  price={item.listed_price}
+                />
               )}
             </td>
           </tr>

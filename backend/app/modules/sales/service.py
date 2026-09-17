@@ -2881,6 +2881,10 @@ class SalesService:
             product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
             if product is None:
                 raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
+            # 停售的不能再賣（2026-09-17）：POS 掃碼已經找不到它，這裡是服務層的防線
+            # ——購物車還原、補單等路徑會直接帶 id 進來。
+            if not product.is_active:
+                raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
             applies = _campaign_applies(
                 campaign, line_type=SaleLineType.CATALOG, is_consignment=False
             )
@@ -3297,6 +3301,9 @@ class SalesService:
         product = await self._inventory.get_catalog(store_id, line.catalog_product_id)
         if product is None:
             raise SaleItemNotFound(f"找不到一般商品 {line.catalog_product_id}")
+        # 停售的不能再賣（2026-09-17）：報價與實際成交是兩條路徑，兩邊都要擋。
+        if not product.is_active:
+            raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
         applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
         if discountable_out is not None:
             discountable_out.append(gift is None)
