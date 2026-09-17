@@ -51,6 +51,7 @@ function AutoRow({
   href,
   actionLabel,
   onSkip,
+  onUndoSkip,
   busy,
 }: {
   label: string;
@@ -59,6 +60,7 @@ function AutoRow({
   href: string;
   actionLabel: string;
   onSkip: () => void;
+  onUndoSkip: () => void;
   busy: boolean;
 }) {
   return (
@@ -75,7 +77,12 @@ function AutoRow({
           <Link className="btn-ghost" href={href}>
             {actionLabel}
           </Link>
-          {state !== "skipped" && (
+          {state === "skipped" ? (
+            // 按錯要能改回來：打勾可以取消，略過沒道理只能等明天。
+            <button type="button" className="btn-ghost" disabled={busy} onClick={onUndoSkip}>
+              取消略過
+            </button>
+          ) : (
             <button type="button" className="btn-ghost" disabled={busy} onClick={onSkip}>
               今天略過
             </button>
@@ -94,11 +101,11 @@ export default function OpeningCheckPage() {
     useOpeningCheckStatus(true);
 
   const skip = useMutation({
-    mutationFn: async (key: string) => {
+    mutationFn: async ({ key, skipped }: { key: string; skipped: boolean }) => {
       const { data, error } = await api.POST("/api/v1/opening-check/today/skip", {
-        body: { key },
+        body: { key, skipped },
       });
-      if (!data) throw new Error(extractDetail(error) ?? "略過失敗");
+      if (!data) throw new Error(extractDetail(error) ?? "更新失敗");
       return data;
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["opening-check"] }),
@@ -230,7 +237,8 @@ export default function OpeningCheckPage() {
               href={row.href}
               actionLabel={row.actionLabel}
               busy={busy}
-              onSkip={() => skip.mutate(row.key)}
+              onSkip={() => skip.mutate({ key: row.key, skipped: true })}
+              onUndoSkip={() => skip.mutate({ key: row.key, skipped: false })}
             />
           ))}
         </ul>

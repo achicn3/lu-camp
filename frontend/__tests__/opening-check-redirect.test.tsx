@@ -108,13 +108,88 @@ describe("開店前檢查的自動導向", () => {
     expect(typeof original).toBe("function");
   });
 
-  it("今天已完成：不帶、也不顯示紅點", async () => {
+  it("今天已完成且裝置都過：不帶、也不顯示紅點", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/opening-check/today")) {
+          return json({ ...TODAY_INCOMPLETE, completed: true });
+        }
+        if (url.includes("/devices/status")) {
+          return json({
+            devices: [
+              {
+                id: "ql810w",
+                kind: "LABEL_PRINTER",
+                model: "Brother QL-810W",
+                online: true,
+                last_seen: "2026-09-17T01:00:00Z",
+                probe_error: null,
+                driver: "real",
+              },
+            ],
+          });
+        }
+        if (url.includes("/auth/me")) return json({ id: 1, role: "MANAGER", store_id: 1 });
+        return json({});
+      }),
+    );
+    setToken(makeToken());
+    renderLayout();
+    await screen.findByText("內容");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(replaceMock).not.toHaveBeenCalledWith("/opening-check");
+    expect(document.querySelector(".nav-dot")).toBeNull();
+  });
+
+  it("代理問不到（手機/平板沒裝代理）：不亮紅點、不導向", async () => {
+    // 代理只跑在收銀電腦上。把「問不到」當成未完成的話，其他裝置會天天亮紅點、天天被導走，
+    // 而且畫面上一列裝置都沒有，連略過的按鈕都按不到，永遠解不掉。
     stubFetch({ ...TODAY_INCOMPLETE, completed: true });
     setToken(makeToken());
     renderLayout();
     await screen.findByText("內容");
+    // 等兩個查詢都落地再斷言：只等畫面出現的話，會在 devices 還沒回來時就通過（假綠）。
+    await waitFor(() => {
+      expect(window.localStorage.getItem("lu-camp.opening-check.2026-09-17")).toBeNull();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 400));
     expect(replaceMock).not.toHaveBeenCalledWith("/opening-check");
     expect(document.querySelector(".nav-dot")).toBeNull();
+  });
+
+  it("裝置確實讀到且有一台沒過：亮紅點並導向", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes("/opening-check/today")) {
+          return json({ ...TODAY_INCOMPLETE, completed: true });
+        }
+        if (url.includes("/devices/status")) {
+          return json({
+            devices: [
+              {
+                id: "ql810w",
+                kind: "LABEL_PRINTER",
+                model: "Brother QL-810W",
+                online: false,
+                last_seen: null,
+                probe_error: null,
+                driver: "real",
+              },
+            ],
+          });
+        }
+        if (url.includes("/auth/me")) return json({ id: 1, role: "MANAGER", store_id: 1 });
+        return json({});
+      }),
+    );
+    setToken(makeToken());
+    renderLayout();
+    await waitFor(() => expect(document.querySelector(".nav-dot")).not.toBeNull());
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/opening-check"));
   });
 
   it("讀不到今日狀態時不顯示紅點、也不亂導（錯誤另外報）", async () => {

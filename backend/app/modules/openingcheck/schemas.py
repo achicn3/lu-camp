@@ -21,7 +21,25 @@ class OpeningCheckItemRead(BaseModel):
 class OpeningCheckItemCreateRequest(BaseModel):
     label: str = Field(min_length=1, max_length=100)
     # 「前往處理」要去哪（選填）：**只收站內路徑**（例如 /cash）——這個值會直接餵給站內導覽。
-    href: str | None = Field(default=None, max_length=200, pattern=r"^/")
+    href: str | None = Field(default=None, max_length=200)
+
+    @field_validator("href")
+    @classmethod
+    def _internal_path(cls, value: str | None) -> str | None:
+        """只收站內路徑。
+
+        `//evil.com` 也是以 `/` 開頭（protocol-relative URL），單純比對開頭會把店員導到站外，
+        所以連續兩個斜線要一併擋掉。（Pydantic 的 pattern 走 Rust 正則、不支援前瞻，
+        因此寫成驗證器而不是 pattern。）
+        """
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if cleaned == "":
+            return None
+        if not cleaned.startswith("/") or cleaned.startswith("//"):
+            raise ValueError("連結只能是站內路徑（例如 /cash）")
+        return cleaned
 
 
 class CashSessionState(StrEnum):

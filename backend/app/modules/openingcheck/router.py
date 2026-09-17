@@ -19,6 +19,7 @@ from app.modules.openingcheck.schemas import (
 )
 from app.modules.openingcheck.service import OpeningCheckService
 from app.shared.enums import UserRole
+from app.shared.exceptions import OpeningCheckConflict
 
 router = APIRouter(prefix="/opening-check", tags=["opening-check"])
 
@@ -45,9 +46,13 @@ async def set_item_done(
     user: StaffDep,
 ) -> OpeningCheckTodayRead:
     """勾／取消勾一條確認事項（按錯了要能取消）。"""
-    result = await OpeningCheckService(session).set_item_done(
-        user.store_id, item_id, done=payload.done
-    )
+    try:
+        result = await OpeningCheckService(session).set_item_done(
+            user.store_id, item_id, done=payload.done
+        )
+    except OpeningCheckConflict as exc:  # 當天第一筆兩台同時進來
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if result is None:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到檢查項目")
@@ -60,9 +65,13 @@ async def skip(
     payload: OpeningCheckSkipRequest, session: SessionDep, user: StaffDep
 ) -> OpeningCheckTodayRead:
     """今天略過一個自動項目（裁示：不必填原因）；明天會再檢查一次。"""
-    result = await OpeningCheckService(session).skip(
-        user.store_id, payload.key, skipped=payload.skipped
-    )
+    try:
+        result = await OpeningCheckService(session).skip(
+            user.store_id, payload.key, skipped=payload.skipped
+        )
+    except OpeningCheckConflict as exc:  # 當天第一筆兩台同時進來
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     await session.commit()
     return result
 

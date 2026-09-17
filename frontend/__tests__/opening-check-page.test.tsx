@@ -126,7 +126,8 @@ describe("/opening-check 開店前檢查", () => {
     await screen.findByText("今日已開帳");
     await user.click(screen.getAllByRole("button", { name: "今天略過" })[0]);
     await waitFor(() => expect(posted).not.toBe(""));
-    expect(JSON.parse(posted)).toEqual({ key: "cash_session" });
+    // 略過不必填原因，但要明講是「略過」還是「取消略過」（後端兩種都收）
+    expect(JSON.parse(posted)).toEqual({ key: "cash_session", skipped: true });
   });
 
   it("勾選自訂項目送出 done", async () => {
@@ -172,5 +173,25 @@ describe("/opening-check 開店前檢查", () => {
     });
     renderPage();
     expect(await screen.findByText("今日檢查完成")).toBeTruthy();
+  });
+
+  it("按錯了可以取消略過（後端早就支援，UI 也要給得出來）", async () => {
+    let posted = "";
+    stubFetch((url, method, body) => {
+      if (url.includes("/opening-check/today/skip") && method === "POST") {
+        posted = body;
+        return json({ ...TODAY, skipped_keys: [] });
+      }
+      if (url.includes("/devices/status")) return json(DEVICES);
+      if (url.includes("/opening-check/today")) {
+        return json({ ...TODAY, skipped_keys: ["cash_session"] });
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "取消略過" }));
+    await waitFor(() => expect(posted).not.toBe(""));
+    expect(JSON.parse(posted)).toEqual({ key: "cash_session", skipped: false });
   });
 });

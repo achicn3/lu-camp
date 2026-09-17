@@ -7881,7 +7881,6 @@
             "anyOf": [
               {
                 "maxLength": 200,
-                "pattern": "^/",
                 "type": "string"
               },
               {

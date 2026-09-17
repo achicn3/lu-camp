@@ -7,15 +7,11 @@ import { useQuery } from "@tanstack/react-query";
 
 import { type AgentDevice, fetchDeviceStatus } from "@/lib/agent";
 import { api } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export type OpeningCheckToday = {
-  business_date: string;
-  cash_session_state: "OPEN_TODAY" | "STALE" | "NONE";
-  cash_session_open: boolean;
-  items: { id: number; label: string; href: string | null; done: boolean }[];
-  skipped_keys: string[];
-  completed: boolean;
-};
+// 型別一律取自 OpenAPI 生成物（CLAUDE.md §3）：手寫一份等於把合約複製兩份，
+// 日後後端改欄位，手寫的那份不會紅。
+export type OpeningCheckToday = components["schemas"]["OpeningCheckTodayRead"];
 
 function extractDetail(error: unknown): string | null {
   if (error && typeof error === "object" && "detail" in error) {
@@ -43,7 +39,7 @@ export function useOpeningCheckStatus(enabled: boolean) {
       // 店員以為都做完了（與發票待處理徽章同一條教訓）。
       const { data, error } = await api.GET("/api/v1/opening-check/today");
       if (!data) throw new Error(extractDetail(error) ?? "讀取開店前檢查失敗");
-      return data as OpeningCheckToday;
+      return data;
     },
   });
 
@@ -57,11 +53,12 @@ export function useOpeningCheckStatus(enabled: boolean) {
   });
 
   const deviceList = devices.data ?? null;
+  // 「問不到」＝連不到代理，或代理回空清單（空清單會被誤讀成「沒有任何裝置」）。
   const devicesUnknown =
     devices.isFetched && (deviceList === null || deviceList.length === 0);
   const skipped = new Set(today.data?.skipped_keys ?? []);
-  const devicesOk = (deviceList ?? []).every(
-    (device) => devicePasses(device) || skipped.has(deviceKey(device)),
+  const failingDevices = (deviceList ?? []).filter(
+    (device) => !devicePasses(device) && !skipped.has(deviceKey(device)),
   );
 
   return {
@@ -70,10 +67,15 @@ export function useOpeningCheckStatus(enabled: boolean) {
     deviceList,
     devicesUnknown,
     skipped,
-    // 只有「三件事都明確知道」才算完成：後端狀態讀到了、後端說完成、裝置查得到且都過。
-    // 任何一項不確定都不算——寧可多提醒一次，也不要謊報綠燈。
-    allClear: today.isSuccess && today.data.completed && !devicesUnknown && devicesOk,
-    // 明確知道「還沒做完」才顯示紅點；讀不到狀態時不顯示（那是錯誤，另外報）。
-    incomplete: today.isSuccess && !(today.data.completed && !devicesUnknown && devicesOk),
+    // 頁面用：只有「三件事都明確知道」才敢說全綠——狀態讀到了、後端說完成、裝置查得到且都過。
+    allClear:
+      today.isSuccess && today.data.completed && !devicesUnknown && failingDevices.length === 0,
+    // 紅點與自動導向用：只在**明確知道有東西沒做**時才提醒。
+    //
+    // 「問不到代理」不算沒做完：手機、平板上根本沒有代理（代理只跑在收銀電腦上），
+    // 把它當成未完成的話，那些裝置會天天亮紅點、天天被導走，而且畫面上一列裝置都沒有
+    // ——連略過的按鈕都按不到，永遠解不掉。天天亮的提醒等於沒有提醒。
+    incomplete:
+      today.isSuccess && (!today.data.completed || failingDevices.length > 0),
   };
 }
