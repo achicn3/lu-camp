@@ -1026,7 +1026,8 @@ function AgreementEditDialog({
   const save = useMutation({
     mutationFn: async () => {
       const { data, error: err } = await api.POST("/api/v1/agreements", {
-        body: { title, body },
+        // 帶開啟視窗時看到的版本：中間若有人改過，後端回 409 而不是無聲蓋掉對方的內容
+        body: { title, body, expected_version: current.version },
       });
       if (!data) throw new Error(extractDetail(err) ?? "儲存失敗");
       return data;

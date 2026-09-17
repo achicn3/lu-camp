@@ -38,6 +38,7 @@ from app.shared.exceptions import (
     SignatureTaskInvalidated,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
+    StaleAgreementVersion,
 )
 from app.shared.schemas import ListCountRead
 
@@ -469,11 +470,15 @@ async def publish_agreement(
     """改切結書內文＝發新版本（201）；內容一字未改則沿用現版（200）。"""
     try:
         agreement, created = await SigningService(session).publish_agreement(
-            user.store_id, title=payload.title, body=payload.body, actor_user_id=user.id
+            user.store_id,
+            title=payload.title,
+            body=payload.body,
+            expected_version=payload.expected_version,
+            actor_user_id=user.id,
         )
     except InvalidAgreementText as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    except SignatureTaskConflict as exc:
+    except (StaleAgreementVersion, SignatureTaskConflict) as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await session.commit()
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK

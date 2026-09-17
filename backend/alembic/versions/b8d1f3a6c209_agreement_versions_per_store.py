@@ -38,15 +38,52 @@ def upgrade() -> None:
         "agreement_versions", sa.Column("created_by_user_id", sa.Integer(), nullable=True)
     )
 
-    rows = conn.execute(sa.text("SELECT count(*) FROM agreement_versions")).scalar_one()
+    # 先卸掉舊的全域唯一鍵：底下要替其他分店複製同版本號的列，唯一鍵還在就插不進去。
+    op.drop_constraint("uq_agreement_versions_version", "agreement_versions", type_="unique")
+
+    rows = conn.execute(sa.text("SELECT id FROM agreement_versions")).all()
     if rows:
-        store_id = conn.execute(sa.text("SELECT min(id) FROM stores")).scalar()
-        if store_id is None:
+        stores = [r[0] for r in conn.execute(sa.text("SELECT id FROM stores ORDER BY id")).all()]
+        if not stores:
             raise RuntimeError("agreement_versions 有資料但 stores 是空的，無法決定歸屬店別")
+        # 原本的版本列是**全店共用**的。全部塞給第一家店的話，其他店的既有簽署就會指到
+        # 別人店的版本列，店別隔離破功。但已簽的任務**不能改指向**（DB 觸發器擋著：
+        # 簽署內容與歸屬不可修改，那是法律證據），所以只能這樣拆：
+        #   - 有簽署參照到共用列的那家店 → 原列歸它，簽署一動不動。
+        #   - 其他店 → 各複製一份同版本號的列（內容一字不差），日後改版各走各的。
+        #   - 若兩家以上都已有簽署參照 → 中止，交由人工決定，不擅自搬動任何人的證據。
+        referencing = [
+            r[0]
+            for r in conn.execute(
+                sa.text(
+                    "SELECT DISTINCT store_id FROM signature_tasks"
+                    " WHERE agreement_version_id IS NOT NULL"
+                )
+            ).all()
+        ]
+        if len(referencing) > 1:
+            raise RuntimeError(
+                "有兩家以上分店的簽署共用同一份切結書版本列，且已簽署的歸屬不可修改；"
+                "請人工決定各店版本歸屬後再升版"
+            )
+        owner = referencing[0] if referencing else stores[0]
         conn.execute(
             sa.text("UPDATE agreement_versions SET store_id = :sid WHERE store_id IS NULL"),
-            {"sid": store_id},
+            {"sid": owner},
         )
+        for store_id in stores:
+            if store_id == owner:
+                continue
+            for (row_id,) in rows:
+                conn.execute(
+                    sa.text(
+                        "INSERT INTO agreement_versions"
+                        " (store_id, version, title, body, created_at)"
+                        " SELECT :sid, version, title, body, created_at"
+                        " FROM agreement_versions WHERE id = :rid"
+                    ),
+                    {"sid": store_id, "rid": row_id},
+                )
 
     op.alter_column("agreement_versions", "store_id", nullable=False)
     op.create_index(
@@ -66,7 +103,6 @@ def upgrade() -> None:
         ["created_by_user_id"],
         ["id"],
     )
-    op.drop_constraint("uq_agreement_versions_version", "agreement_versions", type_="unique")
     op.create_unique_constraint(
         "uq_agreement_versions_store_version", "agreement_versions", ["store_id", "version"]
     )

@@ -2968,6 +2968,8 @@ body {
 .kiosk-agreement-title {
   font-size: var(--text-lg);
   margin: 0 0 var(--sp-3);
+  /* 店主自訂的標題可能很長且不含空白，手持裝置上不斷行會撐破簽署框 */
+  overflow-wrap: anywhere;
 }
 .kiosk-snapshot {
   display: flex;

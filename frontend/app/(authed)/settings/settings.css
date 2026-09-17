@@ -80,6 +80,8 @@
 .agreement-title-preview {
   font-weight: 700;
   margin: 0 0 var(--sp-2);
+  /* 標題也可能是 100 字不含空白的英文，窄螢幕不斷行就會超出卡片 */
+  overflow-wrap: anywhere;
 }
 .agreement-preview {
   /* 店主可能貼上沒有空白的超長字串（網址、連續標點）：不強制斷行就會撐破版面 */

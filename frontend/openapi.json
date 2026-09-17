@@ -742,6 +742,11 @@
             "title": "Body",
             "type": "string"
           },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
           "title": {
             "maxLength": 100,
             "minLength": 1,
@@ -751,7 +756,8 @@
         },
         "required": [
           "title",
-          "body"
+          "body",
+          "expected_version"
         ],
         "title": "AgreementTextUpdateRequest",
         "type": "object"

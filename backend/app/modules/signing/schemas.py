@@ -129,3 +129,6 @@ class AgreementTextUpdateRequest(BaseModel):
 
     title: str = Field(min_length=1, max_length=MAX_AGREEMENT_TITLE_CHARS)
     body: str = Field(min_length=1, max_length=MAX_AGREEMENT_BODY_CHARS)
+    # 編輯視窗開啟時看到的版本號。對不上＝有人在這中間改過，回 409 請他重新載入：
+    # 版本號遞增本身擋不住覆蓋（拿舊內容照樣能存成下一版，先存的人的內容就沒了）。
+    expected_version: int = Field(ge=1)

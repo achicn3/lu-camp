@@ -3444,6 +3444,8 @@ export interface components {
         AgreementTextUpdateRequest: {
             /** Body */
             body: string;
+            /** Expected Version */
+            expected_version: number;
             /** Title */
             title: string;
         };

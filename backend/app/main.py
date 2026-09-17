@@ -58,6 +58,9 @@ API_PREFIX = "/api/v1"
 # 手持端請求體上限：簽名 base64（≈683KB）＋ JSON 外殼的寬裕值。手持裝置在客人手上，
 # 超大 payload 於 JSON 解析「前」即以 Content-Length 擋下（服務層另有解碼前防線）。
 KIOSK_MAX_BODY_BYTES = 1_000_000
+# 切結書內文上限 20000 字（UTF-8 中文最多 3 bytes/字）＋標題與 JSON 外殼，抓 256KB 綽綽有餘。
+# 字數上限是在 JSON 解析**之後**才驗的，擋不住有人先塞一個超大 body 進來。
+AGREEMENT_MAX_BODY_BYTES = 256_000
 
 
 logger = logging.getLogger(__name__)
@@ -128,26 +131,32 @@ def create_app() -> FastAPI:
         # 嚴格政策（Codex 第三輪 medium）：帶 body 的 /kiosk 請求必須有合法 Content-Length
         # ——缺（chunked/串流）一律 411，超上限/非法 413，皆於 JSON 解析「前」擋下。
         # 自家 kiosk 前端必帶 Content-Length，正常流量零影響；schema/服務層為內層防線。
-        if request.url.path.startswith(f"{API_PREFIX}/kiosk") and request.method in (
-            "POST",
-            "PUT",
-            "PATCH",
-        ):
+        is_kiosk = request.url.path.startswith(f"{API_PREFIX}/kiosk")
+        # 切結書改版是唯一會收「整份長文」的店務端點，同樣在解析前擋大小。
+        is_agreement = request.url.path.startswith(f"{API_PREFIX}/agreements")
+        if (is_kiosk or is_agreement) and request.method in ("POST", "PUT", "PATCH"):
+            limit = KIOSK_MAX_BODY_BYTES if is_kiosk else AGREEMENT_MAX_BODY_BYTES
             content_length = request.headers.get("content-length")
             if content_length is None:
-                return JSONResponse(
-                    status_code=411,
-                    content={"detail": "簽署裝置請求必須帶 Content-Length"},
-                )
-            try:
-                too_large = int(content_length) > KIOSK_MAX_BODY_BYTES
-            except ValueError:
-                too_large = True
-            if too_large:
-                return JSONResponse(
-                    status_code=413,
-                    content={"detail": "請求體過大（簽署裝置上限 1MB）"},
-                )
+                if is_kiosk:
+                    return JSONResponse(
+                        status_code=411,
+                        content={"detail": "簽署裝置請求必須帶 Content-Length"},
+                    )
+            else:
+                try:
+                    too_large = int(content_length) > limit
+                except ValueError:
+                    too_large = True
+                if too_large:
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "detail": "請求體過大（簽署裝置上限 1MB）"
+                            if is_kiosk
+                            else "切結書內容過大"
+                        },
+                    )
         return await call_next(request)
 
     @app.get(

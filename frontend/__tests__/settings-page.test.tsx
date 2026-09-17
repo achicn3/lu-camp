@@ -450,7 +450,12 @@ describe("/settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "儲存" }));
 
     await waitFor(() => expect(posted.length).toBe(1));
-    expect(JSON.parse(posted[0])).toEqual({ title: AGREEMENT.title, body: "新內文" });
+    // 帶著開啟時的版本號送出：後端據此擋下「拿舊版蓋掉新版」
+    expect(JSON.parse(posted[0])).toEqual({
+      title: AGREEMENT.title,
+      body: "新內文",
+      expected_version: AGREEMENT.version,
+    });
   });
 
   it("切結書：內文清空不送出，直接提示（客人不能簽一張白紙）", async () => {

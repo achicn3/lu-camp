@@ -54,6 +54,7 @@ from app.shared.exceptions import (
     SignatureTaskInvalidated,
     SignatureTaskNotFound,
     SignatureTaskNotPending,
+    StaleAgreementVersion,
 )
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -1491,19 +1492,26 @@ class SigningService:
         if existing is not None:
             return existing
         title, body = agreements.AGREEMENT_TEXTS[version]
+        # 首次落庫可能兩邊同時種（例如兩個分頁同時開設定頁）。落在 savepoint 裡，撞唯一鍵
+        # 就回滾這一小段、改讀對方種好的那列——這只是「內建全文」的初始化，兩邊內容相同，
+        # 沒有理由讓使用者看到 500 或被要求重試。
         try:
-            return await self._repo.add_agreement(
-                AgreementVersion(store_id=store_id, version=version, title=title, body=body)
-            )
-        except IntegrityError as exc:  # 首次落庫競態：另一筆先種成功
-            raise SignatureTaskConflict("切結書版本初始化衝突，請重試") from exc
+            async with self._session.begin_nested():
+                return await self._repo.add_agreement(
+                    AgreementVersion(store_id=store_id, version=version, title=title, body=body)
+                )
+        except IntegrityError:
+            seeded = await self._repo.get_agreement_by_version(store_id, version)
+            if seeded is None:  # 不是版本號衝突造成的，交給上層處理
+                raise
+            return seeded
 
     async def get_current_agreement(self, store_id: int) -> AgreementVersion:
         """設定頁讀「目前這份」；沒改過就是內建版（要先落庫才有版本號可顯示）。"""
         return await self._get_or_seed_current_agreement(store_id)
 
     async def publish_agreement(
-        self, store_id: int, *, title: str, body: str, actor_user_id: int
+        self, store_id: int, *, title: str, body: str, expected_version: int, actor_user_id: int
     ) -> tuple[AgreementVersion, bool]:
         """店家改切結書內文＝發新版本，回 (版本列, 是否真的發了新版)。
 
@@ -1512,6 +1520,11 @@ class SigningService:
         """
         normalized_title, normalized_body = _normalize_agreement_text(title, body)
         current = await self._get_or_seed_current_agreement(store_id)
+        # 帶著舊版按儲存＝他沒看到中間那次修改。不擋的話後存的會無聲蓋掉先存的內容。
+        if expected_version != current.version:
+            raise StaleAgreementVersion(
+                f"切結書已被更新為第 {current.version} 版，請重新載入後再存"
+            )
         # 比對前把現版也正規化：內建版的內文結尾帶換行，不先對齊的話「原封不動按儲存」
         # 會被當成有改，每開一次編輯視窗就多一版。
         current_title, current_body = _normalize_agreement_text(current.title, current.body)

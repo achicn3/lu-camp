@@ -415,6 +415,10 @@ class InvalidAgreementText(DomainError):
     """
 
 
+class StaleAgreementVersion(DomainError):
+    """送出的切結書改版基於舊版本——中間有人改過，後送的會蓋掉先送的內容。"""
+
+
 class AmegoNotConfigured(DomainError):
     """Amego 光貿 API 憑證未設定（AMEGO_APP_KEY 環境變數／店家統編）。
 
