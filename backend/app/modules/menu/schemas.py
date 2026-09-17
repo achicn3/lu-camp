@@ -43,6 +43,8 @@ class MenuItemCreateRequest(BaseModel):
             return None
         if value != value.to_integral_value():
             raise ValueError("成本必須為整數元")
+        if value < 0:
+            raise ValueError("成本不可為負")  # 負成本會讓毛利報表憑空變大
         ensure_ntd_fits_numeric_12(value, field="成本")
         return value
 
@@ -75,6 +77,8 @@ class MenuItemUpdateRequest(BaseModel):
             return None
         if value != value.to_integral_value():
             raise ValueError("成本必須為整數元")
+        if value < 0:
+            raise ValueError("成本不可為負")  # 負成本會讓毛利報表憑空變大
         ensure_ntd_fits_numeric_12(value, field="成本")
         return value
 

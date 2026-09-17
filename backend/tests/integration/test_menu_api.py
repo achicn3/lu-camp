@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator
 from decimal import Decimal
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,9 +14,11 @@ from app.core.db import get_session
 from app.core.security import encode_access_token
 from app.main import create_app
 from app.modules.menu.models import MenuItem
+from app.modules.menu.service import MenuService
 from app.modules.store.models import Store
 from app.modules.user.models import User
 from app.shared.enums import UserRole
+from app.shared.exceptions import SaleLineInvalid
 
 
 @pytest_asyncio.fixture
@@ -233,3 +236,114 @@ async def test_store_isolation(client: httpx.AsyncClient, db_session: AsyncSessi
         f"/api/v1/menu-items/{other.id}", json={"unit_price": "1"}, headers=_auth(mgr_a)
     )
     assert resp.status_code == 404
+
+
+async def test_cost_invariants_enforced_in_service(db_session: AsyncSession) -> None:
+    """成本不變量歸 service（CLAUDE.md §2）：負值／小數／超額一律擋下。
+
+    負成本會讓報表高估毛利，所以不能只靠 schema——service 是唯一保證不變量的地方，
+    其他呼叫端（腳本、跨模組）不會經過 HTTP。
+    """
+    _, _, store_id = await _seed(db_session)
+    actor = await db_session.scalar(select(User.id).where(User.username == "mgr"))
+    assert actor is not None
+    svc = MenuService(db_session)
+    for bad in (Decimal("-1"), Decimal("1.5"), Decimal("1000000000000")):
+        with pytest.raises(SaleLineInvalid):
+            await svc.create_menu_item(
+                store_id,
+                name=f"壞成本-{bad}",
+                unit_price=Decimal("100"),
+                unit_cost=bad,
+                actor_user_id=actor,
+            )
+    good = await svc.create_menu_item(
+        store_id,
+        name="正常品",
+        unit_price=Decimal("100"),
+        unit_cost=Decimal("0"),
+        actor_user_id=actor,
+    )
+    assert good.unit_cost == Decimal("0")  # 0＝已知零成本，與 None（未知）不同
+    for bad in (Decimal("-1"), Decimal("1.5")):
+        with pytest.raises(SaleLineInvalid):
+            await svc.update_menu_item(store_id, good.id, unit_cost=bad, actor_user_id=actor)
+
+
+async def test_negative_cost_rejected_by_api(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _, mgr, _ = await _seed(db_session)
+    resp = await client.post(
+        "/api/v1/menu-items",
+        json={"name": "負成本", "unit_price": "100", "unit_cost": "-1"},
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_update_without_cost_keeps_it(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """沒帶 unit_cost 的更新＝不動成本；帶 null 才是清空（_UNSET 哨兵語意）。"""
+    _, mgr, _ = await _seed(db_session)
+    created = await client.post(
+        "/api/v1/menu-items",
+        json={"name": "拿鐵", "unit_price": "150", "unit_cost": "45"},
+        headers=_auth(mgr),
+    )
+    item_id = created.json()["id"]
+    renamed = await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"name": "拿鐵（大）"}, headers=_auth(mgr)
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["unit_cost"] == "45"  # 只改名不該把成本弄丟
+    cleared = await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"unit_cost": None}, headers=_auth(mgr)
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["unit_cost"] is None
+
+
+async def test_zero_cost_is_known_not_unknown(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """明確填 0＝成本已知為零（例如贈飲用料另計），不可被當成「未知」。"""
+    _, mgr, _ = await _seed(db_session)
+    created = await client.post(
+        "/api/v1/menu-items",
+        json={"name": "白開水", "unit_price": "10", "unit_cost": "0"},
+        headers=_auth(mgr),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["unit_cost"] == "0"
+
+
+async def test_cost_change_is_audited(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """成本會直接影響毛利報表，改動要留前後值（§5 敏感操作）。"""
+    _, mgr, _ = await _seed(db_session)
+    created = await client.post(
+        "/api/v1/menu-items",
+        json={"name": "拿鐵", "unit_price": "150", "unit_cost": "45"},
+        headers=_auth(mgr),
+    )
+    item_id = created.json()["id"]
+    await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"unit_cost": "60"}, headers=_auth(mgr)
+    )
+    await client.patch(
+        f"/api/v1/menu-items/{item_id}", json={"unit_cost": None}, headers=_auth(mgr)
+    )
+    logs = (
+        await db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "UPDATE_MENU_ITEM_COST")
+            .order_by(AuditLog.id)
+        )
+    ).all()
+    assert [(log.before["unit_cost"], log.after["unit_cost"]) for log in logs] == [
+        ("45", "60"),
+        ("60", None),
+    ]

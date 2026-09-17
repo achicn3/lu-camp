@@ -12,8 +12,19 @@ import { useCurrentRole } from "@/lib/useCurrentRole";
 
 type MenuItemRead = components["schemas"]["MenuItemRead"];
 
-/** 定價用的店內設定：稅率與行動支付費率（取兩者較高）。缺值回 null，寧可不算也不要算錯。 */
-type PricingRates = { taxRate: number | null; feeRate: number | null; defaultMargin?: number };
+/**
+ * 定價用的店內設定。兩個費率刻意分開，因為兩邊的「安全方向」相反：
+ * - `feeRateForPricing`：算建議售價用，讀不到就以 0 計（CLAUDE.md §7.9：寧可少補，
+ *   也不要在設定沒載入時把客人的價格墊高）。
+ * - `feeRate`：顯示既有品項的預估毛利率用，讀不到就回 null 而不顯示——這裡用 0 會
+ *   把被金流商抽走的錢算成店家收益，毛利系統性高估。
+ */
+type PricingRates = {
+  taxRate: number | null;
+  feeRate: number | null;
+  feeRateForPricing: number;
+  defaultMargin?: number;
+};
 
 function usePricingRates(enabled: boolean): PricingRates {
   const settings = useQuery({
@@ -30,7 +41,13 @@ function usePricingRates(enabled: boolean): PricingRates {
     .map((rate) => (rate == null || String(rate).trim() === "" ? Number.NaN : Number(rate)))
     .filter((rate) => Number.isFinite(rate) && rate >= 0 && rate < 1);
   const feeRate = !settings.isError && feeRates.length === 2 ? Math.max(...feeRates) : null;
-  return { taxRate, feeRate, defaultMargin: settings.data?.purchase_default_margin_pct };
+  const feeRateForPricing = feeRates.length > 0 ? Math.max(...feeRates) : 0;
+  return {
+    taxRate,
+    feeRate,
+    feeRateForPricing,
+    defaultMargin: settings.data?.purchase_default_margin_pct,
+  };
 }
 
 function extractDetail(error: unknown): string | null {
@@ -52,15 +69,15 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
   const [category, setCategory] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { taxRate, feeRate, defaultMargin } = rates;
+  const { taxRate, feeRateForPricing, defaultMargin } = rates;
   // 毛利率顯示值：沒碰過就用設定的預設（設定還沒載入時留白，不要先塞 0 再跳動）。
   const marginValue = margin ?? (defaultMargin === undefined ? "" : String(defaultMargin));
   const marginNum = /^\d+$/.test(marginValue.trim()) ? Number(marginValue) : Number.NaN;
   const marginValid = Number.isInteger(marginNum) && marginNum >= 0 && marginNum <= 99;
   const costNum = parseNtd(cost);
   const suggested =
-    taxRate !== null && feeRate !== null && costNum !== null && costNum > 0 && marginValid
-      ? suggestedListedPrice(costNum, marginNum, taxRate, feeRate)
+    taxRate !== null && costNum !== null && costNum > 0 && marginValid
+      ? suggestedListedPrice(costNum, marginNum, taxRate, feeRateForPricing)
       : null;
   const priceValue = price ?? (suggested === null ? "" : String(suggested));
 
@@ -163,7 +180,7 @@ function CreateMenuItemForm({ onCreated, rates }: { onCreated: () => void; rates
       )}
       {costNum !== null && costNum > 0 && marginValid && suggested === null && (
         <p role="status" className="hint">
-          讀不到稅率或行動支付費率設定，暫不計算建議售價，請直接輸入售價。
+          讀不到稅率設定，暫不計算建議售價，請直接輸入售價。
         </p>
       )}
       {suggested !== null && (

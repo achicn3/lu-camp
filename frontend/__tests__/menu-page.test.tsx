@@ -40,7 +40,7 @@ const SETTINGS = {
 
 type Route = (url: string, method: string, body: string) => Response | null;
 
-function stubFetch(route: Route) {
+function stubFetch(route: Route, settings: Record<string, unknown> = SETTINGS) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -50,7 +50,7 @@ function stubFetch(route: Route) {
         input instanceof Request ? await input.clone().text() : String(init?.body ?? "");
       // 角色以 DB 現值為準（menu 頁 gate 改用 useCurrentRole）：測試一律回 MANAGER。
       if (url.includes("/auth/me")) return json({ id: 1, role: "MANAGER", store_id: 1 });
-      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/settings")) return json(settings);
       const resp = route(url, method, body);
       if (resp) return resp;
       throw new Error(`unmatched fetch: ${method} ${url}`);
@@ -162,6 +162,25 @@ describe("/menu 餐飲菜單管理頁", () => {
     await waitFor(() => expect(posted).toContain("拿鐵"));
     expect(JSON.parse(posted).unit_cost).toBe("60");
     expect(JSON.parse(posted).unit_price).toBe("92");
+  });
+
+  it("讀不到手續費率時仍算建議售價（費率以 0 計，CLAUDE.md §7.9）", async () => {
+    stubFetch((url) => (url.includes("/menu-items") ? json(ITEMS) : null), {
+      ...SETTINGS,
+      linepay_fee_pct: null,
+      taiwanpay_fee_pct: null,
+    });
+    const user = userEvent.setup();
+    renderPage("MANAGER");
+    await screen.findByText("手沖-耶加");
+    await user.type(screen.getByLabelText("成本（整數元，選填）"), "60");
+    // 費率 0：60÷0.7=85.71 → ×1.05 = 90（少補手續費，不把客人的價格墊高）
+    await waitFor(() =>
+      expect((screen.getByLabelText("售價（整數元）") as HTMLInputElement).value).toBe("90"),
+    );
+    // 但既有品項的預估毛利率不可用 0 費率硬算（會高估店家收益）
+    const row = screen.getByText("手沖-耶加").closest("tr")!;
+    expect(row.cells[4].textContent).toBe("—");
   });
 
   it("沒填成本就不送 unit_cost（留 null＝成本未知，不可當 0）", async () => {

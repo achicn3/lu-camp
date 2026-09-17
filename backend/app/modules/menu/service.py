@@ -11,6 +11,7 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
+from app.core.money import MAX_NTD
 from app.modules.menu.models import MenuItem
 from app.modules.menu.repository import MenuRepository
 from app.shared.exceptions import (
@@ -30,6 +31,22 @@ def _validate_price(unit_price: Decimal) -> None:
         raise SaleLineInvalid("菜單售價必須為正")
 
 
+def _validate_cost(unit_cost: Decimal | None) -> None:
+    """成本：None＝未知；其餘須為 0 以上的整數元且不超過金額上限。
+
+    不變量放在 service 而不只在 Pydantic：負成本會讓毛利報表憑空變大，而腳本／跨模組
+    呼叫不經過 HTTP schema。0 是合法的「已知零成本」，與 None（未知）語意不同。
+    """
+    if unit_cost is None:
+        return
+    if unit_cost != unit_cost.to_integral_value():
+        raise SaleLineInvalid("菜單成本必須為整數元")
+    if unit_cost < 0:
+        raise SaleLineInvalid("菜單成本不可為負")
+    if unit_cost > MAX_NTD:
+        raise SaleLineInvalid(f"菜單成本不可超過 {MAX_NTD}")
+
+
 class MenuService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -47,6 +64,7 @@ class MenuService:
         actor_user_id: int,
     ) -> MenuItem:
         _validate_price(unit_price)
+        _validate_cost(unit_cost)
         if await self._repo.name_exists(store_id, name):
             raise DuplicateMenuItem(f"已有同名菜單品項：{name}")
         item = await self._repo.add(
@@ -94,6 +112,7 @@ class MenuService:
             raise MenuItemNotFound(f"找不到菜單品項 {item_id}")
 
         before_price = item.unit_price
+        before_cost = item.unit_cost
         if name is not None and name != item.name:
             if await self._repo.name_exists(store_id, name, exclude_id=item_id):
                 raise DuplicateMenuItem(f"已有同名菜單品項：{name}")
@@ -102,6 +121,7 @@ class MenuService:
             _validate_price(unit_price)
             item.unit_price = unit_price
         if unit_cost is not _UNSET:
+            _validate_cost(unit_cost)  # type: ignore[arg-type]
             item.unit_cost = unit_cost  # type: ignore[assignment]
         if category is not _UNSET:
             item.category = category  # type: ignore[assignment]
@@ -121,6 +141,18 @@ class MenuService:
                 entity_id=str(item.id),
                 before={"unit_price": str(before_price)},
                 after={"unit_price": str(unit_price)},
+            )
+        # 成本直接決定毛利報表，改動同樣留前後值（含清空＝改回「未知」）。
+        if unit_cost is not _UNSET and unit_cost != before_cost:
+            await write_audit_log(
+                self._session,
+                store_id=store_id,
+                actor_user_id=actor_user_id,
+                action="UPDATE_MENU_ITEM_COST",
+                entity_type="menu_item",
+                entity_id=str(item.id),
+                before={"unit_cost": None if before_cost is None else str(before_cost)},
+                after={"unit_cost": None if unit_cost is None else str(unit_cost)},
             )
         return item
 
