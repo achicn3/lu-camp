@@ -350,8 +350,7 @@ async def test_rename_serialized_and_bulk(
     """序號品與散裝批的改名：權限、他店、空白、稽核前後值。"""
     from decimal import Decimal as _D
 
-    from app.core.audit import AuditLog as _AuditLog
-    from app.modules.inventory.models import BulkLot, SerializedItem
+    from app.modules.inventory.models import SerializedItem
     from app.shared.enums import (
         BulkAcquisitionBasis,
         BulkLotStatus,
@@ -412,9 +411,9 @@ async def test_rename_serialized_and_bulk(
 
     logs = (
         await db_session.scalars(
-            select(_AuditLog)
-            .where(_AuditLog.action.in_(("RENAME_SERIALIZED_ITEM", "RENAME_BULK_LOT")))
-            .order_by(_AuditLog.id)
+            select(AuditLog)
+            .where(AuditLog.action.in_(("RENAME_SERIALIZED_ITEM", "RENAME_BULK_LOT")))
+            .order_by(AuditLog.id)
         )
     ).all()
     pairs = []
