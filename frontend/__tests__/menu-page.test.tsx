@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // /menu 餐飲菜單管理頁測試：清單渲染、建立、上下架切換、MANAGER 權限閘。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -247,7 +247,6 @@ describe("/menu 餐飲菜單管理頁", () => {
 
   it("刪除：確認後打 delete 端點；賣過的顯示後端給的原因", async () => {
     const calls: string[] = [];
-    vi.stubGlobal("confirm", vi.fn(() => true));
     stubFetch((url, method) => {
       if (url.includes("/menu-items/1/delete") && method === "DELETE") {
         calls.push(url);
@@ -260,13 +259,16 @@ describe("/menu 餐飲菜單管理頁", () => {
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
     await user.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    // 站內確認視窗（不是瀏覽器的 confirm）：按下去才真的送出
+    const dialog = await screen.findByRole("dialog", { name: "刪除品項" });
+    expect(calls).toEqual([]);
+    await user.click(within(dialog).getByRole("button", { name: "刪除" }));
     await waitFor(() => expect(calls.length).toBe(1));
     expect(await screen.findByText(/賣過了/)).toBeTruthy();
   });
 
   it("刪除：取消確認就不送出（誤按不該讓商品消失）", async () => {
     const calls: string[] = [];
-    vi.stubGlobal("confirm", vi.fn(() => false));
     stubFetch((url, method) => {
       if (url.includes("/delete") && method === "DELETE") {
         calls.push(url);
@@ -279,6 +281,8 @@ describe("/menu 餐飲菜單管理頁", () => {
     renderPage("MANAGER");
     await screen.findByText("手沖-耶加");
     await user.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "刪除品項" });
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls).toEqual([]);
   });
 });

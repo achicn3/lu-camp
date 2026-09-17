@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 
 import { marginPct, suggestedListedPrice } from "@/features/acquisition/pricing";
+import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatNtd, parseNtd } from "@/lib/money";
@@ -215,6 +216,7 @@ function MenuItemRow({
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(item.unit_price);
   const [editingCost, setEditingCost] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [cost, setCost] = useState(item.unit_cost ?? "");
   const [rowError, setRowError] = useState<string | null>(null);
 
@@ -246,9 +248,13 @@ function MenuItemRow({
     },
     onSuccess: () => {
       setRowError(null);
+      setConfirmingDelete(false);
       onChanged();
     },
-    onError: (err: Error) => setRowError(err.message),
+    onError: (err: Error) => {
+      setConfirmingDelete(false); // 擋下的原因顯示在列上，視窗先收起來才看得到
+      setRowError(err.message);
+    },
   });
 
   function savePrice() {
@@ -379,13 +385,31 @@ function MenuItemRow({
             disabled={remove.isPending}
             onClick={() => {
               setRowError(null);
-              if (window.confirm(`確定要刪除「${item.name}」？刪掉就找不回來了。`)) {
-                remove.mutate();
-              }
+              setConfirmingDelete(true);
             }}
           >
             刪除
           </button>
+          {confirmingDelete && (
+            <ConfirmDialog
+              title="刪除品項"
+              danger
+              busy={remove.isPending}
+              confirmLabel="刪除"
+              body={
+                <>
+                  <p>
+                    確定要刪除 <strong>{item.name}</strong>？
+                  </p>
+                  <p className="hint">
+                    刪掉就找不回來了。賣過的品項刪不掉，只能下架——系統會擋下並告訴你。
+                  </p>
+                </>
+              }
+              onConfirm={() => remove.mutate()}
+              onCancel={() => setConfirmingDelete(false)}
+            />
+          )}
         </div>
         {rowError !== null && (
           <p role="alert" className="form-error menu-row-error">

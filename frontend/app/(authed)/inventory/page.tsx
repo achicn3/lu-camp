@@ -24,6 +24,7 @@ import {
 } from "@/features/inventory/inventory";
 import { labelConditionForGrade } from "@/features/inventory/grades";
 import { type LabelCondition, printLabel } from "@/lib/agent";
+import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
@@ -313,6 +314,7 @@ function DeleteItemButton({
   name: string;
 }) {
   const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const mut = useMutation({
@@ -330,9 +332,13 @@ function DeleteItemButton({
     },
     onSuccess: () => {
       setError(null);
+      setConfirming(false);
       void qc.invalidateQueries({ queryKey: ["inventory"] });
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => {
+      setConfirming(false); // 擋下的原因顯示在列上，視窗先收起來才看得到
+      setError(err.message);
+    },
   });
 
   return (
@@ -343,11 +349,31 @@ function DeleteItemButton({
         disabled={mut.isPending}
         onClick={() => {
           setError(null);
-          if (window.confirm(`確定要刪除「${name}」？刪掉就找不回來了。`)) mut.mutate();
+          setConfirming(true);
         }}
       >
         刪除
       </button>
+      {confirming && (
+        <ConfirmDialog
+          title="刪除商品"
+          danger
+          busy={mut.isPending}
+          confirmLabel="刪除"
+          body={
+            <>
+              <p>
+                確定要刪除 <strong>{name}</strong>？
+              </p>
+              <p className="hint">
+                刪掉就找不回來了。賣過、進過貨或盤點過的商品刪不掉，系統會擋下並告訴你原因。
+              </p>
+            </>
+          }
+          onConfirm={() => mut.mutate()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
       {error !== null && (
         <p role="alert" className="form-error menu-row-error">
           {error}

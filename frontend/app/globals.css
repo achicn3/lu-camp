@@ -3876,3 +3876,15 @@ body {
   background: color-mix(in srgb, var(--info) 10%, transparent);
   font-weight: 600;
 }
+
+/* 站內確認視窗（取代 window.confirm）。刪除是不可逆的，所以主鈕走危險色。 */
+.confirm-dialog {
+  max-width: 460px;
+}
+.confirm-dialog-body {
+  font-size: var(--text-md);
+  line-height: 1.7;
+}
+.confirm-dialog-body strong {
+  overflow-wrap: anywhere; /* 品名可能很長且不含空白 */
+}

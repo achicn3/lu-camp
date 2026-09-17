@@ -729,7 +729,6 @@ describe("InventoryPage", () => {
 
   it("刪除一般商品：確認後打 DELETE；被擋下時照實顯示後端原因", async () => {
     loginManager();
-    vi.stubGlobal("confirm", vi.fn(() => true));
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -744,13 +743,16 @@ describe("InventoryPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     await screen.findByText("SKU-9");
     await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    // 站內確認視窗（不是瀏覽器的 confirm）
+    const dialog = await screen.findByRole("dialog", { name: "刪除商品" });
+    expect(calls).toEqual([]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "刪除" }));
     await waitFor(() => expect(calls.length).toBe(1));
     expect(await screen.findByText(/採購紀錄/)).toBeTruthy();
   });
 
   it("刪除：取消確認不送出（誤按不該讓商品消失）", async () => {
     loginManager();
-    vi.stubGlobal("confirm", vi.fn(() => false));
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -765,6 +767,8 @@ describe("InventoryPage", () => {
     await userEvent.click(screen.getByRole("tab", { name: "一般商品" }));
     await screen.findByText("SKU-9");
     await userEvent.click(screen.getAllByRole("button", { name: "刪除" })[0]);
+    const dialog = await screen.findByRole("dialog", { name: "刪除商品" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls).toEqual([]);
   });
 });

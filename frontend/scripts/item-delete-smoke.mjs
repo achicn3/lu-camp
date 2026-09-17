@@ -25,7 +25,17 @@ const run = randomUUID().slice(0, 6);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 page.on("pageerror", (err) => ok("頁面 JS 錯誤", false, String(err)));
-page.on("dialog", (d) => d.accept()); // confirm() 一律確認
+// 站內確認視窗（不是瀏覽器的 confirm）：若冒出系統對話框代表改壞了，直接讓煙霧失敗。
+page.on("dialog", async (d) => {
+  ok("不該出現瀏覽器原生對話框", false, d.message());
+  await d.dismiss();
+});
+
+async function confirmDelete() {
+  const dialog = page.getByRole("dialog", { name: "刪除商品" });
+  await dialog.waitFor({ timeout: 10000 });
+  await dialog.getByRole("button", { name: "刪除", exact: true }).click();
+}
 
 const deletes = [];
 page.on("response", async (res) => {
@@ -64,6 +74,8 @@ try {
   await row.waitFor({ timeout: 10000 });
   await page.screenshot({ path: `${SHOTS}/del-01-before.png`, fullPage: true });
   await row.locator('button:has-text("刪除")').click();
+  await page.screenshot({ path: `${SHOTS}/del-01b-confirm.png` });
+  await confirmDelete();
   await row.waitFor({ state: "detached", timeout: 10000 });
   const deleted = deletes.find((d) => d.status === 204);
   assert.ok(deleted, `沒有成功的刪除請求：${JSON.stringify(deletes)}`);
@@ -95,6 +107,7 @@ try {
   const soldRow = page.locator(`tr:has-text("${soldSku}")`);
   await soldRow.waitFor({ timeout: 10000 });
   await soldRow.locator('button:has-text("刪除")').click();
+  await confirmDelete();
   await soldRow.locator('[role="alert"]').waitFor({ timeout: 10000 });
   const blocked = deletes.find((d) => d.status === 409);
   assert.ok(blocked, `沒有被擋下的刪除請求：${JSON.stringify(deletes)}`);
