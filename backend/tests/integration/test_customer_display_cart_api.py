@@ -1842,3 +1842,190 @@ async def test_linepay_definitive_reject_does_not_lock_cart(
     assert "PAYMENT_UNCERTAIN" not in response.text
     assert cart.status.value != "PAYMENT_UNCERTAIN"
     assert sales == 0
+
+
+# ── 換裝置（解除配對 → 配新平板）─────────────────────────────────────────
+# 店主裁示「允許換裝置」：解除配對不擋進行中的購物車，改為把購物車轉綁到新平板。
+# 這三支守的是 2026-09-18 Opus 複審抓到的三個缺口。
+
+
+async def _relogin_kiosk(
+    client: httpx.AsyncClient,
+    seeded: Seeded,
+    *,
+    installation_id: str,
+    label: str,
+) -> dict[str, object]:
+    """以另一台實體平板登入（不同 installation_id → 不同 device）。"""
+    response = await client.post(
+        "/api/v1/kiosk/device-sessions",
+        json={
+            "username": seeded.kiosk_username,
+            "password": seeded.kiosk_password,
+            "installation_id": installation_id,
+            "label": label,
+        },
+    )
+    assert response.status_code == 201, response.text
+    body: dict[str, object] = response.json()
+    return body
+
+
+async def test_unpaired_kiosk_immediately_loses_access_to_the_cart_snapshot(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """解除配對後，舊平板不得再讀到購物車快照。
+
+    快照裡有 `member`（會員遮罩姓名）。平板遺失／被換走正是店員按「解除配對」的典型
+    理由，若 session 還在就能繼續拉到即時購物車，等於個資留在已經不受控的裝置上。
+    """
+    seeded = await _seed(db_session, "70")
+    terminal_id, _, _ = await _pair(client, seeded, suffix="70")
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=_cart_payload(seeded, qty=1, expected_revision=None),
+    )
+    assert created.status_code == 200, created.text
+    visible = await client.get("/api/v1/kiosk/cart/current")
+    assert visible.status_code == 200
+    assert visible.json() is not None, "配對中本來就該看得到"
+
+    unpaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_auth(seeded.manager_token),
+        json={"reason": "平板拿去維修"},
+    )
+    assert unpaired.status_code == 200, unpaired.text
+
+    after = await client.get("/api/v1/kiosk/cart/current")
+    assert after.status_code == 200, after.text
+    assert after.json() is None, "解除配對後舊平板不得再看到購物車（含會員資料）"
+
+
+async def test_swapping_kiosk_rebinds_the_running_cart_to_the_new_device(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """換裝置後，同一台進行中的購物車要跟著轉到新平板上顯示。
+
+    否則店員換了平板、購物車還綁在舊 device_id，新平板一片空白，只能取消重掃。
+    """
+    seeded = await _seed(db_session, "71")
+    terminal_id, old_device_id, _ = await _pair(client, seeded, suffix="71")
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=_cart_payload(seeded, qty=1, expected_revision=None),
+    )
+    assert created.status_code == 200, created.text
+    cart_id = created.json()["id"]
+
+    await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_auth(seeded.manager_token),
+        json={"reason": "換平板"},
+    )
+    new_kiosk = await _relogin_kiosk(
+        client,
+        seeded,
+        installation_id="00000000-0000-4000-8000-000000000171",
+        label="顧客平板（新）",
+    )
+    new_device_id = new_kiosk["device_id"]
+    assert new_device_id != old_device_id
+    repaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/pair",
+        headers=_auth(seeded.manager_token),
+        json={"pairing_code": new_kiosk["pairing_code"]},
+    )
+    assert repaired.status_code == 200, repaired.text
+
+    # 店員在新平板上繼續加商品：購物車應轉綁到新裝置，而不是留在舊 device_id。
+    updated = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=_cart_payload(seeded, qty=2, expected_revision=created.json()["revision"]),
+    )
+    assert updated.status_code == 200, updated.text
+    cart = await db_session.get(CartSession, cart_id)
+    assert cart is not None
+    await db_session.refresh(cart)
+    assert cart.kiosk_device_id == new_device_id, "購物車必須跟著換到新平板"
+
+    visible = await client.get("/api/v1/kiosk/cart/current")
+    assert visible.status_code == 200
+    assert visible.json() is not None, "新平板要看得到這台購物車"
+
+
+async def test_store_credit_signature_after_swap_goes_to_the_newly_paired_device(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """換裝置後送簽，簽署任務必須建在新平板上。
+
+    原本線上檢查用 pairing 的 device、建任務卻用 cart 的 device：換過平板後任務會被推到
+    已解除配對的舊平板，新平板顯示不出來、客人簽不到，購物金就卡在那裡。
+    """
+    seeded = await _seed(db_session, "72")
+    terminal_id, old_device_id, _ = await _pair(client, seeded, suffix="72")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-72"))
+    assert manager is not None
+    await StoreCreditService(db_session).adjust(
+        manager.store_id,
+        seeded.member_id,
+        amount=Decimal("100"),
+        reason="換裝置簽署測試",
+        created_by=manager.id,
+        idempotency_key="swap-test-credit",
+    )
+    await db_session.commit()
+
+    cart_payload = _cart_payload(seeded, qty=1, expected_revision=None)
+    cart_payload["tenders"] = [
+        {"tender_type": "STORE_CREDIT", "amount": "50"},
+        {"tender_type": "LINE_PAY", "amount": "70"},
+    ]
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=cart_payload,
+    )
+    assert created.status_code == 200, created.text
+
+    await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_auth(seeded.manager_token),
+        json={"reason": "換平板"},
+    )
+    new_kiosk = await _relogin_kiosk(
+        client,
+        seeded,
+        installation_id="00000000-0000-4000-8000-000000000172",
+        label="顧客平板（新）",
+    )
+    new_device_id = new_kiosk["device_id"]
+    assert new_device_id != old_device_id
+    repaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/pair",
+        headers=_auth(seeded.manager_token),
+        json={"pairing_code": new_kiosk["pairing_code"]},
+    )
+    assert repaired.status_code == 200, repaired.text
+
+    frozen = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature",
+        headers=_auth(seeded.manager_token),
+        json={"expected_revision": created.json()["revision"]},
+    )
+    assert frozen.status_code == 200, frozen.text
+    task = await db_session.get(SignatureTask, frozen.json()["signature_task_id"])
+    assert task is not None
+    assert task.kiosk_device_id == new_device_id, "簽署任務必須建在目前配對的新平板上"
+
+    # 新平板真的拿得到這張任務（不是只有 DB 欄位對）。
+    current = await client.get("/api/v1/kiosk/tasks/current")
+    assert current.status_code == 200, current.text
+    assert current.json() is not None
+    assert current.json()["id"] == task.id

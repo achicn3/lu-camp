@@ -146,6 +146,8 @@ export function PosCustomerDisplay({
 }: PosCustomerDisplayProps) {
   const queryClient = useQueryClient();
   const [pairingCode, setPairingCode] = useState("");
+  const [showUnpairForm, setShowUnpairForm] = useState(false);
+  const [unpairReason, setUnpairReason] = useState("");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [syncedRevision, setSyncedRevision] = useState<number | null>(null);
@@ -575,6 +577,37 @@ export function PosCustomerDisplay({
     if (/^\d{6}$/.test(pairingCode)) pair.mutate(pairingCode);
   }
 
+  const unpair = useMutation({
+    mutationFn: async (reason: string) => {
+      if (!terminal.data) throw new Error("POS 櫃檯尚未就緒");
+      const { data, error } = await api.POST(
+        "/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        {
+          params: { path: { terminal_id: terminal.data.id } },
+          body: { reason },
+        },
+      );
+      if (!data) {
+        const detail =
+          error && typeof error === "object" && "detail" in error
+            ? String(error.detail)
+            : "解除配對失敗";
+        throw new Error(detail);
+      }
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["customer-display", "terminal"], data);
+      setShowUnpairForm(false);
+      setUnpairReason("");
+    },
+  });
+
+  function submitUnpair(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (unpairReason.trim() !== "") unpair.mutate(unpairReason.trim());
+  }
+
   if (terminal.isPending) {
     return <div className="pos-kiosk-status is-muted">顧客螢幕設定載入中…</div>;
   }
@@ -624,6 +657,48 @@ export function PosCustomerDisplay({
         <span role="alert" className="form-error">
           {syncError}
         </span>
+      )}
+      {/* 客顯斷線或換裝置時，重新配對前必須先解除這組舊配對——否則永遠卡在
+          上面的連線狀態顯示，沒有路徑回到輸入配對碼的畫面（2026-09-18 實測回報）。 */}
+      {!showUnpairForm ? (
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => setShowUnpairForm(true)}
+        >
+          解除配對
+        </button>
+      ) : (
+        <form className="pos-kiosk-unpair" onSubmit={submitUnpair}>
+          <label>
+            <span className="sr-only">解除配對原因</span>
+            <input
+              placeholder="解除配對原因（例如：換裝置）"
+              value={unpairReason}
+              onChange={(event) => setUnpairReason(event.target.value)}
+              maxLength={200}
+              autoFocus
+            />
+          </label>
+          <button
+            type="submit"
+            className="btn-secondary"
+            disabled={unpair.isPending || unpairReason.trim() === ""}
+          >
+            {unpair.isPending ? "解除中…" : "確認解除配對"}
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setShowUnpairForm(false);
+              setUnpairReason("");
+            }}
+          >
+            取消
+          </button>
+          {unpair.isError && <span role="alert">{unpair.error.message}</span>}
+        </form>
       )}
     </div>
   );

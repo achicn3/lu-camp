@@ -843,6 +843,9 @@ class CustomerDisplayService:
             )
         changes = _cart_changes(current.snapshot, snapshot)
         current.revision += 1
+        # 換裝置（解除配對→配新平板）後，購物車要跟著轉綁到目前配對的那一台，否則新平板
+        # 讀不到這台車、簽署任務也會被推到舊平板（店主裁示「允許換裝置」，不擋進行中的車）。
+        current.kiosk_device_id = pairing.kiosk_device_id
         current.buyer_contact_id = data.buyer_contact_id
         current.snapshot = snapshot
         current.snapshot_fingerprint = fingerprint
@@ -987,10 +990,13 @@ class CustomerDisplayService:
             ],
             "member": cart.snapshot.get("member"),
         }
+        # 一律用 pairing 的裝置，不用 cart 上那個可能是換裝置前的舊 device_id：上面的
+        # 「顧客螢幕在線」檢查看的就是 pairing，兩邊不一致會讓任務被推到已解除配對的舊平板。
+        cart.kiosk_device_id = pairing.kiosk_device_id
         task = await SigningService(self._session).create_store_credit_task_for_cart(
             store_id=store_id,
             cart_session_id=cart.id,
-            kiosk_device_id=cart.kiosk_device_id,
+            kiosk_device_id=pairing.kiosk_device_id,
             contact_id=cart.buyer_contact_id,
             content=content,
             cart_snapshot_fingerprint=cart.snapshot_fingerprint,
@@ -1023,6 +1029,21 @@ class CustomerDisplayService:
         self,
         principal: DevicePrincipal,
     ) -> CartSession | None:
+        """目前配對中才看得到購物車快照。
+
+        裝置 session 有效期是一年，解除配對並不會使它失效（刻意的：同一台平板重新配對
+        不必再輸一次 kiosk 密碼）。但快照裡有 `member` 會員資料，而「平板遺失／被換走」
+        正是解除配對的典型理由——所以讀取這一側必須另外確認 pairing 還在，否則已經不
+        受控的裝置會繼續拉到即時購物車。
+        """
+        if (
+            await self._repo.get_active_pairing_for_device(
+                principal.store_id,
+                principal.device_id,
+            )
+            is None
+        ):
+            return None
         return await self._repo.get_display_cart_for_device(
             principal.store_id,
             principal.device_id,

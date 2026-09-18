@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -197,6 +198,199 @@ describe("POS 顧客螢幕同步", () => {
       service_mode: null,
       table_no: null,
     });
+  });
+
+  it("已配對時可解除配對並回到輸入配對碼的畫面（客顯斷線/換裝置的唯一復原路徑）", async () => {
+    let paired = true;
+    let unpairBody: Record<string, unknown> | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (
+          request.url.endsWith("/api/v1/customer-display/terminals") &&
+          request.method === "POST"
+        ) {
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: paired
+              ? {
+                  id: 8,
+                  label: "顧客平板",
+                  online: false,
+                  last_seen_at: "2026-07-24T10:00:00Z",
+                  current_session_id: null,
+                  displayed_revision: 0,
+                }
+              : null,
+          });
+        }
+        if (request.url.endsWith("/terminals/3/cart/current")) return json(null);
+        if (
+          request.url.endsWith("/terminals/3/unpair") &&
+          request.method === "POST"
+        ) {
+          unpairBody = await request.clone().json();
+          paired = false;
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: null,
+          });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <PosCustomerDisplay
+        lines={[]}
+        buyerContactId={null}
+        adjustments={[]}
+        tenders={[]}
+        ready
+        serviceMode={null}
+        tableNo={null}
+        onRestore={vi.fn()}
+      />,
+      { wrapper: wrapper() },
+    );
+    expect(await screen.findByText(/顧客螢幕離線/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "解除配對" }));
+    await user.type(screen.getByLabelText("解除配對原因"), "換裝置");
+    await user.click(screen.getByRole("button", { name: "確認解除配對" }));
+
+    await waitFor(() => expect(unpairBody).toEqual({ reason: "換裝置" }));
+    expect(await screen.findByText("顧客螢幕尚未配對")).toBeTruthy();
+  });
+
+  it("解除配對失敗要出聲，且取消會清掉已輸入的原因", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (
+          request.url.endsWith("/api/v1/customer-display/terminals") &&
+          request.method === "POST"
+        ) {
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          });
+        }
+        if (request.url.endsWith("/terminals/3/cart/current")) return json(null);
+        if (
+          request.url.endsWith("/terminals/3/unpair") &&
+          request.method === "POST"
+        ) {
+          return json({ detail: "此 POS 櫃檯目前沒有配對顧客螢幕" }, 409);
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <PosCustomerDisplay
+        lines={[]}
+        buyerContactId={null}
+        adjustments={[]}
+        tenders={[]}
+        ready
+        serviceMode={null}
+        tableNo={null}
+        onRestore={vi.fn()}
+      />,
+      { wrapper: wrapper() },
+    );
+    expect(await screen.findByText(/顧客螢幕已連線/)).toBeTruthy();
+
+    // 失敗必須看得見：靜默失敗會讓店員一直按、以為是平板的問題。
+    await user.click(screen.getByRole("button", { name: "解除配對" }));
+    await user.type(screen.getByLabelText("解除配對原因"), "換裝置");
+    await user.click(screen.getByRole("button", { name: "確認解除配對" }));
+    expect(
+      await screen.findByText("此 POS 櫃檯目前沒有配對顧客螢幕"),
+    ).toBeTruthy();
+    // 失敗後仍留在已配對畫面，不得假裝已解除。
+    expect(screen.getByText(/顧客螢幕已連線/)).toBeTruthy();
+
+    // 取消要真的清掉原因，否則下次打開會看到上一次的殘留字串。
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "解除配對" }));
+    expect(screen.getByLabelText("解除配對原因")).toHaveProperty("value", "");
+  });
+
+  it("沒填原因時不得送出解除配對（後端 reason 必填，送出去只會白跑一趟 422）", async () => {
+    const unpairCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (
+          request.url.endsWith("/api/v1/customer-display/terminals") &&
+          request.method === "POST"
+        ) {
+          return json({
+            id: 3,
+            installation_id: "10000000-0000-4000-8000-000000000003",
+            name: "主要櫃檯",
+            paired_kiosk: {
+              id: 8,
+              label: "顧客平板",
+              online: true,
+              last_seen_at: "2026-07-24T10:00:00Z",
+              current_session_id: null,
+              displayed_revision: 0,
+            },
+          });
+        }
+        if (request.url.endsWith("/terminals/3/cart/current")) return json(null);
+        if (request.url.endsWith("/terminals/3/unpair")) {
+          unpairCalls.push(request.url);
+          return json({});
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <PosCustomerDisplay
+        lines={[]}
+        buyerContactId={null}
+        adjustments={[]}
+        tenders={[]}
+        ready
+        serviceMode={null}
+        tableNo={null}
+        onRestore={vi.fn()}
+      />,
+      { wrapper: wrapper() },
+    );
+    expect(await screen.findByText(/顧客螢幕已連線/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "解除配對" }));
+    const submit = screen.getByRole("button", { name: "確認解除配對" });
+    expect(submit).toHaveProperty("disabled", true);
+    // 只打空白也不算填了原因（後端 min_length=1，trim 後為空會 422）。
+    await user.type(screen.getByLabelText("解除配對原因"), "   ");
+    expect(screen.getByRole("button", { name: "確認解除配對" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(unpairCalls).toEqual([]);
   });
 
   it("外部撤回解凍帶回較新 revision 後，下一次同步使用新的 CAS 基準", async () => {
