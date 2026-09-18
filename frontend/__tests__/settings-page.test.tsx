@@ -2,7 +2,7 @@
 // /settings 設定頁測試：MANAGER 可見完整設定、溢價建議值採納、PATCH 僅送變更欄位、
 // 非 MANAGER 顯示權限不足提示。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -491,5 +491,44 @@ describe("/settings", () => {
     expect(preview).toBeTruthy();
     // 同時掛 kiosk 的樣式 class：店主看到的排版＝客人看到的排版
     expect(preview!.classList.contains("kiosk-agreement-body")).toBe(true);
+  });
+
+  it("切結書：可整份預覽——內容不被切掉、也不是另一層捲動", async () => {
+    loginAs("MANAGER");
+    defaultStub();
+    renderPage();
+    await screen.findByRole("button", { name: "編輯切結書內容" });
+
+    await userEvent.click(screen.getByRole("button", { name: "整份預覽" }));
+    const dialog = await screen.findByRole("dialog", { name: "切結書預覽" });
+    // 標題與每一條都在，不是只看得到前幾行
+    expect(within(dialog).getByText(AGREEMENT.title)).toBeTruthy();
+    expect(within(dialog).getByText(/二、交易確認/)).toBeTruthy();
+    // 預覽區本身不再限高（限高＝店主永遠看不到完整一份）
+    const body = dialog.querySelector(".agreement-full-body");
+    expect(body).toBeTruthy();
+    expect(body!.classList.contains("kiosk-agreement-body")).toBe(false);
+  });
+
+  it("切結書：編輯視窗裡也能整份預覽（改到一半要能確認排版）", async () => {
+    loginAs("MANAGER");
+    defaultStub();
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "編輯切結書內容" }));
+    const editor = screen.getByLabelText("切結書內文");
+    await userEvent.clear(editor);
+    await userEvent.type(editor, "改到一半的內文");
+
+    // 卡片上也有同名按鈕，所以限定在編輯視窗裡按
+    const editDialog = screen.getByRole("dialog", { name: "編輯切結書內容" });
+    await userEvent.click(within(editDialog).getByRole("button", { name: "整份預覽" }));
+    const dialog = await screen.findByRole("dialog", { name: "切結書預覽" });
+    // 預覽的是**編輯中**的內容，不是已存檔的舊版
+    expect(within(dialog).getByText("改到一半的內文")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "關閉" }));
+    // 關掉預覽後編輯視窗還在，內容沒被丟掉
+    expect((screen.getByLabelText("切結書內文") as HTMLTextAreaElement).value).toBe(
+      "改到一半的內文",
+    );
   });
 });

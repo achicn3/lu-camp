@@ -111,3 +111,38 @@
 .agreement-dialog .agreement-preview {
   max-height: 180px;
 }
+
+/* 整份預覽：把切結書一次攤開。卡片與編輯視窗裡的小預覽是限高捲動的（只夠瞄一眼），
+   要檢查排版得看完整的一份，否則店主永遠不知道自己打的字在手持裝置上長怎樣。 */
+.agreement-full-dialog {
+  max-width: 560px;
+  max-height: 88vh;
+  overflow-y: auto;
+  white-space: normal;
+  text-align: left;
+}
+.agreement-full-sheet {
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+}
+.agreement-full-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  margin: 0 0 var(--sp-3);
+  overflow-wrap: anywhere;
+}
+/* 排版規則與手持端一致（pre-wrap＋強制斷行），但**不限高、不自己捲動**：
+   捲動交給整個視窗，免得變成巢狀捲動。 */
+.agreement-full-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  font-size: var(--text-md);
+}
+.agreement-card-actions {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  flex-wrap: wrap;
+}

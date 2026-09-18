@@ -81,6 +81,35 @@ try {
   ok("編輯視窗帶入現有全文", true, `${prefilled.length} 字`);
   await page.screenshot({ path: `${SHOTS}/ag-02-dialog.png` });
 
+  // 整份預覽：看得到完整內容，而且不是另一層捲動（限高＝店主永遠看不到整份）
+  await dialog.getByRole("button", { name: "整份預覽" }).click();
+  const preview = page.getByRole("dialog", { name: "切結書預覽" });
+  await preview.waitFor({ timeout: 10000 });
+  await page.screenshot({ path: `${SHOTS}/ag-04-full-preview.png` });
+  const previewBox = await page.evaluate(() => {
+    const body = document.querySelector(".agreement-full-body");
+    if (!body) return null;
+    return {
+      scrollH: body.scrollHeight,
+      clientH: body.clientHeight,
+      text: (body.textContent ?? "").length,
+    };
+  });
+  assert.ok(previewBox, "找不到整份預覽的內文區");
+  assert.ok(
+    previewBox.scrollH <= previewBox.clientH + 1,
+    `預覽內文自己捲動了（${previewBox.scrollH} > ${previewBox.clientH}），店主看不到整份`,
+  );
+  // 長度對照編輯器裡的實際內容，不寫死數字（這份內文本來就會被店主改長改短）
+  assert.equal(
+    previewBox.text,
+    prefilled.length,
+    `預覽內容與編輯中的內文不一致：預覽 ${previewBox.text} 字、編輯器 ${prefilled.length} 字`,
+  );
+  ok("整份預覽一次看完、沒有巢狀捲動", true, `${previewBox.text} 字`);
+  await preview.getByRole("button", { name: "關閉" }).click();
+  await preview.waitFor({ state: "detached", timeout: 10000 });
+
   // 取消不得送出任何請求
   await dialog.locator('button:has-text("取消")').click();
   await dialog.waitFor({ state: "detached" });

@@ -12,6 +12,7 @@ import {
   sameTables,
 } from "@/features/settings/dineInTables";
 import { clampRate, formatPct, parsePctInput, parseRateInput, ratePercentValue } from "@/features/settings/helpers";
+import { useDialogFocus } from "@/features/common/useDialogFocus";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDateTime } from "@/lib/datetime";
@@ -953,6 +954,7 @@ function SignatureRetentionReportCard({
 function AgreementCard() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
 
   const agreementQuery = useQuery({
     queryKey: ["agreement", "current"],
@@ -991,10 +993,22 @@ function AgreementCard() {
           </dl>
           <p className="agreement-title-preview">{current.title}</p>
           <div className="kiosk-agreement-body agreement-preview">{current.body}</div>
-          <button type="button" className="btn-primary" onClick={() => setEditing(true)}>
-            編輯切結書內容
-          </button>
+          <div className="agreement-card-actions">
+            <button type="button" className="btn-primary" onClick={() => setEditing(true)}>
+              編輯切結書內容
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setPreviewing(true)}>
+              整份預覽
+            </button>
+          </div>
         </>
+      )}
+      {previewing && current !== null && (
+        <AgreementPreviewDialog
+          title={current.title}
+          body={current.body}
+          onClose={() => setPreviewing(false)}
+        />
       )}
       {editing && current !== null && (
         <AgreementEditDialog
@@ -1021,6 +1035,7 @@ function AgreementEditDialog({
 }) {
   const [title, setTitle] = useState(current.title);
   const [body, setBody] = useState(current.body);
+  const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -1078,8 +1093,13 @@ function AgreementEditDialog({
           />
         </label>
         <p className="hint">{body.length} / 20000 字</p>
-        {/* 預覽用手持裝置同一組樣式：店主在這裡看到的排版，就是客人簽名時看到的排版 */}
-        <p className="field-label">手持裝置上的樣子</p>
+        {/* 小預覽只夠瞄一眼（限高＋捲動）；要確認排版請開整份預覽。 */}
+        <div className="agreement-card-actions">
+          <p className="field-label">手持裝置上的樣子</p>
+          <button type="button" className="btn-ghost" onClick={() => setPreviewing(true)}>
+            整份預覽
+          </button>
+        </div>
         <p className="agreement-title-preview">{title}</p>
         <div className="kiosk-agreement-body agreement-preview">{body}</div>
         {error !== null && (
@@ -1096,10 +1116,64 @@ function AgreementEditDialog({
           </button>
         </div>
       </form>
+      {previewing && (
+        // 預覽**編輯中**的內容（不是已存檔的舊版），關掉後編輯視窗與內容都還在。
+        <AgreementPreviewDialog
+          title={title}
+          body={body}
+          onClose={() => setPreviewing(false)}
+        />
+      )}
     </div>
   );
 }
 
+
+// 整份預覽：卡片與編輯視窗裡的預覽都被限高（180/260px），店主永遠看不到完整一份，
+// 又是巢狀捲動。這裡把整份攤開，寬度比照手持裝置，讓他真的能檢查排版。
+function AgreementPreviewDialog({
+  title,
+  body,
+  onClose,
+}: {
+  title: string;
+  body: string;
+  onClose: () => void;
+}) {
+  const dialogRef = useDialogFocus<HTMLDivElement>();
+  return (
+    <div
+      className="pos-dialog-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="切結書預覽"
+      ref={dialogRef}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <div className="card pos-dialog agreement-full-dialog">
+        <h2>切結書預覽</h2>
+        <p className="hint">
+          客人在手持裝置上看到的就是這一份。裝置畫面較小，內文區會自己捲動——這裡把整份
+          攤開讓你一次看完。
+        </p>
+        <div className="agreement-full-sheet">
+          <p className="agreement-full-title">{title}</p>
+          {/* 刻意不用 .kiosk-agreement-body：那個 class 帶 260px 限高與捲動，
+              預覽要的是「一次看完」。排版規則（pre-wrap、強制斷行）與手持端一致。 */}
+          <div className="agreement-full-body">{body}</div>
+        </div>
+        <div className="pos-dialog-actions">
+          <button type="button" className="btn-primary" onClick={onClose}>
+            關閉
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // -- 開店前檢查項目 --
 // 店主自己決定每天開店要確認什麼；系統自動檢查的（開帳、各機器連線）不在這裡，那些不能手動打勾。
