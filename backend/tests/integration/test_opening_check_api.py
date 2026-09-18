@@ -313,6 +313,20 @@ async def test_skip_rejects_unknown_key(
     assert resp.status_code == 422, resp.text
 
 
+async def test_item_href_rejects_protocol_relative(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """`//evil.com` 與 `/\\evil.com` 也是以 / 開頭，卻會把店員導到站外。"""
+    mgr, _, _store_id, _clerk_id = await _seed(db_session)
+    for bad in ("//evil.com", "/\\evil.com"):
+        resp = await client.post(
+            "/api/v1/opening-check/items",
+            json={"label": "外部連結", "href": bad},
+            headers=_auth(mgr),
+        )
+        assert resp.status_code == 422, (bad, resp.text)
+
+
 async def test_item_href_must_be_internal_path(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:

@@ -37,7 +37,8 @@ class OpeningCheckItemCreateRequest(BaseModel):
         cleaned = value.strip()
         if cleaned == "":
             return None
-        if not cleaned.startswith("/") or cleaned.startswith("//"):
+        # `//evil.com` 與 `/\evil.com` 都是以 `/` 開頭卻會導到站外（瀏覽器把 `\` 當 `/`）。
+        if not cleaned.startswith("/") or cleaned[1:2] in {"/", "\\"}:
             raise ValueError("連結只能是站內路徑（例如 /cash）")
         return cleaned
 
