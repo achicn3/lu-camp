@@ -112,6 +112,35 @@ async def require_kiosk_csrf(
 KioskMutationDep = Annotated[DevicePrincipal, Depends(require_kiosk_csrf)]
 
 
+async def require_paired_kiosk(
+    session: SessionDep,
+    principal: KioskPrincipalDep,
+) -> DevicePrincipal:
+    """在 session 之外再要求「目前仍在配對中」。
+
+    解除配對不會讓裝置 session 失效，所以任何會吐出客人資料、或代客人做決定的端點
+    都要多這一道，否則已被解除配對（可能已遺失）的平板還是讀得到、按得下去。
+    """
+    if not await CustomerDisplayService(session).device_is_paired(principal):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="此顧客螢幕尚未與 POS 櫃檯配對",
+        )
+    return principal
+
+
+async def require_paired_kiosk_csrf(
+    principal: Annotated[DevicePrincipal, Depends(require_kiosk_csrf)],
+    paired: Annotated[DevicePrincipal, Depends(require_paired_kiosk)],
+) -> DevicePrincipal:
+    """變更型請求：CSRF＋可信 Origin 之外，再要求仍在配對中。"""
+    return principal
+
+
+PairedKioskDep = Annotated[DevicePrincipal, Depends(require_paired_kiosk)]
+PairedKioskMutationDep = Annotated[DevicePrincipal, Depends(require_paired_kiosk_csrf)]
+
+
 def _sse_event(event: str, data: dict[str, object], *, event_id: str) -> str:
     payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return f"id: {event_id}\nevent: {event}\ndata: {payload}\n\n"
@@ -271,7 +300,7 @@ async def get_current_kiosk_cart(
 async def stream_kiosk_events(
     request: Request,
     session: SessionDep,
-    principal: KioskPrincipalDep,
+    principal: PairedKioskDep,
 ) -> StreamingResponse:
     """只送版本通知；客顯收到或重連後一律另 GET 完整最新狀態。"""
 
@@ -281,7 +310,13 @@ async def stream_kiosk_events(
         while not await request.is_disconnected():
             # 同一長連線持有的 identity map 不可遮蔽別筆交易剛提交的 revision。
             session.expire_all()
-            cart = await CustomerDisplayService(session).current_cart_for_device(principal)
+            display = CustomerDisplayService(session)
+            # 這條連線可能開著好幾小時：配對只在連線當下驗過一次不夠，中途被解除配對
+            # 就必須斷線（否則已交還／遺失的平板還在收簽署任務的 id 與狀態）。
+            if not await display.device_is_paired(principal):
+                await session.rollback()
+                return
+            cart = await display.current_cart_for_device(principal)
             from app.modules.signing.service import SigningService
 
             task = await SigningService(session).peek_active_task_for_device(

@@ -38,7 +38,7 @@ from app.modules.signing.service import SigningService
 from app.modules.store.models import Store
 from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.models import User
-from app.shared.enums import ServiceMode, UserRole
+from app.shared.enums import ServiceMode, SignatureTaskStatus, UserRole
 from app.shared.exceptions import LinePayTransportError
 
 ORIGIN = "http://localhost:3000"
@@ -2029,3 +2029,84 @@ async def test_store_credit_signature_after_swap_goes_to_the_newly_paired_device
     assert current.status_code == 200, current.text
     assert current.json() is not None
     assert current.json()["id"] == task.id
+
+
+async def test_unpaired_kiosk_can_neither_read_nor_sign_its_pending_task(
+    client: httpx.AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """解除配對後，舊平板不得再讀到簽署任務、也不得把它簽掉。
+
+    購物車那條路已經擋住了，但任務同樣含 `member` 與購物金餘額，且簽下去就等於
+    授權扣購物金。平板遺失／被換走正是解除配對的理由，這條不擋等於留著一台
+    已經不受控的裝置可以代客人簽名。
+    """
+    seeded = await _seed(db_session, "73")
+    terminal_id, device_id, csrf = await _pair(client, seeded, suffix="73")
+    manager = await db_session.scalar(select(User).where(User.username == "cart-manager-73"))
+    assert manager is not None
+    await StoreCreditService(db_session).adjust(
+        manager.store_id,
+        seeded.member_id,
+        amount=Decimal("100"),
+        reason="解除配對後簽署測試",
+        created_by=manager.id,
+        idempotency_key="unpaired-sign-credit",
+    )
+    await db_session.commit()
+
+    cart_payload = _cart_payload(seeded, qty=1, expected_revision=None)
+    cart_payload["tenders"] = [
+        {"tender_type": "STORE_CREDIT", "amount": "50"},
+        {"tender_type": "LINE_PAY", "amount": "70"},
+    ]
+    created = await client.put(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart",
+        headers=_auth(seeded.manager_token),
+        json=cart_payload,
+    )
+    assert created.status_code == 200, created.text
+    frozen = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/cart/freeze-for-signature",
+        headers=_auth(seeded.manager_token),
+        json={"expected_revision": created.json()["revision"]},
+    )
+    assert frozen.status_code == 200, frozen.text
+    task_id = frozen.json()["signature_task_id"]
+
+    # 配對中本來就看得到，否則下面的斷言會因為別的原因而「通過」。
+    before = await client.get("/api/v1/kiosk/tasks/current")
+    assert before.status_code == 200, before.text
+    assert before.json() is not None
+    assert before.json()["id"] == task_id
+
+    unpaired = await client.post(
+        f"/api/v1/customer-display/terminals/{terminal_id}/unpair",
+        headers=_auth(seeded.manager_token),
+        json={"reason": "平板遺失"},
+    )
+    assert unpaired.status_code == 200, unpaired.text
+
+    # 此時 client 仍帶著舊裝置的 cookie（沒有重新登入）＝模擬那台已脫離控制的平板。
+    # 403 而非 200+null：前端的 fetchCurrentTask 已把 401/403/404 一律當成「沒有任務」，
+    # 畫面不會壞，而 403 才誠實說明「這台已經不在配對中」。
+    after = await client.get("/api/v1/kiosk/tasks/current")
+    assert after.status_code == 403, f"解除配對後舊平板不得再讀到簽署任務：{after.status_code}"
+
+    direct = await client.get(f"/api/v1/kiosk/tasks/{task_id}")
+    assert direct.status_code in (403, 404), f"指名讀取也要擋：{direct.status_code}"
+
+    signed = await client.post(
+        f"/api/v1/kiosk/tasks/{task_id}/sign",
+        headers={"X-CSRF-Token": csrf},
+        json={
+            "signature_image_base64": _signature_png(),
+            "idempotency_key": "unpaired-should-not-sign",
+        },
+    )
+    assert signed.status_code in (403, 404, 409), f"解除配對的平板不得簽名：{signed.status_code}"
+    task = await db_session.get(SignatureTask, task_id)
+    assert task is not None
+    await db_session.refresh(task)
+    assert task.status is not SignatureTaskStatus.SIGNED, "任務不該被已解除配對的平板簽掉"
+    assert device_id is not None

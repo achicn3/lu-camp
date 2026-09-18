@@ -1025,24 +1025,28 @@ class CustomerDisplayService:
         )
         return cart, task
 
-    async def current_cart_for_device(
-        self,
-        principal: DevicePrincipal,
-    ) -> CartSession | None:
-        """目前配對中才看得到購物車快照。
+    async def device_is_paired(self, principal: DevicePrincipal) -> bool:
+        """這台裝置目前還在配對中嗎。
 
         裝置 session 有效期是一年，解除配對並不會使它失效（刻意的：同一台平板重新配對
-        不必再輸一次 kiosk 密碼）。但快照裡有 `member` 會員資料，而「平板遺失／被換走」
-        正是解除配對的典型理由——所以讀取這一側必須另外確認 pairing 還在，否則已經不
-        受控的裝置會繼續拉到即時購物車。
+        不必再輸一次 kiosk 密碼）。因此凡是會吐出客人資料、或代客人做決定的端點，都得
+        另外問這一句——「平板遺失／被換走」正是店員按解除配對的典型理由，光有 session
+        不該還能看到或簽掉任何東西。跨模組請呼叫這個方法，不要自己去碰 pairing 資料表。
         """
-        if (
+        return (
             await self._repo.get_active_pairing_for_device(
                 principal.store_id,
                 principal.device_id,
             )
-            is None
-        ):
+            is not None
+        )
+
+    async def current_cart_for_device(
+        self,
+        principal: DevicePrincipal,
+    ) -> CartSession | None:
+        """目前配對中才看得到購物車快照（快照含 `member` 會員資料）。"""
+        if not await self.device_is_paired(principal):
             return None
         return await self._repo.get_display_cart_for_device(
             principal.store_id,

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
-from app.modules.customerdisplay.router import KioskMutationDep, KioskPrincipalDep
+from app.modules.customerdisplay.router import PairedKioskDep, PairedKioskMutationDep
 from app.modules.signing.models import AgreementVersion, SignatureTask
 from app.modules.signing.schemas import (
     AgreementTextRead,
@@ -308,7 +308,7 @@ async def get_signature_image(task_id: int, session: SessionDep, user: StaffDep)
 )
 async def get_current_kiosk_task(
     session: SessionDep,
-    principal: KioskPrincipalDep,
+    principal: PairedKioskDep,
 ) -> KioskTaskRead | None:
     """只讀取此裝置目前任務；重連先由後端重驗狀態與 TTL。"""
     service = SigningService(session)
@@ -325,7 +325,7 @@ async def get_current_kiosk_task(
 async def get_kiosk_task(
     task_id: int,
     session: SessionDep,
-    principal: KioskPrincipalDep,
+    principal: PairedKioskDep,
 ) -> KioskTaskRead:
     """手持端重讀指定任務（簽名頁確認狀態未被店員作廢）。
 
@@ -353,7 +353,7 @@ async def get_kiosk_task(
 async def acknowledge_kiosk_task(
     task_id: int,
     session: SessionDep,
-    principal: KioskMutationDep,
+    principal: PairedKioskMutationDep,
 ) -> KioskTaskRead:
     service = SigningService(session)
     try:
@@ -385,7 +385,7 @@ async def record_kiosk_task_activity(
     task_id: int,
     body: KioskActivityRequest,
     session: SessionDep,
-    principal: KioskMutationDep,
+    principal: PairedKioskMutationDep,
 ) -> KioskTaskRead:
     service = SigningService(session)
     try:
@@ -416,7 +416,7 @@ async def sign_kiosk_task(
     task_id: int,
     body: KioskSignRequest,
     session: SessionDep,
-    principal: KioskMutationDep,
+    principal: PairedKioskMutationDep,
 ) -> KioskTaskRead:
     service = SigningService(session)
     try:
