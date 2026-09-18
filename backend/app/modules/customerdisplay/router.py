@@ -230,7 +230,10 @@ async def create_kiosk_device_session(
         result.raw_session_token,
         max_age=KIOSK_COOKIE_MAX_AGE,
         httponly=True,
-        secure=get_settings().app_env == "production",
+        # 依實際連線是否為 HTTPS 判斷，不看 APP_ENV：內網 production 部署常走純 HTTP
+        # （無反向代理終止 TLS），APP_ENV=="production" 會讓瀏覽器直接拒收 Secure cookie，
+        # 5 秒後的裝置狀態輪詢因此送不出 session、被判 401 退回登入畫面（2026-09-18 實測）。
+        secure=request.url.scheme == "https",
         samesite="strict",
         path=KIOSK_COOKIE_PATH,
     )

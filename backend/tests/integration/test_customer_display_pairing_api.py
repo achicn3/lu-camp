@@ -10,9 +10,11 @@
 from collections.abc import AsyncGenerator
 
 import httpx
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.security import encode_access_token, hash_password
 from app.main import create_app
@@ -100,6 +102,12 @@ def _staff_auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _installation_for(app_env: str, prefix: str) -> str:
+    """參數化跑兩次時，每次都要是不同的實體裝置，否則第二次會沿用第一次的 device。"""
+    tail = "1" if app_env == "production" else "0"
+    return f"{prefix}-2f2f-4b2b-9f2f-2f2f2f2f2f2{tail}"
+
+
 async def _login_kiosk(
     client: httpx.AsyncClient,
     seeded: Seeded,
@@ -161,6 +169,77 @@ async def test_kiosk_login_sets_scoped_http_only_cookie_and_returns_pairing_code
     # Cookie Path 不涵蓋一般店務 API；沒有 bearer token 時仍須 401。
     general = await client.get("/api/v1/cash-sessions/current")
     assert general.status_code == 401
+
+
+@pytest.mark.parametrize("app_env", ["development", "production"])
+async def test_kiosk_cookie_secure_flag_follows_request_scheme_not_app_env(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    app_env: str,
+) -> None:
+    """Secure 旗標必須看實際連線是不是 HTTPS，不能看 APP_ENV。
+
+    內網用 HTTP 連線的 production 部署，若 Secure 旗標只看 APP_ENV=="production"，
+    瀏覽器會整個拒收這顆 cookie——登入後幾秒同一頁的輪詢就會因為送不出 cookie
+    而被判 401、退回登入畫面（2026-09-18 實測踩過）。
+
+    **兩個 app_env 都要跑**：只在預設的 development 下驗，HTTP 那半是空轉（新舊寫法
+    都是 False），擋不住「`app_env == "production" or scheme == "https"`」這種最容易
+    出現的折衷回歸——而 production+HTTP 正是實際踩到的那一格。
+    """
+    monkeypatch.setenv("APP_ENV", app_env)
+    # get_settings 是 lru_cache 單例：改了環境變數要清快取才會重讀，離開時也要再清一次，
+    # 否則這個 app_env 會殘留給後面的測試。
+    get_settings.cache_clear()
+    request.addfinalizer(get_settings.cache_clear)
+    assert get_settings().app_env == app_env
+
+    async def _client_with_scheme(scheme: str) -> httpx.AsyncClient:
+        app = create_app()
+        throttle = LoginThrottle()
+
+        async def _override() -> AsyncGenerator[AsyncSession]:
+            yield db_session
+
+        app.dependency_overrides[get_session] = _override
+        app.dependency_overrides[get_login_throttle] = lambda: throttle
+        transport = httpx.ASGITransport(app=app)
+        return httpx.AsyncClient(
+            transport=transport,
+            base_url=f"{scheme}://test",
+            headers={"Origin": ORIGIN},
+        )
+
+    seeded_http = await _seed(db_session, suffix=f"scheme-http-{app_env}")
+    async with await _client_with_scheme("http") as http_client:
+        response = await http_client.post(
+            "/api/v1/kiosk/device-sessions",
+            json={
+                "username": seeded_http.kiosk_username,
+                "password": seeded_http.kiosk_password,
+                "installation_id": _installation_for(app_env, "b3f7c9b0"),
+                "label": "顧客平板",
+            },
+        )
+        assert response.status_code == 201, response.text
+        cookie = next(c for c in http_client.cookies.jar if c.name == "lu_camp_kiosk_session")
+        assert not cookie.secure, "HTTP 連線不該拿到 Secure cookie（瀏覽器會直接拒存）"
+
+    seeded_https = await _seed(db_session, suffix=f"scheme-https-{app_env}")
+    async with await _client_with_scheme("https") as https_client:
+        response = await https_client.post(
+            "/api/v1/kiosk/device-sessions",
+            json={
+                "username": seeded_https.kiosk_username,
+                "password": seeded_https.kiosk_password,
+                "installation_id": _installation_for(app_env, "c3f7c9b0"),
+                "label": "顧客平板",
+            },
+        )
+        assert response.status_code == 201, response.text
+        cookie = next(c for c in https_client.cookies.jar if c.name == "lu_camp_kiosk_session")
+        assert cookie.secure, "HTTPS 連線應該要有 Secure cookie"
 
 
 async def test_kiosk_device_login_uses_same_pre_hash_throttle_as_staff_login(
