@@ -97,3 +97,56 @@ def test_v3_keeps_everything_else_identical_to_v2() -> None:
             assert a != b
         else:
             assert a == b, f"第 {i} 段不該變"
+
+
+def test_v3_text_is_frozen() -> None:
+    """v3 已落庫且已有簽署綁著它——改它不會生效，只會讓程式與資料庫不一致。"""
+    title, body = AGREEMENT_TEXTS[3]
+    assert title == AGREEMENT_TITLE_V1
+    assert "未稅售價1,000元，本店抽成500元，本人應領500元" in body
+    assert len(body) == 819  # 落庫長度；變了就是改到 v3 了
+
+
+def test_v4_is_the_current_version() -> None:
+    from app.modules.signing.agreements import AGREEMENT_TITLE_V4
+
+    title, _body = AGREEMENT_TEXTS[CURRENT_AGREEMENT_VERSION]
+    assert CURRENT_AGREEMENT_VERSION == 4
+    assert title == AGREEMENT_TITLE_V4
+
+
+def test_v4_consignment_math_matches_the_system() -> None:
+    """合約寫的算法必須與 core.money.consignment_split 同序，否則客人簽的跟系統算的不同。
+
+    系統：含稅 → 除稅得未稅 → 未稅 × 抽成 → 未稅減抽成＝寄售人。合約範例也必須算得出來。
+    """
+    from decimal import Decimal
+
+    from app.core.money import consignment_split
+
+    _title, body = AGREEMENT_TEXTS[4]
+    assert "應售價（含稅）÷（1＋營業稅率）＝ 稅前銷售額" in body
+    assert "各項金額均計算至新臺幣元，採四捨五入" in body
+
+    # 合約範例：含稅 10,500、稅率 5%、抽成 20% → 寄售人 8,000
+    store_share, payout = consignment_split(Decimal(10500), 20, Decimal("0.05"))
+    assert payout == 8000, "系統算出來的寄售人金額與合約範例不符"
+    assert store_share == 2500  # 抽成 2,000 ＋ 代繳稅 500
+    assert "10,000 － 2,000 ＝ 8,000 元（寄售人應得款項）" in body
+
+
+def test_v4_states_storage_fee_and_disposal_rules() -> None:
+    """未取回商品的處理是店主 2026-09-18 的裁示，條文要寫得出具體數字與期間。"""
+    _title, body = AGREEMENT_TEXTS[4]
+    assert "通知到達之日起三十日內取回商品" in body
+    assert "按日收取寄放費用新臺幣五百元" in body
+    assert "不負保管責任" in body
+    # 全部免責（含故意重大過失）在定型化契約裡站不住，條文刻意留這個例外
+    assert "除本店之故意或重大過失外，本店不負賠償責任" in body
+    assert "視為本人拋棄該商品之所有權" in body
+
+
+def test_v4_does_not_promise_to_keep_signature_images() -> None:
+    """系統的 signature_png_retention_days 到期會清圖：不能承諾保存原圖。"""
+    _title, body = AGREEMENT_TEXTS[4]
+    assert "簽名影像依本店資料保存政策定期清除" in body
