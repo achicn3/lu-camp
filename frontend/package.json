@@ -2,13 +2,17 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.4"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "_comment_test": "NODE_OPTIONS 關掉 Node 22.4+ 內建的實驗性全域 localStorage：沒給 --localstorage-file 時它是回傳 undefined 的 getter，而 vitest 的 jsdom 環境裡 window === globalThis，它會蓋掉 jsdom 自己的 localStorage，讓所有碰 localStorage 的測試炸在 undefined。此旗標必須在 Node 啟動時給（試過 vitest poolOptions.execArgv，無效），所以只能掛在這裡——請一律用 `pnpm test`，別直接跑 `vitest`。",
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run",
     "smoke:timezone": "node scripts/timezone-smoke.mjs",
     "gen:api": "openapi-typescript openapi.json -o lib/api-types.ts"
   },
