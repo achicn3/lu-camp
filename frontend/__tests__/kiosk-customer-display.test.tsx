@@ -897,4 +897,135 @@ describe("/kiosk 客顯", () => {
     });
     expect(screen.queryByText("已完成簽署")).toBeNull();
   });
+
+  it("配對被解除後自行回到配對畫面，不會卡在待機或斷線提示", async () => {
+    // 店員在櫃檯按「解除配對」（平板遺失、改配到收購櫃檯）後，平板上的 SSE 會收到 403
+    // 而永久關閉（EventSource 規格：非 200 不重連）。若裝置狀態在配對後就停止輪詢，
+    // 這台平板會永遠停在舊畫面，店員沒有任何辦法讓它重新配對——只能重新整理。
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    window.localStorage.setItem(
+      "lu-camp.kiosk.csrf",
+      "csrf-token-at-least-thirty-two-characters",
+    );
+    let paired = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: paired ? null : "913247",
+            pairing_code_expires_at: paired
+              ? null
+              : new Date(Date.now() + 5 * 60_000).toISOString(),
+            paired_terminal: paired ? { id: 3, name: "主櫃檯" } : null,
+          });
+        }
+        // 購物車端點不要求配對，解除配對後照樣回 200/null——畫面因此**不會**出現任何
+        // 錯誤，只會安靜地停在待機。任務端點才會 403。
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) {
+          return paired ? json(null) : json({ detail: "此顧客螢幕尚未與 POS 櫃檯配對" }, 403);
+        }
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText("櫃檯 · 主櫃檯")).toBeTruthy();
+
+    paired = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("913247")).toBeTruthy();
+    });
+    vi.useRealTimers();
+  });
+
+  it("連線中斷時畫面上的「正在重新連線」是真的會重試，恢復後自動回到購物車", async () => {
+    // 2026-09-19 回報：客顯斷線後卡在斷線提示詞。原因是購物車 query 失敗後沒有任何東西
+    // 會再去重試（SSE 在非 200 時依規格永久關閉、不重連），那句「正在重新連線…」純粹
+    // 是文案，店員看著它等不到恢復，只能去把平板重新整理。
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    window.localStorage.setItem(
+      "lu-camp.kiosk.csrf",
+      "csrf-token-at-least-thirty-two-characters",
+    );
+    let backendUp = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        if (request.url.endsWith("/api/v1/kiosk/device")) {
+          return json({
+            device_id: 8,
+            label: "收銀台客顯",
+            pairing_code: null,
+            pairing_code_expires_at: null,
+            paired_terminal: { id: 3, name: "主櫃檯" },
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/cart/current")) {
+          if (!backendUp) return json({ detail: "bad gateway" }, 502);
+          return json({
+            id: 21,
+            status: "DRAFT",
+            revision: 1,
+            snapshot: {
+              content_version: "cart-v2",
+              items: [
+                {
+                  item_key: "CATALOG:6",
+                  line_type: "CATALOG",
+                  name: "瓦斯罐三入組",
+                  qty: 1,
+                  unit_price: "120",
+                  original_unit_price: null,
+                  discount_amount: "0",
+                  line_total: "120",
+                  line_kind: "NORMAL",
+                  manual_discount_amount: "0",
+                  net_amount: "120",
+                },
+              ],
+              total: "120",
+              discount_total: "0",
+              manual_discount_total: "0",
+              gift_retail_value: "0",
+              campaign_name: null,
+              member: null,
+              tenders: [],
+            },
+            changes: [],
+          });
+        }
+        if (request.url.endsWith("/api/v1/kiosk/tasks/current")) return json(null);
+        if (request.url.endsWith("/api/v1/kiosk/heartbeat")) {
+          return json({ online: true, last_seen_at: "2026-07-24T10:01:00Z" });
+        }
+        throw new Error(`unmatched fetch ${request.method} ${request.url}`);
+      }),
+    );
+
+    renderPage();
+    expect(await screen.findByText("顧客螢幕同步中斷，正在重新連線…")).toBeTruthy();
+
+    backendUp = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("瓦斯罐三入組")).toBeTruthy();
+    });
+    vi.useRealTimers();
+  });
 });

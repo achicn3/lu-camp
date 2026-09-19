@@ -87,6 +87,11 @@ class SignatureTask(Base, TimestampMixin):
             name="fk_signature_tasks_cart_session_store",
             use_alter=True,
         ),
+        ForeignKeyConstraint(
+            ["pos_terminal_id", "store_id"],
+            ["pos_terminals.id", "pos_terminals.store_id"],
+            name="fk_signature_tasks_pos_terminal_store",
+        ),
         # PNG 可依保存政策獨立清除；SIGNED 仍須保留簽署時間與三組不可變 hash。
         CheckConstraint(
             "status NOT IN ('SIGNED','CONSUMED','FAILED') OR "
@@ -149,6 +154,10 @@ class SignatureTask(Base, TimestampMixin):
     # 能簽退貨同意，見 ck_signature_tasks_contact_required）。
     contact_id: Mapped[int | None] = mapped_column(index=True)
     kiosk_device_id: Mapped[int | None] = mapped_column(index=True)
+    # 推這張任務的櫃檯。裝置會換配對（平板遺失、改配到收購櫃檯），只記「哪台平板」不夠：
+    # 換配對後舊櫃檯的任務仍掛在同一台平板上，會被新配對的畫面讀到、甚至簽掉。
+    # 舊資料（本欄上線前）為 NULL，視為「不限櫃檯」，沿用舊行為不追溯改寫已簽證據。
+    pos_terminal_id: Mapped[int | None] = mapped_column(index=True)
     cart_session_id: Mapped[int | None] = mapped_column(index=True)
     content: Mapped[dict[str, Any]] = mapped_column(JSONB)  # 顯示內容快照
     agreement_version_id: Mapped[int | None] = mapped_column(ForeignKey("agreement_versions.id"))
@@ -258,6 +267,7 @@ BEGIN
      OR OLD.kind IS DISTINCT FROM NEW.kind
      OR OLD.contact_id IS DISTINCT FROM NEW.contact_id
      OR OLD.kiosk_device_id IS DISTINCT FROM NEW.kiosk_device_id
+     OR OLD.pos_terminal_id IS DISTINCT FROM NEW.pos_terminal_id
      OR OLD.cart_session_id IS DISTINCT FROM NEW.cart_session_id
      OR OLD.content IS DISTINCT FROM NEW.content
      OR OLD.agreement_version_id IS DISTINCT FROM NEW.agreement_version_id

@@ -135,6 +135,24 @@ try {
     ok("解除配對後回到輸入配對碼畫面", true);
     await pos.screenshot({ path: join(SHOTS, "05-pos-back-to-pairing.png"), fullPage: true });
 
+    // ── 2b. 舊平板必須**自己**回到配對畫面（2026-09-19 回報）────────────────
+    // 被解除配對時，舊平板的 SSE 會拿到 403 而永久關閉（EventSource 規格：非 200
+    // 不重連）。裝置狀態若在配對後就停止輪詢，這台平板會一直停在待機或「同步中斷」，
+    // 店員沒有任何辦法讓它重新配對，只能自己跑去把平板重新整理。
+    // 這裡**不重新整理頁面**，純粹等它自癒；裝置輪詢 15 秒一輪，給 25 秒。
+    // 等的是配對畫面本身，不是 `.kiosk-pairing-code`：舊配對碼已被用掉，這頁會顯示
+    // 「取得配對碼」按鈕而不是六位數字，用數字當條件會偶爾假性失敗。
+    const oldRecovered = await oldTablet.page
+      .waitForSelector('h1:has-text("連接您的 POS 櫃檯")', { timeout: 25000 })
+      .then(() => true)
+      .catch(() => false);
+    ok(
+      "舊平板被解除配對後自行回到配對畫面（免重新整理）",
+      oldRecovered,
+      oldRecovered ? "" : "卡在舊畫面＝店員無法讓它重新配對",
+    );
+    await oldTablet.page.screenshot({ path: join(SHOTS, "05b-old-kiosk-back-to-pairing.png") });
+
     // ── 3. 換一台新平板，從 POS 畫面重新配對 ──────────────────────────────
     const newTablet = await openKiosk(browser, "煙霧新平板");
     const secondCode = (await newTablet.page.textContent(".kiosk-pairing-code"))?.trim();

@@ -3,11 +3,26 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.signing.models import AgreementVersion, SignatureTask, SignatureTaskEvent
 from app.shared.enums import SignatureTaskKind, SignatureTaskStatus
+
+
+def _visible_to_terminal(pos_terminal_id: int | None) -> ColumnElement[bool]:
+    """任務是否屬於「現在這台櫃檯」。
+
+    `pos_terminal_id=None` 代表呼叫端不分櫃檯（例如建立任務時檢查這台平板上有沒有別的
+    任務——那道唯一索引本來就只看裝置）。任務自己的 `pos_terminal_id` 為 NULL 是本欄
+    上線前的舊列，視為不限櫃檯，沿用舊行為。
+    """
+    if pos_terminal_id is None:
+        return true()
+    return or_(
+        SignatureTask.pos_terminal_id.is_(None),
+        SignatureTask.pos_terminal_id == pos_terminal_id,
+    )
 
 
 class SigningRepository:
@@ -48,6 +63,7 @@ class SigningRepository:
         device_id: int,
         *,
         for_update: bool = False,
+        pos_terminal_id: int | None = None,
     ) -> SignatureTask | None:
         """裝置目前可見的唯一任務；SIGNED 仍須顯示等待店員完成結帳。"""
         stmt = (
@@ -55,6 +71,7 @@ class SigningRepository:
             .where(
                 SignatureTask.store_id == store_id,
                 SignatureTask.kiosk_device_id == device_id,
+                _visible_to_terminal(pos_terminal_id),
                 SignatureTask.status.in_(
                     (
                         SignatureTaskStatus.PENDING,
@@ -71,31 +88,6 @@ class SigningRepository:
         result: SignatureTask | None = await self._session.scalar(stmt)
         return result
 
-    async def get_active_for_device(
-        self,
-        store_id: int,
-        device_id: int,
-        task_id: int,
-        *,
-        for_update: bool = False,
-    ) -> SignatureTask | None:
-        stmt = select(SignatureTask).where(
-            SignatureTask.id == task_id,
-            SignatureTask.store_id == store_id,
-            SignatureTask.kiosk_device_id == device_id,
-            SignatureTask.status.in_(
-                (
-                    SignatureTaskStatus.PENDING,
-                    SignatureTaskStatus.SIGNING,
-                    SignatureTaskStatus.SIGNED,
-                )
-            ),
-        )
-        if for_update:
-            stmt = stmt.with_for_update().execution_options(populate_existing=True)
-        result: SignatureTask | None = await self._session.scalar(stmt)
-        return result
-
     async def get_for_device(
         self,
         store_id: int,
@@ -103,11 +95,13 @@ class SigningRepository:
         task_id: int,
         *,
         for_update: bool = False,
+        pos_terminal_id: int | None = None,
     ) -> SignatureTask | None:
         stmt = select(SignatureTask).where(
             SignatureTask.id == task_id,
             SignatureTask.store_id == store_id,
             SignatureTask.kiosk_device_id == device_id,
+            _visible_to_terminal(pos_terminal_id),
         )
         if for_update:
             stmt = stmt.with_for_update().execution_options(populate_existing=True)

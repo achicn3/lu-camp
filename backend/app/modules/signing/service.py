@@ -135,6 +135,15 @@ class SigningService:
             text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key}
         )
 
+    async def _paired_terminal_id(self, store_id: int, device_id: int) -> int | None:
+        """這台平板**現在**配到哪一台櫃檯；沒配對回 None（＝什麼都不該看到）。
+
+        只問「還在配對中嗎」不夠：換配對之後，前一台櫃檯的任務仍掛在同一台平板上
+        （2026-09-19 審查 M1）。所有裝置端入口都要用這個值把可見範圍收到當前櫃檯。
+        """
+        pairing = await self._display_repo.get_active_pairing_for_device(store_id, device_id)
+        return None if pairing is None else pairing.pos_terminal_id
+
     async def _lock_device_task_after_cart(
         self,
         store_id: int,
@@ -142,7 +151,15 @@ class SigningService:
         task_id: int,
     ) -> SignatureTask | None:
         """跨購物車任務一律先鎖 cart、再鎖 task，與結帳保持同一全域鎖順序。"""
-        preview = await self._repo.get_for_device(store_id, device_id, task_id)
+        terminal_id = await self._paired_terminal_id(store_id, device_id)
+        if terminal_id is None:
+            return None
+        preview = await self._repo.get_for_device(
+            store_id,
+            device_id,
+            task_id,
+            pos_terminal_id=terminal_id,
+        )
         if preview is None:
             return None
         if preview.cart_session_id is not None:
@@ -156,6 +173,7 @@ class SigningService:
             device_id,
             task_id,
             for_update=True,
+            pos_terminal_id=terminal_id,
         )
 
     async def _lock_task_after_cart(
@@ -213,7 +231,7 @@ class SigningService:
 
         if data.kind is SignatureTaskKind.STORE_CREDIT_USE:
             raise SignatureTaskConflict("購物金簽署必須從 POS 權威購物車凍結流程建立")
-        kiosk_device_id = await self._resolve_kiosk_device(
+        kiosk_device_id, pos_terminal_id = await self._resolve_kiosk_device(
             store_id,
             terminal_id=data.terminal_id,
         )
@@ -248,6 +266,7 @@ class SigningService:
             kind=data.kind,
             contact_id=data.contact_id,
             kiosk_device_id=kiosk_device_id,
+            pos_terminal_id=pos_terminal_id,
             content=content,
             agreement_version_id=agreement_version_id,
             identity_fingerprint=identity_fingerprint,
@@ -275,7 +294,9 @@ class SigningService:
         store_id: int,
         *,
         terminal_id: int | None,
-    ) -> int:
+    ) -> tuple[int, int]:
+        """回 (顧客螢幕裝置, 推這張任務的櫃檯)。兩者都要記：只記裝置的話，平板換配對後
+        舊櫃檯的任務仍會出現在新配對的畫面上（2026-09-19 審查 M1）。"""
         if terminal_id is not None:
             terminal = await self._display_repo.get_terminal(
                 store_id,
@@ -291,11 +312,11 @@ class SigningService:
             )
             if pairing is None:
                 raise SignatureTaskConflict("POS 櫃檯尚未配對顧客螢幕")
-            return pairing.kiosk_device_id
+            return pairing.kiosk_device_id, pairing.pos_terminal_id
         pairings = await self._display_repo.list_active_pairings_for_store(store_id)
         if len(pairings) != 1:
             raise SignatureTaskConflict("請指定 POS 櫃檯；目前無法唯一判定簽署顧客螢幕")
-        return pairings[0].kiosk_device_id
+        return pairings[0].kiosk_device_id, pairings[0].pos_terminal_id
 
     async def create_store_credit_task_for_cart(
         self,
@@ -303,6 +324,7 @@ class SigningService:
         store_id: int,
         cart_session_id: int,
         kiosk_device_id: int,
+        pos_terminal_id: int,
         contact_id: int,
         content: dict[str, object],
         cart_snapshot_fingerprint: str,
@@ -324,6 +346,7 @@ class SigningService:
             status=SignatureTaskStatus.PENDING,
             contact_id=contact_id,
             kiosk_device_id=kiosk_device_id,
+            pos_terminal_id=pos_terminal_id,
             cart_session_id=cart_session_id,
             content=content,
             content_sha256=fingerprint,
@@ -1271,7 +1294,14 @@ class SigningService:
         device_id: int,
     ) -> SignatureTask | None:
         """重連後以後端真相決定畫面；逾時任務原子作廢並清場。"""
-        preview = await self._repo.active_for_device(store_id, device_id)
+        terminal_id = await self._paired_terminal_id(store_id, device_id)
+        if terminal_id is None:
+            return None
+        preview = await self._repo.active_for_device(
+            store_id,
+            device_id,
+            pos_terminal_id=terminal_id,
+        )
         if preview is None:
             return None
         task = await self._lock_device_task_after_cart(
@@ -1313,7 +1343,14 @@ class SigningService:
         device_id: int,
     ) -> SignatureTask | None:
         """SSE 只用來通知版本／狀態；真正 TTL 裁定由全量 GET 與 sweeper 負責。"""
-        return await self._repo.active_for_device(store_id, device_id)
+        terminal_id = await self._paired_terminal_id(store_id, device_id)
+        if terminal_id is None:
+            return None
+        return await self._repo.active_for_device(
+            store_id,
+            device_id,
+            pos_terminal_id=terminal_id,
+        )
 
     async def sweep_expired_tasks(self, *, now: datetime | None = None) -> int:
         observed_at = now or datetime.now(UTC)

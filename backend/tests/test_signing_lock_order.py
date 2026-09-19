@@ -33,6 +33,7 @@ async def test_kiosk_ack_locks_cart_before_signature_task() -> None:
             task_id: int,
             *,
             for_update: bool = False,
+            pos_terminal_id: int | None = None,
         ) -> Any:
             calls.append("task_lock" if for_update else "task_preview")
             return task
@@ -41,6 +42,17 @@ async def test_kiosk_ack_locks_cart_before_signature_task() -> None:
             return event
 
     class _DisplayRepo:
+        async def get_active_pairing_for_device(
+            self,
+            store_id: int,
+            device_id: int,
+            *,
+            for_update: bool = False,
+        ) -> Any:
+            # 查「現在配對到哪台櫃檯」不上鎖，不參與 cart→task 的鎖順序。
+            calls.append("pairing_read")
+            return SimpleNamespace(pos_terminal_id=5, kiosk_device_id=device_id)
+
         async def get_cart(
             self,
             store_id: int,
@@ -57,4 +69,10 @@ async def test_kiosk_ack_locks_cart_before_signature_task() -> None:
 
     await service.acknowledge_task(7, 11, 31)
 
-    assert calls[:3] == ["task_preview", "cart_lock", "task_lock"]
+    # 先讀配對（無鎖）只是決定可見範圍；真正上鎖的順序仍須是 cart→task。
+    assert calls[0] == "pairing_read"
+    assert [call for call in calls if call != "pairing_read"][:3] == [
+        "task_preview",
+        "cart_lock",
+        "task_lock",
+    ]

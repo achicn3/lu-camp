@@ -127,8 +127,12 @@ export default function KioskPage() {
     // 登入回應是配對明碼唯一一次可取得的來源；先讓它完成首屏渲染，避免啟用 query 後
     // 立即 GET（只回裝置狀態、不保存明碼）在 React commit 前覆蓋快取。
     staleTime: 5_000,
+    // **配對後仍要慢速輪詢**。配對狀態只由 SSE 的 invalidate 帶動，而 SSE 在解除配對
+    // 後會拿到 403 並依規格永久關閉（非 200 不重連）；不留一條自己的路，這台平板要回到
+    // 配對畫面就只剩「請人去把它重新整理」。等配對碼時要快（店員正盯著螢幕輸入），
+    // 已配對後 15 秒一次即可。
     refetchInterval: (query) =>
-      query.state.data?.paired_terminal == null ? 5000 : false,
+      query.state.data?.paired_terminal == null ? 5_000 : 15_000,
     queryFn: async () => {
       const { data, response } = await kioskApi.GET("/api/v1/kiosk/device");
       if (response.status === 401) throw new Error("AUTH_REQUIRED");
@@ -311,15 +315,18 @@ function KioskConsole({
   terminalName: string;
 }) {
   const queryClient = useQueryClient();
+  const [streamConnected, setStreamConnected] = useState(false);
   const cart = useQuery({
     queryKey: ["kiosk", "cart"],
+    // SSE 斷掉時改用輪詢自救：畫面上那句「正在重新連線…」原本只是文案，沒有任何東西
+    // 會再去重試，店員看著它等不到恢復。串流正常時不輪詢，維持原本的事件驅動。
+    refetchInterval: streamConnected ? false : 10_000,
     queryFn: async () => {
       const { data, response } = await kioskApi.GET("/api/v1/kiosk/cart/current");
       if (!response.ok) throw new Error("無法讀取購物車");
       return data ?? null;
     },
   });
-  const [streamConnected, setStreamConnected] = useState(false);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
 
   useEffect(() => {

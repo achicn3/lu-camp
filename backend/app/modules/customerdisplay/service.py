@@ -519,9 +519,15 @@ class CustomerDisplayService:
                 and cart.completed_at is not None
                 and cart.completed_at >= now - COMPLETED_DISPLAY_TTL
             )
+            # 一併收斂到「現在配對的那台櫃檯」（2026-09-19 審查）：只比對裝置的話，
+            # 換配對後的平板仍能把舊櫃檯的車回報成「我正在顯示這張」，弄髒店務端看到的
+            # displayed_cart_session_id。這裡不回內容，所以不是外洩，但入口要一致。
+            pairing = await self.active_pairing_for_device(principal)
             if (
                 cart is None
                 or cart.kiosk_device_id != principal.device_id
+                or pairing is None
+                or cart.pos_terminal_id != pairing.pos_terminal_id
                 or (
                     cart.status
                     not in (
@@ -997,6 +1003,7 @@ class CustomerDisplayService:
             store_id=store_id,
             cart_session_id=cart.id,
             kiosk_device_id=pairing.kiosk_device_id,
+            pos_terminal_id=pairing.pos_terminal_id,
             contact_id=cart.buyer_contact_id,
             content=content,
             cart_snapshot_fingerprint=cart.snapshot_fingerprint,
@@ -1025,33 +1032,45 @@ class CustomerDisplayService:
         )
         return cart, task
 
-    async def device_is_paired(self, principal: DevicePrincipal) -> bool:
-        """這台裝置目前還在配對中嗎。
+    async def active_pairing_for_device(
+        self,
+        principal: DevicePrincipal,
+    ) -> TerminalKioskPairing | None:
+        """這台裝置目前配到**哪一台**櫃檯；沒配對回 None。
 
         裝置 session 有效期是一年，解除配對並不會使它失效（刻意的：同一台平板重新配對
         不必再輸一次 kiosk 密碼）。因此凡是會吐出客人資料、或代客人做決定的端點，都得
         另外問這一句——「平板遺失／被換走」正是店員按解除配對的典型理由，光有 session
-        不該還能看到或簽掉任何東西。跨模組請呼叫這個方法，不要自己去碰 pairing 資料表。
+        不該還能看到或簽掉任何東西。
+
+        而且只問「還在配對中嗎」不夠：店裡不只一台櫃檯（收購平板自己開一個店務分頁就是
+        第二台）。平板從櫃檯①改配到櫃檯②之後，櫃檯①的購物車與簽署任務仍掛在同一台平板
+        上，光看布林值就會讓它繼續讀得到、甚至簽得下去。故一律回傳配對本身，由呼叫端以
+        `pos_terminal_id` 收斂範圍。跨模組請呼叫這個方法，不要自己去碰 pairing 資料表。
         """
-        return (
-            await self._repo.get_active_pairing_for_device(
-                principal.store_id,
-                principal.device_id,
-            )
-            is not None
+        return await self._repo.get_active_pairing_for_device(
+            principal.store_id,
+            principal.device_id,
         )
+
+    async def device_is_paired(self, principal: DevicePrincipal) -> bool:
+        """這台裝置目前還在配對中嗎（不問配到哪一台；需要櫃檯請用
+        `active_pairing_for_device`）。"""
+        return await self.active_pairing_for_device(principal) is not None
 
     async def current_cart_for_device(
         self,
         principal: DevicePrincipal,
     ) -> CartSession | None:
-        """目前配對中才看得到購物車快照（快照含 `member` 會員資料）。"""
-        if not await self.device_is_paired(principal):
+        """目前配對中、且是**這台櫃檯**的車才看得到（快照含 `member` 會員資料）。"""
+        pairing = await self.active_pairing_for_device(principal)
+        if pairing is None:
             return None
         return await self._repo.get_display_cart_for_device(
             principal.store_id,
             principal.device_id,
             completed_after=datetime.now(UTC) - COMPLETED_DISPLAY_TTL,
+            pos_terminal_id=pairing.pos_terminal_id,
         )
 
     async def cancel_cart(

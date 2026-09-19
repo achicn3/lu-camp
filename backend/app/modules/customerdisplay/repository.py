@@ -269,11 +269,15 @@ class CustomerDisplayRepository:
         self,
         store_id: int,
         device_id: int,
+        *,
+        pos_terminal_id: int,
     ) -> CartSession | None:
         result: CartSession | None = await self._session.scalar(
             select(CartSession).where(
                 CartSession.store_id == store_id,
                 CartSession.kiosk_device_id == device_id,
+                # 只認**現在配對中**的那台櫃檯：平板換配對後，舊櫃檯的車不該再被看見。
+                CartSession.pos_terminal_id == pos_terminal_id,
                 CartSession.status.in_(
                     (
                         CartSessionStatus.DRAFT,
@@ -292,8 +296,13 @@ class CustomerDisplayRepository:
         device_id: int,
         *,
         completed_after: datetime,
+        pos_terminal_id: int,
     ) -> CartSession | None:
-        active = await self.get_active_cart_for_device(store_id, device_id)
+        active = await self.get_active_cart_for_device(
+            store_id,
+            device_id,
+            pos_terminal_id=pos_terminal_id,
+        )
         if active is not None:
             return active
         result: CartSession | None = await self._session.scalar(
@@ -301,6 +310,7 @@ class CustomerDisplayRepository:
             .where(
                 CartSession.store_id == store_id,
                 CartSession.kiosk_device_id == device_id,
+                CartSession.pos_terminal_id == pos_terminal_id,
                 CartSession.status == CartSessionStatus.COMPLETED,
                 CartSession.completed_at >= completed_after,
             )
