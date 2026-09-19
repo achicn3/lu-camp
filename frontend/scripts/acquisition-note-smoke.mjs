@@ -62,7 +62,7 @@ async function fillRow(row, { name, price, cost, category }) {
   const create = page.locator(`button:has-text("建立「${category}」")`);
   if (await create.count()) await create.first().click();
   else await page.locator(`button:has-text("${category}")`).first().click();
-  await row.getByLabel("上架售價（含稅）").fill(String(price));
+  await row.getByLabel("上架售價（含稅與手續費）").fill(String(price));
   await row.getByLabel("收購價").fill(String(cost));
 }
 

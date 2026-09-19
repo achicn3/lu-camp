@@ -198,11 +198,11 @@ try {
   // ── 5) 估計轉售價（未稅）→ 上架售價自動帶入含稅價 ──
   await page.locator('input[aria-label="估計轉售價"]').first().fill("2500");
   await page.waitForTimeout(300);
-  const listedField = page.locator('input[aria-label="上架售價（含稅）"]').first();
+  const listedField = page.locator('input[aria-label="上架售價（含稅與手續費）"]').first();
   const autoListed = await listedField.inputValue();
   ok("估計轉售價 2500（未稅）→ 上架售價自動 2625（含稅）", autoListed === "2625", `上架售價=${autoListed}`);
-  const fillBtn = page.locator('button:has-text("帶入含稅價格")').first();
-  ok("出現「帶入含稅價格」快捷", (await fillBtn.count()) > 0);
+  const fillBtn = page.locator('button:has-text("帶入客人實付價")').first();
+  ok("出現「帶入客人實付價」快捷", (await fillBtn.count()) > 0);
   await fillBtn.click();
   const listed = await listedField.inputValue();
   ok("按鈕帶入後仍為含稅價", listed === "2625", `上架售價=${listed}`);

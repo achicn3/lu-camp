@@ -72,7 +72,7 @@ try {
   await cat.click();
   await cat.fill(`多件分類-${RUN}`);
   await page.click(`button:has-text("建立「多件分類-${RUN}」")`);
-  await page.fill('input[aria-label="上架售價（含稅）"]', "1500");
+  await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "1500");
   await page.fill('input[aria-label="收購價"]', String(COST));
 
   const qtyBox = page.getByLabel("件數").first();
@@ -93,7 +93,7 @@ try {
   await cat2.click();
   await cat2.fill(`多件分類-${RUN}`);
   await page.click(`button:has-text("多件分類-${RUN}")`);
-  await rows.nth(1).getByLabel("上架售價（含稅）").fill("1500");
+  await rows.nth(1).getByLabel("上架售價（含稅與手續費）").fill("1500");
   await rows.nth(1).getByLabel("收購價").fill(String(COST));
   await page.waitForTimeout(300);
 

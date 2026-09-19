@@ -275,12 +275,12 @@ async function main() {
     await page.fill('input[aria-label="估計轉售價"]', "9000");
     // 估計轉售價會非同步把含稅價自動填進上架售價；等它落地再覆寫，否則會被蓋掉（偶發紅）。
     await page.waitForFunction(
-      () => (document.querySelector('input[aria-label="上架售價（含稅）"]')?.value ?? "") !== "",
+      () => (document.querySelector('input[aria-label="上架售價（含稅與手續費）"]')?.value ?? "") !== "",
       null,
       { timeout: 5000 },
     );
     await page.fill('input[aria-label="收購價"]', "5000");
-    await page.fill('input[aria-label="上架售價（含稅）"]', "8800");
+    await page.fill('input[aria-label="上架售價（含稅與手續費）"]', "8800");
     await T(page, 400);
     await shot(page, "24-acq-row-filled");
     // 撥款方式：購物金（賣方非會員）→ 提醒

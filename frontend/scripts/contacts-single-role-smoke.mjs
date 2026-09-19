@@ -112,7 +112,7 @@ try {
   await cat.click();
   await cat.fill(`身分分類-${RUN}`);
   await page.click(`button:has-text("建立「身分分類-${RUN}」")`);
-  await page.getByLabel("上架售價（含稅）").fill("1000");
+  await page.getByLabel("上架售價（含稅與手續費）").fill("1000");
   await page.getByLabel("收購價").fill("300");
   await page.click('button:has-text("送出收購")');
   await page.waitForSelector("text=收購完成", { timeout: 20000 });

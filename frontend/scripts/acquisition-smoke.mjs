@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 
 import { uniquePhone, validNationalId } from "./_national-id.mjs";
+import { skipOpeningCheckRedirect } from "./_opening-check.mjs";
 
 const BASE = process.env.SMOKE_BASE ?? "http://localhost:3000";
 const API = process.env.SMOKE_API_BASE ?? "http://localhost:8000";
@@ -49,7 +50,8 @@ try {
     body: { default_commission_pct: 37 },
   });
 
-  // 1) 登入
+  // 1) 登入（先關掉開店前檢查的每日導向，否則會在半路把煙霧帶去 /opening-check）
+  await skipOpeningCheckRedirect(page);
   await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   await page.fill('input[name="username"]', "dev-manager");
@@ -111,10 +113,10 @@ try {
   await page.waitForSelector("text=建議最高收購成本");
   ok("顯示建議最高收購成本", true);
   // 上架售價一律同步為含稅價：3000 × 1.05 = 3150（店主裁示 2026-08-22）
-  const listedInput = page.locator('input[aria-label="上架售價（含稅）"]');
+  const listedInput = page.locator('input[aria-label="上架售價（含稅與手續費）"]');
   await page.waitForFunction(
     () =>
-      document.querySelector('input[aria-label="上架售價（含稅）"]')?.value === "3150",
+      document.querySelector('input[aria-label="上架售價（含稅與手續費）"]')?.value === "3150",
     null,
     { timeout: 5000 },
   );
