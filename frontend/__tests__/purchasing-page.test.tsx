@@ -328,7 +328,7 @@ describe("/purchasing", () => {
     // 裁示 2026-09-16：毛利率逐件設定（預設取設定值 30%），建議售價含營業稅與行動支付
     // 手續費補償（與收購同一套算法，CLAUDE.md §7.9）。
     loginAs("MANAGER");
-    const created = { ...CATALOG, id: 91, sku: "AUTO-COST01", name: "濾掛咖啡", unit_price: "77" };
+    const created = { ...CATALOG, id: 91, sku: "AUTO-COST01", name: "濾掛咖啡", unit_price: "80" };
     let createdBody: string | null = null;
     stubFetch((url, init) => {
       if (url.includes("/suppliers")) return json([SUPPLIER]);
@@ -360,13 +360,14 @@ describe("/purchasing", () => {
 
     // 成本 50、毛利 30%、稅 5%、手續費 2.2%
     //   未稅目標 = 50 ÷ 0.7 = 71.43；含稅 = 75.0；補手續費 ÷ (1 − 0.022×1.05) = 76.8 → 77
+    //   → 進位到 10 的倍數 → 80（ADR-023：系統帶出的上架售價一律 0 結尾）
     await user.type(screen.getByLabelText("一般商品進貨成本"), "50");
     const price = screen.getByLabelText("一般商品售價") as HTMLInputElement;
-    await waitFor(() => expect(price.value).toBe("77"));
+    await waitFor(() => expect(price.value).toBe("80"));
 
     await user.click(screen.getByRole("button", { name: "建立並加入採購單" }));
     await waitFor(() => expect(createdBody).not.toBeNull());
-    expect(JSON.parse(createdBody as unknown as string).unit_price).toBe(77);
+    expect(JSON.parse(createdBody as unknown as string).unit_price).toBe(80);
 
     // 成本自動帶進明細那一列，不必再打一次
     const costInput = (await screen.findByLabelText("進貨單價 濾掛咖啡")) as HTMLInputElement;
@@ -438,8 +439,9 @@ describe("/purchasing", () => {
     expect(screen.getByText(mode === "pending" ? /稅率設定載入中/ : /讀不到稅率設定/)).toBeTruthy();
     if (mode === "pending") {
       release(json(valid));
-      // 手算 1000 / .7 * 1.05 / (1 - .022 * 1.05) = 1535.469...，整數1535。
-      await waitFor(() => expect(price.value).toBe("1535"));
+      // 手算 1000 / .7 * 1.05 / (1 - .022 * 1.05) = 1535.469...，整數 1535 → 進位 1540。
+      // 這條守的是「不可用零稅率推價」：零稅率會得到 1430（進位 1430），與 1540 仍分得開。
+      await waitFor(() => expect(price.value).toBe("1540"));
     } else {
       await userEvent.type(price, "1600");
       expect(price.value).toBe("1600");

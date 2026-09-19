@@ -215,7 +215,8 @@ async def test_bulk_lot_must_be_grade_e(db_session: AsyncSession) -> None:
 
 # ── 必測 5（服務委派）+ 必測 6：主檔唯一 / brand_id / product_model_id ──
 def test_suggested_listed_price_delegates_to_money() -> None:
-    assert InventoryService.suggested_listed_price(Decimal("600"), 45, Decimal("0.05")) == 1145
+    # 毛利式算出 1145，再進位到 10 的倍數（ADR-023）→ 1150。
+    assert InventoryService.suggested_listed_price(Decimal("600"), 45, Decimal("0.05")) == 1150
 
 
 async def test_brand_get_or_create_unique_per_store_name(

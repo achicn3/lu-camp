@@ -366,7 +366,11 @@ export interface paths {
         delete: operations["deleteBulkLot"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Bulk Lot
+         * @description 改散裝批名稱／全新售價（寫稽核）。未提供的欄位不動。
+         */
+        patch: operations["updateBulkLot"];
         trace?: never;
     };
     "/api/v1/bulk-lots/{lot_id}/detail": {
@@ -387,26 +391,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/bulk-lots/{lot_id}/name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Rename Bulk Lot
-         * @description 改散裝批名稱（寫稽核）。
-         */
-        patch: operations["renameBulkLot"];
         trace?: never;
     };
     "/api/v1/bulk-lots/{lot_id}/note": {
@@ -2928,7 +2912,13 @@ export interface paths {
         delete: operations["deleteSerializedItem"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Serialized Item
+         * @description 改序號品品名／全新售價（含已售出；寫稽核）。未提供的欄位不動。
+         *
+         *     歷史明細存的是成交當下的快照，不受影響。
+         */
+        patch: operations["updateSerializedItem"];
         trace?: never;
     };
     "/api/v1/serialized-items/{item_id}/detail": {
@@ -2949,26 +2939,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/serialized-items/{item_id}/name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Rename Serialized Item
-         * @description 改序號品品名（含已售出；寫稽核）。歷史明細存的是成交當下的快照，不受影響。
-         */
-        patch: operations["renameSerializedItem"];
         trace?: never;
     };
     "/api/v1/serialized-items/{item_id}/note": {
@@ -3423,6 +3393,8 @@ export interface components {
             note?: string | null;
             /** Product Model Id */
             product_model_id?: number | null;
+            /** Retail Price */
+            retail_price?: number | string | null;
         };
         /**
          * AcquisitionLotIn
@@ -3442,6 +3414,8 @@ export interface components {
             name: string;
             /** Note */
             note?: string | null;
+            /** Retail Price */
+            retail_price?: number | string | null;
             /** Total Qty */
             total_qty: number;
             /** Unit Price */
@@ -3808,6 +3782,8 @@ export interface components {
             note?: string | null;
             /** Remaining Qty */
             remaining_qty: number;
+            /** Retail Price */
+            retail_price: string | null;
             status: components["schemas"]["BulkLotStatus"];
             /** Store Id */
             store_id: number;
@@ -5833,14 +5809,6 @@ export interface components {
             qty: number;
         };
         /**
-         * ItemRenameRequest
-         * @description 改品名（序號品／散裝批）。空白一律擋下——清單上會變成看不出是什麼的空列。
-         */
-        ItemRenameRequest: {
-            /** Name */
-            name: string;
-        };
-        /**
          * ItemSourceRead
          * @description 庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。
          */
@@ -5853,6 +5821,19 @@ export interface components {
             name: string | null;
             /** Phone */
             phone: string | null;
+        };
+        /**
+         * ItemUpdateRequest
+         * @description 改序號品／散裝批：未提供的欄位不變。
+         *
+         *     `name` 空白一律擋下——清單上會變成看不出是什麼的空列。
+         *     `retail_price` 明確給 null 代表清空（查錯了要能拿掉），不給則不動。
+         */
+        ItemUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Retail Price */
+            retail_price?: number | string | null;
         };
         /** KioskActivityRequest */
         KioskActivityRequest: {
@@ -7598,6 +7579,8 @@ export interface components {
             ownership_type: components["schemas"]["OwnershipType"];
             /** Product Model Id */
             product_model_id: number | null;
+            /** Retail Price */
+            retail_price: string | null;
             /** Sold Date */
             sold_date: string | null;
             status: components["schemas"]["SerializedItemStatus"];
@@ -8942,6 +8925,41 @@ export interface operations {
             };
         };
     };
+    updateBulkLot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lot_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkLotRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getBulkLotDetail: {
         parameters: {
             query?: never;
@@ -8960,41 +8978,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkLotDetailRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    renameBulkLot: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lot_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ItemRenameRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BulkLotRead"];
                 };
             };
             /** @description Validation Error */
@@ -13706,6 +13689,41 @@ export interface operations {
             };
         };
     };
+    updateSerializedItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SerializedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     getSerializedItemDetail: {
         parameters: {
             query?: never;
@@ -13724,41 +13742,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SerializedItemDetailRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    renameSerializedItem: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                item_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ItemRenameRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SerializedItemRead"];
                 };
             };
             /** @description Validation Error */

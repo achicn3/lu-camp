@@ -19,6 +19,8 @@ export interface ItemDraft {
   brandId: number | null;
   productModelId: number | null;
   listedPrice: string;
+  /** 全新售價（原價，選填）：客人問「這值不值」時的對照數字。純記錄，不參與任何計算。 */
+  retailPrice: string;
   acquisitionCost: string; // 買斷
   commissionPct: string; // 寄售
   /**
@@ -37,6 +39,8 @@ export interface LotDraft {
   acquisitionBasis: Basis | "";
   totalQty: string;
   unitPrice: string;
+  /** 全新售價（原價，選填）：同序號品，純記錄。 */
+  retailPrice: string;
   label: string;
   note: string;
 }

@@ -159,6 +159,8 @@ class SerializedItemRead(BaseModel):
     consignor_id: int | None
     commission_pct: int | None
     listed_price: NTDAmount
+    # 全新售價（原價）：純記錄，沒查到就是 None。
+    retail_price: NTDAmount | None
     status: SerializedItemStatus
     intake_date: datetime
     sold_date: datetime | None
@@ -361,6 +363,7 @@ class BulkLotRead(BaseModel):
     acquisition_cost: NTDAmount
     acquisition_basis: BulkAcquisitionBasis
     unit_price: NTDAmount
+    retail_price: NTDAmount | None
     total_qty: int
     remaining_qty: int
     status: BulkLotStatus
@@ -459,7 +462,24 @@ class CatalogProductUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
-class ItemRenameRequest(BaseModel):
-    """改品名（序號品／散裝批）。空白一律擋下——清單上會變成看不出是什麼的空列。"""
+class ItemUpdateRequest(BaseModel):
+    """改序號品／散裝批：未提供的欄位不變。
 
-    name: str = Field(min_length=1, max_length=150)
+    `name` 空白一律擋下——清單上會變成看不出是什麼的空列。
+    `retail_price` 明確給 null 代表清空（查錯了要能拿掉），不給則不動。
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    retail_price: NTDAmount | None = None
+
+    @field_validator("retail_price")
+    @classmethod
+    def _whole_nonneg(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
+        if value < 0:
+            raise ValueError("全新售價不可為負")
+        if value != value.to_integral_value():
+            raise ValueError("全新售價必須為整數元")
+        ensure_ntd_fits_numeric_12(value, field="全新售價")
+        return Decimal(value.to_integral_value())

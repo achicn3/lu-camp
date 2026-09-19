@@ -11,7 +11,9 @@ from app.core.money import (
     consignment_split,
     discounted_price,
     round_ntd,
+    round_up_to_listed_step,
     split_tax_inclusive,
+    suggested_listed_price,
     suggested_price,
 )
 from app.shared.exceptions import (
@@ -341,3 +343,52 @@ def test_consignment_breakdown_never_shows_a_negative_share_for_legacy_rows() ->
     net, tax, commission_net = consignment_breakdown(Decimal("1050"), Decimal("0"), RATE)
     assert (net, tax) == (1000, 50)
     assert commission_net == 0
+
+
+# ── 上架售價一律 10 的倍數、無條件進位（2026-09-19 裁示）────────────────────
+
+
+def test_suggested_listed_price_rounds_up_to_ten() -> None:
+    """要填進畫面的建議價必須是 10 的倍數，且只進不退。
+
+    店主要架上價格一律 0 結尾。進位而非四捨五入：退位會讓實際毛利低於目標，
+    而這個數字的用途就是「至少賺到目標毛利」。
+    """
+    # 未稅 600/0.55 = 1090.909…；×1.05 = 1145.4545… → 1145 → 進位 → 1150
+    assert suggested_price(Decimal("600"), 45, RATE) == 1145
+    assert suggested_listed_price(Decimal("600"), 45, RATE) == 1150
+
+
+def test_suggested_listed_price_leaves_exact_multiples_alone() -> None:
+    """已經是 10 的倍數就不動——無條件進位不是「一律加 10」。"""
+    assert suggested_listed_price(Decimal("1000"), 0, RATE) == 1050
+
+
+def test_suggested_listed_price_keeps_the_fee_compensation() -> None:
+    """帶手續費時也走同一條進位：1954 → 1960，不得因為多包一層而漏掉費率。"""
+    assert suggested_listed_price(Decimal("1000"), 45, RATE, FEE) == 1960
+
+
+def test_suggested_listed_price_never_drops_below_the_exact_price() -> None:
+    """進位只進不退——任何輸入都不該比毛利式算出來的價格低。"""
+    for cost in (Decimal(1), Decimal(87), Decimal(600), Decimal("12345")):
+        exact = suggested_price(cost, 45, RATE, FEE)
+        assert suggested_listed_price(cost, 45, RATE, FEE) >= exact
+
+
+def test_round_up_to_listed_step_rounds_up_even_one_dollar_over() -> None:
+    """差一元也要進位（21 → 30 是店主給的例子的同一條規則）。"""
+    assert round_up_to_listed_step(21) == 30
+    assert round_up_to_listed_step(20) == 20
+    assert round_up_to_listed_step(1) == 10
+
+
+def test_round_up_to_listed_step_rejects_negative() -> None:
+    """負價沒有意義；靜默回 0 會讓錯誤的輸入變成「免費商品」。"""
+    with pytest.raises(ValueError):
+        round_up_to_listed_step(-1)
+
+
+def test_round_up_to_listed_step_zero_stays_zero() -> None:
+    """0 元（例如成本 0 的贈品）不該被抬成 10 元。"""
+    assert round_up_to_listed_step(0) == 0

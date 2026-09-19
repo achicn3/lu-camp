@@ -21,6 +21,7 @@ import {
   creditPremiumPreview,
   marginPct,
   maxAcquisitionCost,
+  roundUpToListedStep,
   suggestedListedPrice,
   taxAndFeeInclusivePrice,
 } from "@/features/acquisition/pricing";
@@ -87,6 +88,7 @@ function emptyItem(commissionPct = ""): ItemDraft & {
     brandId: null,
     productModelId: null,
     listedPrice: "",
+    retailPrice: "",
     acquisitionCost: "",
     commissionPct,
     estimatedResale: "",
@@ -106,6 +108,7 @@ function emptyLot(): LotDraft {
     acquisitionBasis: "",
     totalQty: "",
     unitPrice: "",
+    retailPrice: "",
     label: "",
     note: "",
   };
@@ -443,9 +446,12 @@ function ItemRowCard({
       : null;
   // 估計轉售價（未稅）對應的客人實付價（含稅＋行動支付手續費）：自動帶入上架售價、
   // 也是按鈕上顯示的數字。
+  // 一律進位到 10 的倍數（裁示 2026-09-19）：**系統填進上架售價的數字**都要 0 結尾。
+  // 只進位建議按鈕、不進位這條自動同步的話，店員最常走的「打估計轉售價→自動帶入」
+  // 仍然會產生 21、37 這種價格，等於這條規則沒生效。
   const resaleTaxInclusive =
     resale !== null && taxRate !== null
-      ? taxAndFeeInclusivePrice(resale, taxRate, feeRate)
+      ? roundUpToListedStep(taxAndFeeInclusivePrice(resale, taxRate, feeRate))
       : null;
 
   // onChange 由父層以行內箭頭函式傳入、每次 render 都換身分，不能進相依陣列
@@ -481,7 +487,8 @@ function ItemRowCard({
     // 寄售的分潤基準另案處理（見 ADR-016 Follow-up 2），這裡先只對買斷自動加稅。
     if (type === "CONSIGNMENT") return;
     if (resale === null || taxRate === null) return;
-    const target = taxAndFeeInclusivePrice(resale, taxRate, feeRate);
+    // 與 resaleTaxInclusive 走同一條進位，否則「認領」比對會永遠不相等而反覆覆寫。
+    const target = roundUpToListedStep(taxAndFeeInclusivePrice(resale, taxRate, feeRate));
     if (target === null) return;
     const next = String(target);
     if (next === row.listedPrice) {
@@ -697,6 +704,7 @@ function ItemRowCard({
               className="acq-link"
               onClick={() =>
                 onChange({
+                  // suggestedListedPrice 本身已進位到 10 的倍數（ADR-023）。
                   listedPrice: String(
                     suggestedListedPrice(cost, category.target_margin_pct, taxRate, feeRate) ?? cost,
                   ),
@@ -740,6 +748,22 @@ function ItemRowCard({
             </span>
           )
         )}
+      </label>
+
+      {/* 全新售價（原價，選填）：客人問「這值不值」時的對照數字。
+          **純記錄**——不參與定價、毛利與報表的任何計算，查不到就留白。 */}
+      <label className="field">
+        <span className="field-label">
+          全新售價（原價，選填）
+          <InfoTip text="這件商品全新時的市售價，用來跟客人說明二手價的落差。只是記錄，不會影響上架售價、毛利或報表。查不到就留白。" />
+        </span>
+        <input
+          aria-label="全新售價（原價）"
+          inputMode="numeric"
+          placeholder="例：8000"
+          value={row.retailPrice}
+          onChange={(e) => onChange({ retailPrice: e.target.value })}
+        />
       </label>
 
       {/* 商品備註：驗機當下就記下狀況或作業提醒，結帳時系統會提醒店員。
@@ -1122,6 +1146,11 @@ export default function AcquisitionPage() {
   const submit = useMutation({
     mutationFn: async () => {
       const ntd = (s: string) => String(parseNtd(s));
+      // 全新售價是選填：沒填就送 null，不要送 "null" 或 0——0 會被讀成「全新也不值錢」。
+      const optionalNtd = (s: string) => {
+        const value = parseNtd(s.trim());
+        return value === null ? null : String(value);
+      };
       const body: Record<string, unknown> = { type, contact_id: seller?.id };
       if (isBulk) {
         body.lot = {
@@ -1130,6 +1159,7 @@ export default function AcquisitionPage() {
           acquisition_basis: lot.acquisitionBasis,
           total_qty: parseNtd(lot.totalQty),
           unit_price: ntd(lot.unitPrice),
+          retail_price: optionalNtd(lot.retailPrice),
           brand_id: lot.brandId,
           category_id: lot.categoryId,
           label: lot.label || null,
@@ -1142,6 +1172,7 @@ export default function AcquisitionPage() {
           name: r.name,
           grade: r.grade,
           listed_price: ntd(r.listedPrice),
+          retail_price: optionalNtd(r.retailPrice),
           brand_id: r.brandId,
           product_model_id: r.productModelId,
           category_id: r.categoryId,
@@ -1749,6 +1780,20 @@ function BulkLotForm({
         <label className="field">
           <span className="field-label">每件均一價</span>
           <input inputMode="numeric" value={lot.unitPrice} onChange={(e) => patch({ unitPrice: e.target.value })} />
+        </label>
+        {/* 全新售價（原價，選填）：純記錄，不參與定價、毛利與報表的任何計算。 */}
+        <label className="field">
+          <span className="field-label">
+            全新售價（原價，選填）
+            <InfoTip text="這批商品全新時的市售價，用來跟客人說明二手價的落差。只是記錄，不會影響每件均一價、毛利或報表。查不到就留白。" />
+          </span>
+          <input
+            aria-label="全新售價（原價）"
+            inputMode="numeric"
+            placeholder="例：150"
+            value={lot.retailPrice}
+            onChange={(e) => patch({ retailPrice: e.target.value })}
+          />
         </label>
         <label className="field">
           <span className="field-label">命名（選填）</span>

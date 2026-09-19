@@ -156,12 +156,13 @@ describe("/menu 餐飲菜單管理頁", () => {
     await screen.findByText("手沖-耶加");
     await user.type(screen.getByLabelText("品名"), "拿鐵");
     await user.type(screen.getByLabelText("成本（整數元，選填）"), "60");
-    // 預設毛利率 30%：未稅 60÷0.7=85.71 → 含稅 ÷(1−0.022×1.05) → 92
-    await waitFor(() => expect((screen.getByLabelText("售價（整數元）") as HTMLInputElement).value).toBe("92"));
+    // 預設毛利率 30%：未稅 60÷0.7=85.71 → 含稅 ÷(1−0.022×1.05) → 92 → 進位 → 100
+    // 餐飲售價也走同一條進位（ADR-023）：菜單板一樣要好讀、找零一樣要備一元硬幣。
+    await waitFor(() => expect((screen.getByLabelText("售價（整數元）") as HTMLInputElement).value).toBe("100"));
     await user.click(screen.getByRole("button", { name: "新增品項" }));
     await waitFor(() => expect(posted).toContain("拿鐵"));
     expect(JSON.parse(posted).unit_cost).toBe("60");
-    expect(JSON.parse(posted).unit_price).toBe("92");
+    expect(JSON.parse(posted).unit_price).toBe("100");
   });
 
   it("讀不到手續費率時仍算建議售價（費率以 0 計，CLAUDE.md §7.9）", async () => {

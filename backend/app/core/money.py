@@ -126,6 +126,44 @@ def suggested_price(
     )
 
 
+def suggested_listed_price(
+    acquisition_cost: Decimal,
+    margin_pct: int,
+    tax_rate: Decimal,
+    fee_rate: Decimal = Decimal(0),
+) -> int:
+    """實際要帶進「上架售價」欄位的建議價：毛利式算完再進位到 10 的倍數（ADR-023）。
+
+    與 `suggested_price` 分成兩支是刻意的：毛利式必須維持 §7.9「全程只四捨五入一次」，
+    而級距進位是**價格呈現規則**、不是又一次捨入誤差。合成一支的話，釘住單次捨入的
+    回歸測試會失去鑑別力（1145 與 1146 進位後同為 1150，兩種實作分不出來）。
+
+    **要填進畫面或存進商品的建議價一律用這支**；`suggested_price` 只供毛利推導與驗算。
+    進位只會讓實際毛利 ≥ 目標。
+    """
+    exact = suggested_price(acquisition_cost, margin_pct, tax_rate, fee_rate)
+    return round_up_to_listed_step(exact)
+
+
+LISTED_PRICE_STEP = 10
+"""上架售價的級距：架上價格一律 10 的倍數（店主裁示 2026-09-19）。"""
+
+
+def round_up_to_listed_step(value: Decimal | int) -> int:
+    """無條件進位到 `LISTED_PRICE_STEP` 的倍數（21 → 30；20 → 20；0 → 0）。
+
+    **進位而非四捨五入**：這個數字的用途是「至少達到目標毛利」，退位會讓實際毛利
+    低於目標。已經是倍數就不動——無條件進位不是「一律加一級」。
+
+    只用於**建議價**這類系統自動帶出的價格；店員手打的價格不受此限（裁示：不擋手動輸入）。
+    """
+    amount = value if isinstance(value, int) else round_ntd(value)
+    if amount < 0:
+        raise ValueError(f"上架售價不可為負，收到 {amount}")
+    remainder = amount % LISTED_PRICE_STEP
+    return amount if remainder == 0 else amount + (LISTED_PRICE_STEP - remainder)
+
+
 def split_tax_inclusive(total: Decimal, rate: Decimal) -> tuple[int, int]:
     """將含稅總額拆為（未稅 net, 稅額 tax），保證 net + tax = total（整數元、不差一元）。
 

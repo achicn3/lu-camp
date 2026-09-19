@@ -301,6 +301,16 @@ function SearchBar({
   );
 }
 
+/** 全新售價（原價）：售價底下一行小字。純記錄，沒填就整行不出現。 */
+function RetailPriceHint({ value }: { value?: string | null }) {
+  if (value == null || value === "") return null;
+  return (
+    <span className="inv-retail-hint">
+      原價 <MoneyText value={value} />
+    </span>
+  );
+}
+
 // 單一「編輯」視窗（管理者限定）。原本改價／編輯／停售／刪除各一顆鈕，一列六顆太吵，
 // 整併成一個視窗分區呈現：基本資料｜售價｜狀態｜刪除。改價與刪除都會寫稽核。
 function ItemEditButton({
@@ -308,6 +318,7 @@ function ItemEditButton({
   id,
   name,
   price,
+  retailPrice,
   reorderPoint,
   sku,
   isActive,
@@ -316,6 +327,8 @@ function ItemEditButton({
   id: number;
   name: string;
   price: string;
+  /** 全新售價（原價）；一般商品沒有這個欄位，序號品／散裝批可為 null。 */
+  retailPrice?: string | null;
   reorderPoint?: number;
   sku?: string;
   isActive?: boolean;
@@ -325,6 +338,7 @@ function ItemEditButton({
   const [nextName, setNextName] = useState(name);
   const [nextPrice, setNextPrice] = useState(price);
   const [nextReorder, setNextReorder] = useState(String(reorderPoint ?? 0));
+  const [nextRetail, setNextRetail] = useState(retailPrice ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -337,15 +351,39 @@ function ItemEditButton({
     if (kind === "catalog") return; // 一般商品的品名與再訂購點一起送（同一個端點）
     const { data, error: e } =
       kind === "serialized"
-        ? await api.PATCH("/api/v1/serialized-items/{item_id}/name", {
+        ? await api.PATCH("/api/v1/serialized-items/{item_id}", {
             params: { path: { item_id: id } },
             body: { name: trimmed },
           })
-        : await api.PATCH("/api/v1/bulk-lots/{lot_id}/name", {
+        : await api.PATCH("/api/v1/bulk-lots/{lot_id}", {
             params: { path: { lot_id: id } },
             body: { name: trimmed },
           });
     if (!data) throw new Error(extractDetail(e) ?? "改品名失敗");
+  }
+
+  /** 全新售價（原價）：一般商品沒有這個欄位；清空要送 null，不能送 ""。 */
+  async function patchRetailPrice(): Promise<void> {
+    if (kind === "catalog") return;
+    const trimmed = nextRetail.trim();
+    const parsed = trimmed === "" ? null : parseNtd(trimmed);
+    if (trimmed !== "" && (parsed === null || !Number.isInteger(parsed) || parsed < 0)) {
+      throw new Error("全新售價須為 0 以上的整數元");
+    }
+    const current = retailPrice == null ? null : parseNtd(retailPrice);
+    if (parsed === current) return;
+    const body = { retail_price: parsed === null ? null : String(parsed) };
+    const { data, error: e } =
+      kind === "serialized"
+        ? await api.PATCH("/api/v1/serialized-items/{item_id}", {
+            params: { path: { item_id: id } },
+            body,
+          })
+        : await api.PATCH("/api/v1/bulk-lots/{lot_id}", {
+            params: { path: { lot_id: id } },
+            body,
+          });
+    if (!data) throw new Error(extractDetail(e) ?? "改全新售價失敗");
   }
 
   async function patchCatalogFields(): Promise<void> {
@@ -395,6 +433,7 @@ function ItemEditButton({
     mutationFn: async () => {
       await patchCatalogFields();
       await patchName();
+      await patchRetailPrice();
       await patchPrice();
     },
     onSuccess: () => {
@@ -460,6 +499,7 @@ function ItemEditButton({
           setNextName(name);
           setNextPrice(price);
           setNextReorder(String(reorderPoint ?? 0));
+          setNextRetail(retailPrice ?? "");
           setError(null);
           setOpen(true);
         }}
@@ -522,9 +562,24 @@ function ItemEditButton({
             onChange={(e) => setNextPrice(e.target.value)}
           />
         </label>
+        {kind !== "catalog" && (
+          <label className="field">
+            <span className="field-label">全新售價（原價，選填）</span>
+            <input
+              inputMode="numeric"
+              aria-label="全新售價（原價）"
+              placeholder="查不到就留白"
+              value={nextRetail}
+              disabled={busy}
+              onChange={(e) => setNextRetail(e.target.value)}
+            />
+          </label>
+        )}
         <p className="hint">
           改價會記錄誰、何時、改前改後（稽核）。已經賣出去的那幾筆不受影響——交易紀錄與報表
           用的是成交當下的價格。改了品名或售價後，貨架上的舊標籤還是舊的，記得補印。
+          {kind !== "catalog" &&
+            "全新售價只是記錄，用來跟客人說明二手價的落差，不會影響售價、毛利或報表。"}
         </p>
 
         {kind === "catalog" && (
@@ -1271,6 +1326,7 @@ function SerializedPanel() {
             </td>
             <td>
               <MoneyText value={item.listed_price} />
+              <RetailPriceHint value={item.retail_price} />
             </td>
             <td className="inv-row-actions">
               {isManager && (
@@ -1284,6 +1340,7 @@ function SerializedPanel() {
                   id={item.id}
                   name={item.name}
                   price={item.listed_price}
+                  retailPrice={item.retail_price}
                 />
               )}
               {item.status === "IN_STOCK" && (
@@ -1804,6 +1861,7 @@ function BulkPanel() {
             <td>{gradeLabel(lot.grade)}</td>
             <td>
               <MoneyText value={lot.unit_price} />
+              <RetailPriceHint value={lot.retail_price} />
             </td>
             <td>
               {lot.remaining_qty} / {lot.total_qty}
@@ -1822,7 +1880,13 @@ function BulkPanel() {
                 </button>
               )}
               {isManager && lot.status === "ON_SALE" && (
-                <ItemEditButton kind="bulk" id={lot.id} name={lot.name} price={lot.unit_price} />
+                <ItemEditButton
+                  kind="bulk"
+                  id={lot.id}
+                  name={lot.name}
+                  price={lot.unit_price}
+                  retailPrice={lot.retail_price}
+                />
               )}
               {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
@@ -2026,6 +2090,7 @@ function AgingPanel() {
             </td>
             <td>
               <MoneyText value={item.listed_price} />
+              <RetailPriceHint value={item.retail_price} />
             </td>
             <td>{dt(item.intake_date)}</td>
             <td>
@@ -2043,6 +2108,7 @@ function AgingPanel() {
                   id={item.id}
                   name={item.name}
                   price={item.listed_price}
+                  retailPrice={item.retail_price}
                 />
               )}
             </td>

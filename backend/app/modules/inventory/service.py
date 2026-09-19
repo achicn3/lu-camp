@@ -12,7 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit_log
-from app.core.money import round_ntd, suggested_price
+from app.core.money import round_ntd
+from app.core.money import suggested_listed_price as money_suggested_listed_price
 from app.modules.inventory.models import (
     Brand,
     BulkLot,
@@ -252,6 +253,7 @@ class InventoryService:
         acquisition_id: int | None = None,
         category_id: int | None = None,
         note: str | None = None,
+        retail_price: Decimal | None = None,
     ) -> SerializedItem:
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
@@ -283,6 +285,7 @@ class InventoryService:
             acquisition_id=acquisition_id,
             category_id=category_id,
             note=note,
+            retail_price=retail_price,
         )
         return await self._repo.add_serialized(item)
 
@@ -810,58 +813,104 @@ class InventoryService:
         """以 id 取散裝批（限本店）。POS 還原購物車重新取回備註用。"""
         return await self._repo.get_bulk_lot(store_id, lot_id)
 
-    async def rename_serialized_item(
-        self, store_id: int, item_id: int, *, name: str, actor_user_id: int
-    ) -> SerializedItem | None:
-        """改序號品品名（含已售出；寫稽核）。找不到→None。
+    @staticmethod
+    def _apply_item_edits(
+        item: SerializedItem | BulkLot,
+        *,
+        name: str | None,
+        retail_price: Decimal | None,
+        set_retail_price: bool,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """套用編輯，回 (before, after) 只含**真的變了**的欄位，供稽核紀錄。
 
-        已成交的明細存的是成交當下的品名快照，所以改名不會改寫歷史——打錯字要能修。
+        `set_retail_price` 區分「沒送這個欄位」與「明確送 null 要清空」——少了它，
+        只改品名的請求會把原價洗掉。
+        """
+        before: dict[str, object] = {}
+        after: dict[str, object] = {}
+        if name is not None:
+            cleaned = name.strip()
+            if not cleaned:
+                raise SaleLineInvalid("品名不可空白")
+            if cleaned != item.name:
+                before["name"], after["name"] = item.name, cleaned
+                item.name = cleaned
+        if set_retail_price and retail_price != item.retail_price:
+            before["retail_price"] = None if item.retail_price is None else str(item.retail_price)
+            after["retail_price"] = None if retail_price is None else str(retail_price)
+            item.retail_price = retail_price
+        return before, after
+
+    async def update_serialized_item(
+        self,
+        store_id: int,
+        item_id: int,
+        *,
+        name: str | None = None,
+        retail_price: Decimal | None = None,
+        set_retail_price: bool = False,
+        actor_user_id: int,
+    ) -> SerializedItem | None:
+        """改序號品品名／全新售價（含已售出；寫稽核）。找不到→None。
+
+        已成交的明細存的是成交當下的快照，所以改這裡不會改寫歷史——打錯字要能修。
         """
         item = await self._repo.get_serialized_for_update(store_id, item_id)
         if item is None:
             return None
-        cleaned = name.strip()
-        if not cleaned:
-            raise SaleLineInvalid("品名不可空白")
-        if cleaned == item.name:
+        before, after = self._apply_item_edits(
+            item,
+            name=name,
+            retail_price=retail_price,
+            set_retail_price=set_retail_price,
+        )
+        if not after:
             return item
-        before, item.name = item.name, cleaned
         await self._session.flush()
         await write_audit_log(
             self._session,
             store_id=store_id,
             actor_user_id=actor_user_id,
-            action="RENAME_SERIALIZED_ITEM",
+            action="UPDATE_SERIALIZED_ITEM",
             entity_type="serialized_item",
             entity_id=str(item_id),
-            before={"name": before},
-            after={"name": cleaned},
+            before=before,
+            after=after,
         )
         return item
 
-    async def rename_bulk_lot(
-        self, store_id: int, lot_id: int, *, name: str, actor_user_id: int
+    async def update_bulk_lot(
+        self,
+        store_id: int,
+        lot_id: int,
+        *,
+        name: str | None = None,
+        retail_price: Decimal | None = None,
+        set_retail_price: bool = False,
+        actor_user_id: int,
     ) -> BulkLot | None:
-        """改散裝批名稱（寫稽核）。找不到→None。"""
+        """改散裝批名稱／全新售價（寫稽核）。找不到→None。"""
         lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
         if lot is None:
             return None
-        cleaned = name.strip()
-        if not cleaned:
-            raise SaleLineInvalid("品名不可空白")
-        if cleaned == lot.name:
+        before, after = self._apply_item_edits(
+            lot,
+            name=name,
+            retail_price=retail_price,
+            set_retail_price=set_retail_price,
+        )
+        if not after:
             return lot
-        before, lot.name = lot.name, cleaned
         await self._session.flush()
         await write_audit_log(
             self._session,
             store_id=store_id,
             actor_user_id=actor_user_id,
-            action="RENAME_BULK_LOT",
+            action="UPDATE_BULK_LOT",
             entity_type="bulk_lot",
             entity_id=str(lot_id),
-            before={"name": before},
-            after={"name": cleaned},
+            before=before,
+            after=after,
         )
         return lot
 
@@ -1540,6 +1589,7 @@ class InventoryService:
         acquisition_id: int | None = None,
         category_id: int | None = None,
         note: str | None = None,
+        retail_price: Decimal | None = None,
     ) -> BulkLot:
         if grade != Grade.E:
             raise OwnershipValidationError("散裝批 grade 必須為 E")
@@ -1564,6 +1614,7 @@ class InventoryService:
             acquisition_id=acquisition_id,
             category_id=category_id,
             note=note,
+            retail_price=retail_price,
         )
         return await self._repo.add_bulk_lot(lot)
 
@@ -1728,5 +1779,9 @@ class InventoryService:
     def suggested_listed_price(
         acquisition_cost: Decimal, margin_pct: int, tax_rate: Decimal
     ) -> int:
-        """收購定價輔助（**含稅**整數元）；委派 core/money（§7.9：目標毛利對未稅談）。"""
-        return suggested_price(acquisition_cost, margin_pct, tax_rate)
+        """收購定價輔助（**含稅**整數元，已進位到 10 的倍數）；委派 core/money。
+
+        §7.9：目標毛利對未稅談；級距進位見 ADR-023。
+        """
+        # 別名匯入：與本方法同名會讓讀者以為是遞迴。
+        return money_suggested_listed_price(acquisition_cost, margin_pct, tax_rate)

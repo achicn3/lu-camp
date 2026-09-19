@@ -1948,6 +1948,13 @@ body {
 }
 
 /* ── 庫存：逐件詳細 / 久滯庫存 / 列操作 ── */
+/* 全新售價（原價）：售價底下的次要小字，純記錄用。獨立一行，免得與售價擠在一起被誤讀。 */
+.inv-retail-hint {
+  display: block;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+
 .inv-row-actions {
   display: flex;
   gap: var(--sp-2);

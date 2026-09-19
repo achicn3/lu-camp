@@ -131,7 +131,11 @@ export function marginPct(
 }
 
 /**
- * 建議**含稅**售價；margin 限 0–99，越界回 null。與後端 core/money.suggested_price 同式。
+ * 毛利式算出的建議**含稅**售價，**未**進位到 10 的倍數；margin 限 0–99，越界回 null。
+ * 與後端 `core/money.suggested_price` 同式、同名對應。
+ *
+ * **要填進「上架售價」欄位的請改用 `suggestedListedPrice()`**（會進位，ADR-023）。
+ * 這支只供毛利推導與對齊驗算——先前兩者同名不同義，採購頁就是因此漏掉進位的。
  *
  *     未稅目標 = cost ÷ (1 − margin/100)
  *     含稅售價 = round(未稅目標 × (1 + 稅率) ÷ (1 − 費率 × (1 + 稅率)))
@@ -146,7 +150,7 @@ export function marginPct(
  * 採**精確補償**（除以 1 − 費率×(1+稅率)）而不是把費率乘上去——後者補償不足。
  * 費率 0 時退化為舊式。費率×(1+稅率) ≥ 1（手續費把售價吃光）或負費率回 null。
  */
-export function suggestedListedPrice(
+export function exactSuggestedPrice(
   costNtd: number,
   targetMarginPct: number,
   taxRate: number,
@@ -178,6 +182,36 @@ export function suggestedListedPrice(
   // 正數有理數的 ROUND_HALF_UP：floor(n/d + 1/2)。BigInt 避免 Numeric(12,0)
   // 合法大額在中間乘法超出 Number.MAX_SAFE_INTEGER 後掉一元。
   return roundRatio(numerator, denominator);
+}
+
+/** 上架售價的級距：架上價格一律 10 的倍數（店主裁示 2026-09-19，ADR-023）。 */
+export const LISTED_PRICE_STEP = 10;
+
+/**
+ * 無條件進位到 `LISTED_PRICE_STEP` 的倍數（21 → 30；20 → 20；0 → 0）。與後端
+ * `core/money.round_up_to_listed_step` 同式。
+ *
+ * **進位而非四捨五入**：這個數字的用途是「至少達到目標毛利」，退位會讓實際毛利低於目標。
+ * 只用於**系統自動帶出**的價格；店員手打的價格不受此限（裁示：不擋手動輸入）。
+ * 負數與 null 原樣回傳——那是上游算不出來的訊號，不該被這裡悄悄變成 0 或 10。
+ */
+export function roundUpToListedStep(value: number | null): number | null {
+  if (value === null || value < 0) return value;
+  const remainder = value % LISTED_PRICE_STEP;
+  return remainder === 0 ? value : value + (LISTED_PRICE_STEP - remainder);
+}
+
+/**
+ * **要填進「上架售價」欄位的建議價**：毛利式算完再進位到 10 的倍數（ADR-023）。
+ * 與後端 `core/money.suggested_listed_price` 同式、同名對應。
+ */
+export function suggestedListedPrice(
+  costNtd: number,
+  targetMarginPct: number,
+  taxRate: number,
+  feeRate = 0,
+): number | null {
+  return roundUpToListedStep(exactSuggestedPrice(costNtd, targetMarginPct, taxRate, feeRate));
 }
 
 /** SPLIT 現金部分合法：整數且 0 < cash < total。 */

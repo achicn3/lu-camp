@@ -49,6 +49,8 @@ class AcquisitionItemIn(BaseModel):
     product_model_id: int | None = None
     category_id: int | None = None  # F6 additive 持久化（前端 serialized 必填，後端選填）
     acquisition_cost: NTDAmount | None = None
+    # 全新售價（原價）：客人問「這值不值」時的對照數字。**純記錄**，不參與任何計算。
+    retail_price: NTDAmount | None = None
     commission_pct: int | None = Field(default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX)
     # 商品備註（選填）：驗機當下就記下狀況/作業提醒，POS 結帳會據此跳提醒。
     note: str | None = Field(default=None, max_length=500)
@@ -65,7 +67,7 @@ class AcquisitionItemIn(BaseModel):
             raise ValueError("E 級為散裝批，請改用 BULK_LOT 的 lot 欄位")
         return v
 
-    @field_validator("listed_price", "acquisition_cost")
+    @field_validator("listed_price", "acquisition_cost", "retail_price")
     @classmethod
     def _whole_nonneg(cls, v: Decimal | None) -> Decimal | None:
         return v if v is None else _ensure_whole_nonneg(v, "金額")
@@ -79,6 +81,8 @@ class AcquisitionLotIn(BaseModel):
     acquisition_basis: BulkAcquisitionBasis
     total_qty: int = Field(gt=0)
     unit_price: NTDAmount
+    # 全新售價（原價）：同序號品，純記錄。
+    retail_price: NTDAmount | None = None
     brand_id: int | None = None
     category_id: int | None = None  # F6 additive 持久化（散裝選填）
     label: str | None = None
@@ -89,10 +93,10 @@ class AcquisitionLotIn(BaseModel):
     def _blank_note_to_none(cls, v: str | None) -> str | None:
         return (v.strip() or None) if v is not None else None
 
-    @field_validator("acquisition_cost", "unit_price")
+    @field_validator("acquisition_cost", "unit_price", "retail_price")
     @classmethod
-    def _whole_nonneg(cls, v: Decimal) -> Decimal:
-        return _ensure_whole_nonneg(v, "金額")
+    def _whole_nonneg(cls, v: Decimal | None) -> Decimal | None:
+        return v if v is None else _ensure_whole_nonneg(v, "金額")
 
 
 class AcquisitionCreate(BaseModel):

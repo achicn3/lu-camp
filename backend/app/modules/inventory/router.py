@@ -29,7 +29,7 @@ from app.modules.inventory.schemas import (
     CategoryRead,
     CategoryTargetUpdate,
     InventoryCountRead,
-    ItemRenameRequest,
+    ItemUpdateRequest,
     NoteUpdateRequest,
     PriceHintRead,
     PriceUpdateRequest,
@@ -901,17 +901,25 @@ async def update_catalog_product(
 
 
 @router.patch(
-    "/serialized-items/{item_id}/name",
+    "/serialized-items/{item_id}",
     response_model=SerializedItemRead,
-    operation_id="renameSerializedItem",
+    operation_id="updateSerializedItem",
 )
-async def rename_serialized_item(
-    item_id: int, payload: ItemRenameRequest, session: SessionDep, user: ManagerDep
+async def update_serialized_item(
+    item_id: int, payload: ItemUpdateRequest, session: SessionDep, user: ManagerDep
 ) -> SerializedItemRead:
-    """改序號品品名（含已售出；寫稽核）。歷史明細存的是成交當下的快照，不受影響。"""
+    """改序號品品名／全新售價（含已售出；寫稽核）。未提供的欄位不動。
+
+    歷史明細存的是成交當下的快照，不受影響。
+    """
     try:
-        item = await InventoryService(session).rename_serialized_item(
-            user.store_id, item_id, name=payload.name, actor_user_id=user.id
+        item = await InventoryService(session).update_serialized_item(
+            user.store_id,
+            item_id,
+            name=payload.name,
+            retail_price=payload.retail_price,
+            set_retail_price="retail_price" in payload.model_fields_set,
+            actor_user_id=user.id,
         )
     except SaleLineInvalid as exc:
         await session.rollback()
@@ -926,17 +934,22 @@ async def rename_serialized_item(
 
 
 @router.patch(
-    "/bulk-lots/{lot_id}/name",
+    "/bulk-lots/{lot_id}",
     response_model=BulkLotRead,
-    operation_id="renameBulkLot",
+    operation_id="updateBulkLot",
 )
-async def rename_bulk_lot(
-    lot_id: int, payload: ItemRenameRequest, session: SessionDep, user: ManagerDep
+async def update_bulk_lot(
+    lot_id: int, payload: ItemUpdateRequest, session: SessionDep, user: ManagerDep
 ) -> BulkLotRead:
-    """改散裝批名稱（寫稽核）。"""
+    """改散裝批名稱／全新售價（寫稽核）。未提供的欄位不動。"""
     try:
-        lot = await InventoryService(session).rename_bulk_lot(
-            user.store_id, lot_id, name=payload.name, actor_user_id=user.id
+        lot = await InventoryService(session).update_bulk_lot(
+            user.store_id,
+            lot_id,
+            name=payload.name,
+            retail_price=payload.retail_price,
+            set_retail_price="retail_price" in payload.model_fields_set,
+            actor_user_id=user.id,
         )
     except SaleLineInvalid as exc:
         await session.rollback()

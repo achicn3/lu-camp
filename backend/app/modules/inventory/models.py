@@ -142,6 +142,13 @@ class SerializedItem(Base, TimestampMixin):
     """序號單品（成色 N、S-D）。item_code 建檔即固定、全域唯一（與 POS 掃碼同一套碼）。"""
 
     __tablename__ = "serialized_items"
+    __table_args__ = (
+        # 負的原價沒有意義；擋在 DB 讓任何寫入路徑（含日後的匯入腳本）都繞不過去。
+        CheckConstraint(
+            "retail_price IS NULL OR retail_price >= 0",
+            name="ck_serialized_items_retail_price_nonneg",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -155,6 +162,9 @@ class SerializedItem(Base, TimestampMixin):
     consignor_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     commission_pct: Mapped[int | None] = mapped_column()
     listed_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 商品全新售價（原價）：客人問「這值不值」時的對照數字（2026-09-19 裁示）。
+    # **純記錄**——不參與定價、毛利與報表的任何計算；查不到全新價就留空。
+    retail_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     status: Mapped[SerializedItemStatus] = mapped_column(
         _enum_col(SerializedItemStatus),
         default=SerializedItemStatus.IN_STOCK,
@@ -179,6 +189,13 @@ class BulkLot(Base, TimestampMixin):
     """散裝批（E 級）。lot_code 建檔即固定、全域唯一。每件成本 = acquisition_cost/total_qty。"""
 
     __tablename__ = "bulk_lots"
+    __table_args__ = (
+        # 負的原價沒有意義；擋在 DB 讓任何寫入路徑（含日後的匯入腳本）都繞不過去。
+        CheckConstraint(
+            "retail_price IS NULL OR retail_price >= 0",
+            name="ck_bulk_lots_retail_price_nonneg",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
@@ -191,6 +208,9 @@ class BulkLot(Base, TimestampMixin):
     acquisition_cost: Mapped[Decimal] = mapped_column(Numeric(12, 0))
     acquisition_basis: Mapped[BulkAcquisitionBasis] = mapped_column(_enum_col(BulkAcquisitionBasis))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    # 商品全新售價（原價）：客人問「這值不值」時的對照數字（2026-09-19 裁示）。
+    # **純記錄**——不參與定價、毛利與報表的任何計算；查不到全新價就留空。
+    retail_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
     total_qty: Mapped[int] = mapped_column()
     remaining_qty: Mapped[int] = mapped_column()
     status: Mapped[BulkLotStatus] = mapped_column(

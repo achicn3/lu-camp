@@ -179,6 +179,21 @@
               }
             ],
             "title": "Product Model Id"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
           }
         },
         "required": [
@@ -256,6 +271,21 @@
               }
             ],
             "title": "Note"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
           },
           "total_qty": {
             "exclusiveMinimum": 0.0,
@@ -1250,6 +1280,17 @@
             "title": "Remaining Qty",
             "type": "integer"
           },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
+          },
           "status": {
             "$ref": "#/components/schemas/BulkLotStatus"
           },
@@ -1278,6 +1319,7 @@
           "acquisition_cost",
           "acquisition_basis",
           "unit_price",
+          "retail_price",
           "total_qty",
           "remaining_qty",
           "status"
@@ -6387,22 +6429,6 @@
         "title": "ItemHistoryEvent",
         "type": "object"
       },
-      "ItemRenameRequest": {
-        "description": "改品名（序號品／散裝批）。空白一律擋下——清單上會變成看不出是什麼的空列。",
-        "properties": {
-          "name": {
-            "maxLength": 150,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "ItemRenameRequest",
-        "type": "object"
-      },
       "ItemSourceRead": {
         "description": "庫存明細「來源」：買斷賣方或寄售人（不含 national_id）。",
         "properties": {
@@ -6451,6 +6477,41 @@
           "kind"
         ],
         "title": "ItemSourceRead",
+        "type": "object"
+      },
+      "ItemUpdateRequest": {
+        "description": "改序號品／散裝批：未提供的欄位不變。\n\n`name` 空白一律擋下——清單上會變成看不出是什麼的空列。\n`retail_price` 明確給 null 代表清空（查錯了要能拿掉），不給則不動。",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
+          }
+        },
+        "title": "ItemUpdateRequest",
         "type": "object"
       },
       "KioskActivityRequest": {
@@ -10954,6 +11015,17 @@
             ],
             "title": "Product Model Id"
           },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
+          },
           "sold_date": {
             "anyOf": [
               {
@@ -10987,6 +11059,7 @@
           "consignor_id",
           "commission_pct",
           "listed_price",
+          "retail_price",
           "status",
           "intake_date",
           "sold_date"
@@ -14226,6 +14299,62 @@
         "tags": [
           "inventory"
         ]
+      },
+      "patch": {
+        "description": "改散裝批名稱／全新售價（寫稽核）。未提供的欄位不動。",
+        "operationId": "updateBulkLot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lot_id",
+            "required": true,
+            "schema": {
+              "title": "Lot Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkLotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Bulk Lot",
+        "tags": [
+          "inventory"
+        ]
       }
     },
     "/api/v1/bulk-lots/{lot_id}/detail": {
@@ -14271,64 +14400,6 @@
           }
         ],
         "summary": "Get Bulk Detail",
-        "tags": [
-          "inventory"
-        ]
-      }
-    },
-    "/api/v1/bulk-lots/{lot_id}/name": {
-      "patch": {
-        "description": "改散裝批名稱（寫稽核）。",
-        "operationId": "renameBulkLot",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "lot_id",
-            "required": true,
-            "schema": {
-              "title": "Lot Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ItemRenameRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BulkLotRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Rename Bulk Lot",
         "tags": [
           "inventory"
         ]
@@ -23064,6 +23135,62 @@
         "tags": [
           "inventory"
         ]
+      },
+      "patch": {
+        "description": "改序號品品名／全新售價（含已售出；寫稽核）。未提供的欄位不動。\n\n歷史明細存的是成交當下的快照，不受影響。",
+        "operationId": "updateSerializedItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SerializedItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Serialized Item",
+        "tags": [
+          "inventory"
+        ]
       }
     },
     "/api/v1/serialized-items/{item_id}/detail": {
@@ -23109,64 +23236,6 @@
           }
         ],
         "summary": "Get Serialized Detail",
-        "tags": [
-          "inventory"
-        ]
-      }
-    },
-    "/api/v1/serialized-items/{item_id}/name": {
-      "patch": {
-        "description": "改序號品品名（含已售出；寫稽核）。歷史明細存的是成交當下的快照，不受影響。",
-        "operationId": "renameSerializedItem",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "item_id",
-            "required": true,
-            "schema": {
-              "title": "Item Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ItemRenameRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SerializedItemRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "Rename Serialized Item",
         "tags": [
           "inventory"
         ]

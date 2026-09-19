@@ -14,6 +14,7 @@ const row = (over: Partial<ItemDraft & { qty: string }> = {}) => ({
   brandId: null,
   productModelId: null,
   listedPrice: "1000",
+  retailPrice: "",
   acquisitionCost: "500",
   commissionPct: "",
   note: "",

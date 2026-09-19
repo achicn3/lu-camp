@@ -257,19 +257,22 @@ describe("AcquisitionPage", () => {
     expect(patches[0].roles).toBeUndefined();
   });
 
-  it("打完估計轉售價（未稅）→ 上架售價自動帶入含稅價", async () => {
+  it("打完估計轉售價（未稅）→ 上架售價自動帶入含稅價（進位到 10 的倍數）", async () => {
+    // 未稅 2010、稅 5% → 純加稅 2111 → 進位到 10 的倍數 → 2120（裁示 2026-09-19，ADR-023）。
+    // **系統自動填進上架售價的數字都要 0 結尾**，不是只有「套用建議」那顆按鈕。
     stub();
     renderPage();
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     await waitFor(() =>
-      expect((screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value).toBe("2111"),
+      expect((screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value).toBe("2120"),
     );
   });
 
   it("有行動支付手續費時，價格要把手續費也補進去（取兩種支付的較高者）", async () => {
     // 未稅 2010、稅 5%、手續費取 max(1.5%, 2.2%) = 2.2%
     //   純加稅：2111；補手續費後：round(2010 × 1.05 ÷ (1 − 0.022×1.05)) = 2160
+    //   2160 本來就是 10 的倍數，所以進位規則在這條看不出差別（刻意保留為對照組）。
     // 不補的話客人刷卡被抽 47 元，店家實得掉到未稅 2062，毛利就不是談好的那個數字。
     stub({ linepayFee: "0.0150", taiwanpayFee: "0.0220" });
     renderPage();
@@ -308,7 +311,7 @@ describe("AcquisitionPage", () => {
       expect(
         (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement)
           .value,
-      ).toBe("2111"),
+      ).toBe("2120"),
     );
   });
 
@@ -318,7 +321,7 @@ describe("AcquisitionPage", () => {
     const resale = await screen.findByLabelText("估計轉售價", { selector: "input" });
     await userEvent.type(resale, "2010");
     const listed = screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
-    await waitFor(() => expect(listed.value).toBe("2111"));
+    await waitFor(() => expect(listed.value).toBe("2120"));
     // 店員手動改成別的價
     await userEvent.clear(listed);
     await userEvent.type(listed, "2500");
@@ -337,7 +340,7 @@ describe("AcquisitionPage", () => {
     await waitFor(() =>
       expect(
         (screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement).value,
-      ).toBe("2211"),
+      ).toBe("2220"),
     );
   });
 
@@ -367,7 +370,7 @@ describe("AcquisitionPage", () => {
     const listed = screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
     expect(listed.value).toBe("");
     releaseSettings?.();
-    await waitFor(() => expect(listed.value).toBe("2111"));
+    await waitFor(() => expect(listed.value).toBe("2120"));
   });
 
   it("讀不到稅率設定時，明講不能自動換算（不可靜默）", async () => {

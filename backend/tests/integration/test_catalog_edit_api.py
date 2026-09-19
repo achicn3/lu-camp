@@ -388,14 +388,14 @@ async def test_rename_serialized_and_bulk(
     # 店員不可改
     assert (
         await client.patch(
-            f"/api/v1/serialized-items/{item.id}/name",
+            f"/api/v1/serialized-items/{item.id}",
             json={"name": "x"},
             headers=_auth(clerk),
         )
     ).status_code == 403
 
     renamed = await client.patch(
-        f"/api/v1/serialized-items/{item.id}/name",
+        f"/api/v1/serialized-items/{item.id}",
         json={"name": "北歐風帳篷"},
         headers=_auth(mgr),
     )
@@ -404,7 +404,7 @@ async def test_rename_serialized_and_bulk(
     assert renamed.json()["item_code"] == "REN-1"  # 條碼不動
 
     lot_renamed = await client.patch(
-        f"/api/v1/bulk-lots/{lot.id}/name", json={"name": "露營小物堆"}, headers=_auth(mgr)
+        f"/api/v1/bulk-lots/{lot.id}", json={"name": "露營小物堆"}, headers=_auth(mgr)
     )
     assert lot_renamed.status_code == 200, lot_renamed.text
     assert lot_renamed.json()["name"] == "露營小物堆"
@@ -412,7 +412,7 @@ async def test_rename_serialized_and_bulk(
     logs = (
         await db_session.scalars(
             select(AuditLog)
-            .where(AuditLog.action.in_(("RENAME_SERIALIZED_ITEM", "RENAME_BULK_LOT")))
+            .where(AuditLog.action.in_(("UPDATE_SERIALIZED_ITEM", "UPDATE_BULK_LOT")))
             .order_by(AuditLog.id)
         )
     ).all()
@@ -454,7 +454,7 @@ async def test_rename_rejects_blank_name(
     db_session.add(own)
     await db_session.flush()
     blank = await client.patch(
-        f"/api/v1/bulk-lots/{own.id}/name", json={"name": "   "}, headers=_auth(mgr)
+        f"/api/v1/bulk-lots/{own.id}", json={"name": "   "}, headers=_auth(mgr)
     )
     assert blank.status_code == 422
 
@@ -471,7 +471,7 @@ async def test_rename_other_store_is_not_found(
     db_session.add(lot)
     await db_session.flush()
     resp = await client.patch(
-        f"/api/v1/bulk-lots/{lot.id}/name", json={"name": "改名"}, headers=_auth(mgr)
+        f"/api/v1/bulk-lots/{lot.id}", json={"name": "改名"}, headers=_auth(mgr)
     )
     assert resp.status_code == 404
 

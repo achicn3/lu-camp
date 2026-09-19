@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   creditPremiumPreview,
+  exactSuggestedPrice,
   marginPct,
   maxAcquisitionCost,
   netOfTaxInclusive,
+  roundUpToListedStep,
   splitValid,
   suggestedListedPrice,
   taxAndFeeInclusivePrice,
@@ -79,39 +81,39 @@ describe("marginPct", () => {
   });
 });
 
-describe("suggestedListedPrice", () => {
+describe("exactSuggestedPrice（毛利式，未進位）", () => {
   it("回**含稅**價：cost ÷ (1 − margin/100) × (1 + 稅率)", () => {
     // 未稅 1000（550/0.55）→ 含稅 1050
-    expect(suggestedListedPrice(550, 45, RATE)).toBe(1050);
-    expect(suggestedListedPrice(800, 0, RATE)).toBe(840);
+    expect(exactSuggestedPrice(550, 45, RATE)).toBe(1050);
+    expect(exactSuggestedPrice(800, 0, RATE)).toBe(840);
   });
   it("只四捨五入一次（不先取整未稅再取整含稅）", () => {
     // 未稅 = 600/0.55 = 1090.909…；單次取整 ×1.05 → 1145.4545… → 1145
     // 兩段式（先取整未稅 1091 再 ×1.05 = 1145.55）會得 1146 → 這條才分得出來
-    expect(suggestedListedPrice(600, 45, RATE)).toBe(1145);
+    expect(exactSuggestedPrice(600, 45, RATE)).toBe(1145);
   });
 
   it("與後端 core/money.suggested_price 逐值一致（.5 邊界不得掉一元）", () => {
     // cost 87 / margin 10：未稅 96.666…×1.05 = 101.5 整。
     // 純浮點除法會算成 101.49999999999999 而少一元（後端 Decimal 得 102）。
-    expect(suggestedListedPrice(87, 10, RATE)).toBe(102);
+    expect(exactSuggestedPrice(87, 10, RATE)).toBe(102);
     // cost 41 / margin 18：精確值 41 × 105 ÷ 82 = 52.5 整 → 53。
     // 最自然的浮點寫法 `(cost/(1-m/100))*(1+rate)` 會算成 52.49999999999999 → 52
     // （該寫法在 cost 1–30000 × margin 0–99 中有 2.26% 的組合少一元）。
-    expect(suggestedListedPrice(41, 18, RATE)).toBe(53);
-    expect(suggestedListedPrice(1000, 45, RATE)).toBe(1909);
+    expect(exactSuggestedPrice(41, 18, RATE)).toBe(53);
+    expect(exactSuggestedPrice(1000, 45, RATE)).toBe(1909);
   });
   it("合法的 Numeric(12,0) 大額輸入仍與後端 Decimal 逐元一致", () => {
     // 精確值 284633213106 × 105 ÷ 60 = 498108122935.5 → ROUND_HALF_UP 498108122936。
     // 直接用 Number 做大分子乘法會超出安全整數，曾少算 1 元。
-    expect(suggestedListedPrice(284633213106, 40, RATE)).toBe(498108122936);
+    expect(exactSuggestedPrice(284633213106, 40, RATE)).toBe(498108122936);
   });
   it("稅率 0 → 等同舊行為", () => {
-    expect(suggestedListedPrice(550, 45, 0)).toBe(1000);
+    expect(exactSuggestedPrice(550, 45, 0)).toBe(1000);
   });
   it("margin out of 0–99 → null", () => {
-    expect(suggestedListedPrice(100, 100, RATE)).toBeNull();
-    expect(suggestedListedPrice(100, -1, RATE)).toBeNull();
+    expect(exactSuggestedPrice(100, 100, RATE)).toBeNull();
+    expect(exactSuggestedPrice(100, -1, RATE)).toBeNull();
   });
 });
 
@@ -133,24 +135,24 @@ describe("splitValid / creditPremiumPreview", () => {
 // ── 行動支付手續費納入建議售價（裁示 2026-09-09）────────────────────────
 //
 // 與後端 core/money.suggested_price 同式；兩邊都測同一組數字，避免哪天只改一邊。
-describe("suggestedListedPrice 納入手續費", () => {
+describe("exactSuggestedPrice 納入手續費", () => {
   const FEE = 0.022; // 兩種行動支付取較高者
 
   it("不帶費率時與舊行為完全相同", () => {
-    expect(suggestedListedPrice(1000, 45, RATE)).toBe(suggestedListedPrice(1000, 45, RATE, 0));
+    expect(exactSuggestedPrice(1000, 45, RATE)).toBe(exactSuggestedPrice(1000, 45, RATE, 0));
   });
 
   it("收 1000、毛利 45%、稅 5%、費 2.2% → 1954（與後端同值）", () => {
-    expect(suggestedListedPrice(1000, 45, RATE, FEE)).toBe(1954);
+    expect(exactSuggestedPrice(1000, 45, RATE, FEE)).toBe(1954);
   });
 
   it("補的是精確值，不是直接乘上費率", () => {
     // 直接乘：round(1818.18 × 1.05 × 1.022) = 1951，補償不足。
-    expect(suggestedListedPrice(1000, 45, RATE, FEE)).toBeGreaterThan(1951);
+    expect(exactSuggestedPrice(1000, 45, RATE, FEE)).toBeGreaterThan(1951);
   });
 
   it("照這個價賣掉、扣掉手續費後，未稅實得要回到目標毛利", () => {
-    const price = suggestedListedPrice(1000, 45, RATE, FEE) as number;
+    const price = exactSuggestedPrice(1000, 45, RATE, FEE) as number;
     const netAfterFee = price / (1 + RATE) - price * FEE;
     const realised = ((netAfterFee - 1000) / netAfterFee) * 100;
     expect(realised).toBeGreaterThan(44.9);
@@ -158,11 +160,11 @@ describe("suggestedListedPrice 納入手續費", () => {
   });
 
   it("費率把整個售價吃光（費率×(1+稅率) ≥ 1）回 null，不回怪數字", () => {
-    expect(suggestedListedPrice(1000, 45, RATE, 0.96)).toBeNull();
+    expect(exactSuggestedPrice(1000, 45, RATE, 0.96)).toBeNull();
   });
 
   it("負費率回 null", () => {
-    expect(suggestedListedPrice(1000, 45, RATE, -0.01)).toBeNull();
+    expect(exactSuggestedPrice(1000, 45, RATE, -0.01)).toBeNull();
   });
 });
 
@@ -195,5 +197,52 @@ describe("毛利率的手續費不得用浮點乘法", () => {
     // 毛利 = (5750/1.05 − 127 − 成本) / (5750/1.05 − 127)
     //      = (5476 − 127 − 3000) / 5349 = 2349/5349 = 43.9% → 44
     expect(marginPct(5750, 3000, RATE, 0.022)).toBe(44);
+  });
+});
+
+
+// ── 上架售價一律 10 的倍數、無條件進位（裁示 2026-09-19，ADR-023）─────────────
+describe("roundUpToListedStep", () => {
+  it("無條件進位到 10 的倍數，已是倍數就不動", () => {
+    expect(roundUpToListedStep(21)).toBe(30);
+    expect(roundUpToListedStep(20)).toBe(20);
+    expect(roundUpToListedStep(1)).toBe(10);
+    expect(roundUpToListedStep(0)).toBe(0);
+  });
+
+  it("算不出來的訊號原樣傳下去，不可悄悄變成 0 或 10", () => {
+    // null＝上游（稅率沒讀到、費率設定不合法）算不出價格；變成 10 會讓店員以為有建議價。
+    expect(roundUpToListedStep(null)).toBeNull();
+    expect(roundUpToListedStep(-5)).toBe(-5);
+  });
+
+  it("與後端 core/money.round_up_to_listed_step 對齊：建議價 1145 → 1150", () => {
+    // 後端 suggested_price(600, 45, 0.05) = 1145，suggested_listed_price = 1150。
+    expect(exactSuggestedPrice(600, 45, RATE)).toBe(1145);
+    expect(roundUpToListedStep(1145)).toBe(1150);
+  });
+});
+
+// 前後端命名對齊（2026-09-19 審查）：前端的 `suggestedListedPrice` 一度對應後端的
+// `suggested_price`（不進位），採購頁就是因為這個同名不同義而漏掉進位。
+describe("suggestedListedPrice 一律已進位", () => {
+  it("要填進上架售價欄位的建議價，本身就是 10 的倍數", () => {
+    // 收購頁、採購頁、餐飲菜單三處都直接拿它當欄位預設值，呼叫端不必再包一層。
+    expect(suggestedListedPrice(600, 45, RATE)).toBe(1150);
+    expect(suggestedListedPrice(1000, 45, RATE, 0.022)).toBe(1960);
+    expect(suggestedListedPrice(1000, 0, RATE)).toBe(1050);
+  });
+
+  it("等於 exactSuggestedPrice 再進位一次，兩者不可分家", () => {
+    for (const cost of [1, 87, 600, 12345]) {
+      expect(suggestedListedPrice(cost, 45, RATE, 0.022)).toBe(
+        roundUpToListedStep(exactSuggestedPrice(cost, 45, RATE, 0.022)),
+      );
+    }
+  });
+
+  it("算不出來時仍回 null，不可因為多包一層而變成 0", () => {
+    expect(suggestedListedPrice(1000, 100, RATE)).toBeNull();
+    expect(suggestedListedPrice(1000, 45, RATE, -1)).toBeNull();
   });
 });

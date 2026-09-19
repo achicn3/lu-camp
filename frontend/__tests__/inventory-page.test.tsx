@@ -30,6 +30,7 @@ const SERIALIZED = [
     ownership_type: "CONSIGNMENT",
     status: "IN_STOCK",
     listed_price: "3500",
+    retail_price: "8000",
     brand_id: 11,
     product_model_id: 21,
     commission_pct: 50,
@@ -606,6 +607,52 @@ describe("InventoryPage", () => {
     await waitFor(() => expect(patched).not.toBeNull());
     expect(patched!.url).toContain("/serialized-items/1/price");
     expect(patched!.body).toEqual({ unit_price: "4200" });
+  });
+
+it("編輯：全新售價（原價）可以改，也可以清空", async () => {
+    // 原價是純記錄——只送它的時候不可以順手把品名或售價也改掉。
+    loginManager();
+    const patches: { url: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+        if (method === "PATCH") {
+          const raw =
+            input instanceof Request ? await input.clone().text() : String(init?.body ?? "{}");
+          patches.push({ url, body: JSON.parse(raw) });
+          return json({ ...SERIALIZED[0], retail_price: null });
+        }
+        const resp = route(url);
+        if (resp) return resp;
+        throw new Error(`unmatched fetch: ${url}`);
+      }),
+    );
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "編輯" }));
+
+    // 現值要帶進來，店員才知道原本填了什麼。
+    const retail = (await screen.findByLabelText("全新售價（原價）")) as HTMLInputElement;
+    expect(retail.value).toBe("8000");
+
+    await userEvent.clear(retail);
+    await userEvent.type(retail, "9500");
+    await userEvent.click(screen.getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(patches.length).toBe(1));
+    expect(patches[0].url).toContain("/serialized-items/1");
+    expect(patches[0].url).not.toContain("/price");
+    expect(patches[0].body).toEqual({ retail_price: "9500" });
+
+    // 清空要送 null（不是空字串），否則後端分不出「沒送」與「要清掉」。
+    patches.length = 0;
+    await userEvent.click(screen.getByRole("button", { name: "編輯" }));
+    const again = (await screen.findByLabelText("全新售價（原價）")) as HTMLInputElement;
+    await userEvent.clear(again);
+    await userEvent.click(screen.getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(patches.length).toBe(1));
+    expect(patches[0].body).toEqual({ retail_price: null });
   });
 
   it("久滯庫存 tab queries by min_age_days and shows days-in-stock", async () => {

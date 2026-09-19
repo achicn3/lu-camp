@@ -862,6 +862,7 @@ class AcquisitionService:
                 acquisition_id=acquisition_id,
                 category_id=item.category_id,
                 note=item.note,
+                retail_price=item.retail_price,
             )
             await self._inventory.record_stock_in(
                 store_id,
@@ -895,6 +896,7 @@ class AcquisitionService:
             acquisition_id=acquisition_id,
             category_id=lot.category_id,
             note=lot.note,
+            retail_price=lot.retail_price,
         )
         await self._inventory.record_stock_in(
             store_id,
