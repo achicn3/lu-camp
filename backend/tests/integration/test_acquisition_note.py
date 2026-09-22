@@ -208,6 +208,8 @@ def test_fingerprint_ignores_absent_note_for_legacy_replays() -> None:
     legacy_dump = data.model_dump(mode="json")
     for item in legacy_dump["items"]:
         item.pop("note", None)
+        # 2026-09 折數欄位也不在舊版請求中；省略時須維持相同重送指紋。
+        item.pop("resale_discount_pct", None)
     legacy = hashlib.sha256(
         json.dumps(legacy_dump, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()

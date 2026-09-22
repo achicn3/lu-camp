@@ -161,6 +161,7 @@ class SerializedItemRead(BaseModel):
     listed_price: NTDAmount
     # 全新售價（原價）：純記錄，沒查到就是 None。
     retail_price: NTDAmount | None
+    resale_discount_pct: int | None = None
     status: SerializedItemStatus
     intake_date: datetime
     sold_date: datetime | None
@@ -460,6 +461,15 @@ class CatalogProductUpdateRequest(BaseModel):
     category_id: int | None = None
     reorder_point: int | None = Field(default=None, ge=0)
     is_active: bool | None = None
+    note: str | None = Field(default=None, max_length=500)
+    unit_price: NTDAmount | None = None
+
+    @field_validator("unit_price")
+    @classmethod
+    def _price(cls, value: Decimal | None) -> Decimal:
+        if value is None:
+            raise ValueError("售價不可為空")
+        return PriceUpdateRequest._positive_integer(value)
 
 
 class ItemUpdateRequest(BaseModel):
@@ -471,6 +481,17 @@ class ItemUpdateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=150)
     retail_price: NTDAmount | None = None
+    brand_id: int | None = None
+    category_id: int | None = None
+    note: str | None = Field(default=None, max_length=500)
+    unit_price: NTDAmount | None = None
+
+    @field_validator("unit_price")
+    @classmethod
+    def _price(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            raise ValueError("售價不可為空")
+        return PriceUpdateRequest._positive_integer(value)
 
     @field_validator("retail_price")
     @classmethod
@@ -483,3 +504,16 @@ class ItemUpdateRequest(BaseModel):
             raise ValueError("全新售價必須為整數元")
         ensure_ntd_fits_numeric_12(value, field="全新售價")
         return Decimal(value.to_integral_value())
+
+
+class SerializedItemUpdateRequest(ItemUpdateRequest):
+    product_model_id: int | None = None
+    grade: Grade | None = None
+    resale_discount_pct: int | None = Field(default=None, ge=1, le=100)
+
+    @field_validator("grade")
+    @classmethod
+    def _serialized_grade(cls, value: Grade | None) -> Grade:
+        if value is None or value == Grade.E:
+            raise ValueError("序號品成色不可為空或 E")
+        return value

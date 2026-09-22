@@ -3393,6 +3393,8 @@ export interface components {
             note?: string | null;
             /** Product Model Id */
             product_model_id?: number | null;
+            /** Resale Discount Pct */
+            resale_discount_pct?: number | null;
             /** Retail Price */
             retail_price?: number | string | null;
         };
@@ -4434,10 +4436,14 @@ export interface components {
             is_active?: boolean | null;
             /** Name */
             name?: string | null;
+            /** Note */
+            note?: string | null;
             /** Product Model Id */
             product_model_id?: number | null;
             /** Reorder Point */
             reorder_point?: number | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
         };
         /**
          * CatalogPurchaseRead
@@ -5830,10 +5836,18 @@ export interface components {
          *     `retail_price` 明確給 null 代表清空（查錯了要能拿掉），不給則不動。
          */
         ItemUpdateRequest: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
             /** Name */
             name?: string | null;
+            /** Note */
+            note?: string | null;
             /** Retail Price */
             retail_price?: number | string | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
         };
         /** KioskActivityRequest */
         KioskActivityRequest: {
@@ -7579,6 +7593,8 @@ export interface components {
             ownership_type: components["schemas"]["OwnershipType"];
             /** Product Model Id */
             product_model_id: number | null;
+            /** Resale Discount Pct */
+            resale_discount_pct?: number | null;
             /** Retail Price */
             retail_price: string | null;
             /** Sold Date */
@@ -7593,6 +7609,26 @@ export interface components {
          * @enum {string}
          */
         SerializedItemStatus: "IN_STOCK" | "SOLD" | "RETURNED_TO_CONSIGNOR" | "WRITTEN_OFF";
+        /** SerializedItemUpdateRequest */
+        SerializedItemUpdateRequest: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            grade?: components["schemas"]["Grade"] | null;
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Product Model Id */
+            product_model_id?: number | null;
+            /** Resale Discount Pct */
+            resale_discount_pct?: number | null;
+            /** Retail Price */
+            retail_price?: number | string | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
+        };
         /**
          * ServiceMode
          * @description 餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。
@@ -13700,7 +13736,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ItemUpdateRequest"];
+                "application/json": components["schemas"]["SerializedItemUpdateRequest"];
             };
         };
         responses: {

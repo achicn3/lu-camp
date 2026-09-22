@@ -11,6 +11,44 @@ const BASIS_POINTS_PER_UNIT = 10_000;
 const PERCENT_POINTS_PER_UNIT = 100;
 const ROUND_HALF_UP_FACTOR = BigInt(2);
 
+/** 折數用十分位整數表示：6.5 折 → 65%，避免價格乘法使用浮點。 */
+export function discountPercent(discount: string): number | null {
+  if (!/^(?:[0-9](?:\.[0-9])?|10(?:\.0)?)$/.test(discount)) return null;
+  const [whole, fraction = "0"] = discount.split(".");
+  const pct = Number(whole) * 10 + Number(fraction);
+  return pct > 0 && pct <= 100 ? pct : null;
+}
+
+/** 參考價 × 折數即客人實付價，不再次加稅或支付費。 */
+export function discountedPrice(referenceNtd: number, discount: string): number | null {
+  const pct = discountPercent(discount);
+  if (!Number.isSafeInteger(referenceNtd) || referenceNtd <= 0 || pct === null) return null;
+  return roundRatio(BigInt(referenceNtd) * BigInt(pct), BigInt(100));
+}
+
+export function gradeFromDiscount(discount: string): "S" | "A" | "B" | "C" | null {
+  const pct = discountPercent(discount);
+  if (pct === null) return null;
+  return pct >= 70 ? "S" : pct >= 50 ? "A" : pct >= 30 ? "B" : "C";
+}
+
+/** 以含稅售價扣除稅與支付費後的實得，反推每件收購價。 */
+export function acquisitionFromListedPrice(
+  listedNtd: number,
+  targetMarginPct: number,
+  taxRate: number,
+  feeRate: number,
+): number | null {
+  if (!Number.isSafeInteger(listedNtd) || listedNtd <= 0 ||
+      !Number.isInteger(targetMarginPct) || targetMarginPct < 0 || targetMarginPct > 99 ||
+      !Number.isFinite(taxRate) || taxRate < 0 || taxRate >= 1 ||
+      !Number.isFinite(feeRate) || feeRate < 0 || feeRate >= 1) return null;
+  const fee = roundRatio(BigInt(listedNtd) * BigInt(rateBasisPoints(feeRate)), BigInt(BASIS_POINTS_PER_UNIT));
+  const net = netOfTaxInclusive(listedNtd, taxRate) - fee;
+  if (net <= 0) return null;
+  return roundRatio(BigInt(net) * BigInt(100 - targetMarginPct), BigInt(100));
+}
+
 /** 正數金額收整到整數元（ROUND_HALF_UP）。 */
 export function roundNtd(value: number): number {
   return Math.round(value);

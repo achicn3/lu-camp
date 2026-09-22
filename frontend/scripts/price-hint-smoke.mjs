@@ -1,5 +1,5 @@
 // 收購定價提示瀏覽器煙霧：先用 API 造出「以前收過同款」的歷史，再從畫面確認
-// 店員選完品牌＋型號＋成色就看得到當時收多少、賣多少，並能展開比較各成色。
+// 店員選完品牌＋型號就看得到同型號（不分成色）當時收多少、上架多少，並能展開看各成色明細。
 // 需 backend + frontend 已起、已 seed（dev-manager）。執行：node scripts/price-hint-smoke.mjs
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -178,39 +178,36 @@ try {
   ok("選完品牌＋型號就出現提示", await hintBox.isVisible());
   await page.screenshot({ path: join(SHOTS, "02-hint-no-grade.png"), fullPage: true });
 
-  // 該列第一個 select 就是成色（同 acquisition-smoke 的取法）。
-  await page.locator(".acq-row select").first().selectOption("A");
-  await page.getByText(/A 近全新\/精品 以前收過 2 件/).waitFor();
-  const mainLine = await page.locator(".price-hint-main").innerText();
+  // 區間只看同型號、不分成色（裁示 2026-09-22）：A 兩件＋C 一件合併成一個區間。
+  await page.getByText(/同型號以前收過 3 件/).waitFor();
+  const ranges = await page.locator(".price-hint-ranges").innerText();
   ok(
-    "依成色顯示該級距的收購價與售價區間",
-    mainLine.includes("收購 35–45") && mainLine.includes("售價 100–130"),
-    mainLine,
+    "同型號不分成色的收購價與上架售價區間",
+    ranges.includes("20–45") && ranges.includes("70–130"),
+    ranges.replace(/\n/g, " | "),
   );
-  const subLine = await page.locator(".price-hint-sub").first().innerText();
-  // 最近一次是 C 級那件；必須連成色一起講，否則會被誤讀成 A 級的行情。
+  // 換成色不得改變區間——店員選的成色不參與篩選。
+  await page.locator(".acq-row select").first().selectOption("A");
+  const rangesAfterGrade = await page.locator(".price-hint-ranges").innerText();
+  ok("選了成色區間不變", rangesAfterGrade === ranges, rangesAfterGrade.replace(/\n/g, " | "));
+  const subLine = await page.locator(".price-hint-sub").nth(1).innerText();
+  // 最近一次是 C 級那件；連成色一起講，才知道那筆是什麼狀況。
   ok(
-    "最近一次有標成色，不會跟上面的區間混淆",
-    subLine.includes("C 普通") && subLine.includes("收 20") && subLine.includes("賣 70"),
+    "最近一次有標成色",
+    subLine.includes("C 普通") && subLine.includes("收 20") && subLine.includes("上架 70"),
     subLine,
   );
-  await page.screenshot({ path: join(SHOTS, "03-hint-grade-a.png"), fullPage: true });
+  await page.screenshot({ path: join(SHOTS, "03-hint-model-range.png"), fullPage: true });
 
   await page.getByRole("button", { name: /看各成色行情/ }).click();
   await page.locator(".price-hint-table").waitFor();
   const tableText = await page.locator(".price-hint-table").innerText();
   ok(
-    "展開後一眼比較各成色（A 與 C 都在）",
+    "展開後可看各成色明細（A 與 C 都在）",
     tableText.includes("A 近全新/精品") && tableText.includes("C 普通") && tableText.includes("70"),
     tableText.replace(/\n/g, " | "),
   );
   await page.screenshot({ path: join(SHOTS, "04-all-grades.png"), fullPage: true });
-
-  // 換成沒收過的成色：提示仍在，但要老實說這個成色沒收過，不能拿別的成色的價唬人。
-  await page.locator(".acq-row select").first().selectOption("S");
-  await page.getByText(/但沒收過 S 超熱門搶手貨/).waitFor();
-  ok("沒收過的成色會明說，不拿別級距的價唬人", true);
-  await page.screenshot({ path: join(SHOTS, "05-grade-never-acquired.png"), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: join(SHOTS, "06-mobile.png"), fullPage: true });

@@ -173,6 +173,8 @@ class AcquisitionService:
         items = payload.get("items")
         if isinstance(items, list):
             for item in items:
+                if isinstance(item, dict) and item.get("resale_discount_pct") is None:
+                    item.pop("resale_discount_pct", None)
                 if isinstance(item, dict) and item.get("note") is None:
                     item.pop("note", None)
         lot = payload.get("lot")
@@ -863,6 +865,7 @@ class AcquisitionService:
                 category_id=item.category_id,
                 note=item.note,
                 retail_price=item.retail_price,
+                resale_discount_pct=item.resale_discount_pct,
             )
             await self._inventory.record_stock_in(
                 store_id,

@@ -73,9 +73,7 @@ async def _seed(session: AsyncSession) -> Seeded:
     await session.flush()
     await CashDrawerService(session).open_session(store.id, manager.id, Decimal(10000))
     return Seeded(
-        manager_token=encode_access_token(
-            user_id=manager.id, role="MANAGER", store_id=store.id
-        ),
+        manager_token=encode_access_token(user_id=manager.id, role="MANAGER", store_id=store.id),
         store_id=store.id,
         seller_id=seller.id,
         category_id=category.id,
@@ -129,6 +127,135 @@ async def test_buyout_records_retail_price_on_the_item(
     assert rows[0]["retail_price"] == "8000"
     # 原價純記錄：不可污染售價或成本。
     assert rows[0]["listed_price"] == "3500"
+
+
+async def test_discount_intake_and_edit_details(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    seeded = await _seed(db_session)
+    headers = _auth(seeded.manager_token)
+    created = await client.post(
+        "/api/v1/acquisitions",
+        headers=headers,
+        json={
+            "type": "BUYOUT",
+            "contact_id": seeded.seller_id,
+            "items": [
+                {
+                    "name": "型號一",
+                    "grade": "A",
+                    "category_id": seeded.category_id,
+                    "listed_price": "500",
+                    "acquisition_cost": "256",
+                    "retail_price": "1000",
+                    "resale_discount_pct": 50,
+                }
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    read = await client.get(
+        f"/api/v1/serialized-items/by-code/{created.json()['item_codes'][0]}",
+        headers=headers,
+    )
+    item = read.json()
+    assert item["resale_discount_pct"] == 50
+    edited = await client.patch(
+        f"/api/v1/serialized-items/{item['id']}",
+        headers=headers,
+        json={
+            "name": "修正型號",
+            "grade": "B",
+            "category_id": seeded.category_id,
+            "retail_price": "1200",
+            "resale_discount_pct": 40,
+            "note": "缺配件",
+            "unit_price": "480",
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["grade"] == "B"
+    assert edited.json()["resale_discount_pct"] == 40
+    assert edited.json()["listed_price"] == "480"
+    assert edited.json()["note"] == "缺配件"
+    results = await client.get("/api/v1/serialized-items", params={"q": "帳篷"}, headers=headers)
+    assert [r["id"] for r in results.json()] == [item["id"]]
+    count = await client.get(
+        "/api/v1/serialized-items/count", params={"q": "帳篷"}, headers=headers
+    )
+    assert count.json()["count"] == 1
+    invalid = await client.patch(
+        f"/api/v1/serialized-items/{item['id']}",
+        headers=headers,
+        json={"name": "不可部分儲存", "category_id": 999999, "unit_price": "999"},
+    )
+    assert invalid.status_code == 422
+    unchanged = await client.get(
+        f"/api/v1/serialized-items/by-code/{item['item_code']}", headers=headers
+    )
+    assert unchanged.json()["name"] == "修正型號"
+    assert unchanged.json()["listed_price"] == "480"
+    for invalid_fields in (
+        {"grade": "E"},
+        {"grade": None},
+        {"unit_price": "1.5"},
+        {"unit_price": None},
+        {"resale_discount_pct": 101},
+    ):
+        rejected = await client.patch(
+            f"/api/v1/serialized-items/{item['id']}", headers=headers, json=invalid_fields
+        )
+        assert rejected.status_code == 422, rejected.text
+
+
+async def test_category_keyword_search_for_catalog_and_bulk(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    seeded = await _seed(db_session)
+    headers = _auth(seeded.manager_token)
+    product = await client.post(
+        "/api/v1/catalog-products",
+        headers=headers,
+        json={"name": "其他品名", "unit_price": "100", "category_id": seeded.category_id},
+    )
+    assert product.status_code == 201, product.text
+    for suffix in ("", "/count"):
+        result = await client.get(
+            f"/api/v1/catalog-products{suffix}", headers=headers, params={"q": "帳篷"}
+        )
+        assert result.status_code == 200
+        assert (result.json()["count"] if suffix else len(result.json())) == 1
+    edited = await client.patch(
+        f"/api/v1/catalog-products/{product.json()['id']}",
+        headers=headers,
+        json={"note": "備註", "unit_price": "150", "reorder_point": 3},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["note"] == "備註"
+    assert edited.json()["unit_price"] == "150"
+    created = await client.post(
+        "/api/v1/acquisitions",
+        headers=_auth(seeded.manager_token),
+        json={
+            "type": "BULK_LOT",
+            "contact_id": seeded.seller_id,
+            "lot": {
+                "name": "其他散裝",
+                "category_id": seeded.category_id,
+                "total_qty": 3,
+                "unit_price": "100",
+                "acquisition_cost": "100",
+                "acquisition_basis": "BAG",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    for suffix in ("", "/count"):
+        result = await client.get(
+            f"/api/v1/bulk-lots{suffix}", headers=headers, params={"q": "帳篷"}
+        )
+        assert result.status_code == 200
+        assert (result.json()["count"] if suffix else len(result.json())) == 1
 
 
 async def test_retail_price_is_optional(

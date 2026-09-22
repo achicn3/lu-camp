@@ -254,6 +254,7 @@ class InventoryService:
         category_id: int | None = None,
         note: str | None = None,
         retail_price: Decimal | None = None,
+        resale_discount_pct: int | None = None,
     ) -> SerializedItem:
         if grade == Grade.E:
             raise OwnershipValidationError("E 級為散裝批，不走序號單品")
@@ -286,6 +287,7 @@ class InventoryService:
             category_id=category_id,
             note=note,
             retail_price=retail_price,
+            resale_discount_pct=resale_discount_pct,
         )
         return await self._repo.add_serialized(item)
 
@@ -619,6 +621,7 @@ class InventoryService:
         reorder_point: int | None = None,
         is_active: bool | None = None,
         actor_user_id: int,
+        details: dict[str, Any] | None = None,
     ) -> CatalogProduct | None:
         """改一般商品的資料與上下架狀態（寫稽核）。找不到→None。
 
@@ -673,6 +676,10 @@ class InventoryService:
                 raise ItemDeleteBlocked("這件在一筆待確認付款的交易裡，補單完成前不能停售")
         if is_active is not None:
             product.is_active = is_active
+        for key, value in (details or {}).items():
+            old = getattr(product, key)
+            before[key] = str(old) if isinstance(old, Decimal) else old
+            setattr(product, key, ((value or "").strip() or None) if key == "note" else value)
         await self._session.flush()
         after: dict[str, object] = {
             "name": product.name,
@@ -682,6 +689,9 @@ class InventoryService:
             "reorder_point": product.reorder_point,
             "is_active": product.is_active,
         }
+        for key in details or {}:
+            value = getattr(product, key)
+            after[key] = str(value) if isinstance(value, Decimal) else value
         if before != after:
             await write_audit_log(
                 self._session,
@@ -841,6 +851,40 @@ class InventoryService:
             item.retail_price = retail_price
         return before, after
 
+    async def _apply_detail_edits(
+        self, store_id: int, item: SerializedItem | BulkLot,
+        changes: dict[str, Any],
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """Validate references and editable metadata under the caller's row lock."""
+        await self._validate_item_references(
+            store_id,
+            brand_id=changes.get("brand_id", item.brand_id),
+            category_id=changes.get("category_id", item.category_id),
+            product_model_id=changes.get("product_model_id", item.product_model_id)
+            if isinstance(item, SerializedItem) else None,
+        )
+        if "unit_price" in changes:
+            available = item.status == (
+                SerializedItemStatus.IN_STOCK if isinstance(item, SerializedItem)
+                else BulkLotStatus.ON_SALE
+            )
+            if not available:
+                raise InvalidStateTransition("僅在庫商品可改售價")
+            price_field = "listed_price" if isinstance(item, SerializedItem) else "unit_price"
+            changes[price_field] = changes.pop("unit_price")
+        if "note" in changes:
+            changes["note"] = (changes["note"] or "").strip() or None
+        before: dict[str, object] = {}
+        after: dict[str, object] = {}
+        for key, value in changes.items():
+            old = getattr(item, key)
+            if old == value:
+                continue
+            before[key] = str(old) if isinstance(old, Decimal) else old
+            after[key] = str(value) if isinstance(value, Decimal) else value
+            setattr(item, key, value)
+        return before, after
+
     async def update_serialized_item(
         self,
         store_id: int,
@@ -850,6 +894,7 @@ class InventoryService:
         retail_price: Decimal | None = None,
         set_retail_price: bool = False,
         actor_user_id: int,
+        details: dict[str, Any] | None = None,
     ) -> SerializedItem | None:
         """改序號品品名／全新售價（含已售出；寫稽核）。找不到→None。
 
@@ -858,12 +903,15 @@ class InventoryService:
         item = await self._repo.get_serialized_for_update(store_id, item_id)
         if item is None:
             return None
+        detail_before, detail_after = await self._apply_detail_edits(store_id, item, details or {})
         before, after = self._apply_item_edits(
             item,
             name=name,
             retail_price=retail_price,
             set_retail_price=set_retail_price,
         )
+        before.update(detail_before)
+        after.update(detail_after)
         if not after:
             return item
         await self._session.flush()
@@ -888,17 +936,21 @@ class InventoryService:
         retail_price: Decimal | None = None,
         set_retail_price: bool = False,
         actor_user_id: int,
+        details: dict[str, Any] | None = None,
     ) -> BulkLot | None:
         """改散裝批名稱／全新售價（寫稽核）。找不到→None。"""
         lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
         if lot is None:
             return None
+        detail_before, detail_after = await self._apply_detail_edits(store_id, lot, details or {})
         before, after = self._apply_item_edits(
             lot,
             name=name,
             retail_price=retail_price,
             set_retail_price=set_retail_price,
         )
+        before.update(detail_before)
+        after.update(detail_after)
         if not after:
             return lot
         await self._session.flush()

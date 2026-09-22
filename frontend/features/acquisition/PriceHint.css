@@ -1,0 +1,24 @@
+.price-hint-ranges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.price-hint-ranges dt {
+  font-size: 0.8rem;
+}
+
+.price-hint-ranges dd {
+  margin: 4px 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 380px) {
+  .price-hint-ranges {
+    grid-template-columns: 1fr;
+  }
+}

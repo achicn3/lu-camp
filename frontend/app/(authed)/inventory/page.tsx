@@ -24,6 +24,8 @@ import {
 } from "@/features/inventory/inventory";
 import { labelConditionForGrade } from "@/features/inventory/grades";
 import { type LabelCondition, printLabel } from "@/lib/agent";
+import { discountPercent } from "@/features/acquisition/pricing";
+import { ProductDetailFields, type DetailEdits, type InventoryProduct } from "@/features/inventory/ProductDetailFields";
 import { ConfirmDialog } from "@/features/common/ConfirmDialog";
 import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
@@ -306,7 +308,7 @@ function RetailPriceHint({ value }: { value?: string | null }) {
   if (value == null || value === "") return null;
   return (
     <span className="inv-retail-hint">
-      原價 <MoneyText value={value} />
+      參考價（原價／最低價）<MoneyText value={value} />
     </span>
   );
 }
@@ -314,6 +316,7 @@ function RetailPriceHint({ value }: { value?: string | null }) {
 // 單一「編輯」視窗（管理者限定）。原本改價／編輯／停售／刪除各一顆鈕，一列六顆太吵，
 // 整併成一個視窗分區呈現：基本資料｜售價｜狀態｜刪除。改價與刪除都會寫稽核。
 function ItemEditButton({
+  item,
   kind,
   id,
   name,
@@ -323,6 +326,7 @@ function ItemEditButton({
   sku,
   isActive,
 }: {
+  item: InventoryProduct;
   kind: "serialized" | "catalog" | "bulk";
   id: number;
   name: string;
@@ -339,110 +343,52 @@ function ItemEditButton({
   const [nextPrice, setNextPrice] = useState(price);
   const [nextReorder, setNextReorder] = useState(String(reorderPoint ?? 0));
   const [nextRetail, setNextRetail] = useState(retailPrice ?? "");
+  const initialDiscount = "resale_discount_pct" in item && item.resale_discount_pct != null ? String(item.resale_discount_pct / 10) : "";
+  const [nextDiscount, setNextDiscount] = useState(initialDiscount);
+  const [edits, setEdits] = useState<DetailEdits>({});
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ["inventory"] });
 
-  async function patchName(): Promise<void> {
-    const trimmed = nextName.trim();
-    if (trimmed === name) return;
-    if (trimmed === "") throw new Error("品名不可空白");
-    if (kind === "catalog") return; // 一般商品的品名與再訂購點一起送（同一個端點）
-    const { data, error: e } =
-      kind === "serialized"
-        ? await api.PATCH("/api/v1/serialized-items/{item_id}", {
-            params: { path: { item_id: id } },
-            body: { name: trimmed },
-          })
-        : await api.PATCH("/api/v1/bulk-lots/{lot_id}", {
-            params: { path: { lot_id: id } },
-            body: { name: trimmed },
-          });
-    if (!data) throw new Error(extractDetail(e) ?? "改品名失敗");
-  }
-
-  /** 全新售價（原價）：一般商品沒有這個欄位；清空要送 null，不能送 ""。 */
-  async function patchRetailPrice(): Promise<void> {
-    if (kind === "catalog") return;
-    const trimmed = nextRetail.trim();
-    const parsed = trimmed === "" ? null : parseNtd(trimmed);
-    if (trimmed !== "" && (parsed === null || !Number.isInteger(parsed) || parsed < 0)) {
-      throw new Error("全新售價須為 0 以上的整數元");
+  async function saveProduct(): Promise<void> {
+    const body: DetailEdits & { reorder_point?: number } = { ...edits };
+    if (!nextName.trim()) throw new Error("品名不可空白");
+    if (nextName.trim() !== name) body.name = nextName.trim();
+    const amount = parseNtd(nextPrice);
+    if (amount === null || amount <= 0) throw new Error("售價須為正整數元");
+    if (amount !== parseNtd(price)) body.unit_price = String(amount);
+    if (kind === "catalog") {
+      const reorder = parseNtd(nextReorder);
+      if (reorder === null || reorder < 0) throw new Error("再訂購點須為 0 以上的整數");
+      if (reorder !== reorderPoint) body.reorder_point = reorder;
+    } else {
+      const retail = nextRetail.trim() ? parseNtd(nextRetail) : null;
+      if (nextRetail.trim() && (retail === null || retail < 0)) throw new Error("參考價須為 0 以上的整數元");
+      if (retail !== (retailPrice == null ? null : parseNtd(retailPrice))) body.retail_price = retail === null ? null : String(retail);
     }
-    const current = retailPrice == null ? null : parseNtd(retailPrice);
-    if (parsed === current) return;
-    const body = { retail_price: parsed === null ? null : String(parsed) };
-    const { data, error: e } =
-      kind === "serialized"
-        ? await api.PATCH("/api/v1/serialized-items/{item_id}", {
-            params: { path: { item_id: id } },
-            body,
-          })
-        : await api.PATCH("/api/v1/bulk-lots/{lot_id}", {
-            params: { path: { lot_id: id } },
-            body,
-          });
-    if (!data) throw new Error(extractDetail(e) ?? "改全新售價失敗");
-  }
-
-  async function patchCatalogFields(): Promise<void> {
-    if (kind !== "catalog") return;
-    const trimmed = nextName.trim();
-    const reorder = Number(nextReorder);
-    if (trimmed === "") throw new Error("品名不可空白");
-    if (!Number.isInteger(reorder) || reorder < 0) throw new Error("再訂購點須為 0 以上的整數");
-    if (trimmed === name && reorder === reorderPoint) return;
-    const { data, error: e } = await api.PATCH("/api/v1/catalog-products/{product_id}", {
-      params: { path: { product_id: id } },
-      body: { name: trimmed, reorder_point: reorder },
-    });
-    if (!data) throw new Error(extractDetail(e) ?? "更新失敗");
-  }
-
-  async function patchPrice(): Promise<void> {
-    // 比較正規化後的值：打「1,200」而原價就是 1200 時，字串比不相等會白送一次 PATCH，
-    // 稽核就多一筆 before == after 的改價紀錄。
-    if (parseNtd(nextPrice) === parseNtd(price)) return;
-    // 前端先擋一次（0 或小數）：讓店員當場看到原因，而不是送出去才被後端退。
-    // 用站上既有的 parseNtd：它吃得下「1,200」這種輸入，也會把值正規化再送出。
-    const parsed = parseNtd(nextPrice);
-    if (parsed === null || !Number.isInteger(parsed) || parsed <= 0) {
-      throw new Error("售價須為正整數元");
+    if (kind === "serialized" && nextDiscount !== initialDiscount) {
+      const pct = nextDiscount === "" ? null : discountPercent(nextDiscount);
+      if (nextDiscount !== "" && pct === null) throw new Error("折數請輸入 0.1–10，最多一位小數");
+      body.resale_discount_pct = pct;
     }
-    const body = { unit_price: String(parsed) };
-    const { data, error: e } =
-      kind === "serialized"
-        ? await api.PATCH("/api/v1/serialized-items/{item_id}/price", {
-            params: { path: { item_id: id } },
-            body,
-          })
-        : kind === "catalog"
-          ? await api.PATCH("/api/v1/catalog-products/{product_id}/price", {
-              params: { path: { product_id: id } },
-              body,
-            })
-          : await api.PATCH("/api/v1/bulk-lots/{lot_id}/price", {
-              params: { path: { lot_id: id } },
-              body,
-            });
-    if (!data) throw new Error(extractDetail(e) ?? "改價失敗");
+    if (!Object.keys(body).length) return;
+    const response = kind === "serialized"
+      ? await api.PATCH("/api/v1/serialized-items/{item_id}", { params: { path: { item_id: id } }, body })
+      : kind === "catalog"
+        ? await api.PATCH("/api/v1/catalog-products/{product_id}", { params: { path: { product_id: id } }, body })
+        : await api.PATCH("/api/v1/bulk-lots/{lot_id}", { params: { path: { lot_id: id } }, body });
+    if (!response.data) throw new Error(extractDetail(response.error) ?? "儲存失敗");
   }
 
   const save = useMutation({
-    mutationFn: async () => {
-      await patchCatalogFields();
-      await patchName();
-      await patchRetailPrice();
-      await patchPrice();
-    },
+    mutationFn: saveProduct,
     onSuccess: () => {
       setError(null);
       setOpen(false);
     },
     onError: (err: Error) => setError(err.message),
-    // 這裡會依序送多個 PATCH（品名/再訂購點 → 售價）。中途失敗時前面那段其實已經存進去了，
-    // 不重載的話畫面還是舊值，店員會以為整筆都沒成功。無論成敗都重載。
+    // 整筆商品資料在同一交易儲存；無論成敗都重新整理。
     onSettled: () => refresh(),
   });
 
@@ -500,6 +446,8 @@ function ItemEditButton({
           setNextPrice(price);
           setNextReorder(String(reorderPoint ?? 0));
           setNextRetail(retailPrice ?? "");
+          setNextDiscount(initialDiscount);
+          setEdits({});
           setError(null);
           setOpen(true);
         }}
@@ -551,6 +499,12 @@ function ItemEditButton({
         )}
 
         <p className="inv-edit-section">售價</p>
+        <ProductDetailFields item={item} kind={kind} edits={edits} onChange={setEdits} disabled={busy} />
+        {kind === "serialized" && <label className="field"><span className="field-label">可售折數</span>
+          <input aria-label="可售折數" inputMode="decimal" value={nextDiscount} disabled={busy}
+            onChange={(e) => setNextDiscount(e.target.value)} />
+          <span className="hint">修改估價紀錄不會自動改價，請確認下方售價。</span>
+        </label>}
         <label className="field">
           <span className="field-label">售價（含稅整數元）</span>
           <input
@@ -564,7 +518,7 @@ function ItemEditButton({
         </label>
         {kind !== "catalog" && (
           <label className="field">
-            <span className="field-label">全新售價（原價，選填）</span>
+            <span className="field-label">參考價（原價或目前最低價，選填）</span>
             <input
               inputMode="numeric"
               aria-label="全新售價（原價）"
@@ -1227,7 +1181,7 @@ function SerializedPanel() {
 
   return (
     <div className="inv-panel">
-      <SearchBar placeholder="品名 / 序號碼" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="品名 / 序號碼 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
         <select
           aria-label="狀態"
           value={status}
@@ -1337,6 +1291,7 @@ function SerializedPanel() {
               {isManager && item.status === "IN_STOCK" && (
                 <ItemEditButton
                   kind="serialized"
+                  item={item}
                   id={item.id}
                   name={item.name}
                   price={item.listed_price}
@@ -1597,7 +1552,7 @@ function CatalogPanel() {
   return (
     <div className="inv-panel">
       <CreateCatalogProduct />
-      <SearchBar placeholder="品名 / 商品編號" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="品名 / 商品編號 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
         <label className="inv-check">
           <input
             type="checkbox"
@@ -1684,6 +1639,7 @@ function CatalogPanel() {
                 {isManager && (
                   <ItemEditButton
                     kind="catalog"
+                    item={product}
                     id={product.id}
                     name={product.name}
                     price={product.unit_price}
@@ -1789,7 +1745,7 @@ function BulkPanel() {
 
   return (
     <div className="inv-panel">
-      <SearchBar placeholder="名稱 / 批號" onSearch={(value) => { setQ(value); setPage(0); }}>
+      <SearchBar placeholder="名稱 / 批號 / 種類" onSearch={(value) => { setQ(value); setPage(0); }}>
         <select
           aria-label="狀態"
           value={status}
@@ -1882,6 +1838,7 @@ function BulkPanel() {
               {isManager && lot.status === "ON_SALE" && (
                 <ItemEditButton
                   kind="bulk"
+                  item={lot}
                   id={lot.id}
                   name={lot.name}
                   price={lot.unit_price}
@@ -2105,6 +2062,7 @@ function AgingPanel() {
               {isManager && (
                 <ItemEditButton
                   kind="serialized"
+                  item={item}
                   id={item.id}
                   name={item.name}
                   price={item.listed_price}

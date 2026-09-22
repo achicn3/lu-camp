@@ -54,6 +54,12 @@ describe("isPositiveIntNtd", () => {
 });
 
 describe("serializedRowErrors", () => {
+  it("折數模式必須有有效折數與正數參考價，即使手動填完售價也不能跳過", () => {
+    expect(serializedRowErrors("BUYOUT", 0, item({ discount: "11", retailPrice: "1000" })))
+      .toContain("第 1 列：折數須為 0.1–10，最多一位小數");
+    expect(serializedRowErrors("BUYOUT", 0, item({ discount: "5", retailPrice: "" })))
+      .toContain("第 1 列：請輸入正整數參考價");
+  });
   it("valid buyout row → no errors", () => {
     expect(serializedRowErrors("BUYOUT", 0, item())).toEqual([]);
   });

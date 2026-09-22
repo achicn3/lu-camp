@@ -198,10 +198,12 @@ function GeneralSettingsCard({
         <span className="field-label">收購定價目標毛利 (%)</span>
         <input
           name="default_margin_pct"
+          aria-label="收購定價目標毛利 (%)"
           inputMode="numeric"
           defaultValue={String(settings.default_margin_pct)}
           required
         />
+        <span className="hint">折數鑑價會先扣除稅與支付手續費，再依這個毛利率自動計算收購價。</span>
       </label>
       <label className="field">
         {/* 與收購分開：二手議價空間大、目標毛利本來就比新品高（裁示 2026-09-16）。

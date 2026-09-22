@@ -90,6 +90,76 @@ afterEach(() => {
 });
 
 describe("AcquisitionPage", () => {
+  it("不填參考價直接輸入售價可反推收購價，保留手改與成色並可恢復自動", async () => {
+    stub({ linepayFee: "0.0220" });
+    renderPage();
+    const listed = () => screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
+    const cost = () => screen.getByLabelText("收購價") as HTMLInputElement;
+    await userEvent.selectOptions(await screen.findByLabelText("成色"), "B");
+    await userEvent.type(listed(), "500");
+    await waitFor(() => expect(cost().value).toBe("256"));
+    expect((screen.getByLabelText("參考價（原價或目前最低價）") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("B");
+    await userEvent.clear(listed());
+    await waitFor(() => expect(cost().value).toBe(""));
+    await userEvent.type(listed(), "500");
+    await waitFor(() => expect(cost().value).toBe("256"));
+    await userEvent.clear(cost());
+    await userEvent.type(cost(), "250");
+    await userEvent.clear(listed());
+    await userEvent.type(listed(), "1000");
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+    expect(cost().value).toBe("250");
+    await userEvent.click(screen.getByRole("button", { name: "重新依毛利計算收購價" }));
+    await waitFor(() => expect(cost().value).toBe("512"));
+    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("B");
+  });
+  it("折數鑑價採設定頁的收購毛利率，不被分類舊規則蓋掉", async () => {
+    stub();
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes("/settings")) return json({ default_margin_pct: 30, tax_rate: "0.0500", linepay_fee_pct: "0.0220", taiwanpay_fee_pct: "0" });
+      return originalFetch(input, init);
+    }));
+    renderPage();
+    await userEvent.click(await screen.findByLabelText("分類"));
+    await userEvent.click(await screen.findByRole("option", { name: "登山服飾" }));
+    await userEvent.type(screen.getByLabelText("參考價（原價或目前最低價）"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "5折" }));
+    await waitFor(() => expect((screen.getByLabelText("收購價") as HTMLInputElement).value).toBe("326"));
+  });
+  it("參考價加五折自動帶售價、收購價與成色，手動改價在切頁後保留", async () => {
+    stub({ linepayFee: "0.0220" });
+    renderPage();
+    await userEvent.type(await screen.findByLabelText("參考價（原價或目前最低價）"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "5折" }));
+    const listed = () => screen.getByLabelText("上架售價（含稅與手續費）", { selector: "input" }) as HTMLInputElement;
+    const cost = () => screen.getByLabelText("收購價") as HTMLInputElement;
+    await waitFor(() => expect(cost().value).toBe("256"));
+    expect(listed().value).toBe("500");
+    expect((screen.getByLabelText("成色") as HTMLSelectElement).value).toBe("A");
+    await userEvent.clear(cost());
+    await userEvent.type(cost(), "250");
+    await userEvent.clear(listed());
+    await userEvent.type(listed(), "499");
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+    expect(listed().value).toBe("499");
+    expect(cost().value).toBe("250");
+  });
+  it("自訂折數在切換散裝再返回後仍可直接修改", async () => {
+    stub();
+    renderPage();
+    await userEvent.type(await screen.findByLabelText("參考價（原價或目前最低價）"), "1000");
+    await userEvent.click(screen.getByRole("button", { name: "自訂" }));
+    await userEvent.type(screen.getByLabelText("自訂折數"), "6.5");
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
+    await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
+    expect((screen.getByLabelText("自訂折數") as HTMLInputElement).value).toBe("6.5");
+    expect(screen.getByRole("button", { name: "自訂" }).getAttribute("aria-pressed")).toBe("true");
+  });
   it("renders zh-TW type tabs", () => {
     stub();
     renderPage();

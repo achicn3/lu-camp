@@ -148,6 +148,9 @@ class SerializedItem(Base, TimestampMixin):
             "retail_price IS NULL OR retail_price >= 0",
             name="ck_serialized_items_retail_price_nonneg",
         ),
+        CheckConstraint(
+            "resale_discount_pct BETWEEN 1 AND 100", name="ck_serialized_resale_discount"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -162,6 +165,7 @@ class SerializedItem(Base, TimestampMixin):
     consignor_id: Mapped[int | None] = mapped_column(ForeignKey("contacts.id"))
     commission_pct: Mapped[int | None] = mapped_column()
     listed_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    resale_discount_pct: Mapped[int | None] = mapped_column()
     # 商品全新售價（原價）：客人問「這值不值」時的對照數字（2026-09-19 裁示）。
     # **純記錄**——不參與定價、毛利與報表的任何計算；查不到全新價就留空。
     retail_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))

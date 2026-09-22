@@ -2155,8 +2155,9 @@ body {
 .acq-backfill-row .btn-primary {
   white-space: nowrap;
 }
-/* 成色下拉與其他鑑價欄位輸入框同尺寸（同高、滿寬）。 */
-.acq-row-grid select {
+/* 收購與商品編輯的下拉選單沿用表單欄位尺寸（同高、滿寬）。 */
+.acq-row-grid select,
+.inv-edit-dialog select {
   min-height: var(--tap-min);
   width: 100%;
   padding: 0 var(--sp-3);
@@ -2165,7 +2166,8 @@ body {
   background: var(--surface);
   font-size: var(--text-md);
 }
-.acq-row-grid select:focus {
+.acq-row-grid select:focus,
+.inv-edit-dialog select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
@@ -2203,6 +2205,54 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+.acq-quick-pricing {
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.acq-discounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.acq-discounts button {
+  min-width: 52px;
+  min-height: 44px;
+}
+.acq-discounts button[aria-pressed="true"] {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  font-weight: 700;
+}
+.acq-legacy-pricing {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+}
+.acq-legacy-pricing summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.acq-name-detail {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+.acq-name-detail summary,
+.acq-price-breakdown summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
+.acq-price-breakdown dl > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.acq-price-breakdown dd {
+  margin: 0;
 }
 .acq-aid {
   color: var(--info);
@@ -3900,11 +3950,6 @@ body {
 
 .price-hint-table tbody tr:last-child td {
   border-bottom: none;
-}
-
-.price-hint-current {
-  background: color-mix(in srgb, var(--info) 10%, transparent);
-  font-weight: 600;
 }
 
 /* 站內確認視窗（取代 window.confirm）。刪除是不可逆的，所以主鈕走危險色。 */

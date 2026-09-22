@@ -4,6 +4,7 @@ import { SERIALIZED_GRADES } from "@/features/inventory/grades";
 import { parseNtd } from "@/lib/money";
 
 import { qtyErrors, rowsPayableTotal } from "./quantity";
+import { discountPercent } from "./pricing";
 import type { components } from "@/lib/api-types";
 
 type Grade = components["schemas"]["Grade"];
@@ -13,13 +14,14 @@ type PayoutMethod = components["schemas"]["PayoutMethod"];
 export type AcqType = "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
 
 export interface ItemDraft {
+  discount?: string;
   name: string;
   grade: Grade | "";
   categoryId: number | null;
   brandId: number | null;
   productModelId: number | null;
   listedPrice: string;
-  /** 全新售價（原價，選填）：客人問「這值不值」時的對照數字。純記錄，不參與任何計算。 */
+  /** 參考價（原價或最低價）；使用折數鑑價時必填，其他流程選填。 */
   retailPrice: string;
   acquisitionCost: string; // 買斷
   commissionPct: string; // 寄售
@@ -79,6 +81,10 @@ export function serializedRowErrors(type: AcqType, index: number, row: ItemDraft
   if (!isPositiveIntNtd(row.listedPrice)) errors.push(`${tag}：上架售價須為正整數元`);
   if (type === "BUYOUT" && !isPositiveIntNtd(row.acquisitionCost)) {
     errors.push(`${tag}：買斷收購價須為正整數元`);
+  }
+  if (type === "BUYOUT" && row.discount) {
+    if (discountPercent(row.discount) === null) errors.push(`${tag}：折數須為 0.1–10，最多一位小數`);
+    if (!isPositiveIntNtd(row.retailPrice)) errors.push(`${tag}：請輸入正整數參考價`);
   }
   if (type === "CONSIGNMENT") {
     const pct = parseNtd(row.commissionPct);

@@ -51,6 +51,7 @@ class AcquisitionItemIn(BaseModel):
     acquisition_cost: NTDAmount | None = None
     # 全新售價（原價）：客人問「這值不值」時的對照數字。**純記錄**，不參與任何計算。
     retail_price: NTDAmount | None = None
+    resale_discount_pct: int | None = Field(default=None, ge=1, le=100)
     commission_pct: int | None = Field(default=None, ge=COMMISSION_PCT_MIN, le=COMMISSION_PCT_MAX)
     # 商品備註（選填）：驗機當下就記下狀況/作業提醒，POS 結帳會據此跳提醒。
     note: str | None = Field(default=None, max_length=500)

@@ -1447,3 +1447,31 @@ async def test_get_by_id_does_not_shadow_by_code_routes(
             ).status_code == 200
     assert (await client.get("/api/v1/bulk-lots/by-code/LOT-SHADOW", headers=headers)
             ).status_code == 200
+
+
+async def test_detail_edit_keeps_store_role_and_sold_price_guards(
+    client: httpx.AsyncClient, db_session: AsyncSession,
+) -> None:
+    store_id = await _seed_store(db_session)
+    other_store = await _seed_store(db_session, "另一門市")
+    category = Category(store_id=other_store, name="別店分類", target_margin_pct=45)
+    db_session.add(category)
+    await db_session.flush()
+    category_id = category.id
+    item = await _seed_item(db_session, store_id, status=SerializedItemStatus.SOLD)
+    item_id, code = item.id, item.item_code
+    path = f"/api/v1/serialized-items/{item_id}"
+    manager = await _auth_manager(db_session, store_id)
+    # API 的失敗會 rollback 當次交易；先固定測資在測試外層 savepoint，與真實已存在商品一致。
+    await db_session.commit()
+    forbidden = await client.patch(path, headers=_auth(store_id), json={"name": "店員改名"})
+    assert forbidden.status_code == 403
+    cross_store = await client.patch(path, headers=manager, json={"category_id": category_id})
+    assert cross_store.status_code == 422
+    sold = await client.patch(
+        path, headers=manager, json={"name": "不能部分儲存", "unit_price": "999"}
+    )
+    assert sold.status_code == 409
+    read = await client.get(f"/api/v1/serialized-items/by-code/{code}", headers=manager)
+    assert read.json()["name"] == "雙人帳篷"
+    assert read.json()["listed_price"] == "1280"

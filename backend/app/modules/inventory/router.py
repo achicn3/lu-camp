@@ -41,6 +41,7 @@ from app.modules.inventory.schemas import (
     SerializedFilterOptions,
     SerializedItemDetailRead,
     SerializedItemRead,
+    SerializedItemUpdateRequest,
 )
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
@@ -874,6 +875,7 @@ async def update_catalog_product(
             reorder_point=payload.reorder_point,
             is_active=payload.is_active,
             actor_user_id=user.id,
+            details=payload.model_dump(include={"note", "unit_price"}, exclude_unset=True),
             **{
                 key: getattr(payload, key)
                 for key in ("brand_id", "product_model_id", "category_id")
@@ -906,7 +908,7 @@ async def update_catalog_product(
     operation_id="updateSerializedItem",
 )
 async def update_serialized_item(
-    item_id: int, payload: ItemUpdateRequest, session: SessionDep, user: ManagerDep
+    item_id: int, payload: SerializedItemUpdateRequest, session: SessionDep, user: ManagerDep
 ) -> SerializedItemRead:
     """改序號品品名／全新售價（含已售出；寫稽核）。未提供的欄位不動。
 
@@ -920,8 +922,12 @@ async def update_serialized_item(
             retail_price=payload.retail_price,
             set_retail_price="retail_price" in payload.model_fields_set,
             actor_user_id=user.id,
+            details=payload.model_dump(exclude_unset=True, exclude={"name", "retail_price"}),
         )
-    except SaleLineInvalid as exc:
+    except InvalidStateTransition as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (SaleLineInvalid, CrossStoreReference) as exc:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -950,8 +956,12 @@ async def update_bulk_lot(
             retail_price=payload.retail_price,
             set_retail_price="retail_price" in payload.model_fields_set,
             actor_user_id=user.id,
+            details=payload.model_dump(exclude_unset=True, exclude={"name", "retail_price"}),
         )
-    except SaleLineInvalid as exc:
+    except InvalidStateTransition as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (SaleLineInvalid, CrossStoreReference) as exc:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)

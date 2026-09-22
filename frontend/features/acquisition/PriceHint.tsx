@@ -11,8 +11,8 @@ import { api } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { formatTaipeiDate } from "@/lib/datetime";
 import { formatNtd, parseNtd } from "@/lib/money";
+import "./PriceHint.css";
 
-type Grade = components["schemas"]["Grade"];
 type GradeStat = components["schemas"]["GradePriceStat"];
 
 
@@ -25,12 +25,20 @@ function range(min: string | null | undefined, max: string | null | undefined): 
   return lo === hi ? formatNtd(lo) : `${formatNtd(lo)}–${formatNtd(hi)}`;
 }
 
-function statLine(stat: GradeStat): string {
-  const cost = range(stat.cost_min, stat.cost_max);
-  const listed = range(stat.listed_min, stat.listed_max);
-  // 買斷一定有成本，但欄位可為 NULL；真的沒有就只講售價，絕不補 0 唬人。
-  const parts = [cost === null ? null : `收購 ${cost}`, listed === null ? null : `售價 ${listed}`];
-  return parts.filter((p) => p !== null).join("、");
+function combinedRange(stats: GradeStat[], low: "cost_min" | "listed_min", high: "cost_max" | "listed_max"): string | null {
+  const mins = stats.flatMap((stat) => {
+    const value = stat[low] == null ? null : parseNtd(stat[low]);
+    return value === null ? [] : [value];
+  });
+  const maxs = stats.flatMap((stat) => {
+    const value = stat[high] == null ? null : parseNtd(stat[high]);
+    return value === null ? [] : [value];
+  });
+  if (!mins.length || !maxs.length) return null;
+  return range(
+    mins.reduce((a, b) => a < b ? a : b).toString(),
+    maxs.reduce((a, b) => a > b ? a : b).toString(),
+  );
 }
 
 /**
@@ -40,17 +48,15 @@ function statLine(stat: GradeStat): string {
  * 自由文字，拿來比對會漏。**只看買斷**：寄售的架上價是跟寄售人談的、店家沒有
  * 收購成本，混進來會誤導定價（裁示 2026-09-09）。
  *
- * 查無歷史就整個不顯示，不要用「查無資料」佔畫面；查詢失敗時同樣安靜消失——
- * 這是刻意的，一個參考用的提示不該把整張收購單擋下來或跳錯誤。
+ * 區間一律看同型號全部成色、不依店員選的成色篩（裁示 2026-09-22）；各成色明細收在展開表。
+ * 僅供參考，不修改表單價格。
  */
 export function PriceHint({
   brandId,
   productModelId,
-  grade,
 }: {
   brandId: number | null;
   productModelId: number | null;
-  grade: Grade | "";
 }) {
   const [showAll, setShowAll] = useState(false);
 
@@ -60,33 +66,37 @@ export function PriceHint({
       const { data } = await api.GET("/api/v1/serialized-items/price-hint", {
         params: { query: { brand_id: brandId as number, product_model_id: productModelId as number } },
       });
-      return data ?? null;
+      if (!data) throw new Error("無法讀取歷史價格");
+      return data;
     },
     enabled: brandId !== null && productModelId !== null,
   });
 
   const hint = hintQuery.data;
-  if (!hint || hint.total_count === 0) return null;
+  if (brandId === null || productModelId === null) return null;
+  if (hintQuery.isError) return <p className="price-hint" role="status">歷史價格暫時無法讀取，可繼續估價。</p>;
+  if (!hint) return <p className="price-hint" role="status">讀取歷史價格中…</p>;
+  if (hint.total_count === 0) return <p className="price-hint" role="status">這款商品尚無歷史記錄，可直接估價。</p>;
 
   // 生成型別把有預設值的欄位標成 optional，先收斂成 null 再用，TS 才收斂得掉。
   const latest = hint.latest ?? null;
-  const mine = hint.grades.find((g) => g.grade === grade) ?? null;
-  const others = hint.grades.filter((g) => g.grade !== grade);
 
   return (
-    <div className="price-hint">
-      <p className="price-hint-main">
-        {mine === null ? (
-          <>
-            以前收過這款 <strong>{hint.total_count}</strong> 件
-            {grade === "" ? "" : `，但沒收過 ${GRADE_LABEL[grade] ?? grade}`}
-          </>
-        ) : (
-          <>
-            <strong>{GRADE_LABEL[mine.grade] ?? mine.grade}</strong> 以前收過 {mine.count} 件：
-            {statLine(mine)}
-          </>
-        )}
+    <div className="price-hint" aria-label="歷史價格參考">
+      <p className="price-hint-main">同型號以前收過 {hint.total_count} 件（不分成色）：</p>
+      <dl className="price-hint-ranges">
+        <div>
+          <dt>歷史收購價區間</dt>
+          <dd>{combinedRange(hint.grades, "cost_min", "cost_max") ?? "無收購價記錄"}</dd>
+        </div>
+        <div>
+          <dt>歷史上架售價區間</dt>
+          <dd>{combinedRange(hint.grades, "listed_min", "listed_max") ?? "無上架價記錄"}</dd>
+        </div>
+      </dl>
+      <p className="price-hint-sub">
+        {hint.used_all_time ? "全部歷史" : `近 ${hint.window_months} 個月`}・本店買斷商品・金額為新台幣。
+        上架售價含稅，依商品目前記錄，非成交價；僅供估價參考。
       </p>
 
       {latest === null ? null : (
@@ -94,8 +104,8 @@ export function PriceHint({
           {/* 一定要標成色：最近一次可能是別的成色，不標的話會跟上面那行的區間對不起來。 */}
           最近一次收這款 {formatTaipeiDate(latest.acquired_at)}（
           {GRADE_LABEL[latest.grade] ?? latest.grade}）：
-          {latest.cost == null ? "未填收購價" : `收 ${formatNtd(parseNtd(latest.cost) ?? 0)}`}
-          、賣 {formatNtd(parseNtd(latest.listed_price) ?? 0)}
+          {range(latest.cost, latest.cost) === null ? "未填收購價" : `收 ${range(latest.cost, latest.cost)}`}
+          、上架 {range(latest.listed_price, latest.listed_price) ?? "未填上架價"}
         </p>
       )}
 
@@ -103,7 +113,7 @@ export function PriceHint({
         <p className="price-hint-sub">近一年沒收過這款，上面是更早以前的紀錄，行情可能已經變了。</p>
       ) : null}
 
-      {others.length === 0 ? null : (
+      {hint.grades.length < 2 ? null : (
         <>
           <button
             type="button"
@@ -111,7 +121,7 @@ export function PriceHint({
             aria-expanded={showAll}
             onClick={() => setShowAll((v) => !v)}
           >
-            {showAll ? "收起各成色行情" : `看各成色行情（另有 ${others.length} 種成色）`}
+            {showAll ? "收起各成色行情" : `看各成色行情（共 ${hint.grades.length} 種成色）`}
           </button>
           {showAll ? (
             <table className="price-hint-table">
@@ -125,7 +135,7 @@ export function PriceHint({
               </thead>
               <tbody>
                 {hint.grades.map((g) => (
-                  <tr key={g.grade} className={g.grade === grade ? "price-hint-current" : undefined}>
+                  <tr key={g.grade}>
                     <td>{GRADE_LABEL[g.grade] ?? g.grade}</td>
                     <td>{g.count}</td>
                     <td>{range(g.cost_min, g.cost_max) ?? "—"}</td>

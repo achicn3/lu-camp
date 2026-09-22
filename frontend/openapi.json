@@ -180,6 +180,19 @@
             ],
             "title": "Product Model Id"
           },
+          "resale_discount_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resale Discount Pct"
+          },
           "retail_price": {
             "anyOf": [
               {
@@ -3045,6 +3058,18 @@
             ],
             "title": "Name"
           },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "product_model_id": {
             "anyOf": [
               {
@@ -3067,6 +3092,21 @@
               }
             ],
             "title": "Reorder Point"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
           }
         },
         "title": "CatalogProductUpdateRequest",
@@ -6482,6 +6522,28 @@
       "ItemUpdateRequest": {
         "description": "改序號品／散裝批：未提供的欄位不變。\n\n`name` 空白一律擋下——清單上會變成看不出是什麼的空列。\n`retail_price` 明確給 null 代表清空（查錯了要能拿掉），不給則不動。",
         "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
           "name": {
             "anyOf": [
               {
@@ -6494,6 +6556,18 @@
               }
             ],
             "title": "Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
           },
           "retail_price": {
             "anyOf": [
@@ -6509,6 +6583,21 @@
               }
             ],
             "title": "Retail Price"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
           }
         },
         "title": "ItemUpdateRequest",
@@ -11015,6 +11104,17 @@
             ],
             "title": "Product Model Id"
           },
+          "resale_discount_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resale Discount Pct"
+          },
           "retail_price": {
             "anyOf": [
               {
@@ -11077,6 +11177,123 @@
         ],
         "title": "SerializedItemStatus",
         "type": "string"
+      },
+      "SerializedItemUpdateRequest": {
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "grade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Grade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "product_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Model Id"
+          },
+          "resale_discount_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resale Discount Pct"
+          },
+          "retail_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retail Price"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "title": "SerializedItemUpdateRequest",
+        "type": "object"
       },
       "ServiceMode": {
         "description": "餐飲的供應方式（docs/35）：內用要桌號才知道送去哪一桌，外帶不需要。\n\n只有含餐飲（`SaleLineType.MENU`）明細的銷售才有值；純二手/一般商品的銷售為 NULL。\n**與折扣/點數/購物金無關**——餐飲的那三條限制綁的是 `line_type == MENU`，\n外帶餐飲同樣不累點、不套活動、不可用購物金折抵。",
@@ -23154,7 +23371,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ItemUpdateRequest"
+                "$ref": "#/components/schemas/SerializedItemUpdateRequest"
               }
             }
           },

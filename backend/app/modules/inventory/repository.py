@@ -204,6 +204,8 @@ class InventoryRepository:
             pattern = f"%{q}%"
             conds.append(
                 SerializedItem.name.ilike(pattern) | SerializedItem.item_code.ilike(pattern)
+                | SerializedItem.category_id.in_(select(Category.id).where(
+                    Category.store_id == store_id, Category.name.ilike(pattern)))
             )
         return conds
 
@@ -329,7 +331,9 @@ class InventoryRepository:
             conds.append(CatalogProduct.brand_id == brand_id)
         if q:
             pattern = f"%{q}%"
-            conds.append(CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern))
+            conds.append(CatalogProduct.name.ilike(pattern) | CatalogProduct.sku.ilike(pattern)
+                | CatalogProduct.category_id.in_(select(Category.id).where(
+                    Category.store_id == store_id, Category.name.ilike(pattern))))
         if low_stock:
             conds.append(CatalogProduct.quantity_on_hand <= CatalogProduct.reorder_point)
         return conds
@@ -427,6 +431,8 @@ class InventoryRepository:
                 BulkLot.name.ilike(pattern)
                 | BulkLot.lot_code.ilike(pattern)
                 | BulkLot.label.ilike(pattern)
+                | BulkLot.category_id.in_(select(Category.id).where(
+                    Category.store_id == store_id, Category.name.ilike(pattern)))
             )
         return conds
 

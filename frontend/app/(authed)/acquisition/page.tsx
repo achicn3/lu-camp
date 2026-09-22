@@ -19,7 +19,12 @@ import { gradeShortName, labelConditionForGrade } from "@/features/inventory/gra
 import { PHONE_HINT, looksLikePhone, normalizeMobile } from "@/lib/phone";
 import {
   creditPremiumPreview,
+  acquisitionFromListedPrice,
+  discountedPrice,
+  discountPercent,
+  gradeFromDiscount,
   marginPct,
+  netOfTaxInclusive,
   maxAcquisitionCost,
   roundUpToListedStep,
   suggestedListedPrice,
@@ -73,11 +78,7 @@ function detail(error: unknown): string | null {
   return null;
 }
 
-function emptyItem(commissionPct = ""): ItemDraft & {
-  estimatedResale: string;
-  rowKey: string;
-  qty: string;
-} {
+function emptyItem(commissionPct = ""): Row {
   return {
     // 穩定的列識別：用 index 當 React key 時，刪除中間列會讓後面的列沿用同一個元件實例，
     // 連帶把前一列的內部狀態（如已選標籤）帶過去。不進 API payload（逐欄挑選）。
@@ -92,6 +93,8 @@ function emptyItem(commissionPct = ""): ItemDraft & {
     acquisitionCost: "",
     commissionPct,
     estimatedResale: "",
+    discount: "",
+    costManual: false,
     // 商品備註（選填）：一列一則，套用該列全部件數。
     note: "",
     // 同款多件（客人一次帶三頂一樣的帳篷）：畫面上一列，送出時展開成三筆獨立商品。
@@ -114,7 +117,7 @@ function emptyLot(): LotDraft {
   };
 }
 
-type Row = ItemDraft & { estimatedResale: string; rowKey: string; qty: string };
+type Row = ItemDraft & { estimatedResale: string; rowKey: string; qty: string; discount: string; costManual: boolean };
 
 // ── 賣方/寄售人 ──
 function SellerSection({
@@ -379,6 +382,7 @@ function ItemRowCard({
   onRemove,
   refreshCategories,
   defaultCommissionPct,
+  defaultMarginPct,
   taxRate,
   feeRate,
   taxRateLoading,
@@ -393,6 +397,7 @@ function ItemRowCard({
   refreshCategories: () => void;
   /** 寄售設定預設值；列尚未自訂時顯示，第一次輸入會取代而不是接在預設值後。 */
   defaultCommissionPct: string;
+  defaultMarginPct: number | null;
   /** 營業稅率（settings，不寫死）；尚未載入為 null，此時不做含稅換算。 */
   taxRate: number | null;
   /** 行動支付手續費率，取兩種支付的較高者；讀不到為 0（不補、不墊高客人價格）。 */
@@ -403,6 +408,8 @@ function ItemRowCard({
   taxRateUnavailable: boolean;
 }) {
   const category = categories.find((c) => c.id === row.categoryId) ?? null;
+  const targetMargin = defaultMarginPct;
+  const [customDiscount, setCustomDiscount] = useState(() => row.discount !== "" && !/^[1-9]$/.test(row.discount));
 
   const rulesQuery = useQuery({
     queryKey: ["pricing-rules", row.categoryId],
@@ -440,6 +447,10 @@ function ItemRowCard({
   const multiUnitCount =
     type === "BUYOUT" && qtyIssues.length === 0 ? (parseNtd(row.qty) ?? null) : null;
   const listed = parseNtd(row.listedPrice);
+  const netProceeds = listed !== null && taxRate !== null
+    ? acquisitionFromListedPrice(listed, 0, taxRate, feeRate) : null;
+  const netSale = netProceeds !== null && listed !== null && taxRate !== null
+    ? netOfTaxInclusive(listed, taxRate) : null;
   const margin =
     listed !== null && cost !== null && taxRate !== null
       ? marginPct(listed, cost, taxRate, feeRate)
@@ -461,6 +472,23 @@ function ItemRowCard({
   useEffect(() => {
     onChangeRef.current = onChange;
   });
+  useEffect(() => {
+    if (type !== "BUYOUT" || row.costManual || taxRate === null || targetMargin === null) return;
+    const price = parseNtd(row.listedPrice);
+    const next = price === null ? null : acquisitionFromListedPrice(price, targetMargin, taxRate, feeRate);
+    const value = next === null ? "" : String(next);
+    if (value !== row.acquisitionCost) onChangeRef.current({ acquisitionCost: value });
+  }, [type, row.costManual, row.listedPrice, row.acquisitionCost, taxRate, feeRate, targetMargin]);
+
+  function applyDiscount(reference: string, discount: string) {
+    const amount = parseNtd(reference);
+    const listed = amount === null ? null : roundUpToListedStep(discountedPrice(amount, discount));
+    const grade = gradeFromDiscount(discount);
+    onChange({ retailPrice: reference, discount, estimatedResale: "", costManual: false,
+      listedPrice: listed === null ? "" : String(listed),
+      ...(grade === null ? {} : { grade }),
+    });
+  }
   // 上一次同步時的估計轉售價，與我們自己填進去的那個值。
   // 用來分辨「店員動了估計轉售價」與「只是稅率設定晚到」——前者要覆蓋，後者不可以。
   // **初始值用當下的 resale/taxRate，不是 null**：切到散裝分頁時整個 ItemRowCard 會 unmount，
@@ -549,7 +577,6 @@ function ItemRowCard({
         </button>
       </div>
       <div className="acq-row-grid">
-        <ItemNameField value={row.name} onChange={(name) => onChange({ name })} />
         <CreatableCombobox
           label="品牌"
           search={searchBrands}
@@ -565,7 +592,7 @@ function ItemRowCard({
           placeholder={row.brandId === null ? "先選品牌" : "選擇或新增型號"}
           disabled={row.brandId === null}
           selectedId={row.productModelId}
-          onChange={(o) => onChange({ productModelId: o?.id ?? null })}
+          onChange={(o) => onChange({ productModelId: o?.id ?? null, ...(o ? { name: o.name } : {}) })}
         />
         <CreatableCombobox
           label="分類"
@@ -587,9 +614,13 @@ function ItemRowCard({
           selectedId={row.categoryId}
           onChange={(o) => onChange({ categoryId: o?.id ?? null })}
         />
+        <details className="acq-name-detail">
+          <summary>品名：{row.name || "選型號自動帶入，或展開填寫"}</summary>
+          <ItemNameField value={row.name} onChange={(name) => onChange({ name })} />
+        </details>
         <label className="field">
           <span className="field-label">成色</span>
-          <select value={row.grade} onChange={(e) => onChange({ grade: e.target.value as Grade })}>
+          <select aria-label="成色" value={row.grade} onChange={(e) => onChange({ grade: e.target.value as Grade })}>
             <option value="">請選擇</option>
             {SERIALIZED_GRADES.map((g) => (
               <option key={g} value={g}>
@@ -602,8 +633,9 @@ function ItemRowCard({
         <PriceHint
           brandId={row.brandId}
           productModelId={row.productModelId}
-          grade={row.grade}
         />
+        <details className="acq-legacy-pricing">
+          <summary>{type === "BUYOUT" ? "其他估價方式（直接輸入未稅轉售價）" : "行情參考（不自動換算售價）"}</summary>
         <label className="field">
           <span className="field-label">
             {autoTaxApplies ? "估計轉售價（未稅）" : "估計轉售價"}
@@ -619,10 +651,35 @@ function ItemRowCard({
             aria-label="估計轉售價"
             inputMode="numeric"
             value={row.estimatedResale}
-            onChange={(e) => onChange({ estimatedResale: e.target.value })}
+            onChange={(e) => onChange({ estimatedResale: e.target.value, discount: "" })}
           />
         </label>
+        </details>
       </div>
+
+      {type === "BUYOUT" && (
+        <div className="acq-quick-pricing">
+          <label className="field">
+            <span className="field-label">參考價（原價或目前最低價）</span>
+            <input aria-label="參考價（原價或目前最低價）" inputMode="numeric"
+              value={row.retailPrice} onChange={(e) => applyDiscount(e.target.value, row.discount)} />
+          </label>
+          <div className="acq-discounts" role="group" aria-label="預估可售折數">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+              <button key={n} type="button" className="btn-secondary" aria-pressed={!customDiscount && row.discount === String(n)}
+                onClick={() => { setCustomDiscount(false); applyDiscount(row.retailPrice, String(n)); }}>{n}折</button>
+            ))}
+            <button type="button" className="btn-secondary" aria-pressed={customDiscount}
+              onClick={() => setCustomDiscount(true)}>自訂</button>
+          </div>
+          {customDiscount && <label className="field"><span className="field-label">自訂折數（0.1–10）</span>
+            <input aria-label="自訂折數" inputMode="decimal" value={row.discount}
+              onChange={(e) => applyDiscount(row.retailPrice, e.target.value)} />
+            {row.discount && gradeFromDiscount(row.discount) === null && <span className="form-error">請輸入 0.1–10 折，最多一位小數。</span>}
+          </label>}
+          <p className="hint">也可不填參考價與折數，直接輸入上架售價，自動計算收購價；成色請自行選擇。折後價包含稅與手續費；自動售價進位至十元。{targetMargin !== null ? `目標毛利率：${targetMargin}%（可於設定維護）` : "正在讀取毛利設定"}。價格及成色皆可手動調整。</p>
+        </div>
+      )}
 
       {maxCost !== null && (
         <p className="acq-aid">
@@ -641,8 +698,9 @@ function ItemRowCard({
             aria-label="收購價"
             inputMode="numeric"
             value={row.acquisitionCost}
-            onChange={(e) => onChange({ acquisitionCost: e.target.value })}
+            onChange={(e) => onChange({ acquisitionCost: e.target.value, costManual: true })}
           />
+          <button type="button" className="acq-link" onClick={() => onChange({ costManual: false })}>重新依毛利計算收購價</button>
           {overCost && <span className="form-error acq-warn">超過建議最高收購成本，毛利偏低</span>}
         </label>
         <label className="field acq-qty">
@@ -694,11 +752,11 @@ function ItemRowCard({
           <InfoTip
             text={
               autoTaxApplies
-                ? "客人實際要付的價格，會存入系統並印在標籤上。打完上面的估計轉售價，系統會自動加上營業稅與行動支付手續費帶進來，你也可以直接改這裡。"
+                ? "客人最後支付的價格。可直接輸入，或依參考價與折數帶入；收購價依扣稅與支付費後的實得自動計算，手動修改過的收購價會保留。"
                 : "客人實際要付的含稅價格，會存入系統並印在標籤上。寄售請直接輸入與寄售人談定的架上價。"
             }
           />
-          {autoTaxApplies && category !== null && cost !== null && taxRate !== null && (
+          {autoTaxApplies && !row.discount && category !== null && cost !== null && taxRate !== null && (
             <button
               type="button"
               className="acq-link"
@@ -744,15 +802,26 @@ function ItemRowCard({
           autoTaxApplies && margin !== null && (
             <span className="hint">
               毛利 {margin}%
-              {category !== null && margin < category.target_margin_pct ? "（低於目標）" : ""}
+              {targetMargin !== null && margin < targetMargin ? "（低於目標）" : ""}
             </span>
           )
         )}
       </label>
 
+      {type === "BUYOUT" && netSale !== null && netProceeds !== null && (
+        <details className="acq-price-breakdown">
+          <summary>查看未稅價、手續費與實得</summary>
+          <dl>
+            <div><dt>未稅售價</dt><dd>{formatNtd(netSale)} 元</dd></div>
+            <div><dt>預估支付手續費（{Math.round(feeRate * 10000) / 100}%）</dt><dd>{formatNtd(netSale - netProceeds)} 元</dd></div>
+            <div><dt>扣稅、扣費後實得</dt><dd>{formatNtd(netProceeds)} 元</dd></div>
+          </dl>
+        </details>
+      )}
+
       {/* 全新售價（原價，選填）：客人問「這值不值」時的對照數字。
           **純記錄**——不參與定價、毛利與報表的任何計算，查不到就留白。 */}
-      <label className="field">
+      {type !== "BUYOUT" && <label className="field">
         <span className="field-label">
           全新售價（原價，選填）
           <InfoTip text="這件商品全新時的市售價，用來跟客人說明二手價的落差。只是記錄，不會影響上架售價、毛利或報表。查不到就留白。" />
@@ -764,7 +833,7 @@ function ItemRowCard({
           value={row.retailPrice}
           onChange={(e) => onChange({ retailPrice: e.target.value })}
         />
-      </label>
+      </label>}
 
       {/* 商品備註：驗機當下就記下狀況或作業提醒，結帳時系統會提醒店員。
           一列一則，套用該列全部件數（2026-09-04 裁示）——要分別註記就拆成多列填。 */}
@@ -1173,6 +1242,7 @@ export default function AcquisitionPage() {
           grade: r.grade,
           listed_price: ntd(r.listedPrice),
           retail_price: optionalNtd(r.retailPrice),
+          resale_discount_pct: discountPercent(r.discount ?? ""),
           brand_id: r.brandId,
           product_model_id: r.productModelId,
           category_id: r.categoryId,
@@ -1480,6 +1550,7 @@ export default function AcquisitionPage() {
               }
               defaultCommissionPct={defaultCommissionPct}
               taxRate={taxRate}
+              defaultMarginPct={settings.data?.default_margin_pct ?? null}
               feeRate={feeRate}
               taxRateLoading={taxRateLoading}
               taxRateUnavailable={taxRateUnavailable}

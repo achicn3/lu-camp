@@ -2,7 +2,7 @@
 // 收購定價提示：同款以前收多少、賣多少。
 //
 // 這個元件唯一的職責是「把歷史講清楚，不要讓店員誤讀」，所以測的重點都在誤讀風險：
-// 沒收過的成色不能拿別級距的價唬人、最近一次必須標成色、沒有成本不能顯示成 0。
+// 區間只看同型號不分成色（裁示 2026-09-22）、最近一次必須標成色、沒有成本不能顯示成 0。
 // 寄售已在後端整批排除（裁示 2026-09-09），前端不需要也不應該再處理寄售。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -66,51 +66,39 @@ afterEach(() => {
 setToken(fakeJwt({ sub: "1", role: "CLERK", store_id: 1 }));
 
 describe("收購定價提示", () => {
-  it("選定成色後顯示該成色的收購價與售價區間", async () => {
+  it("區間只看同型號、不分成色（裁示 2026-09-22）", async () => {
     stubHint(A_AND_C);
-    wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
-    await screen.findByText(/以前收過 2 件/);
-    expect(screen.getByText(/收購 35–45、售價 100–130/)).toBeTruthy();
+    await screen.findByText(/同型號以前收過 3 件/);
+    expect(screen.getByText("歷史收購價區間")).toBeTruthy();
+    expect(screen.getByText("20–45")).toBeTruthy();
+    expect(screen.getByText("歷史上架售價區間")).toBeTruthy();
+    expect(screen.getByText("70–130")).toBeTruthy();
+    expect(screen.getByText(/近 12 個月/)).toBeTruthy();
+    expect(screen.getByText(/含稅.*非成交價/)).toBeTruthy();
   });
 
   it("最近一次必須標成色——那件可能不是店員現在要收的成色", async () => {
     stubHint(A_AND_C);
-    wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
     // 上面講 A 級 35–45，這行講的卻是 C 級的 20；不標成色就會被讀成 A 級行情崩了。
     const latest = await screen.findByText(/最近一次收這款/);
     expect(latest.textContent).toContain("C 普通");
     expect(latest.textContent).toContain("收 20");
-    expect(latest.textContent).toContain("賣 70");
-  });
-
-  it("沒收過的成色要明說，不能拿別級距的價唬人", async () => {
-    stubHint(A_AND_C);
-    wrap(<PriceHint brandId={1} productModelId={2} grade="S" />);
-
-    await screen.findByText(/但沒收過 S 超熱門搶手貨/);
-    expect(screen.queryByText(/收購 35–45/)).toBeNull();
+    expect(latest.textContent).toContain("上架 70");
   });
 
   it("展開後列出各成色，方便一眼比較", async () => {
     stubHint(A_AND_C);
     const user = userEvent.setup();
-    wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
     await user.click(await screen.findByRole("button", { name: /看各成色行情/ }));
     const table = screen.getByRole("table");
     expect(table.textContent).toContain("A 近全新/精品");
     expect(table.textContent).toContain("C 普通");
-  });
-
-  it("成色說明與收購下拉同一份：全新未拆不會被講成別的，S 也不再寫成「全新」", async () => {
-    // 定價提示原本自帶一份說明，S 寫「全新/未使用」，跟下拉的「S 超熱門搶手貨」互相矛盾；
-    // 加了全新未拆之後，同一頁出現兩個「全新」會讓店員選錯。
-    stubHint(A_AND_C);
-    wrap(<PriceHint brandId={1} productModelId={2} grade="N" />);
-    await screen.findByText(/但沒收過 全新未拆/);
-    expect(screen.queryByText(/全新\/未使用/)).toBeNull();
   });
 
   it("沒有收購價紀錄時只講售價，不得補 0 唬人", async () => {
@@ -123,31 +111,66 @@ describe("收購定價提示", () => {
       ],
       latest: { acquired_at: "2026-09-01T05:00:00Z", grade: "A", cost: null, listed_price: "150" },
     });
-    wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
-    await screen.findByText(/售價 150/);
+    await screen.findByText("150");
+    expect(screen.getByText("無收購價記錄")).toBeTruthy();
     expect(screen.queryByText(/收購 0/)).toBeNull();
     expect(screen.getByText(/未填收購價/)).toBeTruthy();
   });
 
   it("退回全部歷史時要提醒行情可能已經變了", async () => {
     stubHint({ ...A_AND_C, used_all_time: true });
-    wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
     await screen.findByText(/近一年沒收過這款/);
   });
 
-  it("查無歷史就整個不顯示，不要用「查無資料」佔畫面", async () => {
+  it("查無歷史明示狀態，避免誤以為還在載入", async () => {
     stubHint({ window_months: 12, used_all_time: false, total_count: 0, grades: [], latest: null });
-    const { container } = wrap(<PriceHint brandId={1} productModelId={2} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={2} />);
 
     await waitFor(() => expect(requested.length).toBeGreaterThan(0));
-    expect(container.querySelector(".price-hint")).toBeNull();
+    await screen.findByText(/尚無歷史記錄/);
+  });
+
+  it("讀取失敗明示可繼續估價，不冒充無歷史", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    await screen.findByText(/歷史價格暫時無法讀取.*可繼續估價/);
+    expect(screen.queryByText(/尚無歷史記錄/)).toBeNull();
+  });
+
+  it("同型號範圍忽略缺少成本的記錄，不把未知當零", async () => {
+    stubHint({ ...A_AND_C, grades: [
+      A_AND_C.grades[0],
+      { ...A_AND_C.grades[1], cost_min: null, cost_max: null },
+    ] });
+    wrap(<PriceHint brandId={1} productModelId={2} />);
+    await screen.findByText("35–45");
+    expect(screen.queryByText("0–45")).toBeNull();
+    expect(screen.getByText("70–130")).toBeTruthy();
+  });
+
+  it("切換型號不殘留前一款的區間", async () => {
+    stubHint(A_AND_C);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const node = (model: number) => (
+      <QueryClientProvider client={client}>
+        <PriceHint brandId={1} productModelId={model} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(node(2));
+    await screen.findByText("20–45");
+    stubHint({ ...A_AND_C, total_count: 0, grades: [], latest: null });
+    rerender(node(3));
+    expect(screen.queryByText("20–45")).toBeNull();
+    await screen.findByText(/尚無歷史記錄/);
   });
 
   it("品牌或型號還沒選就不查——沒有可靠比對鍵時不要猜", async () => {
     stubHint(A_AND_C);
-    wrap(<PriceHint brandId={1} productModelId={null} grade="A" />);
+    wrap(<PriceHint brandId={1} productModelId={null} />);
 
     await waitFor(() => expect(requested).toHaveLength(0));
     expect(screen.queryByText(/以前收過/)).toBeNull();

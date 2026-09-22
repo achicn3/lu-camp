@@ -578,7 +578,7 @@ describe("InventoryPage", () => {
     expect(screen.getByText(/散裝寄售人/)).toBeTruthy();
   });
 
-  it("管理者可改序號品售價（PATCH /price，含稅整數元）", async () => {
+  it("管理者可改序號品售價（與商品資料一起原子儲存，含稅整數元）", async () => {
     loginManager();
     let patched: { url: string; body: unknown } | null = null;
     vi.stubGlobal(
@@ -586,7 +586,7 @@ describe("InventoryPage", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
-        if (url.includes("/serialized-items/") && url.includes("/price") && method === "PATCH") {
+        if (url.includes("/serialized-items/") && method === "PATCH") {
           const raw =
             input instanceof Request ? await input.clone().text() : String(init?.body ?? "{}");
           patched = { url, body: JSON.parse(raw) };
@@ -605,8 +605,31 @@ describe("InventoryPage", () => {
     await userEvent.type(input, "4200");
     await userEvent.click(screen.getByRole("button", { name: "儲存" }));
     await waitFor(() => expect(patched).not.toBeNull());
-    expect(patched!.url).toContain("/serialized-items/1/price");
+    expect(patched!.url).toMatch(/\/serialized-items\/1$/);
     expect(patched!.body).toEqual({ unit_price: "4200" });
+  });
+
+  it("編輯可以一次儲存成色、折數及商品備註", async () => {
+    loginManager();
+    const patches: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (input instanceof Request ? input.method : init?.method) ?? "GET";
+      if (method === "PATCH") {
+        patches.push(JSON.parse(input instanceof Request ? await input.clone().text() : String(init?.body)));
+        return json(SERIALIZED[0]);
+      }
+      return route(url) ?? json([]);
+    }));
+    renderPage();
+    await screen.findByText("SER-001");
+    await userEvent.click(screen.getByRole("button", { name: "編輯" }));
+    const dialog = screen.getByRole("dialog", { name: "編輯商品" });
+    await userEvent.selectOptions(within(dialog).getByLabelText("成色"), "B");
+    await userEvent.type(within(dialog).getByLabelText("可售折數"), "6.5");
+    await userEvent.type(within(dialog).getByLabelText("商品備註"), "缺配件");
+    await userEvent.click(within(dialog).getByRole("button", { name: "儲存" }));
+    await waitFor(() => expect(patches).toEqual([{ grade: "B", resale_discount_pct: 65, note: "缺配件" }]));
   });
 
 it("編輯：全新售價（原價）可以改，也可以清空", async () => {
