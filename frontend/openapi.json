@@ -8830,6 +8830,16 @@
             "title": "Total Count",
             "type": "integer"
           },
+          "typical": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TypicalPriceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "used_all_time": {
             "title": "Used All Time",
             "type": "boolean"
@@ -8846,6 +8856,77 @@
           "grades"
         ],
         "title": "PriceHintRead",
+        "type": "object"
+      },
+      "PriceHintRecord": {
+        "description": "行情提示的一筆紀錄：哪天收的、什麼成色、收多少、上架多少、現在賣掉了沒。",
+        "properties": {
+          "acquired_at": {
+            "format": "date-time",
+            "title": "Acquired At",
+            "type": "string"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/Grade"
+          },
+          "listed_price": {
+            "title": "Listed Price",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SerializedItemStatus"
+          }
+        },
+        "required": [
+          "acquired_at",
+          "grade",
+          "listed_price",
+          "status"
+        ],
+        "title": "PriceHintRecord",
+        "type": "object"
+      },
+      "PriceHintRecordsRead": {
+        "description": "行情提示的逐筆紀錄（新到舊、分頁）；期間與母體和 PriceHintRead 相同。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PriceHintRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "used_all_time": {
+            "title": "Used All Time",
+            "type": "boolean"
+          },
+          "window_months": {
+            "title": "Window Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_months",
+          "used_all_time",
+          "total",
+          "items"
+        ],
+        "title": "PriceHintRecordsRead",
         "type": "object"
       },
       "PriceUpdateRequest": {
@@ -13738,6 +13819,47 @@
           "rows"
         ],
         "title": "TrendsReport",
+        "type": "object"
+      },
+      "TypicalPriceRange": {
+        "description": "一般行情：收購價與上架售價各自的中間一半（第 25～75 百分位、取實際出現過的價格）。\n\n最低～最高會被一筆特價或填錯的價格拉開；店員第一眼看這個。不分成色。",
+        "properties": {
+          "cost_high": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost High"
+          },
+          "cost_low": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Low"
+          },
+          "listed_high": {
+            "title": "Listed High",
+            "type": "string"
+          },
+          "listed_low": {
+            "title": "Listed Low",
+            "type": "string"
+          }
+        },
+        "required": [
+          "listed_low",
+          "listed_high"
+        ],
+        "title": "TypicalPriceRange",
         "type": "object"
       },
       "UnreturnedGiftRead": {
@@ -24083,6 +24205,90 @@
           }
         ],
         "summary": "Acquisition Price Hint",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/serialized-items/price-hint/records": {
+      "get": {
+        "description": "收購定價提示的逐筆紀錄：同品牌＋型號每一件的收購日、成色、收購價、上架價與狀態。\n\n與 `/serialized-items/price-hint` 同一個期間（近一年，沒有才退回全部）與母體（只計買斷、\n排除作廢收購），件數對得起來。權限同行情提示，一般店員可看。",
+        "operationId": "acquisitionPriceHintRecords",
+        "parameters": [
+          {
+            "description": "品牌 id（必填）",
+            "in": "query",
+            "name": "brand_id",
+            "required": true,
+            "schema": {
+              "description": "品牌 id（必填）",
+              "title": "Brand Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "型號 id（必填）",
+            "in": "query",
+            "name": "product_model_id",
+            "required": true,
+            "schema": {
+              "description": "型號 id（必填）",
+              "title": "Product Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceHintRecordsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acquisition Price Hint Records",
         "tags": [
           "inventory"
         ]

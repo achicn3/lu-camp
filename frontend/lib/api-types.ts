@@ -2980,6 +2980,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/serialized-items/price-hint/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Acquisition Price Hint Records
+         * @description 收購定價提示的逐筆紀錄：同品牌＋型號每一件的收購日、成色、收購價、上架價與狀態。
+         *
+         *     與 `/serialized-items/price-hint` 同一個期間（近一年，沒有才退回全部）與母體（只計買斷、
+         *     排除作廢收購），件數對得起來。權限同行情提示，一般店員可看。
+         */
+        get: operations["acquisitionPriceHintRecords"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/serialized-items/{item_id}": {
         parameters: {
             query?: never;
@@ -6760,6 +6783,38 @@ export interface components {
             latest?: components["schemas"]["LatestAcquisitionRead"] | null;
             /** Total Count */
             total_count: number;
+            typical?: components["schemas"]["TypicalPriceRange"] | null;
+            /** Used All Time */
+            used_all_time: boolean;
+            /** Window Months */
+            window_months: number;
+        };
+        /**
+         * PriceHintRecord
+         * @description 行情提示的一筆紀錄：哪天收的、什麼成色、收多少、上架多少、現在賣掉了沒。
+         */
+        PriceHintRecord: {
+            /**
+             * Acquired At
+             * Format: date-time
+             */
+            acquired_at: string;
+            /** Cost */
+            cost?: string | null;
+            grade: components["schemas"]["Grade"];
+            /** Listed Price */
+            listed_price: string;
+            status: components["schemas"]["SerializedItemStatus"];
+        };
+        /**
+         * PriceHintRecordsRead
+         * @description 行情提示的逐筆紀錄（新到舊、分頁）；期間與母體和 PriceHintRead 相同。
+         */
+        PriceHintRecordsRead: {
+            /** Items */
+            items: components["schemas"]["PriceHintRecord"][];
+            /** Total */
+            total: number;
             /** Used All Time */
             used_all_time: boolean;
             /** Window Months */
@@ -8499,6 +8554,22 @@ export interface components {
             rows: components["schemas"]["TrendRow"][];
             /** Store Id */
             store_id: number;
+        };
+        /**
+         * TypicalPriceRange
+         * @description 一般行情：收購價與上架售價各自的中間一半（第 25～75 百分位、取實際出現過的價格）。
+         *
+         *     最低～最高會被一筆特價或填錯的價格拉開；店員第一眼看這個。不分成色。
+         */
+        TypicalPriceRange: {
+            /** Cost High */
+            cost_high?: string | null;
+            /** Cost Low */
+            cost_low?: string | null;
+            /** Listed High */
+            listed_high: string;
+            /** Listed Low */
+            listed_low: string;
         };
         /**
          * UnreturnedGiftRead
@@ -14097,6 +14168,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PriceHintRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acquisitionPriceHintRecords: {
+        parameters: {
+            query: {
+                /** @description 品牌 id（必填） */
+                brand_id: number;
+                /** @description 型號 id（必填） */
+                product_model_id: number;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceHintRecordsRead"];
                 };
             };
             /** @description Validation Error */
