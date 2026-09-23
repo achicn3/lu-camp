@@ -469,6 +469,33 @@ class CampaignStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class CampaignItemKind(StrEnum):
+    """門市活動可套用的品項種類（沿用 docs/21 的四個開關：applies_*）。餐飲永不參加。"""
+
+    OWNED_SERIALIZED = "OWNED_SERIALIZED"
+    CONSIGNMENT_SERIALIZED = "CONSIGNMENT_SERIALIZED"
+    OWNED_BULK = "OWNED_BULK"
+    CATALOG = "CATALOG"
+
+
+class CampaignTargetType(StrEnum):
+    """門市活動的範圍條件指向什麼（docs/40 §3）。一律須屬本店。"""
+
+    CATEGORY = "CATEGORY"
+    BRAND = "BRAND"
+    PRODUCT_MODEL = "PRODUCT_MODEL"
+    SERIALIZED_ITEM = "SERIALIZED_ITEM"
+    CATALOG_PRODUCT = "CATALOG_PRODUCT"
+    BULK_BASKET = "BULK_BASKET"
+
+
+class CampaignTargetMode(StrEnum):
+    """範圍條件是「包含」還是「排除」：符合任一包含、且不符合任何排除，才算適用。"""
+
+    INCLUDE = "INCLUDE"
+    EXCLUDE = "EXCLUDE"
+
+
 class SignatureTaskKind(StrEnum):
     """手持簽署任務類型（docs/23）。"""
 

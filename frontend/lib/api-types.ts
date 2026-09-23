@@ -4177,7 +4177,17 @@ export interface components {
             ends_at: components["schemas"]["AwareDateTime"];
             /** Name */
             name: string;
+            /**
+             * Stackable
+             * @default false
+             */
+            stackable: boolean;
             starts_at: components["schemas"]["AwareDateTime"];
+            /**
+             * Targets
+             * @default []
+             */
+            targets: components["schemas"]["CampaignTargetInput"][];
         };
         /**
          * CampaignPerformanceReport
@@ -4261,6 +4271,8 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+            /** Stackable */
+            stackable: boolean;
             /**
              * Starts At
              * Format: date-time
@@ -4269,6 +4281,8 @@ export interface components {
             status: components["schemas"]["CampaignStatus"];
             /** Store Id */
             store_id: number;
+            /** Targets */
+            targets: components["schemas"]["CampaignTargetRead"][];
             /**
              * Updated At
              * Format: date-time
@@ -4281,6 +4295,37 @@ export interface components {
          * @enum {string}
          */
         CampaignStatus: "DRAFT" | "ACTIVE" | "ENDED" | "CANCELLED";
+        /**
+         * CampaignTargetInput
+         * @description 一條範圍條件：包含或排除某個分類／品牌／型號／單件／一般商品／販售籃（須屬本店）。
+         */
+        CampaignTargetInput: {
+            mode: components["schemas"]["CampaignTargetMode"];
+            /** Target Id */
+            target_id: number;
+            target_type: components["schemas"]["CampaignTargetType"];
+        };
+        /**
+         * CampaignTargetMode
+         * @description 範圍條件是「包含」還是「排除」：符合任一包含、且不符合任何排除，才算適用。
+         * @enum {string}
+         */
+        CampaignTargetMode: "INCLUDE" | "EXCLUDE";
+        /** CampaignTargetRead */
+        CampaignTargetRead: {
+            /** Label */
+            label: string;
+            mode: components["schemas"]["CampaignTargetMode"];
+            /** Target Id */
+            target_id: number;
+            target_type: components["schemas"]["CampaignTargetType"];
+        };
+        /**
+         * CampaignTargetType
+         * @description 門市活動的範圍條件指向什麼（docs/40 §3）。一律須屬本店。
+         * @enum {string}
+         */
+        CampaignTargetType: "CATEGORY" | "BRAND" | "PRODUCT_MODEL" | "SERIALIZED_ITEM" | "CATALOG_PRODUCT" | "BULK_BASKET";
         /** CartBeginCheckoutRequest */
         CartBeginCheckoutRequest: {
             /** Expected Revision */
@@ -7494,10 +7539,27 @@ export interface components {
          */
         SaleLineType: "SERIALIZED" | "CATALOG" | "BULK_LOT" | "MENU";
         /**
+         * SaleQuoteCampaignRead
+         * @description 套到的一個門市活動與它折了多少（一行或整筆；docs/40）。
+         */
+        SaleQuoteCampaignRead: {
+            /** Campaign Id */
+            campaign_id: number;
+            /** Discount Amount */
+            discount_amount: string;
+            /** Name */
+            name: string;
+        };
+        /**
          * SaleQuoteLineRead
          * @description 試算單行輸出：折後實際成交＋折讓留痕。
          */
         SaleQuoteLineRead: {
+            /**
+             * Campaigns
+             * @default []
+             */
+            campaigns: components["schemas"]["SaleQuoteCampaignRead"][];
             /** Description */
             description: string;
             /** Discount Amount */
@@ -7538,6 +7600,11 @@ export interface components {
             campaign_id: number | null;
             /** Campaign Name */
             campaign_name: string | null;
+            /**
+             * Campaigns
+             * @default []
+             */
+            campaigns: components["schemas"]["SaleQuoteCampaignRead"][];
             /** Food Subtotal */
             food_subtotal: string;
             /** Gift Retail Value */

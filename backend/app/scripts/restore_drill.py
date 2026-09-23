@@ -134,6 +134,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("採購-明細筆數", "SELECT count(*) FROM purchase_order_lines"),
     ("採購-供應商數", "SELECT count(*) FROM suppliers"),
     ("活動-檔數", "SELECT count(*) FROM campaigns"),
+    # 活動 v2（docs/40）：範圍條件是店長設定的（救不回來要重選），每行套用明細是報表的歸屬依據。
+    ("活動-範圍條件數", "SELECT count(*) FROM campaign_targets"),
+    (
+        "交易-活動折讓明細（筆數/金額）",
+        "SELECT count(*)::text || '/' || COALESCE(SUM(discount_amount),0)::text"
+        " FROM sale_line_campaigns",
+    ),
     ("餐飲-菜單品項數", "SELECT count(*) FROM menu_items"),
     # 開店前檢查：自訂項目是店主設定的（救不回來要重打），每日狀態則是當天的作業紀錄。
     ("開店檢查-自訂項目數", "SELECT count(*) FROM opening_check_items"),

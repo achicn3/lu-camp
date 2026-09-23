@@ -197,6 +197,26 @@ class SaleLine(Base, TimestampMixin):
     parent_sale_line_id: Mapped[int | None] = mapped_column(ForeignKey("sale_lines.id"))
 
 
+class SaleLineCampaign(Base, TimestampMixin):
+    """一行套到哪些門市活動、各折了多少（docs/40；可疊加時一行會有多筆）。
+
+    Σ discount_amount ＝ sale_lines.discount_amount。活動成效報表依此歸屬，
+    sale_lines.campaign_id 只留「貢獻最多的活動」供舊畫面與舊單據相容。
+    """
+
+    __tablename__ = "sale_line_campaigns"
+    __table_args__ = (
+        UniqueConstraint("sale_line_id", "campaign_id", name="uq_sale_line_campaigns_entry"),
+        CheckConstraint("discount_amount > 0", name="ck_sale_line_campaigns_amount_pos"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_line_id: Mapped[int] = mapped_column(ForeignKey("sale_lines.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    discount_amount: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+
+
 class SaleBulkAllocation(Base, TimestampMixin):
     """販售籃行的來源分配（ADR-025）：這一行從哪個散裝來源扣了幾件、當時成本多少。
 

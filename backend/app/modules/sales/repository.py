@@ -24,6 +24,7 @@ from app.modules.sales.models import (
     SaleAdjustment,
     SaleBulkAllocation,
     SaleLine,
+    SaleLineCampaign,
     SaleTender,
 )
 from app.shared.enums import (
@@ -122,6 +123,10 @@ class SalesRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def add_line_campaigns(self, rows: list[SaleLineCampaign]) -> None:
+        self._session.add_all(rows)
+        await self._session.flush()
 
     async def add_bulk_allocations(self, rows: list[SaleBulkAllocation]) -> None:
         self._session.add_all(rows)
@@ -640,26 +645,23 @@ class SalesRepository:
         return list((await self._session.scalars(stmt)).all())
 
     async def discount_totals_by_campaign(self, store_id: int) -> dict[int, Decimal]:
-        """各活動實際造成的折讓總額（非作廢）：Σ sale_line.discount_amount group by campaign_id。
+        """各活動實際造成的折讓總額（非作廢）：Σ sale_line_campaigns.discount_amount group by 活動。
 
-        供活動成效報表（C4）精確歸屬「此活動發出的折讓」（以 sale_line.campaign_id 為準，
-        非以期間概算）。作廢單以 invoice_status != VOID 排除（與毛利口徑一致）。
+        供活動成效報表（C4）。疊加時一行會分給多個活動、各記各的（docs/40）；舊單已由
+        migration 回填成一行一筆。作廢單排除（與毛利口徑一致）。
         """
         stmt = (
             select(
-                SaleLine.campaign_id,
-                func.coalesce(func.sum(SaleLine.discount_amount), 0),
+                SaleLineCampaign.campaign_id,
+                func.coalesce(func.sum(SaleLineCampaign.discount_amount), 0),
             )
+            .join(SaleLine, SaleLineCampaign.sale_line_id == SaleLine.id)
             .join(Sale, SaleLine.sale_id == Sale.id)
-            .where(
-                Sale.store_id == store_id,
-                Sale.status != SaleStatus.VOIDED,
-                SaleLine.campaign_id.is_not(None),
-            )
-            .group_by(SaleLine.campaign_id)
+            .where(Sale.store_id == store_id, Sale.status != SaleStatus.VOIDED)
+            .group_by(SaleLineCampaign.campaign_id)
         )
         rows = await self._session.execute(stmt)
-        return {cid: Decimal(total) for cid, total in rows if cid is not None}
+        return {cid: Decimal(total) for cid, total in rows}
 
     async def goods_margin_and_revenue(
         self, store_id: int, date_from: datetime, date_to: datetime

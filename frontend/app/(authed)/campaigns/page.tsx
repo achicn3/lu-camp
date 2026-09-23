@@ -63,6 +63,9 @@ function CreateCampaignForm({ onCreated }: { onCreated: () => void }) {
           applies_owned_bulk: appliesOwnedBulk,
           applies_catalog: appliesCatalog,
           applies_consignment: appliesConsignment,
+          // 可疊加與範圍條件的畫面在 P1b（docs/40）；目前一律不疊加、不限範圍（同 v1 行為）。
+          stackable: false,
+          targets: [],
         },
       });
       if (!data) throw new Error(extractDetail(error) ?? "建立活動失敗");

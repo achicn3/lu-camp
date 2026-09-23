@@ -37,6 +37,10 @@ class CampaignConflict(DomainError):
     """門市活動衝突（同店已有生效活動、非法狀態轉移、區間/欄位不合法）。"""
 
 
+class InvalidCampaignTarget(DomainError):
+    """活動範圍條件指向不存在或不屬本店的項目。"""
+
+
 class CampaignNotFound(DomainError):
     """指定的門市活動不存在（或非本店）。"""
 

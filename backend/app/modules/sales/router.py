@@ -26,13 +26,14 @@ from app.modules.sales.schemas import (
     LinePayRefundAttemptRead,
     LinePayRefundResolveRequest,
     SaleCreateRequest,
+    SaleQuoteCampaignRead,
     SaleQuoteLineRead,
     SaleQuoteRequest,
     SaleQuoteResponse,
     SaleRead,
     SaleSummaryRead,
 )
-from app.modules.sales.service import LinePayAttemptState, SalesService
+from app.modules.sales.service import LinePayAttemptState, QuoteLineCampaign, SalesService
 from app.modules.user.service import UserService
 from app.shared.enums import UserRole
 from app.shared.exceptions import (
@@ -432,6 +433,12 @@ async def create_sale(
     return SaleRead.build(sale, lines, tenders)
 
 
+def _campaign_read(c: QuoteLineCampaign) -> SaleQuoteCampaignRead:
+    return SaleQuoteCampaignRead(
+        campaign_id=c.campaign_id, name=c.name, discount_amount=c.discount_amount
+    )
+
+
 @router.post("/quote", response_model=SaleQuoteResponse, operation_id="quoteSale")
 async def quote_sale(
     payload: SaleQuoteRequest, session: SessionDep, user: CurrentUserDep
@@ -453,6 +460,7 @@ async def quote_sale(
         total=quote.total,
         campaign_id=quote.campaign_id,
         campaign_name=quote.campaign_name,
+        campaigns=[_campaign_read(c) for c in quote.campaigns],
         lines=[
             SaleQuoteLineRead(
                 line_type=ql.line_type,
@@ -465,6 +473,7 @@ async def quote_sale(
                 line_kind=ql.line_kind,
                 manual_discount_amount=ql.manual_discount_amount,
                 net_amount=ql.net_amount,
+                campaigns=[_campaign_read(c) for c in ql.campaigns],
             )
             for ql in quote.lines
         ],

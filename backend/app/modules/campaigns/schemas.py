@@ -6,7 +6,23 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from app.core.time import AwareDateTime
-from app.shared.enums import CampaignStatus
+from app.shared.enums import CampaignStatus, CampaignTargetMode, CampaignTargetType
+
+# 一個活動最多掛幾條範圍條件（包含＋排除）；再多就該用分類或品牌。
+CAMPAIGN_TARGETS_MAX = 200
+
+
+class CampaignTargetInput(BaseModel):
+    """一條範圍條件：包含或排除某個分類／品牌／型號／單件／一般商品／販售籃（須屬本店）。"""
+
+    mode: CampaignTargetMode
+    target_type: CampaignTargetType
+    target_id: Annotated[int, Field(gt=0)]
+
+
+class CampaignTargetRead(CampaignTargetInput):
+    label: str
+    """顯示用名稱（型號含品牌、單件含條碼）。"""
 
 
 class CampaignCreateRequest(BaseModel):
@@ -23,6 +39,10 @@ class CampaignCreateRequest(BaseModel):
     applies_owned_bulk: bool = True
     applies_catalog: bool = False
     applies_consignment: bool = False
+    # v2（docs/40）：可與其他活動疊加；false＝不跟任何活動併用（定價挑最划算）。
+    stackable: bool = False
+    # 範圍條件；沒有任何「包含」＝上面勾的種類全部適用。
+    targets: Annotated[list[CampaignTargetInput], Field(max_length=CAMPAIGN_TARGETS_MAX)] = []
 
 
 class CampaignRead(BaseModel):
@@ -37,6 +57,8 @@ class CampaignRead(BaseModel):
     starts_at: datetime
     ends_at: datetime
     status: CampaignStatus
+    stackable: bool
+    targets: list[CampaignTargetRead]
     created_by: int
     created_at: datetime
     updated_at: datetime

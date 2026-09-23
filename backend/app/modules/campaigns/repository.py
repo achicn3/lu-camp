@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.campaigns.models import Campaign
+from app.modules.campaigns.models import Campaign, CampaignTarget
 from app.shared.enums import CampaignStatus
 
 
@@ -34,7 +34,7 @@ class CampaignRepository:
         result: Campaign | None = await self._session.scalar(stmt)
         return result
 
-    async def list(
+    async def list_campaigns(
         self,
         store_id: int,
         *,
@@ -57,13 +57,34 @@ class CampaignRepository:
             stmt = stmt.where(Campaign.status == status)
         return int((await self._session.scalar(stmt)) or 0)
 
-    async def get_effective(self, store_id: int, now: datetime) -> Campaign | None:
-        """目前生效中活動：status=ACTIVE 且 now ∈ [starts_at, ends_at)（同店至多一個）。"""
-        stmt = select(Campaign).where(
-            Campaign.store_id == store_id,
-            Campaign.status == CampaignStatus.ACTIVE,
-            Campaign.starts_at <= now,
-            Campaign.ends_at > now,
+    async def list_effective(self, store_id: int, now: datetime) -> list[Campaign]:
+        """目前生效中的活動（可多個）：status=ACTIVE 且 now ∈ [starts_at, ends_at)；依 id。"""
+        stmt = (
+            select(Campaign)
+            .where(
+                Campaign.store_id == store_id,
+                Campaign.status == CampaignStatus.ACTIVE,
+                Campaign.starts_at <= now,
+                Campaign.ends_at > now,
+            )
+            .order_by(Campaign.id)
         )
-        result: Campaign | None = await self._session.scalar(stmt)
-        return result
+        return list((await self._session.scalars(stmt)).all())
+
+    async def add_targets(self, targets: list[CampaignTarget]) -> None:
+        self._session.add_all(targets)
+        await self._session.flush()
+
+    async def targets_for(self, store_id: int, campaign_ids: list[int]) -> list[CampaignTarget]:
+        """一批活動的範圍條件（依 id，順序穩定）。"""
+        if not campaign_ids:
+            return []
+        stmt = (
+            select(CampaignTarget)
+            .where(
+                CampaignTarget.store_id == store_id,
+                CampaignTarget.campaign_id.in_(campaign_ids),
+            )
+            .order_by(CampaignTarget.id)
+        )
+        return list((await self._session.scalars(stmt)).all())

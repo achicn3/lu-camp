@@ -1,7 +1,7 @@
 """campaigns 路由（docs/21）：門市活動 CRUD 與狀態機，MANAGER 限定。
 
 只做 I/O 與驗證；業務邏輯在 service。領域例外對應 HTTP：NotFound→404、Conflict→409、
-InvalidDiscountPct→422。狀態變更皆於 service 寫稽核。
+InvalidDiscountPct／InvalidCampaignTarget→422。狀態變更皆於 service 寫稽核。
 """
 
 from typing import Annotated
@@ -15,17 +15,18 @@ from app.modules.campaigns.models import Campaign
 from app.modules.campaigns.schemas import CampaignCreateRequest, CampaignRead
 from app.modules.campaigns.service import CampaignService
 from app.shared.enums import CampaignStatus
-from app.shared.exceptions import CampaignConflict, CampaignNotFound, InvalidDiscountPct
+from app.shared.exceptions import (
+    CampaignConflict,
+    CampaignNotFound,
+    InvalidCampaignTarget,
+    InvalidDiscountPct,
+)
 from app.shared.schemas import ListCountRead
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 ManagerDep = Annotated[CurrentUser, Depends(require_role("MANAGER"))]
-
-
-def _to_read(campaign: Campaign) -> CampaignRead:
-    return CampaignRead.model_validate(campaign, from_attributes=True)
 
 
 @router.post(
@@ -49,8 +50,10 @@ async def create_campaign(
             applies_catalog=body.applies_catalog,
             applies_consignment=body.applies_consignment,
             created_by=user.id,
+            stackable=body.stackable,
+            targets=body.targets,
         )
-    except InvalidDiscountPct as exc:
+    except (InvalidDiscountPct, InvalidCampaignTarget) as exc:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -60,7 +63,7 @@ async def create_campaign(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     # get_session 不自動 commit；寫入端點成功才落地（與 sales/cashdrawer 一致）。
     await session.commit()
-    return _to_read(campaign)
+    return await CampaignService(session).to_read(user.store_id, campaign)
 
 
 @router.get("", response_model=list[CampaignRead], operation_id="listCampaigns")
@@ -71,10 +74,11 @@ async def list_campaigns(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[CampaignRead]:
-    campaigns = await CampaignService(session).list_campaigns(
+    svc = CampaignService(session)
+    campaigns = await svc.list_campaigns(
         user.store_id, status=campaign_status, limit=limit, offset=offset
     )
-    return [_to_read(c) for c in campaigns]
+    return await svc.to_reads(user.store_id, campaigns)
 
 
 @router.get("/count", response_model=ListCountRead, operation_id="countCampaigns")
@@ -90,10 +94,11 @@ async def count_campaigns(
 
 @router.get("/{campaign_id}", response_model=CampaignRead, operation_id="getCampaign")
 async def get_campaign(campaign_id: int, session: SessionDep, user: ManagerDep) -> CampaignRead:
-    campaign = await CampaignService(session).get(user.store_id, campaign_id)
+    svc = CampaignService(session)
+    campaign = await svc.get(user.store_id, campaign_id)
     if campaign is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到活動")
-    return _to_read(campaign)
+    return await svc.to_read(user.store_id, campaign)
 
 
 async def _transition(
@@ -122,18 +127,18 @@ async def activate_campaign(
 ) -> CampaignRead:
     campaign = await _transition(session, user.store_id, campaign_id, user.id, "activate")
     await session.commit()
-    return _to_read(campaign)
+    return await CampaignService(session).to_read(user.store_id, campaign)
 
 
 @router.post("/{campaign_id}/end", response_model=CampaignRead, operation_id="endCampaign")
 async def end_campaign(campaign_id: int, session: SessionDep, user: ManagerDep) -> CampaignRead:
     campaign = await _transition(session, user.store_id, campaign_id, user.id, "end")
     await session.commit()
-    return _to_read(campaign)
+    return await CampaignService(session).to_read(user.store_id, campaign)
 
 
 @router.post("/{campaign_id}/cancel", response_model=CampaignRead, operation_id="cancelCampaign")
 async def cancel_campaign(campaign_id: int, session: SessionDep, user: ManagerDep) -> CampaignRead:
     campaign = await _transition(session, user.store_id, campaign_id, user.id, "cancel")
     await session.commit()
-    return _to_read(campaign)
+    return await CampaignService(session).to_read(user.store_id, campaign)

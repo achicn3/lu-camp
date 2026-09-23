@@ -401,6 +401,10 @@ class InventoryService:
                 f"序號品非 IN_STOCK，無法轉移到 {to_status}（如已售出/已下架）"
             )
 
+    async def get_serialized_by_id(self, store_id: int, item_id: int) -> SerializedItem | None:
+        """以 id 取本店序號品（活動範圍驗證用）。"""
+        return await self._repo.get_serialized_by_id(store_id, item_id)
+
     async def get_serialized_by_code(self, store_id: int, item_code: str) -> SerializedItem | None:
         """以 item_code 取序號品（供 POS 掃碼查件、讀取售價/ownership）。"""
         return await self._repo.get_serialized_by_code(store_id, item_code)

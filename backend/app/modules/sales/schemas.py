@@ -345,6 +345,14 @@ class SaleQuoteRequest(BaseModel):
         return [adjustment.to_request() for adjustment in self.adjustments]
 
 
+class SaleQuoteCampaignRead(BaseModel):
+    """套到的一個門市活動與它折了多少（一行或整筆；docs/40）。"""
+
+    campaign_id: int
+    name: str
+    discount_amount: NTDAmount
+
+
 class SaleQuoteLineRead(BaseModel):
     """試算單行輸出：折後實際成交＋折讓留痕。"""
 
@@ -359,14 +367,19 @@ class SaleQuoteLineRead(BaseModel):
     line_kind: SaleLineKind
     manual_discount_amount: NTDAmount
     net_amount: NTDAmount
+    # 本行套到的活動與各自折讓（加總＝discount_amount；可疊加時會有多個）。
+    campaigns: list[SaleQuoteCampaignRead] = []
 
 
 class SaleQuoteResponse(BaseModel):
     """結帳前試算輸出：套生效活動後的折後總額與各行折讓；唯讀。"""
 
     total: NTDAmount
+    # 舊欄位：貢獻最多的活動／全部活動名以「、」串起。新畫面請讀 campaigns。
     campaign_id: int | None
     campaign_name: str | None
+    # 整筆套到的活動（依活動 id），各自加總本筆的折讓（docs/40）。
+    campaigns: list[SaleQuoteCampaignRead] = []
     lines: list[SaleQuoteLineRead]
     # 餐飲（內用）小計與購物金可折抵上限（=total−food_subtotal）；POS 據此卡住購物金輸入。
     food_subtotal: NTDAmount

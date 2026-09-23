@@ -30,6 +30,7 @@
 - [會員中心](./17-member-center.md)
 - [報表與風險 review](./19-reports-and-risk-review-plan.md)
 - [門市活動](./21-store-campaigns-plan.md)
+- [門市活動 v2：多活動、指定商品、疊加、買 N 送 M、組合包](./40-promotions-v2.md)
 - [備份與還原](./22-backup-restore.md)
 - [Kiosk 簽署](./23-kiosk-signing-spec.md)
 - [AMEGO 電子發票](./24-amego-einvoice.md)

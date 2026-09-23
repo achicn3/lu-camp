@@ -1,6 +1,6 @@
 """C1 門市活動 API 整合測試（docs/21）：
 
-CRUD + 狀態機（DRAFT→ACTIVE→ENDED、→CANCELLED）、單一 ACTIVE 守衛、折扣/區間驗證、
+CRUD + 狀態機（DRAFT→ACTIVE→ENDED、→CANCELLED）、可同時多個 ACTIVE（v2）、折扣/區間驗證、
 跨店隔離、MANAGER 限定、稽核留痕。
 """
 
@@ -122,18 +122,19 @@ async def test_create_rejects_datetime_without_offset(
     assert resp.status_code == 422, resp.text
 
 
-async def test_activate_and_single_active_guard(
+async def test_several_campaigns_can_be_active_at_once(
     client: httpx.AsyncClient, db_session: AsyncSession
 ) -> None:
+    """v2（docs/40，2026-09-23）：拿掉「同店至多一個生效中」——多個活動可同時進行。"""
     mgr, _clerk, _store = await _seed(db_session)
     a = await _create(client, mgr, name="活動A")
     b = await _create(client, mgr, name="活動B")
     act_a = await client.post(f"/api/v1/campaigns/{a['id']}/activate", headers=_auth(mgr))
     assert act_a.status_code == 200
     assert act_a.json()["status"] == "ACTIVE"
-    # 第二個啟用 → 同店已有 ACTIVE → 409
     act_b = await client.post(f"/api/v1/campaigns/{b['id']}/activate", headers=_auth(mgr))
-    assert act_b.status_code == 409
+    assert act_b.status_code == 200, act_b.text
+    assert act_b.json()["status"] == "ACTIVE"
 
 
 async def test_end_then_can_activate_another(

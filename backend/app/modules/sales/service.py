@@ -13,8 +13,8 @@ commit/rollback 由呼叫端控制），不留「庫存扣了但現金沒進」�
 """
 
 import hashlib
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.audit import write_audit_log
 from app.core.canonical import canonical_json_bytes
-from app.core.money import MAX_NTD, discounted_price, round_ntd, split_tax_inclusive
-from app.modules.campaigns.models import Campaign
+from app.core.money import MAX_NTD, round_ntd, split_tax_inclusive
+from app.modules.campaigns.pricing import PromoCampaign, PromoItem, price_unit
 from app.modules.campaigns.service import CampaignService
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.consignment.service import ConsignmentService
@@ -33,6 +33,7 @@ from app.modules.customerdisplay.models import CartSession, CartSessionEvent
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.einvoice.service import EInvoiceService
 from app.modules.inventory.basket_service import BulkBasketService
+from app.modules.inventory.models import BulkBasket, BulkLot, CatalogProduct, SerializedItem
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
@@ -64,6 +65,7 @@ from app.modules.sales.models import (
     SaleAdjustmentAllocation,
     SaleBulkAllocation,
     SaleLine,
+    SaleLineCampaign,
     SaleTender,
 )
 from app.modules.sales.pricing import (
@@ -78,6 +80,7 @@ from app.modules.storecredit.service import StoreCreditService
 from app.modules.user.service import UserService
 from app.shared.enums import (
     AdjustmentScope,
+    CampaignItemKind,
     CartSessionStatus,
     CashMovementType,
     EInvoiceIssueChannel,
@@ -237,7 +240,9 @@ class _AppliedDiscount:
     unit_price: Decimal  # 折後（無折扣＝原價）
     original_unit_price: Decimal | None  # 折前單價（無折扣→None，sale_line 留痕）
     discount_per_unit: Decimal  # 每件折讓（無折扣＝0）
-    campaign_id: int | None
+    campaign_id: int | None  # 貢獻最多的活動（舊欄位 sale_lines.campaign_id）
+    # 每件折讓由哪些活動貢獻：(campaign_id, 每件折讓)；加總＝discount_per_unit（docs/40）。
+    allocations: tuple[tuple[int, Decimal], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -249,33 +254,104 @@ class _GiftContext:
     note: str | None
 
 
-def _compute_discount(
-    campaign: Campaign | None, original_unit: Decimal, *, applies: bool
+def _campaign_discount(
+    promos: Sequence[PromoCampaign], item: PromoItem | None, original_unit: Decimal
 ) -> _AppliedDiscount:
-    """依生效活動算折後單價；不適用（無活動/該品項未開）→ 原價、無留痕。"""
-    if campaign is None or not applies:
-        return _AppliedDiscount(original_unit, None, Decimal(0), None)
-    disc = Decimal(discounted_price(original_unit, campaign.discount_pct))
-    return _AppliedDiscount(disc, original_unit, original_unit - disc, campaign.id)
+    """依生效中的活動算折後單價（docs/40：多活動、可疊加、挑最划算；process 與 quote 共用）。
 
-
-def _campaign_applies(
-    campaign: Campaign | None, *, line_type: SaleLineType, is_consignment: bool
-) -> bool:
-    """該活動是否套用到此明細（docs/21 §8.2；process 與 quote 共用，避免口徑漂移）。
-
-    序號：自有→applies_owned_serialized、寄售→applies_consignment；一般商品→applies_catalog；
-    散裝：只折自有（applies_owned_bulk），寄售散裝無抽成模型、永不折。
+    item 為 None＝這種品項不參加活動（寄售散裝：無抽成模型，永不折）。餐飲不會進來。
     """
-    if campaign is None:
-        return False
-    if line_type == SaleLineType.MENU:
-        return False  # 餐飲不參與門市活動折扣（裁示）
-    if line_type == SaleLineType.SERIALIZED:
-        return campaign.applies_consignment if is_consignment else campaign.applies_owned_serialized
-    if line_type == SaleLineType.CATALOG:
-        return campaign.applies_catalog
-    return campaign.applies_owned_bulk and not is_consignment
+    if item is None or not promos:
+        return _AppliedDiscount(original_unit, None, Decimal(0), None)
+    priced = price_unit(original_unit, item, promos)
+    return _AppliedDiscount(
+        priced.unit_price,
+        priced.original_unit_price,
+        priced.discount_per_unit,
+        priced.primary_campaign_id,
+        priced.allocations,
+    )
+
+
+def _serialized_promo_item(item: SerializedItem) -> PromoItem:
+    return PromoItem(
+        kind=(
+            CampaignItemKind.CONSIGNMENT_SERIALIZED
+            if item.ownership_type == OwnershipType.CONSIGNMENT
+            else CampaignItemKind.OWNED_SERIALIZED
+        ),
+        category_id=item.category_id,
+        brand_id=item.brand_id,
+        product_model_id=item.product_model_id,
+        serialized_item_id=item.id,
+    )
+
+
+def _catalog_promo_item(product: CatalogProduct) -> PromoItem:
+    return PromoItem(
+        kind=CampaignItemKind.CATALOG,
+        category_id=product.category_id,
+        brand_id=product.brand_id,
+        product_model_id=product.product_model_id,
+        catalog_product_id=product.id,
+    )
+
+
+def _bulk_promo_item(lot: BulkLot) -> PromoItem | None:
+    """散裝只折自有；寄售散裝無抽成模型、永不折（docs/21 §2）。已入籃的來源依籃子比對。"""
+    if lot.consignor_id is not None:
+        return None
+    return PromoItem(
+        kind=CampaignItemKind.OWNED_BULK,
+        category_id=lot.category_id,
+        brand_id=lot.brand_id,
+        bulk_basket_id=lot.basket_id,
+    )
+
+
+def _basket_promo_item(basket: BulkBasket) -> PromoItem:
+    """籃內只有自有散裝（寄售不入籃）。"""
+    return PromoItem(
+        kind=CampaignItemKind.OWNED_BULK,
+        category_id=basket.category_id,
+        brand_id=basket.brand_id,
+        bulk_basket_id=basket.id,
+    )
+
+
+@dataclass(frozen=True)
+class QuoteLineCampaign:
+    """一行（或整筆）套到的一個活動與它折了多少（含稅整數元）。"""
+
+    campaign_id: int
+    name: str
+    discount_amount: Decimal
+
+
+def _sum_campaigns(
+    per_line: Iterable[tuple[QuoteLineCampaign, ...]],
+) -> list[QuoteLineCampaign]:
+    """各行的活動折讓依活動加總（依活動 id 排序）。"""
+    totals: dict[int, QuoteLineCampaign] = {}
+    for campaigns in per_line:
+        for c in campaigns:
+            prev = totals.get(c.campaign_id)
+            totals[c.campaign_id] = QuoteLineCampaign(
+                c.campaign_id,
+                c.name,
+                c.discount_amount + (prev.discount_amount if prev else Decimal(0)),
+            )
+    return [totals[k] for k in sorted(totals)]
+
+
+def _line_campaigns(
+    promos: Sequence[PromoCampaign], disc: _AppliedDiscount, qty: int
+) -> tuple[QuoteLineCampaign, ...]:
+    names = {c.id: c.name for c in promos}
+    return tuple(
+        QuoteLineCampaign(campaign_id, names.get(campaign_id, ""), per_unit * qty)
+        for campaign_id, per_unit in disc.allocations
+    )
 
 
 @dataclass(frozen=True)
@@ -293,6 +369,8 @@ class QuoteLine:
     manual_discount_amount: Decimal = Decimal(0)
     net_amount: Decimal = Decimal(0)
     """本行實付＝line_total − manual_discount_amount（贈品恆為 0）。"""
+    campaigns: tuple[QuoteLineCampaign, ...] = ()
+    """本行套到的活動與各自的折讓（加總＝discount_amount）。"""
 
 
 @dataclass(frozen=True)
@@ -318,6 +396,9 @@ class SaleQuote:
     """贈品原價價值——**僅供顯示參考**，不加進應付、也不算折扣。"""
     item_discount_amount: Decimal = Decimal(0)
     order_discount_amount: Decimal = Decimal(0)
+    campaigns: list[QuoteLineCampaign] = field(default_factory=list)
+    """整筆套到的活動（依活動 id），各自加總本筆的折讓。campaign_id／campaign_name 為舊欄位：
+    貢獻最多的那個／全部活動名以「、」串起。"""
 
 
 def _member_points_for(total: Decimal) -> int:
@@ -435,10 +516,7 @@ def _cart_fingerprint(
         # 明細對「掃描順序」正規化排序（Codex 第四輪 #3）：與前端持久化冪等鍵的排序語意一致——
         # 同一籃商品以不同順序重掃，指紋須相同，回應遺失後同鍵重送才會冪等重放原單、不誤回 409。
         "lines": sorted(
-            (
-                _line_fingerprint(line)
-                for line in lines
-            ),
+            (_line_fingerprint(line) for line in lines),
             key=canonical_json_bytes,
         ),
         # 收款組成納入指紋，但對 tender_type 正規化排序（順序不影響語意：每型別至多一筆）。
@@ -481,7 +559,6 @@ def _cart_fingerprint(
     return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
 
 
-
 def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
     """單行的冪等指紋內容。販售籃是後加欄位（ADR-025）：沒帶時不放進去，
     指紋維持加欄位前的形狀，部署前送出、回應遺失的結帳重送才不會被誤判成不同請求。"""
@@ -499,6 +576,7 @@ def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
     if line.bulk_basket_id is not None:
         fields["bulk_basket_id"] = line.bulk_basket_id
     return fields
+
 
 class SalesService:
     @staticmethod
@@ -1074,7 +1152,7 @@ class SalesService:
 
         # 門市活動折扣（docs/21 C2）：結帳當下取生效中活動（status=ACTIVE 且 now ∈ 窗），
         # 逐行依品項種類/擁有型態與活動開關套折後價（無活動→原價）。
-        campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
+        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
 
         # 餐飲小計（**含外帶**）：購物金折抵上限與會員點數都要扣掉它。
         # 判斷依 line_type == MENU，與內用/外帶無關——寫成「內用」會誤導。
@@ -1082,7 +1160,7 @@ class SalesService:
         discountable_flags: list[bool] = []
         for line in lines:
             line_total = await self._process_line(
-                store_id, sale.id, line, consignment_sales, campaign, discountable_flags
+                store_id, sale.id, line, consignment_sales, promos, discountable_flags
             )
             total += line_total
             if total > MAX_NTD:
@@ -2829,13 +2907,13 @@ class SalesService:
             raise EmptySale("結帳試算必須至少有一筆明細")
         # 試算永遠不放行停售品：同一個 service 實例若先做過補單，旗標不能殘留到這裡。
         self._allow_inactive_items = False
-        campaign = await self._campaigns.get_effective(store_id, datetime.now(UTC))
+        promos = await self._campaigns.effective_promos(store_id, datetime.now(UTC))
         quoted: list[QuoteLine] = []
         total = Decimal(0)
         food_subtotal = Decimal(0)
         discountable: list[bool] = []
         for line in lines:
-            ql = await self._quote_line(store_id, line, campaign, discountable)
+            ql = await self._quote_line(store_id, line, promos, discountable)
             self._ensure_numeric_12_amounts(
                 ql.unit_price,
                 ql.line_total,
@@ -2891,6 +2969,7 @@ class SalesService:
             order_discount = result.order_discount_amount
 
         min_spend = (await self._settings.get_effective_settings(store_id)).store_credit_min_spend
+        applied = _sum_campaigns(ql.campaigns for ql in quoted)
         return SaleQuote(
             gift_retail_value=sum(
                 (
@@ -2903,8 +2982,11 @@ class SalesService:
             item_discount_amount=item_discount,
             order_discount_amount=order_discount,
             total=total,
-            campaign_id=campaign.id if campaign is not None else None,
-            campaign_name=campaign.name if campaign is not None else None,
+            campaign_id=(
+                max(applied, key=lambda c: c.discount_amount).campaign_id if applied else None
+            ),
+            campaign_name="、".join(c.name for c in applied) if applied else None,
+            campaigns=applied,
             lines=quoted,
             food_subtotal=food_subtotal,
             store_credit_max=total - food_subtotal,
@@ -2915,7 +2997,7 @@ class SalesService:
         self,
         store_id: int,
         line: SaleLineInput,
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         discountable_out: list[bool] | None = None,
     ) -> QuoteLine:
         """單行試算（唯讀）：解析品項、算折後價；不動任何狀態。
@@ -2930,11 +3012,6 @@ class SalesService:
             item = await self._inventory.get_serialized_by_code(store_id, line.item_code)
             if item is None:
                 raise SaleItemNotFound(f"找不到序號品 {line.item_code}")
-            applies = _campaign_applies(
-                campaign,
-                line_type=SaleLineType.SERIALIZED,
-                is_consignment=item.ownership_type == OwnershipType.CONSIGNMENT,
-            )
             is_consignment = item.ownership_type == OwnershipType.CONSIGNMENT
             if gift is not None and is_consignment:
                 raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
@@ -2943,7 +3020,7 @@ class SalesService:
             disc = (
                 self._gift_discount(item.listed_price)
                 if gift is not None
-                else _compute_discount(campaign, item.listed_price, applies=applies)
+                else _campaign_discount(promos, _serialized_promo_item(item), item.listed_price)
             )
             return QuoteLine(
                 line_type=SaleLineType.SERIALIZED,
@@ -2955,6 +3032,7 @@ class SalesService:
                 discount_amount=disc.discount_per_unit,
                 line_kind=line.line_kind,
                 net_amount=disc.unit_price,
+                campaigns=_line_campaigns(promos, disc, 1),
             )
         if line.line_type == SaleLineType.CATALOG:
             if line.catalog_product_id is None:
@@ -2967,15 +3045,12 @@ class SalesService:
             # 停售的不能再賣（2026-09-17）：報價與實際成交是兩條路徑，兩邊都要擋。
             if not product.is_active and not self._allow_inactive_items:
                 raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
-            applies = _campaign_applies(
-                campaign, line_type=SaleLineType.CATALOG, is_consignment=False
-            )
             if discountable_out is not None:
                 discountable_out.append(gift is None)
             disc = (
                 self._gift_discount(product.unit_price)
                 if gift is not None
-                else _compute_discount(campaign, product.unit_price, applies=applies)
+                else _campaign_discount(promos, _catalog_promo_item(product), product.unit_price)
             )
             return QuoteLine(
                 line_type=SaleLineType.CATALOG,
@@ -2987,6 +3062,7 @@ class SalesService:
                 discount_amount=disc.discount_per_unit * line.qty,
                 line_kind=line.line_kind,
                 net_amount=disc.unit_price * line.qty,
+                campaigns=_line_campaigns(promos, disc, line.qty),
             )
         if line.line_type == SaleLineType.MENU:
             menu_item = await self._resolve_menu_item(store_id, line)
@@ -3005,7 +3081,7 @@ class SalesService:
                 net_amount=menu_item.unit_price * line.qty,
             )
         if line.bulk_basket_id is not None:
-            return await self._quote_basket(store_id, line, campaign, gift, discountable_out)
+            return await self._quote_basket(store_id, line, promos, gift, discountable_out)
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
         if line.qty <= 0:
@@ -3013,9 +3089,6 @@ class SalesService:
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
-        applies = _campaign_applies(
-            campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
-        )
         if gift is not None and lot.consignor_id is not None:
             raise SaleLineInvalid("寄售散裝批不可作為贈品（分潤依售價計）")
         if discountable_out is not None:
@@ -3023,7 +3096,7 @@ class SalesService:
         disc = (
             self._gift_discount(lot.unit_price)
             if gift is not None
-            else _compute_discount(campaign, lot.unit_price, applies=applies)
+            else _campaign_discount(promos, _bulk_promo_item(lot), lot.unit_price)
         )
         return QuoteLine(
             line_type=SaleLineType.BULK_LOT,
@@ -3035,13 +3108,14 @@ class SalesService:
             discount_amount=disc.discount_per_unit * line.qty,
             line_kind=line.line_kind,
             net_amount=disc.unit_price * line.qty,
+            campaigns=_line_campaigns(promos, disc, line.qty),
         )
 
     async def _quote_basket(
         self,
         store_id: int,
         line: SaleLineInput,
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         gift: _GiftContext | None,
         discountable_out: list[bool] | None,
     ) -> QuoteLine:
@@ -3055,7 +3129,7 @@ class SalesService:
         basket = view.basket
         if discountable_out is not None:
             discountable_out.append(gift is None)
-        disc = self._basket_discount(basket.unit_price, campaign, gift)
+        disc = self._basket_discount(basket, promos, gift)
         return QuoteLine(
             line_type=SaleLineType.BULK_LOT,
             description=basket.name,
@@ -3066,16 +3140,16 @@ class SalesService:
             discount_amount=disc.discount_per_unit * line.qty,
             line_kind=line.line_kind,
             net_amount=disc.unit_price * line.qty,
+            campaigns=_line_campaigns(promos, disc, line.qty),
         )
 
     def _basket_discount(
-        self, unit_price: Decimal, campaign: Campaign | None, gift: _GiftContext | None
+        self, basket: BulkBasket, promos: Sequence[PromoCampaign], gift: _GiftContext | None
     ) -> _AppliedDiscount:
         """籃內只有自有散裝（寄售不入籃），活動折扣與贈品規則同自有散裝批。"""
         if gift is not None:
-            return self._gift_discount(unit_price)
-        applies = _campaign_applies(campaign, line_type=SaleLineType.BULK_LOT, is_consignment=False)
-        return _compute_discount(campaign, unit_price, applies=applies)
+            return self._gift_discount(basket.unit_price)
+        return _campaign_discount(promos, _basket_promo_item(basket), basket.unit_price)
 
     async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:
         """贈品的前置驗證：必須帶原因、原因必須屬本店且啟用。
@@ -3221,7 +3295,7 @@ class SalesService:
         sale_id: int,
         line: SaleLineInput,
         consignment_sales: list[tuple[int, Decimal, int]],
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
         """解析單行、原子扣庫存、寫 stock_movement(OUT)、建 sale_line；回傳該行含稅小計（折後）。
@@ -3235,13 +3309,13 @@ class SalesService:
         flags = discountable_out if discountable_out is not None else []
         if line.line_type == SaleLineType.SERIALIZED:
             return await self._process_serialized(
-                store_id, sale_id, line, consignment_sales, campaign, gift, flags
+                store_id, sale_id, line, consignment_sales, promos, gift, flags
             )
         if line.line_type == SaleLineType.CATALOG:
-            return await self._process_catalog(store_id, sale_id, line, campaign, gift, flags)
+            return await self._process_catalog(store_id, sale_id, line, promos, gift, flags)
         if line.line_type == SaleLineType.MENU:
             return await self._process_menu(store_id, sale_id, line, gift, flags)
-        return await self._process_bulk(store_id, sale_id, line, campaign, gift, flags)
+        return await self._process_bulk(store_id, sale_id, line, promos, gift, flags)
 
     async def _resolve_menu_item(self, store_id: int, line: SaleLineInput) -> MenuItem:
         """解析餐飲明細：驗 menu_item_id/qty、取本店未封存且可售的品項。"""
@@ -3297,7 +3371,7 @@ class SalesService:
         sale_id: int,
         line: SaleLineInput,
         consignment_sales: list[tuple[int, Decimal, int]],
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         gift: _GiftContext | None = None,
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
@@ -3314,13 +3388,10 @@ class SalesService:
         if gift is not None and is_consignment:
             # 寄售分潤按成交價計，送出去等於寄售人拿 0——拿別人的貨做人情。
             raise SaleLineInvalid("寄售品不可作為贈品（分潤依售價計，贈送等同由寄售人吸收）")
-        applies = _campaign_applies(
-            campaign, line_type=SaleLineType.SERIALIZED, is_consignment=is_consignment
-        )
         disc = (
             self._gift_discount(item.listed_price)
             if gift is not None
-            else _compute_discount(campaign, item.listed_price, applies=applies)
+            else _campaign_discount(promos, _serialized_promo_item(item), item.listed_price)
         )  # qty 固定 1
         # 原子轉移 IN_STOCK→SOLD（已售出/併發競態 → 拋 InvalidStateTransition）。
         await self._inventory.sell_serialized_item(item.id)
@@ -3333,7 +3404,7 @@ class SalesService:
             ref_id=sale_id,
             serialized_item_id=item.id,
         )
-        await self._repo.add_line(
+        await self._add_priced_line(
             SaleLine(
                 store_id=store_id,
                 sale_id=sale_id,
@@ -3342,7 +3413,8 @@ class SalesService:
                 description=item.name,
                 qty=1,
                 **self._line_amounts(disc, qty=1, cost=item.acquisition_cost, gift=gift),
-            )
+            ),
+            disc,
         )
         if is_consignment:
             # 寄售品建檔時保證有 commission_pct（inventory 已驗），此處防呆。
@@ -3352,6 +3424,23 @@ class SalesService:
             # （disc.unit_price 在未折時等於原 listed_price）。docs/21 §8.1：折扣一律按比例分攤。
             consignment_sales.append((item.id, disc.unit_price, item.commission_pct))
         return disc.unit_price
+
+    async def _add_priced_line(self, sale_line: SaleLine, disc: _AppliedDiscount) -> SaleLine:
+        """建 sale_line，並記下它套到哪些活動、各折多少（docs/40：Σ＝discount_amount）。"""
+        saved = await self._repo.add_line(sale_line)
+        if disc.allocations:
+            await self._repo.add_line_campaigns(
+                [
+                    SaleLineCampaign(
+                        store_id=saved.store_id,
+                        sale_line_id=saved.id,
+                        campaign_id=campaign_id,
+                        discount_amount=per_unit * saved.qty,
+                    )
+                    for campaign_id, per_unit in disc.allocations
+                ]
+            )
+        return saved
 
     @staticmethod
     def _gift_discount(retail_unit_price: Decimal) -> _AppliedDiscount:
@@ -3414,7 +3503,7 @@ class SalesService:
         store_id: int,
         sale_id: int,
         line: SaleLineInput,
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         gift: _GiftContext | None = None,
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
@@ -3429,13 +3518,12 @@ class SalesService:
         # ——購物車還原等路徑會直接帶 id 進來。補單例外（交易已經發生，只是在補帳）。
         if not product.is_active and not self._allow_inactive_items:
             raise SaleLineInvalid(f"「{product.name}」已停售，不能結帳")
-        applies = _campaign_applies(campaign, line_type=SaleLineType.CATALOG, is_consignment=False)
         if discountable_out is not None:
             discountable_out.append(gift is None)
         disc = (
             self._gift_discount(product.unit_price)
             if gift is not None
-            else _compute_discount(campaign, product.unit_price, applies=applies)
+            else _campaign_discount(promos, _catalog_promo_item(product), product.unit_price)
         )
         amounts = self._line_amounts(
             disc,
@@ -3453,7 +3541,7 @@ class SalesService:
             ref_id=sale_id,
             catalog_product_id=product.id,
         )
-        await self._repo.add_line(
+        await self._add_priced_line(
             SaleLine(
                 store_id=store_id,
                 sale_id=sale_id,
@@ -3462,7 +3550,8 @@ class SalesService:
                 description=product.name,
                 qty=line.qty,
                 **amounts,
-            )
+            ),
+            disc,
         )
         return disc.unit_price * line.qty
 
@@ -3471,13 +3560,13 @@ class SalesService:
         store_id: int,
         sale_id: int,
         line: SaleLineInput,
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         gift: _GiftContext | None = None,
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
         if line.bulk_basket_id is not None:
             return await self._process_basket(
-                store_id, sale_id, line, campaign, gift, discountable_out
+                store_id, sale_id, line, promos, gift, discountable_out
             )
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
@@ -3486,10 +3575,6 @@ class SalesService:
         lot = await self._inventory.get_bulk_lot(store_id, line.bulk_lot_id)
         if lot is None:
             raise SaleItemNotFound(f"找不到散裝批 {line.bulk_lot_id}")
-        # 折扣只套自有散裝（applies_owned_bulk）；寄售散裝無抽成模型、不折（docs/21 §2）。
-        applies = _campaign_applies(
-            campaign, line_type=SaleLineType.BULK_LOT, is_consignment=lot.consignor_id is not None
-        )
         if discountable_out is not None:
             discountable_out.append(gift is None and lot.consignor_id is None)
         if gift is not None and lot.consignor_id is not None:
@@ -3497,7 +3582,7 @@ class SalesService:
         disc = (
             self._gift_discount(lot.unit_price)
             if gift is not None
-            else _compute_discount(campaign, lot.unit_price, applies=applies)
+            else _campaign_discount(promos, _bulk_promo_item(lot), lot.unit_price)
         )
         amounts = self._line_amounts(
             disc,
@@ -3516,7 +3601,7 @@ class SalesService:
             ref_id=sale_id,
             bulk_lot_id=lot.id,
         )
-        await self._repo.add_line(
+        await self._add_priced_line(
             SaleLine(
                 store_id=store_id,
                 sale_id=sale_id,
@@ -3525,7 +3610,8 @@ class SalesService:
                 description=lot.name,
                 qty=line.qty,
                 **amounts,
-            )
+            ),
+            disc,
         )
         return disc.unit_price * line.qty
 
@@ -3534,7 +3620,7 @@ class SalesService:
         store_id: int,
         sale_id: int,
         line: SaleLineInput,
-        campaign: Campaign | None,
+        promos: Sequence[PromoCampaign],
         gift: _GiftContext | None,
         discountable_out: list[bool] | None,
     ) -> Decimal:
@@ -3556,7 +3642,7 @@ class SalesService:
             (lot, qty, Decimal(round_ntd(InventoryService.per_piece_cost(lot) * qty)))
             for lot, qty in parts
         ]
-        disc = self._basket_discount(basket.unit_price, campaign, gift)
+        disc = self._basket_discount(basket, promos, gift)
         amounts = self._line_amounts(
             disc, qty=line.qty, cost=sum((cost for _, _, cost in priced), Decimal(0)), gift=gift
         )
@@ -3570,7 +3656,7 @@ class SalesService:
                 ref_id=sale_id,
                 bulk_lot_id=lot.id,
             )
-        sale_line = await self._repo.add_line(
+        sale_line = await self._add_priced_line(
             SaleLine(
                 store_id=store_id,
                 sale_id=sale_id,
@@ -3580,7 +3666,8 @@ class SalesService:
                 description=basket.name,
                 qty=line.qty,
                 **amounts,
-            )
+            ),
+            disc,
         )
         await self._repo.add_bulk_allocations(
             [

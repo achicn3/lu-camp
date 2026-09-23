@@ -2074,8 +2074,22 @@
             "title": "Name",
             "type": "string"
           },
+          "stackable": {
+            "default": false,
+            "title": "Stackable",
+            "type": "boolean"
+          },
           "starts_at": {
             "$ref": "#/components/schemas/AwareDateTime"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CampaignTargetInput"
+            },
+            "maxItems": 200,
+            "title": "Targets",
+            "type": "array"
           }
         },
         "required": [
@@ -2236,6 +2250,10 @@
             "title": "Name",
             "type": "string"
           },
+          "stackable": {
+            "title": "Stackable",
+            "type": "boolean"
+          },
           "starts_at": {
             "format": "date-time",
             "title": "Starts At",
@@ -2247,6 +2265,13 @@
           "store_id": {
             "title": "Store Id",
             "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignTargetRead"
+            },
+            "title": "Targets",
+            "type": "array"
           },
           "updated_at": {
             "format": "date-time",
@@ -2266,6 +2291,8 @@
           "starts_at",
           "ends_at",
           "status",
+          "stackable",
+          "targets",
           "created_by",
           "created_at",
           "updated_at"
@@ -2282,6 +2309,78 @@
           "CANCELLED"
         ],
         "title": "CampaignStatus",
+        "type": "string"
+      },
+      "CampaignTargetInput": {
+        "description": "一條範圍條件：包含或排除某個分類／品牌／型號／單件／一般商品／販售籃（須屬本店）。",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/CampaignTargetMode"
+          },
+          "target_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Id",
+            "type": "integer"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CampaignTargetType"
+          }
+        },
+        "required": [
+          "mode",
+          "target_type",
+          "target_id"
+        ],
+        "title": "CampaignTargetInput",
+        "type": "object"
+      },
+      "CampaignTargetMode": {
+        "description": "範圍條件是「包含」還是「排除」：符合任一包含、且不符合任何排除，才算適用。",
+        "enum": [
+          "INCLUDE",
+          "EXCLUDE"
+        ],
+        "title": "CampaignTargetMode",
+        "type": "string"
+      },
+      "CampaignTargetRead": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/CampaignTargetMode"
+          },
+          "target_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Target Id",
+            "type": "integer"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/CampaignTargetType"
+          }
+        },
+        "required": [
+          "mode",
+          "target_type",
+          "target_id",
+          "label"
+        ],
+        "title": "CampaignTargetRead",
+        "type": "object"
+      },
+      "CampaignTargetType": {
+        "description": "門市活動的範圍條件指向什麼（docs/40 §3）。一律須屬本店。",
+        "enum": [
+          "CATEGORY",
+          "BRAND",
+          "PRODUCT_MODEL",
+          "SERIALIZED_ITEM",
+          "CATALOG_PRODUCT",
+          "BULK_BASKET"
+        ],
+        "title": "CampaignTargetType",
         "type": "string"
       },
       "CartBeginCheckoutRequest": {
@@ -10679,9 +10778,41 @@
         "title": "SaleLineType",
         "type": "string"
       },
+      "SaleQuoteCampaignRead": {
+        "description": "套到的一個門市活動與它折了多少（一行或整筆；docs/40）。",
+        "properties": {
+          "campaign_id": {
+            "title": "Campaign Id",
+            "type": "integer"
+          },
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id",
+          "name",
+          "discount_amount"
+        ],
+        "title": "SaleQuoteCampaignRead",
+        "type": "object"
+      },
       "SaleQuoteLineRead": {
         "description": "試算單行輸出：折後實際成交＋折讓留痕。",
         "properties": {
+          "campaigns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleQuoteCampaignRead"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -10810,6 +10941,14 @@
               }
             ],
             "title": "Campaign Name"
+          },
+          "campaigns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SaleQuoteCampaignRead"
+            },
+            "title": "Campaigns",
+            "type": "array"
           },
           "food_subtotal": {
             "title": "Food Subtotal",

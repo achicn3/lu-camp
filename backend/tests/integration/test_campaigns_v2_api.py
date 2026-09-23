@@ -1,0 +1,157 @@
+"""門市活動 v2 管理 API（docs/40 P1，2026-09-23）：可疊加開關、範圍條件（包含／排除）。
+
+範圍可細到分類／品牌／型號／單件／一般商品／販售籃；一律須屬本店，他店或不存在的 id → 422。
+讀回時附名稱（label），管理頁不必再逐一查。
+"""
+
+from collections.abc import AsyncGenerator
+from decimal import Decimal
+
+import httpx
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_session
+from app.core.security import encode_access_token
+from app.main import create_app
+from app.modules.inventory.models import Brand, Category, ProductModel, SerializedItem
+from app.modules.store.models import Store
+from app.modules.user.models import User
+from app.shared.enums import Grade, OwnershipType, SerializedItemStatus, UserRole
+
+PATH = "/api/v1/campaigns"
+
+
+@pytest_asyncio.fixture
+async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient]:
+    app = create_app()
+
+    async def _override() -> AsyncGenerator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _override
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+async def _store(db: AsyncSession, name: str = "門市") -> tuple[int, str]:
+    store = Store(name=name)
+    db.add(store)
+    await db.flush()
+    mgr = User(
+        store_id=store.id, username=f"mgr{store.id}", password_hash="h", role=UserRole.MANAGER
+    )
+    db.add(mgr)
+    await db.flush()
+    return store.id, encode_access_token(user_id=mgr.id, role="MANAGER", store_id=store.id)
+
+
+def _auth(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _payload(**overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
+        "name": "露營週",
+        "discount_pct": 10,
+        "starts_at": "2026-06-01T00:00:00Z",
+        "ends_at": "2026-07-01T00:00:00Z",
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_defaults_not_stackable_and_no_targets(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _store_id, mgr = await _store(db_session)
+    resp = await client.post(PATH, json=_payload(), headers=_auth(mgr))
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["stackable"] is False
+    assert body["targets"] == []
+
+
+async def test_create_with_stackable_and_targets_reads_back_with_labels(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    store_id, mgr = await _store(db_session)
+    category = Category(store_id=store_id, name="帳篷", target_margin_pct=45)
+    brand = Brand(store_id=store_id, name="Snow Peak")
+    db_session.add_all([category, brand])
+    await db_session.flush()
+    model = ProductModel(store_id=store_id, brand_id=brand.id, name="Amenity Dome")
+    db_session.add(model)
+    await db_session.flush()
+    item = SerializedItem(
+        store_id=store_id,
+        item_code="ITM-V2-1",
+        name="Amenity Dome M",
+        grade=Grade.A,
+        ownership_type=OwnershipType.OWNED,
+        listed_price=Decimal(8000),
+        status=SerializedItemStatus.IN_STOCK,
+    )
+    db_session.add(item)
+    await db_session.flush()
+
+    resp = await client.post(
+        PATH,
+        json=_payload(
+            stackable=True,
+            targets=[
+                {"mode": "INCLUDE", "target_type": "CATEGORY", "target_id": category.id},
+                {"mode": "INCLUDE", "target_type": "PRODUCT_MODEL", "target_id": model.id},
+                {"mode": "INCLUDE", "target_type": "PRODUCT_MODEL", "target_id": model.id},
+                {"mode": "EXCLUDE", "target_type": "SERIALIZED_ITEM", "target_id": item.id},
+            ],
+        ),
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["stackable"] is True
+    targets = {(t["mode"], t["target_type"], t["target_id"]): t["label"] for t in body["targets"]}
+    assert targets == {
+        ("INCLUDE", "CATEGORY", category.id): "帳篷",
+        ("INCLUDE", "PRODUCT_MODEL", model.id): "Snow Peak Amenity Dome",
+        ("EXCLUDE", "SERIALIZED_ITEM", item.id): "Amenity Dome M（ITM-V2-1）",
+    }
+
+    got = await client.get(f"{PATH}/{body['id']}", headers=_auth(mgr))
+    assert len(got.json()["targets"]) == 3
+
+
+async def test_target_from_another_store_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _mine, mgr = await _store(db_session)
+    other, _ = await _store(db_session, "他店")
+    foreign = Category(store_id=other, name="他店分類", target_margin_pct=45)
+    db_session.add(foreign)
+    await db_session.flush()
+
+    resp = await client.post(
+        PATH,
+        json=_payload(
+            targets=[{"mode": "INCLUDE", "target_type": "CATEGORY", "target_id": foreign.id}]
+        ),
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_missing_target_is_rejected(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    _mine, mgr = await _store(db_session)
+    resp = await client.post(
+        PATH,
+        json=_payload(
+            targets=[{"mode": "EXCLUDE", "target_type": "BULK_BASKET", "target_id": 999999}]
+        ),
+        headers=_auth(mgr),
+    )
+    assert resp.status_code == 422, resp.text
