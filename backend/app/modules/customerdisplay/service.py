@@ -143,6 +143,8 @@ def _line_key(line: SaleLineInput) -> str:
         return f"SERIALIZED:{line.item_code}"
     if line.line_type is SaleLineType.CATALOG:
         return f"CATALOG:{line.catalog_product_id}"
+    if line.line_type is SaleLineType.BULK_LOT and line.bulk_basket_id is not None:
+        return f"BULK_BASKET:{line.bulk_basket_id}"
     if line.line_type is SaleLineType.BULK_LOT:
         return f"BULK_LOT:{line.bulk_lot_id}"
     return f"MENU:{line.menu_item_id}"

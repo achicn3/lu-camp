@@ -23,6 +23,7 @@ import {
   serializedStatusBadge,
 } from "@/features/inventory/inventory";
 import { labelConditionForGrade } from "@/features/inventory/grades";
+import { BasketPanel } from "@/features/inventory/BasketPanel";
 import { type LabelCondition, printLabel } from "@/lib/agent";
 import { discountPercent } from "@/features/acquisition/pricing";
 import { ProductDetailFields, type DetailEdits, type InventoryProduct } from "@/features/inventory/ProductDetailFields";
@@ -55,7 +56,7 @@ type BulkStatus = components["schemas"]["BulkLotStatus"];
 type Ownership = components["schemas"]["OwnershipType"];
 type Grade = components["schemas"]["Grade"];
 
-type Tab = "serialized" | "aging" | "catalog" | "bulk";
+type Tab = "serialized" | "aging" | "catalog" | "bulk" | "baskets";
 const PAGE_SIZE = 20;
 const AGE_PRESETS = [30, 60, 90, 180];
 
@@ -107,7 +108,8 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "serialized", label: "序號品" },
   { key: "aging", label: "久滯庫存" },
   { key: "catalog", label: "一般商品" },
-  { key: "bulk", label: "散裝批" },
+  { key: "bulk", label: "散裝" },
+  { key: "baskets", label: "販售籃" },
 ];
 
 function extractDetail(error: unknown): string | null {
@@ -1034,10 +1036,10 @@ function BulkDetailModal({
   });
   const d = detail.data;
   return (
-    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="散裝批明細">
+    <div className="pos-dialog-backdrop" role="dialog" aria-modal="true" aria-label="散裝明細">
       <div className="card pos-dialog inv-detail">
         <div className="inv-detail-head">
-          <h2>散裝批明細</h2>
+          <h2>散裝明細</h2>
           <button type="button" className="btn-ghost" onClick={onClose}>
             關閉
           </button>
@@ -1738,7 +1740,7 @@ function BulkPanel() {
         },
       });
       if (response.ok && data) return data;
-      throw new Error(extractDetail(error) ?? "讀取散裝批失敗");
+      throw new Error(extractDetail(error) ?? "讀取散裝失敗");
     },
   });
   const rows: BulkLot[] = query.data ?? [];
@@ -1845,7 +1847,11 @@ function BulkPanel() {
                   retailPrice={lot.retail_price}
                 />
               )}
-              {lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
+              {lot.basket_id != null && (
+                // 入籃的散裝貼籃子的標籤（到「販售籃」分頁補印），不印這批自己的。
+                <span className="hint">在販售籃中</span>
+              )}
+              {lot.basket_id == null && lot.status === "ON_SALE" && lot.remaining_qty > 0 && (
                 <ReprintLabelButton
                   code={lot.lot_code}
                   name={lot.name}
@@ -2109,6 +2115,7 @@ export default function InventoryPage() {
       {tab === "aging" && <AgingPanel />}
       {tab === "catalog" && <CatalogPanel />}
       {tab === "bulk" && <BulkPanel />}
+      {tab === "baskets" && <BasketPanel />}
     </section>
   );
 }

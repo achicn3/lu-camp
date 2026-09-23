@@ -113,6 +113,7 @@ describe("件數必須擋住送出", () => {
     lot: {
       name: "", categoryId: null, brandId: null, acquisitionCost: "",
       acquisitionBasis: "" as const, totalQty: "", unitPrice: "", retailPrice: "", label: "", note: "",
+      basketMode: "NONE" as const, basketId: null,
     },
     payoutMethod: "CASH" as const,
     payoutSplitCash: "",

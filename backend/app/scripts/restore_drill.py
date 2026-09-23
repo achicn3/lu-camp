@@ -91,6 +91,13 @@ FEATURE_CHECKS: list[tuple[str, str]] = [
     ("庫存-一般商品現量合計", "SELECT COALESCE(SUM(quantity_on_hand),0) FROM catalog_products"),
     ("庫存-異動筆數", "SELECT count(*) FROM stock_movements"),
     ("庫存-散裝餘量合計", "SELECT COALESCE(SUM(remaining_qty),0) FROM bulk_lots"),
+    # 散裝販售籃（ADR-025）：籃子本身與結帳時的來源分配（退貨回補依它，漏了就回錯來源）。
+    ("庫存-販售籃數", "SELECT count(*) FROM bulk_baskets"),
+    (
+        "交易-販售籃分配（件數/已退/成本）",
+        "SELECT COALESCE(SUM(qty),0)::text || '/' || COALESCE(SUM(returned_qty),0)::text"
+        " || '/' || COALESCE(SUM(cost_snapshot),0)::text FROM sale_bulk_allocations",
+    ),
     # 切結書條款全文：不可變、舊簽名永遠指向舊版全文，程式碼重跑 seeder 只會有當前版 → 救不回來。
     ("簽署-條款版本數", "SELECT count(*) FROM agreement_versions"),
     (

@@ -81,6 +81,21 @@ const SETTINGS = {
   premium_rate: "0.10",
 };
 
+const BASKET = {
+  id: 5,
+  store_id: 1,
+  code: "K1-ABCDEF0123",
+  name: "無品牌營釘",
+  brand_id: null,
+  category_id: null,
+  unit_price: "20",
+  note: null,
+  is_active: true,
+  remaining_qty: 30,
+  sources: [],
+  cost_reference: { sample_count: 0, unit_cost_min: null, unit_cost_max: null },
+};
+
 const TENT = {
   id: 1,
   item_code: "TENT1",
@@ -1769,6 +1784,69 @@ describe("/pos 結帳頁", () => {
     );
     // 一般商品可調量（非序號品才有 qty 輸入框）。
     expect(screen.getByLabelText("高山瓦斯罐 230g 數量")).toBeTruthy();
+  });
+
+  it("掃販售籃標籤：一籃一行、可調量（ADR-025）", async () => {
+    const requested: string[] = [];
+    stubFetch((url) => {
+      requested.push(url);
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/bulk-baskets/by-code/K1-ABCDEF0123"))
+        return json({ ...BASKET });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    await user.type(scanBox(), "K1-ABCDEF0123");
+    await waitFor(() => expect(screen.getByText("無品牌營釘")).toBeTruthy());
+    // 散裝可調量（上限＝整籃剩餘，見 pos-bulk-basket 的 basketCartLine 測試）。
+    expect(screen.getByLabelText("無品牌營釘 數量")).toBeTruthy();
+    // 籃子碼不是序號品也不是單一來源，不該先問那兩支（掃碼槍反應要快）。
+    expect(requested.some((u) => u.includes("/serialized-items/by-code/"))).toBe(false);
+  });
+
+  it("掃已入籃的舊來源標籤：改賣整籃，不只賣那一批", async () => {
+    stubFetch((url) => {
+      if (url.includes("/settings")) return json(SETTINGS);
+      if (url.includes("/cash-sessions/current"))
+        return json({ id: 1, status: "OPEN" });
+      if (url.includes("/serialized-items/by-code/"))
+        return json({ detail: "not found" }, 404);
+      if (url.includes("/bulk-lots/by-code/L1-ABCDEF0123"))
+        return json({
+          id: 9,
+          store_id: 1,
+          lot_code: "L1-ABCDEF0123",
+          label: null,
+          name: "舊標籤營釘",
+          brand_id: null,
+          category_id: null,
+          grade: "E",
+          acquisition_cost: "50",
+          acquisition_basis: "UNSPECIFIED",
+          unit_price: "20",
+          retail_price: null,
+          total_qty: 10,
+          remaining_qty: 0,
+          status: "SOLD_OUT",
+          note: null,
+          basket_id: 5,
+        });
+      if (url.endsWith("/bulk-baskets/5")) return json({ ...BASKET });
+      return null;
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/這筆不開發票/)).toBeTruthy());
+    await waitFor(() => expect(scanBox().disabled).toBe(false));
+    await user.type(scanBox(), "L1-ABCDEF0123");
+    // 那一批已賣完，但籃裡還有 30 支：不能報「已售罄」。
+    await waitFor(() => expect(screen.getByText("無品牌營釘")).toBeTruthy());
+    expect(screen.queryByText(/已售罄/)).toBeNull();
   });
 
   it("掃無庫存的一般商品 SKU 顯示阻擋", async () => {

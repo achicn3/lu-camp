@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.money import round_ntd
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.modules.returns.models import CustomerReturn, ReturnLine, ReturnTender
-from app.modules.sales.models import Sale, SaleLine
+from app.modules.sales.bulk_allocation import returned_cost
+from app.modules.sales.models import Sale, SaleBulkAllocation, SaleLine
 from app.shared.enums import OwnershipType, SaleLineKind, SaleLineType, SaleStatus, TenderType
 
 
@@ -307,6 +308,20 @@ class ReturnsRepository:
             if lot_ids
             else {}
         )
+        # 販售籃行（ADR-025）：成本依分配紀錄逐來源反轉，與退貨實際回到各來源的順序一致。
+        basket_line_ids = [r[0].id for r in rows if r[0].bulk_basket_id is not None]
+        basket_allocations: dict[int, list[tuple[int, Decimal]]] = {}
+        if basket_line_ids:
+            for alloc in (
+                await self._session.scalars(
+                    select(SaleBulkAllocation)
+                    .where(SaleBulkAllocation.sale_line_id.in_(basket_line_ids))
+                    .order_by(SaleBulkAllocation.id)
+                )
+            ).all():
+                basket_allocations.setdefault(alloc.sale_line_id, []).append(
+                    (alloc.qty, Decimal(alloc.cost_snapshot))
+                )
         cogs_done: set[int] = set()  # 散裝 COGS 每 sale_line 只以差額法算一次（非逐 row）
         for line, rqty, refund in rows:
             if line.line_type == SaleLineType.CATALOG:
@@ -322,7 +337,13 @@ class ReturnsRepository:
                     c_bulk_rev += refund
                 else:
                     o_bulk_rev += refund
-                    if lot is not None and lot.total_qty and line.id not in cogs_done:
+                    if line.id in basket_allocations and line.id not in cogs_done:
+                        cogs_done.add(line.id)
+                        prior = prior_returned.get(line.id, 0)
+                        cum = prior + period_returned.get(line.id, 0)
+                        allocs = basket_allocations[line.id]
+                        o_bulk_cogs += returned_cost(allocs, cum) - returned_cost(allocs, prior)
+                    elif lot is not None and lot.total_qty and line.id not in cogs_done:
                         cogs_done.add(line.id)
                         prior = prior_returned.get(line.id, 0)
                         cum = prior + period_returned.get(line.id, 0)

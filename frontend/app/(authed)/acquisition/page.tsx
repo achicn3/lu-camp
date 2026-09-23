@@ -65,6 +65,7 @@ import { newIdempotencyKey } from "@/lib/uuid";
 
 type Contact = components["schemas"]["ContactRead"];
 type Category = components["schemas"]["CategoryRead"];
+type BulkBasket = components["schemas"]["BulkBasketRead"];
 type PricingRule = components["schemas"]["PricingRuleRead"];
 type Grade = components["schemas"]["Grade"];
 type PayoutMethod = components["schemas"]["PayoutMethod"];
@@ -114,6 +115,8 @@ function emptyLot(): LotDraft {
     retailPrice: "",
     label: "",
     note: "",
+    basketMode: "NONE",
+    basketId: null,
   };
 }
 
@@ -902,8 +905,16 @@ async function resolveBrands(
 
 // ── 標籤列印（Brother 標籤機）：收購完成後，逐一補印序號品 / 散裝批的條碼標籤 ──
 // 右下角的全新／二手依成色決定：只有「全新未拆」印全新，其餘印二手（2026-09-16）；成色本身不印。
-function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null }) {
-  const total = codes.length + (lot !== null ? 1 : 0);
+function PrintLabelsAction({
+  codes,
+  lot,
+  basket = null,
+}: {
+  codes: string[];
+  lot: string | null;
+  basket?: string | null;
+}) {
+  const total = codes.length + (lot !== null ? 1 : 0) + (basket !== null ? 1 : 0);
 
   const print = useMutation({
     mutationFn: async () => {
@@ -926,13 +937,26 @@ function PrintLabelsAction({ codes, lot }: { codes: string[]; lot: string | null
         const { data, error } = await api.GET("/api/v1/bulk-lots/by-code/{lot_code}", {
           params: { path: { lot_code: lot } },
         });
-        if (!data) throw new Error(detail(error) ?? `查無散裝批 ${lot}`);
+        if (!data) throw new Error(detail(error) ?? `查無散裝 ${lot}`);
         lots.push({
           code: lot,
           name: data.name,
           price: parseNtd(data.unit_price) ?? 0,
           brandId: data.brand_id,
           grade: data.grade,
+        });
+      }
+      if (basket !== null) {
+        const { data, error } = await api.GET("/api/v1/bulk-baskets/by-code/{code}", {
+          params: { path: { code: basket } },
+        });
+        if (!data) throw new Error(detail(error) ?? `查無販售籃 ${basket}`);
+        lots.push({
+          code: basket,
+          name: data.name,
+          price: parseNtd(data.unit_price) ?? 0,
+          brandId: data.brand_id,
+          grade: "E",
         });
       }
 
@@ -1070,6 +1094,10 @@ export default function AcquisitionPage() {
     type: AcquisitionType;
     codes: string[];
     lot: string | null;
+    /** 散裝入籃時的販售籃碼（標籤印這個）；未入籃為 null。 */
+    basket: string | null;
+    /** 加入的是既有籃：籃上已有標籤，不必重印。 */
+    joinedBasket: boolean;
     /** 撥入購物金實發額（後端帳本分錄 signed_amount；非購物金撥款為 null）。 */
     creditGranted: string | null;
     /** 撥入後購物金總額（後端帳本分錄 balance_after；非購物金撥款為 null）。 */
@@ -1233,6 +1261,9 @@ export default function AcquisitionPage() {
           category_id: lot.categoryId,
           label: lot.label || null,
           note: lot.note.trim() || null,
+          // 販售籃（ADR-025）：沒選就不送，維持舊指紋與舊行為。
+          ...(lot.basketMode === "JOIN" && lot.basketId !== null ? { basket_id: lot.basketId } : {}),
+          ...(lot.basketMode === "NEW" ? { new_basket: true } : {}),
         };
       } else {
         // 同款多件在此展開：一列填 3 件 → 送出 3 筆各自獨立的序號品。
@@ -1304,6 +1335,8 @@ export default function AcquisitionPage() {
         type: data.type,
         codes: data.item_codes,
         lot: data.lot_code,
+        basket: data.basket_code ?? null,
+        joinedBasket: isBulk && lot.basketMode === "JOIN",
         creditGranted: data.payout_credit_granted,
         creditBalanceAfter: data.payout_credit_balance_after,
       });
@@ -1392,7 +1425,7 @@ export default function AcquisitionPage() {
         throw new Error(problems[0]);
       }
       const items = isBulk
-        ? [{ name: lot.name || "散裝批", amount: String(payable) }]
+        ? [{ name: lot.name || "散裝", amount: String(payable) }]
         : // **與送出的 payload 用同一份展開結果**：後端綁定會逐項比對品名與金額，
           // 客人簽 1 件、店員改成 3 件會直接被擋下——件數因此自動被簽名綁住，
           // 不必另外傳一個件數欄位給後端比對（與散裝批的 lot 快照是不同做法）。
@@ -1720,8 +1753,17 @@ export default function AcquisitionPage() {
             </p>
           )}
           {result.codes.length > 0 && <p>序號條碼：{result.codes.join("、")}</p>}
-          {result.lot !== null && <p>散裝批號：{result.lot}</p>}
-          <PrintLabelsAction codes={result.codes} lot={result.lot} />
+          {result.lot !== null && <p>散裝編號：{result.lot}</p>}
+          {result.basket !== null && <p>販售籃：{result.basket}</p>}
+          {result.basket !== null && result.joinedBasket ? (
+            <p className="hint">已加入販售籃，沿用籃上原本的標籤，不必重印。</p>
+          ) : null}
+          <PrintLabelsAction
+            codes={result.codes}
+            // 入籃的散裝貼籃子的標籤（多次收購共用一張），不印這批自己的。
+            lot={result.basket === null ? result.lot : null}
+            basket={result.basket !== null && !result.joinedBasket ? result.basket : null}
+          />
           {receiptSnap !== null && (
             <div className="acq-receipt-print">
               <button
@@ -1766,6 +1808,61 @@ export default function AcquisitionPage() {
   );
 }
 
+// ── 散裝販售籃選擇（ADR-025）──
+function BasketPicker({
+  baskets,
+  loading,
+  failed,
+  chosen,
+  onChoose,
+}: {
+  baskets: BulkBasket[];
+  loading: boolean;
+  failed: boolean;
+  chosen: BulkBasket | null;
+  onChoose: (basket: BulkBasket | null) => void;
+}) {
+  if (failed) return <p className="form-error">販售籃讀取失敗，請稍後再試或改選「開新販售籃」。</p>;
+  if (loading) return <p className="hint">讀取販售籃中…</p>;
+  if (baskets.length === 0) return <p className="hint">還沒有販售籃，請改選「開新販售籃」。</p>;
+  const ref = chosen?.cost_reference;
+  const costRange =
+    ref && ref.unit_cost_min != null && ref.unit_cost_max != null
+      ? ref.unit_cost_min === ref.unit_cost_max
+        ? `${formatNtd(parseNtd(ref.unit_cost_min) ?? 0)}`
+        : `${formatNtd(parseNtd(ref.unit_cost_min) ?? 0)}–${formatNtd(parseNtd(ref.unit_cost_max) ?? 0)}`
+      : null;
+  return (
+    <>
+      <label className="field">
+        <span className="field-label">選擇販售籃</span>
+        <select
+          aria-label="販售籃"
+          value={chosen?.id ?? ""}
+          onChange={(e) =>
+            onChoose(baskets.find((b) => String(b.id) === e.target.value) ?? null)
+          }
+        >
+          <option value="">請選擇</option>
+          {baskets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}（每件 {formatNtd(parseNtd(b.unit_price) ?? 0)} 元）
+            </option>
+          ))}
+        </select>
+      </label>
+      {chosen !== null ? (
+        <p className="hint">
+          目前 {chosen.remaining_qty} 件・每件 {formatNtd(parseNtd(chosen.unit_price) ?? 0)} 元。
+          {costRange === null
+            ? "還沒有收購紀錄可參考。"
+            : `以前收過 ${ref?.sample_count ?? 0} 批，單件收購成本 ${costRange} 元（整批成本 ÷ 件數）。`}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 // ── 散裝批 ──
 function BulkLotForm({
   lot,
@@ -1779,14 +1876,102 @@ function BulkLotForm({
   function patch(p: Partial<LotDraft>) {
     onChange({ ...lot, ...p });
   }
+  const joining = lot.basketMode === "JOIN";
+  const baskets = useQuery({
+    queryKey: ["bulk-baskets"],
+    queryFn: async () => {
+      const { data, error } = await api.GET("/api/v1/bulk-baskets");
+      if (!data) throw new Error(detail(error) ?? "讀取販售籃失敗");
+      return data;
+    },
+    enabled: joining,
+  });
+  const chosen = joining ? baskets.data?.find((b) => b.id === lot.basketId) ?? null : null;
+
+  function chooseMode(mode: LotDraft["basketMode"]) {
+    // 離開「加入」時只解除鎖定、不清掉已帶入的內容：店員可能只是想以這批另開一籃。
+    onChange({ ...lot, basketMode: mode, basketId: mode === "JOIN" ? lot.basketId : null });
+  }
+
+  function chooseBasket(basket: BulkBasket | null) {
+    if (basket === null) {
+      patch({ basketId: null });
+      return;
+    }
+    // 同籃同品項同價（店主 2026-09-22 裁示）：名稱／品牌／分類／售價一律以籃子為準。
+    patch({
+      basketId: basket.id,
+      name: basket.name,
+      brandId: basket.brand_id,
+      categoryId: basket.category_id,
+      unitPrice: String(parseNtd(basket.unit_price) ?? ""),
+    });
+  }
+
   return (
     <div className="card acq-row">
-      <h2>散裝批</h2>
+      <h2>散裝</h2>
+      <fieldset className="acq-basket">
+        <legend className="field-label">
+          販售籃
+          <InfoTip text="同樣的東西（例如無品牌營釘）不同客人分次賣進來，可以放同一籃、貼同一張標籤、賣同一個價。每次收購的成本和數量仍各自記錄。" />
+        </legend>
+        <label>
+          <input
+            type="radio"
+            name="basket-mode"
+            checked={lot.basketMode === "NONE"}
+            onChange={() => chooseMode("NONE")}
+          />
+          不放入販售籃
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="basket-mode"
+            checked={lot.basketMode === "NEW"}
+            onChange={() => chooseMode("NEW")}
+          />
+          開新販售籃
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="basket-mode"
+            checked={joining}
+            onChange={() => chooseMode("JOIN")}
+          />
+          加入現有販售籃
+        </label>
+        {lot.basketMode === "NEW" ? (
+          <p className="hint">
+            送出後會開一個新籃並印籃子的標籤；之後同樣的東西，選「加入現有販售籃」就能共用這張標籤。
+          </p>
+        ) : null}
+        {joining ? (
+          <BasketPicker
+            baskets={baskets.data ?? []}
+            loading={baskets.isLoading}
+            failed={baskets.isError}
+            chosen={chosen}
+            onChoose={chooseBasket}
+          />
+        ) : null}
+      </fieldset>
       <div className="acq-row-grid">
         <label className="field">
           <span className="field-label">名稱</span>
-          <input value={lot.name} onChange={(e) => patch({ name: e.target.value })} />
+          <input
+            aria-label="名稱"
+            value={lot.name}
+            readOnly={joining}
+            onChange={(e) => patch({ name: e.target.value })}
+          />
         </label>
+        {joining ? (
+          <p className="hint acq-basket-locked">品牌、分類、每件售價沿用販售籃，要改請到庫存頁改販售籃。</p>
+        ) : (
+          <>
         <CreatableCombobox
           label="品牌"
           search={(q) =>
@@ -1823,6 +2008,8 @@ function BulkLotForm({
           selectedId={lot.categoryId}
           onChange={(o) => patch({ categoryId: o?.id ?? null })}
         />
+          </>
+        )}
         <label className="field">
           <span className="field-label">整堆收購成本</span>
           <input
@@ -1850,7 +2037,13 @@ function BulkLotForm({
         </label>
         <label className="field">
           <span className="field-label">每件均一價</span>
-          <input inputMode="numeric" value={lot.unitPrice} onChange={(e) => patch({ unitPrice: e.target.value })} />
+          <input
+            aria-label="每件均一價"
+            inputMode="numeric"
+            value={lot.unitPrice}
+            readOnly={joining}
+            onChange={(e) => patch({ unitPrice: e.target.value })}
+          />
         </label>
         {/* 全新售價（原價，選填）：純記錄，不參與定價、毛利與報表的任何計算。 */}
         <label className="field">
@@ -1877,7 +2070,7 @@ function BulkLotForm({
             <InfoTip text="商品狀況或作業提醒，結帳時會跳出來提醒店員。例：數量請客人自己點過、放 B 架第三層。請勿填寫客人身分證或電話。" />
           </span>
           <input
-            aria-label="散裝批備註"
+            aria-label="散裝備註"
             maxLength={NOTE_MAX_LENGTH}
             placeholder="例：數量請客人自己點過"
             value={lot.note}

@@ -22,6 +22,7 @@ import {
 import {
   type CartLine,
   addLine,
+  basketCartLine,
   cartTotal,
   isGift,
   lineTotal,
@@ -108,9 +109,32 @@ function Money({ value }: { value: number }) {
 }
 
 // ── 掃碼加入購物車 ──
-// 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）；掃描到完整碼即自動加入。
+// 序號品 S{店}-{10碼HEX}、散裝 L{店}-{10碼HEX}（acquisition/codes.py）、散裝販售籃
+// K{店}-{10碼HEX}（inventory/basket_service.py）；掃描到完整碼即自動加入。
 // 一般商品以 SKU 查（任意字串，掃碼槍尾端 Enter 送出）：序號品 → 散裝 → 一般商品 一格通吃。
-const ITEM_CODE_RE = /^[SL]\d+-[0-9A-F]{10}$/;
+const ITEM_CODE_RE = /^[SLK]\d+-[0-9A-F]{10}$/;
+const BASKET_CODE_RE = /^K\d+-[0-9A-F]{10}$/;
+
+/** 取販售籃並轉成購物車行；查不到或整籃賣完都如實回報。 */
+async function basketLineById(basketId: number): Promise<CartLine> {
+  const { data, error, response } = await api.GET("/api/v1/bulk-baskets/{basket_id}", {
+    params: { path: { basket_id: basketId } },
+  });
+  if (!data) {
+    throw new Error(extractDetail(error) ?? `查詢販售籃失敗（代碼 ${response.status}）`);
+  }
+  return basketCartLine(data);
+}
+
+/** 還原購物車時由店員端原始請求算回前端行鍵（與掃碼加入時的鍵一致，折扣指向才對得上）。 */
+function payloadLineKey(line: components["schemas"]["StaffCartLineRead"]): string {
+  if (line.line_type === "SERIALIZED") return `S:${line.item_code}`;
+  if (line.line_type === "CATALOG") return `C:${line.catalog_product_id}`;
+  if (line.line_type === "BULK_LOT") {
+    return line.bulk_basket_id != null ? `K:${line.bulk_basket_id}` : `B:${line.bulk_lot_id}`;
+  }
+  return `MENU-${line.menu_item_id}`;
+}
 
 function ScanBar({
   onResolved,
@@ -127,6 +151,17 @@ function ScanBar({
   const [error, setError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: async (code: string): Promise<CartLine> => {
+      // 販售籃碼制明確，直接查籃子，不必先問序號品與散裝（ADR-025）。
+      if (BASKET_CODE_RE.test(code)) {
+        const basket = await api.GET("/api/v1/bulk-baskets/by-code/{code}", {
+          params: { path: { code } },
+        });
+        if (basket.data) return basketCartLine(basket.data);
+        if (basket.response.status === 404) throw new Error(`找不到此條碼：${code}`);
+        throw new Error(
+          extractDetail(basket.error) ?? `查詢失敗（代碼 ${basket.response.status}）`,
+        );
+      }
       // 先試序號品，再試散裝堆，最後試一般商品 SKU（一格掃碼通吃，docs/10 §3）。
       const serialized = await api.GET(
         "/api/v1/serialized-items/by-code/{item_code}",
@@ -163,6 +198,8 @@ function ScanBar({
       });
       if (bulk.response.status === 200 && bulk.data) {
         const lot = bulk.data;
+        // 已入籃的舊來源標籤：改賣整籃。這批賣完了籃裡可能還有別批，不能報售罄。
+        if (lot.basket_id != null) return await basketLineById(lot.basket_id);
         if (lot.remaining_qty <= 0) throw new Error(`${lot.lot_code} 已售罄`);
         return {
           key: `B:${lot.id}`,
@@ -1154,14 +1191,7 @@ export default function PosPage() {
         const restoredLines: CartLine[] = payload.lines.map((line, index) => {
             const gift = line.line_kind === "GIFT";
             const snapshot = cart.snapshot.items[index];
-            const base =
-              line.line_type === "SERIALIZED"
-                ? `S:${line.item_code}`
-                : line.line_type === "CATALOG"
-                  ? `C:${line.catalog_product_id}`
-                  : line.line_type === "BULK_LOT"
-                    ? `B:${line.bulk_lot_id}`
-                    : `MENU-${line.menu_item_id}`;
+            const base = payloadLineKey(line);
             return {
               key: gift ? `G:${base}` : base,
               lineType: line.line_type,
@@ -1171,6 +1201,7 @@ export default function PosPage() {
               itemCode: line.item_code ?? undefined,
               catalogProductId: line.catalog_product_id ?? undefined,
               bulkLotId: line.bulk_lot_id ?? undefined,
+              bulkBasketId: line.bulk_basket_id ?? undefined,
               menuItemId: line.menu_item_id ?? undefined,
               lineKind: gift ? "GIFT" : "NORMAL",
               giftReasonId: line.gift_reason_id ?? undefined,
@@ -1190,14 +1221,7 @@ export default function PosPage() {
                 : (() => {
                     const line = payload.lines[adjustment.target_line_index];
                     if (!line) return null;
-                    const base =
-                      line.line_type === "SERIALIZED"
-                        ? `S:${line.item_code}`
-                        : line.line_type === "CATALOG"
-                          ? `C:${line.catalog_product_id}`
-                          : line.line_type === "BULK_LOT"
-                            ? `B:${line.bulk_lot_id}`
-                            : `MENU-${line.menu_item_id}`;
+                    const base = payloadLineKey(line);
                     return line.line_kind === "GIFT" ? `G:${base}` : base;
                   })(),
             method: adjustment.method,

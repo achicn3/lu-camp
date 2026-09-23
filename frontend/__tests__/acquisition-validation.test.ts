@@ -39,6 +39,8 @@ function lot(over: Partial<LotDraft> = {}): LotDraft {
     retailPrice: "",
     label: "",
     note: "",
+    basketMode: "NONE",
+    basketId: null,
     ...over,
   };
 }
@@ -94,6 +96,10 @@ describe("serializedRowErrors", () => {
 });
 
 describe("lotErrors", () => {
+  it("加入現有販售籃必須選定是哪一籃", () => {
+    expect(lotErrors(lot({ basketMode: "JOIN" }))).toContain("散裝：請選擇要加入的販售籃");
+    expect(lotErrors(lot({ basketMode: "JOIN", basketId: 5 }))).toEqual([]);
+  });
   it("valid lot → none", () => {
     expect(lotErrors(lot())).toEqual([]);
   });

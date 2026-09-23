@@ -32,10 +32,12 @@ from app.modules.contacts.service import ContactService
 from app.modules.customerdisplay.models import CartSession, CartSessionEvent
 from app.modules.customerdisplay.repository import CustomerDisplayRepository
 from app.modules.einvoice.service import EInvoiceService
+from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.service import InventoryService
 from app.modules.menu.models import MenuItem
 from app.modules.menu.service import MenuService
 from app.modules.sales import linepay as sales_linepay
+from app.modules.sales.bulk_allocation import returned_split
 from app.modules.sales.inputs import (
     CARRIER_TYPE_MOBILE,
     LINEPAY_RETURN_RECOVERY_KIND,
@@ -60,6 +62,7 @@ from app.modules.sales.models import (
     Sale,
     SaleAdjustment,
     SaleAdjustmentAllocation,
+    SaleBulkAllocation,
     SaleLine,
     SaleTender,
 )
@@ -96,6 +99,7 @@ from app.shared.enums import (
     TenderType,
 )
 from app.shared.exceptions import (
+    BulkBasketNotFound,
     CrossStoreReference,
     EInvoiceSettingsChanged,
     EmptySale,
@@ -432,17 +436,7 @@ def _cart_fingerprint(
         # 同一籃商品以不同順序重掃，指紋須相同，回應遺失後同鍵重送才會冪等重放原單、不誤回 409。
         "lines": sorted(
             (
-                {
-                    "line_type": line.line_type.value,
-                    "item_code": line.item_code,
-                    "catalog_product_id": line.catalog_product_id,
-                    "bulk_lot_id": line.bulk_lot_id,
-                    "menu_item_id": line.menu_item_id,
-                    "qty": line.qty,
-                    "line_kind": line.line_kind.value,
-                    "gift_reason_id": line.gift_reason_id,
-                    "gift_note": line.gift_note,
-                }
+                _line_fingerprint(line)
                 for line in lines
             ),
             key=canonical_json_bytes,
@@ -487,6 +481,25 @@ def _cart_fingerprint(
     return hashlib.sha256(canonical_json_bytes(canonical)).hexdigest()
 
 
+
+def _line_fingerprint(line: SaleLineInput) -> dict[str, object]:
+    """單行的冪等指紋內容。販售籃是後加欄位（ADR-025）：沒帶時不放進去，
+    指紋維持加欄位前的形狀，部署前送出、回應遺失的結帳重送才不會被誤判成不同請求。"""
+    fields: dict[str, object] = {
+        "line_type": line.line_type.value,
+        "item_code": line.item_code,
+        "catalog_product_id": line.catalog_product_id,
+        "bulk_lot_id": line.bulk_lot_id,
+        "menu_item_id": line.menu_item_id,
+        "qty": line.qty,
+        "line_kind": line.line_kind.value,
+        "gift_reason_id": line.gift_reason_id,
+        "gift_note": line.gift_note,
+    }
+    if line.bulk_basket_id is not None:
+        fields["bulk_basket_id"] = line.bulk_basket_id
+    return fields
+
 class SalesService:
     @staticmethod
     def configured_linepay_client() -> LinePayClient | None:
@@ -502,6 +515,7 @@ class SalesService:
         self._session = session
         self._repo = SalesRepository(session)
         self._inventory = InventoryService(session)
+        self._baskets = BulkBasketService(session)
         # 補單時放行已停售商品（見 create_sale 的 rebuilding_paid_sale）。只在該次呼叫內有效。
         self._allow_inactive_items = False
         self._cash = CashDrawerService(session)
@@ -622,6 +636,8 @@ class SalesService:
             base = f"SERIALIZED:{line.item_code}"
         elif line.line_type is SaleLineType.CATALOG:
             base = f"CATALOG:{line.catalog_product_id}"
+        elif line.line_type is SaleLineType.BULK_LOT and line.bulk_basket_id is not None:
+            base = f"BULK_BASKET:{line.bulk_basket_id}"
         elif line.line_type is SaleLineType.BULK_LOT:
             base = f"BULK_LOT:{line.bulk_lot_id}"
         else:
@@ -2275,6 +2291,7 @@ class SalesService:
             datetime,
             datetime,
             Decimal,
+            Decimal | None,
         ]
     ]:
         """期間售出散裝的洞察原始列（經營洞察把散裝納入品牌/類型排行；Codex P2）。"""
@@ -2444,15 +2461,53 @@ class SalesService:
                         ref_id=sale.id,
                     )
                 elif line.line_type == SaleLineType.BULK_LOT and line.bulk_lot_id is not None:
-                    await self._inventory.return_bulk_lot_items(
-                        sale.store_id,
-                        line.bulk_lot_id,
-                        line.qty,
-                        ref_type="sale_void",
-                        ref_id=sale.id,
+                    await self.restore_bulk_line(
+                        sale.store_id, line, line.qty, ref_type="sale_void", ref_id=sale.id
                     )
                 # MENU：無庫存，略過。
         return sale
+
+    async def restore_bulk_line(
+        self,
+        store_id: int,
+        line: SaleLine,
+        qty: int,
+        *,
+        ref_type: str,
+        ref_id: int,
+        reason: StockReason = StockReason.RETURN,
+    ) -> None:
+        """散裝行退回 qty 件（退貨／作廢共用）。
+
+        單一來源行回 bulk_lot_id；販售籃行依分配紀錄「後分配的先回」回補各來源
+        （ADR-025；同一規則也用在報表的成本反轉，見 bulk_allocation）。
+        """
+        if line.bulk_basket_id is None:
+            assert line.bulk_lot_id is not None
+            await self._inventory.return_bulk_lot_items(
+                store_id, line.bulk_lot_id, qty, ref_type=ref_type, ref_id=ref_id, reason=reason
+            )
+            return
+        allocations = await self._repo.bulk_allocations_for_update(store_id, line.id)
+        already = sum(a.returned_qty for a in allocations)
+        try:
+            target = returned_split([a.qty for a in allocations], already + qty)
+        except ValueError as exc:
+            raise SaleLineInvalid(f"銷售明細 {line.id} 退回數量超過售出數量") from exc
+        for allocation, returned in zip(allocations, target, strict=True):
+            delta = returned - allocation.returned_qty
+            if delta == 0:
+                continue
+            await self._inventory.return_bulk_lot_items(
+                store_id,
+                allocation.bulk_lot_id,
+                delta,
+                ref_type=ref_type,
+                ref_id=ref_id,
+                reason=reason,
+            )
+            allocation.returned_qty = returned
+        await self._session.flush()
 
     async def mark_invoice_issued(self, store_id: int, sale_id: int) -> None:
         """電子發票平台核可（F0401 ProcessResult 成功）後，把對應銷售的 invoice_status
@@ -2929,6 +2984,8 @@ class SalesService:
                 discount_amount=Decimal(0),
                 net_amount=menu_item.unit_price * line.qty,
             )
+        if line.bulk_basket_id is not None:
+            return await self._quote_basket(store_id, line, campaign, gift, discountable_out)
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
         if line.qty <= 0:
@@ -2959,6 +3016,46 @@ class SalesService:
             line_kind=line.line_kind,
             net_amount=disc.unit_price * line.qty,
         )
+
+    async def _quote_basket(
+        self,
+        store_id: int,
+        line: SaleLineInput,
+        campaign: Campaign | None,
+        gift: _GiftContext | None,
+        discountable_out: list[bool] | None,
+    ) -> QuoteLine:
+        """販售籃報價：與結帳同價（籃子售價、自有散裝的活動規則）；不扣庫存。"""
+        assert line.bulk_basket_id is not None
+        if line.qty <= 0:
+            raise SaleLineInvalid("BULK_LOT 明細數量必須 > 0")
+        view = await self._baskets.get(store_id, line.bulk_basket_id)
+        if view is None:
+            raise SaleItemNotFound(f"找不到販售籃 {line.bulk_basket_id}")
+        basket = view.basket
+        if discountable_out is not None:
+            discountable_out.append(gift is None)
+        disc = self._basket_discount(basket.unit_price, campaign, gift)
+        return QuoteLine(
+            line_type=SaleLineType.BULK_LOT,
+            description=basket.name,
+            qty=line.qty,
+            unit_price=disc.unit_price,
+            line_total=disc.unit_price * line.qty,
+            original_unit_price=disc.original_unit_price,
+            discount_amount=disc.discount_per_unit * line.qty,
+            line_kind=line.line_kind,
+            net_amount=disc.unit_price * line.qty,
+        )
+
+    def _basket_discount(
+        self, unit_price: Decimal, campaign: Campaign | None, gift: _GiftContext | None
+    ) -> _AppliedDiscount:
+        """籃內只有自有散裝（寄售不入籃），活動折扣與贈品規則同自有散裝批。"""
+        if gift is not None:
+            return self._gift_discount(unit_price)
+        applies = _campaign_applies(campaign, line_type=SaleLineType.BULK_LOT, is_consignment=False)
+        return _compute_discount(campaign, unit_price, applies=applies)
 
     async def _resolve_gift(self, store_id: int, line: SaleLineInput) -> _GiftContext | None:
         """贈品的前置驗證：必須帶原因、原因必須屬本店且啟用。
@@ -3358,6 +3455,10 @@ class SalesService:
         gift: _GiftContext | None = None,
         discountable_out: list[bool] | None = None,
     ) -> Decimal:
+        if line.bulk_basket_id is not None:
+            return await self._process_basket(
+                store_id, sale_id, line, campaign, gift, discountable_out
+            )
         if line.bulk_lot_id is None:
             raise SaleLineInvalid("BULK_LOT 明細必須帶 bulk_lot_id")
         if line.qty <= 0:
@@ -3405,5 +3506,72 @@ class SalesService:
                 qty=line.qty,
                 **amounts,
             )
+        )
+        return disc.unit_price * line.qty
+
+    async def _process_basket(
+        self,
+        store_id: int,
+        sale_id: int,
+        line: SaleLineInput,
+        campaign: Campaign | None,
+        gift: _GiftContext | None,
+        discountable_out: list[bool] | None,
+    ) -> Decimal:
+        """販售籃售出（ADR-025）：一行 sale_line，庫存依 FIFO 分配到各來源並逐筆留痕。
+
+        成本逐來源 HALF_UP 到整數元後加總，與分配紀錄的 cost_snapshot 加總一致。
+        """
+        assert line.bulk_basket_id is not None
+        if line.qty <= 0:
+            raise SaleLineInvalid("BULK_LOT 明細數量必須 > 0")
+        if discountable_out is not None:
+            discountable_out.append(gift is None)
+        try:
+            basket, parts = await self._baskets.sell(store_id, line.bulk_basket_id, line.qty)
+        except BulkBasketNotFound as exc:
+            # 與找不到散裝批同一個對外語意（404），客顯與結帳路徑的錯誤對應不必各加一條。
+            raise SaleItemNotFound(str(exc)) from exc
+        priced = [
+            (lot, qty, Decimal(round_ntd(InventoryService.per_piece_cost(lot) * qty)))
+            for lot, qty in parts
+        ]
+        disc = self._basket_discount(basket.unit_price, campaign, gift)
+        amounts = self._line_amounts(
+            disc, qty=line.qty, cost=sum((cost for _, _, cost in priced), Decimal(0)), gift=gift
+        )
+        for lot, qty, _ in priced:
+            await self._inventory.record_stock_out(
+                store_id,
+                ItemKind.BULK_LOT,
+                qty=qty,
+                reason=StockReason.GIFT if gift is not None else StockReason.SALE,
+                ref_type="sale",
+                ref_id=sale_id,
+                bulk_lot_id=lot.id,
+            )
+        sale_line = await self._repo.add_line(
+            SaleLine(
+                store_id=store_id,
+                sale_id=sale_id,
+                line_type=SaleLineType.BULK_LOT,
+                bulk_lot_id=priced[0][0].id,
+                bulk_basket_id=basket.id,
+                description=basket.name,
+                qty=line.qty,
+                **amounts,
+            )
+        )
+        await self._repo.add_bulk_allocations(
+            [
+                SaleBulkAllocation(
+                    store_id=store_id,
+                    sale_line_id=sale_line.id,
+                    bulk_lot_id=lot.id,
+                    qty=qty,
+                    cost_snapshot=cost,
+                )
+                for lot, qty, cost in priced
+            ]
         )
         return disc.unit_price * line.qty

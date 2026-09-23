@@ -263,6 +263,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bulk-baskets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Bulk Baskets
+         * @description 販售籃清單（收購選籃、庫存管理）。預設只列啟用中的。
+         */
+        get: operations["listBulkBaskets"];
+        put?: never;
+        /**
+         * Create Bulk Basket
+         * @description 建立空的販售籃（店員收購時也要能開新籃，故不限管理者）。
+         */
+        post: operations["createBulkBasket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-baskets/by-code/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bulk Basket By Code
+         * @description POS 掃籃子標籤（條碼即 Code 128 編 code）。
+         */
+        get: operations["getBulkBasketByCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bulk-baskets/{basket_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Bulk Basket */
+        get: operations["getBulkBasket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Bulk Basket
+         * @description 改販售籃（限管理者）。改售價後記得重印標籤；已成交的價格與成本不受影響。
+         */
+        patch: operations["updateBulkBasket"];
+        trace?: never;
+    };
+    "/api/v1/bulk-baskets/{basket_id}/lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Lot To Bulk Basket
+         * @description 既有散裝整批加入販售籃（限管理者；同價、自有、未入其他籃）。
+         */
+        post: operations["addLotToBulkBasket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bulk-lots": {
         parameters: {
             query?: never;
@@ -3406,6 +3491,8 @@ export interface components {
             acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
             /** Acquisition Cost */
             acquisition_cost: number | string;
+            /** Basket Id */
+            basket_id?: number | null;
             /** Brand Id */
             brand_id?: number | null;
             /** Category Id */
@@ -3414,6 +3501,11 @@ export interface components {
             label?: string | null;
             /** Name */
             name: string;
+            /**
+             * New Basket
+             * @default false
+             */
+            new_basket: boolean;
             /** Note */
             note?: string | null;
             /** Retail Price */
@@ -3505,6 +3597,8 @@ export interface components {
         AcquisitionResult: {
             /** Acquisition Id */
             acquisition_id: number;
+            /** Basket Code */
+            basket_code?: string | null;
             /** Contact Id */
             contact_id: number;
             /** Item Codes */
@@ -3709,6 +3803,113 @@ export interface components {
          */
         BulkAcquisitionBasis: "WEIGHT" | "BAG" | "UNSPECIFIED";
         /**
+         * BulkBasketAddLot
+         * @description 把既有散裝整批加入販售籃（限管理者；須同價、自有、未入其他籃）。
+         */
+        BulkBasketAddLot: {
+            /** Bulk Lot Id */
+            bulk_lot_id: number;
+        };
+        /**
+         * BulkBasketCreate
+         * @description 建立散裝販售籃（ADR-025）：名稱＋每件售價（含稅整數元 > 0）。
+         */
+        BulkBasketCreate: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /**
+         * BulkBasketRead
+         * @description 散裝販售籃輸出：可售數量由有效來源加總。
+         */
+        BulkBasketRead: {
+            /** Brand Id */
+            brand_id: number | null;
+            /** Category Id */
+            category_id: number | null;
+            /** Code */
+            code: string;
+            cost_reference: components["schemas"]["BulkCostReference"];
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Remaining Qty */
+            remaining_qty: number;
+            /** Sources */
+            sources: components["schemas"]["BulkBasketSource"][];
+            /** Store Id */
+            store_id: number;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * BulkBasketSource
+         * @description 籃內一筆來源（一次收購）：數量與成本各自保留，不與其他來源合併。
+         */
+        BulkBasketSource: {
+            /** Acquisition Cost */
+            acquisition_cost: string;
+            /** Bulk Lot Id */
+            bulk_lot_id: number;
+            /**
+             * Intake Date
+             * Format: date-time
+             */
+            intake_date: string;
+            /** Lot Code */
+            lot_code: string;
+            /** Remaining Qty */
+            remaining_qty: number;
+            status: components["schemas"]["BulkLotStatus"];
+            /** Total Qty */
+            total_qty: number;
+            /** Unit Cost */
+            unit_cost: string;
+        };
+        /**
+         * BulkBasketUpdate
+         * @description 改販售籃（限管理者）。只改有帶的欄位；售價／名稱／品牌／分類會同步到籃內各來源。
+         */
+        BulkBasketUpdate: {
+            /** Brand Id */
+            brand_id?: number | null;
+            /** Category Id */
+            category_id?: number | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Unit Price */
+            unit_price?: number | string | null;
+        };
+        /**
+         * BulkCostReference
+         * @description 同籃歷史單件收購成本區間；樣本數＝來源收購筆數（不是件數）。
+         */
+        BulkCostReference: {
+            /** Sample Count */
+            sample_count: number;
+            /** Unit Cost Max */
+            unit_cost_max?: string | null;
+            /** Unit Cost Min */
+            unit_cost_min?: string | null;
+        };
+        /**
          * BulkFilterOptions
          * @description 散裝批的篩選選項；分類與成色依品牌收斂，品牌一律列全部實際有的。
          */
@@ -3767,6 +3968,8 @@ export interface components {
             acquisition_basis: components["schemas"]["BulkAcquisitionBasis"];
             /** Acquisition Cost */
             acquisition_cost: string;
+            /** Basket Id */
+            basket_id?: number | null;
             /** Brand Id */
             brand_id: number | null;
             /** Category Id */
@@ -4061,6 +4264,8 @@ export interface components {
         };
         /** CartLineRequest */
         CartLineRequest: {
+            /** Bulk Basket Id */
+            bulk_basket_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
             /** Catalog Product Id */
@@ -7073,6 +7278,8 @@ export interface components {
          * @description 單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。
          */
         SaleLineCreateRequest: {
+            /** Bulk Basket Id */
+            bulk_basket_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
             /** Catalog Product Id */
@@ -7112,6 +7319,8 @@ export interface components {
          * @description 銷售明細輸出。
          */
         SaleLineRead: {
+            /** Bulk Basket Id */
+            bulk_basket_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id: number | null;
             /** Catalog Product Id */
@@ -7912,6 +8121,8 @@ export interface components {
          *     回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。
          */
         StaffCartLineRead: {
+            /** Bulk Basket Id */
+            bulk_basket_id?: number | null;
             /** Bulk Lot Id */
             bulk_lot_id?: number | null;
             /** Catalog Product Id */
@@ -8753,6 +8964,203 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrandRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listBulkBaskets: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                include_inactive?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    createBulkBasket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkBasketCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getBulkBasketByCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getBulkBasket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                basket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updateBulkBasket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                basket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkBasketUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    addLotToBulkBasket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                basket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkBasketAddLot"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkBasketRead"];
                 };
             };
             /** @description Validation Error */

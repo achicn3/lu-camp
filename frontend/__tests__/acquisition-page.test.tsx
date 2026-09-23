@@ -172,7 +172,7 @@ describe("AcquisitionPage", () => {
     stub();
     renderPage();
     await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
-    expect(await screen.findByText("散裝批")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "散裝" })).toBeTruthy();
     expect(screen.getByText("秤斤")).toBeTruthy();
     expect(screen.getByText("整袋")).toBeTruthy();
   });
@@ -480,7 +480,7 @@ describe("AcquisitionPage", () => {
     expect(listed().value).toBe("1800");
 
     await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
-    expect(await screen.findByText("散裝批")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "散裝" })).toBeTruthy();
     await userEvent.click(screen.getByRole("tab", { name: "買斷" }));
 
     await waitFor(() => expect(listed().value).toBe("1800"));

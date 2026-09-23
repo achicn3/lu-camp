@@ -45,6 +45,12 @@ export interface LotDraft {
   retailPrice: string;
   label: string;
   note: string;
+  /**
+   * 散裝販售籃（ADR-025）：NONE＝單獨一張標籤（舊式）；NEW＝以這批開新籃；
+   * JOIN＝加入 basketId 那一籃（名稱／品牌／分類／每件售價以籃子為準）。
+   */
+  basketMode: "NONE" | "NEW" | "JOIN";
+  basketId: number | null;
 }
 
 export interface AcquisitionDraft {
@@ -95,6 +101,9 @@ export function serializedRowErrors(type: AcqType, index: number, row: ItemDraft
 
 export function lotErrors(lot: LotDraft): string[] {
   const errors: string[] = [];
+  if (lot.basketMode === "JOIN" && lot.basketId === null) {
+    errors.push("散裝：請選擇要加入的販售籃");
+  }
   if (!lot.name.trim()) errors.push("散裝：名稱必填");
   if (!isPositiveIntNtd(lot.acquisitionCost)) errors.push("散裝：整堆收購成本須為正整數元");
   if (lot.acquisitionBasis !== "WEIGHT" && lot.acquisitionBasis !== "BAG") {

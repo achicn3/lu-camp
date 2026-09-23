@@ -43,6 +43,8 @@ class SaleLineCreateRequest(BaseModel):
     catalog_product_id: int | None = None
     bulk_lot_id: int | None = None
     menu_item_id: int | None = None
+    # 販售籃（ADR-025）：BULK_LOT 行以籃子售出，後端依先進先出分配到各來源。
+    bulk_basket_id: int | None = Field(default=None, ge=1)
     qty: int = Field(default=1, ge=1)
     # 商業性質與贈品來歷。與客顯購物車的 CartLineRequest 一致——兩條路徑最終都變成
     # 同一個 SaleLineInput，欄位若有落差，購物車快照與實際成交就會對不起來。
@@ -53,6 +55,8 @@ class SaleLineCreateRequest(BaseModel):
     @model_validator(mode="after")
     def _check_shape(self) -> "SaleLineCreateRequest":
         """依 line_type 驗證：只接受對應的參照、序號品 qty 必為 1（避免靜默只賣 1）。"""
+        if self.line_type != SaleLineType.BULK_LOT and self.bulk_basket_id is not None:
+            raise ValueError("只有散裝明細可以帶 bulk_basket_id")
         if self.line_type == SaleLineType.SERIALIZED:
             if self.item_code is None:
                 raise ValueError("SERIALIZED 明細必須帶 item_code")
@@ -83,14 +87,14 @@ class SaleLineCreateRequest(BaseModel):
             ):
                 raise ValueError("MENU 明細只能帶 menu_item_id")
         else:  # BULK_LOT
-            if self.bulk_lot_id is None:
-                raise ValueError("BULK_LOT 明細必須帶 bulk_lot_id")
+            if (self.bulk_lot_id is None) == (self.bulk_basket_id is None):
+                raise ValueError("BULK_LOT 明細必須帶 bulk_lot_id 或 bulk_basket_id（擇一）")
             if (
                 self.item_code is not None
                 or self.catalog_product_id is not None
                 or (self.menu_item_id is not None)
             ):
-                raise ValueError("BULK_LOT 明細只能帶 bulk_lot_id")
+                raise ValueError("BULK_LOT 明細只能帶 bulk_lot_id 或 bulk_basket_id")
         return self
 
     def to_input(self) -> SaleLineInput:
@@ -101,6 +105,7 @@ class SaleLineCreateRequest(BaseModel):
             bulk_lot_id=self.bulk_lot_id,
             menu_item_id=self.menu_item_id,
             qty=self.qty,
+            bulk_basket_id=self.bulk_basket_id,
             line_kind=self.line_kind,
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
@@ -385,6 +390,7 @@ class SaleLineRead(BaseModel):
     catalog_product_id: int | None
     bulk_lot_id: int | None
     menu_item_id: int | None
+    bulk_basket_id: int | None = None
     description: str
     qty: int
     unit_price: NTDAmount

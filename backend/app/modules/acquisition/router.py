@@ -29,6 +29,8 @@ from app.shared.exceptions import (
     AcquisitionNotFound,
     AcquisitionRequiresNationalId,
     AcquisitionVoidUnsupported,
+    BulkBasketConflict,
+    BulkBasketNotFound,
     ContactNotFound,
     CrossStoreReference,
     DomainError,
@@ -53,6 +55,8 @@ ManagerDep = Annotated[CurrentUser, Depends(require_role(UserRole.MANAGER.value)
 # 領域錯誤 → HTTP 狀態；未列出者（如直接呼叫才會遇到的 InvalidCommissionPct）視為 400。
 _STATUS_BY_EXC: dict[type[DomainError], int] = {
     ContactNotFound: status.HTTP_404_NOT_FOUND,
+    BulkBasketNotFound: status.HTTP_404_NOT_FOUND,
+    BulkBasketConflict: status.HTTP_409_CONFLICT,
     AcquisitionNotFound: status.HTTP_404_NOT_FOUND,
     AcquisitionRequiresNationalId: status.HTTP_422_UNPROCESSABLE_CONTENT,
     InvalidAcquisitionCategory: status.HTTP_422_UNPROCESSABLE_CONTENT,

@@ -32,6 +32,7 @@ from app.modules.acquisition.schemas import (
 )
 from app.modules.cashdrawer.service import CashDrawerService
 from app.modules.contacts.service import ContactService
+from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
@@ -84,6 +85,7 @@ class AcquisitionService:
         self._repo = AcquisitionRepository(session)
         self._contacts = ContactService(session)
         self._inventory = InventoryService(session)
+        self._baskets = BulkBasketService(session)
         self._settings = StoreSettingsService(session)
         self._storecredit = StoreCreditService(session)
         self._cash = CashDrawerService(session)
@@ -180,6 +182,11 @@ class AcquisitionService:
         lot = payload.get("lot")
         if isinstance(lot, dict) and lot.get("note") is None:
             lot.pop("note", None)
+        # 販售籃欄位同為後加（ADR-025）：沒選籃時退化成舊指紋。
+        if isinstance(lot, dict) and lot.get("basket_id") is None:
+            lot.pop("basket_id", None)
+        if isinstance(lot, dict) and lot.get("new_basket") is False:
+            lot.pop("new_basket", None)
         canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -213,6 +220,7 @@ class AcquisitionService:
     ) -> AcquisitionResult:
         """自既有收購單重建對外結果（識別碼補齊）——供冪等/切結重放共用。"""
         item_codes, lot_code = await self._repo.get_codes(store_id, existing.id)
+        basket_code = await self._basket_code_of_lot(store_id, lot_code)
         # 重放也要帶撥入購物金的帳本事實（與首發回應同值）：自帳本以來源反查本筆 CREDIT
         # 分錄（不可變），非另查活餘額。
         credit_granted: Decimal | None = None
@@ -238,7 +246,14 @@ class AcquisitionService:
             payout_credit_balance_after=credit_balance_after,
             item_codes=item_codes,
             lot_code=lot_code,
+            basket_code=basket_code,
         )
+
+    async def _basket_code_of_lot(self, store_id: int, lot_code: str | None) -> str | None:
+        if lot_code is None:
+            return None
+        lot = await self._inventory.get_bulk_lot_by_code(store_id, lot_code)
+        return None if lot is None else await self._baskets.code_of(store_id, lot.basket_id)
 
     async def _replay_by_signature_task(
         self, store_id: int, signature_task_id: int, data: AcquisitionCreate
@@ -625,7 +640,9 @@ class AcquisitionService:
         )
 
         if data.type == AcquisitionType.BULK_LOT:
-            lot_code, total_cash = await self._create_bulk_lot(store_id, acquisition.id, data)
+            lot_code, total_cash, basket_code = await self._create_bulk_lot(
+                store_id, acquisition.id, data, actor_user_id=clerk_user_id
+            )
             item_codes: list[str] = []
         else:
             item_codes, total_cash = await self._create_serialized_items(
@@ -636,6 +653,7 @@ class AcquisitionService:
                 default_commission_pct=default_commission_pct,
             )
             lot_code = None
+            basket_code = None
 
         credit_granted: Decimal | None = None
         credit_balance_after: Decimal | None = None
@@ -727,6 +745,7 @@ class AcquisitionService:
             payout_credit_balance_after=credit_balance_after,
             item_codes=item_codes,
             lot_code=lot_code,
+            basket_code=basket_code,
         )
 
     async def void_acquisition(
@@ -880,10 +899,17 @@ class AcquisitionService:
         return item_codes, total_cash
 
     async def _create_bulk_lot(
-        self, store_id: int, acquisition_id: int, data: AcquisitionCreate
-    ) -> tuple[str, Decimal]:
+        self, store_id: int, acquisition_id: int, data: AcquisitionCreate, *, actor_user_id: int
+    ) -> tuple[str, Decimal, str | None]:
+        """建立散裝來源；選了販售籃就掛進去（ADR-025）。回 (lot_code, 應付, basket_code)。"""
         lot = data.lot
         assert lot is not None  # schema 已驗證
+        # 先鎖籃再建來源：停用／他店的籃要在任何寫入前擋下。
+        basket = (
+            await self._baskets.lock_for_intake(store_id, lot.basket_id)
+            if lot.basket_id is not None
+            else None
+        )
         lot_code = new_lot_code(store_id)
         created = await self._inventory.create_bulk_lot(
             store_id,
@@ -910,4 +936,8 @@ class AcquisitionService:
             ref_id=acquisition_id,
             bulk_lot_id=created.id,
         )
-        return lot_code, lot.acquisition_cost
+        if basket is not None:
+            await self._baskets.attach_new_lot(basket, created)
+        elif lot.new_basket:
+            basket = await self._baskets.create_from_lot(created, actor_user_id=actor_user_id)
+        return lot_code, lot.acquisition_cost, None if basket is None else basket.code

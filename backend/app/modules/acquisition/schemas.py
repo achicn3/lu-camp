@@ -88,6 +88,16 @@ class AcquisitionLotIn(BaseModel):
     category_id: int | None = None  # F6 additive 持久化（散裝選填）
     label: str | None = None
     note: str | None = Field(default=None, max_length=500)
+    # 散裝販售籃（ADR-025）：加入既有籃（名稱／品牌／分類／售價以籃子為準），
+    # 或以這批開一個新籃。兩者擇一；都不帶＝舊式獨立散裝。
+    basket_id: int | None = Field(default=None, ge=1)
+    new_basket: bool = False
+
+    @model_validator(mode="after")
+    def _basket_choice(self) -> Self:
+        if self.basket_id is not None and self.new_basket:
+            raise ValueError("加入既有販售籃與建立新販售籃只能擇一")
+        return self
 
     @field_validator("note")
     @classmethod
@@ -173,6 +183,8 @@ class AcquisitionResult(BaseModel):
     payout_credit_balance_after: NTDAmount | None
     item_codes: list[str]
     lot_code: str | None
+    # 散裝入籃時的販售籃識別碼（標籤印這個）；未入籃為 None。
+    basket_code: str | None = None
 
 
 class AcquisitionVoidRequest(BaseModel):

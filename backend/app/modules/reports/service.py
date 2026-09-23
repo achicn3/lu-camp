@@ -124,7 +124,7 @@ class _GiftAmounts:
 
 
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
-#            intake, sold, line_total)
+#            intake, sold, line_total, 成交成本快照)
 _BulkSold = tuple[
     int | None,
     int | None,
@@ -135,6 +135,7 @@ _BulkSold = tuple[
     datetime,
     datetime,
     Decimal,
+    Decimal | None,
 ]
 
 
@@ -562,13 +563,19 @@ class ReportsService:
             intake,
             sold,
             line_total,
+            cost_snapshot,
         ) in rows:
             if consignor_id is not None:
                 margin = Decimal(0)  # 寄售散裝無抽成模型（與報表他處一致）
             else:
-                # 整行四捨五入 COGS（Codex P3）：與銷售毛利/庫存報表同口徑
-                # （round(整堆成本×件數÷整堆件數)），否則洞察毛利與財報對不起來。
-                cogs = Decimal(round_ntd(acq_cost * qty / total_qty)) if total_qty else Decimal(0)
+                # 成本優先取成交快照（同 margin_components）；舊資料無快照才以整行四捨五入
+                # 回推（Codex P3：round(整堆成本×件數÷整堆件數)），否則洞察毛利與財報對不起來。
+                if cost_snapshot is not None:
+                    cogs = Decimal(cost_snapshot)
+                elif total_qty:
+                    cogs = Decimal(round_ntd(acq_cost * qty / total_qty))
+                else:
+                    cogs = Decimal(0)
                 margin = line_total - cogs
             out.append(
                 _NormRow(brand_id, category_id, qty, line_total, margin, (sold - intake).days)

@@ -189,6 +189,35 @@ class SerializedItem(Base, TimestampMixin):
     note: Mapped[str | None] = mapped_column(String(500))
 
 
+class BulkBasket(Base, TimestampMixin):
+    """散裝販售籃（ADR-025）：多次收購的散裝放同一籃、共用一張標籤與一個每件售價。
+
+    籃子只是「販售品項」：庫存與成本仍在各來源 BulkLot（每次收購一筆，互不覆寫）；
+    可售數量由有效來源的 remaining_qty 加總，不另存一份會漂移的數字。
+    售價以籃子為準，來源的 unit_price 隨籃子同步。只收自有散裝（寄售不入籃）。
+    code 建檔即固定、全域唯一，同 lot_code 以 Code 128 印成標籤。
+    """
+
+    __tablename__ = "bulk_baskets"
+    __table_args__ = (
+        UniqueConstraint("id", "store_id", name="uq_bulk_baskets_id_store"),
+        CheckConstraint("unit_price >= 0", name="ck_bulk_baskets_unit_price_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(150))
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="RESTRICT")
+    )
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    note: Mapped[str | None] = mapped_column(String(500))
+    # 停用＝不再讓新的收購加入（舊標籤仍可結帳賣完剩下的庫存）。
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+
+
 class BulkLot(Base, TimestampMixin):
     """散裝批（E 級）。lot_code 建檔即固定、全域唯一。每件成本 = acquisition_cost/total_qty。"""
 
@@ -223,6 +252,8 @@ class BulkLot(Base, TimestampMixin):
         server_default=BulkLotStatus.ON_SALE.value,
     )
     acquisition_id: Mapped[int | None] = mapped_column(ForeignKey("acquisitions.id"))
+    # 所屬販售籃（ADR-025）；NULL＝獨立販售的舊式散裝。
+    basket_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_baskets.id"), index=True)
     # 分類（F6 additive 持久化；散裝選填、恆 nullable）。
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="RESTRICT")

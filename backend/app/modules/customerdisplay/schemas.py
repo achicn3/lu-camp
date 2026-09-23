@@ -96,6 +96,8 @@ class CartLineRequest(BaseModel):
     catalog_product_id: int | None = Field(default=None, ge=1)
     bulk_lot_id: int | None = Field(default=None, ge=1)
     menu_item_id: int | None = Field(default=None, ge=1)
+    # 販售籃（ADR-025）；與 SaleLineCreateRequest 同形，否則快照與實際成交對不起來。
+    bulk_basket_id: int | None = Field(default=None, ge=1)
     qty: int = Field(default=1, ge=1)
     # 商業性質與贈品來歷：客顯購物車是權威購物車，贈品必須經同一條路徑進來，
     # 否則快照與實際成交會對不起來（結帳時逐欄位比對會失敗）。
@@ -108,11 +110,15 @@ class CartLineRequest(BaseModel):
         refs = {
             SaleLineType.SERIALIZED: self.item_code,
             SaleLineType.CATALOG: self.catalog_product_id,
-            SaleLineType.BULK_LOT: self.bulk_lot_id,
+            SaleLineType.BULK_LOT: self.bulk_lot_id or self.bulk_basket_id,
             SaleLineType.MENU: self.menu_item_id,
         }
         if refs[self.line_type] is None:
             raise ValueError(f"{self.line_type.value} 明細缺少對應商品識別")
+        if self.bulk_basket_id is not None and (
+            self.line_type is not SaleLineType.BULK_LOT or self.bulk_lot_id is not None
+        ):
+            raise ValueError("販售籃明細只能帶 bulk_basket_id")
         if self.line_type is SaleLineType.SERIALIZED and self.qty != 1:
             raise ValueError("序號品數量固定為 1")
         return self
@@ -125,6 +131,7 @@ class CartLineRequest(BaseModel):
             bulk_lot_id=self.bulk_lot_id,
             menu_item_id=self.menu_item_id,
             qty=self.qty,
+            bulk_basket_id=self.bulk_basket_id,
             line_kind=self.line_kind,
             gift_reason_id=self.gift_reason_id,
             gift_note=self.gift_note,
@@ -270,6 +277,7 @@ class StaffCartLineRead(BaseModel):
     catalog_product_id: int | None = None
     bulk_lot_id: int | None = None
     menu_item_id: int | None = None
+    bulk_basket_id: int | None = None
     qty: int
     line_kind: SaleLineKind
     gift_reason_id: int | None = None

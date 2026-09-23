@@ -526,3 +526,14 @@ class RestoreAlreadyRunning(DomainError):
 
 class CallTicketNotFound(DomainError):
     """叫號單不存在或不屬於本店（docs/38）。"""
+
+
+class BulkBasketNotFound(DomainError):
+    """散裝販售籃不存在或不屬於本店（ADR-025）。"""
+
+
+class BulkBasketConflict(DomainError):
+    """販售籃的操作與現況衝突：已停用、來源已在別籃、售價不同、寄售品不可入籃等。
+
+    訊息直接寫給店員看得懂的原因（同 ItemDeleteBlocked）。
+    """

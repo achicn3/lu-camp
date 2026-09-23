@@ -235,6 +235,18 @@
             ],
             "title": "Acquisition Cost"
           },
+          "basket_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Id"
+          },
           "brand_id": {
             "anyOf": [
               {
@@ -272,6 +284,11 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "new_basket": {
+            "default": false,
+            "title": "New Basket",
+            "type": "boolean"
           },
           "note": {
             "anyOf": [
@@ -541,6 +558,17 @@
           "acquisition_id": {
             "title": "Acquisition Id",
             "type": "integer"
+          },
+          "basket_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Code"
           },
           "contact_id": {
             "title": "Contact Id",
@@ -1055,6 +1083,345 @@
         "title": "BulkAcquisitionBasis",
         "type": "string"
       },
+      "BulkBasketAddLot": {
+        "description": "把既有散裝整批加入販售籃（限管理者；須同價、自有、未入其他籃）。",
+        "properties": {
+          "bulk_lot_id": {
+            "minimum": 1.0,
+            "title": "Bulk Lot Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bulk_lot_id"
+        ],
+        "title": "BulkBasketAddLot",
+        "type": "object"
+      },
+      "BulkBasketCreate": {
+        "description": "建立散裝販售籃（ADR-025）：名稱＋每件售價（含稅整數元 > 0）。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "name": {
+            "maxLength": 150,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "name",
+          "unit_price"
+        ],
+        "title": "BulkBasketCreate",
+        "type": "object"
+      },
+      "BulkBasketRead": {
+        "description": "散裝販售籃輸出：可售數量由有效來源加總。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "cost_reference": {
+            "$ref": "#/components/schemas/BulkCostReference"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "remaining_qty": {
+            "title": "Remaining Qty",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/BulkBasketSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "store_id": {
+            "title": "Store Id",
+            "type": "integer"
+          },
+          "unit_price": {
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "store_id",
+          "code",
+          "name",
+          "brand_id",
+          "category_id",
+          "unit_price",
+          "note",
+          "is_active",
+          "remaining_qty",
+          "sources",
+          "cost_reference"
+        ],
+        "title": "BulkBasketRead",
+        "type": "object"
+      },
+      "BulkBasketSource": {
+        "description": "籃內一筆來源（一次收購）：數量與成本各自保留，不與其他來源合併。",
+        "properties": {
+          "acquisition_cost": {
+            "title": "Acquisition Cost",
+            "type": "string"
+          },
+          "bulk_lot_id": {
+            "title": "Bulk Lot Id",
+            "type": "integer"
+          },
+          "intake_date": {
+            "format": "date-time",
+            "title": "Intake Date",
+            "type": "string"
+          },
+          "lot_code": {
+            "title": "Lot Code",
+            "type": "string"
+          },
+          "remaining_qty": {
+            "title": "Remaining Qty",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BulkLotStatus"
+          },
+          "total_qty": {
+            "title": "Total Qty",
+            "type": "integer"
+          },
+          "unit_cost": {
+            "title": "Unit Cost",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bulk_lot_id",
+          "lot_code",
+          "intake_date",
+          "total_qty",
+          "remaining_qty",
+          "status",
+          "acquisition_cost",
+          "unit_cost"
+        ],
+        "title": "BulkBasketSource",
+        "type": "object"
+      },
+      "BulkBasketUpdate": {
+        "description": "改販售籃（限管理者）。只改有帶的欄位；售價／名稱／品牌／分類會同步到籃內各來源。",
+        "properties": {
+          "brand_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 150,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "title": "BulkBasketUpdate",
+        "type": "object"
+      },
+      "BulkCostReference": {
+        "description": "同籃歷史單件收購成本區間；樣本數＝來源收購筆數（不是件數）。",
+        "properties": {
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "unit_cost_max": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost Max"
+          },
+          "unit_cost_min": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Cost Min"
+          }
+        },
+        "required": [
+          "sample_count"
+        ],
+        "title": "BulkCostReference",
+        "type": "object"
+      },
       "BulkFilterOptions": {
         "description": "散裝批的篩選選項；分類與成色依品牌收斂，品牌一律列全部實際有的。",
         "properties": {
@@ -1229,6 +1596,17 @@
           "acquisition_cost": {
             "title": "Acquisition Cost",
             "type": "string"
+          },
+          "basket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Id"
           },
           "brand_id": {
             "anyOf": [
@@ -1941,6 +2319,18 @@
       },
       "CartLineRequest": {
         "properties": {
+          "bulk_basket_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Basket Id"
+          },
           "bulk_lot_id": {
             "anyOf": [
               {
@@ -9766,6 +10156,18 @@
       "SaleLineCreateRequest": {
         "description": "單行結帳輸入：SERIALIZED→item_code（qty 固定 1）；CATALOG/BULK_LOT/MENU→id + qty。",
         "properties": {
+          "bulk_basket_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Basket Id"
+          },
           "bulk_lot_id": {
             "anyOf": [
               {
@@ -9866,6 +10268,17 @@
       "SaleLineRead": {
         "description": "銷售明細輸出。",
         "properties": {
+          "bulk_basket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Basket Id"
+          },
           "bulk_lot_id": {
             "anyOf": [
               {
@@ -12273,6 +12686,17 @@
       "StaffCartLineRead": {
         "description": "還原用的明細（含贈品來歷）。**刻意與 `CartLineRequest` 分開**：請求模型若同時出現在\n回應裡，OpenAPI 會分裂出 Input/Output 兩個變體並連帶改名既有 schema，前端合約整片位移。",
         "properties": {
+          "bulk_basket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bulk Basket Id"
+          },
           "bulk_lot_id": {
             "anyOf": [
               {
@@ -14055,6 +14479,330 @@
           }
         ],
         "summary": "Create Brand",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-baskets": {
+      "get": {
+        "description": "販售籃清單（收購選籃、庫存管理）。預設只列啟用中的。",
+        "operationId": "listBulkBaskets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BulkBasketRead"
+                  },
+                  "title": "Response Listbulkbaskets",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Bulk Baskets",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "post": {
+        "description": "建立空的販售籃（店員收購時也要能開新籃，故不限管理者）。",
+        "operationId": "createBulkBasket",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkBasketCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkBasketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Bulk Basket",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-baskets/by-code/{code}": {
+      "get": {
+        "description": "POS 掃籃子標籤（條碼即 Code 128 編 code）。",
+        "operationId": "getBulkBasketByCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkBasketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bulk Basket By Code",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-baskets/{basket_id}": {
+      "get": {
+        "operationId": "getBulkBasket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "basket_id",
+            "required": true,
+            "schema": {
+              "title": "Basket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkBasketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Bulk Basket",
+        "tags": [
+          "inventory"
+        ]
+      },
+      "patch": {
+        "description": "改販售籃（限管理者）。改售價後記得重印標籤；已成交的價格與成本不受影響。",
+        "operationId": "updateBulkBasket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "basket_id",
+            "required": true,
+            "schema": {
+              "title": "Basket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkBasketUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkBasketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Bulk Basket",
+        "tags": [
+          "inventory"
+        ]
+      }
+    },
+    "/api/v1/bulk-baskets/{basket_id}/lots": {
+      "post": {
+        "description": "既有散裝整批加入販售籃（限管理者；同價、自有、未入其他籃）。",
+        "operationId": "addLotToBulkBasket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "basket_id",
+            "required": true,
+            "schema": {
+              "title": "Basket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkBasketAddLot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkBasketRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Lot To Bulk Basket",
         "tags": [
           "inventory"
         ]

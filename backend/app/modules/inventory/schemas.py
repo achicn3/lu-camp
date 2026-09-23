@@ -86,6 +86,14 @@ class CategoryTargetUpdate(BaseModel):
     target_margin_pct: int = Field(ge=0, le=99)
 
 
+def _positive_price(v: Decimal) -> Decimal:
+    """售價須為正整數元且放得進 NUMERIC(12,0)。"""
+    if v <= 0 or v != v.to_integral_value():
+        raise ValueError("售價須為正整數元")
+    ensure_ntd_fits_numeric_12(v, field="售價")
+    return v
+
+
 class PriceUpdateRequest(BaseModel):
     """改售價（manager；含稅整數元 > 0；序號品=標價、一般商品/散裝=單價）。"""
 
@@ -94,10 +102,7 @@ class PriceUpdateRequest(BaseModel):
     @field_validator("unit_price")
     @classmethod
     def _positive_integer(cls, v: Decimal) -> Decimal:
-        if v <= 0 or v != v.to_integral_value():
-            raise ValueError("售價須為正整數元")
-        ensure_ntd_fits_numeric_12(v, field="售價")
-        return v
+        return _positive_price(v)
 
 
 class NoteUpdateRequest(BaseModel):
@@ -369,6 +374,8 @@ class BulkLotRead(BaseModel):
     remaining_qty: int
     status: BulkLotStatus
     note: str | None = None
+    # 所屬販售籃（ADR-025）；POS 掃到入籃的舊來源標籤時，據此改賣整籃庫存。
+    basket_id: int | None = None
 
 
 class GradePriceStat(BaseModel):
@@ -517,3 +524,87 @@ class SerializedItemUpdateRequest(ItemUpdateRequest):
         if value is None or value == Grade.E:
             raise ValueError("序號品成色不可為空或 E")
         return value
+
+
+class BulkBasketCreate(BaseModel):
+    """建立散裝販售籃（ADR-025）：名稱＋每件售價（含稅整數元 > 0）。"""
+
+    name: str = Field(min_length=1, max_length=150)
+    unit_price: NTDAmount
+    brand_id: int | None = Field(default=None, ge=1)
+    category_id: int | None = Field(default=None, ge=1)
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("名稱不可空白")
+        return v
+
+    @field_validator("unit_price")
+    @classmethod
+    def _positive_integer(cls, v: Decimal) -> Decimal:
+        return _positive_price(v)
+
+
+class BulkBasketUpdate(BaseModel):
+    """改販售籃（限管理者）。只改有帶的欄位；售價／名稱／品牌／分類會同步到籃內各來源。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=150)
+    unit_price: NTDAmount | None = None
+    brand_id: int | None = Field(default=None, ge=1)
+    category_id: int | None = Field(default=None, ge=1)
+    note: str | None = Field(default=None, max_length=500)
+    is_active: bool | None = None
+
+    @field_validator("unit_price")
+    @classmethod
+    def _positive_integer(cls, v: Decimal | None) -> Decimal | None:
+        return v if v is None else _positive_price(v)
+
+
+class BulkBasketAddLot(BaseModel):
+    """把既有散裝整批加入販售籃（限管理者；須同價、自有、未入其他籃）。"""
+
+    bulk_lot_id: int = Field(ge=1)
+
+
+class BulkBasketSource(BaseModel):
+    """籃內一筆來源（一次收購）：數量與成本各自保留，不與其他來源合併。"""
+
+    bulk_lot_id: int
+    lot_code: str
+    intake_date: datetime
+    total_qty: int
+    remaining_qty: int
+    status: BulkLotStatus
+    acquisition_cost: NTDAmount
+    # 單件成本＝整批成本 ÷ 原數量（整數元 HALF_UP）；估價參考用。
+    unit_cost: NTDAmount
+
+
+class BulkCostReference(BaseModel):
+    """同籃歷史單件收購成本區間；樣本數＝來源收購筆數（不是件數）。"""
+
+    sample_count: int
+    unit_cost_min: NTDAmountOpt = None
+    unit_cost_max: NTDAmountOpt = None
+
+
+class BulkBasketRead(BaseModel):
+    """散裝販售籃輸出：可售數量由有效來源加總。"""
+
+    id: int
+    store_id: int
+    code: str
+    name: str
+    brand_id: int | None
+    category_id: int | None
+    unit_price: NTDAmount
+    note: str | None
+    is_active: bool
+    remaining_qty: int
+    sources: list[BulkBasketSource]
+    cost_reference: BulkCostReference

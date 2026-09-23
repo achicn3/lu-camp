@@ -1096,12 +1096,7 @@ class ReturnsService:
                 reason=reason,
             )
         else:
-            assert line.bulk_lot_id is not None
-            await self._inventory.return_bulk_lot_items(
-                store_id,
-                line.bulk_lot_id,
-                qty,
-                ref_type="return",
-                ref_id=return_id,
-                reason=reason,
+            # 販售籃行要依分配紀錄回到各來源（ADR-025），統一交給 sales 處理。
+            await SalesService(self._session).restore_bulk_line(
+                store_id, line, qty, ref_type="return", ref_id=return_id, reason=reason
             )

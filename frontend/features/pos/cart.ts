@@ -1,8 +1,10 @@
 // POS 購物車純邏輯（無 React/DOM 依賴，便於單元測試）。
 // 金額一律整數元（number），與 API 字串於邊界轉換（lib/money）。docs/10 §5、docs/16 §3.2。
 import type { components } from "@/lib/api-types";
+import { parseNtd } from "@/lib/money";
 
 type SaleLineType = components["schemas"]["SaleLineType"];
+type BulkBasket = components["schemas"]["BulkBasketRead"];
 
 /** 購物車一行。serialized 數量固定 1；catalog/bulk 可調量。 */
 export interface CartLine {
@@ -16,6 +18,8 @@ export interface CartLine {
   itemCode?: string;
   catalogProductId?: number;
   bulkLotId?: number;
+  /** 散裝販售籃（ADR-025）：以籃子售出，後端依先進先出分配到各來源。與 bulkLotId 擇一。 */
+  bulkBasketId?: number;
   menuItemId?: number;
   /** bulk 可售上限（remaining_qty），用於數量上限提示；serialized 為 1。 */
   maxQty?: number;
@@ -134,6 +138,7 @@ export function toSaleLines(
     item_code: l.itemCode ?? null,
     catalog_product_id: l.catalogProductId ?? null,
     bulk_lot_id: l.bulkLotId ?? null,
+    bulk_basket_id: l.bulkBasketId ?? null,
     menu_item_id: l.menuItemId ?? null,
     qty: l.qty,
     // 商業性質（一般銷售／贈品）。贈品 UI 於 P4 加入，這裡先明確送出一般銷售——
@@ -142,6 +147,24 @@ export function toSaleLines(
     gift_reason_id: l.giftReasonId ?? null,
     gift_note: l.giftNote ?? null,
   }));
+}
+
+/**
+ * 散裝販售籃 → 購物車一行。一籃一行、可售上限是整籃剩餘（多次收購加總），
+ * 掃籃子標籤或掃已入籃的舊來源標籤都走這裡，避免舊標籤只賣得到其中一批。
+ */
+export function basketCartLine(basket: BulkBasket): CartLine {
+  if (basket.remaining_qty <= 0) throw new Error(`${basket.name} 已售罄`);
+  return {
+    key: `K:${basket.id}`,
+    lineType: "BULK_LOT",
+    description: basket.name,
+    unitPrice: parseNtd(basket.unit_price) ?? 0,
+    qty: 1,
+    bulkBasketId: basket.id,
+    maxQty: basket.remaining_qty,
+    note: basket.note,
+  };
 }
 
 /** 贈品列的 key 前綴：同一商品「買 2 ＋ 送 1」是兩列，共用 key 會被合併成一列。 */

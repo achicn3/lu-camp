@@ -291,6 +291,16 @@ class InventoryService:
         )
         return await self._repo.add_serialized(item)
 
+    async def validate_item_references(
+        self,
+        store_id: int,
+        *,
+        brand_id: int | None,
+        category_id: int | None = None,
+    ) -> None:
+        """品牌／分類須屬本店（供同模組的販售籃服務共用）。"""
+        await self._validate_item_references(store_id, brand_id=brand_id, category_id=category_id)
+
     async def _validate_item_references(
         self,
         store_id: int,
@@ -809,6 +819,7 @@ class InventoryService:
             return None
         if lot.status != BulkLotStatus.ON_SALE:
             raise InvalidStateTransition("僅販售中散裝批可改售價")
+        _reject_if_in_basket(lot, {"unit_price"})
         old, new = lot.unit_price, Decimal(round_ntd(unit_price))
         lot.unit_price = new
         await self._session.flush()
@@ -942,6 +953,10 @@ class InventoryService:
         lot = await self._repo.get_bulk_lot_for_update(store_id, lot_id)
         if lot is None:
             return None
+        requested = {k for k, v in (details or {}).items() if getattr(lot, k, None) != v}
+        if name is not None and name != lot.name:
+            requested.add("name")
+        _reject_if_in_basket(lot, requested)
         detail_before, detail_after = await self._apply_detail_edits(store_id, lot, details or {})
         before, after = self._apply_item_edits(
             lot,
@@ -1837,3 +1852,12 @@ class InventoryService:
         """
         # 別名匯入：與本方法同名會讓讀者以為是遞迴。
         return money_suggested_listed_price(acquisition_cost, margin_pct, tax_rate)
+
+
+# 入籃的來源跟著籃子走；單獨改會讓同一張標籤出現兩個價／兩種品項（ADR-025）。
+_BASKET_MIRRORED = {"name", "brand_id", "category_id", "unit_price"}
+
+
+def _reject_if_in_basket(lot: BulkLot, requested: set[str]) -> None:
+    if lot.basket_id is not None and requested & _BASKET_MIRRORED:
+        raise InvalidStateTransition("這批散裝已放入販售籃，名稱、品牌、分類、售價請改販售籃")

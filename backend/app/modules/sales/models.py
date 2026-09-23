@@ -149,6 +149,10 @@ class SaleLine(Base, TimestampMixin):
     serialized_item_id: Mapped[int | None] = mapped_column(ForeignKey("serialized_items.id"))
     catalog_product_id: Mapped[int | None] = mapped_column(ForeignKey("catalog_products.id"))
     bulk_lot_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_lots.id"))
+    # 販售籃行（ADR-025）：以籃子售出，實際扣自哪些來源見 sale_bulk_allocations。
+    # 此時 bulk_lot_id 只是「代表來源」（第一筆分配，供報表 join 品牌／分類／寄售判斷；
+    # 同籃來源這三項必與籃子一致），**庫存回補一律依分配紀錄，不可只回 bulk_lot_id**。
+    bulk_basket_id: Mapped[int | None] = mapped_column(ForeignKey("bulk_baskets.id"))
     menu_item_id: Mapped[int | None] = mapped_column(ForeignKey("menu_items.id"))
     description: Mapped[str] = mapped_column(String(150))
     qty: Mapped[int] = mapped_column()
@@ -191,6 +195,32 @@ class SaleLine(Base, TimestampMixin):
     gift_note: Mapped[str | None] = mapped_column(String(200))
     # 因哪一行而贈（買 A 送 B）。純供追溯，不參與任何金額計算。
     parent_sale_line_id: Mapped[int | None] = mapped_column(ForeignKey("sale_lines.id"))
+
+
+class SaleBulkAllocation(Base, TimestampMixin):
+    """販售籃行的來源分配（ADR-025）：這一行從哪個散裝來源扣了幾件、當時成本多少。
+
+    結帳時依入庫先後（FIFO）寫入，之後只增 returned_qty（退貨依分配反向回補）。
+    cost_snapshot＝該來源每件成本 × qty（整數元 HALF_UP），各筆加總＝sale_line.cost_snapshot。
+    """
+
+    __tablename__ = "sale_bulk_allocations"
+    __table_args__ = (
+        CheckConstraint("qty > 0", name="ck_sale_bulk_allocations_qty_pos"),
+        CheckConstraint(
+            "returned_qty >= 0 AND returned_qty <= qty",
+            name="ck_sale_bulk_allocations_returned_range",
+        ),
+        CheckConstraint("cost_snapshot >= 0", name="ck_sale_bulk_allocations_cost_nonneg"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    sale_line_id: Mapped[int] = mapped_column(ForeignKey("sale_lines.id"), index=True)
+    bulk_lot_id: Mapped[int] = mapped_column(ForeignKey("bulk_lots.id"), index=True)
+    qty: Mapped[int] = mapped_column()
+    cost_snapshot: Mapped[Decimal] = mapped_column(Numeric(12, 0))
+    returned_qty: Mapped[int] = mapped_column(default=0, server_default=text("0"))
 
 
 class GiftReason(Base, TimestampMixin):

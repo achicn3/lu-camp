@@ -55,9 +55,11 @@ function itemIdentity(item: CartItem): Partial<CartLine> | null {
     }
     case "BULK_LOT": {
       const id = Number(raw);
-      return Number.isInteger(id) && id > 0
-        ? { key: `${giftPrefix}B:${id}`, bulkLotId: id }
-        : null;
+      if (!Number.isInteger(id) || id <= 0) return null;
+      // 販售籃行的鍵是 BULK_BASKET:{id}（後端 _line_key），與單一來源 BULK_LOT:{id} 分開。
+      return withoutKind.startsWith("BULK_BASKET:")
+        ? { key: `${giftPrefix}K:${id}`, bulkBasketId: id }
+        : { key: `${giftPrefix}B:${id}`, bulkLotId: id };
     }
     case "MENU": {
       const id = Number(raw);

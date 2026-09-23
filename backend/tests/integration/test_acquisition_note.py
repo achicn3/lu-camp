@@ -139,9 +139,7 @@ async def test_acquisition_without_note_is_null(
     assert item is not None and item.note is None
 
 
-async def test_bulk_lot_persists_note(
-    client: httpx.AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_bulk_lot_persists_note(client: httpx.AsyncClient, db_session: AsyncSession) -> None:
     """散裝批同樣可在收購當下寫備註。"""
     _sid, token = await _store_token(db_session, "店C")
     await _open_drawer(client, token)
@@ -180,9 +178,7 @@ async def test_catalog_product_create_persists_note(
     )
     assert resp.status_code in (200, 201), resp.text
     product_id = int(resp.json()["id"])
-    product = await db_session.scalar(
-        select(CatalogProduct).where(CatalogProduct.id == product_id)
-    )
+    product = await db_session.scalar(select(CatalogProduct).where(CatalogProduct.id == product_id))
     assert product is not None and product.note == "效期短，先進先出"
     assert resp.json()["note"] == "效期短，先進先出"
 
@@ -240,7 +236,20 @@ def test_fingerprint_ignores_absent_note_for_bulk_lot() -> None:
     )
     legacy_dump = data.model_dump(mode="json")
     legacy_dump["lot"].pop("note", None)
+    # 2026-09 販售籃欄位（ADR-025）也不在舊版請求中；沒選籃時須維持相同重送指紋。
+    legacy_dump["lot"].pop("basket_id", None)
+    legacy_dump["lot"].pop("new_basket", None)
     legacy = hashlib.sha256(
         json.dumps(legacy_dump, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     assert AcquisitionService._fingerprint(data) == legacy
+
+    # 有選籃即是不同內容：同鍵改成入籃仍要被擋（否則會重放成沒入籃的舊單）。
+    for choice in ({"basket_id": 3}, {"new_basket": True}):
+        joined = AcquisitionCreate.model_validate(
+            {
+                **data.model_dump(mode="json"),
+                "lot": {**data.model_dump(mode="json")["lot"], **choice},
+            }
+        )
+        assert AcquisitionService._fingerprint(joined) != legacy

@@ -22,6 +22,7 @@ from app.modules.sales.models import (
     LinePayTransaction,
     Sale,
     SaleAdjustment,
+    SaleBulkAllocation,
     SaleLine,
     SaleTender,
 )
@@ -52,7 +53,7 @@ _SoldRowDB = tuple[
     int,
 ]
 # 散裝售出列：(brand_id, category_id, consignor_id, 整堆成本, 整堆件數, 本行件數,
-#            intake, sold, net_amount)
+#            intake, sold, net_amount, 成交成本快照)
 _BulkSoldRowDB = tuple[
     int | None,
     int | None,
@@ -63,6 +64,7 @@ _BulkSoldRowDB = tuple[
     datetime,
     datetime,
     Decimal,
+    Decimal | None,
 ]
 
 
@@ -120,6 +122,41 @@ class SalesRepository:
         self._session.add(line)
         await self._session.flush()
         return line
+
+    async def add_bulk_allocations(self, rows: list[SaleBulkAllocation]) -> None:
+        self._session.add_all(rows)
+        await self._session.flush()
+
+    async def bulk_allocations_for_update(
+        self, store_id: int, sale_line_id: int
+    ) -> list[SaleBulkAllocation]:
+        """販售籃行的來源分配（依分配順序），鎖列：退貨／作廢回補時與並行退貨序列化。"""
+        stmt = (
+            select(SaleBulkAllocation)
+            .where(
+                SaleBulkAllocation.store_id == store_id,
+                SaleBulkAllocation.sale_line_id == sale_line_id,
+            )
+            .order_by(SaleBulkAllocation.id)
+            .with_for_update()
+        )
+        return list((await self._session.scalars(stmt)).all())
+
+    async def bulk_allocations_by_line(
+        self, sale_line_ids: list[int]
+    ) -> dict[int, list[SaleBulkAllocation]]:
+        """多行的來源分配（依分配順序；報表成本反轉用）；單一查詢。"""
+        grouped: dict[int, list[SaleBulkAllocation]] = {}
+        if not sale_line_ids:
+            return grouped
+        stmt = (
+            select(SaleBulkAllocation)
+            .where(SaleBulkAllocation.sale_line_id.in_(sale_line_ids))
+            .order_by(SaleBulkAllocation.id)
+        )
+        for row in (await self._session.scalars(stmt)).all():
+            grouped.setdefault(row.sale_line_id, []).append(row)
+        return grouped
 
     async def add_tender(self, tender: SaleTender) -> SaleTender:
         self._session.add(tender)
@@ -560,6 +597,8 @@ class SalesRepository:
                 Sale.created_at,
                 # 成交額認實付；贈品另於 where 排除（同序號品洞察）。
                 SaleLine.net_amount,
+                # 販售籃行跨多個來源，代表來源的整堆成本算不出它的成本（ADR-025）。
+                SaleLine.cost_snapshot,
             )
             .join(Sale, SaleLine.sale_id == Sale.id)
             .join(BulkLot, SaleLine.bulk_lot_id == BulkLot.id)
@@ -924,6 +963,16 @@ class SalesRepository:
             .where(Sale.store_id == store_id, column == value)
             .limit(1)
         )
+        if found is None and bulk_lot_id is not None:
+            # 販售籃行的非代表來源只出現在分配紀錄（ADR-025）。
+            found = await self._session.scalar(
+                select(SaleBulkAllocation.id)
+                .where(
+                    SaleBulkAllocation.store_id == store_id,
+                    SaleBulkAllocation.bulk_lot_id == bulk_lot_id,
+                )
+                .limit(1)
+            )
         return found is not None
 
     async def margin_components(

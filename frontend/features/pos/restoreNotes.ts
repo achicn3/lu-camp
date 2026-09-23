@@ -35,6 +35,13 @@ async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLooku
       });
       return classify(data?.note, response.status);
     }
+    if (line.lineType === "BULK_LOT" && line.bulkBasketId != null) {
+      const { data, response } = await api.GET("/api/v1/bulk-baskets/{basket_id}", {
+        params: { path: { basket_id: line.bulkBasketId } },
+        signal,
+      });
+      return classify(data?.note, response.status);
+    }
     if (line.lineType === "BULK_LOT" && line.bulkLotId != null) {
       const { data, response } = await api.GET("/api/v1/bulk-lots/{lot_id}", {
         params: { path: { lot_id: line.bulkLotId } },
