@@ -1275,6 +1275,17 @@
             "title": "Lot Code",
             "type": "string"
           },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
           "remaining_qty": {
             "title": "Remaining Qty",
             "type": "integer"

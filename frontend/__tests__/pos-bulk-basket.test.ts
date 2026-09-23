@@ -48,6 +48,29 @@ describe("散裝販售籃購物車行", () => {
     expect(line.bulkLotId).toBeUndefined();
   });
 
+  it("籃內還有貨的那幾批，收購時寫的備註也要一起提醒；賣完的那批不提（Codex 第二輪）", () => {
+    const source = (id: number, remaining: number, note: string | null) => ({
+      bulk_lot_id: id,
+      lot_code: `L1-${id}`,
+      intake_date: "2026-09-20T02:00:00Z",
+      total_qty: 10,
+      remaining_qty: remaining,
+      status: remaining > 0 ? ("ON_SALE" as const) : ("SOLD_OUT" as const),
+      acquisition_cost: "50",
+      unit_cost: "5",
+      note,
+    });
+    const line = basketCartLine({
+      ...BASKET,
+      sources: [source(1, 0, "早就賣完的那批"), source(2, 18, "有 3 支彎掉"), source(3, 12, null)],
+    });
+    expect(line.note).toBe("長短混裝；有 3 支彎掉");
+  });
+
+  it("籃子和各批都沒備註時不提醒", () => {
+    expect(basketCartLine({ ...BASKET, note: null }).note).toBeNull();
+  });
+
   it("整籃賣完要擋下，不能加進購物車", () => {
     expect(() => basketCartLine({ ...BASKET, remaining_qty: 0 })).toThrow(/已售罄/);
   });

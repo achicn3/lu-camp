@@ -583,6 +583,8 @@ class BulkBasketSource(BaseModel):
     acquisition_cost: NTDAmount
     # 單件成本＝整批成本 ÷ 原數量（整數元 HALF_UP）；估價參考用。
     unit_cost: NTDAmount
+    # 收購時寫在這批的備註：POS 掃籃子時要一併提醒（例：「有 3 支彎掉」）。
+    note: str | None = None
 
 
 class BulkCostReference(BaseModel):

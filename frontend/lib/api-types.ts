@@ -3871,6 +3871,8 @@ export interface components {
             intake_date: string;
             /** Lot Code */
             lot_code: string;
+            /** Note */
+            note?: string | null;
             /** Remaining Qty */
             remaining_qty: number;
             status: components["schemas"]["BulkLotStatus"];

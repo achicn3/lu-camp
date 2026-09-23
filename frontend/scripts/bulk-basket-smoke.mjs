@@ -144,6 +144,7 @@ try {
   const hint = (await page.locator(".acq-basket .hint").last().textContent()) ?? "";
   ok("顯示目前件數與歷史單件成本", hint.includes("目前 10 件") && hint.includes("單件收購成本 5 元"), hint);
   await fillLotAmounts(page, { cost: 160, qty: 20 });
+  await page.locator('input[aria-label="散裝備註"]').fill("有 3 支彎掉");
   await page.screenshot({ path: join(SHOTS, "03-join-basket-form.png"), fullPage: true });
   await page.click('button:has-text("送出收購")');
   const second = await resultText(page);
@@ -169,8 +170,14 @@ try {
     document.querySelector(".pos-total strong")?.textContent?.includes("240"),
   );
   ok("POS 一籃一行、12 支合計 240", true);
+  ok("乙那批的收購備註在 POS 跟著籃子提醒", await page.locator("text=有 3 支彎掉").first().isVisible());
   await page.screenshot({ path: join(SHOTS, "06-pos-basket-line.png"), fullPage: true });
   await page.click('button:has-text("結帳")');
+  // 乙那批有收購備註 → 交貨前確認彈窗（與一般散裝同一套提醒）。
+  await page.waitForSelector("text=交貨前請先確認");
+  ok("結帳前跳出備註確認", await page.locator("text=交貨前請先確認").isVisible());
+  await page.screenshot({ path: join(SHOTS, "06b-pos-note-confirm.png"), fullPage: true });
+  await page.click('button:has-text("已確認，繼續結帳")');
   await page.waitForSelector("text=已完成");
   ok("現金結帳完成", true);
   await page.screenshot({ path: join(SHOTS, "07-pos-done.png"), fullPage: true });

@@ -50,6 +50,7 @@ def _read(view: BasketView) -> BulkBasketRead:
                 status=lot.status,
                 acquisition_cost=lot.acquisition_cost,
                 unit_cost=unit_cost(lot),
+                note=lot.note,
             )
             for lot in view.sources
         ],

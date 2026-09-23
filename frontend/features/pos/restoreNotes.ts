@@ -9,7 +9,7 @@
 // 「先別賣」就會無聲消失——正是本修正要避免的事。取不到的行標記 `noteUnknown`，
 // 結帳提醒會把它列出來要求店員自行查證，而不是靜默放行。
 // 只有 404（商品不存在／他店）才算「確定沒有備註」。
-import type { CartLine } from "@/features/pos/cart";
+import { basketNote, type CartLine } from "@/features/pos/cart";
 import { api } from "@/lib/api";
 import { RESTORE_LOOKUP_TIMEOUT_MS, withDeadline } from "@/lib/deadline";
 
@@ -40,7 +40,8 @@ async function fetchNote(line: CartLine, signal: AbortSignal): Promise<NoteLooku
         params: { path: { basket_id: line.bulkBasketId } },
         signal,
       });
-      return classify(data?.note, response.status);
+      // 與掃碼加入時同一套組法（籃子＋還有貨的各批），還原後提醒才不會變少。
+      return classify(data ? basketNote(data) : null, response.status);
     }
     if (line.lineType === "BULK_LOT" && line.bulkLotId != null) {
       const { data, response } = await api.GET("/api/v1/bulk-lots/{lot_id}", {

@@ -163,8 +163,26 @@ export function basketCartLine(basket: BulkBasket): CartLine {
     qty: 1,
     bulkBasketId: basket.id,
     maxQty: basket.remaining_qty,
-    note: basket.note,
+    note: basketNote(basket),
   };
+}
+
+/**
+ * 籃子的結帳提醒＝籃子本身的備註＋籃內**還有貨**的各批收購備註（去重）。
+ * 收購時寫在那批的「有 3 支彎掉」若只存在來源上，放進籃子後就再也不會被提醒；
+ * 已賣完的批次不會再出貨，不必提。都沒有則為 null。
+ */
+export function basketNote(basket: BulkBasket): string | null {
+  const notes = [
+    basket.note,
+    ...basket.sources
+      .filter((source) => source.status === "ON_SALE" && source.remaining_qty > 0)
+      .map((source) => source.note),
+  ]
+    .map((note) => note?.trim() ?? "")
+    .filter((note) => note !== "");
+  const unique = [...new Set(notes)];
+  return unique.length > 0 ? unique.join("；") : null;
 }
 
 /** 贈品列的 key 前綴：同一商品「買 2 ＋ 送 1」是兩列，共用 key 會被合併成一列。 */

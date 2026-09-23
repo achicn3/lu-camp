@@ -408,3 +408,23 @@ async def test_acquisition_replay_returns_same_basket_code(
     assert replay.json()["basket_code"] == first.json()["basket_code"]
     listed = (await client.get("/api/v1/bulk-baskets", headers=_h(token))).json()
     assert len(listed) == 1
+
+
+async def test_basket_exposes_each_source_note_for_checkout_reminders(
+    client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    """收購時寫在那批的備註（例：有 3 支彎掉）入籃後也要讀得到。
+
+    POS 才能在結帳前提醒（Codex 第二輪）。
+    """
+    _, token = await _token(db_session)
+    await _open_drawer(client, token)
+    first = await _acquire_bulk(client, token, qty=10, cost="50", new_basket=True)
+    basket = (
+        await client.get(f"/api/v1/bulk-baskets/by-code/{first['basket_code']}", headers=_h(token))
+    ).json()
+    await _acquire_bulk(
+        client, token, qty=20, cost="160", basket_id=basket["id"], note="有 3 支彎掉"
+    )
+    read = (await client.get(f"/api/v1/bulk-baskets/{basket['id']}", headers=_h(token))).json()
+    assert [s["note"] for s in read["sources"]] == [None, "有 3 支彎掉"]
