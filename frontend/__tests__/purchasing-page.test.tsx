@@ -202,16 +202,31 @@ describe("/purchasing 列表頁", () => {
     expect(await screen.findByText(/低於補貨點/)).toBeTruthy();
     expect(screen.getByText(/其中 1 項已在途/)).toBeTruthy();
     // 在途已足的不列入「全部帶入」，避免重複下單。
+    // 數量＝補貨點−現量−在途（5−1−0＝4），一起帶進網址。
     expect(
       screen.getByRole("link", { name: "全部帶入建立採購單" }).getAttribute("href"),
-    ).toBe("/purchasing/new?reorder=42");
+    ).toBe("/purchasing/new?reorder=42:4");
     await user.click(screen.getByRole("button", { name: "查看" }));
     expect(screen.getAllByText(/現量 1 \/ 補貨點 5/)).toHaveLength(2);
     expect(screen.getByText(/待到貨 8/)).toBeTruthy();
     expect(screen.getByText(/在途已足/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "補貨 瓦斯罐" }).getAttribute("href")).toBe(
-      "/purchasing/new?reorder=42",
+      "/purchasing/new?reorder=42:4",
     );
+  });
+
+  it("在途只補了一部分：建議數量扣掉在途，不重複下單（Codex 審查）", async () => {
+    loginAs("CLERK");
+    const partial = { ...CATALOG, quantity_on_hand: 1, reorder_point: 10, incoming_qty: 6 };
+    stubFetch((url) => {
+      if (url.includes("/catalog-products") && url.includes("low_stock=true")) return json([partial]);
+      if (url.includes("/purchase-orders/count")) return json({ count: 0 });
+      if (url.includes("/purchase-orders")) return json([]);
+      return null;
+    });
+    renderPage();
+    const link = await screen.findByRole("link", { name: "全部帶入建立採購單" });
+    expect(link.getAttribute("href")).toBe("/purchasing/new?reorder=42:3");
   });
 
   it("沒有低庫存就不佔版面", async () => {
@@ -431,7 +446,8 @@ describe("/purchasing/new 建立採購單", () => {
   it("搜尋結果不顯示 SKU，改顯示品牌、售價與現量", async () => {
     loginAs("CLERK");
     stubFetch((url) => {
-      if (url.includes("/brands")) return json([{ id: 2, name: "Snow Peak" }]);
+      if (url.includes("/catalog-products/filter-options"))
+        return json({ brands: [{ id: 2, name: "Snow Peak" }] });
       if (url.includes("/catalog-products"))
         return json([{ ...CATALOG, sku: "AUTO-XYZ", brand_id: 2 }]);
       return null;
@@ -849,6 +865,17 @@ describe("/purchasing/new 建立採購單", () => {
     expect(JSON.parse(createdBody as unknown as string).submit).toBe(false);
   });
 
+  it("從低庫存帶入時採用提示算好的數量（已扣在途）", async () => {
+    loginAs("CLERK");
+    stubFetch((url) => {
+      if (new URL(url).pathname.endsWith("/catalog-products/42")) return json(CATALOG);
+      return json([]);
+    });
+    renderNew("reorder=42:3");
+    expect(await screen.findByLabelText("進貨單價 瓦斯罐")).toBeTruthy();
+    expect((screen.getByLabelText("數量 瓦斯罐") as HTMLInputElement).value).toBe("3");
+  });
+
   it("從低庫存「補貨」進來：該品已在明細，數量預設補到補貨點", async () => {
     loginAs("CLERK");
     stubFetch((url) => {
@@ -871,7 +898,8 @@ describe("/purchasing/[id] 採購單明細", () => {
     return (url, init) => {
       const hit = extra(url, init);
       if (hit) return hit;
-      if (url.includes("/brands")) return json([]);
+      if (url.includes("/catalog-products/filter-options"))
+        return json({ brands: [{ id: 2, name: "Snow Peak" }] });
       if (new URL(url).pathname.endsWith("/catalog-products/42")) return json(CATALOG);
       if (isPoDetail(url)) return json(po);
       return null;
@@ -934,7 +962,7 @@ describe("/purchasing/[id] 採購單明細", () => {
         receivePosted = true;
         return json({ receipt_id: 1, purchase_order: received });
       }
-      if (url.includes("/brands")) return json([]);
+      if (url.includes("/catalog-products/filter-options")) return json({ brands: [] });
       if (new URL(url).pathname.endsWith("/catalog-products/42")) return json(CATALOG);
       if (isPoDetail(url)) return json(receivePosted ? received : ORDERED_PO);
       return null;
@@ -956,6 +984,30 @@ describe("/purchasing/[id] 採購單明細", () => {
     stubFetch(detailRoutes(ORDERED_PO));
     renderDetail(7, "receive=1");
     expect(await screen.findByRole("dialog", { name: "確認收貨" })).toBeTruthy();
+  });
+
+  it("品牌名從「一般商品實際用到的品牌」查，不受品牌清單 200 筆上限影響（Codex 審查）", async () => {
+    loginAs("CLERK");
+    const branded = { ...CATALOG, brand_id: 2 };
+    const received = {
+      ...ORDERED_PO,
+      status: "RECEIVED",
+      lines: [{ ...ORDERED_PO.lines[0], received_qty: 10 }],
+    };
+    const urls: string[] = [];
+    stubFetch((url) => {
+      urls.push(url);
+      if (url.includes("/catalog-products/filter-options"))
+        return json({ brands: [{ id: 2, name: "Snow Peak" }] });
+      if (new URL(url).pathname.endsWith("/catalog-products/42")) return json(branded);
+      if (isPoDetail(url)) return json(received);
+      return null;
+    });
+    renderDetail();
+    expect(await screen.findByText("Snow Peak")).toBeTruthy();
+    const print = screen.getByRole("button", { name: "印標籤 瓦斯罐" }) as HTMLButtonElement;
+    expect(print.disabled).toBe(false);
+    expect(urls.some((u) => new URL(u).pathname.endsWith("/api/v1/brands"))).toBe(false);
   });
 
   it("尚未收貨的品項不顯示印標籤", async () => {

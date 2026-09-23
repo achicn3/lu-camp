@@ -8,9 +8,18 @@ import { useState } from "react";
 
 import { extractDetail } from "@/features/purchasing/shared";
 import { api } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 
-export function reorderHref(ids: number[]): string {
-  return `/purchasing/new?reorder=${ids.join(",")}`;
+type CatalogProduct = components["schemas"]["CatalogProductRead"];
+
+/** 還缺幾件才到補貨點：扣掉現量與在途（至少 1）。在途只補一部分時，不重複下單。 */
+export function shortage(product: CatalogProduct): number {
+  return Math.max(1, product.reorder_point - product.quantity_on_hand - product.incoming_qty);
+}
+
+/** 帶進建立頁的網址：reorder=商品id:建議數量,…（清單才有在途數量，單查一項商品沒有）。 */
+export function reorderHref(products: CatalogProduct[]): string {
+  return `/purchasing/new?reorder=${products.map((p) => `${p.id}:${shortage(p)}`).join(",")}`;
 }
 
 export function LowStockBanner() {
@@ -56,7 +65,7 @@ export function LowStockBanner() {
             {open ? "收起" : "查看"}
           </button>
           {needed.length > 0 && (
-            <Link href={reorderHref(needed.map((p) => p.id))} className="btn-primary">
+            <Link href={reorderHref(needed)} className="btn-primary">
               全部帶入建立採購單
             </Link>
           )}
@@ -79,7 +88,7 @@ export function LowStockBanner() {
                   )}
                 </span>
                 <Link
-                  href={reorderHref([p.id])}
+                  href={reorderHref([p])}
                   className="btn-secondary pur-reorder-btn"
                   aria-label={`補貨 ${p.name}`}
                 >

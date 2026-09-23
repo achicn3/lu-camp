@@ -20,8 +20,8 @@ import {
   unitCostError,
 } from "@/features/purchasing/purchasing";
 import { extractDetail, nextDraftKey, type PurchaseOrder } from "@/features/purchasing/shared";
+import { useCatalogBrandNames } from "@/features/purchasing/useCatalogBrandNames";
 import { api } from "@/lib/api";
-import type { components } from "@/lib/api-types";
 import { decodeSession } from "@/lib/auth";
 import {
   canDiscardIdempotencyKey,
@@ -34,18 +34,6 @@ import {
 import { formatNtd, parseNtd } from "@/lib/money";
 import { newIdempotencyKey } from "@/lib/uuid";
 
-type Brand = components["schemas"]["BrandRead"];
-
-function useBrandNames(): (id: number | null) => string | null {
-  const brands = useQuery({
-    queryKey: ["brands", "purchasing-names"],
-    queryFn: async () =>
-      (await api.GET("/api/v1/brands", { params: { query: { limit: 200 } } })).data ?? [],
-  });
-  return (id) =>
-    id === null ? null : (brands.data ?? []).find((b: Brand) => b.id === id)?.name ?? null;
-}
-
 // ── 明細列 ──
 function DraftLineRow({
   line,
@@ -54,7 +42,7 @@ function DraftLineRow({
   onRemove,
 }: {
   line: DraftLine;
-  brand: string | null;
+  brand: string | null | undefined;
   onChange: (next: DraftLine) => void;
   onRemove: () => void;
 }) {
@@ -65,7 +53,7 @@ function DraftLineRow({
     <tr>
       <td>
         {line.product.name}
-        {brand !== null && <span className="row-sub">{brand}</span>}
+        {brand && <span className="row-sub">{brand}</span>}
       </td>
       <td>
         <input
@@ -105,16 +93,22 @@ function DraftLineRow({
   );
 }
 
+export interface ReorderItem {
+  id: number;
+  /** 低庫存提示算好的建議數量（補貨點−現量−在途）；沒帶就補到補貨點。 */
+  qty?: number;
+}
+
 export function CreatePurchaseOrderForm({
-  initialProductIds = [],
+  initialItems = [],
   onCreated,
 }: {
   /** 從低庫存「補貨」帶進來的商品，進頁面就先放進明細。 */
-  initialProductIds?: number[];
+  initialItems?: ReorderItem[];
   onCreated: (po: PurchaseOrder) => void;
 }) {
   const queryClient = useQueryClient();
-  const brandName = useBrandNames();
+  const brandName = useCatalogBrandNames();
   const catalogCreateStoreId = decodeSession()?.storeId ?? 0;
   const pendingCatalogCreate = useSyncExternalStore(
     subscribePendingCatalogCreate,
@@ -151,18 +145,22 @@ export function CreatePurchaseOrderForm({
   // 低庫存帶入：只在第一次拿到商品時放進明細（之後店員移除的不會被加回來）。
   const seeded = useRef(false);
   const reorderProducts = useQuery({
-    queryKey: ["catalog-products", "reorder", initialProductIds.join(",")],
-    enabled: initialProductIds.length > 0,
+    queryKey: ["catalog-products", "reorder", initialItems.map((item) => item.id).join(",")],
+    enabled: initialItems.length > 0,
     queryFn: async () =>
       (
         await Promise.all(
-          initialProductIds.map((id) =>
-            api.GET("/api/v1/catalog-products/{product_id}", {
+          initialItems.map(async ({ id, qty }) => {
+            const { data } = await api.GET("/api/v1/catalog-products/{product_id}", {
               params: { path: { product_id: id } },
-            }),
-          ),
+            });
+            // 優先用提示算好的數量（已扣在途）；沒帶就補到補貨點（至少 1）。
+            return data
+              ? [{ product: data, qty: qty ?? Math.max(1, data.reorder_point - data.quantity_on_hand) }]
+              : [];
+          }),
         )
-      ).flatMap(({ data }) => (data ? [data] : [])),
+      ).flat(),
   });
   useEffect(() => {
     if (seeded.current || !reorderProducts.data) return;
@@ -171,14 +169,8 @@ export function CreatePurchaseOrderForm({
     setLines((prev) => [
       ...prev,
       ...incoming
-        .filter((product) => !prev.some((l) => l.product.id === product.id))
-        // 補到補貨點以上：預設數量＝補貨點−現量（至少 1）。
-        .map((product) => ({
-          key: nextDraftKey(),
-          product,
-          qty: Math.max(1, product.reorder_point - product.quantity_on_hand),
-          unitCost: "",
-        })),
+        .filter(({ product }) => !prev.some((l) => l.product.id === product.id))
+        .map(({ product, qty }) => ({ key: nextDraftKey(), product, qty, unitCost: "" })),
     ]);
   }, [reorderProducts.data]);
 
@@ -455,7 +447,7 @@ export function CreatePurchaseOrderForm({
                   <li key={p.id}>
                     <button type="button" className="btn-ghost" onClick={() => addProduct(p)}>
                       ＋ {p.name}
-                      {brandName(p.brand_id) !== null && (
+                      {brandName(p.brand_id) && (
                         <span className="row-sub">{brandName(p.brand_id)}</span>
                       )}
                       <span className="row-sub">

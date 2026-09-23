@@ -16,6 +16,7 @@ import {
 } from "@/features/purchasing/purchasing";
 import { ReceiveDialog } from "@/features/purchasing/ReceiveDialog";
 import { dt, extractDetail, money, type PurchaseOrder } from "@/features/purchasing/shared";
+import { useCatalogBrandNames } from "@/features/purchasing/useCatalogBrandNames";
 import { printLabel } from "@/lib/agent";
 import { api } from "@/lib/api";
 import { parseNtd } from "@/lib/money";
@@ -61,13 +62,7 @@ export function PurchaseOrderDetail({
   const productById = new Map(
     products.flatMap((q) => (q.data ? [[q.data.id, q.data] as const] : [])),
   );
-  const brands = useQuery({
-    queryKey: ["brands", "purchasing-labels"],
-    queryFn: async () =>
-      (await api.GET("/api/v1/brands", { params: { query: { limit: 200 } } })).data ?? [],
-  });
-  const brandName = (id: number | null): string | null | undefined =>
-    id === null ? null : brands.data?.find((b) => b.id === id)?.name;
+  const brandName = useCatalogBrandNames();
   const productName = (id: number) => productById.get(id)?.name ?? `#${id}`;
 
   const refresh = () => {
