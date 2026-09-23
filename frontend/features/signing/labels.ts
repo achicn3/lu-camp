@@ -67,7 +67,7 @@ export function contentRows(content: Record<string, unknown>): ContentRow[] {
   if (lot && typeof lot === "object") {
     const l = lot as { total_qty?: unknown; acquisition_basis?: unknown };
     rows.push({
-      label: "散裝批",
+      label: "散裝",
       value: `數量 ${String(l.total_qty ?? "—")}（計價基準 ${String(l.acquisition_basis ?? "—")}）`,
     });
   }

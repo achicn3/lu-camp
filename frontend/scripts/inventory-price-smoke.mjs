@@ -97,8 +97,8 @@ try {
   await changeFirstPrice("一般商品（單價）", "02-catalog");
 
   // 5) 散裝批改單價
-  await switchTab("散裝批");
-  await changeFirstPrice("散裝批（單價）", "03-bulk");
+  await switchTab("散裝");
+  await changeFirstPrice("散裝（單價）", "03-bulk");
 } catch (err) {
   ok("流程未完成（例外）", false, String(err));
 } finally {

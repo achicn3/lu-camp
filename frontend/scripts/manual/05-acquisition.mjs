@@ -241,7 +241,7 @@ await page.waitForSelector(".acq-result", { timeout: 20000 });
 await page.waitForTimeout(800);
 const done4 = await page.textContent(".acq-result");
 created.bulk = /單號 #(\d+)/.exec(done4)?.[1];
-created.lotCode = /散裝批號：([SL]\d+-[0-9A-F]+)/.exec(done4)?.[1];
+created.lotCode = /散裝編號：([SL]\d+-[0-9A-F]+)/.exec(done4)?.[1];
 note(`散裝完成：${done4?.replace(/\s+/g, " ").slice(0, 120)}`);
 await shot(page, "bulk-result", { locator: ".acq-result" });
 

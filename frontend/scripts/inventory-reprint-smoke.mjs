@@ -130,10 +130,10 @@ try {
   await page.screenshot({ path: `${SHOTS}/inv-reprint-03-catalog.png` });
 
   // 5) 散裝批：一樣是收購進來的＝二手
-  await page.click('[role="tab"]:has-text("散裝批")');
+  await page.click('[role="tab"]:has-text("散裝")');
   await page.waitForSelector(".inv-table tbody tr");
   await filterInStock("販售中");
-  checkLabel("散裝批", await reprintFirstRow("散裝批"), "二手");
+  checkLabel("散裝", await reprintFirstRow("散裝"), "二手");
   await page.screenshot({ path: `${SHOTS}/inv-reprint-04-bulk.png` });
 
   // 5b) 成色「全新未拆」一定印「全新」：直接用成色篩選，不靠清單第一列剛好是哪一件。

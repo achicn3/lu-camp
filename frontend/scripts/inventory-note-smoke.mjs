@@ -18,7 +18,7 @@ mkdirSync(SHOTS, { recursive: true });
 const CASES = [
   { tab: "序號品", note: "缺營釘一支，交貨前要跟客人說" },
   { tab: "一般商品", note: "效期較短，請先進先出" },
-  { tab: "散裝批", note: "數量請客人自己點過再收款" },
+  { tab: "散裝", note: "數量請客人自己點過再收款" },
 ];
 
 const results = [];
@@ -67,7 +67,7 @@ try {
 
     await row.locator('button:has-text("詳細")').click();
     const detail = page.locator(
-      '[aria-label="商品明細"], [aria-label="一般商品明細"], [aria-label="散裝批明細"]',
+      '[aria-label="商品明細"], [aria-label="一般商品明細"], [aria-label="散裝明細"]',
     );
     await detail.waitFor({ state: "visible", timeout: 6000 });
     await detail

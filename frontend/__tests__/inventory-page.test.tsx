@@ -376,7 +376,7 @@ describe("InventoryPage", () => {
   it("bulk tab shows sell-through percent", async () => {
     stubInventory();
     renderPage();
-    await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
     expect(await screen.findByText("LOT-7")).toBeTruthy();
     expect(screen.getByText("60%")).toBeTruthy(); // (10-4)/10
     expect(screen.getByText("販售中", { selector: ".inv-badge" })).toBeTruthy();
@@ -449,7 +449,7 @@ describe("InventoryPage", () => {
   // 一般商品來自採購＝全新；序號品與散裝批來自收購＝二手。成色不印。
   it.each([
     { tab: "一般商品", row: "SKU-9", code: "SKU-9", name: "瓦斯罐", price: 120, condition: "全新" },
-    { tab: "散裝批", row: "LOT-7", code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
+    { tab: "散裝", row: "LOT-7", code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
   ])("$tab row prints a label marked $condition", async (c) => {
     const calls: { url: string; body: unknown }[] = [];
     vi.stubGlobal(
@@ -483,7 +483,7 @@ describe("InventoryPage", () => {
   it.each([
     { tab: "序號品", endpoint: "serialized-items", rows: SERIALIZED, code: "SER-001", name: "登山帳篷", price: 3500, condition: "二手" },
     { tab: "一般商品", endpoint: "catalog-products", rows: CATALOG, code: "SKU-9", name: "瓦斯罐", price: 120, condition: "全新" },
-    { tab: "散裝批", endpoint: "bulk-lots", rows: BULK, code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
+    { tab: "散裝", endpoint: "bulk-lots", rows: BULK, code: "LOT-7", name: "雜物堆", price: 50, condition: "二手" },
   ].flatMap((c) => ["pending", "failed", "missing"].map((state) => ({ ...c, state }))))("$tab blocks printing when the assigned brand is $state, then recovers", async (c) => {
     const { state } = c;
     let release!: (response: Response) => void;
@@ -571,10 +571,10 @@ describe("InventoryPage", () => {
     stubInventory();
     loginManager();
     renderPage();
-    await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
     await screen.findByText("LOT-7");
     await userEvent.click(screen.getByRole("button", { name: "詳細" }));
-    expect(await screen.findByText("散裝批明細")).toBeTruthy();
+    expect(await screen.findByText("散裝明細")).toBeTruthy();
     expect(screen.getByText(/散裝寄售人/)).toBeTruthy();
   });
 
@@ -779,7 +779,7 @@ it("編輯：全新售價（原價）可以改，也可以清空", async () => {
       .toEqual(["商品編號", "品牌", "品名"]);
     expect(screen.getByText(/共 \d+ 件/)).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("tab", { name: "散裝批" }));
+    await userEvent.click(screen.getByRole("tab", { name: "散裝" }));
     await screen.findByText(/第 \d+ \/ \d+ 頁/);
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent).slice(0, 3))
       .toEqual(["批號", "品牌", "名稱"]);

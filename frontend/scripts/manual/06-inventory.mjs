@@ -79,7 +79,7 @@ const sku = await page
 note(`一般商品編號：${sku}`);
 
 // ── 散裝批 ──
-await page.click('button:has-text("散裝批")');
+await page.click('button:has-text("散裝")');
 await page.waitForTimeout(1200);
 await shot(page, "bulk-list", { content: true });
 await page.locator('.inv-table tbody tr button:has-text("詳細")').first().click();

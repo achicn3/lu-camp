@@ -56,9 +56,9 @@ try {
   await page.screenshot({ path: `${SHOTS}/02-catalog-lowstock.png` });
 
   // 5) 散裝批分頁：售出進度
-  await page.click('button[role="tab"]:has-text("散裝批")');
+  await page.click('button[role="tab"]:has-text("散裝")');
   await page.waitForSelector("text=LOT-1");
-  ok("散裝批列出", true);
+  ok("散裝列出", true);
   ok("售出進度 60%（(10-4)/10）", await page.locator("text=60%").isVisible());
   ok("狀態 badge=販售中", await page.locator('.inv-badge:has-text("販售中")').isVisible());
   await page.screenshot({ path: `${SHOTS}/03-bulk.png` });

@@ -550,7 +550,7 @@ function InsightsPanel() {
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.bulk_on_sale}</span>
-              <span className="rpt-insight-cap">販售中散裝批</span>
+              <span className="rpt-insight-cap">販售中散裝</span>
             </div>
             <div className="rpt-insight-card">
               <span className="rpt-insight-num">{report.turnover.catalog_in_stock}</span>
@@ -1269,7 +1269,7 @@ function InventoryValuePanel() {
               <td><MoneyText value={report.owned_serialized_retail} /></td>
             </tr>
             <tr>
-              <td>散裝批</td>
+              <td>散裝</td>
               <td className="money">{report.owned_bulk_remaining_qty}</td>
               <td><MoneyText value={report.owned_bulk_cost} /></td>
               <td><MoneyText value={report.owned_bulk_retail} /></td>

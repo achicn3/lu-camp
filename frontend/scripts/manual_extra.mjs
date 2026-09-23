@@ -77,10 +77,10 @@ async function main() {
     await shotV(page, "inv-04-detail-catalog", ".inv-detail");
     await page.locator('.inv-detail button:has-text("關閉")').click().catch(() => {});
     // 散裝批詳細
-    await page.locator('.inv-tab:has-text("散裝批")').click();
+    await page.locator('.inv-tab:has-text("散裝")').click();
     await T(page, 700);
     await page.locator('button:has-text("詳細")').first().click();
-    await page.locator("text=散裝批明細").waitFor({ timeout: 5000 });
+    await page.locator("text=散裝明細").waitFor({ timeout: 5000 });
     await T(page, 400);
     await shotV(page, "inv-05-detail-bulk", ".inv-detail");
   });

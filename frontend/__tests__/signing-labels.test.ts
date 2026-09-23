@@ -38,7 +38,7 @@ describe("contentRows", () => {
       total: "800",
       lot: { total_qty: 30, acquisition_basis: "BAG" },
     });
-    expect(rows).toContainEqual({ label: "散裝批", value: "數量 30（計價基準 BAG）" });
+    expect(rows).toContainEqual({ label: "散裝", value: "數量 30（計價基準 BAG）" });
   });
 
   it("未知鍵以原鍵名呈現、未知巢狀物件以 JSON 如實呈現（不可默默丟棄）", () => {

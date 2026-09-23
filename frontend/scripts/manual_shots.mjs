@@ -325,7 +325,7 @@ async function main() {
     await go(page, "/inventory");
     await T(page, 600);
     await shot(page, "40-inventory");
-    const bulkTab = page.locator(".inv-tab", { hasText: "散裝批" });
+    const bulkTab = page.locator(".inv-tab", { hasText: "散裝" });
     if (await bulkTab.count()) {
       await bulkTab.first().click();
       await T(page, 700);
