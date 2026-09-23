@@ -4,16 +4,18 @@
 確保「庫存建了但現金沒扣」之類的半套不會落地（給現金永遠在系統成功之後）。
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.deps import CurrentUser, get_current_user, require_role
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
+    AcquisitionListRead,
     AcquisitionRead,
     AcquisitionReceiptRead,
     AcquisitionResult,
@@ -21,7 +23,7 @@ from app.modules.acquisition.schemas import (
     AcquisitionVoidResult,
 )
 from app.modules.acquisition.service import AcquisitionService
-from app.shared.enums import UserRole
+from app.shared.enums import AcquisitionType, UserRole
 from app.shared.exceptions import (
     AcquisitionAlreadyVoid,
     AcquisitionCreditSpent,
@@ -154,6 +156,39 @@ async def create_acquisition(
         raise
     await session.commit()
     return result
+
+
+# 收購紀錄清單一頁上限。
+ACQUISITION_LIST_MAX_LIMIT = 100
+
+
+@router.get("", response_model=AcquisitionListRead, operation_id="listAcquisitions")
+async def list_acquisitions(
+    session: SessionDep,
+    user: CurrentUserDep,
+    date_from: Annotated[datetime | None, Query(description="收購時間起（含）")] = None,
+    date_to: Annotated[datetime | None, Query(description="收購時間迄（不含）")] = None,
+    type: Annotated[AcquisitionType | None, Query(description="只看某種收購")] = None,
+    voided: Annotated[bool | None, Query(description="true 只看已作廢、false 只看有效")] = None,
+    q: Annotated[str | None, Query(max_length=100, description="賣方姓名或電話")] = None,
+    limit: Annotated[int, Query(ge=1, le=ACQUISITION_LIST_MAX_LIMIT)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AcquisitionListRead:
+    """收購紀錄清單（新到舊、分頁）；每列附「現在能不能作廢、為什麼不行」。
+
+    店員也能看（2026-09-23 裁示）；作廢仍走 POST /{id}/void（限管理者、最終權威）。
+    不回作廢原因與賣方證號（可能含 PII，§5）。
+    """
+    return await AcquisitionService(session).list_acquisitions(
+        user.store_id,
+        date_from=date_from,
+        date_to=date_to,
+        acq_type=type,
+        voided=voided,
+        q=q,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{acquisition_id}", response_model=AcquisitionRead, operation_id="getAcquisition")

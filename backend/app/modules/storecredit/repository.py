@@ -72,6 +72,24 @@ class StoreCreditRepository:
         result: StoreCreditLedger | None = await self._session.scalar(stmt)
         return result
 
+    async def credit_amounts_by_source(
+        self, store_id: int, source_type: StoreCreditSourceType, source_ids: list[int]
+    ) -> dict[int, Decimal]:
+        """一批來源各自的購物金入帳金額（CREDIT 分錄的 signed_amount）。"""
+        if not source_ids:
+            return {}
+        stmt = select(StoreCreditLedger.source_id, StoreCreditLedger.signed_amount).where(
+            StoreCreditLedger.store_id == store_id,
+            StoreCreditLedger.source_type == source_type,
+            StoreCreditLedger.source_id.in_(source_ids),
+            StoreCreditLedger.entry_type == StoreCreditEntryType.CREDIT,
+        )
+        return {
+            int(row.source_id): Decimal(row.signed_amount)
+            for row in await self._session.execute(stmt)
+            if row.source_id is not None
+        }
+
     async def get_entry(self, store_id: int, entry_id: int) -> StoreCreditLedger | None:
         """以 id 取本店分錄（沖正前重載持久列，不信任呼叫端物件）。"""
         stmt = select(StoreCreditLedger).where(

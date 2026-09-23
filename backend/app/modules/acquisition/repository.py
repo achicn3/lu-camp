@@ -1,6 +1,8 @@
 """acquisition 資料存取層（唯一直接碰本模組 ORM 的層）。"""
 
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.acquisition.models import Acquisition
 from app.modules.inventory.models import BulkLot, SerializedItem
 from app.shared.enums import AcquisitionType, PayoutMethod
+
+
+@dataclass(frozen=True)
+class AcquisitionListFilter:
+    """收購紀錄清單的篩選條件（None ＝ 不篩）。date_to 不含。"""
+
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    acq_type: AcquisitionType | None = None
+    voided: bool | None = None
+    contact_ids: list[int] | None = None
 
 
 class AcquisitionRepository:
@@ -76,6 +89,41 @@ class AcquisitionRepository:
         )
         result = await self._session.scalars(stmt)
         return list(result)
+
+    @staticmethod
+    def _filtered(store_id: int, f: AcquisitionListFilter) -> list[Any]:
+        """收購紀錄清單的篩選條件——清單與總筆數共用這一份，兩者才不會各算各的。"""
+        conds: list[Any] = [Acquisition.store_id == store_id]
+        if f.date_from is not None:
+            conds.append(Acquisition.created_at >= f.date_from)
+        if f.date_to is not None:
+            conds.append(Acquisition.created_at < f.date_to)
+        if f.acq_type is not None:
+            conds.append(Acquisition.type == f.acq_type)
+        if f.voided is not None:
+            conds.append(
+                Acquisition.voided_at.is_not(None) if f.voided else Acquisition.voided_at.is_(None)
+            )
+        if f.contact_ids is not None:
+            conds.append(Acquisition.contact_id.in_(f.contact_ids))
+        return conds
+
+    async def list_filtered(
+        self, store_id: int, f: AcquisitionListFilter, *, limit: int, offset: int
+    ) -> list[Acquisition]:
+        """收購紀錄清單（新到舊、分頁）；單號即 id，同一秒建單也有穩定順序。"""
+        stmt = (
+            select(Acquisition)
+            .where(*self._filtered(store_id, f))
+            .order_by(Acquisition.created_at.desc(), Acquisition.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def count_filtered(self, store_id: int, f: AcquisitionListFilter) -> int:
+        stmt = select(func.count()).where(*self._filtered(store_id, f))
+        return int(await self._session.scalar(stmt) or 0)
 
     async def list_ids_by_contact(self, store_id: int, contact_id: int) -> list[int]:
         """某來源的所有收購單 id（id-only，供 sourced-items 反查買斷庫存；不載全列）。"""

@@ -19,7 +19,13 @@ from pydantic import (
 
 from app.core.money import MAX_NTD, ensure_ntd_fits_numeric_12, format_ntd
 from app.modules.acquisition.models import Acquisition
-from app.shared.enums import AcquisitionType, BulkAcquisitionBasis, Grade, PayoutMethod
+from app.shared.enums import (
+    AcquisitionType,
+    AcquisitionVoidBlock,
+    BulkAcquisitionBasis,
+    Grade,
+    PayoutMethod,
+)
 
 # 金額：輸出序列化為字串；輸入可吃字串或數字（Pydantic 轉 Decimal）。
 NTDAmount = Annotated[Decimal, PlainSerializer(format_ntd, return_type=str)]
@@ -264,3 +270,34 @@ class AcquisitionRead(BaseModel):
     @classmethod
     def from_model(cls, acquisition: Acquisition) -> "AcquisitionRead":
         return cls.model_validate(acquisition)
+
+
+class AcquisitionListItem(BaseModel):
+    """收購紀錄清單的一列：誰、何時、收了什麼、付了多少、現在能不能作廢。
+
+    不含作廢原因（自由文字可能含 PII，見 AcquisitionRead）與賣方證號；賣方只給姓名。
+    """
+
+    id: int
+    created_at: datetime
+    type: AcquisitionType
+    contact_id: int
+    seller_name: str
+    clerk_name: str | None
+    item_count: int
+    # 最多前 3 個品名（入庫順序），其餘看件數。
+    item_names: list[str]
+    payout_method: PayoutMethod
+    total_cash_paid: NTDAmount | None
+    payout_cash_amount: NTDAmount | None
+    payout_credit_cash_equivalent: NTDAmount | None
+    voided_at: datetime | None
+    # None ＝ 現在可以作廢（作廢鈕仍限管理者，端點是最終權威）。
+    void_block: AcquisitionVoidBlock | None
+
+
+class AcquisitionListRead(BaseModel):
+    """收購紀錄清單（新到舊、分頁）。total 是符合篩選條件的總筆數。"""
+
+    total: int
+    items: list[AcquisitionListItem]

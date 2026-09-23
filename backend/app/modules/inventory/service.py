@@ -3,6 +3,7 @@
 import hashlib
 import json
 from collections.abc import Awaitable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final
@@ -127,6 +128,15 @@ def _catalog_create_fingerprint(
 # 區分「未提供（不變）」與「明確設為 None（清空）」：品牌/型號/分類都可以清掉。
 _UNSET: Final = object()
 
+
+
+@dataclass
+class AcquisitionItemOverview:
+    """一張收購入庫了什麼：件數、品名（入庫順序）、是否已有商品賣出或動用。"""
+
+    count: int = 0
+    names: list[str] = field(default_factory=list)
+    used: bool = False
 
 class InventoryService:
     def __init__(self, session: AsyncSession) -> None:
@@ -1632,6 +1642,27 @@ class InventoryService:
         ids = await self._repo.list_serialized_ids_by_codes(store_id, item_codes)
         for item_id in ids:  # list_serialized_ids_by_codes 已升冪
             await self._repo.lock_serialized_row(store_id, item_id)
+
+    async def acquisition_item_overviews(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> dict[int, AcquisitionItemOverview]:
+        """一批收購各自入庫了什麼（收購紀錄清單用；唯讀、兩個彙總查詢、不逐張查）。
+
+        「已動用」口徑與 has_sold_items 相同，清單才能事先標出「含已售出，不能作廢」。
+        """
+        if not acquisition_ids:
+            return {}
+        overviews: dict[int, AcquisitionItemOverview] = {}
+        rows = [
+            *await self._repo.acquisition_serialized_overview(store_id, acquisition_ids),
+            *await self._repo.acquisition_bulk_overview(store_id, acquisition_ids),
+        ]
+        for row in rows:
+            ov = overviews.setdefault(int(row.acquisition_id), AcquisitionItemOverview())
+            ov.count += int(row.count or 0)
+            ov.names.extend(row.names or [])
+            ov.used = ov.used or bool(row.used)
+        return overviews
 
     async def has_sold_items(self, store_id: int, acquisition_id: int) -> bool:
         """該收購入庫的庫存是否已有任一售出/動用（read-only，作廢前置擋下用，F6.5）。

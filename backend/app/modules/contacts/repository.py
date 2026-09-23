@@ -105,6 +105,22 @@ class ContactRepository:
         )
         return list(await self._session.scalars(stmt))
 
+    async def names_for(self, store_id: int, contact_ids: list[int]) -> dict[int, str]:
+        """一批聯絡人的姓名（清單顯示用；只取 id 與姓名，不載其他欄位）。"""
+        if not contact_ids:
+            return {}
+        stmt = select(Contact.id, Contact.name).where(
+            Contact.store_id == store_id, Contact.id.in_(contact_ids)
+        )
+        return {row.id: row.name for row in await self._session.execute(stmt)}
+
+    async def search_ids(self, store_id: int, q: str) -> list[int]:
+        """姓名/電話模糊搜尋的全部 id（不分頁；給別的清單當篩選條件）。"""
+        stmt = select(Contact.id).where(
+            Contact.id.in_(self._search_select(store_id, None, q).with_only_columns(Contact.id))
+        )
+        return list(await self._session.scalars(stmt))
+
     async def count_search(self, store_id: int, role: str | None, q: str | None) -> int:
         """符合同一組搜尋條件的總筆數（不分頁；清單頁算總頁數用）。"""
         stmt = select(func.count()).select_from(self._search_select(store_id, role, q).subquery())

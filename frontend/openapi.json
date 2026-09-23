@@ -217,6 +217,151 @@
         "title": "AcquisitionItemIn",
         "type": "object"
       },
+      "AcquisitionListItem": {
+        "description": "收購紀錄清單的一列：誰、何時、收了什麼、付了多少、現在能不能作廢。\n\n不含作廢原因（自由文字可能含 PII，見 AcquisitionRead）與賣方證號；賣方只給姓名。",
+        "properties": {
+          "clerk_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clerk Name"
+          },
+          "contact_id": {
+            "title": "Contact Id",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "item_names": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Item Names",
+            "type": "array"
+          },
+          "payout_cash_amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Cash Amount"
+          },
+          "payout_credit_cash_equivalent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payout Credit Cash Equivalent"
+          },
+          "payout_method": {
+            "$ref": "#/components/schemas/PayoutMethod"
+          },
+          "seller_name": {
+            "title": "Seller Name",
+            "type": "string"
+          },
+          "total_cash_paid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cash Paid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AcquisitionType"
+          },
+          "void_block": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcquisitionVoidBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "voided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voided At"
+          }
+        },
+        "required": [
+          "id",
+          "created_at",
+          "type",
+          "contact_id",
+          "seller_name",
+          "clerk_name",
+          "item_count",
+          "item_names",
+          "payout_method",
+          "total_cash_paid",
+          "payout_cash_amount",
+          "payout_credit_cash_equivalent",
+          "voided_at",
+          "void_block"
+        ],
+        "title": "AcquisitionListItem",
+        "type": "object"
+      },
+      "AcquisitionListRead": {
+        "description": "收購紀錄清單（新到舊、分頁）。total 是符合篩選條件的總筆數。",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AcquisitionListItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "AcquisitionListRead",
+        "type": "object"
+      },
       "AcquisitionLotIn": {
         "description": "E 級散裝批入庫（BULK_LOT）。",
         "properties": {
@@ -678,6 +823,18 @@
           "BULK_LOT"
         ],
         "title": "AcquisitionType",
+        "type": "string"
+      },
+      "AcquisitionVoidBlock": {
+        "description": "收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。\n\n清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。",
+        "enum": [
+          "CONSIGNMENT",
+          "ALREADY_VOIDED",
+          "HAS_SOLD_ITEMS",
+          "CREDIT_SPENT",
+          "NO_OPEN_CASH_SESSION"
+        ],
+        "title": "AcquisitionVoidBlock",
         "type": "string"
       },
       "AcquisitionVoidRequest": {
@@ -13957,6 +14114,159 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/v1/acquisitions": {
+      "get": {
+        "description": "收購紀錄清單（新到舊、分頁）；每列附「現在能不能作廢、為什麼不行」。\n\n店員也能看（2026-09-23 裁示）；作廢仍走 POST /{id}/void（限管理者、最終權威）。\n不回作廢原因與賣方證號（可能含 PII，§5）。",
+        "operationId": "listAcquisitions",
+        "parameters": [
+          {
+            "description": "收購時間起（含）",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "收購時間起（含）",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "收購時間迄（不含）",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "收購時間迄（不含）",
+              "title": "Date To"
+            }
+          },
+          {
+            "description": "只看某種收購",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AcquisitionType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "只看某種收購",
+              "title": "Type"
+            }
+          },
+          {
+            "description": "true 只看已作廢、false 只看有效",
+            "in": "query",
+            "name": "voided",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true 只看已作廢、false 只看有效",
+              "title": "Voided"
+            }
+          },
+          {
+            "description": "賣方姓名或電話",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "賣方姓名或電話",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcquisitionListRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Acquisitions",
+        "tags": [
+          "acquisition"
+        ]
+      },
       "post": {
         "description": "建立收購單（必帶 Idempotency-Key，D-2 模式）：重試回原結果、不重複\n入庫/付現/入購物金；同 key 不同內容 409。",
         "operationId": "createAcquisition",

@@ -23,9 +23,11 @@ from app.core.audit import write_audit_log
 from app.core.money import MAX_NTD, round_ntd
 from app.modules.acquisition.codes import new_item_code, new_lot_code
 from app.modules.acquisition.models import Acquisition
-from app.modules.acquisition.repository import AcquisitionRepository
+from app.modules.acquisition.repository import AcquisitionListFilter, AcquisitionRepository
 from app.modules.acquisition.schemas import (
     AcquisitionCreate,
+    AcquisitionListItem,
+    AcquisitionListRead,
     AcquisitionReceiptItem,
     AcquisitionReceiptRead,
     AcquisitionResult,
@@ -36,8 +38,10 @@ from app.modules.inventory.basket_service import BulkBasketService
 from app.modules.inventory.service import InventoryService
 from app.modules.settings.service import StoreSettingsService
 from app.modules.storecredit.service import StoreCreditService
+from app.modules.user.service import UserService
 from app.shared.enums import (
     AcquisitionType,
+    AcquisitionVoidBlock,
     CashMovementType,
     ContactRole,
     Grade,
@@ -77,6 +81,8 @@ _CASH_PAYING = frozenset({AcquisitionType.BUYOUT, AcquisitionType.BULK_LOT})
 
 # 憑證聯的品項上限：一張紙印不下太多，且收購單本來就不會有數百件。
 _RECEIPT_ITEM_CAP = 200
+# 收購紀錄清單每列最多列幾個品名，其餘看件數。
+_LIST_ITEM_NAMES = 3
 
 
 class AcquisitionService:
@@ -89,6 +95,7 @@ class AcquisitionService:
         self._settings = StoreSettingsService(session)
         self._storecredit = StoreCreditService(session)
         self._cash = CashDrawerService(session)
+        self._users = UserService(session)
 
     async def find_by_signature_task(
         self, store_id: int, signature_task_id: int
@@ -144,6 +151,88 @@ class AcquisitionService:
             store_credit_granted=acquisition.payout_credit_cash_equivalent,
             voided_at=acquisition.voided_at,
         )
+
+    async def list_acquisitions(
+        self,
+        store_id: int,
+        *,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        acq_type: AcquisitionType | None = None,
+        voided: bool | None = None,
+        q: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> AcquisitionListRead:
+        """收購紀錄清單（新到舊、分頁），每列事先算好能不能作廢。唯讀。
+
+        賣方名、經手人、入庫品項、購物金餘額都經各自模組的 service 批次取回（§2，不逐列查）。
+        q 以賣方姓名/電話模糊篩（§5 不以證號搜尋）。
+        """
+        contact_ids: list[int] | None = None
+        if q is not None and q.strip():
+            contact_ids = await self._contacts.search_ids(store_id, q.strip())
+            if not contact_ids:
+                return AcquisitionListRead(total=0, items=[])
+        filters = AcquisitionListFilter(
+            date_from=date_from,
+            date_to=date_to,
+            acq_type=acq_type,
+            voided=voided,
+            contact_ids=contact_ids,
+        )
+        total = await self._repo.count_filtered(store_id, filters)
+        rows = await self._repo.list_filtered(store_id, filters, limit=limit, offset=offset)
+        if not rows:
+            return AcquisitionListRead(total=total, items=[])
+
+        ids = [a.id for a in rows]
+        sellers = await self._contacts.names_for(store_id, list({a.contact_id for a in rows}))
+        clerks = await self._users.usernames_for(store_id, [a.clerk_user_id for a in rows])
+        overviews = await self._inventory.acquisition_item_overviews(store_id, ids)
+        credits = await self._storecredit.acquisition_credit_amounts(store_id, ids)
+        balances = await self._storecredit.balances_for(
+            store_id, list({a.contact_id for a in rows if a.id in credits})
+        )
+        drawer_open = await self._cash.get_current_session(store_id) is not None
+
+        def void_block(acq: Acquisition, used: bool) -> AcquisitionVoidBlock | None:
+            # 順序與 void_acquisition 的擋下順序一致，清單講的原因才會跟按下去時一樣。
+            if acq.type == AcquisitionType.CONSIGNMENT:
+                return AcquisitionVoidBlock.CONSIGNMENT
+            if acq.voided_at is not None:
+                return AcquisitionVoidBlock.ALREADY_VOIDED
+            if used:
+                return AcquisitionVoidBlock.HAS_SOLD_ITEMS
+            if (acq.payout_cash_amount or Decimal(0)) > 0 and not drawer_open:
+                return AcquisitionVoidBlock.NO_OPEN_CASH_SESSION
+            credit = credits.get(acq.id)
+            if credit is not None and balances.get(acq.contact_id, Decimal(0)) < credit:
+                return AcquisitionVoidBlock.CREDIT_SPENT
+            return None
+
+        items: list[AcquisitionListItem] = []
+        for acq in rows:
+            overview = overviews.get(acq.id)
+            items.append(
+                AcquisitionListItem(
+                    id=acq.id,
+                    created_at=acq.created_at,
+                    type=acq.type,
+                    contact_id=acq.contact_id,
+                    seller_name=sellers.get(acq.contact_id, ""),
+                    clerk_name=clerks.get(acq.clerk_user_id),
+                    item_count=overview.count if overview else 0,
+                    item_names=overview.names[:_LIST_ITEM_NAMES] if overview else [],
+                    payout_method=acq.payout_method,
+                    total_cash_paid=acq.total_cash_paid,
+                    payout_cash_amount=acq.payout_cash_amount,
+                    payout_credit_cash_equivalent=acq.payout_credit_cash_equivalent,
+                    voided_at=acq.voided_at,
+                    void_block=void_block(acq, overview.used if overview else False),
+                )
+            )
+        return AcquisitionListRead(total=total, items=items)
 
     async def list_by_contact(
         self, store_id: int, contact_id: int, *, limit: int = 50, offset: int = 0
@@ -729,9 +818,7 @@ class AcquisitionService:
         # 賣過東西的人自動標記為賣方（2026-09-01 裁示：店員不必手動勾角色）。
         # 放在最後、與收購同一個交易：收購沒成立就不該留下賣方標記。
         # 冪等，且此處的 national_id 前置檢查已在本方法開頭做過。
-        await self._contacts.ensure_seller_role(
-            store_id, contact.id, actor_user_id=clerk_user_id
-        )
+        await self._contacts.ensure_seller_role(store_id, contact.id, actor_user_id=clerk_user_id)
 
         return AcquisitionResult(
             acquisition_id=acquisition.id,

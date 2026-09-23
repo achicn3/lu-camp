@@ -19,6 +19,15 @@ class UserService:
         """取得屬於該 store 的使用者；不屬於或不存在則回 None。"""
         return await self._repo.get_in_store(store_id, user_id)
 
+    async def usernames_for(self, store_id: int, user_ids: list[int]) -> dict[int, str]:
+        """一批本店使用者的帳號名（清單顯示經手人用）。"""
+        names: dict[int, str] = {}
+        for user_id in set(user_ids):
+            user = await self._repo.get_in_store(store_id, user_id)
+            if user is not None:
+                names[user_id] = user.username
+        return names
+
     async def authenticate(self, username: str, password: str) -> User | None:
         """驗證帳密；帳號不存在／密碼錯誤／已停用一律回 None（呼叫端統一 401）。"""
         user = await self._repo.get_by_username(username)

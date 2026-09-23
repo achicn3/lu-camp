@@ -11,7 +11,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Acquisitions
+         * @description 收購紀錄清單（新到舊、分頁）；每列附「現在能不能作廢、為什麼不行」。
+         *
+         *     店員也能看（2026-09-23 裁示）；作廢仍走 POST /{id}/void（限管理者、最終權威）。
+         *     不回作廢原因與賣方證號（可能含 PII，§5）。
+         */
+        get: operations["listAcquisitions"];
         put?: never;
         /**
          * Create Acquisition
@@ -3507,6 +3514,52 @@ export interface components {
             retail_price?: number | string | null;
         };
         /**
+         * AcquisitionListItem
+         * @description 收購紀錄清單的一列：誰、何時、收了什麼、付了多少、現在能不能作廢。
+         *
+         *     不含作廢原因（自由文字可能含 PII，見 AcquisitionRead）與賣方證號；賣方只給姓名。
+         */
+        AcquisitionListItem: {
+            /** Clerk Name */
+            clerk_name: string | null;
+            /** Contact Id */
+            contact_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Item Count */
+            item_count: number;
+            /** Item Names */
+            item_names: string[];
+            /** Payout Cash Amount */
+            payout_cash_amount: string | null;
+            /** Payout Credit Cash Equivalent */
+            payout_credit_cash_equivalent: string | null;
+            payout_method: components["schemas"]["PayoutMethod"];
+            /** Seller Name */
+            seller_name: string;
+            /** Total Cash Paid */
+            total_cash_paid: string | null;
+            type: components["schemas"]["AcquisitionType"];
+            void_block: components["schemas"]["AcquisitionVoidBlock"] | null;
+            /** Voided At */
+            voided_at: string | null;
+        };
+        /**
+         * AcquisitionListRead
+         * @description 收購紀錄清單（新到舊、分頁）。total 是符合篩選條件的總筆數。
+         */
+        AcquisitionListRead: {
+            /** Items */
+            items: components["schemas"]["AcquisitionListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * AcquisitionLotIn
          * @description E 級散裝批入庫（BULK_LOT）。
          */
@@ -3650,6 +3703,14 @@ export interface components {
          * @enum {string}
          */
         AcquisitionType: "BUYOUT" | "CONSIGNMENT" | "BULK_LOT";
+        /**
+         * AcquisitionVoidBlock
+         * @description 收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。
+         *
+         *     清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
+         * @enum {string}
+         */
+        AcquisitionVoidBlock: "CONSIGNMENT" | "ALREADY_VOIDED" | "HAS_SOLD_ITEMS" | "CREDIT_SPENT" | "NO_OPEN_CASH_SESSION";
         /**
          * AcquisitionVoidRequest
          * @description 作廢收購（F6.5）：必填原因（稽核留痕）。
@@ -8616,6 +8677,48 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listAcquisitions: {
+        parameters: {
+            query?: {
+                /** @description 收購時間起（含） */
+                date_from?: string | null;
+                /** @description 收購時間迄（不含） */
+                date_to?: string | null;
+                /** @description 只看某種收購 */
+                type?: components["schemas"]["AcquisitionType"] | null;
+                /** @description true 只看已作廢、false 只看有效 */
+                voided?: boolean | null;
+                /** @description 賣方姓名或電話 */
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcquisitionListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     createAcquisition: {
         parameters: {
             query?: never;

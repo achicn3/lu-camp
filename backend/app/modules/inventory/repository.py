@@ -7,7 +7,8 @@
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, case, delete, func, select, update
+from sqlalchemy import CursorResult, and_, case, delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.inventory.models import (
@@ -677,6 +678,59 @@ class InventoryRepository:
             .order_by(BulkLot.id)
         )
         return list((await self._session.scalars(stmt)).all())
+
+    async def acquisition_serialized_overview(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> list[Any]:
+        """每張收購的序號品：件數、品名（入庫順序）、是否有買斷品已動用（收購紀錄清單用）。
+
+        「已動用」口徑與作廢前置檢查 has_sold_items 相同：買斷品任一非 IN_STOCK。
+        """
+        stmt = (
+            select(
+                SerializedItem.acquisition_id,
+                func.count().label("count"),
+                func.array_agg(aggregate_order_by(SerializedItem.name, SerializedItem.id)).label(
+                    "names"
+                ),
+                func.bool_or(
+                    and_(
+                        SerializedItem.ownership_type == OwnershipType.OWNED,
+                        SerializedItem.status != SerializedItemStatus.IN_STOCK,
+                    )
+                ).label("used"),
+            )
+            .where(
+                SerializedItem.store_id == store_id,
+                SerializedItem.acquisition_id.in_(acquisition_ids),
+            )
+            .group_by(SerializedItem.acquisition_id)
+        )
+        return list((await self._session.execute(stmt)).all())
+
+    async def acquisition_bulk_overview(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> list[Any]:
+        """每張收購的散裝批：總件數、品名、是否有自有批已賣出（口徑同 has_sold_items）。"""
+        stmt = (
+            select(
+                BulkLot.acquisition_id,
+                func.sum(BulkLot.total_qty).label("count"),
+                func.array_agg(aggregate_order_by(BulkLot.name, BulkLot.id)).label("names"),
+                func.bool_or(
+                    and_(
+                        BulkLot.consignor_id.is_(None),
+                        or_(
+                            BulkLot.status != BulkLotStatus.ON_SALE,
+                            BulkLot.remaining_qty != BulkLot.total_qty,
+                        ),
+                    )
+                ).label("used"),
+            )
+            .where(BulkLot.store_id == store_id, BulkLot.acquisition_id.in_(acquisition_ids))
+            .group_by(BulkLot.acquisition_id)
+        )
+        return list((await self._session.execute(stmt)).all())
 
     async def list_serialized_ids_by_codes(self, store_id: int, item_codes: list[str]) -> list[int]:
         """解析 item_codes → 序號品 id（升冪；供銷售前置依 id 序鎖定，與作廢一致防 AB-BA）。"""

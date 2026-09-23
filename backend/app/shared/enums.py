@@ -113,6 +113,19 @@ class AcquisitionType(StrEnum):
     BULK_LOT = "BULK_LOT"
 
 
+class AcquisitionVoidBlock(StrEnum):
+    """收購紀錄清單上「這張現在不能作廢」的原因（口徑與作廢端點的 409/422 一致）。
+
+    清單事先算好，店長不必按下去才被拒絕；作廢端點仍是最終權威。
+    """
+
+    CONSIGNMENT = "CONSIGNMENT"  # 寄售走寄售退貨／結算反轉
+    ALREADY_VOIDED = "ALREADY_VOIDED"
+    HAS_SOLD_ITEMS = "HAS_SOLD_ITEMS"  # 已有商品賣出或動用
+    CREDIT_SPENT = "CREDIT_SPENT"  # 撥的購物金已被用掉，沖回會變負
+    NO_OPEN_CASH_SESSION = "NO_OPEN_CASH_SESSION"  # 付現的退款要進開帳中的抽屜
+
+
 class ItemKind(StrEnum):
     """庫存品種類（stock_movement 用）。"""
 

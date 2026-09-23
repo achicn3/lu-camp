@@ -272,6 +272,14 @@ class ContactService:
     ) -> list[Contact]:
         return await self._repo.search(store_id, role, q, limit=limit, offset=offset)
 
+    async def names_for(self, store_id: int, contact_ids: list[int]) -> dict[int, str]:
+        """一批聯絡人的姓名（別的模組的清單顯示賣方名用）。"""
+        return await self._repo.names_for(store_id, contact_ids)
+
+    async def search_ids(self, store_id: int, q: str) -> list[int]:
+        """姓名/電話模糊搜尋的全部 id（§5 不以 national_id 搜尋）。"""
+        return await self._repo.search_ids(store_id, q)
+
     async def list_members_with_credit(
         self, store_id: int, q: str | None, *, limit: int, offset: int
     ) -> list[tuple[Contact, Decimal]]:

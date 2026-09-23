@@ -443,6 +443,14 @@ class StoreCreditService:
             created_by=created_by,
         )
 
+    async def acquisition_credit_amounts(
+        self, store_id: int, acquisition_ids: list[int]
+    ) -> dict[int, Decimal]:
+        """一批收購各自撥出的購物金（作廢時要沖回的額度；沒撥購物金的收購不在結果裡）。"""
+        return await self._repo.credit_amounts_by_source(
+            store_id, StoreCreditSourceType.ACQUISITION, acquisition_ids
+        )
+
     async def adjust(
         self,
         store_id: int,
